@@ -45,6 +45,16 @@ describe("createInMemoryEventLogStore", () => {
     expect(conflict.name).toBe("AgentEventLogConflictError");
   });
 
+  test("fork rejects upToIndex 0, which would drop the init entry", async () => {
+    const store = createInMemoryEventLogStore();
+    await store.append({ threadId: "t", expectedIndex: 0, entries: [testEntry(0, "a")] });
+
+    await expect(
+      store.fork({ threadId: "t", newThreadId: "f", upToIndex: 0 }),
+    ).rejects.toThrowError(/upToIndex must be an integer in \[1, 1\]/);
+    expect(await store.length("f")).toBe(0);
+  });
+
   test("rejects an entry that is not a valid envelope", async () => {
     const store = createInMemoryEventLogStore();
 

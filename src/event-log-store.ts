@@ -41,7 +41,9 @@ export interface AgentEventLogStore {
   length(threadId: string): Promise<number>;
   /**
    * Copy the prefix `[0, upToIndex)` onto a fresh, empty `newThreadId`.
-   * Without `upToIndex` the full source is copied. The fork then appends
+   * Without `upToIndex` the full source is copied. `upToIndex` is exclusive
+   * and must be an integer in `[1, length]`, so the fork keeps the reserved
+   * init entry and stays a self-contained log. The fork then appends
    * independently. Rejects (plain `Error`) if `newThreadId` already has
    * entries, the source is unknown, or `upToIndex` is out of range.
    * Implementations may copy-on-write or physically copy; observable behavior
@@ -150,10 +152,12 @@ export function createInMemoryEventLogStore(): AgentEventLogStore {
         throw new Error(`AgentEventLogStore.fork: unknown source thread "${threadId}".`);
       }
       const upTo = upToIndex ?? source.length;
-      if (upTo < 0 || upTo > source.length) {
+      // `upToIndex` is exclusive and must leave the reserved init entry in
+      // place: a fork of 0 entries is not a self-contained log.
+      if (!Number.isInteger(upTo) || upTo < 1 || upTo > source.length) {
         throw new Error(
-          `AgentEventLogStore.fork: thread "${threadId}" (length ${source.length}) ` +
-            `has no index ${upTo} to fork up to.`,
+          `AgentEventLogStore.fork: upToIndex must be an integer in ` +
+            `[1, ${source.length}] on thread "${threadId}"; got ${String(upTo)}.`,
         );
       }
       threads.set(

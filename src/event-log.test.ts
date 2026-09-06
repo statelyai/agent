@@ -362,6 +362,61 @@ describe("replay", () => {
 });
 
 describe("getSnapshotStateHash", () => {
+  test("hashes a reserved key that lives in context as application data", () => {
+    const base = { status: "active", value: "idle", children: {} };
+
+    expect(getSnapshotStateHash({ ...base, context: { sessionId: 1 } })).not.toBe(
+      getSnapshotStateHash({ ...base, context: { sessionId: 2 } }),
+    );
+    expect(getSnapshotStateHash({ ...base, context: { nested: { _nextTimerId: 1 } } })).not.toBe(
+      getSnapshotStateHash({ ...base, context: { nested: { _nextTimerId: 9 } } }),
+    );
+    // An event payload carried in `output` is application data too.
+    expect(getSnapshotStateHash({ ...base, output: { sessionId: "a" } })).not.toBe(
+      getSnapshotStateHash({ ...base, output: { sessionId: "b" } }),
+    );
+  });
+
+  test("strips re-minted identity only at the snapshot and children positions", () => {
+    const snapshotWith = (sessionId: string, childSessionId: string, nextTimerId: number) => ({
+      status: "active",
+      value: "working",
+      sessionId,
+      _nextTimerId: nextTimerId,
+      _nextActorIds: { job: nextTimerId },
+      context: { attempt: 1 },
+      children: {
+        job: {
+          sessionId: childSessionId,
+          src: "job",
+          syncSnapshot: false,
+          snapshot: { status: "active", sessionId: `${childSessionId}:inner`, context: {} },
+        },
+      },
+    });
+
+    expect(getSnapshotStateHash(snapshotWith("x:1", "x:2", 0))).toBe(
+      getSnapshotStateHash(snapshotWith("y:1", "y:2", 7)),
+    );
+  });
+
+  test("two live actors of the same machine at the same state hash identically", () => {
+    const first = replay(machine, buildLog().slice(0, 2)).persistedSnapshot;
+    const second = replay(machine, buildLog().slice(0, 2)).persistedSnapshot;
+
+    expect(getSnapshotStateHash(first)).toBe(getSnapshotStateHash(second));
+  });
+
+  test("terminates on a self-containing Map or Set", () => {
+    const map = new Map<string, unknown>();
+    map.set("self", map);
+    const set = new Set<unknown>();
+    set.add(set);
+
+    expect(getSnapshotStateHash({ context: { map } })).toMatch(/^[0-9a-f]{8}$/);
+    expect(getSnapshotStateHash({ context: { set } })).toMatch(/^[0-9a-f]{8}$/);
+  });
+
   test("is stable across a JSON round-trip and changes with state", () => {
     const early = replay(machine, buildLog().slice(0, 2)).persistedSnapshot;
     const late = replay(machine, buildLog()).persistedSnapshot;
@@ -390,6 +445,23 @@ describe("agentCallOccurrence", () => {
 
   test("accepts log entries as well as bare events", () => {
     expect(agentCallOccurrence(buildLog(), "job")).toBe(2);
+  });
+
+  test("does not unwrap a bare event that carries its own `event` payload", () => {
+    const history = [
+      journaled({ type: "WRAPPED", event: { type: "xstate.done.actor", actorId: "job" } }),
+      journaled({ type: "xstate.done.actor", actorId: "job", output: 1 }),
+    ];
+
+    expect(agentCallOccurrence(history, "job")).toBe(2);
+    expect(
+      getUsageFromEvents([
+        journaled({
+          type: "WRAPPED",
+          event: { type: AGENT_USAGE_EVENT_TYPE, usage: { inputTokens: 99 } },
+        }),
+      ]).inputTokens,
+    ).toBeUndefined();
   });
 });
 
@@ -427,5 +499,33 @@ describe("forkEventLog", () => {
 
     expect(() => forkEventLog(entries, 0)).toThrowError(AgentEventLogError);
     expect(() => forkEventLog(entries, 99)).toThrowError(AgentEventLogError);
+  });
+});
+
+describe("validateReplayEntries", () => {
+  test("a bridged log validates standalone, without a machine", () => {
+    const previous = buildLog().slice(0, 2);
+    const { persistedSnapshot } = replay(machine, previous);
+    const entries: AgentLogEntry[] = [
+      initEntry(machine, { snapshot: persistedSnapshot }, { machineVersion: "v0-legacy" }),
+    ];
+    entries.push(
+      createReplayEntry(
+        machine,
+        entries,
+        journaled({ type: "xstate.done.actor", actorId: "job", output: "bridged" }),
+      ),
+    );
+
+    // Entry 0 carries the OLD version it bridges from; entry 1 the current one.
+    expect(entries[0]!.machineVersion).not.toBe(entries[1]!.machineVersion);
+    expect(() => validateReplayEntries(entries)).not.toThrow();
+  });
+
+  test("still rejects a genuinely mismatched entry with no machine", () => {
+    const entries = buildLog();
+    entries[2] = { ...entries[2]!, machineVersion: "some-other-version" };
+
+    expect(() => validateReplayEntries(entries)).toThrowError(AgentMachineVersionMismatchError);
   });
 });

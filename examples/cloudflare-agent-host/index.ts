@@ -186,6 +186,14 @@ export class EmailDrafter extends Agent<Env> {
         );
       },
     });
+    // A turn becomes the cached view only once the journal holds it. A rejected
+    // write settles the run as `{ status: 'error', cause: 'journal' }` rather
+    // than throwing, and caching that would report state the log never
+    // recorded — so an errored turn leaves `#last` where the journal is, and
+    // the request reports the failure instead.
+    if (result.status === "error") {
+      throw result.error instanceof Error ? result.error : new Error(messageOf(result.error));
+    }
     this.#last = result;
     return result;
   }

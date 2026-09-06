@@ -219,6 +219,45 @@ describe("cloudflare agent host", () => {
     expect(view.state).toBeUndefined();
   });
 
+  it("leaves the cached turn where the journal is when an append fails", async () => {
+    const name = "append-fails";
+    await get(name);
+    const before = await journal(name);
+
+    // Break exactly the next append: the store writes inside `transactionSync`,
+    // so failing it once fails the write-ahead append for the incoming event
+    // and `runAgent` rejects before it can return a turn.
+    await runInDurableObject(await stubFor(name), (_instance, state) => {
+      const storage = state.storage;
+      const transactionSync = storage.transactionSync.bind(storage);
+      let broken = true;
+      Object.defineProperty(storage, "transactionSync", {
+        configurable: true,
+        writable: true,
+        value: <T>(run: () => T): T => {
+          if (broken) {
+            broken = false;
+            throw new Error("storage unavailable");
+          }
+          return transactionSync(run);
+        },
+      });
+    });
+
+    const failed = await SELF.fetch(url(name), {
+      method: "POST",
+      body: JSON.stringify({ type: "PROMPT_SUBMITTED", prompt: "Email ana@example.com" }),
+    });
+    expect(failed.status).toBe(500);
+
+    // Nothing was journaled, and the view still reports the state the journal
+    // implies — not the turn that failed to persist.
+    expect(await journal(name)).toHaveLength(before.length);
+    const { view } = await get(name);
+    expect(view.state).toBe("prompting");
+    expect(view.draft).toBeNull();
+  });
+
   it("keeps each :name in its own Durable Object", async () => {
     await send("alice", { type: "PROMPT_SUBMITTED", prompt: "Email alice@example.com" });
     const bob = await get("bob");

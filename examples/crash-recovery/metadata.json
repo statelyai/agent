@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph checkpointer"],
-    "purpose": "Writes an article in two steps, journals every accepted input through `onEvent`, and resumes from the log alone — recorded model calls are replayed, and the in-flight one re-executes under the same `info.callKey`."
+    "purpose": "Writes an article in two steps, journals every accepted input to the store before the next model call, and resumes from the log alone — recorded model calls are replayed, and the in-flight one re-executes under the same `info.callKey`."
   },
   "starters": ["state machines", "the history of the fax machine", "why builds are slow"]
 }

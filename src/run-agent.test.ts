@@ -38,6 +38,18 @@ import {
 } from "./index.js";
 import { getMachineStructuralHash } from "./index.js";
 
+/**
+ * A promise plus its resolver. Tests drive a run's timing off these instead of
+ * wall-clock sleeps, so a slow machine cannot turn a race into a flake.
+ */
+function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
 describe("runAgent", () => {
   test("done path: completes with typed output from a TextLogic invoke", async () => {
     const schemas = createAgentSchemas({
@@ -3495,10 +3507,10 @@ describe("runAgent event log", () => {
 
   /** asking --(model)--> waiting --APPROVE--> wrapping --(raised)--> done */
   const makeLoggedMachine = (
-    overrides: { version?: string; migrate?: (snapshot: unknown) => unknown } = {},
+    overrides: { id?: string; version?: string; migrate?: (snapshot: unknown) => unknown } = {},
   ) =>
     setup({ actors: { answer } }).createMachine({
-      id: "logged",
+      id: overrides.id ?? "logged",
       ...(overrides.version !== undefined ? { version: overrides.version } : {}),
       ...(overrides.migrate ? { migrate: overrides.migrate } : {}),
       context: () => ({ answer: null as string | null }),
@@ -3615,17 +3627,28 @@ describe("runAgent event log", () => {
     } as never);
 
     const firstCalls: Array<{ requestId?: string; callKey?: string }> = [];
-    const crashed = await runAgent(twoCallMachine, {
-      input: undefined,
-      signal: AbortSignal.timeout(30),
-      executors: {
-        generateText: async (_request, info) => {
-          firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
-          // The second call is the one that was still in flight at the crash.
-          return firstCalls.length === 1 ? { output: "one" } : await new Promise<never>(() => {});
+    // The crash is driven by the run itself, not by the clock: abort only once
+    // the second call is actually in flight.
+    const controller = new AbortController();
+    const inFlight = deferred();
+    const crashed = await (async () => {
+      const running = runAgent(twoCallMachine, {
+        input: undefined,
+        signal: controller.signal,
+        executors: {
+          generateText: async (_request, info) => {
+            firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+            if (firstCalls.length === 1) return { output: "one" };
+            // The second call is the one still in flight at the crash.
+            inFlight.resolve();
+            return await new Promise<never>(() => {});
+          },
         },
-      },
-    });
+      });
+      await inFlight.promise;
+      controller.abort();
+      return running;
+    })();
 
     expect(crashed.status).toBe("error");
     expect(firstCalls.map((call) => call.requestId)).toEqual(["a", "b"]);
@@ -3649,6 +3672,64 @@ describe("runAgent event log", () => {
     // Identical key across the crash: an executor-level cache can dedupe it.
     expect(secondCalls[0]!.callKey).toBe(firstCalls[1]!.callKey);
     expect(secondCalls[0]!.callKey).toMatch(/^[0-9a-f-]+:b#1$/);
+  });
+
+  test("decision retries get distinct, replay-stable callKeys", async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({}),
+      input: z.object({}),
+      events: { ATTACK: z.object({}) },
+    });
+    const chooseMove = createDecisionLogic({
+      model: "test-model",
+      prompt: "Choose a move.",
+      allowedEvents: ["ATTACK"] as const,
+    });
+    const agent = setupAgent({ schemas, actors: { chooseMove } });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "choosing",
+      states: {
+        choosing: {
+          invoke: { id: "choosing", src: "chooseMove", input: {} },
+          on: { ATTACK: { target: "attacked" } },
+        },
+        attacked: { type: "final" },
+      },
+    });
+
+    const run = async () => {
+      const keys: Array<string | undefined> = [];
+      const result = await runAgent(machine, {
+        input: {},
+        executors: {
+          decide: async (request, info) => {
+            keys.push(info?.callKey);
+            // The first attempt picks an event that is not a candidate, so
+            // `resolveDecision` rejects it and retries with feedback.
+            return request.attempts.length === 0
+              ? { event: { type: "NOPE" } as never }
+              : { event: { type: "ATTACK" } as never };
+          },
+        },
+      });
+      return { keys, result };
+    };
+
+    const first = await run();
+    expect(first.result.status).toBe("done");
+    expect(first.keys).toHaveLength(2);
+    // Same invoke, same occurrence — but the attempt ordinal keeps a compliant
+    // cache from returning the rejected first attempt for the retry.
+    expect(first.keys[0]).toMatch(/^[0-9a-f-]+:choosing#\d+\.0$/);
+    expect(first.keys[1]).toBe(`${first.keys[0]!.slice(0, -2)}.1`);
+
+    // The ordinal comes from `request.attempts.length`, so re-executing an
+    // attempt derives the same key rather than a fresh one.
+    const second = await run();
+    expect(second.keys.map((key) => key?.split(":")[1])).toEqual(
+      first.keys.map((key) => key?.split(":")[1]),
+    );
   });
 
   test("resume precedence: a tail-stamped snapshot is trusted, a stale one is not", async () => {
@@ -3762,6 +3843,96 @@ describe("runAgent event log", () => {
     ).rejects.toBeInstanceOf(AgentMachineVersionMismatchError);
   });
 
+  test("version bridge: only the log's own tail snapshot is accepted", async () => {
+    const v1 = makeLoggedMachine({ version: "1" });
+    const first = await runAgent(v1, { input: undefined, executors: executors() });
+    const tailOfFirst = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
+
+    // The thread moves on, so `tailOfFirst` now caches an INTERIOR index.
+    const second = await runAgent(v1, {
+      events: first.events,
+      snapshot: tailOfFirst,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(second.events.length).toBeGreaterThan(first.events.length);
+
+    const v2 = makeLoggedMachine({
+      version: "2",
+      migrate: (snapshot) => ({ ...(snapshot as object), version: "2" }),
+    });
+
+    // Bridging with it would roll the thread back past logged entries.
+    await expect(
+      runAgent(v2, {
+        events: second.events,
+        snapshot: tailOfFirst,
+        executors: executors(),
+      }),
+    ).rejects.toBeInstanceOf(AgentSnapshotDivergedError);
+
+    // Right index, wrong state: the tail entry's recorded hash catches it.
+    const tampered = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown> & {
+      context: { answer: string };
+    };
+    tampered.context.answer = "tampered";
+    await expect(
+      runAgent(v2, { events: first.events, snapshot: tampered, executors: executors() }),
+    ).rejects.toBeInstanceOf(AgentSnapshotDivergedError);
+
+    // The genuine tail still bridges.
+    const bridged = await runAgent(v2, {
+      events: first.events,
+      snapshot: tailOfFirst,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(bridged.status).toBe("done");
+  });
+
+  test("a log written by another machine is never a resume", async () => {
+    const machine = makeLoggedMachine({ version: "1" });
+    const other = makeLoggedMachine({ version: "1", id: "other-logged" });
+    const first = await runAgent(machine, { input: undefined, executors: executors() });
+
+    // Same version, different artifact: the entries fold against states this
+    // machine does not have.
+    await expect(
+      runAgent(other, {
+        events: first.events,
+        snapshot: JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>,
+        event: { type: "APPROVE" } as never,
+        executors: executors(),
+      }),
+    ).rejects.toBeInstanceOf(AgentMachineVersionMismatchError);
+  });
+
+  test("an unverified log outranks a snapshot that merely claims to cache it", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+      verification: false,
+    });
+    expect(first.events.every((entry) => entry.verification === undefined)).toBe(true);
+
+    // Correct `agentMeta`, wrong state: with no recorded hash to check it
+    // against, the log is replayed rather than the snapshot trusted.
+    const tampered = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown> & {
+      context: { answer: string };
+    };
+    tampered.context.answer = "tampered";
+    const resumed = await runAgent(machine, {
+      events: first.events,
+      snapshot: tampered,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+      verification: false,
+    });
+    expect(resumed.status).toBe("done");
+    expect((resumed.snapshot as AnyMachineSnapshot).context).toEqual({ answer: "42" });
+  });
+
   test("snapshot-only resume starts a replayable log from that snapshot", async () => {
     const machine = makeLoggedMachine();
     const first = await runAgent(machine, {
@@ -3802,31 +3973,41 @@ describe("runAgent event log", () => {
   test("a call that settles after the run is still appended to the log", async () => {
     const machine = makeLoggedMachine();
     const streamed: AgentLogEntry[] = [];
-    let release: (() => void) | undefined;
-    const pending = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const controller = new AbortController();
+    const inFlight = deferred();
+    const release = deferred();
+    const stragglerEntry = deferred<AgentLogEntry>();
+    let atSettle: number | undefined;
 
-    const result = await runAgent(machine, {
+    const running = runAgent(machine, {
       input: undefined,
-      signal: AbortSignal.timeout(20),
-      onEvent: (entry) => streamed.push(entry),
+      signal: controller.signal,
+      onEvent: (entry) => {
+        streamed.push(entry);
+        // Anything past the settle boundary is the straggler.
+        if (atSettle !== undefined && streamed.length > atSettle) {
+          stragglerEntry.resolve(entry);
+        }
+      },
       executors: {
         generateText: async () => {
-          await pending;
+          inFlight.resolve();
+          await release.promise;
           return { output: "late", usage: { totalTokens: 11 } };
         },
       },
     });
+    await inFlight.promise;
+    controller.abort();
+    const result = await running;
 
     expect(result.status).toBe("error");
-    const atSettle = streamed.length;
+    atSettle = streamed.length;
     expect(result.events).toHaveLength(atSettle);
-    release!();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    release.resolve();
     // The tokens were spent, so the record is appended (and streamed) even
     // though the run had already returned.
-    const straggler = streamed[streamed.length - 1]!;
+    const straggler = await stragglerEntry.promise;
     expect(streamed.length).toBe(atSettle + 1);
     expect(straggler.event.type).toBe(AGENT_USAGE_EVENT_TYPE);
   });
@@ -4001,18 +4182,25 @@ describe("runAgent write-ahead store", () => {
 
     const store = createInMemoryEventLogStore();
     const firstCalls: Array<{ requestId?: string; callKey?: string }> = [];
-    const crashed = await runAgent(twoCallMachine, {
+    const controller = new AbortController();
+    const inFlight = deferred();
+    const running = runAgent(twoCallMachine, {
       input: undefined,
       store,
       threadId: "main",
-      signal: AbortSignal.timeout(30),
+      signal: controller.signal,
       executors: {
         generateText: async (_request, info) => {
           firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
-          return firstCalls.length === 1 ? { output: "one" } : await new Promise<never>(() => {});
+          if (firstCalls.length === 1) return { output: "one" };
+          inFlight.resolve();
+          return await new Promise<never>(() => {});
         },
       },
     });
+    await inFlight.promise;
+    controller.abort();
+    const crashed = await running;
     expect(crashed.status).toBe("error");
 
     const secondCalls: Array<{ requestId?: string; callKey?: string }> = [];
@@ -4093,5 +4281,96 @@ describe("runAgent write-ahead store", () => {
         executors: executors(),
       }),
     ).rejects.toBeInstanceOf(AgentEventLogConflictError);
+  });
+
+  test("`events` of the right length but the wrong content are rejected", async () => {
+    const store = createInMemoryEventLogStore();
+    const first = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: executors(),
+    });
+
+    // Same length, one entry from somewhere else: appending onto this thread
+    // would splice two lineages together.
+    const altered = JSON.parse(JSON.stringify(first.events)) as AgentLogEntry[];
+    altered[1] = { ...altered[1]!, id: `${altered[1]!.id}_other` };
+    await expect(
+      runAgent(makeMachine(), {
+        store,
+        threadId: "main",
+        events: altered,
+        executors: executors(),
+      }),
+    ).rejects.toMatchObject({ code: "event-log-conflict" });
+
+    // The thread's own log still resumes.
+    const resumed = await runAgent(makeMachine(), {
+      store,
+      threadId: "main",
+      events: first.events,
+      snapshot: first.persist(),
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(resumed.status).toBe("done");
+  });
+
+  test("result.drain() waits for a straggler's write; the result itself does not", async () => {
+    const inner = createInMemoryEventLogStore();
+    const slowStore: AgentEventLogStore = {
+      ...inner,
+      append: async (input) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await inner.append(input);
+      },
+    };
+
+    const controller = new AbortController();
+    const inFlight = deferred();
+    const release = deferred();
+    const stragglerAppended = deferred();
+    let atSettle: number | undefined;
+    let streamed = 0;
+
+    const running = runAgent(makeMachine(), {
+      input: undefined,
+      store: slowStore,
+      threadId: "main",
+      signal: controller.signal,
+      onEvent: () => {
+        streamed++;
+        if (atSettle !== undefined && streamed > atSettle) {
+          stragglerAppended.resolve();
+        }
+      },
+      executors: {
+        generateText: async () => {
+          inFlight.resolve();
+          await release.promise;
+          return { output: "42", usage: { totalTokens: 5 } };
+        },
+      },
+    });
+    await inFlight.promise;
+    controller.abort();
+    const result = await running;
+    expect(result.status).toBe("error");
+
+    atSettle = streamed;
+    expect(await inner.read("main")).toHaveLength(atSettle);
+
+    // The straggler's usage entry is appended after the run returned, so its
+    // write is outside the result's own barrier...
+    release.resolve();
+    await stragglerAppended.promise;
+    expect(await inner.read("main")).toHaveLength(atSettle);
+
+    // ...and `drain()` is what waits for it.
+    await result.drain();
+    const stored = await inner.read("main");
+    expect(stored).toHaveLength(atSettle + 1);
+    expect(stored[stored.length - 1]!.event.type).toBe(AGENT_USAGE_EVENT_TYPE);
   });
 });

@@ -39,7 +39,10 @@ export async function runAgentLoop<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunAgentLoopOptions<TMachine>,
 ): Promise<RunAgentResult<TMachine>> {
-  const { onIdle, persist, maxTurns = 100, ...runOptions } = options;
+  // `events` is pulled OUT of the forwarded options: it is turn-scoped (see
+  // below), and leaving it in `runOptions` would re-assert turn 1's log on
+  // every later turn — a store-backed loop would then conflict on turn 2.
+  const { onIdle, persist, maxTurns = 100, events: initialEvents, ...runOptions } = options;
   if (!Number.isInteger(maxTurns) || maxTurns < 0) {
     throw new Error("runAgentLoop: maxTurns must be a non-negative integer.");
   }
@@ -48,11 +51,11 @@ export async function runAgentLoop<TMachine extends AnyStateMachine>(
   let snapshot: ReturnType<RunAgentResult<TMachine>["persist"]> | undefined;
   let event: EventFromLogic<TMachine> | undefined;
   // Threaded turn to turn so the whole loop yields ONE continuous log rather
-  // than a fresh segment per turn. With a `store`, the log lives there: each
-  // turn reads the thread back, so carrying it here would only re-assert a
-  // length the store already knows.
+  // than a fresh segment per turn. With a `store`, the log lives there: the
+  // caller's `events` seeds the FIRST turn only, and every later turn reads
+  // the thread back from the store instead.
   const stored = options.store !== undefined;
-  let events: readonly AgentLogEntry[] | undefined = stored ? undefined : options.events;
+  let events: readonly AgentLogEntry[] | undefined = initialEvents;
 
   for (let turn = 0; ; turn++) {
     const result = await runAgent(machine, {
@@ -60,9 +63,7 @@ export async function runAgentLoop<TMachine extends AnyStateMachine>(
       ...(events ? { events } : {}),
       ...(snapshot ? { snapshot, event } : {}),
     } as RunAgentOptions<TMachine>);
-    if (!stored) {
-      events = result.events;
-    }
+    events = stored ? undefined : result.events;
     usage = addUsage(usage, result.usage);
     const cumulative = { ...result, usage } as RunAgentResult<TMachine>;
 

@@ -28,19 +28,21 @@ Execution is at-least-once. A host runs the request and then journals its comple
 
 - `executionId` is the log's lineage id, pinned in the reserved `@agent.init` entry's `metadata` and inherited by every resume.
 - `requestId` is the invoke site, and `n` counts that site's completions in the log — each iteration of a looped state gets its own key.
+- A decision retry appends its attempt ordinal: `<executionId>:<requestId>#<n>.<attempt>`, where `attempt` is the number of prior failed attempts. Each retry is a different request, so it gets a different key.
 - A resumed run re-executing an in-flight request passes the same `callKey` as the original attempt.
-- A fork copies the init entry, so it keeps the parent's lineage id and can reuse results cached under the parent's keys.
+- A fork copies the init entry, so it keeps the parent's lineage id and can reuse results cached under the parent's keys for the requests it has not changed.
 - It is `undefined` off the `runAgent` path (a bare `provideExecutors` bind) and on a run with no event log.
 
-Pass it to the provider or tool as the idempotency key, and dedupe on it in your own cache:
+The key names the call *site*, not the request. A fork inherits the parent's lineage id, so a fork that changes what it asks at the same invoke site produces the same key for a different request. Cache on `callKey` **and** a fingerprint of the request, and reuse the cached result only when the request also matches. Pass `callKey` to a provider as its dedupe key for that identical request:
 
 ```ts no-check
 const executors = {
   generateText: async (request, info) => {
+    const fingerprint = JSON.stringify([request.model, request.prompt, request.messages]);
     const cached = info.callKey ? results.get(info.callKey) : undefined;
-    if (cached) return cached;
+    if (cached?.fingerprint === fingerprint) return cached.result;
     const result = await callProvider(request, { idempotencyKey: info.callKey });
-    if (info.callKey) results.set(info.callKey, result);
+    if (info.callKey) results.set(info.callKey, { fingerprint, result });
     return result;
   }
 };

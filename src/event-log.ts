@@ -356,11 +356,39 @@ function normalizeEventErrors(
 // --- Hashing ---------------------------------------------------------------
 
 // Keys stripped from a persisted snapshot before hashing: they are re-minted on
-// every fold (actor session ids, the actor/timer id counters) and so differ
-// between two runs that are otherwise identical.
-const VOLATILE_SNAPSHOT_KEYS = new Set(["sessionId", "_nextTimerId", "_nextActorIds"]);
+// every fold (actor session identity, the actor/timer id counters) and so
+// differ between two runs that are otherwise identical.
+//
+// Stripping is POSITION-AWARE. A persisted snapshot nests application data
+// (`context`, `output`, `error`, event payloads) that may legitimately own a
+// key called `sessionId`; erasing it there would let a mutated snapshot verify
+// against an unchanged hash. So the walk tracks where it is in the persisted
+// shape and only strips at the structural positions XState itself writes:
+// the snapshot root, and each `children[*]` entry (whose `snapshot` is itself
+// a persisted snapshot).
+const SNAPSHOT_VOLATILE_KEYS = new Set(["sessionId", "_nextTimerId", "_nextActorIds"]);
+const CHILD_VOLATILE_KEYS = new Set(["sessionId"]);
 
-function canonicalizeForHash(value: unknown, seen: WeakSet<object> = new WeakSet()): unknown {
+/**
+ * Where the walk is inside a persisted snapshot: the snapshot object itself,
+ * its `children` record, one child entry, or plain application data (where no
+ * key is ever reserved).
+ */
+type HashPosition = "snapshot" | "children" | "child" | "data";
+
+// The position a value occupies, given its parent's position and its key.
+function positionOf(parent: HashPosition, key: string): HashPosition {
+  if (parent === "snapshot") return key === "children" ? "children" : "data";
+  if (parent === "children") return "child";
+  if (parent === "child") return key === "snapshot" ? "snapshot" : "data";
+  return "data";
+}
+
+function canonicalizeForHash(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+  position: HashPosition = "snapshot",
+): unknown {
   if (value === undefined) return "[undefined]";
   if (typeof value === "function") return "[function]";
   if (typeof value === "bigint") return `[bigint:${String(value)}]`;
@@ -371,38 +399,50 @@ function canonicalizeForHash(value: unknown, seen: WeakSet<object> = new WeakSet
     return {
       errorName: value.name,
       message: value.message,
-      ...(value.cause !== undefined ? { cause: canonicalizeForHash(value.cause, seen) } : {}),
+      ...(value.cause !== undefined
+        ? { cause: canonicalizeForHash(value.cause, seen, "data") }
+        : {}),
     };
-  }
-  if (value instanceof Set) {
-    return [...value]
-      .map((item) => canonicalizeForHash(item, seen))
-      .sort((a, b) => stableJson(a).localeCompare(stableJson(b)));
-  }
-  if (value instanceof Map) {
-    return [...value.entries()]
-      .map(([key, item]) => [canonicalizeForHash(key, seen), canonicalizeForHash(item, seen)])
-      .sort(([a], [b]) => stableJson(a).localeCompare(stableJson(b)));
   }
   if (seen.has(value)) return "[circular]";
   seen.add(value);
-  if (Array.isArray(value)) {
-    const result = value.map((item) => canonicalizeForHash(item, seen));
-    seen.delete(value);
+  try {
+    if (value instanceof Set) {
+      return [...value]
+        .map((item) => canonicalizeForHash(item, seen, "data"))
+        .sort((a, b) => stableJson(a).localeCompare(stableJson(b)));
+    }
+    if (value instanceof Map) {
+      return [...value.entries()]
+        .map(([key, item]) => [
+          canonicalizeForHash(key, seen, "data"),
+          canonicalizeForHash(item, seen, "data"),
+        ])
+        .sort(([a], [b]) => stableJson(a).localeCompare(stableJson(b)));
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => canonicalizeForHash(item, seen, "data"));
+    }
+    const volatileKeys =
+      position === "snapshot"
+        ? SNAPSHOT_VOLATILE_KEYS
+        : position === "child"
+          ? CHILD_VOLATILE_KEYS
+          : undefined;
+    const result: Record<string, unknown> = {};
+    for (const key of Object.keys(value).sort()) {
+      if (volatileKeys?.has(key)) continue;
+      const child = (value as Record<string, unknown>)[key];
+      // Undefined values are dropped rather than encoded: a persisted snapshot
+      // carries `output`/`error` as explicit `undefined` before it is serialized,
+      // and a JSON round-trip drops them, so both forms must hash alike.
+      if (child === undefined) continue;
+      result[key] = canonicalizeForHash(child, seen, positionOf(position, key));
+    }
     return result;
+  } finally {
+    seen.delete(value);
   }
-  const result: Record<string, unknown> = {};
-  for (const key of Object.keys(value).sort()) {
-    if (VOLATILE_SNAPSHOT_KEYS.has(key)) continue;
-    const child = (value as Record<string, unknown>)[key];
-    // Undefined values are dropped rather than encoded: a persisted snapshot
-    // carries `output`/`error` as explicit `undefined` before it is serialized,
-    // and a JSON round-trip drops them, so both forms must hash alike.
-    if (child === undefined) continue;
-    result[key] = canonicalizeForHash(child, seen);
-  }
-  seen.delete(value);
-  return result;
 }
 
 function stableJson(value: unknown): string {
@@ -427,10 +467,14 @@ function sortJson(value: unknown): unknown {
  * `verification.stateHash`.
  *
  * Stripped before hashing, because they are re-minted on every fold and would
- * otherwise make two identical runs hash differently: any `sessionId` (child
- * actor session identity), `_nextTimerId` and `_nextActorIds` (id counters),
- * and `undefined`-valued properties (so a snapshot hashes the same before and
- * after a JSON round-trip). Object keys are sorted, so key order is irrelevant.
+ * otherwise make two identical runs hash differently: `sessionId`,
+ * `_nextTimerId` and `_nextActorIds` at the snapshot root, `sessionId` on each
+ * `children[*]` entry (recursively, through nested child snapshots), and
+ * `undefined`-valued properties (so a snapshot hashes the same before and
+ * after a JSON round-trip). Stripping is confined to those structural
+ * positions: a `sessionId` inside `context`, `output`, `error` or an event
+ * payload is application data and is hashed. Object keys are sorted, so key
+ * order is irrelevant.
  *
  * A change detector, not a cryptographic digest.
  */
@@ -571,7 +615,7 @@ export function initEntry(
 
 /** Whether `entry` is the reserved init entry. */
 function isInitEntry(entry: AgentLogEntry): boolean {
-  return entry.event.type === AGENT_INIT_EVENT_TYPE;
+  return (entry as Partial<AgentLogEntry>)?.event?.type === AGENT_INIT_EVENT_TYPE;
 }
 
 /** Whether `entry` is the version-bridging init-with-snapshot entry. */
@@ -615,14 +659,19 @@ export function validateReplayEntries(
   if (entries.length === 0) {
     return;
   }
+  // Without a machine to compare against, the log describes its own identity.
+  // An init-with-snapshot entry is the wrong reference: it carries the OLD
+  // version it bridges FROM, so deriving from it would reject every entry after
+  // it. Take the first entry that is not that bridge.
+  const reference = entries.find((entry) => !isSnapshotInitEntry(entry)) ?? entries[0]!;
   const expected = options.machine
     ? {
         machineId: machineIdOf(options.machine),
         machineVersion: options.machineVersion ?? resolveMachineVersion(options.machine),
       }
     : {
-        machineId: entries[0]!.machineId,
-        machineVersion: options.machineVersion ?? entries[0]!.machineVersion,
+        machineId: reference.machineId,
+        machineVersion: options.machineVersion ?? reference.machineVersion,
       };
   const ids = new Set<string>();
   for (let index = 0; index < entries.length; index++) {
@@ -694,11 +743,17 @@ function toEvents(history: readonly (EventObject | AgentLogEntry)[] | undefined)
   if (!history) {
     return [];
   }
-  return history.map((entry) => {
-    const candidate = entry as AgentLogEntry;
-    return candidate && typeof candidate === "object" && "event" in candidate && candidate.event
-      ? candidate.event
-      : (entry as EventObject);
+  return history.map((item) => {
+    // Discriminate on the durable envelope's own fields, not on the presence of
+    // an `event` key: a bare machine event may legitimately carry an `event`
+    // payload of its own, and unwrapping it would shift every occurrence count.
+    const candidate = item as Partial<AgentLogEntry> | null;
+    return candidate?.schemaVersion === AGENT_EVENT_SCHEMA_VERSION &&
+      typeof candidate.index === "number" &&
+      candidate.event !== null &&
+      typeof candidate.event === "object"
+      ? (candidate.event as EventObject)
+      : (item as EventObject);
   });
 }
 

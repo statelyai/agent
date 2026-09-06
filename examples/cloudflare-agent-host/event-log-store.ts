@@ -172,10 +172,12 @@ export function createDurableObjectEventLogStore(
           throw new Error(`AgentEventLogStore.fork: unknown source thread "${threadId}".`);
         }
         const upTo = upToIndex ?? sourceLength;
-        if (upTo < 0 || upTo > sourceLength) {
+        // `upToIndex` is exclusive and must keep the reserved init entry, so
+        // the smallest legal cutoff is 1.
+        if (!Number.isInteger(upTo) || upTo < 1 || upTo > sourceLength) {
           throw new Error(
             `AgentEventLogStore.fork: thread "${threadId}" (length ${sourceLength}) ` +
-              `has no index ${upTo} to fork up to.`,
+              `cannot fork up to index ${upTo}; expected an integer in [1, ${sourceLength}].`,
           );
         }
         sql.exec(

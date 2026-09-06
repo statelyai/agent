@@ -283,7 +283,7 @@ const cases: Array<{ name: string; run: (create: CreateStore) => Promise<void> }
     },
   },
   {
-    name: "fork rejects a non-empty target, an unknown source, and an out-of-range cutoff",
+    name: "fork rejects a non-empty target, an unknown source, and an out-of-range cutoff (0 included)",
     async run(create) {
       const store = await create();
       await store.append({ threadId: "src", expectedIndex: 0, entries: entriesFrom(0, 3) });
@@ -323,6 +323,20 @@ const cases: Array<{ name: string; run: (create: CreateStore) => Promise<void> }
       }
       if (!(caughtRange instanceof Error) || caughtRange instanceof AgentEventLogConflictError) {
         fail("forking past the source length must reject with a plain Error");
+      }
+
+      // `upToIndex` is exclusive, so 0 would produce a log with no init entry.
+      let caughtZero: unknown;
+      try {
+        await store.fork({ threadId: "src", newThreadId: "fork-zero", upToIndex: 0 });
+      } catch (error) {
+        caughtZero = error;
+      }
+      if (!(caughtZero instanceof Error) || caughtZero instanceof AgentEventLogConflictError) {
+        fail("forking with upToIndex 0 must reject with a plain Error");
+      }
+      if ((await store.length("fork-zero")) !== 0) {
+        fail("a rejected fork must not create the target thread");
       }
     },
   },

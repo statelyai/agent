@@ -669,6 +669,15 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
    */
   persist(): Snapshot<unknown>;
   /**
+   * Resolves once every {@link RunAgentOptions.store} write issued so far has
+   * landed — including a straggler `@agent.usage` entry appended by a call
+   * that settled after the run returned, which the result itself does not wait
+   * for. Await it before terminating the process if those entries matter.
+   * Resolves immediately when the run has no store, and never rejects: a
+   * failed write settles the run with `cause: 'journal'` instead.
+   */
+  drain(): Promise<void>;
+  /**
    * Aggregated model-call usage for THIS run — `modelCalls` plus the token
    * fields every executor reported (see {@link AgentUsage} for the
    * partial-sum rule). Present on all three variants: an `idle` or `error`
@@ -1066,8 +1075,10 @@ interface RunAgentBindContext {
   /**
    * Mints the per-call idempotency key threaded to executors as
    * `info.callKey` (`${executionId}:${siteId}#${n}`). Memoized per invoked
-   * leaf actor (`self`), so a decision's retries within one invoke share one
-   * key. Unset off the runAgent path, and when the log has no `executionId`.
+   * leaf actor (`self`), so every attempt of one decision invoke shares this
+   * invoke-level key; the decision wrap appends the attempt ordinal
+   * (`…#${n}.${attempts.length}`) so retries do not collide in a cache.
+   * Unset off the runAgent path, and when the log has no `executionId`.
    */
   callKey?: (siteId: string, self?: object) => string | undefined;
   /**
@@ -1317,9 +1328,18 @@ function createCountingDecide(
     runCtx.emitTrace?.({ type: "request.start", request: attemptRequest }, self);
     try {
       const { id } = selfIdAndSrc(self);
-      // One key per invoke, not per decision attempt: `callKey` is memoized on
-      // `self`, so a retried decision keeps the key its first attempt used.
-      const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+      // The invoke-level key is memoized on `self`, so every attempt of this
+      // decision shares it — but each attempt is a DISTINCT paid call with a
+      // different request (the rejected attempts ride along as feedback), so
+      // the attempt ordinal is appended: `…#<n>.<attempt>`. Without it a
+      // compliant idempotency cache would replay the rejected first attempt
+      // for every retry. The ordinal comes from `request.attempts.length`, so
+      // a crash re-executing attempt k derives the same key again.
+      const invokeCallKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+      const callKey =
+        invokeCallKey === undefined
+          ? undefined
+          : `${invokeCallKey}.${attemptRequest.attempts?.length ?? 0}`;
       // Write-ahead: the log up to this point must be durable before the call.
       await runCtx.awaitJournal?.();
       // `runId` rides on the request like `signal` does: host-injected
@@ -1863,11 +1883,13 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   }
   if (options.events !== undefined) {
     // An explicit log wins as the resume, but it must BE the thread's log:
-    // appending onto a store that has moved on would interleave two lineages.
-    const length = await store.length(threadId);
-    if (length !== options.events.length) {
-      throw new AgentEventLogConflictError(threadId, options.events.length, length);
+    // appending onto a store that has moved on — or onto a same-length log
+    // that says something else — would interleave two lineages.
+    const storedThread = await store.read(threadId);
+    if (storedThread.length !== options.events.length) {
+      throw new AgentEventLogConflictError(threadId, options.events.length, storedThread.length);
     }
+    assertThreadMatchesEvents(threadId, storedThread, options.events);
     return createAgentSession(machine, options).settled();
   }
   const stored = await store.read(threadId);
@@ -1879,6 +1901,38 @@ export async function runAgent<TMachine extends AnyStateMachine>(
 
 interface AgentRunSession<TMachine extends AnyStateMachine> {
   settled(): Promise<RunAgentResult<TMachine>>;
+}
+
+/**
+ * Entry-by-entry check that the caller's `events` IS the store's thread. Equal
+ * lengths prove nothing: a fork, a rolled-back replay, or a concurrent writer
+ * that appended and truncated all produce a divergent log of the same size,
+ * and appending this run's entries onto it would splice two lineages together.
+ */
+function assertThreadMatchesEvents(
+  threadId: string,
+  stored: readonly AgentLogEntry[],
+  events: readonly AgentLogEntry[],
+): void {
+  for (let index = 0; index < stored.length; index++) {
+    const storedEntry = stored[index]!;
+    const givenEntry = events[index]!;
+    const storedHash = storedEntry.verification?.stateHash;
+    const givenHash = givenEntry.verification?.stateHash;
+    const same =
+      storedEntry.id === givenEntry.id &&
+      storedEntry.index === givenEntry.index &&
+      JSON.stringify(storedEntry.event) === JSON.stringify(givenEntry.event) &&
+      (storedHash === undefined || givenHash === undefined || storedHash === givenHash);
+    if (!same) {
+      throw new AgentError(
+        "event-log-conflict",
+        `runAgent: the given \`events\` diverge from thread "${threadId}" at index ${index} ` +
+          `(stored entry '${storedEntry.id}', given '${givenEntry.id}') — ` +
+          "the log passed in is not this thread's log.",
+      );
+    }
+  }
 }
 
 function createAgentSession<TMachine extends AnyStateMachine>(
@@ -1995,6 +2049,26 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       .finally(() => {
         journalPending--;
       });
+  };
+
+  /**
+   * Every journal write ISSUED SO FAR, including the stragglers appended after
+   * the run settled. Re-reads the chain tail until it stops moving, so a write
+   * queued while an earlier one was in flight is covered too. Never rejects: a
+   * failed write already settled the run with `cause: 'journal'`.
+   */
+  const drainJournal = async (): Promise<void> => {
+    if (store === undefined) {
+      return;
+    }
+    let tail = journalChain;
+    for (;;) {
+      await tail;
+      if (journalPending === 0 && journalChain === tail) {
+        return;
+      }
+      tail = journalChain;
+    }
   };
 
   /** The barrier: settle the pending chain, then surface any failure. */
@@ -2353,8 +2427,18 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     validateReplayEntries(resumeEvents);
     const tail = resumeEvents[resumeEvents.length - 1]!;
     const inheritedExecutionId = getLogExecutionId(resumeEvents);
-    const sameMachine =
-      resumeEvents[0]!.machineId === machineId && tail.machineVersion === machineVersion;
+    // A log written by a DIFFERENT machine is never a resume for this one: its
+    // entries fold against states this machine does not have, and its snapshot
+    // caches another artifact's state. Only a version change is bridgeable.
+    if (resumeEvents[0]!.machineId !== machineId) {
+      throw new AgentMachineVersionMismatchError(
+        tail.id,
+        tail.index,
+        { machineId, machineVersion },
+        { machineId: resumeEvents[0]!.machineId, machineVersion: tail.machineVersion },
+      );
+    }
+    const sameMachine = tail.machineVersion === machineVersion;
 
     if (sameMachine) {
       logEntries.push(...resumeEvents);
@@ -2364,7 +2448,10 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       // Lineage, not length: a snapshot cached at index N of ANOTHER log (a
       // fork, a sibling thread) can trivially collide with this log's length,
       // so the fast path also requires the log's `executionId` and the tail
-      // entry's recorded hash to agree.
+      // entry's recorded hash to agree. The hash must be PRESENT: an
+      // unverified log (`verification: false`) records none, and trusting a
+      // snapshot on its self-reported `agentMeta` alone would let a tampered
+      // cache override the log. No hash, no fast path — the log is the truth.
       const cachedMeta = readAgentMeta(options.snapshot);
       const tailStateHash = tail.verification?.stateHash;
       const trustedCache =
@@ -2372,7 +2459,8 @@ function createAgentSession<TMachine extends AnyStateMachine>(
         inheritedExecutionId !== undefined &&
         cachedMeta?.logId === inheritedExecutionId &&
         cachedMeta.logIndex === resumeEvents.length &&
-        (tailStateHash === undefined || hashResumeSnapshot(options.snapshot) === tailStateHash);
+        tailStateHash !== undefined &&
+        hashResumeSnapshot(options.snapshot) === tailStateHash;
 
       if (!trustedCache) {
         const cachedIndex = cachedMeta?.logIndex;
@@ -2380,7 +2468,11 @@ function createAgentSession<TMachine extends AnyStateMachine>(
           options.snapshot !== undefined &&
           typeof cachedIndex === "number" &&
           cachedIndex >= 1 &&
-          cachedIndex <= resumeEvents.length
+          cachedIndex <= resumeEvents.length &&
+          // Only a verified log can call a snapshot divergent: with
+          // verification off the caller opted out of hashes, so a disagreeing
+          // snapshot is simply ignored in favour of the log.
+          resumeEvents[cachedIndex - 1]!.verification?.stateHash !== undefined
         ) {
           const atCache = replay(logMachine, resumeEvents.slice(0, cachedIndex), {
             machineVersion,
@@ -2407,6 +2499,37 @@ function createAgentSession<TMachine extends AnyStateMachine>(
           tail.index,
           { machineId, machineVersion },
           { machineId: tail.machineId, machineVersion: tail.machineVersion },
+        );
+      }
+      // The snapshot must BE the cache of THIS log's tail under the old
+      // version: the bridge cannot fold the log itself, so an older or foreign
+      // snapshot would silently roll the thread back to state the log has
+      // already moved past.
+      const bridgeMeta = readAgentMeta(options.snapshot);
+      if (inheritedExecutionId === undefined || bridgeMeta?.logId !== inheritedExecutionId) {
+        throw new AgentMachineVersionMismatchError(
+          tail.id,
+          tail.index,
+          { machineId, machineVersion },
+          { machineId: tail.machineId, machineVersion: tail.machineVersion },
+        );
+      }
+      const bridgeTailHash = tail.verification?.stateHash;
+      // Hashed BEFORE any migration: the recorded hash describes the snapshot
+      // as the old version persisted it.
+      const bridgeSnapshotHash = hashResumeSnapshot(options.snapshot);
+      if (bridgeMeta.logIndex !== resumeEvents.length) {
+        throw new AgentSnapshotDivergedError(
+          bridgeTailHash ?? "(unrecorded)",
+          bridgeSnapshotHash,
+          resumeEvents.length,
+        );
+      }
+      if (bridgeTailHash !== undefined && bridgeSnapshotHash !== bridgeTailHash) {
+        throw new AgentSnapshotDivergedError(
+          bridgeTailHash,
+          bridgeSnapshotHash,
+          resumeEvents.length,
         );
       }
       logExecutionId = inheritedExecutionId;
@@ -2547,6 +2670,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       ...outcome,
       events: [...logEntries],
       persist,
+      drain: drainJournal,
       usage: runUsage(),
     } as RunAgentResult<TMachine>;
     if (idleTimer !== undefined) {

@@ -67,9 +67,9 @@ const result = await runAgent(machine, {
 - Each entry is written at its own `index` as `expectedIndex`, so a concurrent writer conflicts instead of interleaving.
 - No model call starts until every entry before it is durable. Pure transitions never wait.
 - A rejected write (an `AgentEventLogConflictError`, or any storage failure) aborts in-flight work and settles the run `{ status: "error", cause: "journal" }`. No further calls run.
-- A `@agent.usage` entry that arrives after the run settled is still written, but the result does not wait for it.
+- A `@agent.usage` entry that arrives after the run settled is still written, but the result does not wait for it. Await `result.drain()` before terminating the process if you care about those straggler entries; it resolves once every write issued so far has landed, and never rejects (a failed write already settled the run with `cause: "journal"`).
 - `threadId` is required with a `store`; without it `runAgent` throws `AgentError` with code `missing-thread-id`.
-- Passing `events` as well makes that log the resume, and the store's thread length must match it — otherwise `AgentEventLogConflictError`.
+- Passing `events` as well makes that log the resume, and it must BE the thread's log: a different length throws `AgentEventLogConflictError`, and an entry-for-entry mismatch at the same length throws `AgentError` with code `event-log-conflict`.
 
 ### `onEvent`: observer
 
@@ -165,7 +165,7 @@ const next = await store.length("session-1"); // the next expectedIndex
 ```
 
 - `append` is atomic. A stale writer fails with `AgentEventLogConflictError`, carrying `threadId`, `expectedIndex`, and `actualIndex`, so two hosts resuming one thread resolve to exactly one winner. Entry indices must be contiguous from `expectedIndex`, and ids unique within the thread.
-- `runAgent({ store, threadId })` drives all three: `read` to resume, `append` per entry, `length` to check an explicit `events` log against the thread.
+- `runAgent({ store, threadId })` drives all three: `read` to resume, `append` per entry, `read` again to check an explicit `events` log against the thread.
 - `read` and `length` are the only reads. Everything else about a thread is derived from its entries.
 - `fork` copies a prefix onto a fresh thread.
 
