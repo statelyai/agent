@@ -620,7 +620,13 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     // a step with no tool calls, on the step budget, or on a tool with no
     // `execute` — a client-side tool, whose call belongs to the caller, so the
     // result comes back with `finishReason: 'tool-calls'` and the raw response.
-    const maxSteps = typeof request.maxSteps === "number" ? Math.max(1, request.maxSteps) : 1;
+    // A non-finite `maxSteps` (NaN, Infinity) would never satisfy the bound
+    // check below and let a model that keeps calling tools run unbounded, so
+    // it falls back to the single-call default like an absent value.
+    const maxSteps =
+      typeof request.maxSteps === "number" && Number.isFinite(request.maxSteps)
+        ? Math.max(1, Math.floor(request.maxSteps))
+        : 1;
     const messages = toOpenAiMessages(request);
     const toolChoice = toOpenAiToolChoice(request.toolChoice);
     let response: ChatCompletion;

@@ -538,6 +538,19 @@ describe("createOpenAiExecutors: tool loop", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  test("a non-finite `maxSteps` falls back to the single-call default", async () => {
+    const create = vi.fn(async (_params: any) => ({
+      choices: [toolCallChoice("lookup", { q: "cats" })],
+    }));
+    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+
+    for (const maxSteps of [Number.NaN, Number.POSITIVE_INFINITY, -1, 2.7]) {
+      create.mockClear();
+      await generateText(textRequest({ tools, maxSteps } as never));
+      expect(create).toHaveBeenCalledTimes(Number.isFinite(maxSteps) && maxSteps >= 1 ? 2 : 1);
+    }
+  });
+
   test("a tool with no `execute` ends the loop and hands the call back", async () => {
     const create = vi.fn(async (_params: any) => ({
       choices: [toolCallChoice("clientSide", {})],

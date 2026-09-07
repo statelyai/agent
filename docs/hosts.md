@@ -10,11 +10,11 @@ const result = await runAgent(machine, {
       const response = await mySdk.generate({
         model: request.model,
         prompt: request.prompt,
-        signal
+        signal,
       });
       return { output: response.text, messages: response.messages };
-    }
-  }
+    },
+  },
 });
 ```
 
@@ -22,7 +22,7 @@ Text, stream, and decision executors all receive `(request, info)`; cancellation
 
 ## Idempotency keys
 
-Execution is at-least-once. A host runs the request and then journals its completion, so a crash between the two re-executes the request on resume. `runAgent({ store, threadId })` makes the log durable *before* each call, which bounds the duplicate to the one call that was in flight; it does not remove it.
+Execution is at-least-once. A host runs the request and then journals its completion, so a crash between the two re-executes the request on resume. `runAgent({ store, threadId })` makes the log durable _before_ each call, which bounds the duplicate to the one call that was in flight; it does not remove it.
 
 `info.callKey` makes the duplicate safe to drop. Its format is `<executionId>:<requestId>#<n>`:
 
@@ -33,7 +33,7 @@ Execution is at-least-once. A host runs the request and then journals its comple
 - A fork copies the init entry, so it keeps the parent's lineage id and can reuse results cached under the parent's keys for the requests it has not changed.
 - It is `undefined` off the `runAgent` path (a bare `provideExecutors` bind) and on a run with no event log.
 
-The key names the call *site*, not the request. A fork inherits the parent's lineage id, so a fork that changes what it asks at the same invoke site produces the same key for a different request. Cache on `callKey` **and** a fingerprint of the request, and reuse the cached result only when the request also matches. Pass `callKey` to a provider as its dedupe key for that identical request:
+The key names the call _site_, not the request. A fork inherits the parent's lineage id, so a fork that changes what it asks at the same invoke site produces the same key for a different request. Cache on `callKey` **and** a fingerprint of the request, and reuse the cached result only when the request also matches. Pass `callKey` to a provider as its dedupe key for that identical request:
 
 ```ts no-check
 const executors = {
@@ -44,7 +44,7 @@ const executors = {
     const result = await callProvider(request, { idempotencyKey: info.callKey });
     if (info.callKey) results.set(info.callKey, { fingerprint, result });
     return result;
-  }
+  },
 };
 ```
 
@@ -56,7 +56,7 @@ See [The event log](event-log.md).
 import { defineModels } from "@statelyai/agent/ai-sdk";
 
 const models = defineModels({ fast: openai("gpt-5.4-mini") });
-const agent = setupAgent({ models, /* schemas and requests */ });
+const agent = setupAgent({ models /* schemas and requests */ });
 
 await runAgent(machine, { input });
 ```
@@ -79,8 +79,8 @@ const executors = createOpenAiExecutors({
   client: new OpenAI(),
   resolveModel: (modelRef) => (modelRef === "deep" ? "gpt-5.4" : "gpt-5.4-mini"),
   settings: {
-    deep: { reasoning_effort: "high" }
-  }
+    deep: { reasoning_effort: "high" },
+  },
 });
 
 await runAgent(machine, { input, executors });
@@ -120,16 +120,18 @@ import type { AgentRequestExecutorInfo, AgentTextRequest } from "@statelyai/agen
 function onTruncated(
   request: AgentTextRequest,
   info: AgentRequestExecutorInfo | undefined,
-  partialText: string,
-  cause: unknown
+  cause: unknown,
+  partialText?: string,
 ): never {
-  // `request.name` is optional, and `requestName` is required.
+  // `request.name` is optional, and `requestName` is required. `partialOutput`
+  // is set only when the provider returned some text, so the error shape
+  // stays the same whether or not there was a partial answer.
   const requestName = request.name ?? "(unnamed)";
   throw new AgentTruncatedError(`Request '${requestName}' hit the output token limit.`, {
     requestName,
     requestId: info?.requestId,
-    partialOutput: partialText,
-    cause
+    ...(partialText !== undefined ? { partialOutput: partialText } : {}),
+    cause,
   });
 }
 ```
@@ -154,7 +156,7 @@ const executors = {
       if (hasTools || !NoObjectGeneratedError.isInstance(error)) throw error;
       return aiSdk.generateText(request, info);
     }
-  }
+  },
 };
 ```
 
