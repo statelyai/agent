@@ -21,7 +21,6 @@ function scriptedDecide(events: ChosenEvent[]) {
         },
       ],
     },
-    repeat: true,
   });
   return { executors, seen };
 }

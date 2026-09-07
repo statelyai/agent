@@ -40,7 +40,7 @@ An event the current state does not accept is a 400 with the current view. A mal
 ## Run
 
 ```sh
-pnpm --filter @statelyai/example-cloudflare-agent-host dev        # keyless, scripted
+pnpm --filter @statelyai/example-cloudflare-agent-host dev        # scripted, no API key
 pnpm --filter @statelyai/example-cloudflare-agent-host dev:live   # real models
 
 curl -X POST localhost:3009/agents/email-drafter/demo \
@@ -49,7 +49,7 @@ curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"SEND"}'
 curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"END"}'
 ```
 
-Without `OPENAI_API_KEY` the host falls back to keyless scripted executors, so the example boots and completes with no credentials.
+Without `OPENAI_API_KEY` the host falls back to scripted executors, so the example boots and completes with no credentials.
 
 ## Test
 

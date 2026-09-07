@@ -44,7 +44,7 @@
  * nothing is recorded in module-level state.
  *
  * Dual-mode: `runReviewToolCallsExample(options?)` takes an injectable
- * `generateText` (keyless tests pass a mock) plus a sequence of resume events,
+ * `generateText` (tests with no API key pass a mock) plus a sequence of resume events,
  * each applied across a JSON snapshot round-trip; the direct run uses real models
  * and a readline approve/edit/reject prompt.
  *

@@ -44,7 +44,7 @@ OPENAI_API_KEY=... npx tsx examples/retrofit/index.ts   # the machine
 OPENAI_API_KEY=... npx tsx examples/retrofit/before.ts  # the loop it replaces
 ```
 
-Tests (`index.test.ts`) run keyless with mock executors:
+Tests (`index.test.ts`) run with no API key with mock executors:
 
 ```bash
 pnpm vitest run examples/retrofit

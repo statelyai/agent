@@ -132,7 +132,7 @@ The differences worth planning for:
 
 - **Merges are explicit.** LangGraph merges every node's return value through the channel's reducer. A machine transition returns the fields it changes, and omitted fields keep their values. There is nowhere for a reducer to live, so a running total is written as `attempts: context.attempts + 1` on the transition.
 - **Routing is a state or a transition, not a return value.** A pure function of state is a `choice` state. A branch taken in response to something arriving is a guarded transition on an event. A branch the model picks is `agent.decide` with `allowedEvents`, and the machine rejects a choice the current state does not accept.
-- **Resume is typed.** `Command({ resume })` carries an opaque value back into the interrupted node. Resuming a machine sends one of its declared events into a state that accepts it, so an unknown event or a bad payload is rejected before anything runs. See [Human in the loop](human-in-the-loop.md).
+- **Resume is typed.** `Command({ resume })` carries an opaque value back into the interrupted node. Resuming a machine sends one of its declared events, and `parseAgentEvent` checks the payload at the boundary before anything runs. An event the state does not handle is ignored, the way a state machine always ignores one. See [Human in the loop](human-in-the-loop.md).
 
 ## Worked examples
 

@@ -5,7 +5,7 @@
   "manual": true,
   "origin": {
     "type": "platform-adapter",
-    "source": "Real @flue/runtime@2 (not a shim): the agent is the exported function returning its instructions, composed by hooks (useModel/useSkill/useTool/usePersistentState) with Valibot tool input/output and run({ data }); booted in-process with start() from @flue/runtime/node and driven via init()/dispatch()/read(), keyless through pi's fauxProvider",
+    "source": "Real @flue/runtime@2 (not a shim): the agent is the exported function returning its instructions, composed by hooks (useModel/useSkill/useTool/usePersistentState) with Valibot tool input/output and run({ data }); booted in-process with start() from @flue/runtime/node and driven via init()/dispatch()/read(), no API key needed through pi's fauxProvider",
     "url": "https://flueframework.com/docs/guide/agent-hooks"
   },
   "comparison": {

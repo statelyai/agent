@@ -20,12 +20,25 @@ return Response.json(result);
 
 ```ts no-check
 const snapshot = await frameworkStore.get(id);
-const result = await runAgent(machine, {
-  snapshot,
-  event: parseAgentEvent(restoredSnapshot, await request.json()),
-  executors
-});
+
+let event;
+try {
+  event = parseAgentEvent(machine, await request.json());
+} catch (error) {
+  return Response.json({ error: String(error) }, { status: 400 });
+}
+
+const result = await runAgent(machine, { snapshot, event, executors });
+
+if (result.ignored) {
+  return Response.json(
+    { error: `'${result.ignored.type}' does not apply right now` },
+    { status: 409 }
+  );
+}
 ```
+
+Parse at the boundary; `runAgent` adds no validation of its own. An event the restored state does not handle is ignored, not an error.
 
 ## Long-lived UI actor
 

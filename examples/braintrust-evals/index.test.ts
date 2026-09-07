@@ -1,5 +1,5 @@
 /**
- * Keyless: scripted executors, no env reads, no Braintrust service. The scorers
+ * No API key: scripted executors, no env reads, no Braintrust service. The scorers
  * are plain functions over a `runAgent` result, so they are testable on their
  * own — which is the point of the example.
  */

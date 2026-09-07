@@ -15,7 +15,7 @@ key or model SDK.
 
 ```ts
 import { z } from "zod";
-import { createScriptedExecutors, runAgent, setupAgent } from "@statelyai/agent";
+import { runAgent, setupAgent } from "@statelyai/agent";
 
 const answerOutputSchema = z.object({ answer: z.string() });
 
@@ -53,15 +53,11 @@ const machine = agent.createMachine({
   },
 });
 
-const scripted = createScriptedExecutors({
-  text: {
-    answer: ["Because transitions constrain behavior."],
-  },
-});
-
 const result = await runAgent(machine, {
   input: { prompt: "Why state machines?" },
-  executors: scripted,
+  executors: {
+    generateText: async () => ({ output: "Because transitions constrain behavior." }),
+  },
 });
 
 if (result.status !== "done") {
@@ -69,7 +65,6 @@ if (result.status !== "done") {
 }
 
 console.log(result.output.answer);
-console.log(scripted.calls[0]?.name); // "answer"
 ```
 
 Run it:
@@ -82,27 +77,15 @@ It prints:
 
 ```text
 Because transitions constrain behavior.
-answer
 ```
 
 Requests have a semantic `name`, resolved `input`, model reference, schemas,
 prompt/messages, and tools. The machine owns control flow; the executor owns
 the provider call.
 
-The script keys by that request `name`, and each entry is the request's output
-value: a bare string here because `answer` declares `z.string()`, and the
-declared object for a structured request. Each key is a queue consumed once per
-call, so a machine that loops over one request takes `repeat: true`:
-
-```ts no-check
-const scripted = createScriptedExecutors({
-  text: { answer: ["Because transitions constrain behavior."] },
-  repeat: true,
-});
-```
-
-See [Evals](evals.md#script-keys) for the full rule, including how an inline
-`agent.decide` is named and what happens when a script key is wrong.
+An executor is just a function, so the machine runs anywhere a function does.
+When several requests each need their own canned answer, `createScriptedExecutors`
+keys them by request `name` — see [Evals](evals.md#scripted-executors).
 
 ## Use a real model
 

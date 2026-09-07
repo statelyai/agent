@@ -4,19 +4,21 @@
  * persisted (see ../../route.ts) and delivers the human's APPROVE / REJECT
  * event, running the machine to `done`.
  *
- * The request body is untrusted, so it is handed to `runAgent` as
- * `resumeEvent` rather than as the typed `event`: `runAgent` restores the
- * paused state, checks the type against what that state currently accepts and
- * the payload against the machine's own event schemas, and settles
- * `{ status: 'error', cause: 'invalid-event' }` when it does not fit. That is
- * a 400, not a 500, and no snapshot or log is touched — so no hand-rolled
- * validation pass lives here.
+ * The request body comes off the wire, so it goes through `parseAgentEvent`
+ * first: that checks it is an object with a string `type` and that its fields
+ * satisfy the machine's own event schemas. A bad payload is a 400 and nothing
+ * runs, so no hand-rolled validation pass lives here.
+ *
+ * Whether the paused state HANDLES the event is a different question, and not
+ * an error: a state machine ignores an event it has no transition for. The run
+ * settles normally and `result.ignored` names the event, which this route
+ * reports as a 409.
  *
  * Note `params` is a PROMISE and must be awaited — dynamic route params went
  * async in the App Router as of Next 15. This example is typed against the real
  * `next` package, so that is enforced rather than assumed.
  */
-import { runAgent } from "@statelyai/agent";
+import { parseAgentEvent, runAgent } from "@statelyai/agent";
 import { NextResponse, type NextRequest } from "next/server";
 import { announceMachine, snapshots } from "../../route";
 import { resolveExecutors, maybeCreateRunInspection } from "../../../../../agent-runtime";
@@ -31,17 +33,27 @@ export async function POST(
 
   const body = (await request.json().catch(() => ({}))) as { event?: unknown };
 
+  let event;
+  try {
+    event = parseAgentEvent(announceMachine, body.event);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 400 },
+    );
+  }
+
   const result = await runAgent(announceMachine, {
     snapshot,
-    resumeEvent: body.event,
+    event,
     executors: resolveExecutors(),
     inspect: await maybeCreateRunInspection(),
   });
 
-  if (result.status === "error" && result.cause === "invalid-event") {
+  if (result.ignored) {
     return NextResponse.json(
-      { error: result.error instanceof Error ? result.error.message : String(result.error) },
-      { status: 400 },
+      { error: `'${result.ignored.type}' does not apply right now` },
+      { status: 409 },
     );
   }
 

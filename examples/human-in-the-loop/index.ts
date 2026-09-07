@@ -20,7 +20,7 @@
  * Two entry points:
  *   - `runHumanInTheLoopExample(options)` — compact, test-facing: draft → idle →
  *     persist → resume with APPROVE. The `generateText` executor is injectable
- *     so keyless tests drive it with a mock.
+ *     so tests with no API key drive it with a mock.
  *   - Direct run (`tsx examples/human-in-the-loop/index.ts`) — a real
  *     interactive CLI loop: it prints each draft, asks you to approve or reject
  *     (with a reason), and re-runs the machine until you approve.

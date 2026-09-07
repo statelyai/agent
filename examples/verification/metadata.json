@@ -4,7 +4,7 @@
   "kind": "evaluation",
   "origin": {
     "type": "stately-agent",
-    "source": "Flagship showcase for the keyless verification suite (lintAgentMachine, canReach, explorePaths, simulateAgent, matchesTrajectory) over a refund-approval machine",
+    "source": "Flagship showcase for the provider-free verification suite (lintAgentMachine, canReach, explorePaths, simulateAgent, matchesTrajectory) over a refund-approval machine",
     "url": null
   },
   "comparison": {

@@ -48,9 +48,9 @@ if (import.meta.url === new URL(process.argv[1] ?? "", "file:").href) {
   // both keys; with either missing, both demos run on the faux provider.
   const live = Boolean(process.env.OPENAI_API_KEY && process.env.ANTHROPIC_API_KEY);
   (async () => {
-    console.log(`=== Way 1: machine-owned (${live ? "live" : "keyless"}) ===`);
+    console.log(`=== Way 1: machine-owned (${live ? "live" : "scripted"}) ===`);
     await machineOwnedMain({ live });
-    console.log(`\n=== Way 2: flue-owned (${live ? "live" : "keyless"}) ===`);
+    console.log(`\n=== Way 2: flue-owned (${live ? "live" : "scripted"}) ===`);
     await flueOwnedMain({ live });
   })().catch((error) => {
     console.error(error);

@@ -73,7 +73,7 @@ const event = eventFromInteraction(paused.snapshot, { type: "APPROVE" });
 await runAgent(machine, { snapshot: paused.persist(), event, executors });
 ```
 
-When the answer arrives over the wire instead of from your own code, skip the separate validation step: `resumeEvent` takes the raw body and `runAgent` validates it against the restored state, settling `{ status: "error", cause: "invalid-event" }` if it does not fit. See [Persistence](persistence.md#resume-with-an-untrusted-event).
+When the answer arrives over the wire instead of from your own code, parse it at the boundary with `parseAgentEvent(machine, await request.json())` and pass the result as `event`. A bad payload throws, which is a 400; an event the paused state has no transition for is ignored and comes back as `result.ignored`. See [Persistence](persistence.md#resume-with-an-event-off-the-wire).
 
 ## Drive several turns
 

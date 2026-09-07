@@ -20,7 +20,7 @@
  * one legal event is adapter business, not core's — see docs/decisions.md.
  *
  * Dual-mode: `runAiSdkHostExample(options?)` takes injectable executors (tests
- * pass mocks — keyless CI); the direct run uses real models.
+ * pass mocks — CI with no API key); the direct run uses real models.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-host/index.ts
  */
@@ -389,7 +389,7 @@ export interface RunAiSdkHostOptions {
   onStep?: (value: StateValue) => void;
 }
 
-/** Runs one turn and returns its output. Keyless when executors are injected. */
+/** Runs one turn and returns its output. No API key needed when executors are injected. */
 export async function runAiSdkHostExample(options: RunAiSdkHostOptions = {}) {
   return runAiSdkGameTurn(
     options.input ?? { playerHp: 20, enemyHp: 15 },

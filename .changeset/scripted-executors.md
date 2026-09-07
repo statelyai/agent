@@ -2,7 +2,7 @@
 "@statelyai/agent": minor
 ---
 
-**`createScriptedExecutors`: run any agent machine with no API key.** A keyless, dependency-free executor set (root export) that plays back a script instead of calling a model, so `runAgent` / `provideExecutors` work end to end with nothing installed but core. The quickstart's first run is now keyless.
+**`createScriptedExecutors`: run any agent machine with no API key.** A dependency-free executor set (root export) that plays back a script instead of calling a model, so `runAgent` / `provideExecutors` work end to end with nothing installed but core. The quickstart's first run needs no API key.
 
 ```ts
 const result = await runAgent(moderationMachine, {

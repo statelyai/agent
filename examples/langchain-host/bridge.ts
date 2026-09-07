@@ -12,8 +12,8 @@
  *
  * The machine owns legality and state; the LangChain agent only converses.
  * Nothing here hardcodes a state name — the event to send is derived from the
- * machine's own `meta.interaction`. Illegal resumes are refused by `runAgent`
- * itself (AgentIllegalResumeEventError), so no hand-rolled legality check
+ * machine's own `meta.interaction`. An event the current state does not handle
+ * is ignored by the machine (`result.ignored`), so no hand-rolled legality check
  * lives in the tools. Same bridge as ../mastra-host/index.ts.
  *
  * Snapshots live in an in-memory `Map` keyed by handle (same shape as
@@ -115,7 +115,7 @@ function currentRunOptions(): RunAgentOptions<typeof emailDrafter> {
  * declared `textEvent` as `text`; a listed choice contributes any fixed fields
  * its metadata attached. The cast is the one unavoidable seam: the eventType
  * arrives as a model-supplied string. `runAgent` still validates it against the
- * restored state and throws on anything illegal.
+ * machine's event schemas.
  */
 function buildEvent(
   interaction: Interaction | null,
@@ -189,6 +189,14 @@ export async function resumeDraft(
     snapshot: stored.snapshot,
     event: buildEvent(stored.interaction, eventType, text),
   });
+
+  // The state has no transition for the event, so the machine ignored it and
+  // nothing happened. That is not a library error: `runAgent` settled
+  // normally and named the event on `result.ignored`. The host decides what
+  // to do about it — here, a plain throw the tool loop reports.
+  if (result.ignored) {
+    throw new Error(`'${result.ignored.type}' does not apply in the current state.`);
+  }
   return toToolResult(result, handle);
 }
 
@@ -248,7 +256,7 @@ export const SYSTEM_PROMPT =
  */
 export function createEmailHostAgent(model: BaseChatModel, machineModel: BaseChatModel = model) {
   // The conversing model and the model *inside* the machine are separable, and
-  // separate scripts keep the keyless demo readable; live, they are one model.
+  // separate scripts keep the scripted demo readable; live, they are one model.
   useModel(machineModel);
   return createAgent({
     model,

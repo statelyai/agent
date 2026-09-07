@@ -18,7 +18,7 @@
  * that example wires these two tools into a real Mastra agent and keys an
  * opaque handle into a run store; this one is the framework-free, stateless
  * version, and both use the same `persist()` / `getInteraction` /
- * `AgentIllegalResumeEventError` protocol. Read this one first.
+ * `result.ignored` protocol. Read this one first.
  *
  * This file simulates the harness side with plain functions; no real harness
  * dependency. `runOptions` is a required parameter of both tools: the example
@@ -233,8 +233,8 @@ function toToolResult(result: RunAgentResult<typeof refundMachine>): ToolResult 
   // opaque id and the persisted snapshot goes in a host-owned store; here the
   // handle *is* the persisted snapshot, so the bridge is stateless and the host
   // needs no storage at all. Everything else — `persist()`, `getInteraction`,
-  // resuming via `runAgent(machine, { snapshot, event })`, and letting
-  // `AgentIllegalResumeEventError` police legality — is identical.
+  // resuming via `runAgent(machine, { snapshot, event })`, and reading
+  // `result.ignored` when the state did not handle the event — is identical.
   const handle: Handle = JSON.stringify(result.persist());
   return {
     status: "pending",
@@ -260,18 +260,26 @@ export async function resumeTool(
 ): Promise<ToolResult> {
   const snapshot = JSON.parse(handle);
   const result = await runAgent(refundMachine, { ...runOptions, snapshot, event });
+
+  // The state has no transition for the event, so the machine ignored it and
+  // nothing happened. That is not a library error: `runAgent` settled
+  // normally and named the event on `result.ignored`. The host decides what
+  // to do about it — here, a plain throw the tool loop reports.
+  if (result.ignored) {
+    throw new Error(`'${result.ignored.type}' does not apply in the current state.`);
+  }
   return toToolResult(result);
 }
 
-// Illegal events are refused up front by `runAgent` itself: `resumeTool`'s
-// `runAgent(refundMachine, { snapshot, event })` throws `AgentIllegalResumeEventError`
-// when the restored state can't take the event, so the harness needs no
-// hand-rolled legality check before resuming.
+// An event the restored state has no transition for is not refused: the
+// machine ignores it, `runAgent` settles normally, and `result.ignored` names
+// it. The harness turns that into its own error above — no hand-rolled
+// legality check runs before resuming.
 
 /**
  * Demo: an over-limit refund through the harness bridge — start pauses with an
  * interaction, the harness approves, the machine finishes. Executors are the
- * caller's, so this runs keyless in tests and against a model from `main`.
+ * caller's, so this runs with no API key in tests and against a model from `main`.
  */
 export async function runMachineAsToolExample(runOptions: RefundRunOptions) {
   const started = await startTool({ amount: 780, orderId: "ORD-9002" }, runOptions);

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createActor } from "xstate";
-import { parseAgentEvent, setupAgent } from "./index.js";
+import { AgentInvalidEventPayloadError, parseAgentEvent, setupAgent } from "./index.js";
 
 const agent = setupAgent({
   context: z.object({}),
@@ -42,17 +42,31 @@ describe("parseAgentEvent", () => {
     expect(parseAgentEvent(snapshot, { type: "CANCEL" }, options)).toEqual({ type: "CANCEL" });
   });
 
-  test("throws, listing accepted types, when the event type is not currently accepted", () => {
+  test("parses from the machine itself, using its registered event schemas", () => {
+    expect(parseAgentEvent(machine, { type: "PROMPT_SUBMITTED", text: "hi" })).toEqual({
+      type: "PROMPT_SUBMITTED",
+      text: "hi",
+    });
+  });
+
+  test("does not check whether the state handles the event — that is the machine's job", () => {
     const snapshot = createActor(machine).start().getSnapshot();
-    expect(() => parseAgentEvent(snapshot, { type: "NOPE" }, options)).toThrow(
-      /not an accepted event.*PROMPT_SUBMITTED/s,
+    // A state machine ignores events it has no transition for; parsing is
+    // about payload shape only, so an unhandled type passes straight through.
+    expect(parseAgentEvent(snapshot, { type: "NOPE" }, options)).toEqual({ type: "NOPE" });
+  });
+
+  test("throws AgentInvalidEventPayloadError when the payload fails the registered schema", () => {
+    const snapshot = createActor(machine).start().getSnapshot();
+    expect(() => parseAgentEvent(snapshot, { type: "PROMPT_SUBMITTED" }, options)).toThrow(
+      AgentInvalidEventPayloadError,
     );
   });
 
-  test("throws when the payload fails the registered schema", () => {
-    const snapshot = createActor(machine).start().getSnapshot();
-    expect(() => parseAgentEvent(snapshot, { type: "PROMPT_SUBMITTED" }, options)).toThrow(
-      /payload failed validation/,
+  test("throws when the payload is not an object with a string `type`", () => {
+    expect(() => parseAgentEvent(machine, "PROMPT_SUBMITTED")).toThrow(
+      AgentInvalidEventPayloadError,
     );
+    expect(() => parseAgentEvent(machine, { text: "hi" })).toThrow(AgentInvalidEventPayloadError);
   });
 });

@@ -4,6 +4,16 @@ Agent requests are independently executable, while the machine gives them meanin
 
 ## Deterministic whole-run evals
 
+Any function satisfies an executor slot, so a one-off stand-in needs no helper:
+
+```ts no-check
+executors: { generateText: async () => ({ output: "a draft" }) }
+```
+
+## Scripted executors
+
+`createScriptedExecutors` is the multi-request version: ordered answers by request name, where the last entry for a name repeats forever.
+
 ```ts no-check
 const scripted = createScriptedExecutors({
   text: {
@@ -56,7 +66,7 @@ createScriptedExecutors({
 });
 ```
 
-Use `"*"` as a fallback route, and a flat array only when the machine makes one kind of request.
+Use `"*"` as a fallback route for anything unmatched.
 
 > **Note:** `simulateAgent` and `explorePaths` are a different API with a different script: they key by invoke **src**, not by request name. See [Verification](verify.md#scripted-playthroughs).
 
@@ -77,29 +87,19 @@ An entry may also be a function of the request, which is how one script serves a
 
 A `decisions` entry is the chosen event (`{ type: "GUESS", letter: "e" }`), or `{ event, reason?, usage? }` when it reports a reason or usage.
 
-### Repeating and exhausting
+### Order and repetition
 
-Each key holds a FIFO queue, consumed once per matching call and shared across every `runAgent` call that takes the same executor set. Exhaustion is the default and it is what makes a call count exact: a queue that runs dry throws instead of quietly reusing an answer.
-
-A looping machine takes `repeat: true`, which reuses the last routed entry after its queue is exhausted:
+Entries for a name are consumed in order, and the last one repeats forever, so a looping machine needs no extra option:
 
 ```ts no-check
-createScriptedExecutors({ text: { revise: [draft] }, repeat: true });
+createScriptedExecutors({ text: { revise: [firstDraft, revisedDraft] } });
 ```
 
-Build the executors once per run. A script queue is stateful, so an executor set hoisted across runs replays a partly consumed script into the next one.
+Assert exact call counts through `scripted.calls` rather than through exhaustion.
 
-### Script faults are not model failures
+Build the executors once per run. The position within each list is stateful, so an executor set hoisted across runs starts partway through its script.
 
-An unknown key and a dry queue both throw `AgentScriptedExecutorError` (codes `scripted-executors-unknown-name` and `scripted-executors-exhausted`) from inside the executor, so an invoke that declares `onError` routes it like any model failure and the run settles with a plausible-looking outcome. Two things keep that honest:
-
-- the executor set is poisoned after the first fault, so no later call is served (pass `strict: false` for the legacy per-call behavior);
-- `scripted.assertScriptOk()` rethrows the fault. Call it after every scripted run.
-
-```ts no-check
-const result = await runAgent(machine, { input, executors: scripted });
-scripted.assertScriptOk();
-```
+A request the script has no route for throws a plain `Error` naming the known keys. It reaches the machine as an ordinary actor error, so an invoke that declares `onError` routes it like a model failure — check `scripted.calls` when a run settles suspiciously.
 
 ## Individual request evals
 

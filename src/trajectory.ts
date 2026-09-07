@@ -6,7 +6,7 @@
  * so an extra retry loop does not fail a run that reached the right places in
  * the right order.
  *
- * Dependency-free and keyless, like the rest of the verification family: it is
+ * Dependency-free and provider-free, like the rest of the verification family: it is
  * a pure function over values a run already returns.
  *
  * @module

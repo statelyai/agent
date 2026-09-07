@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
 import { HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
-import { AgentIllegalResumeEventError } from "@statelyai/agent";
 import {
   ScriptedChatModel,
   agentScript,
@@ -165,16 +164,15 @@ describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
     expect(revised.draft).not.toBeNull();
   });
 
-  test("the machine refuses an illegal resume", async () => {
+  test("an event the state does not handle is ignored", async () => {
     useModel(machineModel());
     const started = await startDraft("Announce the faster deploys.");
     if (started.status !== "pending") throw new Error("expected pending");
 
-    // `SEND` is legal at `reviewing`, not after the email has already been sent.
+    // `SEND` is handled at `reviewing`, not after the email has already been
+    // sent: the machine ignores the second one and the bridge reports it.
     await resumeDraft(started.handle, "SEND");
-    await expect(resumeDraft(started.handle, "SEND")).rejects.toBeInstanceOf(
-      AgentIllegalResumeEventError,
-    );
+    await expect(resumeDraft(started.handle, "SEND")).rejects.toThrow(/'SEND' does not apply/);
   });
 
   test("an unknown handle is rejected", async () => {

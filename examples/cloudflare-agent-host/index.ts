@@ -21,7 +21,7 @@
  * Executors are resolved per Durable Object, not at import: Workers have no
  * ambient `process.env`, so the provider is constructed from the `env` binding.
  * With `OPENAI_API_KEY` set (via `.dev.vars` locally, `wrangler secret` in
- * production) the run is live; without it the host falls back to keyless
+ * production) the run is live; without it the host falls back to scripted
  * `createScriptedExecutors`, so the example boots and completes with no
  * credentials at all.
  *
@@ -33,7 +33,7 @@
  *                                              validated, then run as one turn
  *
  * Run:
- *   pnpm --filter @statelyai/example-cloudflare-agent-host dev        # keyless
+ *   pnpm --filter @statelyai/example-cloudflare-agent-host dev        # scripted, no API key
  *   pnpm --filter @statelyai/example-cloudflare-agent-host dev:live   # real model
  *
  *   curl -X POST localhost:3009/agents/email-drafter/demo \
@@ -41,12 +41,14 @@
  *   curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"SEND"}'
  *   curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"END"}'
  */
+import type { EventFrom } from "xstate";
 import { Agent, routeAgentRequest, type Connection } from "agents";
 import { createOpenAI } from "@ai-sdk/openai";
 import {
   createScriptedExecutors,
   getAcceptedEvents,
   getInteraction,
+  parseAgentEvent,
   runAgent,
   type AgentEventLogStore,
   type AgentRequestExecutors,
@@ -72,14 +74,14 @@ type ClientEvent = { type: string } & Record<string, unknown>;
  */
 const THREAD_ID = "main";
 
-/** An event the current state does not accept: a client mistake (400), not a host failure. */
-class RejectedEventError extends Error {}
+/** The machine ignored the event: the state has no transition for it, so nothing happened (400 for the client, not a host failure). */
+class IgnoredEventError extends Error {}
 
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : String(error ?? "Unknown error");
 
 /**
- * How many keyless model calls this Worker has made. The durability claim of
+ * How many scripted model calls this Worker has made. The durability claim of
  * this host is that a resume REPLAYS journaled calls instead of re-running
  * them, and this counter is what makes that observable — see
  * `test/agent.workers-test.ts`.
@@ -87,10 +89,10 @@ const messageOf = (error: unknown) =>
 export const scriptedModelCalls = { count: 0 };
 
 /**
- * Keyless answers, keyed by the request NAME the machine declares
+ * Scripted answers, keyed by the request NAME the machine declares
  * (`evaluatePrompt` / `draftEmail` in `../email-drafter/agent-logic.ts`), so
  * each entry answers the request it was written for however many rounds the
- * conversation takes. `repeat: true` reuses the last entry of each queue.
+ * conversation takes: the last entry for a name repeats.
  */
 const countCall =
   <T>(answer: T) =>
@@ -110,10 +112,10 @@ const scriptedText = {
   ],
 };
 
-/** Live executors when the DO has a key, scripted (keyless) otherwise. */
+/** Live executors when the DO has a key, scripted otherwise. */
 function resolveExecutors(env: Env): AgentRequestExecutors {
   if (!env.OPENAI_API_KEY) {
-    return createScriptedExecutors({ text: scriptedText, repeat: true });
+    return createScriptedExecutors({ text: scriptedText });
   }
 
   // Bind the provider to the Worker's env: `openai(...)` from the module scope
@@ -163,7 +165,7 @@ export class EmailDrafter extends Agent<Env> {
    * awaited before the next model call, so a crash mid-turn loses nothing but
    * the call that was in flight.
    */
-  async #run(resumeEvent?: unknown): Promise<Turn> {
+  async #run(event?: EventFrom<typeof emailDrafter>): Promise<Turn> {
     this.#executors ??= resolveExecutors(this.env);
 
     const result = await runAgent(emailDrafter, {
@@ -171,11 +173,10 @@ export class EmailDrafter extends Agent<Env> {
       threadId: THREAD_ID,
       // Used only when the thread's log is empty; a resume ignores it.
       input: undefined,
-      // The client frame, unvalidated: `runAgent` checks the type against the
-      // restored state and the payload against the machine's event schemas
-      // before anything runs, and reports a failure as
-      // `{ status: 'error', cause: 'invalid-event' }`.
-      ...(resumeEvent !== undefined ? { resumeEvent } : {}),
+      // Already parsed at the boundary by `parseAgentEvent`, so this is the
+      // machine's own event type. If the current state has no transition for
+      // it, the machine ignores it and the turn reports `result.ignored`.
+      ...(event !== undefined ? { event } : {}),
       executors: this.#executors,
       onTransition: (snapshot) => {
         this.broadcast(
@@ -195,14 +196,14 @@ export class EmailDrafter extends Agent<Env> {
     // recorded — so an errored turn leaves `#last` where the journal is, and
     // the request reports the failure instead.
     if (result.status === "error") {
-      // A wire event the current state cannot take is a client mistake (400).
-      // Nothing was appended, so the thread is exactly where it was.
-      if (result.cause === "invalid-event") {
-        throw new RejectedEventError(messageOf(result.error));
-      }
       throw result.error instanceof Error ? result.error : new Error(messageOf(result.error));
     }
     this.#last = result;
+    // The state did not handle the event. The run settled normally and the
+    // view is current, so this is only worth telling the client about.
+    if (result.ignored) {
+      throw new IgnoredEventError(`'${result.ignored.type}' does not apply in the current state.`);
+    }
     return result;
   }
 
@@ -225,14 +226,17 @@ export class EmailDrafter extends Agent<Env> {
       this.#sendError(connection, `Invalid JSON: ${messageOf(error)}`);
       return;
     }
-    if (!event?.type) {
-      this.#sendError(connection, "Send a machine event: { type, ...payload }");
+    let accepted: EventFrom<typeof emailDrafter>;
+    try {
+      accepted = parseAgentEvent(emailDrafter, event);
+    } catch (error) {
+      // A payload the event schema rejects never reaches the queue.
+      this.#sendError(connection, messageOf(error));
       return;
     }
 
-    const accepted = event;
     void this.#enqueue(async () => {
-      // Fold the journal back first, so a rejected event still leaves this DO
+      // Fold the journal back first, so an ignored event still leaves this DO
       // with a view to report.
       await this.#current();
       await this.#run(accepted);
@@ -261,12 +265,13 @@ export class EmailDrafter extends Agent<Env> {
       );
     }
 
-    const event = (await request.json().catch(() => null)) as ClientEvent | null;
-    if (!event?.type) {
-      return Response.json(
-        { error: "POST a machine event: { type, ...payload }" },
-        { status: 400 },
-      );
+    // Parse the wire payload at the boundary: shape and schema only. Whether
+    // the current state handles it is the machine's business, not a 400.
+    let event: EventFrom<typeof emailDrafter>;
+    try {
+      event = parseAgentEvent(emailDrafter, await request.json().catch(() => null));
+    } catch (error) {
+      return Response.json({ error: messageOf(error) }, { status: 400 });
     }
 
     try {
@@ -277,7 +282,7 @@ export class EmailDrafter extends Agent<Env> {
         await this.#run(event);
       });
     } catch (error) {
-      if (error instanceof RejectedEventError) {
+      if (error instanceof IgnoredEventError) {
         return Response.json({ ...this.#view(), error: error.message }, { status: 400 });
       }
       return Response.json({ error: messageOf(error) }, { status: 500 });

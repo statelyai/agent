@@ -228,7 +228,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     expect(prefixed).toEqual([]);
   });
 
-  test("parseAgentEvent refuses to mint one from untrusted input", async () => {
+  test("parseAgentEvent refuses to mint one from a wire payload", async () => {
     const result = await runAgent(budgetMachine, {
       input: { maxTokens: 400 },
       executors: textExecutors,
@@ -239,7 +239,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
         type: AGENT_USAGE_EVENT_TYPE,
         usage: { totalTokens: 999_999 },
       }),
-    ).toThrow(/is not an accepted event/);
+    ).toThrow(/reserved for the library/);
   });
 
   test("a wildcard-only machine DOES receive it: `on: { '*' }` matches, per plain XState semantics", async () => {

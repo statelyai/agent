@@ -1,7 +1,7 @@
 /**
  * Runs the Worker in real workerd (via @cloudflare/vitest-plugin), so the
  * Durable Object, its SQLite event log, and the folded XState machine are the
- * real thing — not a Node stand-in. Keyless: `vitest.config.ts` forces the
+ * real thing — not a Node stand-in. No API key: `vitest.config.ts` forces the
  * `OPENAI_API_KEY` binding empty (it would otherwise be picked up from a
  * `.dev.vars` left behind by `dev:live`), so the host falls back to scripted
  * executors and this suite never bills a provider.
@@ -144,16 +144,17 @@ describe("cloudflare agent host", () => {
     expect(entries.filter((entry) => entry.event.type === "@agent.init")).toHaveLength(1);
   });
 
-  it("rejects an event the current state does not accept", async () => {
-    const response = await SELF.fetch(url("rejects"), {
+  it("reports an event the current state does not handle, without changing it", async () => {
+    const response = await SELF.fetch(url("ignored"), {
       method: "POST",
       body: JSON.stringify({ type: "SEND" }),
     });
     const view = (await response.json()) as View;
 
     expect(response.status).toBe(400);
-    // `runAgent` refuses the event itself: cause 'invalid-event', nothing run.
-    expect(view.error).toContain("does not accept");
+    // The machine ignored it: `runAgent` settled normally with `result.ignored`
+    // set, and the DO turns that into a 400 with the unchanged view.
+    expect(view.error).toContain("does not apply");
     expect(view.state).toBe("prompting");
   });
 

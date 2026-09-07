@@ -15,7 +15,7 @@ import {
 import { createDecisionLogic } from "./decision.js";
 import { humanInTheLoopMachine, jokeMachine, twentyQuestionsMachine } from "../examples/index.js";
 
-// A refund machine mirroring the README's keyless example: an `agent.decide`
+// A refund machine mirroring the README's no-API-key example: an `agent.decide`
 // that may AUTO_APPROVE (guarded to amount <= 100) or NEEDS_REVIEW, then a human
 // gate (APPROVE/DENY) into two final states.
 function createRefundMachine() {
@@ -229,7 +229,7 @@ describe("lintAgentMachine — each check fires on a crafted bad machine", () =>
   });
 });
 
-describe("simulateAgent — keyless deterministic playthrough", () => {
+describe("simulateAgent — deterministic playthrough", () => {
   // Player turns in twenty-questions are idle states resumed by external
   // events. With no `events` scripted, a playthrough settles at the first
   // player turn; the `events` queue (tested below) crosses such gates.

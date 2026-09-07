@@ -176,7 +176,7 @@ export async function runAgentLoopDemo(
 
 // ─── Demos ───
 
-/** Keyless: both directions against scripted LangChain models. No env reads. */
+/** No API key: both directions against scripted LangChain models. No env reads. */
 export async function main() {
   console.log("— Direction A: LangChain model as executor (stream + structured + decide) —");
   const jokeOutput = await runJokeDemo(new ScriptedChatModel({ responses: jokeScript }), (chunk) =>

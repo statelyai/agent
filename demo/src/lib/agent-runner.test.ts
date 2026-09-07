@@ -4,7 +4,7 @@ import { resumeScenario, startScenarioRun, resumeScenarioRun } from "./agent-run
 import { scriptedExecutorsFor } from "./scripted-executors";
 import type { ScenarioId } from "./scenarios";
 
-// Every test runs the REAL machines with keyless scripted executors — the same
+// Every test runs the REAL machines with scripted executors — the same
 // path the UI uses without an API key. No network, no key.
 function start(id: ScenarioId, prompt: string) {
   return startScenarioRun(id, prompt, "script", undefined, scriptedExecutorsFor(id));
@@ -22,7 +22,7 @@ function resume(id: ScenarioId, snapshot: unknown, event: { type: string; [k: st
   );
 }
 
-describe("scenario outcomes (keyless)", () => {
+describe("scenario outcomes (scripted)", () => {
   test("refund under $100 auto-refunds", async () => {
     const result = await start("refund", "Please refund $75 for a damaged item.");
     expect(result.status).toBe("done");
@@ -197,7 +197,7 @@ describe("bounded exits", () => {
 
 describe("ambiguous free-text review", () => {
   test("re-idles with the snapshot's own event descriptors (REJECT still needs a reason)", async () => {
-    // No key → scripted interpretation, same path the keyless UI takes.
+    // No key → scripted interpretation, same path the scripted UI takes.
     vi.stubEnv("OPENAI_API_KEY", "");
     const first = await start("approval", "Announce the outage.");
     expect(first.status).toBe("idle");

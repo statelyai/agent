@@ -6,12 +6,12 @@
  * call got worse. A machine agent is a chain of calls, and each one is a seam.
  * {@link runSeam} runs the real machine with every request routed to a scripted
  * answer except one: the seam under test gets a `candidate` executor (the real
- * model, a candidate prompt, a fine-tune) or stays scripted for a keyless run.
+ * model, a candidate prompt, a fine-tune) or stays scripted for a run with no API key.
  * Everything after the seam is a real consequence of it — the branch it took,
  * the states it reached, the events the user then sent — so the slice of the
  * run after the seam is the score.
  *
- * Dependency-free and keyless by default, like the rest of the verification
+ * Dependency-free and provider-free by default, like the rest of the verification
  * family: {@link runSeam} returns trajectory slices ready for
  * `matchesTrajectory`, and the scorers stay yours.
  *
@@ -137,7 +137,7 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
   /**
    * The executor for the seam — the real model, a candidate prompt, anything
    * request-shaped. Omit to run the seam scripted too: the whole seam run is
-   * then keyless and deterministic.
+   * then deterministic.
    */
   candidate?: AgentRequestExecutor;
   /**
@@ -225,7 +225,7 @@ async function seamOutputOf(result: ExecutorReturn, request: AgentTextRequest): 
  * seam's own effect completion (the first `xstate.done.*`/`xstate.error.*`
  * entry appended after the call was made).
  *
- * @example Keyless: the seam is scripted too, so the whole thing runs offline.
+ * @example No API key: the seam is scripted too, so the whole thing runs offline.
  * ```ts
  * const run = await runSeam(emailDrafter, {
  *   scripts: { promptEvaluator: [vague, complete], emailDrafter: [draft] },

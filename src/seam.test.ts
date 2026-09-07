@@ -1,5 +1,5 @@
 /**
- * Keyless: every test scripts the whole call plan, so the routing, the slicing
+ * No API key: every test scripts the whole call plan, so the routing, the slicing
  * and the drive loop are testable with no key and no network.
  */
 import { describe, expect, test } from "vitest";
@@ -141,7 +141,7 @@ const reviseRun = () => ({
 });
 
 describe("runSeam", () => {
-  test("keyless: with no candidate the seam is scripted too and the run completes", async () => {
+  test("with no candidate the seam is scripted too and the run completes", async () => {
     const run = await runSeam(machine, { ...clarifyRun(), seam: { request: "assess" } });
 
     expect(run.result.status).toBe("done");

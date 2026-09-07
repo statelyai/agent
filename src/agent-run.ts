@@ -31,7 +31,7 @@ export interface AgentRun<TMachine extends AnyStateMachine = AnyStateMachine> {
    * Settles exactly like {@link runAgent}'s return value: resolves with the
    * `done | idle | error` {@link RunAgentResult}, and rejects only where
    * `runAgent` itself rejects (bind-time programmer errors — a missing
-   * executor, an illegal resume event, a version mismatch). A run-level failure
+   * executor, a version mismatch). A run-level failure
    * still resolves with `{ status: 'error' }`, never rejects.
    */
   result: Promise<RunAgentResult<TMachine>>;

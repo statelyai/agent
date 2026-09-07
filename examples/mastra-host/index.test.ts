@@ -1,14 +1,14 @@
 import { describe, expect, test } from "vitest";
 import { noopObserve } from "@mastra/core/tools";
-import { AgentIllegalResumeEventError, type AgentRequestExecutors } from "@statelyai/agent";
-import { createHost, keylessExecutors, main, unwrapToolResult } from "./index.js";
+import type { AgentRequestExecutors } from "@statelyai/agent";
+import { createHost, scriptedExecutors, main, unwrapToolResult } from "./index.js";
 
 const ctx = { observe: noopObserve };
 
 /** A fresh host per test: no run, handle, or executor is shared between them. */
 function host() {
   const { startWorkflow, resumeWorkflow, startDraft, resumeDraft, agent } = createHost({
-    executors: keylessExecutors,
+    executors: scriptedExecutors,
   });
   return {
     agent,
@@ -67,16 +67,18 @@ describe("mastra-host", () => {
     expect(revised.interaction?.events.map(({ type }) => type)).toContain("SEND");
   });
 
-  test("the machine refuses an illegal resume", async () => {
+  test("an event the state does not handle is ignored", async () => {
     const { startDraft, resumeDraft } = host();
     const started = await startDraft("Announce the faster deploys.");
     if (started.status !== "pending") throw new Error("expected pending");
 
-    // `SEND` is legal at `reviewing`, not after the email has already been sent.
+    // `SEND` is handled at `reviewing`, not after the email has already been
+    // sent: the machine ignores the second one and the host reports it.
     await resumeDraft(started.handle, "SEND");
-    await expect(resumeDraft(started.handle, "SEND")).rejects.toBeInstanceOf(
-      AgentIllegalResumeEventError,
-    );
+    expect(await resumeDraft(started.handle, "SEND")).toEqual({
+      status: "error",
+      error: "'SEND' does not apply in the current state.",
+    });
   });
 
   test("an unknown handle comes back as a tool error, not an exception", async () => {

@@ -2,7 +2,7 @@ import { describe, expect, expectTypeOf, test } from "vitest";
 import { createActor } from "xstate";
 import { z } from "zod";
 import {
-  AgentIllegalResumeEventError,
+  AgentInvalidEventPayloadError,
   eventFromInteraction,
   getInteraction,
   interactionMetaSchema,
@@ -90,7 +90,7 @@ describe("interactions", () => {
 
     expect(getInteraction(hiddenTextSnapshot)).toEqual({ label: "Review", events: [] });
     expect(() => eventFromInteraction(hiddenTextSnapshot, { text: "not accepted" })).toThrow(
-      AgentIllegalResumeEventError,
+      AgentInvalidEventPayloadError,
     );
   });
 });

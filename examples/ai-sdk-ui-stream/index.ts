@@ -22,7 +22,7 @@
  * host, not stored in context: context has to replay identically from the log.
  *
  * Dual-mode: `runAiSdkUiStreamExample(options?)` takes an injectable `streamText`
- * (tests pass a mock — keyless CI); the direct run uses a real model and consumes
+ * (tests pass a mock — CI with no API key); the direct run uses a real model and consumes
  * the stream server-side with `readUIMessageStream`.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-ui-stream/index.ts

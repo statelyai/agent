@@ -383,7 +383,7 @@ export async function main() {
   const candidate = live ? await liveGenerateText() : null;
 
   console.log(
-    `[seam-evals] seam model: ${live ? "real (OPENAI_API_KEY set)" : "scripted (keyless)"} | ` +
+    `[seam-evals] seam model: ${live ? "real (OPENAI_API_KEY set)" : "scripted (no API key)"} | ` +
       `braintrust: ${upload ? "uploading experiments" : "local summaries (noSendLogs)"}`,
   );
 

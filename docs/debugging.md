@@ -17,10 +17,11 @@ Common errors:
 
 | Error | Meaning |
 | --- | --- |
-| `AgentIllegalResumeEventError` | The restored active state does not accept the supplied event type. |
-| `AgentInvalidEventPayloadError` | An untrusted `resumeEvent` was not `{ type, ... }`, or its payload failed the machine's event schema. |
+| `AgentInvalidEventPayloadError` | A payload passed to `parseAgentEvent` was not `{ type, ... }`, used a reserved `@agent.*` type, or failed the machine's event schema. |
 | `AgentDecisionExhaustedError` | Every proposed decision was unknown, invalid, or guard-rejected. |
 | `AgentMaxModelCallsExceededError` | The run exceeded its configured model-call budget. |
 | XState version error | The persisted snapshot version needs the machine's native `migrate` function. |
+
+An event the active state has no transition for is not an error: the run settles normally and the event comes back as `result.ignored`.
 
 `lintAgentMachine` reports only Agent-specific mistakes: decisions with no candidate events, direct object request sources that a host cannot bind, and returned messages with no `agent.messages` transition. General state-machine lint belongs in XState tooling.

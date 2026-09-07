@@ -126,15 +126,13 @@ When the machine reaches `refunded`, the result is:
 The model chooses between the events allowed in `deciding`. The `AUTO_REFUND` transition only works when the amount is at most $100. If the model chooses it for a larger amount, the guard rejects the choice and the decision is tried again.
 
 ```ts
-import { createScriptedExecutors } from "@statelyai/agent";
-
-const result = await runAgent(refundMachine, {
+const scriptedResult = await runAgent(refundMachine, {
   input: { request: "I was charged twice for the same order.", amount: 75 },
-  executors: createScriptedExecutors({ decisions: [{ type: "AUTO_REFUND" }] }),
+  executors: { decide: async () => ({ event: { type: "AUTO_REFUND" } }) },
 });
 ```
 
-Scripted executors run the machine above end to end with no API key. Answers are keyed by request name (a flat array works when there is only one request), each key is a queue consumed once per call, and a looping machine takes `repeat: true`. See [Script keys](docs/evals.md#script-keys).
+An executor is a plain function, so the machine above runs end to end with no API key and no provider installed. For a machine with several requests, `createScriptedExecutors` holds ordered answers keyed by request name. See [Evals](docs/evals.md#scripted-executors).
 
 A registry created by `defineModels` supplies the optional AI SDK executor by default; explicit `executors` override it. Core does not import the AI SDK. See [Hosts and executors](docs/hosts.md).
 

@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { AgentIllegalResumeEventError } from "@statelyai/agent";
 import { init } from "@flue/runtime";
 import { start as startFlue } from "@flue/runtime/node";
 import {
@@ -65,14 +64,13 @@ describe("flue-host (machine-owned)", () => {
     expect(revised.draft).toContain("Deploy pipeline is faster");
   });
 
-  test("the machine refuses an illegal resume", async () => {
+  test("an event the state does not handle is ignored", async () => {
     const started = await start("Announce the faster deploys.");
 
-    // `SEND` is legal at `reviewing`, not after the email has already been sent.
+    // `SEND` is handled at `reviewing`, not after the email has already been
+    // sent: the machine ignores the second one and the bridge reports it.
     await resume(started.handle!, "SEND");
-    await expect(resume(started.handle!, "SEND")).rejects.toBeInstanceOf(
-      AgentIllegalResumeEventError,
-    );
+    await expect(resume(started.handle!, "SEND")).rejects.toThrow(/'SEND' does not apply/);
   });
 
   test("an unknown handle is rejected", async () => {

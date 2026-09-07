@@ -1,13 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
 import { z } from "zod";
-import {
-  AgentScriptedExecutorError,
-  createScriptedExecutors,
-  provideExecutors,
-  runAgent,
-  setupAgent,
-} from "./index.js";
+import { createScriptedExecutors, provideExecutors, runAgent, setupAgent } from "./index.js";
 
 const outcomeSchema = z.enum(["published", "flagged", "blocked"]);
 
@@ -99,11 +93,11 @@ const writerMachine = writerSetup.createMachine({
 });
 
 describe("createScriptedExecutors", () => {
-  test("plays decisions FIFO through runAgent with no API key", async () => {
+  test("plays decisions in order through runAgent with no API key", async () => {
     const result = await runAgent(moderationMachine, {
       input: { comment: "honestly this update is terrible", trust: 20 },
       executors: createScriptedExecutors({
-        decisions: [{ type: "FLAG", reason: "Borderline tone." }],
+        decisions: { "*": [{ type: "FLAG", reason: "Borderline tone." }] },
       }),
     });
 
@@ -112,11 +106,11 @@ describe("createScriptedExecutors", () => {
     expect(result.output).toEqual({ outcome: "flagged", reason: "Borderline tone." });
   });
 
-  test("plays text answers FIFO, one per request, in order", async () => {
+  test("plays text answers by request name", async () => {
     const result = await runAgent(writerMachine, {
       input: { topic: "state machines" },
       executors: createScriptedExecutors({
-        text: ["1. Intro 2. Body 3. Outro", "The article itself."],
+        text: { outline: "1. Intro 2. Body 3. Outro", draft: "The article itself." },
       }),
     });
 
@@ -133,13 +127,13 @@ describe("createScriptedExecutors", () => {
     const result = await runAgent(writerMachine, {
       input: { topic: "state machines" },
       executors: createScriptedExecutors({
-        text: [
-          (request) => {
+        text: {
+          outline: (request) => {
             prompts.push(request.prompt ?? "");
             return `outline for ${request.name}`;
           },
-          async (request) => `draft for ${request.name}`,
-        ],
+          draft: async (request) => `draft for ${request.name}`,
+        },
       }),
     });
 
@@ -174,13 +168,12 @@ describe("createScriptedExecutors", () => {
     ]);
   });
 
-  test("supports named decision scripts, wildcard fallback, repeat, and default usage", async () => {
+  test("supports named decision scripts, wildcard fallback, a repeating last entry, and default usage", async () => {
     const scripted = createScriptedExecutors({
       decisions: {
         moderateComment: [{ type: "BLOCK" }],
         "*": [{ type: "FLAG", reason: "fallback" }],
       },
-      repeat: true,
       usage: { totalTokens: 3 },
     });
 
@@ -238,8 +231,8 @@ describe("createScriptedExecutors", () => {
     const result = await runAgent(moderationMachine, {
       input: { comment: "great post", trust: 90 },
       executors: createScriptedExecutors({
-        decisions: [
-          (request) => {
+        decisions: {
+          "*": (request) => {
             expect(request.events.map((event) => event.type).sort()).toEqual([
               "BLOCK",
               "FLAG",
@@ -247,7 +240,7 @@ describe("createScriptedExecutors", () => {
             ]);
             return { type: "PUBLISH" };
           },
-        ],
+        },
       }),
     });
 
@@ -262,7 +255,7 @@ describe("createScriptedExecutors", () => {
     const result = await runAgent(moderationMachine, {
       input: { comment: "meh", trust: 20 },
       executors: createScriptedExecutors({
-        decisions: [{ type: "PUBLISH" }, { type: "BLOCK" }],
+        decisions: { "*": [{ type: "PUBLISH" }, { type: "BLOCK" }] },
       }),
     });
 
@@ -275,10 +268,16 @@ describe("createScriptedExecutors", () => {
     const result = await runAgent(writerMachine, {
       input: { topic: "state machines" },
       executors: createScriptedExecutors({
-        text: [
-          { output: "an outline", usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 } },
-          { output: "an article", usage: { inputTokens: 20, outputTokens: 6, totalTokens: 26 } },
-        ],
+        text: {
+          outline: {
+            output: "an outline",
+            usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+          },
+          draft: {
+            output: "an article",
+            usage: { inputTokens: 20, outputTokens: 6, totalTokens: 26 },
+          },
+        },
       }),
     });
 
@@ -297,9 +296,9 @@ describe("createScriptedExecutors", () => {
     const result = await runAgent(moderationMachine, {
       input: { comment: "spam", trust: 10 },
       executors: createScriptedExecutors({
-        decisions: [
-          { event: { type: "BLOCK" }, reason: "Obvious spam.", usage: { totalTokens: 7 } },
-        ],
+        decisions: {
+          "*": { event: { type: "BLOCK" }, reason: "Obvious spam.", usage: { totalTokens: 7 } },
+        },
       }),
     });
 
@@ -311,7 +310,7 @@ describe("createScriptedExecutors", () => {
 
   test("a chosen event may carry an `event` payload field", async () => {
     const choice = { type: "FORWARD", event: { type: "NESTED" } };
-    const executors = createScriptedExecutors({ decisions: [choice] });
+    const executors = createScriptedExecutors({ decisions: { forward: [choice] } });
 
     await expect(
       executors.decide({
@@ -359,7 +358,7 @@ describe("createScriptedExecutors", () => {
 
     const result = await runAgent(machine, {
       input: { comment: "spam" },
-      executors: createScriptedExecutors({ text: [{ note: "Repeat offender." }] }),
+      executors: createScriptedExecutors({ text: { moderatorNote: { note: "Repeat offender." } } }),
     });
 
     expect(result.status).toBe("done");
@@ -371,7 +370,7 @@ describe("createScriptedExecutors", () => {
     const executors = createScriptedExecutors({
       // Only `{ output, usage?, raw? }` is the envelope. This object owns a
       // sibling key, so it is the output VALUE — `confidence` must survive.
-      text: [{ output: "draft", confidence: 0.9 }],
+      text: { test: [{ output: "draft", confidence: 0.9 }] },
     });
 
     const result = await executors.generateText({
@@ -387,7 +386,7 @@ describe("createScriptedExecutors", () => {
 
   test("an object owning only envelope keys is still read as the envelope", async () => {
     const executors = createScriptedExecutors({
-      text: [{ output: "draft", usage: { totalTokens: 5 } }],
+      text: { test: [{ output: "draft", usage: { totalTokens: 5 } }] },
     });
 
     const result = await executors.generateText({
@@ -404,7 +403,7 @@ describe("createScriptedExecutors", () => {
   test("an inherited `output` property is not an envelope", async () => {
     const inherited = Object.create({ output: "from the prototype" }) as { note: string };
     inherited.note = "mine";
-    const executors = createScriptedExecutors({ text: [inherited] });
+    const executors = createScriptedExecutors({ text: { test: [inherited] } });
 
     const result = await executors.generateText({
       name: "test",
@@ -420,7 +419,7 @@ describe("createScriptedExecutors", () => {
     const actor = createActor(
       provideExecutors(
         moderationMachine,
-        createScriptedExecutors({ decisions: [{ type: "FLAG", reason: "Borderline." }] }),
+        createScriptedExecutors({ decisions: { "*": [{ type: "FLAG", reason: "Borderline." }] } }),
       ),
       { input: { comment: "hmm", trust: 20 } },
     );
@@ -433,7 +432,7 @@ describe("createScriptedExecutors", () => {
   });
 
   test("streamText replays the scripted text and forwards it as a chunk", async () => {
-    const executors = createScriptedExecutors({ text: ["hello world"] });
+    const executors = createScriptedExecutors({ text: { test: "hello world" } });
     const chunks: string[] = [];
     const result = await executors.streamText(
       { name: "test", model: "fast", prompt: "hi", tools: {} },
@@ -444,20 +443,20 @@ describe("createScriptedExecutors", () => {
     expect(chunks).toEqual(["hello world"]);
   });
 
-  test("throws a descriptive error when the text queue runs dry", async () => {
+  test("throws a descriptive error when a request has no scripted answer", async () => {
     const result = await runAgent(writerMachine, {
       input: { topic: "state machines" },
-      executors: createScriptedExecutors({ text: ["only one answer"] }),
+      executors: createScriptedExecutors({ text: { outline: "only one answer" } }),
     });
 
     expect(result.status).toBe("error");
     if (result.status !== "error") return;
-    expect(String(result.error)).toContain("script ran dry on a pending text request 'draft'");
-    expect(String(result.error)).toContain("`text` queue");
+    expect(String(result.error)).toContain("No scripted answer for request 'draft'");
+    expect(String(result.error)).toContain("Known: outline");
   });
 
-  test("throws a descriptive error naming the candidate events when decisions run dry", async () => {
-    const executors = createScriptedExecutors();
+  test("names the known decision keys when a request has no answer", async () => {
+    const executors = createScriptedExecutors({ decisions: { other: [{ type: "BLOCK" }] } });
     await expect(
       executors.decide({
         kind: "decision",
@@ -470,11 +469,11 @@ describe("createScriptedExecutors", () => {
         ],
         attempts: [],
       }),
-    ).rejects.toThrow(/decision request \(id '0\.\(machine\)\.reviewing'\)[\s\S]*PUBLISH, BLOCK/);
+    ).rejects.toThrow(/No scripted answer for request 'review'\. Known: other/);
   });
 
   test("does not mutate the caller's script arrays, so one script seeds many runs", async () => {
-    const script = { decisions: [{ type: "BLOCK" }] };
+    const script = { decisions: { "*": [{ type: "BLOCK" }] } };
     const run = () =>
       runAgent(moderationMachine, {
         input: { comment: "spam", trust: 10 },
@@ -483,7 +482,7 @@ describe("createScriptedExecutors", () => {
 
     expect((await run()).status).toBe("done");
     expect((await run()).status).toBe("done");
-    expect(script.decisions).toHaveLength(1);
+    expect(script.decisions["*"]).toHaveLength(1);
   });
 });
 
@@ -534,10 +533,10 @@ describe("createScriptedExecutors — userInput", () => {
     );
   });
 
-  test("a dry userInput queue throws, naming the queue to add to", async () => {
+  test("an empty userInput script throws, naming the array to add to", async () => {
     const scripted = createScriptedExecutors();
     await expect(scripted.userInput({ prompt: "How was it?" })).rejects.toThrow(
-      /ran dry on a pending userInput request[\s\S]*`userInput` queue/,
+      /No scripted answer for request 'agent.userInput'[\s\S]*`userInput` array/,
     );
   });
 });
@@ -565,7 +564,7 @@ describe("name-keyed scripts", () => {
       text: { summarise: ["short"], expand: ["long"] },
     });
     await expect(scripted.generateText(request as never)).rejects.toThrow(
-      /no entry for request name 'summarize'\. Known names: summarise, expand/,
+      /No scripted answer for request 'summarize'\. Known: summarise, expand/,
     );
   });
 
@@ -587,13 +586,16 @@ describe("name-keyed scripts", () => {
         events: [{ type: "GO", toolName: "send_event_GO" }],
         attempts: [],
       } as never),
-    ).rejects.toThrow(/Known names: route/);
+    ).rejects.toThrow(/No scripted answer for request 'choose'\. Known: route/);
   });
 
-  test("positional arrays still work", async () => {
-    const scripted = createScriptedExecutors({ text: ["first", "second"] });
+  test("entries are consumed in order and the last one repeats", async () => {
+    const scripted = createScriptedExecutors({ text: { summarize: ["first", "second"] } });
     await expect(scripted.generateText(request as never)).resolves.toMatchObject({
       output: "first",
+    });
+    await expect(scripted.generateText(request as never)).resolves.toMatchObject({
+      output: "second",
     });
     await expect(scripted.generateText(request as never)).resolves.toMatchObject({
       output: "second",
@@ -649,7 +651,6 @@ describe("script keys for inline decisions", () => {
       executors: scripted,
     });
 
-    scripted.assertScriptOk();
     expect(result.status).toBe("done");
     expect(scripted.calls.map((call) => call.name)).toEqual(["guessLetter"]);
   });
@@ -686,58 +687,17 @@ describe("script keys for inline decisions", () => {
     expect(scripted.calls[0]?.name).toContain("guessing");
   });
 
-  test("an unknown key is an AgentScriptedExecutorError, not a model failure", async () => {
+  test("an unknown key reaches the machine as an ordinary actor error", async () => {
     const scripted = createScriptedExecutors({
       decisions: { someOtherName: [{ type: "QUIT" }] },
     });
-    // A script fault stops the run: `runAgent` settles `cause: 'script'` rather
-    // than letting the machine's `onError` route it to a plausible outcome.
+    // The machine's `onError` routes the failure like any other actor error.
     const result = await runAgent(guessMachine({ name: "guessLetter" }), {
       input: {},
       executors: scripted,
     });
 
-    expect(result.status).toBe("error");
-    expect(result.status === "error" ? result.cause : undefined).toBe("script");
-    expect(scripted.scriptError).toBeInstanceOf(AgentScriptedExecutorError);
-    expect(scripted.scriptError?.code).toBe("scripted-executors-unknown-name");
-    expect(() => scripted.assertScriptOk()).toThrow(/no entry for request name 'guessLetter'/);
-  });
-});
-
-describe("strict mode", () => {
-  const request = { name: "draft", model: "fast", prompt: "hi", tools: {} } as never;
-
-  test("poisons the executor set after the first fault", async () => {
-    const scripted = createScriptedExecutors({ text: { draft: ["one"] } });
-
-    await expect(scripted.generateText(request)).resolves.toMatchObject({ output: "one" });
-    await expect(scripted.generateText(request)).rejects.toThrow(/ran dry/);
-    // Without poisoning, an unrelated later call would be served normally.
-    await expect(
-      scripted.generateText({ name: "other", model: "fast", tools: {} } as never),
-    ).rejects.toThrow(/ran dry on a pending text request 'draft'/);
-    expect(scripted.scriptError).toBeInstanceOf(AgentScriptedExecutorError);
-  });
-
-  test("strict: false keeps the legacy per-call behavior", async () => {
-    const scripted = createScriptedExecutors({ text: { draft: ["one"] }, strict: false });
-
-    await expect(scripted.generateText(request)).resolves.toMatchObject({ output: "one" });
-    await expect(scripted.generateText(request)).rejects.toThrow(/ran dry/);
-    // A different name routes to the same script, which has no entry for it.
-    await expect(
-      scripted.generateText({ name: "other", model: "fast", tools: {} } as never),
-    ).rejects.toThrow(/no entry for request name 'other'/);
-    // The fault is still recorded, so `assertScriptOk` works either way.
-    expect(scripted.scriptError).toBeInstanceOf(AgentScriptedExecutorError);
-  });
-
-  test("repeat: true reuses the last routed entry instead of running dry", async () => {
-    const scripted = createScriptedExecutors({ text: { draft: ["one"] }, repeat: true });
-
-    await expect(scripted.generateText(request)).resolves.toMatchObject({ output: "one" });
-    await expect(scripted.generateText(request)).resolves.toMatchObject({ output: "one" });
-    expect(scripted.scriptError).toBeUndefined();
+    expect(result.status).toBe("done");
+    expect(scripted.calls.map((call) => call.name)).toEqual(["guessLetter"]);
   });
 });

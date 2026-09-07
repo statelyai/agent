@@ -46,7 +46,7 @@ export type {
   CreateDecisionRequestOptions,
   ResolveDecisionOptions,
 } from "./decision.js";
-export { getAcceptedEvents, parseAgentEvent } from "./events.js";
+export { AgentInvalidEventPayloadError, getAcceptedEvents, parseAgentEvent } from "./events.js";
 export { eventFromInteraction, getInteraction, interactionMetaSchema } from "./interaction.js";
 export type {
   AgentInteraction,
@@ -136,8 +136,6 @@ export { assertEventLogStoreConformance } from "./event-log-store-conformance.js
 export type { EventLogStoreConformanceHarness } from "./event-log-store-conformance.js";
 export {
   AGENT_TRACE_SCHEMA_VERSION,
-  AgentIllegalResumeEventError,
-  AgentInvalidEventPayloadError,
   AgentMaxModelCallsExceededError,
   AgentSnapshotDivergedError,
   inspectTransitions,
@@ -205,8 +203,9 @@ export type {
   SeamSlice,
   SeamTurn,
 } from "./seam.js";
-export { AgentScriptedExecutorError, createScriptedExecutors } from "./scripted-executors.js";
+export { createScriptedExecutors } from "./scripted-executors.js";
 export type {
+  ScriptedByName,
   ScriptedDecisionEntry,
   ScriptedDecisionValue,
   ScriptedExecutors,

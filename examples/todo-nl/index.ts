@@ -308,7 +308,7 @@ export function idlePrompt(snapshot: TodoSnapshot): string {
 /**
  * Run the machine to completion, resuming every idle settle with the next
  * command. Dual-mode: tests pass a scripted `decide` plus scripted commands
- * (so CI stays keyless); the direct run uses real models and stdin.
+ * (so CI needs no API key); the direct run uses real models and stdin.
  */
 export async function runTodoNlExample(options?: {
   input?: { todos?: Todo[] };

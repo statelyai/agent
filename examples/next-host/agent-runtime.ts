@@ -28,12 +28,12 @@ const writeDraft = (request: AgentTextRequest): string => {
 };
 
 /**
- * Keyless executors for one request. The script is keyed by request NAME, not
- * by position, and `repeat` replays the same function for every redraft a
- * REJECT triggers — the machine's own rejection budget bounds the loop.
+ * Scripted executors for one request, keyed by request NAME. The last entry for
+ * a name repeats, so the same function answers every redraft a REJECT triggers
+ * — the machine's own rejection budget bounds the loop.
  */
 export function createExecutors(): Partial<AgentRequestExecutors> {
-  return createScriptedExecutors({ text: { writeDraft }, repeat: true });
+  return createScriptedExecutors({ text: { writeDraft } });
 }
 
 /** Real models when `OPENAI_API_KEY` is set, scripted playback otherwise. */

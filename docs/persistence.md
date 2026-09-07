@@ -41,28 +41,33 @@ const resumed = await runAgent(machine, {
 
 An empty thread starts fresh from `input`. Pass `events` explicitly to resume from a log the host holds itself (the store's thread length must then match it).
 
-### Resume with an untrusted event
+### Resume with an event off the wire
 
-In a route handler the event comes off the wire. Pass it as `resumeEvent` and `runAgent` validates it against the restored state before anything starts — the type against what that state accepts, the payload against the machine's registered event schema. No separate replay to type-check it first:
+In a route handler the event arrives as JSON. Parse it at the boundary with `parseAgentEvent`, then pass the result as `event`:
 
 ```ts no-check
-const result = await runAgent(machine, {
-  store,
-  threadId,
-  resumeEvent: await request.json(),
-  executors
-});
+let event;
+try {
+  event = parseAgentEvent(machine, await request.json());
+} catch (error) {
+  return Response.json({ error: String(error) }, { status: 400 });
+}
 
-if (result.status === "error" && result.cause === "invalid-event") {
-  return Response.json({ error: String(result.error) }, { status: 400 });
+const result = await runAgent(machine, { store, threadId, event, executors });
+
+if (result.ignored) {
+  return Response.json(
+    { error: `'${result.ignored.type}' does not apply right now` },
+    { status: 409 }
+  );
 }
 ```
 
-- `resumeEvent` is `unknown`: hand over the parsed JSON body as-is.
-- A rejection settles `{ status: "error", cause: "invalid-event", error }`. Nothing runs and no log entry is appended, so the thread is untouched and the next request can resume it.
-- `error` is `AgentIllegalResumeEventError` (code `illegal-resume-event`, with `acceptedTypes`) when the state cannot take that type, `AgentInvalidEventPayloadError` (code `invalid-event-payload`) when the fields are wrong.
-- On success the schema-parsed event is delivered — defaults filled, transforms applied.
-- `event` is the trusted counterpart: typed to the machine's event union, and an illegal type throws instead. Pass one or the other, never both.
+- `parseAgentEvent` takes `unknown`: hand over the parsed JSON body as-is. It accepts the machine itself (reading the event schemas `setupAgent` registered) or any snapshot of it, and returns the event typed as the machine's event union.
+- It throws `AgentInvalidEventPayloadError` (code `invalid-event-payload`) when the payload is not an object with a string `type`, when the type is a reserved `@agent.*` type, or when the fields fail the registered schema. Answer that with a 400.
+- On success the schema-parsed event is returned: defaults filled, transforms applied.
+- `parseAgentEvent` does not check whether the current state handles the event, and `runAgent` adds no validation of its own.
+- An event the resumed state has no transition for is ignored. The run settles normally and `result.ignored` carries the event. It is journaled like any other external input, so replay ignores it again.
 
 - Recorded results are replayed, never re-executed.
 - A request that was in flight when the log ended has no recorded completion, so it re-executes. Execution is at-least-once; key provider calls on [`info.callKey`](hosts.md#idempotency-keys).

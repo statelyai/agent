@@ -69,8 +69,12 @@ const machine = setup.createMachine({
 });
 
 const script = {
-  decisions: [{ event: { type: "WRITE" as const }, usage: { inputTokens: 11, outputTokens: 3 } }],
-  text: [{ output: "a draft", usage: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } }],
+  decisions: {
+    "*": [{ event: { type: "WRITE" as const }, usage: { inputTokens: 11, outputTokens: 3 } }],
+  },
+  text: {
+    "*": [{ output: "a draft", usage: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } }],
+  },
 };
 
 // What a real Node SDK registers; without it `context.active()` is always ROOT
@@ -201,11 +205,11 @@ describe("createOtelTraceHandler", () => {
     const result = await runAgent(machine, {
       input: { topic: "failure" },
       executors: createScriptedExecutors({
-        decisions: [
-          () => {
+        decisions: {
+          "*": () => {
             throw boom;
           },
-        ],
+        },
       }),
       onTrace,
     });

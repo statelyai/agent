@@ -223,7 +223,7 @@ export function FlueOwnedAgent() {
   );
 }
 
-// ─── Keyless model: pi's faux provider, driven by what each render offers ───
+// ─── Scripted model: pi's faux provider, driven by what each render offers ───
 //
 // The demo has no API key, so it plays the model's part — but through the real
 // Flue runtime, not a stand-in for it. A faux response factory sees the very

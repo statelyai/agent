@@ -39,7 +39,7 @@ function buildGroups(examples: ExampleSummary[], query: string): SwitcherGroup[]
     row.purpose.toLowerCase().includes(trimmed) ||
     (row.selection.type === "example" && row.selection.id.includes(trimmed));
 
-  // Keyless (scripted-fallback) scenarios lead; library examples group by kind.
+  // Scripted-fallback scenarios lead; library examples group by kind.
   const groups: SwitcherGroup[] = [
     {
       label: "Interactive · no key needed",
@@ -91,7 +91,7 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
   const theme = useSelector(store, (s) => s.context.theme);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const keyless = selection.type === "scenario";
+  const noKeyNeeded = selection.type === "scenario";
   const groups = useMemo(() => buildGroups(examples, query), [examples, query]);
   const total = scenarios.length + examples.length;
 
@@ -136,7 +136,7 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
       >
         <Popover.Trigger className="switcher-trigger">
           <span className="switcher-trigger__title">{currentTitle}</span>
-          {keyless && <span className="key-badge">no key needed</span>}
+          {noKeyNeeded && <span className="key-badge">no key needed</span>}
           <ChevronDown size={14} aria-hidden="true" />
         </Popover.Trigger>
         <Popover.Portal>

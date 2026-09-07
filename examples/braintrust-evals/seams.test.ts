@@ -1,5 +1,5 @@
 /**
- * Keyless: every seam runs scripted, so the routing, the slicing, and the
+ * No API key: every seam runs scripted, so the routing, the slicing, and the
  * scorers are testable with no key and no network.
  */
 import { describe, expect, test } from "vitest";
