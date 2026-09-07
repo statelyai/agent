@@ -257,7 +257,10 @@ function checkInvokeWithoutOnError(ctx: LintContext): AgentLintDiagnostic[] {
       if (invoke.onError !== undefined || handlesActorError(node.config)) {
         continue;
       }
-      if (ancestorChain(node, ctx.index).some((ancestor) => handlesActorError(ancestor.config))) {
+      if (
+        handlesActorError(ctx.config) ||
+        ancestorChain(node, ctx.index).some((ancestor) => handlesActorError(ancestor.config))
+      ) {
         continue;
       }
       const srcName = typeof invoke.src === "string" ? invoke.src : "(inline logic)";

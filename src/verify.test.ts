@@ -854,6 +854,26 @@ describe("invoke-without-on-error", () => {
     expect(diagnostics[0]!.message).toContain("agent.generateText");
   });
 
+  test("is silent when the machine root handles actor errors", () => {
+    const machine = agent.createMachine({
+      context: { topic: "otters" },
+      initial: "drafting",
+      on: { "xstate.error.actor.*": { target: ".failed" } } as never,
+      states: {
+        drafting: {
+          invoke: {
+            src: "agent.generateText",
+            input: () => ({ model: "quick", prompt: "draft" }),
+            onDone: { target: "done" },
+          },
+        },
+        failed: { type: "final" },
+        done: { type: "final" },
+      } as never,
+    });
+    expect(findings(machine)).toEqual([]);
+  });
+
   test("is silent when the invoke declares onError", () => {
     expect(
       findings(

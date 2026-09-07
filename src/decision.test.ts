@@ -50,6 +50,18 @@ describe("createDecisionRequest", () => {
     expect(toolNames[2]).toBe("send_event_foo_bar_3");
   });
 
+  test("colliding long names stay within the 64-character tool-name limit", () => {
+    const long = "x".repeat(70);
+    const request = createDecisionRequest({
+      model: "picker",
+      prompt: "Pick one.",
+      events: [`${long}.a`, `${long}/a`],
+    });
+    const toolNames = request.events.map((event) => event.toolName ?? "");
+    expect(new Set(toolNames).size).toBe(2);
+    for (const name of toolNames) expect(name.length).toBeLessThanOrEqual(64);
+  });
+
   test("fills in kind, id, attempts, and tool names", () => {
     expect(
       createDecisionRequest({

@@ -457,7 +457,12 @@ function dedupeToolNames<T extends { toolName?: string }>(candidates: T[]): T[] 
   return candidates.map((candidate) => {
     if (candidate.toolName === undefined) return candidate;
     let toolName = candidate.toolName;
-    for (let n = 2; taken.has(toolName); n++) toolName = `${candidate.toolName}_${n}`;
+    for (let n = 2; taken.has(toolName); n++) {
+      // Keep the provider's 64-character tool-name limit that the sanitizer
+      // already honours: make room for the suffix by trimming the base.
+      const suffix = `_${n}`;
+      toolName = `${candidate.toolName.slice(0, 64 - suffix.length)}${suffix}`;
+    }
     taken.add(toolName);
     return toolName === candidate.toolName ? candidate : { ...candidate, toolName };
   });

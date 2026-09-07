@@ -301,6 +301,7 @@ describe("getStatePath", () => {
   test("does not mistake a state named `value` for a snapshot", () => {
     expect(getStatePath({ value: "ready" })).toBe("value.ready");
     expect(getStatePath({ value: "ready", status: "active" })).toBe("ready");
+    expect(getStatePath({ status: "active" })).toBe("status.active");
   });
 
   test("accepts a snapshot as well as a raw state value", () => {

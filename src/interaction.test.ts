@@ -260,3 +260,32 @@ describe("getInteraction respects guards on choice events", () => {
     expect(getInteraction(spent)?.events.map((event) => event.type)).toEqual(["END"]);
   });
 });
+
+describe("getInteraction fixed fields", () => {
+  test("the choice key decides which event is checked, not a fixed `type` field", () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { GO: z.object({ type: z.literal("GO") }), STOP: z.object({}) },
+      meta: interactionMetaSchema,
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: {
+          meta: {
+            interaction: {
+              label: "?",
+              // A stray fixed `type` must not redirect the legality check.
+              events: { GO: { label: "Go", event: { type: "STOP" } } },
+            },
+          },
+          on: { GO: { target: "done" } },
+        },
+        done: { type: "final" },
+      },
+    });
+    const snapshot = machine.resolveState({ value: "waiting", context: {} });
+    expect(getInteraction(snapshot)?.events.map((event) => event.type)).toEqual(["GO"]);
+  });
+});

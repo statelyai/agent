@@ -292,9 +292,13 @@ export function getStatePath(
   // A snapshot is recognised by its `status` field (or `matches` method), never
   // by a `value` key alone: a state named `value` would otherwise be mistaken
   // for one and lose its parent in the path.
+  // Both marks are required: `value` present AND (`status` or `matches`). A
+  // state value that merely contains a region named `status` has no `value`
+  // key and renders as a state value.
   const isSnapshot =
     typeof snapshot === "object" &&
     snapshot !== null &&
+    "value" in snapshot &&
     ("status" in snapshot || typeof (snapshot as { matches?: unknown }).matches === "function");
   const value = isSnapshot ? (snapshot as { value: StateValue }).value : (snapshot as StateValue);
   return serializeStateValue(value);

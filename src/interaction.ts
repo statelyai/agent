@@ -179,7 +179,7 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
     // checked because its payload is not known yet.
     .filter(([type, descriptor]) => {
       try {
-        return snapshot.can({ type, ...(descriptor.event ?? {}) } as never);
+        return snapshot.can({ ...(descriptor.event ?? {}), type } as never);
       } catch {
         return true;
       }
