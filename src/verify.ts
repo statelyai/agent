@@ -24,8 +24,9 @@ import { isTextLogic } from "./text-logic.js";
 import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import {
-  getInvokeEffectMetadata,
+  getPendingInvokes,
   initialAgentStep,
+  rejectAgentStep,
   resolveAgentStep,
   transitionAgentStep,
   type AgentStep,
@@ -463,6 +464,14 @@ export function assertAgentMachine(
  * - `userInput` — a flat FIFO queue of answers for `agent.userInput`, the
  *   shorthand for `invokes: { 'agent.userInput': [...] }`. Entries here are
  *   consumed before that src's `invokes` queue.
+ * - `errors` — failure values to reject a request or invoke with instead of
+ *   resolving it, keyed by the same srcs the other channels use. An entry here
+ *   is consumed BEFORE that src's output queue, so a script can fail the first
+ *   call and let the second succeed. The invoke is rejected with
+ *   {@link rejectAgentStep}, so the machine takes its `onError`; for
+ *   `agent.decide` the entry stands in for retry exhaustion. A value can be
+ *   anything — an `Error`, a string, or an object such as `{ code: 'truncated' }`
+ *   for a machine that branches on `event.error.code`.
  * - `events` — a flat FIFO queue of external (human/host-sent) events. When the
  *   machine settles idle with no pending request or invoke — a human gate — the
  *   next queued event is applied, so a simulation can cross states that a live
@@ -474,6 +483,7 @@ export interface SimulationScript {
   decisions?: Record<string, ChosenEvent[]>;
   invokes?: Record<string, unknown[]>;
   userInput?: unknown[];
+  errors?: Record<string, unknown[]>;
   events?: ChosenEvent[];
 }
 
@@ -499,8 +509,19 @@ export interface SimulationTrailEntry {
    * exhaustion error was routed through the decision invoke's `onError`.
    */
   rejectedEvents?: ChosenEvent[];
-  /** The resolved request (for a text/userInput invoke): its kind and src. */
-  resolvedRequest?: { kind: "text" | "userInput"; src: string; id: string };
+  /**
+   * The request this step settled (a text, decision, or scripted invoke): its
+   * kind, src, and how it settled. `outcome` is `'output'` when a scripted
+   * output resolved it and `'error'` when a `script.errors` entry rejected it,
+   * in which case `error` carries the scripted failure value.
+   */
+  resolvedRequest?: {
+    kind: "text" | "userInput" | "decision";
+    src: string;
+    id: string;
+    outcome: "output" | "error";
+    error?: unknown;
+  };
 }
 
 /** Options for {@link simulateAgent}. */
@@ -519,8 +540,9 @@ export interface SimulateAgentResult {
   trail: SimulationTrailEntry[];
 }
 
-// A pending non-decision invoke surfaced from a step's spawn actions (used for
-// `agent.userInput` and any other actor whose output must be scripted).
+// A pending non-decision invoke read off the snapshot's live children (used
+// for `agent.userInput` and any other actor whose output must be scripted).
+// Ordered by invoke id, like `step.requests`.
 interface PendingInvoke {
   id: string;
   src: string;
@@ -528,9 +550,8 @@ interface PendingInvoke {
 
 function pendingInvokes(step: AgentStep): PendingInvoke[] {
   const out: PendingInvoke[] = [];
-  for (const action of step.actions) {
-    const metadata = getInvokeEffectMetadata(action);
-    if (typeof metadata?.src === "string" && typeof metadata.id === "string") {
+  for (const metadata of getPendingInvokes(step.snapshot as AnyMachineSnapshot)) {
+    if (typeof metadata.src === "string") {
       out.push({ id: metadata.id, src: metadata.src });
     }
   }
@@ -596,6 +617,7 @@ export async function simulateAgent(
     text: mapValues(options.script.text ?? {}, (arr) => [...arr]),
     decisions: mapValues(options.script.decisions ?? {}, (arr) => [...arr]),
     invokes: mapValues(options.script.invokes ?? {}, (arr) => [...arr]),
+    errors: mapValues(options.script.errors ?? {}, (arr) => [...arr]),
     events: [...(options.script.events ?? [])],
   };
   if (options.script.userInput?.length) {
@@ -632,6 +654,18 @@ export async function simulateAgent(
             : request.id in (script.decisions ?? {})
               ? request.id
               : src;
+        const errorSrc = queueKey(script.errors, src, request.id);
+        const failure = takeFromQueue(script.errors, errorSrc);
+        if (failure.found) {
+          // A scripted decide failure stands in for retry exhaustion: the
+          // decide invoke is rejected, so its `onError` observes it.
+          step = rejectScriptedRequest(machine, step, request.id, failure.value, {
+            kind: "decision",
+            src: errorSrc,
+            trail,
+          });
+          continue;
+        }
         step = await applyScriptedDecision(
           machine,
           step,
@@ -643,7 +677,16 @@ export async function simulateAgent(
         );
         continue;
       }
-      // Text request.
+      // Text request. A scripted error for this src wins over its output queue.
+      const failure = takeFromQueue(script.errors, request.src);
+      if (failure.found) {
+        step = rejectScriptedRequest(machine, step, request, failure.value, {
+          kind: "text",
+          src: request.src,
+          trail,
+        });
+        continue;
+      }
       const taken = takeFromQueue(script.text, request.src);
       if (!taken.found) {
         throw scriptDryError("text", request.src, request.id);
@@ -651,7 +694,12 @@ export async function simulateAgent(
       step = resolveAgentStep(machine, step, request, taken.value);
       trail.push({
         state: step.snapshot.value,
-        resolvedRequest: { kind: "text", src: request.src, id: request.id },
+        resolvedRequest: {
+          kind: "text",
+          src: request.src,
+          id: request.id,
+          outcome: "output",
+        },
       });
       continue;
     }
@@ -660,6 +708,15 @@ export async function simulateAgent(
     // (agent.userInput and friends surface as spawn actions, not requests).
     const [invoke] = pendingInvokes(step);
     if (invoke) {
+      const failure = takeFromQueue(script.errors, invoke.src);
+      if (failure.found) {
+        step = rejectScriptedRequest(machine, step, invoke.id, failure.value, {
+          kind: "userInput",
+          src: invoke.src,
+          trail,
+        });
+        continue;
+      }
       const taken = takeFromQueue(script.invokes, invoke.src);
       if (!taken.found) {
         throw scriptDryError("userInput", invoke.src, invoke.id);
@@ -667,7 +724,12 @@ export async function simulateAgent(
       step = resolveAgentStep(machine, step, invoke.id, taken.value);
       trail.push({
         state: step.snapshot.value,
-        resolvedRequest: { kind: "userInput", src: invoke.src, id: invoke.id },
+        resolvedRequest: {
+          kind: "userInput",
+          src: invoke.src,
+          id: invoke.id,
+          outcome: "output",
+        },
       });
       continue;
     }
@@ -693,6 +755,55 @@ export async function simulateAgent(
   }
 
   return { status: "exhausted", snapshot: step.snapshot, trail };
+}
+
+// The key a by-src channel is actually keyed by for this request: its src when
+// present, else its invoke id (an inline logic src has only an auto-generated
+// src string, so scripts key those by id).
+function queueKey<T>(channel: Record<string, T[]> | undefined, src: string, id: string): string {
+  return channel && !(src in channel) && id in channel ? id : src;
+}
+
+// Rejects a pending request/invoke with a scripted error value and records it
+// on the trail. The rejection routes to the invoke's `onError`; when nothing
+// catches it the machine's snapshot goes to `status: 'error'`, and the
+// simulation throws — matching a live run, whose failed invoke ends the run.
+function rejectScriptedRequest(
+  machine: AnyStateMachine,
+  step: AgentStep,
+  request: { id: string } | string,
+  error: unknown,
+  entry: { kind: "text" | "userInput" | "decision"; src: string; trail: SimulationTrailEntry[] },
+): AgentStep {
+  const id = typeof request === "string" ? request : request.id;
+  const next = rejectAgentStep(machine, step, request, error);
+  if ((next.snapshot as { status?: unknown }).status === "error") {
+    throw unhandledScriptedError(error, entry.kind, entry.src, id);
+  }
+  entry.trail.push({
+    state: next.snapshot.value,
+    resolvedRequest: { kind: entry.kind, src: entry.src, id, outcome: "error", error },
+  });
+  return next;
+}
+
+// The scripted error itself is thrown when it is an Error, so a test can assert
+// on the very value it scripted; any other value is wrapped, carried on `cause`.
+function unhandledScriptedError(
+  error: unknown,
+  kind: "text" | "userInput" | "decision",
+  src: string,
+  id: string,
+): unknown {
+  if (error instanceof Error) {
+    return error;
+  }
+  return new Error(
+    `simulateAgent: the scripted error for the ${kind} request '${src}' (id '${id}') reached no ` +
+      `onError transition, so the machine errored. Add an onError to that invoke, or drop the ` +
+      `errors['${src}'] entry.`,
+    { cause: error },
+  );
 }
 
 // Resolves one decision request by running the live run's own validation/retry
@@ -752,13 +863,7 @@ async function applyScriptedDecision(
     if (!(error instanceof AgentDecisionExhaustedError)) {
       throw error;
     }
-    const errorEvent = {
-      type: "xstate.error.actor",
-      actorId: request.id,
-      ...sessionIdOf(step.snapshot, request.id),
-      error,
-    };
-    const next = transitionAgentStep(machine, step, errorEvent as never);
+    const next = rejectAgentStep(machine, step, request.id, error);
     if ((next.snapshot as { status?: unknown }).status === "error") {
       // No onError anywhere caught it — same as a live run failing.
       throw error;
@@ -778,15 +883,14 @@ async function applyScriptedDecision(
   return next;
 }
 
-// The spawn-action metadata for the invoke with this id: its string src (when
+// The metadata for the still-pending invoke with this id: its string src (when
 // it has one) and its inline logic (when the src is a direct logic object).
 function findInvokeMetadata(
   step: AgentStep,
   id: string,
 ): { src?: string; logic?: unknown } | undefined {
-  for (const action of step.actions) {
-    const metadata = getInvokeEffectMetadata(action);
-    if (metadata?.id !== id) {
+  for (const metadata of getPendingInvokes(step.snapshot as AnyMachineSnapshot)) {
+    if (metadata.id !== id) {
       continue;
     }
     return {
@@ -809,13 +913,6 @@ function resolveRegisteredDecisionLogic(
       src
     ] ?? (machine as { sources?: { actors?: Record<string, unknown> } }).sources?.actors?.[src];
   return isDecisionLogic(candidate) ? candidate : undefined;
-}
-
-// The invoked child's session identity, needed on a minted error event so
-// xstate's transition doesn't discard it as stale.
-function sessionIdOf(snapshot: AnyMachineSnapshot, id: string): { sessionId?: string } {
-  const child = (snapshot.children as Record<string, { sessionId?: unknown }>)[id];
-  return typeof child?.sessionId === "string" ? { sessionId: child.sessionId } : {};
 }
 
 function mapValues<T, U>(obj: Record<string, T>, fn: (value: T) => U): Record<string, U> {
@@ -866,6 +963,16 @@ export interface ExplorePathsOptions {
   invokes?: Record<string, unknown>;
   /** Canned output for `agent.userInput`, the shorthand for `invokes['agent.userInput']`. */
   userInput?: unknown;
+  /**
+   * A canned failure per src, keyed like `text`/`invokes`. A src listed here
+   * forks an extra branch at that invoke, where the invoke is rejected and the
+   * machine takes its `onError` — so states reachable only through a failure
+   * are explored. When the src also has an output, both branches are explored;
+   * when it has only an error, only the failing one is. Each fork counts
+   * against `maxDepth`, and the failing branch records
+   * `{ type: 'xstate.error.actor.<id>' }` in the path.
+   */
+  errors?: Record<string, unknown>;
 }
 
 /** A single explored path's terminal outcome. */
@@ -900,6 +1007,21 @@ export interface AgentPathReport {
 // that loops through invokes without ever branching or settling.
 const MAX_ADVANCE_STEPS = 1000;
 
+// An invoke that `options.errors` turns into a branch point: it can be
+// rejected, and — when the src also has a canned output — resolved.
+interface InvokeFork {
+  id: string;
+  src: string;
+  hasOutput: boolean;
+  output?: unknown;
+}
+
+function invokeFork(id: string, src: string, outputs: Record<string, unknown>): InvokeFork {
+  return src in outputs
+    ? { id, src, hasOutput: true, output: outputs[src] }
+    : { id, src, hasOutput: false };
+}
+
 // Shared DFS engine for explorePaths/canReach. When `stopWhen` returns true for
 // a visited snapshot, exploration halts and the witness path is returned.
 async function explore(
@@ -914,6 +1036,7 @@ async function explore(
   if ("userInput" in options) {
     invokeOutputs[USER_INPUT_SRC] = options.userInput;
   }
+  const errorScript = options.errors ?? {};
 
   const reachedStates = new Set<string>();
   const reachedValues: unknown[] = [];
@@ -944,7 +1067,9 @@ async function explore(
   // `stopWhen` is checked on EVERY snapshot along the way — including the
   // intermediate ones this advance resolves straight through — so a predicate
   // canReach target that only holds mid-chain is still found (`hit`).
-  const advance = (step: AgentStep): { step: AgentStep; blockedSrc?: string; hit?: boolean } => {
+  const advance = (
+    step: AgentStep,
+  ): { step: AgentStep; blockedSrc?: string; hit?: boolean; fork?: InvokeFork } => {
     let current = step;
     // Bounded loop: each iteration resolves one text/userInput invoke.
     for (let i = 0; i < MAX_ADVANCE_STEPS; i++) {
@@ -956,6 +1081,9 @@ async function explore(
       }
       const request = current.requests[0] as AgentStepRequest | undefined;
       if (request && request.kind === "text") {
+        if (request.src in errorScript) {
+          return { step: current, fork: invokeFork(request.id, request.src, textScript) };
+        }
         if (!(request.src in textScript)) {
           return { step: current, blockedSrc: request.src };
         }
@@ -969,6 +1097,9 @@ async function explore(
       // No request: maybe a pending scripted invoke (userInput), else a wait.
       const [invoke] = pendingInvokes(current);
       if (invoke) {
+        if (invoke.src in errorScript) {
+          return { step: current, fork: invokeFork(invoke.id, invoke.src, invokeOutputs) };
+        }
         if (!(invoke.src in invokeOutputs)) {
           return { step: current, blockedSrc: invoke.src };
         }
@@ -990,9 +1121,29 @@ async function explore(
       return;
     }
 
-    const { step: settled, blockedSrc, hit } = advance(step);
+    const { step: settled, blockedSrc, hit, fork } = advance(step);
     if (hit) {
       witness = path;
+      return;
+    }
+
+    if (fork) {
+      if (depth >= maxDepth) {
+        pathsExplored++;
+        terminals.push({ status: "max-depth", path, state: settled.snapshot.value });
+        unexplored.push(`max-depth: stopped at path [${path.map((e) => e.type).join(", ")}]`);
+        return;
+      }
+      // The failing branch first, so a canReach witness for an onError-only
+      // state is the short one.
+      const failed = rejectAgentStep(machine, settled, fork.id, errorScript[fork.src]);
+      recordState(failed.snapshot);
+      await visit(failed, [...path, { type: `xstate.error.actor.${fork.id}` }], depth + 1);
+      if (fork.hasOutput) {
+        const resolved = resolveAgentStep(machine, settled, fork.id, fork.output);
+        recordState(resolved.snapshot);
+        await visit(resolved, path, depth + 1);
+      }
       return;
     }
 
@@ -1078,7 +1229,9 @@ async function explore(
  * an idle wait it forks per externally-accepted event. Text requests resolve
  * from `text`, other invokes from `invokes` (or `userInput` for
  * `agent.userInput`) — all by-src canned-output maps, and a missing src halts
- * that branch with a `needs-output` terminal rather than throwing.
+ * that branch with a `needs-output` terminal rather than throwing. A src in
+ * `errors` forks an extra branch where that invoke is rejected, so states
+ * behind an `onError` are explored too.
  *
  * Combinatorics are bounded by `maxDepth` (default 8) and `maxPaths` (default
  * 200, reported via `hitPathCap`).

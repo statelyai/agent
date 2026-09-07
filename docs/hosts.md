@@ -63,6 +63,61 @@ await runAgent(machine, { input });
 
 A registry created by `defineModels` carries an optional AI SDK executor factory. Explicit executors merge over those defaults. Core does not import or require the AI SDK at runtime.
 
+## OpenAI SDK adapter
+
+`@statelyai/agent/openai` maps the same three executors onto the raw `openai` package's Chat Completions API, with no AI SDK in between.
+
+```sh
+pnpm add openai
+```
+
+```ts
+import OpenAI from "openai";
+import { createOpenAiExecutors } from "@statelyai/agent/openai";
+
+const executors = createOpenAiExecutors({
+  client: new OpenAI(),
+  resolveModel: (modelRef) => (modelRef === "deep" ? "gpt-5.4" : "gpt-5.4-mini"),
+  settings: {
+    deep: { reasoning_effort: "high" }
+  }
+});
+
+await runAgent(machine, { input, executors });
+```
+
+`client` is injected, so the API key, base URL, and transport stay with the host. `openai` is an optional peer dependency, accepted at `>=5.0.0 <8`, and is imported for types only.
+
+`resolveModel` maps a machine's model ref to a real OpenAI model id. It defaults to identity, for machines whose refs are already ids.
+
+`settings` carries the provider knobs that belong to the host rather than the machine, such as `reasoning_effort` or `service_tier`. Key it by model ref to give a ref a persona, or pass a function of the request to vary settings per call. Settings merge under what the request declared, so a request that set `maxOutputTokens` wins.
+
+Structured output goes through `response_format: { type: 'json_schema' }` around the `{ result, reasoning? }` envelope, and is unwrapped before the machine validates it. Decisions force a tool call with `tool_choice: 'required'`, one function tool per candidate event.
+
+Every result reports `usage` on the flat `AgentCallUsage` field names, with `reasoning_tokens` and `cached_tokens` folded onto `reasoningTokens` and `cachedInputTokens`, plus the normalized `finishReason` and the untouched response on `raw`. Streams ask for `stream_options: { include_usage: true }`, so a stream reports usage too.
+
+## Finish reasons and truncation
+
+An executor result may report `finishReason`, normalized to `'stop'`, `'length'`, `'tool-calls'`, `'content-filter'`, or `'other'`. Map the provider's own vocabulary onto those five and leave the raw value on `raw`. `runAgent` lifts the normalized reason onto the `request.end` trace event, beside `usage`.
+
+A `'length'` finish is the host's to interpret, because only the host sees it:
+
+- Text request: return the text the model did produce, with `finishReason: 'length'`. Do not throw.
+- Structured request: there is no usable output, so throw `AgentTruncatedError` with the `cause` and, when the model produced something, `partialOutput`.
+
+```ts no-check
+import { AgentTruncatedError } from "@statelyai/agent";
+
+throw new AgentTruncatedError(`Request '${request.name}' hit the output token limit.`, {
+  requestName: request.name,
+  requestId: info?.requestId,
+  partialOutput: partialText,
+  cause: error
+});
+```
+
+The error's code is `'truncated'`, which is what a machine's `onError` branches on. Core never throws it.
+
 ## Executor-owned structured retries
 
 Retry policy belongs to the SDK or host executor. For example, a host may retry a tool-free AI SDK structured-output failure once while preserving the runner's abort signal:

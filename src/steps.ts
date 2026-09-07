@@ -92,6 +92,56 @@ export function getInvokeEffectMetadata(action: {
   return undefined;
 }
 
+/**
+ * The invokes a snapshot is still waiting on, lowered to the same spawn-effect
+ * shape {@link getAgentRequests} reads. Derived from the snapshot's live
+ * children rather than the last transition's actions, so a state that invokes
+ * several actors at once (an `invoke: [...]` array, or parallel regions each
+ * invoking) keeps reporting the siblings after the first one settles —
+ * including when the settled invoke's `onDone` is targetless and starts
+ * nothing new.
+ *
+ * Entries are ordered by invoke id, so a walker that resolves one invoke per
+ * step is deterministic.
+ *
+ * @internal
+ */
+export function getPendingInvokes(snapshot: AnyMachineSnapshot): {
+  type: "@xstate.spawn";
+  id: string;
+  src?: unknown;
+  input?: unknown;
+  logic?: unknown;
+}[] {
+  const children = (snapshot.children ?? {}) as Record<string, PendingChild | undefined>;
+  return Object.keys(children)
+    .sort()
+    .flatMap((id) => {
+      const child = children[id];
+      const childSnapshot = child?.getSnapshot?.();
+      // A settled invoke is removed from `children`; anything left that is not
+      // active (errored, stopped) is not work the walker can resolve.
+      if (!child || childSnapshot?.status !== "active") {
+        return [];
+      }
+      return [
+        {
+          type: "@xstate.spawn" as const,
+          id,
+          src: child.src,
+          input: childSnapshot.input,
+          logic: child.logic,
+        },
+      ];
+    });
+}
+
+interface PendingChild {
+  src?: unknown;
+  logic?: unknown;
+  getSnapshot?: () => { status?: unknown; input?: unknown } | undefined;
+}
+
 /** Options accepted by {@link getAgentRequests}. */
 export interface GetAgentRequestsOptions extends AgentRequestOptions {
   /** Pre-fills `schemas`/`actors` from the machine's registered `setupAgent` options; anything passed here wins. */
@@ -214,9 +264,32 @@ function doneEvent(
 }
 
 /**
- * Applies a request's `output` as a done event via `transition(...)`,
- * returning the raw `[snapshot, actions]` tuple. Lower-level than
- * {@link resolveAgentStep} — that helper wraps this and also runs
+ * The `xstate.error.actor` counterpart of {@link doneEvent} — the event a
+ * failed invoke delivers, which `onError` transitions observe. Carries the
+ * same child session identity, so xstate does not discard it as stale.
+ *
+ * @internal
+ */
+function errorEvent(
+  snapshot: AnyMachineSnapshot,
+  request: Pick<AgentRequest, "id"> | string,
+  error: unknown,
+): EventObject {
+  const id = typeof request === "string" ? request : request.id;
+  const child = (snapshot.children as Record<string, { sessionId?: unknown }>)[id];
+  return {
+    type: "xstate.error.actor",
+    actorId: id,
+    ...(typeof child?.sessionId === "string" ? { sessionId: child.sessionId } : {}),
+    error,
+  } as EventObject;
+}
+
+/**
+ * Applies a request's `output` as a done event (or, with `outcome: 'error'`,
+ * its `output` as the invoke's error) via `transition(...)`, returning the raw
+ * `[snapshot, actions]` tuple. Lower-level than {@link resolveAgentStep} /
+ * {@link rejectAgentStep} — those helpers wrap this and also run
  * {@link getAgentRequests} to produce the next {@link AgentStep}.
  *
  * @internal
@@ -226,8 +299,12 @@ export function transitionResult<TLogic extends AnyActorLogic>(
   snapshot: SnapshotFrom<TLogic>,
   request: Pick<AgentRequest, "id"> | string,
   output: unknown,
+  outcome: "output" | "error" = "output",
 ): [SnapshotFrom<TLogic>, ExecutableActionObjectFromLogic<TLogic>[]] {
-  const event = doneEvent(snapshot as AnyMachineSnapshot, request, output);
+  const event =
+    outcome === "error"
+      ? errorEvent(snapshot as AnyMachineSnapshot, request, output)
+      : doneEvent(snapshot as AnyMachineSnapshot, request, output);
   const result = transition(logic, snapshot, event as never);
   applyFinalStateOutput(logic, result[0], event);
   return result;
@@ -310,6 +387,39 @@ export function resolveAgentStep<TMachine extends AnyActorLogic>(
   options?: Partial<AgentExecutionOptions>,
 ): AgentStep<SnapshotFrom<TMachine>> {
   const [snapshot, actions] = transitionResult(machine, step.snapshot, request, output);
+  return createAgentStep(
+    machine,
+    snapshot,
+    actions,
+    getRegisteredAgentExecutionOptions(machine, options),
+  );
+}
+
+/**
+ * Rejects a pending invoke — the failure counterpart of
+ * {@link resolveAgentStep}. Delivers `error` as the invoke's
+ * `xstate.error.actor` event, so the machine takes that invoke's `onError`
+ * transition and returns the next {@link AgentStep}. With no `onError` in
+ * scope the returned step's snapshot has `status: 'error'`, exactly as a live
+ * run's failed invoke does.
+ *
+ * A durable host replays a failed call with this: the log says the call
+ * failed, so the replay rejects the invoke instead of resolving it. Scripted
+ * playthroughs use it too — see `simulateAgent`'s `script.errors`.
+ *
+ * `error` can be any value. An `Error` instance is the usual one, but a plain
+ * object (`{ code: 'truncated' }`) reaches the `onError` transition as
+ * `event.error` untouched, so a machine that branches on a failure code is
+ * testable without constructing a provider's error class.
+ */
+export function rejectAgentStep<TMachine extends AnyActorLogic>(
+  machine: TMachine,
+  step: AgentStep<SnapshotFrom<TMachine>>,
+  request: Pick<AgentRequest, "id"> | string,
+  error: unknown,
+  options?: Partial<AgentExecutionOptions>,
+): AgentStep<SnapshotFrom<TMachine>> {
+  const [snapshot, actions] = transitionResult(machine, step.snapshot, request, error, "error");
   return createAgentStep(
     machine,
     snapshot,
@@ -410,7 +520,7 @@ function createAgentStep<TMachine extends AnyActorLogic>(
   return {
     snapshot,
     actions,
-    requests: getAgentRequests(actions, {
+    requests: getAgentRequests(getPendingInvokes(snapshot as AnyMachineSnapshot), {
       ...options,
       snapshot: snapshot as AnyMachineSnapshot,
     }),

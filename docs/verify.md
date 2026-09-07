@@ -104,6 +104,9 @@ Use deterministic executors when the test should exercise the real `runAgent` pa
 - `text` holds output values for text requests, keyed by request src.
 - `invokes` holds answers for scripted invokes, keyed by invoke src.
 - `userInput` is one flat queue of answers for `agent.userInput` invokes.
+- `errors` holds failure values that reject a request instead of resolving it, keyed by the same srcs the other channels use.
+
+Pending work is read off the snapshot's live invoked actors, not off the last transition. A state that invokes several actors at once keeps every one of them pending until it settles, including when an invoke's `onDone` targets nothing. `simulateAgent` settles one invoke per step, in invoke-id order, and keeps going until none are left, so an `always` join that waits on all of them fires.
 
 ```ts
 import { simulateAgent } from "@statelyai/agent";
@@ -138,6 +141,33 @@ if (result.status === "done") {
 
 > **Note:** When a script queue runs dry mid-request, `simulateAgent` throws a descriptive error naming the pending request's kind, src, and id.
 
+### Scripted failures
+
+A state behind an invoke's `onError` is unreachable through outputs alone. Script the failure instead. An `errors[src]` entry is consumed before that src's output queue, so the first call fails and later calls fall through to `text`, `invokes`, or `decisions` as usual.
+
+```ts
+const result = await simulateAgent(machine, {
+  script: {
+    errors: { parse: [{ code: "truncated" }] },
+    text: { parse: [{ total: 42 }] }, // still queued: the error was taken first
+  },
+});
+// result.snapshot.value → the target of the `parse` invoke's onError
+```
+
+A failure value is any value. An `Error` is the usual one. A plain object reaches the `onError` transition as `event.error` untouched, so a machine that branches on `event.error.code` is testable without constructing a provider's error class.
+
+An entry keyed by a decision src, usually `agent.decide`, stands in for retry exhaustion: the decision invoke is rejected, and its `onError` observes the failure the way it observes a real `AgentDecisionExhaustedError`.
+
+A rejection that reaches no `onError` errors the machine, as it does in a live run, and `simulateAgent` throws. It throws the scripted value itself when that value is an `Error`, and otherwise a descriptive error carrying the value on `cause`.
+
+Each rejection is on the trail. Every `resolvedRequest` entry carries an `outcome` of `'output'` or `'error'`, and a rejected one also carries the failure value on `error`.
+
+```ts
+const [, settled] = result.trail;
+settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome: 'error', error: { code: 'truncated' } }
+```
+
 ## Branch exploration
 
 `explorePaths(machine, { input, maxDepth?, maxPaths?, text?, invokes?, userInput? })` enumerates decision and external-event branches without a model, and reports coverage.
@@ -147,6 +177,8 @@ if (result.status === "done") {
 - `text` is a map of canned outputs for text requests, keyed by src. One value per src is reused every time that src is reached.
 - `invokes` is the same map for scripted invokes, and `userInput` is the shorthand for `invokes['agent.userInput']`.
 - A src with no canned output halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
+- `errors` is a map of one canned failure per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored.
+- Every invoke a state is still waiting on counts as work, concurrent ones included. They are settled one per branch, in invoke-id order, and a src in `errors` forks per invoke.
 
 <!-- viz: branch exploration tree for the refund machine: deciding -> AUTO_APPROVE (pruned by guard) / NEEDS_REVIEW -> awaitingHuman -> refunded, denied -->
 
@@ -162,6 +194,16 @@ const report = await explorePaths(refundMachine, {
 ```
 
 Exploration is bounded by `maxDepth`, which defaults to 8, and `maxPaths`, which defaults to 200. `report.hitPathCap` is true when the report is partial.
+
+A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id.
+
+```ts
+const report = await explorePaths(machine, {
+  text: { parse: { total: 42 } },
+  errors: { parse: new Error("truncated response") },
+});
+// report.terminals → one path per branch: the parsed state and the onError state
+```
 
 ## Reachability checks
 
@@ -180,6 +222,15 @@ const { reachable, witness } = await canReach(refundMachine, "denied", {
 ```
 
 `witness` is the sequence of chosen and applied events that reaches the state, which is the proof that it is reachable. It is absent when `reachable` is `false`.
+
+`canReach` forwards `errors`, so a state that only a failure reaches is checkable the same way.
+
+```ts
+const failure = await canReach(machine, "failed", {
+  errors: { parse: new Error("truncated response") },
+});
+// failure.reachable → true; failure.witness → [{ type: 'xstate.error.actor.parse' }]
+```
 
 ## CI checks
 

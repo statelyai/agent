@@ -34,12 +34,14 @@ import {
 import { getAcceptedEvents, type AgentSchemas } from "./events.js";
 import {
   GENERATE_TEXT_ACTOR,
+  getCallFinishReason,
   getCallUsage,
   isTextLogic,
   normalizeGeneratorResult,
   STREAM_TEXT_ACTOR,
   USER_INPUT_ACTOR,
   type AgentCallUsage,
+  type AgentFinishReason,
   type AgentUsage,
   type AgentExecutorTextRequest,
   type AgentRequestExecutor,
@@ -228,6 +230,10 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
        * Present only when the executor reported it. The run-level total is
        * {@link RunAgentResult.usage}. */
       usage?: AgentCallUsage;
+      /** Why the call stopped, lifted off the raw executor result's
+       * `finishReason` and normalized. Present only when the executor reported
+       * one the {@link AgentFinishReason} union names. */
+      finishReason?: AgentFinishReason;
     }
   | { type: "request.error"; request: AgentStepRequest; error: unknown }
   | { type: "stream.chunk"; request: AgentRequest; chunk: string }
@@ -318,6 +324,7 @@ const TRACE_ENVELOPE_KEYS = [
   "status",
   "cause",
   "reasoning",
+  "finishReason",
   "chunk",
 ] as const;
 
@@ -1283,6 +1290,7 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
       // Fold this call's reported tokens into the run-level AgentUsage, and
       // surface them per-call on the request.end trace.
       const usage = getCallUsage(raw);
+      const finishReason = getCallFinishReason(raw);
       if (usage) {
         runCtx.recordUsage?.(
           usage,
@@ -1305,6 +1313,7 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
           raw,
           ...(reasoning !== undefined ? { reasoning } : {}),
           ...(usage !== undefined ? { usage } : {}),
+          ...(finishReason !== undefined ? { finishReason } : {}),
         },
         self,
       );
@@ -1356,6 +1365,7 @@ function createCountingDecide(
         },
       );
       const usage = getCallUsage(result);
+      const finishReason = getCallFinishReason(result);
       if (usage) {
         const { src } = selfIdAndSrc(self);
         runCtx.recordUsage?.(
@@ -1376,6 +1386,7 @@ function createCountingDecide(
           output: result.event,
           raw: result,
           ...(usage !== undefined ? { usage } : {}),
+          ...(finishReason !== undefined ? { finishReason } : {}),
         },
         self,
       );

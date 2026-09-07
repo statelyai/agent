@@ -1,4 +1,4 @@
-export { AgentError } from "./errors.js";
+export { AgentError, AgentTruncatedError } from "./errors.js";
 export type {
   ContextOf,
   DoneActorEventOf,
@@ -69,12 +69,14 @@ export {
   buildEnvelopeSchema,
   createTextLogic,
   getAgentOutputMode,
+  getCallFinishReason,
   getCallUsage,
   parseModelRef,
   parseOutput,
   parseStructuredEnvelope,
 } from "./text-logic.js";
 export type {
+  AgentFinishReason,
   AgentModelRef,
   AgentOutputMode,
   StructuredOutputEnvelope,

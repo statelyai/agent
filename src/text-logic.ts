@@ -149,6 +149,48 @@ export interface AgentUsage {
 /** One model call's reported usage — {@link AgentUsage} without the run-level `modelCalls` count. What an executor puts on its result's `usage` field. */
 export type AgentCallUsage = Omit<AgentUsage, "modelCalls">;
 
+/**
+ * Why a model call stopped, normalized across providers:
+ *
+ * - `'stop'` — the model finished on its own.
+ * - `'length'` — the output token limit cut it off.
+ * - `'tool-calls'` — it stopped to call tools.
+ * - `'content-filter'` — a safety filter stopped it.
+ * - `'other'` — anything else, including a provider error the adapter mapped.
+ *
+ * Adapters set it on their executor result; `runAgent` copies it onto the
+ * `request.end` trace event. A provider's own string stays on the result's
+ * `raw`.
+ */
+export type AgentFinishReason = "stop" | "length" | "tool-calls" | "content-filter" | "other";
+
+const AGENT_FINISH_REASONS = new Set<string>([
+  "stop",
+  "length",
+  "tool-calls",
+  "content-filter",
+  "other",
+]);
+
+/**
+ * Reads a settled call's {@link AgentFinishReason} off a RAW executor result's
+ * `finishReason` field — the finish-reason sibling of {@link getCallUsage},
+ * applied by `runAgent` before it puts the reason on the `request.end` trace.
+ * A provider's `'error'` normalizes to `'other'`; anything else the union does
+ * not name (an un-normalized provider string, a missing field) returns
+ * `undefined`.
+ */
+export function getCallFinishReason(raw: unknown): AgentFinishReason | undefined {
+  const value = (raw as { finishReason?: unknown } | null | undefined)?.finishReason;
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  if (value === "error") {
+    return "other";
+  }
+  return AGENT_FINISH_REASONS.has(value) ? (value as AgentFinishReason) : undefined;
+}
+
 /** The token fields {@link AgentUsage} aggregates. @internal */
 export const AGENT_USAGE_TOKEN_FIELDS = [
   "inputTokens",
@@ -710,6 +752,8 @@ export type AgentRequestExecutorResult<TOutput = unknown, TMessage = unknown> = 
   messages?: TMessage[];
   /** This call's token usage, aggregated into the run result's {@link AgentUsage}. */
   usage?: AgentCallUsage;
+  /** Why this call stopped, normalized (see {@link AgentFinishReason}). Surfaced on the `request.end` trace event. */
+  finishReason?: AgentFinishReason;
   [key: string]: unknown;
 };
 

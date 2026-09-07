@@ -23,7 +23,7 @@ import {
   toAiSdkTools,
   toDecisionMessages,
 } from "./mappers.js";
-import { runAgent, setupAgent } from "../index.js";
+import { AgentTruncatedError, runAgent, setupAgent } from "../index.js";
 import type { AiSdkModelMap } from "./index.js";
 
 describe("defineModels", () => {
@@ -1129,5 +1129,53 @@ describe("structured-output resilience", () => {
     // What the decision does declare still wins.
     expect(seen[1]!.temperature).toBe(0.1);
     expect(seen[1]!.topP).toBe(0.3);
+  });
+});
+
+describe("createAiSdkExecutors — truncation", () => {
+  const usage = {
+    inputTokens: { total: 2, noCache: 2, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 3, text: 3, reasoning: 0 },
+  };
+  const answerSchema = z.object({ answer: z.string() });
+
+  test("a truncated structured request is an AgentTruncatedError", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => ({
+        content: [{ type: "text" as const, text: '{"result":{"answer":"half' }],
+        finishReason: { unified: "length" as const, raw: "length" },
+        usage,
+        warnings: [],
+      }),
+    });
+
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+    const error = await generateText({
+      model: "m",
+      name: "answer",
+      prompt: "hi",
+      outputSchema: answerSchema,
+      tools: {},
+    }).catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(AgentTruncatedError);
+    expect(error).toMatchObject({ code: "truncated", requestName: "answer" });
+  });
+
+  test("a truncated text request keeps its text and reports finishReason 'length'", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => ({
+        content: [{ type: "text" as const, text: "as far as it got" }],
+        finishReason: { unified: "length" as const, raw: "length" },
+        usage,
+        warnings: [],
+      }),
+    });
+
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+    const result = await generateText({ model: "m", name: "draft", prompt: "hi", tools: {} });
+
+    expect(result.output).toBe("as far as it got");
+    expect(result.finishReason).toBe("length");
   });
 });

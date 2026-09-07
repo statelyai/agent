@@ -194,3 +194,9 @@ export {
   aiSdkEvaluatorOptimizerMachine,
   runAiSdkEvaluatorOptimizerExample,
 } from "./ai-sdk-evaluator-optimizer/index.js";
+export {
+  generateAndRepairMachine,
+  parseConfigActor,
+  parseGeneratedConfig,
+  runGenerateAndRepairExample,
+} from "./generate-and-repair/index.js";

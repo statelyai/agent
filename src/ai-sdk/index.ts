@@ -1,5 +1,6 @@
 import {
   generateText as aiGenerateText,
+  NoObjectGeneratedError,
   Output,
   streamText as aiStreamText,
   stepCountIs,
@@ -13,10 +14,12 @@ import {
 } from "ai";
 import {
   buildEnvelopeSchema,
+  type AgentFinishReason,
   type AgentRequestExecutorInfo,
   type AgentTextRequest,
   type StructuredOutputEnvelope,
 } from "../text-logic.js";
+import { AgentTruncatedError } from "../errors.js";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
 import { DEFAULT_AGENT_EXECUTORS } from "../internal/registry.js";
@@ -25,6 +28,7 @@ import {
   extractFirstJsonValue,
   isStructuredOutputRequest,
   toAgentCallUsage,
+  toAgentFinishReason,
   toAiSdkCallSettings,
   toAiSdkGenerationSettings,
   toAiSdkEventTools,
@@ -226,7 +230,8 @@ export type AiSdkGenerateResult = {
    * the run result's aggregated `AgentUsage`; the AI SDK's own nested
    * `inputTokenDetails`/`outputTokenDetails` and `raw` ride along untouched. */
   usage: AiSdkCallUsage;
-  finishReason: FinishReason;
+  /** Why the call stopped, normalized to the portable {@link AgentFinishReason}. The SDK's own value stays on `raw`. */
+  finishReason: AgentFinishReason;
   toolCalls: TypedToolCall<ToolSet>[];
   toolResults: TypedToolResult<ToolSet>[];
   /** AI SDK response messages, including tool calls/results from every step. */
@@ -239,7 +244,8 @@ export type AiSdkStreamResult = {
   output: string;
   /** The stream's final (awaited) usage; aggregated into the run result's `AgentUsage`. */
   usage: AiSdkCallUsage;
-  finishReason: FinishReason;
+  /** Why the stream stopped, normalized to the portable {@link AgentFinishReason}. The SDK's own value stays on `raw`. */
+  finishReason: AgentFinishReason;
   /** AI SDK response messages, including tool calls/results from every step. */
   messages: ModelMessage[];
   /** The untouched AI SDK result. */
@@ -271,6 +277,27 @@ export interface AiSdkExecutors {
   ) => Promise<AiSdkDecideResult>;
 }
 
+// Builds the AgentTruncatedError the adapter throws when a `'length'` finish
+// reason left nothing usable. `what` names the part that was cut off.
+function truncated(
+  request: AgentTextRequest,
+  info: AgentRequestExecutorInfo | undefined,
+  partialOutput?: unknown,
+  cause?: unknown,
+): AgentTruncatedError {
+  return new AgentTruncatedError(
+    `createAiSdkExecutors: request '${request.name ?? "(unnamed)"}' hit the output token ` +
+      "limit — its structured output never completed. Raise `maxOutputTokens`, shorten " +
+      "the input, or ask for a smaller output schema.",
+    {
+      requestName: request.name ?? "(unnamed)",
+      ...(info?.requestId !== undefined ? { requestId: info.requestId } : {}),
+      ...(partialOutput !== undefined ? { partialOutput } : {}),
+      ...(cause !== undefined ? { cause } : {}),
+    },
+  );
+}
+
 /**
  * The canonical Vercel AI SDK adapter: builds the `{ generateText, streamText,
  * decide }` executor set consumed by `runAgent`/`executeAgentRequest`. `ai`
@@ -291,7 +318,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
   const generateText = async (
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,
-  ) => {
+  ): Promise<AiSdkGenerateResult> => {
     const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
     const common = {
       model,
@@ -315,13 +342,37 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
           schema: envelope as FlexibleSchema<unknown>,
         }),
       );
-      const result = await aiGenerateText({ ...common, output: structuredOutput });
-      const { result: output, reasoning } = result.output as StructuredOutputEnvelope;
+      // A structured request that ran out of tokens has no usable output: the
+      // envelope never closed. The SDK reports that either by rejecting the
+      // call or by throwing when the parsed output is read, and both become an
+      // AgentTruncatedError a machine can branch on.
+      const result = await aiGenerateText({ ...common, output: structuredOutput }).catch(
+        (error: unknown) => {
+          throw NoObjectGeneratedError.isInstance(error) && error.finishReason === "length"
+            ? truncated(request, info, error.text, error)
+            : error;
+        },
+      );
+      const parsed = ((): StructuredOutputEnvelope => {
+        try {
+          return result.output as StructuredOutputEnvelope;
+        } catch (error) {
+          throw result.finishReason === "length"
+            ? truncated(request, info, result.text, error)
+            : error;
+        }
+      })();
+      const { result: output, reasoning } = parsed;
+      // A structured output the model DID close, but only because it stopped
+      // mid-thought, is not something to hand a machine as a final answer.
+      if (result.finishReason === "length") {
+        throw truncated(request, info, output);
+      }
       return {
         output,
         ...(reasoning !== undefined ? { reasoning } : {}),
         usage: toAgentCallUsage(result.usage),
-        finishReason: result.finishReason,
+        finishReason: toAgentFinishReason(result.finishReason),
         toolCalls: result.toolCalls,
         toolResults: result.toolResults,
         messages: result.responseMessages,
@@ -329,11 +380,13 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       } satisfies AiSdkGenerateResult;
     }
 
+    // A text request that ran out of tokens still has its text. It comes back
+    // with `finishReason: 'length'` — the machine decides what that is worth.
     const result = await aiGenerateText(common);
     return {
       output: result.text,
       usage: toAgentCallUsage(result.usage),
-      finishReason: result.finishReason,
+      finishReason: toAgentFinishReason(result.finishReason),
       toolCalls: result.toolCalls,
       toolResults: result.toolResults,
       messages: result.responseMessages,
@@ -362,7 +415,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     return {
       output: await result.text,
       usage: toAgentCallUsage(await result.usage),
-      finishReason: await result.finishReason,
+      finishReason: toAgentFinishReason(await result.finishReason),
       messages: await result.responseMessages,
       raw: result,
     } satisfies AiSdkStreamResult;

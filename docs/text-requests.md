@@ -161,6 +161,38 @@ const result = await runAgent(machine, {
 
 See [parallel-streams](../examples/parallel-streams/index.ts).
 
+## Finish reason and truncation
+
+<!-- finishReason from src/text-logic.ts (AgentFinishReason) and src/errors.ts -->
+
+An executor result can report why the call stopped, as a normalized `finishReason`: `'stop'`, `'length'`, `'tool-calls'`, `'content-filter'`, or `'other'`. `createAiSdkExecutors` sets it on every text, structured, and streamed result, mapping the provider's own vocabulary onto those five; the provider's raw value stays on the result's `raw`.
+
+The reason reaches observability the way per-call usage does: `runAgent` lifts it onto the `request.end` [trace event](observability.md), next to `usage`.
+
+`'length'` means the output token limit cut the call off. What that costs depends on the request:
+
+- A text request returns the text it did produce, with `finishReason: 'length'`. Nothing throws. The machine decides whether a half-finished draft is worth keeping.
+- A structured request has nothing usable: an envelope that never closed does not parse, and one that stopped mid-thought is not an answer. `createAiSdkExecutors` throws an `AgentTruncatedError`.
+
+`AgentTruncatedError` extends `AgentError` with the code `'truncated'`, so an invoke's `onError` branches on the code without an `instanceof` check across bundles:
+
+```ts no-check
+answering: {
+  invoke: {
+    id: "answer",
+    src: "answerQuestion",
+    input: ({ context }) => ({ prompt: context.prompt }),
+    onDone: ({ output }) => ({ target: "done", context: { answer: output.answer } }),
+    onError: [
+      { guard: ({ event }) => event.error.code === "truncated", target: "askingForLess" },
+      { target: "failed" },
+    ],
+  },
+},
+```
+
+The error carries `requestName`, the `requestId` when the host knows it, and `partialOutput` when the model produced something before it ran out. Core never throws it: truncation is a host observation, and only an adapter knows a call ran out of tokens. See [Hosts](hosts.md#finish-reasons-and-truncation).
+
 ## Tools and multi-step loops
 
 <!-- tools and maxSteps from src/types.ts (AgentTool), src/text-logic.ts and src/ai-sdk/index.ts -->

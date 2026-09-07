@@ -1,0 +1,14 @@
+{
+  "name": "generate-and-repair",
+  "title": "Validate model output, then repair it",
+  "kind": "pattern",
+  "comparison": {
+    "targets": ["output validation", "repair loop"],
+    "purpose": "Asks for three candidate machine configs in one request, parses each with the host's own validator, and sends the first rejection back to the model as a repair prompt — capped at two rounds by an explicit choice state."
+  },
+  "starters": [
+    "a turnstile that locks and unlocks",
+    "a checkout that can be paid, shipped, or refunded",
+    "a file upload with retry and cancel"
+  ]
+}

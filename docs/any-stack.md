@@ -39,3 +39,7 @@ Bind executors with `provideExecutors`, create a normal XState actor, and connec
 - AI SDK and AG-UI streaming: [ai-sdk-ui-stream](../examples/ai-sdk-ui-stream), [tanstack-ai-stream](../examples/tanstack-ai-stream)
 
 Use each framework's own storage, retry, queue, and interruption semantics.
+
+## Related
+
+- [Use in an XState 4 or 5 app](xstate-4-and-5-apps.md): isolating the agent when the app's own XState version cannot change.

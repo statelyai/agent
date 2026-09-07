@@ -18,6 +18,7 @@
     "choosing-a-run-mode",
     "hosts",
     "any-stack",
+    "xstate-4-and-5-apps",
     "steps",
     "---State & durability---",
     "event-log",
@@ -37,6 +38,7 @@
     "evals",
     "---Resources---",
     "patterns",
+    "validate-and-repair",
     "langgraph-comparison",
     "roadmap"
   ]

@@ -58,6 +58,16 @@
         "default": "./dist/machines.cjs"
       }
     },
+    "./openai": {
+      "import": {
+        "types": "./dist/openai.d.mts",
+        "default": "./dist/openai.mjs"
+      },
+      "require": {
+        "types": "./dist/openai.d.cts",
+        "default": "./dist/openai.cjs"
+      }
+    },
     "./otel": {
       "import": {
         "types": "./dist/otel.d.mts",
@@ -144,6 +154,7 @@
     "@opentelemetry/api": "^1",
     "ai": "^7.0.0",
     "ajv": "^8.20.0",
+    "openai": ">=5.0.0 <8",
     "xstate": ">=6.0.0-alpha.46 <6.0.0"
   },
   "peerDependenciesMeta": {
@@ -154,6 +165,9 @@
       "optional": true
     },
     "ajv": {
+      "optional": true
+    },
+    "openai": {
       "optional": true
     }
   },

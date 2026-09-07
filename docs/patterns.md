@@ -5,6 +5,7 @@ The examples are non-trivial state machines, not special runner APIs.
 ## Control-flow patterns
 
 - [Evaluator/optimizer](../examples/ai-sdk-evaluator-optimizer)
+- [Validate and repair](validate-and-repair.md) ([example](../examples/generate-and-repair))
 - [Reflection writer](../examples/reflection-writer)
 - [Plan and execute](../examples/plan-and-execute)
 - [Corrective RAG](../examples/corrective-rag)

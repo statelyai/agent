@@ -1,140 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { z } from "zod";
-import type { AgentDecisionRequest, AgentTextRequest } from "@statelyai/agent";
 import { runAgent } from "@statelyai/agent";
-import { getJsonSchema } from "@statelyai/agent";
-import {
-  createOpenAiExecutors,
-  toAgentCallUsage,
-  toDecisionMessages,
-  toOpenAiCallSettings,
-  toOpenAiEventTools,
-  toOpenAiMessages,
-  toOpenAiTools,
-} from "./index.js";
+import { createOpenAiExecutors } from "@statelyai/agent/openai";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 import { jokeMachine } from "../joke/index.js";
 
-describe("request -> OpenAI param mapping (pure helpers)", () => {
-  test("toOpenAiMessages: system + prompt lower to a system + user message", () => {
-    const messages = toOpenAiMessages({ system: "Be terse.", prompt: "Hi" });
-    expect(messages).toEqual([
-      { role: "system", content: "Be terse." },
-      { role: "user", content: "Hi" },
-    ]);
-  });
-
-  test("toOpenAiMessages: messages array is mapped role-by-role when present", () => {
-    const messages = toOpenAiMessages({
-      messages: [
-        { role: "system", content: "sys" },
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi there" },
-      ],
-    } as Pick<AgentTextRequest, "system" | "prompt" | "messages">);
-    expect(messages).toEqual([
-      { role: "system", content: "sys" },
-      { role: "user", content: "hello" },
-      { role: "assistant", content: "hi there" },
-    ]);
-  });
-
-  test("toOpenAiCallSettings maps to max_completion_tokens, not max_tokens", () => {
-    const settings = toOpenAiCallSettings({
-      model: "gpt-5.4-mini",
-      temperature: 0.5,
-      maxOutputTokens: 100,
-      topP: 0.9,
-      seed: 42,
-      stopSequences: ["END"],
-    } as AgentTextRequest);
-    expect(settings).toEqual({
-      temperature: 0.5,
-      max_completion_tokens: 100,
-      top_p: 0.9,
-      seed: 42,
-      stop: ["END"],
-    });
-  });
-
-  test("getJsonSchema reads the ~standard.jsonSchema extension when present", async () => {
-    const schema = z.object({ sentiment: z.enum(["positive", "negative"]) });
-    const jsonSchema = await getJsonSchema(schema);
-    expect(jsonSchema).toMatchObject({ type: "object" });
-  });
-
-  test("getJsonSchema returns undefined for a schema without the extension", async () => {
-    const bareSchema = {
-      "~standard": {
-        version: 1 as const,
-        vendor: "test",
-        validate: (value: unknown) => ({ value }),
-      },
-    };
-    expect(await getJsonSchema(bareSchema)).toBeUndefined();
-  });
-
-  test("getJsonSchema awaits a Promise-returning jsonSchema.input()", async () => {
-    const asyncSchema = {
-      "~standard": {
-        version: 1 as const,
-        vendor: "test",
-        validate: (value: unknown) => ({ value }),
-        jsonSchema: {
-          input: async () => ({ type: "string" }),
-        },
-      },
-    };
-    expect(await getJsonSchema(asyncSchema)).toEqual({ type: "string" });
-  });
-
-  test("toOpenAiTools builds one function tool per AgentTools entry", () => {
-    const tools = toOpenAiTools({
-      lookup: { description: "Looks something up.", inputSchema: z.object({ query: z.string() }) },
-    });
-    expect(tools).toHaveLength(1);
-    expect(tools[0]).toMatchObject({
-      type: "function",
-      function: { name: "lookup", description: "Looks something up." },
-    });
-  });
-
-  test("toOpenAiEventTools builds one function tool per candidate event", () => {
-    const tools = toOpenAiEventTools([
-      { type: "ASK", toolName: "send_event_ASK" },
-      { type: "GUESS", toolName: "send_event_GUESS" },
-    ]);
-    expect(tools).toHaveLength(2);
-    expect(tools.map((t) => t.function.name)).toEqual(["send_event_ASK", "send_event_GUESS"]);
-  });
-
-  test("toAgentCallUsage maps OpenAI's snake_case usage, omitting what it omits", () => {
-    expect(
-      toAgentCallUsage({
-        prompt_tokens: 12,
-        completion_tokens: 7,
-        total_tokens: 19,
-        completion_tokens_details: { reasoning_tokens: 3 },
-      } as never),
-    ).toEqual({ inputTokens: 12, outputTokens: 7, totalTokens: 19, reasoningTokens: 3 });
-    expect(toAgentCallUsage(undefined)).toBeUndefined();
-  });
-
-  test("toDecisionMessages appends attempt feedback as user messages", () => {
-    const request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts"> = {
-      prompt: "Pick a move.",
-      events: [{ type: "ASK", toolName: "send_event_ASK" }],
-      attempts: [{ failure: "unknown-event", reason: "'FOO' is not allowed." }],
-    };
-    const messages = toDecisionMessages(request);
-    expect(messages.at(-1)).toMatchObject({
-      role: "user",
-      content: expect.stringContaining("'FOO' is not allowed."),
-    });
-  });
-});
-
+// The adapter's own unit tests live in `src/openai/index.test.ts`. These cover
+// the host end to end: real example machines driven by `createOpenAiExecutors`
+// over a stubbed client, no network.
 describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => {
   test("generateText: structured output via response_format json_schema", async () => {
     const stubClient = {
@@ -147,6 +20,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
             return {
               choices: [
                 {
+                  finish_reason: "stop",
                   message: {
                     content: JSON.stringify({
                       result: {
@@ -193,6 +67,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
               return {
                 choices: [
                   {
+                    finish_reason: "tool_calls",
                     message: {
                       content: null,
                       tool_calls: [
@@ -214,6 +89,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
             return {
               choices: [
                 {
+                  finish_reason: "stop",
                   message: {
                     content: JSON.stringify({
                       answer: "yes",
@@ -254,54 +130,6 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output.guess).toBe("a cat");
-  });
-
-  test("generateText reports the call's token usage", async () => {
-    const stubClient = {
-      chat: {
-        completions: {
-          create: async () => ({
-            choices: [{ message: { content: "hello" } }],
-            usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
-          }),
-        },
-      },
-    };
-
-    const { generateText } = createOpenAiExecutors({ client: stubClient as never });
-    const result = await generateText!({
-      name: "demo",
-      model: "gpt-5.4-mini",
-      prompt: "hi",
-      tools: {},
-    } as never);
-    expect(result).toMatchObject({
-      output: "hello",
-      usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
-    });
-  });
-
-  test("streamText is text-only: a structured or tool-carrying request is refused", async () => {
-    const { streamText } = createOpenAiExecutors({ client: {} as never });
-
-    await expect(
-      streamText({
-        name: "demo",
-        model: "gpt-5.4-mini",
-        prompt: "hi",
-        outputSchema: z.object({ sentiment: z.string() }),
-        tools: {},
-      } as never),
-    ).rejects.toThrow(/text-only/);
-
-    await expect(
-      streamText({
-        name: "demo",
-        model: "gpt-5.4-mini",
-        prompt: "hi",
-        tools: { lookup: { inputSchema: z.object({ query: z.string() }) } },
-      } as never),
-    ).rejects.toThrow(/text-only/);
   });
 
   test("streamText: forwards chunks to onChunk and resolves with the full text", async () => {
