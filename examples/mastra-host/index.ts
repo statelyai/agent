@@ -4,7 +4,7 @@
  *
  * The same bridge every framework host in this repo uses (../machine-as-tool is
  * the framework-free version of it: same `persist()` / `getInteraction` /
- * `AgentIllegalResumeEventError` protocol, but the handle IS the persisted
+ * `result.ignored` protocol, but the handle IS the persisted
  * snapshot there, so it needs no run store):
  *
  *   - `start_workflow` runs `runAgent(emailDrafter, ...)` to its first idle,
@@ -14,18 +14,18 @@
  *
  * Everything the host owns lives inside `createHost({ executors, store })`: the
  * executors it runs with, the snapshot store, the handle counter, and the two
- * tools. Nothing is module-level mutable state, so two hosts (keyless and live,
+ * tools. Nothing is module-level mutable state, so two hosts (scripted and live,
  * or one per request in a server) never share a run.
  *
  * The machine owns legality and state; the Mastra agent only converses. Nothing
  * here hardcodes a state name or an event payload shape: the host reads the
  * rendered interaction with `getInteraction(snapshot)` and delivers free text to
  * whichever event that interaction named as its `textEvent`.
- * Illegal resumes are refused by `runAgent` itself (AgentIllegalResumeEventError),
+ * An event the state does not handle is ignored by the machine (`result.ignored`),
  * so no hand-rolled legality check lives in the tools.
  *
  * Run: npx tsx examples/mastra-host/index.ts
- *   No API key -> keyless mock executors drive the machine end to end.
+ *   No API key -> mock executors drive the machine end to end.
  *   OPENAI_API_KEY=... -> also runs the live Mastra agent over the same tools.
  */
 import assert from "node:assert/strict";
@@ -123,14 +123,14 @@ export function createInMemoryRunStore(): RunStore {
   };
 }
 
-// ─── Keyless executors ───
+// ─── Scripted executors ───
 
 /**
  * Mock executors so the example (and its test) run with no API key or network.
  * Routes on `request.name` (the `setupAgent({ requests })` key each request was
  * declared under) instead of sniffing prompt text or the model ref.
  */
-export const keylessExecutors: AgentRequestExecutors = {
+export const scriptedExecutors: AgentRequestExecutors = {
   generateText: async (request) => {
     switch (request.name) {
       case "evaluatePrompt":
@@ -169,8 +169,8 @@ export function createHost({ executors, store = createInMemoryRunStore() }: Crea
    * Build the machine event for `eventType`, attaching `text` to the event the
    * interaction named as its `textEvent` and merging any fixed fields the
    * choice declared. The cast is the one unavoidable seam: the eventType
-   * arrives as a model-supplied string. `runAgent` still validates it against
-   * the restored state and throws on anything illegal.
+   * arrives as a model-supplied string. If the state has no transition for it,
+   * the machine ignores it and the run reports `result.ignored`.
    */
   function buildEvent(
     interaction: Interaction | null,
@@ -237,6 +237,15 @@ export function createHost({ executors, store = createInMemoryRunStore() }: Crea
       snapshot: stored.snapshot,
       event: buildEvent(stored.interaction, eventType, text),
     });
+    // The state has no transition for the event, so the machine ignored it.
+    // Not a library error: `runAgent` settled normally and named the event on
+    // `result.ignored`. This host reports it the way it reports a bad handle.
+    if (result.ignored) {
+      return {
+        status: "error",
+        error: `'${result.ignored.type}' does not apply in the current state.`,
+      };
+    }
     return toToolResult(result, handle);
   }
 
@@ -318,7 +327,7 @@ export function unwrapToolResult(value: ToolResult | ValidationError<unknown> | 
  * for the two model calls the machine makes.
  */
 export async function main() {
-  const { startWorkflow, resumeWorkflow } = createHost({ executors: keylessExecutors });
+  const { startWorkflow, resumeWorkflow } = createHost({ executors: scriptedExecutors });
 
   const started = unwrapToolResult(
     await startWorkflow.execute!(

@@ -1,5 +1,5 @@
 /**
- * Keyless verification for agent machines — static lint checks plus
+ * Provider-free verification for agent machines — static lint checks plus
  * model-free simulation over the pure step path. Coding agents generate these
  * machines; this module lets them close the loop and self-verify WITHOUT any
  * API keys or model calls.

@@ -1,6 +1,5 @@
 import { expect, test } from "vitest";
 import { createAsyncLogic } from "xstate";
-import { AgentIllegalResumeEventError } from "@statelyai/agent";
 import {
   AUTO_APPROVAL_LIMIT,
   resumeTool,
@@ -94,18 +93,19 @@ test("reject path: resume with REJECT ends with refunded:false", async () => {
   expect(done.output).toEqual({ refunded: false, reason: "duplicate" });
 });
 
-test("illegal event is rejected when resuming (runAgent throws AgentIllegalResumeEventError)", async () => {
+test("an event the state does not handle is ignored, and the harness says so", async () => {
   const started = await startTool({ amount: 780, orderId: "ord-3" }, runOptions);
   expect(started.status).toBe("pending");
   if (started.status !== "pending") return;
 
-  // PROMPT_SUBMITTED is not a legal event in awaitingApproval — resumeTool's
-  // runAgent throws AgentIllegalResumeEventError before delivering it.
+  // `awaitingApproval` has no transition for PROMPT_SUBMITTED, so the machine
+  // ignores it: `runAgent` settles normally with `result.ignored` set, and
+  // `resumeTool` turns that into the harness's own error.
   await expect(
     resumeTool(started.handle, { type: "PROMPT_SUBMITTED" } as never, runOptions),
-  ).rejects.toBeInstanceOf(AgentIllegalResumeEventError);
+  ).rejects.toThrow(/'PROMPT_SUBMITTED' does not apply/);
 
-  // The legal events (APPROVE / REJECT) resume without throwing.
+  // The events the state does handle (APPROVE / REJECT) resume as before.
   const done = await resumeTool(started.handle, { type: "APPROVE" }, runOptions);
   expect(done.status).toBe("done");
 });

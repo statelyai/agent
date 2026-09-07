@@ -23,7 +23,11 @@ import {
 import type { AgentMessage, AgentToolChoice, AgentTools, StandardSchemaV1 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
 import { type AgentRequestMode } from "./text-logic.js";
-import { agentExecutionOptions, machineIdlePredicates, missingActor } from "./internal/registry.js";
+import {
+  machineIdlePredicates,
+  missingActor,
+  setAgentExecutionOptions,
+} from "./internal/registry.js";
 import {
   createAgentActors,
   createAgentSchemas,
@@ -994,7 +998,7 @@ export function setupAgentFromConfig(
 
   // What setupAgent's wrapped createMachine registers for runAgent: the
   // schemas/actors this machine executes with.
-  agentExecutionOptions.set(machine as object, { schemas, actors, models: {} });
+  setAgentExecutionOptions(machine, { schemas, actors, models: {} });
   // The wait-state predicate (options.isIdle, or the config's declarative
   // `idleTags`), carried on the root config like setupAgent's — so it
   // survives further `machine.provide(...)` executor rebinding.

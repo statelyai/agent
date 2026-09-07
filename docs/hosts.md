@@ -87,6 +87,35 @@ const executors = {
 
 Tool-bearing calls are not retried here because tools may have side effects. Use the framework's own interruption and retry facilities when available; Stately Agent forwards messages and execution to it.
 
+## Resume events off the wire
+
+A host that resumes a run from an HTTP request or a socket frame parses the payload at the boundary, then hands the parsed event to `runAgent`:
+
+```ts no-check
+let event;
+try {
+  event = parseAgentEvent(machine, await request.json());
+} catch (error) {
+  return Response.json({ error: String(error) }, { status: 400 });
+}
+
+const result = await runAgent(machine, { store, threadId, event, executors });
+
+if (result.ignored) {
+  return Response.json(
+    { error: `'${result.ignored.type}' does not apply right now` },
+    { status: 409 }
+  );
+}
+```
+
+- `parseAgentEvent(machineOrSnapshot, payload)` takes `unknown` and returns the event typed as the machine's event union. Give it the machine to read the event schemas `setupAgent` registered, or any snapshot of it.
+- It throws `AgentInvalidEventPayloadError` (code `invalid-event-payload`) for a payload that is not an object with a string `type`, a reserved `@agent.*` type, or fields that fail the schema. That is the 400.
+- It does not ask whether the current state handles the event, and `runAgent` adds no check of its own.
+- An event the resumed state has no transition for is ignored: the run settles normally and `result.ignored` holds the event. Answer 409 if the client should know nothing happened.
+
+See [Persistence](persistence.md#resume-with-an-event-off-the-wire).
+
 ## Uncontrolled XState actor
 
 ```ts no-check

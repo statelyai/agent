@@ -37,7 +37,7 @@
  * the result reads as a comparison rather than a wall of essay text.
  *
  * Dual-mode: `runReflectionWriterExample(options?)` takes an injectable
- * `generateText` (the test passes mocks — keyless CI); the direct run below
+ * `generateText` (the test passes mocks — CI with no API key); the direct run below
  * uses real models.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/reflection-writer/index.ts

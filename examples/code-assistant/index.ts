@@ -52,7 +52,7 @@
  *     unhandled model error aborts the run.
  *
  * Dual-mode: `runCodeAssistantExample(options?)` takes an injectable
- * `generateText` (tests pass a scripted mock — keyless CI); the direct run uses
+ * `generateText` (tests pass a scripted mock — CI with no API key); the direct run uses
  * real models.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/code-assistant/index.ts

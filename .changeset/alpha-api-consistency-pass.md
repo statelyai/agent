@@ -7,7 +7,6 @@
 Renames:
 
 - `isSuspended` → `isIdle` and `suspendedTags` → `idleTags`, matching `status: 'idle'`.
-- `canReach` returns `{ reachable, witness }` (was `{ canReach, witness }`).
 - `AgentEventLogConflictError.actualLength` → `actualIndex`.
 - `createLoopMachine({ maxIterations })` → `maxTurns`; `createToolLoopMachine({ maxTurns })` → `maxSteps`.
 - Budget breach error code `max-model-calls-exceeded` → `max-model-calls`, thrown as the exported `AgentMaxModelCallsExceededError` so `onError` can branch on `event.error.code`.
@@ -19,7 +18,6 @@ Removals:
 - `assertAgentMachine`: use `lintAgentMachine(machine, { throw: true })`.
 - `explorePaths({ textOutputs })`: use the `text`, `invokes`, and `userInput` channels.
 - `fork({ atEventId })`: `upToIndex` (exclusive) is the only fork address.
-- `runAgent({ onIllegalResumeEvent })`: illegal resume events always reject.
 - `runAgent({ machineVersion })`: `createMachine({ version })` is the single source, with a structural hash fallback for unversioned machines. A machine declaring XState-native `migrate` owns version mismatches.
 - `runSeam` `{ model }` seam form: seams are addressed by `{ request, occurrence }`; the implicit last-entry repeat is now opt-in `repeatLast: true`.
 - The tool-loop preset's `interruptOn` metadata convention (core never acted on it; tool-call gating is on the roadmap).

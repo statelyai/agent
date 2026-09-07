@@ -15,7 +15,7 @@ key or model SDK.
 
 ```ts
 import { z } from "zod";
-import { createScriptedExecutors, runAgent, setupAgent } from "@statelyai/agent";
+import { runAgent, setupAgent } from "@statelyai/agent";
 
 const answerOutputSchema = z.object({ answer: z.string() });
 
@@ -53,15 +53,11 @@ const machine = agent.createMachine({
   },
 });
 
-const scripted = createScriptedExecutors({
-  text: {
-    answer: ["Because transitions constrain behavior."],
-  },
-});
-
 const result = await runAgent(machine, {
   input: { prompt: "Why state machines?" },
-  executors: scripted,
+  executors: {
+    generateText: async () => ({ output: "Because transitions constrain behavior." }),
+  },
 });
 
 if (result.status !== "done") {
@@ -69,7 +65,6 @@ if (result.status !== "done") {
 }
 
 console.log(result.output.answer);
-console.log(scripted.calls[0]?.name); // "answer"
 ```
 
 Run it:
@@ -82,12 +77,15 @@ It prints:
 
 ```text
 Because transitions constrain behavior.
-answer
 ```
 
 Requests have a semantic `name`, resolved `input`, model reference, schemas,
 prompt/messages, and tools. The machine owns control flow; the executor owns
 the provider call.
+
+An executor is just a function, so the machine runs anywhere a function does.
+When several requests each need their own canned answer, `createScriptedExecutors`
+keys them by request `name` — see [Evals](evals.md#scripted-executors).
 
 ## Use a real model
 

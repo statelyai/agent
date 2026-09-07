@@ -18,7 +18,7 @@
  *     with a fabricated plan and a zero result.
  *
  * Dual-mode: `runSqlAgentExample(question, options?)` takes injectable
- * executors (the test passes mocks — keyless CI); the direct run below uses
+ * executors (the test passes mocks — CI with no API key); the direct run below uses
  * real models.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/sql-agent/index.ts

@@ -322,7 +322,7 @@ export function toThrowEvent(text: string): HumanThrowEvent {
 /**
  * Plays a full RPS match, settling idle on every one of your throws and
  * resuming from `result.persist()`. The test passes mock executors and
- * scripted throws, so CI stays keyless.
+ * scripted throws, so CI needs no API key.
  */
 export async function runRpsExample(options?: {
   input?: { targetWins?: number };

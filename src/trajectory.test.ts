@@ -208,7 +208,7 @@ describe("matchesTrajectory: over a real run", () => {
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
-      executors: createScriptedExecutors({ text: ["A joke."] }),
+      executors: createScriptedExecutors({ text: { tellJoke: "A joke." } }),
       onTransition: (snapshot, event) => {
         statePath.push(snapshot.value);
         events.push(event);

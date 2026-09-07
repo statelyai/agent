@@ -1,7 +1,11 @@
 import type { AnyMachineSnapshot, EventObject } from "xstate";
-import { AgentIllegalResumeEventError } from "./run-agent.js";
-import { getAcceptedEvents, parseAgentEvent, type EventFromSnapshot } from "./events.js";
-import { agentExecutionOptions } from "./internal/registry.js";
+import {
+  AgentInvalidEventPayloadError,
+  getAcceptedEvents,
+  parseAgentEvent,
+  type EventFromSnapshot,
+} from "./events.js";
+import { getAgentExecutionOptions } from "./internal/registry.js";
 import { getStateMeta } from "./utils.js";
 import type { StandardSchemaV1 } from "./types.js";
 
@@ -162,9 +166,7 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
   const preserveWhitespace = options.preserveWhitespace ?? false;
   // The event schemas `setupAgent` registered on this machine, so a choice's
   // fixed payload can be judged complete before the guard is consulted.
-  const schemas = agentExecutionOptions.get(
-    (snapshot as { machine?: object }).machine ?? {},
-  )?.schemas;
+  const schemas = getAgentExecutionOptions((snapshot as { machine?: object }).machine)?.schemas;
   const accepted = new Set(getAcceptedEvents(snapshot).map((event) => event.type));
   const label =
     typeof interaction.label === "function"
@@ -222,24 +224,31 @@ export function eventFromInteraction<TSnapshot extends AnyMachineSnapshot>(
 ): EventFromSnapshot<TSnapshot> {
   const interaction = getInteraction(snapshot);
   if (!interaction) {
-    throw new AgentIllegalResumeEventError("(interaction)", []);
+    throw new AgentInvalidEventPayloadError(
+      "(interaction)",
+      "this state renders no interaction, so there is no choice to convert.",
+    );
   }
 
   let event: { type: string } & Record<string, unknown>;
   if ("text" in choice) {
     if (!interaction.textEvent) {
-      throw new AgentIllegalResumeEventError(
+      throw new AgentInvalidEventPayloadError(
         "(text)",
-        interaction.events.map(({ type }) => type),
+        `this interaction takes no free text. Choices: ${
+          interaction.events.map(({ type }) => type).join(", ") || "(none)"
+        }.`,
       );
     }
     event = { type: interaction.textEvent, text: choice.text };
   } else {
     const descriptor = interaction.events.find(({ type }) => type === choice.type);
     if (!descriptor) {
-      throw new AgentIllegalResumeEventError(
+      throw new AgentInvalidEventPayloadError(
         choice.type,
-        interaction.events.map(({ type }) => type),
+        `this interaction does not offer that choice. Choices: ${
+          interaction.events.map(({ type }) => type).join(", ") || "(none)"
+        }.`,
       );
     }
     event = { ...choice, ...descriptor.event, type: choice.type };

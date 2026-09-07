@@ -540,13 +540,14 @@ describe("preset machine types", () => {
       input: { message: "hi" },
       executors: { generateText },
     });
-    await expect(
-      runAgent(handoff, {
-        snapshot: first.persist(),
-        // @ts-expect-error 'transfer_to_nope' is not a declared agent transfer
-        event: { type: "transfer_to_nope" },
-        executors: { generateText },
-      }),
-    ).rejects.toThrow(/cannot resume with event 'transfer_to_nope'/);
+    const second = await runAgent(handoff, {
+      snapshot: first.persist(),
+      // @ts-expect-error 'transfer_to_nope' is not a declared agent transfer
+      event: { type: "transfer_to_nope" },
+      executors: { generateText },
+    });
+    // Not a declared transfer, so the machine has no transition for it and
+    // simply ignores it.
+    expect(second.ignored).toEqual({ type: "transfer_to_nope" });
   });
 });

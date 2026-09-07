@@ -12,7 +12,7 @@
  * - `token_budget` — `result.usage`, summed across the run's resume legs.
  *
  * Two modes, one code path:
- * - keyless (default) — `createScriptedExecutors` plays canned model answers.
+ * - scripted (default) — `createScriptedExecutors` plays canned model answers.
  *   Deterministic, free, no network. This is what the test asserts.
  * - live — set `OPENAI_API_KEY` to score the real model instead. Same dataset,
  *   same scorers; only the executors change.
@@ -50,7 +50,7 @@ export interface DrafterCase {
    * user declines and picks "draft anyway" instead.
    */
   details: string | null;
-  /** Canned model answers for the keyless run, in call order. */
+  /** Canned model answers for the scripted run, in call order. */
   script: {
     /** One assessment per `evaluatePrompt` call. */
     assessments: { satisfied: boolean; missing: string[]; questions: string[] }[];
@@ -396,7 +396,7 @@ export const dataset: {
 
 /**
  * Live executors, built only when `OPENAI_API_KEY` is set. Imported lazily so
- * the keyless path never loads a provider.
+ * the scripted path never loads a provider.
  */
 async function liveExecutors(): Promise<Partial<AgentRequestExecutors>> {
   const { createAiSdkExecutors } = await import("@statelyai/agent/ai-sdk");
@@ -409,7 +409,7 @@ export async function main() {
   const executors = live ? await liveExecutors() : null;
 
   console.log(
-    `[braintrust-evals] model: ${live ? "real (OPENAI_API_KEY set)" : "scripted (keyless)"} | ` +
+    `[braintrust-evals] model: ${live ? "real (OPENAI_API_KEY set)" : "scripted (no API key)"} | ` +
       `braintrust: ${upload ? "uploading experiment" : "local summary (noSendLogs)"}`,
   );
 

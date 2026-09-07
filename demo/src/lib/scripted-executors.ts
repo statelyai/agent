@@ -1,5 +1,5 @@
 /**
- * Scripted executors — a keyless, deterministic stand-in for a real model.
+ * Scripted executors — a deterministic stand-in for a real model.
  *
  * This is a FEATURE, not a fallback hack: the same machines run with no API key
  * by injecting `Partial<AgentRequestExecutors>` that return canned outputs. It

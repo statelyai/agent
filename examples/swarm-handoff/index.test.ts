@@ -46,8 +46,6 @@ test("a HANDOFF to the agent already holding the mic is rejected and retried", a
         },
       ],
     },
-    // The rejected first attempt makes `agent.decide` call the same entry again.
-    repeat: true,
   });
   const { food } = await runSwarmHandoffExample({ executors });
   assert.deepEqual(chosen, ["self", "other"]);

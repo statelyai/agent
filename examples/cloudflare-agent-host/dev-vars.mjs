@@ -11,7 +11,7 @@ let source = "";
 try {
   source = readFileSync(envPath, "utf8");
 } catch {
-  console.error(`No .env at ${envPath.pathname} — starting keyless (scripted executors).`);
+  console.error(`No .env at ${envPath.pathname} — starting with scripted executors.`);
 }
 
 const lines = KEYS.map((key) => {

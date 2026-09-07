@@ -41,6 +41,34 @@ const resumed = await runAgent(machine, {
 
 An empty thread starts fresh from `input`. Pass `events` explicitly to resume from a log the host holds itself (the store's thread length must then match it).
 
+### Resume with an event off the wire
+
+In a route handler the event arrives as JSON. Parse it at the boundary with `parseAgentEvent`, then pass the result as `event`:
+
+```ts no-check
+let event;
+try {
+  event = parseAgentEvent(machine, await request.json());
+} catch (error) {
+  return Response.json({ error: String(error) }, { status: 400 });
+}
+
+const result = await runAgent(machine, { store, threadId, event, executors });
+
+if (result.ignored) {
+  return Response.json(
+    { error: `'${result.ignored.type}' does not apply right now` },
+    { status: 409 }
+  );
+}
+```
+
+- `parseAgentEvent` takes `unknown`: hand over the parsed JSON body as-is. It accepts the machine itself (reading the event schemas `setupAgent` registered) or any snapshot of it, and returns the event typed as the machine's event union.
+- It throws `AgentInvalidEventPayloadError` (code `invalid-event-payload`) when the payload is not an object with a string `type`, when the type is a reserved `@agent.*` type, or when the fields fail the registered schema. Answer that with a 400.
+- On success the schema-parsed event is returned: defaults filled, transforms applied.
+- `parseAgentEvent` does not check whether the current state handles the event, and `runAgent` adds no validation of its own.
+- An event the resumed state has no transition for is ignored. The run settles normally and `result.ignored` carries the event. It is journaled like any other external input, so replay ignores it again.
+
 - Recorded results are replayed, never re-executed.
 - A request that was in flight when the log ended has no recorded completion, so it re-executes. Execution is at-least-once; key provider calls on [`info.callKey`](hosts.md#idempotency-keys).
 - A log that already reached a final state settles immediately with the recorded output.

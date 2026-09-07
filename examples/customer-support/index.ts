@@ -34,7 +34,7 @@
  *     examples/human-in-the-loop.)
  *
  * Dual-mode: `runCustomerSupportExample(options?)` takes an injectable
- * `generateText` (keyless tests pass a mock); the direct run uses real models
+ * `generateText` (tests with no API key pass a mock); the direct run uses real models
  * and a readline approve/deny prompt.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/customer-support/index.ts

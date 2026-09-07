@@ -31,7 +31,7 @@
  * quietly producing an empty answer.
  *
  * Dual-mode: `runPlanAndExecuteExample(options?)` takes injectable executors
- * (the test passes mocks — keyless CI); the direct run below uses real models.
+ * (the test passes mocks — CI with no API key); the direct run below uses real models.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/plan-and-execute/index.ts
  */

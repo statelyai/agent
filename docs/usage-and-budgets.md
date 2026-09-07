@@ -320,7 +320,7 @@ const machine = agentSetup.createMachine({
   },
 });
 
-// Scripted, keyless executor. Returning `usage` is what feeds `@agent.usage`.
+// Scripted executor. Returning `usage` is what feeds `@agent.usage`.
 let call = 0;
 const executors = {
   generateText: async () => ({

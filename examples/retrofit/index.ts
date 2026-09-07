@@ -13,7 +13,7 @@
  *   - the unbounded tool loop → a `lookups` counter checked against MAX_LOOKUPS
  *
  * `step1/2/3.ts` walk this conversion one shippable step at a time. Dual-mode:
- * tests inject mock executors (keyless); a direct run uses real models.
+ * tests inject mock executors (no API key); a direct run uses real models.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/retrofit/index.ts
  */

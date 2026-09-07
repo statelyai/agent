@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   AgentDecisionExhaustedError,
   AgentError,
-  AgentIllegalResumeEventError,
+  AgentInvalidEventPayloadError,
   AgentLintError,
   createAgentSchemas,
   createTextLogic,
@@ -135,7 +135,7 @@ describe("serializeTraceEvent", () => {
         type: "run.end",
         status: "error",
         cause: "machine",
-        error: new AgentIllegalResumeEventError("GO", ["STOP"]),
+        error: new AgentInvalidEventPayloadError("GO", "expected a string `reason`."),
         snapshot: { value: "waiting", context: {} } as never,
       },
     ];
@@ -241,7 +241,7 @@ describe("serializeTraceEvent", () => {
       type: "run.end",
       status: "error",
       cause: "machine",
-      error: new AgentIllegalResumeEventError("GO", ["STOP"]),
+      error: new AgentInvalidEventPayloadError("GO", "expected a string `reason`."),
       snapshot: { value: "a" } as never,
     });
 
@@ -249,9 +249,9 @@ describe("serializeTraceEvent", () => {
       status: "error",
       cause: "machine",
       error: {
-        name: "AgentIllegalResumeEventError",
-        code: "illegal-resume-event",
-        message: expect.stringContaining("cannot resume"),
+        name: "AgentInvalidEventPayloadError",
+        code: "invalid-event-payload",
+        message: expect.stringContaining("Invalid event payload"),
       },
     });
   });
@@ -301,7 +301,10 @@ describe("serializeTraceEvent", () => {
 describe("AgentError", () => {
   test("every error extends AgentError and carries a stable kebab-case code", () => {
     const errors: Array<[AgentError, string]> = [
-      [new AgentIllegalResumeEventError("GO", ["STOP"]), "illegal-resume-event"],
+      [
+        new AgentInvalidEventPayloadError("GO", "expected a string `reason`."),
+        "invalid-event-payload",
+      ],
       [new AgentDecisionExhaustedError([]), "decision-exhausted"],
       [new AgentLintError("m", []), "lint-failed"],
     ];

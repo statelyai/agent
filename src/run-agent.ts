@@ -96,29 +96,6 @@ type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string
 // always settles and the caller resumes by snapshot (§3.4).
 
 /**
- * Thrown by {@link runAgent} when resuming with a `snapshot` + `event` whose
- * `type` the restored state cannot accept (a type-level check via
- * {@link getAcceptedEvents}). A programmer/integration error, in the same
- * class as runAgent's bind-time throws — it throws rather than settling an
- * `error` result. A type-legal event a guard rejects is NOT this error (the
- * machine simply takes no transition). Always enforced; there is no opt-out.
- */
-export class AgentIllegalResumeEventError extends AgentError {
-  readonly eventType: string;
-  readonly acceptedTypes: string[];
-  constructor(eventType: string, acceptedTypes: string[]) {
-    super(
-      "illegal-resume-event",
-      `runAgent: cannot resume with event '${eventType}' — the restored state does not accept ` +
-        `it. Accepted event types: ${acceptedTypes.length > 0 ? acceptedTypes.join(", ") : "(none)"}.`,
-    );
-    this.name = "AgentIllegalResumeEventError";
-    this.eventType = eventType;
-    this.acceptedTypes = acceptedTypes;
-  }
-}
-
-/**
  * Thrown by {@link runAgent} when a resume is given BOTH an `events` log and a
  * `snapshot` that claims a position in that log (`agentMeta.logIndex`), and the
  * two disagree about the state at that position. The log is the source of
@@ -479,7 +456,14 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   // resume
   /** A previously-settled run's `result.persist()`, to resume from instead of starting fresh. Pair with `event` to deliver the event that unblocks the resumed idle state. */
   snapshot?: Snapshot<unknown>;
-  /** An event to send immediately after starting/resuming the actor (e.g. the human's answer to an idle-state prompt). */
+  /**
+   * An event to send immediately after starting/resuming the actor (e.g. the
+   * human's answer to an idle-state prompt), typed as the machine's event
+   * union. If the resumed state has no transition for it, the machine ignores
+   * it — the run settles normally and the result carries
+   * {@link RunAgentResult.ignored}. For a payload off the wire, parse it first
+   * with `parseAgentEvent(machine, payload)`.
+   */
   event?: EventFromLogic<TMachine>;
   /**
    * A prior run's `result.events` — the replayable log to resume from and keep
@@ -688,6 +672,23 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
    * `snapshot`.
    */
   usage: AgentUsage;
+  /**
+   * The {@link RunAgentOptions.event} the machine did not handle: present only
+   * when the resumed state had no transition for it, so sending it was a
+   * no-op (no state change, no actions). The run settles normally — usually
+   * back to `idle` at the same state — and the event is still journaled, so a
+   * replay ignores it again.
+   *
+   * A host that wants to tell the client nothing happened checks this instead
+   * of an error:
+   *
+   * ```ts
+   * if (result.ignored) {
+   *   return Response.json({ error: `'${result.ignored.type}' does not apply here` }, { status: 409 });
+   * }
+   * ```
+   */
+  ignored?: EventObject;
 };
 
 /**
@@ -2587,28 +2588,13 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     return key;
   };
 
-  // Feature B: reject a resume `event` the restored state cannot take. Checked
-  // here (before the actor starts, like the bind-time throws) against the
-  // type-level legal set of the restored snapshot — a live-but-unstarted actor
-  // exposes it via getAcceptedEvents. A guard-rejected-but-type-legal event
-  // still appears here, so it is never treated as illegal. Always enforced.
-  if (effectiveSnapshot !== undefined && options.event !== undefined) {
-    const restoredSnapshot = createActor(boundMachine, {
-      snapshot: effectiveSnapshot,
-    } as never).getSnapshot() as AnyMachineSnapshot;
-    if (restoredSnapshot.status === "active") {
-      const acceptedTypes = getAcceptedEvents(restoredSnapshot, { schemas: runCtx.schemas }).map(
-        (descriptor) => descriptor.type,
-      );
-      const eventType = (options.event as { type: string }).type;
-      if (!acceptedTypes.includes(eventType)) {
-        throw new AgentIllegalResumeEventError(eventType, acceptedTypes);
-      }
-    }
-  }
+  // The event this run delivers after start.
+  const resumeEventToSend: EventFromLogic<TMachine> | undefined = options.event;
+  // Set right after the event is sent, when the root actor took no transition
+  // for it: the state simply does not handle it. Not an error — reported as
+  // `result.ignored` so a host can tell the client nothing happened.
+  let ignoredEvent: EventObject | undefined;
 
-  // The log's first entry is appended only once the run is actually going to
-  // start: a rejected resume event (above) must not emit an entry.
   seedInitEntry?.();
 
   // One run = start (or resume event) to the next quiescence.
@@ -2627,8 +2613,8 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // an `event` is still pending delivery. The restored state may itself be a
   // idle snapshot; without this guard, Feature A's immediate settle
   // would fire during `start()` and settle idle BEFORE the resume event is
-  // sent. Cleared right before `actor.send(options.event)`.
-  let deliveringResumeEvent = options.event !== undefined;
+  // sent. Cleared right before `actor.send(resumeEventToSend)`.
+  let deliveringResumeEvent = resumeEventToSend !== undefined;
 
   const settle = (outcome: RunAgentOutcome<TMachine>) => {
     if (settled) {
@@ -2673,6 +2659,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       persist,
       drain: drainJournal,
       usage: runUsage(),
+      ...(ignoredEvent !== undefined ? { ignored: ignoredEvent } : {}),
     } as RunAgentResult<TMachine>;
     if (idleTimer !== undefined) {
       clearTimeout(idleTimer);
@@ -2766,6 +2753,24 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
       const snapshot = event.snapshot as AnyMachineSnapshot;
       lastRootSnapshot = snapshot;
+
+      // ─── Ignored resume event ───
+      // XState reports every facet of a root transition here. The resume
+      // event was ignored when the machine selected no microstep, ran no
+      // action, and sent nothing: a guard or function transition returning
+      // `undefined`, or an event the state does not declare. An effect-only
+      // handler shows up in `actions`, so it is NOT ignored. Snapshot identity
+      // is not used: on this XState an effect-only transition reuses the
+      // snapshot object (pinned by the "xstate contract" tests).
+      if (
+        resumeEventToSend !== undefined &&
+        (event.event as unknown) === (resumeEventToSend as unknown) &&
+        event.microsteps.length === 0 &&
+        event.actions.length === 0 &&
+        event.sent.length === 0
+      ) {
+        ignoredEvent = resumeEventToSend as EventObject;
+      }
 
       // ─── Journaling ───
       // The log is deliberately smaller than the trace: only EXTERNAL inputs
@@ -2921,7 +2926,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     type: "run.start",
     ...(resolvedInput !== undefined ? { input: resolvedInput as InputFrom<TMachine> } : {}),
     ...(effectiveSnapshot !== undefined ? { snapshot: effectiveSnapshot } : {}),
-    ...(options.event !== undefined ? { event: options.event } : {}),
+    ...(resumeEventToSend !== undefined ? { event: resumeEventToSend } : {}),
   });
 
   actorStarted = true;
@@ -2955,10 +2960,12 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       });
     }
   }
-  if (options.event && !settled) {
+  if (resumeEventToSend && !settled) {
     // Restore transition is done; allow the post-event transition to settle.
     deliveringResumeEvent = false;
-    actor.send(options.event as never);
+    // Whether the machine ignored this event is decided in the inspect
+    // handler from the transition's own facets (see "Ignored resume event").
+    actor.send(resumeEventToSend as never);
   }
 
   return sessionApi;

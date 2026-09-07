@@ -15,7 +15,7 @@
  *     `Date.now()` in context would make every replay of the same run diverge.
  *
  * Dual-mode: `runParallelStreamsExample(options?)` takes injectable executors
- * (the test passes a mock `streamText` — keyless CI); the direct run below
+ * (the test passes a mock `streamText` — CI with no API key); the direct run below
  * streams two real generations concurrently and prints them tagged.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/parallel-streams/index.ts

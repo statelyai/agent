@@ -100,6 +100,8 @@ Use deterministic executors when the test should exercise the real `runAgent` pa
 
 `simulateAgent(machine, { input, script, maxSteps? })` runs a deterministic, model-free transition playthrough. The `script` supplies responses as FIFO queues, so runs are reproducible.
 
+This script keys by invoke **src**, not by request name. It is not the `createScriptedExecutors` script, which keys by request name and runs the real `runAgent` path — see [Script keys](evals.md#script-keys).
+
 - `decisions` holds the `ChosenEvent` to apply per decision, keyed by decision src, usually `agent.decide`.
 - `text` holds output values for text requests, keyed by request src.
 - `invokes` holds answers for scripted invokes, keyed by invoke src.
@@ -199,7 +201,7 @@ For machines authored as data, validate the config with `validateAgentConfig(con
 
 - [Debugging](debugging.md): scripted reproduction and the diagnostic codes in context.
 - [Evals](evals.md): scoring runs on output, trajectory, and budget.
-- [Quickstart](quickstart.md#define-and-run-one-artifact): keyless scripted executors for `runAgent`.
+- [Quickstart](quickstart.md#define-and-run-one-artifact): scripted executors for `runAgent`.
 - [Machines as data](machines-as-data.md): verifying a machine lowered from a config.
 - [Migrating from a hand-rolled loop](from-a-loop.md): pinning behavior across a refactor.
-- [examples/verification](../examples/verification/index.ts): every API on this page run over one refund-approval machine, keyless, including `canReach` proving that an over-limit payout without human approval is unreachable.
+- [examples/verification](../examples/verification/index.ts): every API on this page run over one refund-approval machine, with no API key, including `canReach` proving that an over-limit payout without human approval is unreachable.

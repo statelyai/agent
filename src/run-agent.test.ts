@@ -23,7 +23,8 @@ import {
   createAgentSchemas,
   createInMemoryEventLogStore,
   createTextLogic,
-  AgentIllegalResumeEventError,
+  AgentInvalidEventPayloadError,
+  parseAgentEvent,
   inspectTransitions,
   isAgentIdle,
   runAgent,
@@ -2679,7 +2680,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
   });
 });
 
-describe("Feature B: illegal resume event throws", () => {
+describe("Feature B: an event the state does not handle is ignored", () => {
   const agent = setupAgent({
     context: z.object({ ok: z.boolean() }),
     input: z.object({}),
@@ -2708,41 +2709,51 @@ describe("Feature B: illegal resume event throws", () => {
 
   const generateText = async () => ({ output: {} });
 
-  test("resuming with an event the restored state cannot take throws AgentIllegalResumeEventError with acceptedTypes", async () => {
+  test("an event the restored state does not handle is ignored, not an error", async () => {
     const first = await runAgent(machine, { input: {}, executors: { generateText } });
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
 
-    let caught: unknown;
-    try {
-      await runAgent(machine, {
-        snapshot: first.persist(),
-        event: { type: "NOPE" } as never,
-        executors: {
-          generateText,
-        },
-      });
-    } catch (error) {
-      caught = error;
-    }
+    const second = await runAgent(machine, {
+      snapshot: first.persist(),
+      event: { type: "NOPE" } as never,
+      executors: { generateText },
+    });
 
-    expect(caught).toBeInstanceOf(AgentIllegalResumeEventError);
-    const err = caught as AgentIllegalResumeEventError;
-    expect(err.eventType).toBe("NOPE");
-    expect(err.acceptedTypes.slice().sort()).toEqual(["APPROVE", "REJECT", "SUBMIT"]);
+    expect(second.status).toBe("idle");
+    expect(second.ignored).toEqual({ type: "NOPE" });
+    expect(second.status === "idle" ? second.snapshot.value : undefined).toBe("reviewing");
   });
 
-  test("an illegal resume event always rejects (there is no opt-out)", async () => {
+  test("an ignored event is still journaled, and replay ignores it again", async () => {
     const first = await runAgent(machine, { input: {}, executors: { generateText } });
     if (first.status !== "idle") throw new Error("expected idle");
 
-    await expect(
-      runAgent(machine, {
-        snapshot: first.persist(),
-        event: { type: "NOPE" } as never,
-        executors: { generateText },
-      }),
-    ).rejects.toBeInstanceOf(AgentIllegalResumeEventError);
+    const second = await runAgent(machine, {
+      events: first.events,
+      event: { type: "NOPE" } as never,
+      executors: { generateText },
+    });
+    expect(second.ignored).toEqual({ type: "NOPE" });
+    expect(second.events.length).toBe(first.events.length + 1);
+    expect(second.events[second.events.length - 1]!.event.type).toBe("NOPE");
+
+    // Resuming from that log replays the ignored event without incident.
+    const third = await runAgent(machine, { events: second.events, executors: { generateText } });
+    expect(third.status).toBe("idle");
+    expect(third.ignored).toBeUndefined();
+  });
+
+  test("a handled event is not reported as ignored", async () => {
+    const first = await runAgent(machine, { input: {}, executors: { generateText } });
+    if (first.status !== "idle") throw new Error("expected idle");
+
+    const second = await runAgent(machine, {
+      snapshot: first.persist(),
+      event: { type: "APPROVE" },
+      executors: { generateText },
+    });
+    expect(second.ignored).toBeUndefined();
   });
 
   test("a type-legal event a guard rejects does not throw (settles per normal semantics)", async () => {
@@ -2750,7 +2761,7 @@ describe("Feature B: illegal resume event throws", () => {
     if (first.status !== "idle") throw new Error("expected idle");
 
     // SUBMIT is a declared, type-legal event; its guard rejects it here. This
-    // is NOT an illegal resume event — no throw, machine takes no transition.
+    // is not an error either: the machine takes no transition.
     const second = await runAgent(machine, {
       snapshot: first.persist(),
       event: { type: "SUBMIT" },
@@ -4400,5 +4411,203 @@ describe("runAgent write-ahead store", () => {
     const stored = await inner.read("main");
     expect(stored).toHaveLength(atSettle + 1);
     expect(stored[stored.length - 1]!.event.type).toBe(AGENT_USAGE_EVENT_TYPE);
+  });
+});
+
+describe("wire events: parse at the boundary, ignore what the state does not handle", () => {
+  const agent = setupAgent({
+    context: z.object({ reason: z.string() }),
+    input: z.object({}),
+    output: z.object({}),
+    events: {
+      APPROVE: z.object({}),
+      REJECT: z.object({ reason: z.string() }),
+    },
+  });
+  const machine = agent.createMachine({
+    context: { reason: "" },
+    initial: "reviewing",
+    states: {
+      reviewing: {
+        on: {
+          APPROVE: { target: "done" },
+          REJECT: ({ event }) => ({ target: "done", context: { reason: event.reason } }),
+        },
+      },
+      done: { type: "final", output: () => ({}) },
+    },
+  });
+  const executors = { generateText: async () => ({ output: {} }) };
+
+  const paused = async () => {
+    const first = await runAgent(machine, { input: {}, executors });
+    if (first.status !== "idle") throw new Error("expected idle");
+    return first;
+  };
+
+  test("a well-formed wire event parses from the machine and resumes the run", async () => {
+    const first = await paused();
+    const event = parseAgentEvent(machine, JSON.parse('{"type":"REJECT","reason":"too terse"}'));
+    const result = await runAgent(machine, { snapshot: first.persist(), event, executors });
+    expect(result.status).toBe("done");
+    expect(result.snapshot.context.reason).toBe("too terse");
+  });
+
+  test("a bad payload throws AgentInvalidEventPayloadError at the boundary", () => {
+    expect(() => parseAgentEvent(machine, { type: "REJECT", reason: 42 })).toThrow(
+      AgentInvalidEventPayloadError,
+    );
+    expect(() => parseAgentEvent(machine, "APPROVE")).toThrow(AgentInvalidEventPayloadError);
+    expect(() => parseAgentEvent(machine, null)).toThrow(AgentInvalidEventPayloadError);
+  });
+
+  test("an event with no declared schema parses, and an unhandled one settles ignored", async () => {
+    const first = await paused();
+    const event = parseAgentEvent(machine, { type: "NOPE" });
+    const result = await runAgent(machine, {
+      snapshot: first.persist(),
+      event,
+      executors,
+    });
+    expect(result.status).toBe("idle");
+    expect(result.ignored).toEqual({ type: "NOPE" });
+    expect(result.snapshot.value).toBe("reviewing");
+  });
+
+  test("schemas resolve through a run result snapshot, whose machine is `.provide`-rebound", async () => {
+    const first = await paused();
+    // `runAgent` starts the actor from `machine.provide(...)`, so
+    // `snapshot.machine` is NOT the object `setupAgent` registered. The schema
+    // registry falls back to the shared root `config`, so validation still runs.
+    expect(() => parseAgentEvent(first.snapshot, { type: "REJECT", reason: 7 })).toThrow(
+      AgentInvalidEventPayloadError,
+    );
+    expect(parseAgentEvent(first.snapshot, { type: "REJECT", reason: "ok" })).toEqual({
+      type: "REJECT",
+      reason: "ok",
+    });
+  });
+
+  test("an ignored event leaves the thread resumable", async () => {
+    const store = createInMemoryEventLogStore();
+    const threadId = "t1";
+    const first = await runAgent(machine, { input: {}, executors, store, threadId });
+    if (first.status !== "idle") throw new Error("expected idle");
+
+    const ignoredRun = await runAgent(machine, {
+      store,
+      threadId,
+      event: parseAgentEvent(machine, { type: "NOPE" }),
+      executors,
+    });
+    expect(ignoredRun.status).toBe("idle");
+    expect(ignoredRun.ignored).toEqual({ type: "NOPE" });
+
+    const ok = await runAgent(machine, {
+      store,
+      threadId,
+      event: parseAgentEvent(machine, { type: "APPROVE" }),
+      executors,
+    });
+    expect(ok.status).toBe("done");
+  });
+});
+
+// Pins the XState behaviour `runAgent` reads to set `result.ignored` (see
+// run-agent.ts, where the resume event is delivered). If an xstate bump breaks
+// any assertion here, `result.ignored` is wrong — fix the detection, not this
+// test.
+describe("result.ignored reads the transition facets, not snapshot identity", () => {
+  test("an effect-only resume event is handled, not ignored", async () => {
+    const effects: string[] = [];
+    const machine = setup({}).createMachine({
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            // Effect-only: enqueues work and selects no transition.
+            PING: (_args, enqueue) => {
+              enqueue(() => effects.push("noted"));
+              return undefined;
+            },
+            GO: { target: "done" },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    const first = await runAgent(machine, { input: undefined, executors: {} });
+    expect(first.status).toBe("idle");
+    const pinged = await runAgent(machine, {
+      snapshot: first.persist(),
+      event: { type: "PING" } as never,
+      executors: {},
+    });
+    expect(effects).toEqual(["noted"]);
+    expect(pinged.ignored).toBeUndefined();
+    const unknown = await runAgent(machine, {
+      snapshot: first.persist(),
+      event: { type: "NOPE" } as never,
+      executors: {},
+    });
+    expect(unknown.ignored).toEqual({ type: "NOPE" });
+  });
+});
+
+describe("xstate contract: snapshot identity is NOT a usable `ignored` signal", () => {
+  const effects: string[] = [];
+  const build = () =>
+    setup({}).createMachine({
+      id: "ignored-signal",
+      context: { n: 0 },
+      initial: "a",
+      states: {
+        a: {
+          on: {
+            // Observably different: a new snapshot object.
+            BUMP: ({ context }) => ({ context: { n: context.n + 1 } }),
+            // Runs an effect but selects no transition and changes nothing.
+            EFFECT: (_args, enqueue) => {
+              enqueue(() => effects.push("ran"));
+              return undefined;
+            },
+            // A guard-style refusal.
+            MAYBE: () => undefined,
+          },
+        },
+      },
+    });
+
+  test("an unhandled event returns the SAME snapshot object", () => {
+    const actor = createActor(build()).start();
+    const before = actor.getSnapshot();
+    actor.send({ type: "NOPE" } as never);
+    expect(Object.is(before, actor.getSnapshot())).toBe(true);
+  });
+
+  test("a transition that updates context returns a NEW snapshot object", () => {
+    const actor = createActor(build()).start();
+    const before = actor.getSnapshot();
+    actor.send({ type: "BUMP" } as never);
+    expect(Object.is(before, actor.getSnapshot())).toBe(false);
+  });
+
+  test("a transition function returning undefined returns the SAME snapshot object", () => {
+    const actor = createActor(build()).start();
+    const before = actor.getSnapshot();
+    actor.send({ type: "MAYBE" } as never);
+    expect(Object.is(before, actor.getSnapshot())).toBe(true);
+  });
+
+  // Known limitation of the identity heuristic: a transition that only runs an
+  // effect leaves the snapshot object untouched, so `runAgent` reports the
+  // event as `ignored` even though the machine acted on it.
+  test("an effect-only transition returns the SAME snapshot object", () => {
+    const actor = createActor(build()).start();
+    const before = actor.getSnapshot();
+    effects.length = 0;
+    actor.send({ type: "EFFECT" } as never);
+    expect(effects.length).toBeGreaterThan(0);
+    expect(Object.is(before, actor.getSnapshot())).toBe(true);
   });
 });

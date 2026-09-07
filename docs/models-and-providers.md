@@ -120,14 +120,14 @@ Pass Cloudflare-specific per-call options through request `metadata`. The host r
 
 ## Ollama and OpenAI-compatible endpoints
 
-Ollama runs models locally and serves them over an OpenAI-compatible HTTP API. Point the AI SDK's OpenAI provider at the local endpoint. `apiKey` is optional; omit it for keyless local servers.
+Ollama runs models locally and serves them over an OpenAI-compatible HTTP API. Point the AI SDK's OpenAI provider at the local endpoint. Pass a placeholder `apiKey`: the provider throws while building request headers when neither `apiKey` nor `OPENAI_API_KEY` is set, even for a local server that ignores the value.
 
 ```ts
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // Model IDs here are illustrative; substitute your provider's current models.
-const ollama = createOpenAI({ baseURL: "http://localhost:11434/v1" });
+const ollama = createOpenAI({ baseURL: "http://localhost:11434/v1", apiKey: "ollama" });
 
 await runAgent(machine, {
   input,
@@ -137,7 +137,7 @@ await runAgent(machine, {
 });
 ```
 
-To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and add `apiKey` where the endpoint requires one. Nothing else changes.
+To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and use the endpoint's real `apiKey`. Nothing else changes.
 
 To avoid depending on `ai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. Use `buildEnvelopeSchema`, `getJsonSchema`, and `parseOutput` from `@statelyai/agent` for structured output, and `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
 
@@ -155,6 +155,33 @@ An `AgentTextRequest` is spread-compatible with the AI SDK's call options. Resul
 
 - Structured output is best-effort. A request with an `outputSchema` has its raw text parsed with `JSON.parse` and then validated. A parse failure throws. Use `createAiSdkExecutors` for reliable structured output.
 - `decide` requires the adapter. The tool-per-event mapping lives in the adapter, and there is no raw AI SDK function for it.
+
+## Testing with a mock model
+
+To exercise the adapter path itself without a provider, hand `defineModels` one of the AI SDK's own mock models from `ai/test`.
+
+```ts
+import { MockLanguageModelV3 } from "ai/test";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+
+const executors = createAiSdkExecutors({
+  models: defineModels({
+    fast: new MockLanguageModelV3({
+      doGenerate: async () => ({
+        content: [{ type: "text", text: "Because transitions constrain behavior." }],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 1, text: 1, reasoning: 0 },
+        },
+        warnings: [],
+      }),
+    }),
+  }),
+});
+```
+
+When the adapter is not what is under test, a plain function executor or `createScriptedExecutors` is lighter. See [Evals](evals.md#scripted-executors).
 
 ## Support by path
 

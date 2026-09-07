@@ -289,7 +289,7 @@ export function idlePrompt(snapshot: CompactionSnapshot): string {
 
 /**
  * Dual-mode runner. The test passes mocked executors and a scripted message
- * queue (so CI stays keyless); the direct run below uses real models + stdin.
+ * queue (so CI needs no API key); the direct run below uses real models + stdin.
  */
 export async function runContextCompactionExample(options?: {
   input?: { maxMessages?: number; keepRecent?: number };

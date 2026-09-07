@@ -6,7 +6,7 @@
  * cannot promise that; a guard can, and the verification suite proves it
  * without a single model call.
  *
- * Demonstrates the whole keyless suite over one small machine:
+ * Demonstrates the whole provider-free suite over one small machine:
  *   - `lintAgentMachine` — static structural checks (dead states, decisions
  *     whose chosen event can never be delivered, output-contract gaps).
  *   - `canReach` — the reachability argument, both directions: `issued` IS
@@ -371,7 +371,7 @@ export async function main() {
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module. No
-// API-key check: the whole report is keyless and offline.
+// API-key check: the whole report is offline.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   main().catch((error) => {
     console.error(error);

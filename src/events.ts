@@ -1,12 +1,36 @@
 import {
   getNextTransitions,
   type AnyMachineSnapshot,
+  type AnyStateMachine,
+  type EventFromLogic,
   type EventObject,
   type MachineSnapshot,
 } from "xstate";
+import { AgentError } from "./errors.js";
+import { getAgentExecutionOptions } from "./internal/registry.js";
 import type { StandardSchemaV1 } from "./types.js";
+import { isRecord } from "./internal/is-record.js";
 import { validateSchemaSync } from "./utils.js";
 import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
+
+/**
+ * Thrown by {@link parseAgentEvent} (and {@link eventFromInteraction}) when a
+ * wire payload is not a usable event: it is not an object with a string
+ * `type`, it names a reserved `@agent.*` type, or its fields fail the schema
+ * the machine registered for that type. A host turns it into a 400.
+ *
+ * Not handling an event is NOT this error — a state machine ignores events it
+ * has no transition for, so an event the current state does not handle parses
+ * fine and settles the run with `result.ignored` set.
+ */
+export class AgentInvalidEventPayloadError extends AgentError {
+  readonly eventType: string;
+  constructor(eventType: string, detail: string) {
+    super("invalid-event-payload", `Invalid event payload for '${eventType}': ${detail}`);
+    this.name = "AgentInvalidEventPayloadError";
+    this.eventType = eventType;
+  }
+}
 
 /** The invoke `src` of an {@link AgentRequest}/{@link AgentDecisionRequest} — a plain string, widened so literal `src` values still narrow in editor hints. */
 // `& {}` keeps literal-union autocomplete alive while still allowing any string — a bare `string` in a union would swallow the literals.
@@ -130,59 +154,75 @@ export type EventFromSnapshot<TSnapshot> =
     ? TEvent
     : EventObject;
 
+/** The machine event union {@link parseAgentEvent} returns, from a machine or from a snapshot of one. @internal */
+export type ParsedAgentEvent<TSource> = TSource extends AnyStateMachine
+  ? EventFromLogic<TSource>
+  : EventFromSnapshot<TSource>;
+
 /**
- * Runtime-validates a dynamically-built `{ type, ...payload }` event against a
- * snapshot's currently-accepted events (via {@link getAcceptedEvents}) and,
- * when one is registered, the event type's payload schema — returning the
- * event typed as the machine's event union (recovered from the snapshot type)
- * so it can be sent to `runAgent({ event })` / `actor.send(...)` without an
- * `as never` cast. For generic, meta-driven hosts that assemble events from
- * user input or a wire message.
+ * Parses a wire payload (a request body, a socket frame) into an
+ * event typed as the machine's event union, so it can go straight to
+ * `runAgent({ event })` / `actor.send(...)` without a cast. Pass the machine
+ * itself, or any snapshot of it.
  *
- * Throws a descriptive error when `event.type` is not currently accepted
- * (listing the accepted types) or when its payload fails the registered schema.
- * Pass event payload schemas via `options.events`/`options.schemas` (the same
- * shape {@link getAcceptedEvents} takes) — the accepted TYPES always come from
- * the live snapshot; the schemas only add payload validation.
+ * It checks exactly what a schema can check: the payload is an object with a
+ * string `type`, that type is not one of the library-reserved `@agent.*` types,
+ * and — when the machine registered a schema for it — the fields satisfy that
+ * schema (defaults filled, transforms applied). Anything else throws
+ * {@link AgentInvalidEventPayloadError}, which a host answers with a 400.
+ *
+ * It deliberately does NOT check whether the current state handles the event.
+ * State machines ignore events they have no transition for; that is normal
+ * behavior, not a validation failure. Send the parsed event and read
+ * `result.ignored` if the host wants to tell the client nothing happened.
  *
  * @example
  * ```ts
- * const event = parseAgentEvent(result.snapshot, rawEvent, { events: schemas.events });
- * result = await runAgent(machine, { snapshot: result.snapshot, event, executors });
+ * const event = parseAgentEvent(machine, await request.json());
+ * const result = await runAgent(machine, { store, threadId, event, executors });
  * ```
  */
-export function parseAgentEvent<TSnapshot extends AnyMachineSnapshot>(
-  snapshot: TSnapshot,
-  event: { type: string } & Record<string, unknown>,
-  options: Pick<AgentRequestOptions, "events" | "schemas" | "eventToolName"> = {},
-): EventFromSnapshot<TSnapshot> {
-  const accepted = getAcceptedEvents(snapshot, options);
-  const descriptor = accepted.find((candidate) => candidate.type === event.type);
-  if (!descriptor) {
-    throw new Error(
-      `parseAgentEvent: '${event.type}' is not an accepted event in the current state. ` +
-        `Accepted: ${accepted.map((candidate) => candidate.type).join(", ") || "(none)"}.`,
+export function parseAgentEvent<TSource extends AnyStateMachine | AnyMachineSnapshot>(
+  source: TSource,
+  payload: unknown,
+  options: Pick<AgentRequestOptions, "events" | "schemas"> = {},
+): ParsedAgentEvent<TSource> {
+  if (!isRecord(payload) || typeof (payload as { type?: unknown }).type !== "string") {
+    throw new AgentInvalidEventPayloadError(
+      "(unknown)",
+      "expected an object with a string `type`.",
+    );
+  }
+  const event = payload as { type: string } & Record<string, unknown>;
+  if (isReservedAgentEvent(event.type)) {
+    throw new AgentInvalidEventPayloadError(
+      event.type,
+      "this event type is reserved for the library and cannot be sent from outside.",
     );
   }
 
-  if (descriptor.inputSchema) {
-    const { type, ...payload } = event;
-    try {
-      const validatedPayload = validateSchemaSync(descriptor.inputSchema, payload);
-      return {
-        ...(validatedPayload as Record<string, unknown>),
-        type,
-      } as EventFromSnapshot<TSnapshot>;
-    } catch (error) {
-      throw new Error(
-        `parseAgentEvent: '${event.type}' payload failed validation: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
+  const machine = (
+    typeof (source as { provide?: unknown }).provide === "function"
+      ? source
+      : (source as AnyMachineSnapshot).machine
+  ) as AnyStateMachine | undefined;
+  const registered = getAgentExecutionOptions(machine)?.schemas;
+  const eventSchemas = options.events ?? options.schemas?.events ?? registered?.events;
+  const inputSchema = eventSchemas?.[event.type];
+  if (!inputSchema) {
+    return event as ParsedAgentEvent<TSource>;
   }
 
-  return event as EventFromSnapshot<TSnapshot>;
+  const { type, ...fields } = event;
+  try {
+    const validated = validateSchemaSync(inputSchema, fields) as Record<string, unknown>;
+    return { ...validated, type } as ParsedAgentEvent<TSource>;
+  } catch (error) {
+    throw new AgentInvalidEventPayloadError(
+      event.type,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 /**

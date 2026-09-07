@@ -37,7 +37,7 @@
  * nested under `details`.
  *
  * Dual-mode: `runHierarchicalTeamsExample(options?)` takes injectable
- * `generateText`/`decide` (tests script them — keyless CI); the direct run
+ * `generateText`/`decide` (tests script them — CI with no API key); the direct run
  * defaults real executors.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/hierarchical-teams/index.ts

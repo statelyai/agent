@@ -168,6 +168,17 @@ See [Text requests](text-requests.md) for the full request surface, including st
 
 The `actors` map registers reusable actor logic. This can be text logic from `createTextLogic` or any XState actor. Register logic here when it is reusable, exported, or worth testing on its own.
 
+Non-model work is an ordinary XState actor. `createAsyncLogic({ schemas, run })` is the usual form: `run` receives the validated `input` and resolves the actor's output. Annotate `run`'s return type when it resolves an array or another literal, because the schema type parameters are `const` and an unannotated array literal infers as a readonly tuple.
+
+```ts
+import { createAsyncLogic } from "xstate";
+
+const fetchOrder = createAsyncLogic({
+  schemas: { input: z.object({ orderId: z.string() }), output: z.object({ total: z.number() }) },
+  run: async ({ input }) => ({ total: input.orderId.length }),
+});
+```
+
 Decisions are state-local. They use `src: 'agent.decide'` and are not actor sources. To reuse a decision, share its input builder.
 
 ```ts

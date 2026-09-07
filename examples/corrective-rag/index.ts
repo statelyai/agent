@@ -52,7 +52,7 @@
  * machine shape as a real vector store / search tool.
  *
  * Dual-mode: `runCorrectiveRagExample(options?)` takes an injectable
- * `generateText` (tests pass a scripted mock — keyless CI); the direct run uses
+ * `generateText` (tests pass a scripted mock — CI with no API key); the direct run uses
  * real models.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/corrective-rag/index.ts

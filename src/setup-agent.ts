@@ -42,7 +42,11 @@ import {
   type AgentMessagesEventPayload,
   type AppendMessagesTransition,
 } from "./messages.js";
-import { agentExecutionOptions, machineIdlePredicates } from "./internal/registry.js";
+import {
+  getAgentExecutionOptions,
+  machineIdlePredicates,
+  setAgentExecutionOptions,
+} from "./internal/registry.js";
 import type { AgentSchemas } from "./events.js";
 import {
   setupAgentFromConfig,
@@ -835,7 +839,7 @@ export function setupAgent<
         (machineConfig as { states?: Record<string, any> } | undefined)?.states,
       );
       const machine = createBaseMachine(withRootOutputFromSingleFinal(machineConfig) as never);
-      agentExecutionOptions.set(machine as object, machineOptions);
+      setAgentExecutionOptions(machine, machineOptions);
       // Carry the wait-state predicate on the machine's root `config` (shared by
       // reference across `.provide`), so it survives provide/executor rebinding.
       if (config.isIdle) {
@@ -928,12 +932,11 @@ export namespace setupAgent {
  * authored. Returns `undefined` for machines not built by either (a plain
  * xstate `createMachine`/`setup` machine).
  *
- * Registration is keyed on the machine object, so a machine returned by
- * `machine.provide(...)` carries no pack — read it from the machine the setup
- * returned.
+ * Registration also travels through `machine.provide(...)`: the pack is keyed
+ * on the machine's root `config`, which `.provide` shares by reference.
  */
 export function getAgentSchemas(machine: AnyStateMachine): AgentSchemas | undefined {
-  return agentExecutionOptions.get(machine as object)?.schemas;
+  return getAgentExecutionOptions(machine)?.schemas;
 }
 
 /** Builds one TextLogic actor per `setupAgent({ requests })` entry. @internal */

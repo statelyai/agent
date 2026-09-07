@@ -27,7 +27,7 @@
  *     with a structured-output request.
  *
  * Dual-mode: `runGameLoopExample(options?)` takes injectable executors and
- * scripted human events (the test passes mocks, so CI stays keyless); the
+ * scripted human events (the test passes mocks, so CI needs no API key); the
  * direct run below uses real models and stdin.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/game-loop-agent/index.ts

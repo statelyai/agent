@@ -7,7 +7,7 @@
  * snapshot the client sends back to resume.
  *
  * The same code path runs with real models (`createAiSdkExecutors`, when
- * `OPENAI_API_KEY` is set) or with keyless scripted executors. Tests import the
+ * `OPENAI_API_KEY` is set) or with scripted executors. Tests import the
  * `*Run` functions directly and inject scripted executors — no API key, no
  * network.
  */

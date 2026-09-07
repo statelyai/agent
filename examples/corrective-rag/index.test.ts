@@ -14,7 +14,7 @@ function scriptedGenerateText(text: {
   rewriteQuery?: unknown[];
   generateAnswer?: unknown[];
 }) {
-  return createScriptedExecutors({ text, repeat: true }).generateText;
+  return createScriptedExecutors({ text }).generateText;
 }
 
 const allRelevant = { grades: [{ relevant: true }, { relevant: true }, { relevant: true }] };

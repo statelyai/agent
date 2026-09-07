@@ -13,8 +13,8 @@
  *
  * Nothing here hardcodes a state name; the event to send is derived from the
  * machine's own `meta.interaction`, so adding a state to the machine needs no
- * host change. Illegal resumes are refused by `runAgent` itself
- * (AgentIllegalResumeEventError), so no hand-rolled legality check lives in
+ * host change. An event the current state does not handle is ignored by the
+ * machine (`result.ignored`), so no hand-rolled legality check lives in
  * the tools.
  *
  * Because the machine owns everything, the agent body needs no persistent
@@ -26,7 +26,7 @@
  * unchanged.
  *
  * Run: npx tsx examples/flue-host/index.ts
- *   No API key -> pi's faux provider plays the model and keyless mock executors
+ *   No API key -> pi's faux provider plays the model and mock executors
  *     drive the machine end to end.
  *   OPENAI_API_KEY=... -> a real model calls the same two tools, and the
  *     machine runs against real generations.
@@ -99,7 +99,7 @@ const runs = new Map<string, StoredRun>();
  */
 export const completed: EmailDraft[][] = [];
 
-// ─── Keyless executors ───
+// ─── Scripted executors ───
 
 /**
  * Mock executors so the example (and its test) run with no API key or network.
@@ -122,7 +122,7 @@ export const mockRunOptions: RunAgentOptions<typeof emailDrafter> = {
 };
 
 /**
- * What the tools actually run with. Defaults to the keyless mock so importing
+ * What the tools actually run with. Defaults to the scripted mock so importing
  * this module never touches the network; `useLiveExecutors()` swaps in real
  * generations through the email-drafter's declared models.
  */
@@ -141,7 +141,7 @@ export function useLiveExecutors() {
  * eventType arrives as a model-supplied string, so there is nothing static to
  * infer from — unlike ./flue-owned.ts, where events are code-authored and
  * `EventFromLogic` types them for free. `runAgent` still validates the event
- * against the restored state and throws on anything illegal.
+ * against the machine's event schemas.
  */
 function buildEvent(
   interaction: Interaction | null,
@@ -219,6 +219,14 @@ export async function resumeDraft(
     snapshot: stored.snapshot,
     event: buildEvent(stored.interaction, eventType, text),
   });
+
+  // The state has no transition for the event, so the machine ignored it and
+  // nothing happened. That is not a library error: `runAgent` settled
+  // normally and named the event on `result.ignored`. The host decides what
+  // to do about it — here, a plain throw the tool loop reports.
+  if (result.ignored) {
+    throw new Error(`'${result.ignored.type}' does not apply in the current state.`);
+  }
   return toToolResult(result, handle);
 }
 
@@ -338,7 +346,7 @@ export function MachineOwnedAgent() {
   );
 }
 
-// ─── Keyless model: pi's faux provider, reacting to the machine's pauses ───
+// ─── Scripted model: pi's faux provider, reacting to the machine's pauses ───
 //
 // The demo runs on the real Flue runtime either way; only the model changes.
 // Without a key, a faux response factory plays it — and because the factory

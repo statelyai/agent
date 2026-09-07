@@ -312,18 +312,17 @@ const scriptedAnswers: Record<string, string> = {
 };
 
 /**
- * Keyless executors so the route runs with no API key: `createScriptedExecutors`
- * holds the answers (function entries route on `request.name`, so the script
- * does not depend on which request runs first), and `streamText` is wrapped to
- * replay them word by word — a single chunk per message would be a valid stream
- * but a dull one, and the client should see real incremental deltas.
- *
- * A fresh script per run: the queues are consumed FIFO, so a shared instance
- * would run dry on the second chat turn.
+ * Scripted executors so the route runs with no API key:
+ * `createScriptedExecutors` holds the answers keyed by request name, and
+ * `streamText` is wrapped to replay them word by word — a single chunk per
+ * message would be a valid stream but a dull one, and the client should see
+ * real incremental deltas.
  */
 export function createScriptedChatExecutors(): AgentRequestExecutors {
   const answer = (request: AgentTextRequest) => scriptedAnswers[request.name ?? ""] ?? "";
-  const scripted = createScriptedExecutors({ text: [answer, answer] });
+  const scripted = createScriptedExecutors({
+    text: { streamOutline: answer, streamAnswer: answer },
+  });
 
   return {
     ...scripted,
