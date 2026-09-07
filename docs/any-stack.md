@@ -54,3 +54,7 @@ Bind executors with `provideExecutors`, create a normal XState actor, and connec
 Flue is covered by the [flue-host](../examples/flue-host) example only; there is no separate guide for it in these docs. Eve has no bridge in this repository, so a machine running under Eve needs a host adapter you write yourself, following the same shape as the examples above.
 
 Use each framework's own storage, retry, queue, and interruption semantics.
+
+## Related
+
+- [Use in an XState 4 or 5 app](xstate-4-and-5-apps.md): isolating the agent when the app's own XState version cannot change.

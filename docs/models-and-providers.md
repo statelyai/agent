@@ -139,7 +139,9 @@ await runAgent(machine, {
 
 To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and use the endpoint's real `apiKey`. Nothing else changes.
 
-To avoid depending on `ai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. Use `buildEnvelopeSchema`, `getJsonSchema`, and `parseOutput` from `@statelyai/agent` for structured output, and `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
+For OpenAI itself, `@statelyai/agent/openai` maps the three executors onto the raw `openai` package's Chat Completions API, with no `ai` dependency. See [Hosts](hosts.md#openai-sdk-adapter).
+
+To avoid depending on `ai` or `openai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. For structured output, `buildEnvelopeSchema` and `getJsonSchema` from `@statelyai/agent` build the `{ result, reasoning? }` envelope schema to send; on the way back, `parseStructuredEnvelope` validates the model's JSON against that envelope and unwraps it to `{ result, reasoning? }`. Use `parseOutput` when you validate an unwrapped value on its own, against the schema the request declared. Use `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
 
 ## Raw AI SDK functions
 
@@ -185,11 +187,12 @@ When the adapter is not what is under test, a plain function executor or `create
 
 ## Support by path
 
-| Path                   | `generateText` | `streamText` | `decide` | Structured output |
-| ---------------------- | -------------- | ------------ | -------- | ----------------- |
-| `createAiSdkExecutors` | yes            | yes          | yes      | yes               |
-| Hand-written executors | yes            | yes          | yes      | yes (you map it)  |
-| Raw `ai` functions     | yes            | yes          | no       | best-effort       |
+| Path                    | `generateText` | `streamText` | `decide` | Structured output |
+| ----------------------- | -------------- | ------------ | -------- | ----------------- |
+| `createAiSdkExecutors`  | yes            | yes          | yes      | yes               |
+| `createOpenAiExecutors` | yes            | yes          | yes      | yes               |
+| Hand-written executors  | yes            | yes          | yes      | yes (you map it)  |
+| Raw `ai` functions      | yes            | yes          | no       | best-effort       |
 
 The `decide` executor maps each machine event to a forced tool call. That mapping lives in the adapter layer, so raw `ai` functions cannot back a decision. For reliable structured output, use `createAiSdkExecutors` or map the envelope yourself. See [Text requests](text-requests.md) and [Decisions](decisions.md).
 
@@ -200,7 +203,7 @@ Each example is a runnable host for one provider stack.
 | Example                                                                       | Backing                                                                                                           |
 | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | [ai-sdk-host](../examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the optional adapter                                                                       |
-| [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | raw `openai` (Chat Completions); structured via `response_format`, decisions via `tool_choice: 'required'`        |
+| [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | `createOpenAiExecutors` from `@statelyai/agent/openai`, over the raw `openai` package (Chat Completions)          |
 | [anthropic-sdk-host](../examples/anthropic-sdk-host/index.ts)                 | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }` |
 | [langchain-host](../examples/langchain-host/index.ts)                         | LangChain `BaseChatModel` (`@langchain/core`), wrapped into the executor contract                                 |
 | [mastra-host](../examples/mastra-host/index.ts)                               | Mastra `Agent` and `createTool`, bridging to `runAgent`                                                           |

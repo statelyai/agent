@@ -34,6 +34,12 @@ For the optional Vercel AI SDK executor:
 pnpm add ai@^7 @ai-sdk/openai@^4
 ```
 
+For the optional raw OpenAI SDK executor (`@statelyai/agent/openai`):
+
+```sh
+pnpm add openai
+```
+
 Requirements:
 
 - Node 22.18 or newer, and XState v6 alpha.46 or newer.

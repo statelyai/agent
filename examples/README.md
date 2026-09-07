@@ -33,6 +33,7 @@ convention in a prompt.
 - [chat-with-pdf](chat-with-pdf): one question per state entry, and a refresh guard instead of "after 3-4 questions"
 - [game-agent](game-agent): rock-paper-scissors where the event log saved in context is the agent's only memory
 - [game-loop-agent](game-loop-agent): an invoked agent that receives pushed events and can act only on its own turn
+- [generate-and-repair](generate-and-repair): three candidates fanned out as concurrent invokes, judged by the host's own parser, with a repair round the machine caps explicitly
 
 ## Human in the loop
 

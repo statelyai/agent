@@ -5,6 +5,7 @@ export default defineConfig({
     index: "src/index.ts",
     "ai-sdk": "src/ai-sdk/index.ts",
     machines: "src/machines/index.ts",
+    openai: "src/openai/index.ts",
     otel: "src/otel/index.ts",
     validate: "src/validate/index.ts",
   },

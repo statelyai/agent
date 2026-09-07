@@ -28,8 +28,10 @@ import {
   inspectTransitions,
   isAgentIdle,
   runAgent,
+  serializeTraceEvent,
   setupAgent,
   type AgentDecisionRequest,
+  type AgentRequestExecutorResult,
   type AgentEventLogStore,
   type AgentLogEntry,
   type AgentTextRequest,
@@ -3395,6 +3397,31 @@ describe("runAgent usage aggregation", () => {
     for (const end of ends) {
       expect(end).toHaveProperty("usage", { inputTokens: 2, outputTokens: 1 });
     }
+  });
+
+  test("the call's finishReason rides the request.end trace event, normalized", async () => {
+    const trace: AgentTraceEvent<typeof twoCallMachine>[] = [];
+    await runAgent(twoCallMachine, {
+      input: {},
+      onTrace: (event) => trace.push(event),
+      executors: {
+        // A provider `'error'` is not a member of the portable union (the cast
+        // is what an un-normalizing host would need), so it lands on `'other'`.
+        generateText: async ({ prompt }) =>
+          ({
+            output: "x",
+            finishReason: prompt === "one" ? "length" : "error",
+          }) as AgentRequestExecutorResult<string>,
+      },
+    });
+
+    expect(
+      trace.filter((event) => event.type === "request.end").map((end) => end.finishReason),
+    ).toEqual(["length", "other"]);
+
+    // And it survives the JSON projection.
+    const end = trace.find((event) => event.type === "request.end")!;
+    expect(serializeTraceEvent(end as AgentTraceEvent)).toHaveProperty("finishReason", "length");
   });
 });
 

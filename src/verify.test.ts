@@ -13,6 +13,7 @@ import {
   type ChosenEvent,
 } from "./index.js";
 import { createDecisionLogic } from "./decision.js";
+import { initialAgentStep, rejectAgentStep } from "./steps.js";
 import { humanInTheLoopMachine, jokeMachine, twentyQuestionsMachine } from "../examples/index.js";
 
 // A refund machine mirroring the README's no-API-key example: an `agent.decide`
@@ -935,5 +936,391 @@ describe("invoke-without-on-error", () => {
     expect(
       lintAgentMachine(machine, { disable: ["invoke-without-on-error"] }).map((d) => d.code),
     ).not.toContain("invoke-without-on-error");
+  });
+});
+
+// A parse-then-report machine whose `parse` text request can fail: `failed` is
+// reachable only through the invoke's `onError`, which copies the failure's
+// `code` into context so a test can see the scripted error value arrive intact.
+function createParsingMachine() {
+  const agent = setupAgent({
+    context: z.object({ code: z.string() }),
+    requests: { parse: { schemas: {}, model: "test", prompt: "parse it" } },
+  });
+  return agent.createMachine({
+    context: { code: "" },
+    initial: "parsing",
+    states: {
+      parsing: {
+        invoke: {
+          id: "parse",
+          src: "parse",
+          onDone: { target: "parsed" },
+          onError: ({ event }) => ({
+            target: "failed",
+            context: { code: failureCode(event.error) },
+          }),
+        },
+      },
+      parsed: { type: "final" },
+      failed: { type: "final" },
+    },
+  });
+}
+
+// The same machine with no `onError` anywhere — a rejected `parse` errors the run.
+function createUncaughtParsingMachine() {
+  const agent = setupAgent({
+    context: z.object({ code: z.string() }),
+    requests: { parse: { schemas: {}, model: "test", prompt: "parse it" } },
+  });
+  return agent.createMachine({
+    context: { code: "" },
+    initial: "parsing",
+    states: {
+      parsing: { invoke: { id: "parse", src: "parse", onDone: { target: "parsed" } } },
+      parsed: { type: "final" },
+    },
+  });
+}
+
+function failureCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code: unknown }).code)
+    : "";
+}
+
+describe("simulateAgent — scripted invoke failures", () => {
+  test("an errors entry is consumed before the output queue and routes to onError", async () => {
+    const machine = createParsingMachine();
+    const script = {
+      errors: { parse: [new Error("bad json")] },
+      text: { parse: [{ total: 1 }] },
+    };
+
+    const result = await simulateAgent(machine, { script });
+
+    expect(result.status).toBe("done");
+    expect(result.snapshot.value).toBe("failed");
+    // The output queue is untouched: the error was consumed first.
+    expect(script.text.parse).toHaveLength(1);
+  });
+
+  test("the trail records the rejection with the scripted error value", async () => {
+    const error = new Error("bad json");
+    const result = await simulateAgent(createParsingMachine(), {
+      script: { errors: { parse: [error] } },
+    });
+
+    expect(result.trail.at(-1)?.resolvedRequest).toEqual({
+      kind: "text",
+      src: "parse",
+      id: "parse",
+      outcome: "error",
+      error,
+    });
+  });
+
+  test("a resolved request's trail entry reports outcome 'output'", async () => {
+    const result = await simulateAgent(createParsingMachine(), {
+      script: { text: { parse: [{ total: 1 }] } },
+    });
+
+    expect(result.snapshot.value).toBe("parsed");
+    expect(result.trail.at(-1)?.resolvedRequest).toEqual({
+      kind: "text",
+      src: "parse",
+      id: "parse",
+      outcome: "output",
+    });
+  });
+
+  test("a non-Error failure value reaches onError as event.error, untouched", async () => {
+    const result = await simulateAgent(createParsingMachine(), {
+      script: { errors: { parse: [{ code: "truncated" }] } },
+    });
+
+    expect(result.snapshot.value).toBe("failed");
+    expect((result.snapshot.context as { code: string }).code).toBe("truncated");
+    expect(result.trail.at(-1)?.resolvedRequest?.error).toEqual({ code: "truncated" });
+  });
+
+  test("only the first queued error fails; the next call takes the output queue", async () => {
+    const result = await simulateAgent(createParsingMachine(), {
+      script: { errors: { parse: [new Error("once")] }, text: { parse: [{ total: 1 }] } },
+    });
+    const second = await simulateAgent(createParsingMachine(), {
+      script: { errors: { parse: [] }, text: { parse: [{ total: 1 }] } },
+    });
+
+    expect(result.snapshot.value).toBe("failed");
+    expect(second.snapshot.value).toBe("parsed");
+  });
+
+  test("a decide error stands in for retry exhaustion and hits the decide invoke's onError", async () => {
+    const exhausted = new Error("model would not choose");
+    const result = await simulateAgent(createGuardedIssueMachine(), {
+      input: { amount: 50 },
+      script: { errors: { "agent.decide": [exhausted] } },
+    });
+
+    expect(result.snapshot.value).toBe("refused");
+    expect(result.trail.at(-1)?.resolvedRequest).toEqual({
+      kind: "decision",
+      src: "agent.decide",
+      id: "decide",
+      outcome: "error",
+      error: exhausted,
+    });
+  });
+
+  test("an unhandled scripted error throws the scripted Error itself", async () => {
+    const error = new Error("bad json");
+
+    await expect(
+      simulateAgent(createUncaughtParsingMachine(), { script: { errors: { parse: [error] } } }),
+    ).rejects.toBe(error);
+  });
+
+  test("an unhandled non-Error failure throws a descriptive error carrying it as `cause`", async () => {
+    await expect(
+      simulateAgent(createUncaughtParsingMachine(), {
+        script: { errors: { parse: [{ code: "truncated" }] } },
+      }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("reached no onError transition"),
+      cause: { code: "truncated" },
+    });
+  });
+});
+
+// A decide whose only candidate is ISSUE, so `exhausted` is reachable ONLY
+// through the decide invoke's `onError` — the retry-exhaustion branch.
+function createExhaustibleDecideMachine() {
+  const agent = setupAgent({
+    context: z.object({}),
+    events: { ISSUE: z.object({}) },
+  });
+  return agent.createMachine({
+    context: {},
+    initial: "classifying",
+    states: {
+      classifying: {
+        invoke: {
+          id: "decide",
+          src: "agent.decide",
+          input: () => ({
+            model: "quick",
+            prompt: "Issue?",
+            allowedEvents: ["ISSUE"] as const,
+          }),
+          onError: { target: "exhausted" },
+        },
+        on: { ISSUE: { target: "issued" } },
+      },
+      issued: { type: "final" },
+      exhausted: { type: "final" },
+    },
+  });
+}
+
+describe("explorePaths — scripted invoke failures fork a branch", () => {
+  test("a src with only an error fails on every branch", async () => {
+    const report = await explorePaths(createParsingMachine(), {
+      errors: { parse: new Error("bad json") },
+    });
+
+    expect(report.terminals).toEqual([
+      { status: "done", path: [{ type: "xstate.error.actor.parse" }], state: "failed" },
+    ]);
+    expect(report.reachedStates).toEqual(["parsing", "failed"]);
+  });
+
+  test("a src with both an error and an output explores both branches", async () => {
+    const report = await explorePaths(createParsingMachine(), {
+      text: { parse: { total: 1 } },
+      errors: { parse: new Error("bad json") },
+    });
+
+    expect(report.terminals.map((terminal) => terminal.state).sort()).toEqual(["failed", "parsed"]);
+    expect(report.pathsExplored).toBe(2);
+  });
+
+  test("canReach finds an onError-only state, with the failure in the witness", async () => {
+    const { reachable, witness } = await canReach(createParsingMachine(), "failed", {
+      errors: { parse: new Error("bad json") },
+    });
+
+    expect(reachable).toBe(true);
+    expect(witness).toEqual([{ type: "xstate.error.actor.parse" }]);
+  });
+
+  test("that state is unreachable without a scripted error", async () => {
+    const { reachable } = await canReach(createParsingMachine(), "failed", {
+      text: { parse: { total: 1 } },
+    });
+
+    expect(reachable).toBe(false);
+  });
+
+  test("a decision src in errors reaches the decide invoke's onError-only state", async () => {
+    const machine = createExhaustibleDecideMachine();
+
+    expect((await canReach(machine, "exhausted", {})).reachable).toBe(false);
+
+    const { reachable, witness } = await canReach(machine, "exhausted", {
+      errors: { "agent.decide": new Error("model would not choose") },
+    });
+
+    expect(reachable).toBe(true);
+    expect(witness).toEqual([{ type: "xstate.error.actor.decide" }]);
+  });
+
+  test("a decision fork explores the failure branch AND the candidate events", async () => {
+    const report = await explorePaths(createExhaustibleDecideMachine(), {
+      errors: { "agent.decide": new Error("model would not choose") },
+    });
+
+    expect(report.terminals.map((terminal) => terminal.state).sort()).toEqual([
+      "exhausted",
+      "issued",
+    ]);
+    expect(report.reachedStates).toEqual(["classifying", "exhausted", "issued"]);
+  });
+
+  test("a decision fork can also be keyed by the invoke id", async () => {
+    const { reachable } = await canReach(createExhaustibleDecideMachine(), "exhausted", {
+      errors: { decide: new Error("model would not choose") },
+    });
+
+    expect(reachable).toBe(true);
+  });
+
+  test("a scripted failure with no onError ends the path in an 'error' terminal", async () => {
+    const failure = { code: "truncated" };
+    const report = await explorePaths(createUncaughtParsingMachine(), {
+      errors: { parse: failure },
+    });
+
+    expect(report.terminals).toEqual([
+      {
+        status: "error",
+        path: [{ type: "xstate.error.actor.parse" }],
+        state: "parsing",
+        error: failure,
+      },
+    ]);
+  });
+
+  test("guard pruning and path counts are unchanged when no errors are scripted", async () => {
+    const machine = createRefundMachine();
+    const options = { input: { request: "Refund my duplicate charge", amount: 5000 } };
+
+    const baseline = await explorePaths(machine, options);
+    const withEmptyErrors = await explorePaths(machine, { ...options, errors: {} });
+
+    expect(withEmptyErrors).toEqual(baseline);
+    expect(baseline.prunedByGuard).toBe(1);
+  });
+});
+
+describe("rejectAgentStep", () => {
+  test("delivers the error to the invoke's onError and returns the next step", () => {
+    const machine = createParsingMachine();
+    const step = initialAgentStep(machine, undefined);
+    const next = rejectAgentStep(machine, step, step.requests[0]!, { code: "truncated" });
+
+    expect(next.snapshot.value).toBe("failed");
+    expect((next.snapshot.context as { code: string }).code).toBe("truncated");
+    expect(next.done).toBe(true);
+  });
+
+  test("errors the snapshot when no onError catches it", () => {
+    const machine = createUncaughtParsingMachine();
+    const step = initialAgentStep(machine, undefined);
+    const next = rejectAgentStep(machine, step, "parse", new Error("bad json"));
+
+    expect(next.snapshot.status).toBe("error");
+  });
+});
+
+// Three concurrent `draft` invokes with targetless `onDone`/`onError`s and an
+// `always` join — the fan-out shape whose siblings a per-transition view of
+// pending work forgets once the first invoke settles.
+const DRAFT_SLOTS = ["draft1", "draft2", "draft3"];
+
+type FanOutContext = { drafts: string[]; settled: number };
+
+function createFanOutMachine() {
+  const agent = setupAgent({
+    context: z.object({ drafts: z.array(z.string()), settled: z.number() }),
+    requests: { draft: { schemas: { output: z.string() }, model: "test", prompt: "write it" } },
+  });
+  return agent.createMachine({
+    id: "fan-out",
+    context: { drafts: [], settled: 0 },
+    initial: "drafting",
+    states: {
+      drafting: {
+        invoke: DRAFT_SLOTS.map((id) => ({
+          id,
+          src: "draft" as const,
+          onDone: ({ context, output }: { context: FanOutContext; output: string }) => ({
+            context: { drafts: [...context.drafts, output], settled: context.settled + 1 },
+          }),
+          onError: ({ context }: { context: FanOutContext }) => ({
+            context: { settled: context.settled + 1 },
+          }),
+        })),
+        // Nothing leaves `drafting` until every slot has settled.
+        always: ({ context }) => {
+          if (context.settled < DRAFT_SLOTS.length) {
+            return;
+          }
+          return context.drafts.length > 0
+            ? { target: "done" as const }
+            : { target: "failed" as const };
+        },
+      },
+      done: { type: "final" },
+      failed: { type: "final" },
+    },
+  });
+}
+
+describe("concurrent invokes — every pending invoke stays visible", () => {
+  test("simulateAgent resolves all three slots, then the always join settles done", async () => {
+    const result = await simulateAgent(createFanOutMachine(), {
+      script: { text: { draft: ["one", "two", "three"] } },
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.snapshot.value).toBe("done");
+    expect(result.snapshot.context.settled).toBe(3);
+    // Resolved in invoke-id order, so the drafts arrive in queue order.
+    expect(result.snapshot.context.drafts).toEqual(["one", "two", "three"]);
+    expect(
+      result.trail.flatMap((entry) => (entry.resolvedRequest ? [entry.resolvedRequest.id] : [])),
+    ).toEqual(DRAFT_SLOTS);
+  });
+
+  test("explorePaths forks per invoke, reaching both the join and the failure branch", async () => {
+    const report = await explorePaths(createFanOutMachine(), {
+      text: { draft: "one" },
+      errors: { draft: new Error("truncated") },
+    });
+
+    expect(report.reachedStates).toEqual(expect.arrayContaining(["drafting", "done", "failed"]));
+    expect(report.terminals.map((terminal) => terminal.state)).toContain("done");
+    expect(report.terminals.map((terminal) => terminal.state)).toContain("failed");
+  });
+
+  test("canReach finds the error-only state behind three failed slots", async () => {
+    const { reachable, witness } = await canReach(createFanOutMachine(), "failed", {
+      errors: { draft: new Error("truncated") },
+    });
+
+    expect(reachable).toBe(true);
+    expect(witness).toEqual(DRAFT_SLOTS.map((id) => ({ type: `xstate.error.actor.${id}` })));
   });
 });

@@ -1,12 +1,18 @@
 import {
   tool,
+  type FinishReason,
   type FlexibleSchema,
   type LanguageModelUsage,
   type ModelMessage,
   type Tool,
   type ToolSet,
 } from "ai";
-import { getAgentOutputMode, type AgentCallUsage, type AgentTextRequest } from "../text-logic.js";
+import {
+  getAgentOutputMode,
+  type AgentCallUsage,
+  type AgentFinishReason,
+  type AgentTextRequest,
+} from "../text-logic.js";
 import { isStandardSchema } from "../utils.js";
 import { renderDecisionAttempts } from "../decision.js";
 import type { AgentDecisionRequest } from "../decision.js";
@@ -118,6 +124,17 @@ export function toAgentCallUsage(usage: LanguageModelUsage): AiSdkCallUsage {
     ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
   };
+}
+
+/**
+ * Maps the AI SDK's unified finish reason onto the portable
+ * {@link AgentFinishReason}. Only `'error'` differs: core's union has no
+ * `'error'` member, since a call that failed outright rejects instead of
+ * returning, so it lands on `'other'`. The SDK's own value stays on the
+ * result's `raw`.
+ */
+export function toAgentFinishReason(finishReason: FinishReason): AgentFinishReason {
+  return finishReason === "error" ? "other" : finishReason;
 }
 
 /** Drops keys whose value is `undefined`, so a spread cannot erase what it lands on. */
