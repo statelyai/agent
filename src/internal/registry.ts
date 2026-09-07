@@ -18,7 +18,43 @@ export type DefaultExecutorsRegistry = {
 export type AgentExecutionOptions = Pick<AgentRequestOptions, "schemas" | "actors"> & {
   models?: object;
 };
+/**
+ * Registered execution options, keyed on BOTH the machine object and its root
+ * `config` object. `config` is shared by reference across `machine.provide(...)`
+ * (unlike the machine itself), so the `config` key is what lets a machine
+ * rebound by `runAgent` — or by any host `.provide(...)` — still resolve the
+ * schemas/actors `setupAgent` registered. Always write through
+ * {@link setAgentExecutionOptions} and read through
+ * {@link getAgentExecutionOptions}.
+ */
 export const agentExecutionOptions = new WeakMap<object, AgentExecutionOptions>();
+
+/** The root `config` object a machine shares with every `.provide(...)` of itself. */
+function machineConfigKey(machine: unknown): object | undefined {
+  const config = (machine as { config?: unknown } | undefined)?.config;
+  return config && typeof config === "object" ? (config as object) : undefined;
+}
+
+/** Registers `options` for `machine` and for every `.provide(...)` of it. */
+export function setAgentExecutionOptions(machine: unknown, options: AgentExecutionOptions): void {
+  if (!machine || typeof machine !== "object") return;
+  agentExecutionOptions.set(machine, options);
+  const config = machineConfigKey(machine);
+  if (config) agentExecutionOptions.set(config, options);
+}
+
+/**
+ * Reads the options registered for `machine`, falling back to the root `config`
+ * key so a `.provide(...)`-rebound machine (e.g. the one behind a `runAgent`
+ * result snapshot) resolves the same pack.
+ */
+export function getAgentExecutionOptions(machine: unknown): AgentExecutionOptions | undefined {
+  if (!machine || typeof machine !== "object") return undefined;
+  const direct = agentExecutionOptions.get(machine);
+  if (direct) return direct;
+  const config = machineConfigKey(machine);
+  return config ? agentExecutionOptions.get(config) : undefined;
+}
 
 /**
  * Machine-carried wait-state predicates, keyed on the machine's root `config`
@@ -74,7 +110,7 @@ export function getRegisteredAgentExecutionOptions(
   options?: Partial<AgentExecutionOptions>,
 ): AgentExecutionOptions {
   return {
-    ...agentExecutionOptions.get(machine as object),
+    ...getAgentExecutionOptions(machine),
     ...options,
   };
 }

@@ -39,13 +39,12 @@ const result = await runAgent(machine, {
 
 ### Script keys
 
-Scripts route by semantic request `name`, not prompt text. A request's name is the first of these that exists:
+Scripts route by semantic request `name`, not prompt text. A request resolves its name before routing, taking the first of these that exists:
 
 1. its `name`: the `setupAgent({ requests })` key, the `createTextLogic`/`createDecisionLogic` `name`, or the `name` field on an inline `agent.decide` input;
-2. the invoke `id`;
-3. the invoke's state path, such as `0.(machine).guessing`.
+2. the invoke `id`.
 
-Name the request rather than relying on 2 or 3. A named request fails loudly when it is renamed or reordered, instead of silently taking another request's answer, and a state path changes whenever the machine is restructured.
+`"*"` is the fallback route for anything unmatched. Name the request rather than relying on 2: a named request fails loudly when it is renamed or reordered, instead of silently taking another request's answer.
 
 ```ts no-check
 guessing: {

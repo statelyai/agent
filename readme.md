@@ -47,17 +47,10 @@ Requirements:
 This agent reviews refund requests. The model may propose an automatic refund, but the state machine owns the $100 limit.
 
 ```ts
-import { openai } from "@ai-sdk/openai";
 import { runAgent, setupAgent } from "@statelyai/agent";
-import { defineModels } from "@statelyai/agent/ai-sdk";
 import { z } from "zod";
 
-const models = defineModels({
-  fast: openai("gpt-5.4-mini"),
-});
-
 const agentSetup = setupAgent({
-  models,
   context: z.object({
     request: z.string(),
     amount: z.number(),
@@ -110,6 +103,9 @@ const result = await runAgent(refundMachine, {
     request: "I was charged twice for the same order.",
     amount: 75,
   },
+  // An executor is a plain function, so this run needs no API key and no
+  // provider package.
+  executors: { decide: async () => ({ event: { type: "AUTO_REFUND" } }) },
 });
 
 if (result.status === "done") {
@@ -125,16 +121,21 @@ When the machine reaches `refunded`, the result is:
 
 The model chooses between the events allowed in `deciding`. The `AUTO_REFUND` transition only works when the amount is at most $100. If the model chooses it for a larger amount, the guard rejects the choice and the decision is tried again.
 
+To call a real model, leave the machine unchanged and swap the executors:
+
 ```ts
-const scriptedResult = await runAgent(refundMachine, {
+import { openai } from "@ai-sdk/openai";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+
+const liveResult = await runAgent(refundMachine, {
   input: { request: "I was charged twice for the same order.", amount: 75 },
-  executors: { decide: async () => ({ event: { type: "AUTO_REFUND" } }) },
+  executors: createAiSdkExecutors({ models: { fast: openai("gpt-5.4-mini") } }),
 });
 ```
 
-An executor is a plain function, so the machine above runs end to end with no API key and no provider installed. For a machine with several requests, `createScriptedExecutors` holds ordered answers keyed by request name. See [Evals](docs/evals.md#scripted-executors).
+For a machine with several requests, `createScriptedExecutors` holds ordered answers keyed by request name. See [Evals](docs/evals.md#scripted-executors).
 
-A registry created by `defineModels` supplies the optional AI SDK executor by default; explicit `executors` override it. Core does not import the AI SDK. See [Hosts and executors](docs/hosts.md).
+Passing a `defineModels` registry to `setupAgent({ models })` types the machine's model refs and supplies the AI SDK executor by default; explicit `executors` override it. Core does not import the AI SDK. See [Hosts and executors](docs/hosts.md).
 
 ## Architecture
 

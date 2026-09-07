@@ -2754,6 +2754,24 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       const snapshot = event.snapshot as AnyMachineSnapshot;
       lastRootSnapshot = snapshot;
 
+      // ─── Ignored resume event ───
+      // XState reports every facet of a root transition here. The resume
+      // event was ignored when the machine selected no microstep, ran no
+      // action, and sent nothing: a guard or function transition returning
+      // `undefined`, or an event the state does not declare. An effect-only
+      // handler shows up in `actions`, so it is NOT ignored. Snapshot identity
+      // is not used: on this XState an effect-only transition reuses the
+      // snapshot object (pinned by the "xstate contract" tests).
+      if (
+        resumeEventToSend !== undefined &&
+        (event.event as unknown) === (resumeEventToSend as unknown) &&
+        event.microsteps.length === 0 &&
+        event.actions.length === 0 &&
+        event.sent.length === 0
+      ) {
+        ignoredEvent = resumeEventToSend as EventObject;
+      }
+
       // ─── Journaling ───
       // The log is deliberately smaller than the trace: only EXTERNAL inputs
       // are recorded, because replay re-derives everything else. A root
@@ -2945,16 +2963,9 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   if (resumeEventToSend && !settled) {
     // Restore transition is done; allow the post-event transition to settle.
     deliveringResumeEvent = false;
-    // XState returns the SAME snapshot object when no transition is selected
-    // for an event (an empty microstep is a no-op: no state change, no
-    // actions). So identity across the synchronous `send` is the reliable
-    // "the machine ignored this" test — a targetless, action-only transition
-    // produces a new snapshot and is not ignored.
-    const before = actor.getSnapshot() as AnyMachineSnapshot;
+    // Whether the machine ignored this event is decided in the inspect
+    // handler from the transition's own facets (see "Ignored resume event").
     actor.send(resumeEventToSend as never);
-    if (Object.is(before, actor.getSnapshot() as AnyMachineSnapshot)) {
-      ignoredEvent = resumeEventToSend as EventObject;
-    }
   }
 
   return sessionApi;

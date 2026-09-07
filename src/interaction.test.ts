@@ -6,6 +6,7 @@ import {
   eventFromInteraction,
   getInteraction,
   interactionMetaSchema,
+  runAgent,
   setupAgent,
 } from "./index.js";
 
@@ -315,5 +316,60 @@ describe("getInteraction keeps choices whose payload is not fully fixed", () => 
     });
     const snapshot = machine.resolveState({ value: "waiting", context: {} });
     expect(getInteraction(snapshot)?.events.map((event) => event.type)).toEqual(["PICK", "END"]);
+  });
+});
+
+// `runAgent` starts the actor from `machine.provide(...)`, so the machine
+// behind a result snapshot is not the object `setupAgent` registered. The
+// schema registry resolves through the shared root `config`; without that
+// fallback these choices are judged with no schemas at all.
+describe("getInteraction on a runAgent result snapshot", () => {
+  const agent = setupAgent({
+    context: z.object({ turns: z.number() }),
+    input: z.object({}),
+    output: z.object({}),
+    events: {
+      AGAIN: z.object({}),
+      PICK: z.object({ seat: z.number() }),
+      END: z.object({}),
+    },
+    meta: interactionMetaSchema,
+  });
+  const machine = agent.createMachine({
+    context: { turns: 1 },
+    initial: "waiting",
+    states: {
+      waiting: {
+        meta: {
+          interaction: {
+            label: "Go on?",
+            events: {
+              AGAIN: { label: "Again", event: {} },
+              PICK: "Pick a seat",
+              END: "End",
+            },
+          },
+        },
+        on: {
+          // Complete fixed payload, refused right now: must be hidden.
+          AGAIN: ({ context }) => (context.turns >= 1 ? undefined : { target: "waiting" }),
+          // `seat` is caller-supplied, so the guard must not run against
+          // `undefined` — only the registered schema reveals the payload is
+          // incomplete, so this choice must stay.
+          PICK: ({ event }) => (event.seat >= 0 ? { target: "done" } : undefined),
+          END: { target: "done" },
+        },
+      },
+      done: { type: "final", output: () => ({}) },
+    },
+  });
+
+  test("judges choices with the schemas setupAgent registered", async () => {
+    const result = await runAgent(machine, { input: {} });
+    expect(result.status).toBe("idle");
+    expect(getInteraction(result.snapshot)?.events.map((event) => event.type)).toEqual([
+      "PICK",
+      "END",
+    ]);
   });
 });

@@ -120,14 +120,14 @@ Pass Cloudflare-specific per-call options through request `metadata`. The host r
 
 ## Ollama and OpenAI-compatible endpoints
 
-Ollama runs models locally and serves them over an OpenAI-compatible HTTP API. Point the AI SDK's OpenAI provider at the local endpoint. `apiKey` is optional; omit it for local servers that need no key.
+Ollama runs models locally and serves them over an OpenAI-compatible HTTP API. Point the AI SDK's OpenAI provider at the local endpoint. Pass a placeholder `apiKey`: the provider throws while building request headers when neither `apiKey` nor `OPENAI_API_KEY` is set, even for a local server that ignores the value.
 
 ```ts
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // Model IDs here are illustrative; substitute your provider's current models.
-const ollama = createOpenAI({ baseURL: "http://localhost:11434/v1" });
+const ollama = createOpenAI({ baseURL: "http://localhost:11434/v1", apiKey: "ollama" });
 
 await runAgent(machine, {
   input,
@@ -137,7 +137,7 @@ await runAgent(machine, {
 });
 ```
 
-To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and add `apiKey` where the endpoint requires one. Nothing else changes.
+To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and use the endpoint's real `apiKey`. Nothing else changes.
 
 To avoid depending on `ai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. Use `buildEnvelopeSchema`, `getJsonSchema`, and `parseOutput` from `@statelyai/agent` for structured output, and `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
 

@@ -68,8 +68,8 @@ export type ScriptedTextEntry =
   | object;
 
 /**
- * A request-name keyed script. The key is the request's `name`, else the
- * invoke `id`, else the invoke's state path. `"*"` is the fallback route.
+ * A request-name keyed script. The key is the request's resolved `name` — the
+ * authored name, else the invoke `id`. `"*"` is the fallback route.
  */
 export type ScriptedByName<TEntry> = Record<string, TEntry | TEntry[]>;
 
@@ -220,8 +220,8 @@ export function emitScriptedChunk(result: unknown, info?: AgentRequestExecutorIn
  * Executors that replay a script instead of calling a model. Every slot is
  * provided, so any machine binds.
  *
- * Answers are keyed by request name — the request's `name`, else the invoke
- * `id`, else the invoke's state path — and `"*"` serves anything unmatched.
+ * Answers are keyed by the request's resolved name — its authored `name`, else
+ * the invoke `id` — and `"*"` serves anything unmatched.
  * Entries for a name are consumed in order and the last one repeats forever, so
  * a looping machine needs no extra option. A request the script has no route
  * for throws an ordinary `Error` from inside the executor, which reaches the

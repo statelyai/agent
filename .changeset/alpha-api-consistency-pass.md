@@ -7,7 +7,6 @@
 Renames:
 
 - `isSuspended` → `isIdle` and `suspendedTags` → `idleTags`, matching `status: 'idle'`.
-- `canReach` returns `{ reachable, witness }` (was `{ canReach, witness }`).
 - `AgentEventLogConflictError.actualLength` → `actualIndex`.
 - `createLoopMachine({ maxIterations })` → `maxTurns`; `createToolLoopMachine({ maxTurns })` → `maxSteps`.
 - Budget breach error code `max-model-calls-exceeded` → `max-model-calls`, thrown as the exported `AgentMaxModelCallsExceededError` so `onError` can branch on `event.error.code`.

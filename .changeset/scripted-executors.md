@@ -8,12 +8,12 @@
 const result = await runAgent(moderationMachine, {
   input: { comment: "honestly this update is terrible", trust: 20 },
   executors: createScriptedExecutors({
-    // Plain values play back FIFO. An entry can also be a function of the
-    // request, which says where it was called from: `request.id` is the invoke
-    // id, `request.events` the state's legal candidates, `request.name` the
-    // text request's name.
-    decisions: [(request) => ({ type: request.events[0]!.type })],
-    text: ["a scripted draft"],
+    // Answers are keyed by request name ("*" is the fallback route) and play
+    // back in order. An entry can also be a function of the request, which says
+    // where it was called from: `request.id` is the invoke id, `request.events`
+    // the state's legal candidates, `request.name` the request's name.
+    decisions: { "*": [(request) => ({ type: request.events[0]!.type })] },
+    text: { "*": ["a scripted draft"] },
   }),
 });
 ```

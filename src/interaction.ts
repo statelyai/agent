@@ -5,7 +5,7 @@ import {
   parseAgentEvent,
   type EventFromSnapshot,
 } from "./events.js";
-import { agentExecutionOptions } from "./internal/registry.js";
+import { getAgentExecutionOptions } from "./internal/registry.js";
 import { getStateMeta } from "./utils.js";
 import type { StandardSchemaV1 } from "./types.js";
 
@@ -166,9 +166,7 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
   const preserveWhitespace = options.preserveWhitespace ?? false;
   // The event schemas `setupAgent` registered on this machine, so a choice's
   // fixed payload can be judged complete before the guard is consulted.
-  const schemas = agentExecutionOptions.get(
-    (snapshot as { machine?: object }).machine ?? {},
-  )?.schemas;
+  const schemas = getAgentExecutionOptions((snapshot as { machine?: object }).machine)?.schemas;
   const accepted = new Set(getAcceptedEvents(snapshot).map((event) => event.type));
   const label =
     typeof interaction.label === "function"

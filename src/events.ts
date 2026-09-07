@@ -7,7 +7,7 @@ import {
   type MachineSnapshot,
 } from "xstate";
 import { AgentError } from "./errors.js";
-import { agentExecutionOptions } from "./internal/registry.js";
+import { getAgentExecutionOptions } from "./internal/registry.js";
 import type { StandardSchemaV1 } from "./types.js";
 import { isRecord } from "./internal/is-record.js";
 import { validateSchemaSync } from "./utils.js";
@@ -206,7 +206,7 @@ export function parseAgentEvent<TSource extends AnyStateMachine | AnyMachineSnap
       ? source
       : (source as AnyMachineSnapshot).machine
   ) as AnyStateMachine | undefined;
-  const registered = machine ? agentExecutionOptions.get(machine as object)?.schemas : undefined;
+  const registered = getAgentExecutionOptions(machine)?.schemas;
   const eventSchemas = options.events ?? options.schemas?.events ?? registered?.events;
   const inputSchema = eventSchemas?.[event.type];
   if (!inputSchema) {
