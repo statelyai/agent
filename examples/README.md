@@ -19,7 +19,8 @@ These examples use one XState machine artifact across different model SDKs and h
 - [guardrails](guardrails), [verification](verification): legal paths and reachability
 - [parallel-streams](parallel-streams): concurrent regions
 - [hierarchical-teams](hierarchical-teams), [swarm-handoff](swarm-handoff): child machines and handoff
-- [long-running-onboarding](long-running-onboarding), [snapshot-migration](snapshot-migration), [crash-recovery](crash-recovery): pauses and native XState snapshots
+- [long-running-onboarding](long-running-onboarding), [snapshot-migration](snapshot-migration): pauses and native XState snapshots
+- [crash-recovery](crash-recovery): events-only recovery from the event log, no snapshot
 - [review-tool-calls](review-tool-calls), [sql-agent](sql-agent), [customer-support](customer-support): explicit, persistable human gates
 - [context-compaction](context-compaction), [chat-with-pdf](chat-with-pdf): framework-native message history
 - [tool-calling](tool-calling): SDK-owned multi-step tools and explicit native message retention; compare [review-tool-calls](review-tool-calls) for machine-gated calls

@@ -1,11 +1,27 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createActor, createAsyncLogic, setup, toPromise, type Snapshot } from "xstate";
+import {
+  createActor,
+  createAsyncLogic,
+  setup,
+  toPromise,
+  type AnyMachineSnapshot,
+  type Snapshot,
+} from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
+  AGENT_INIT_EVENT_TYPE,
   AGENT_TRACE_SCHEMA_VERSION,
+  AGENT_USAGE_EVENT_TYPE,
   AgentError,
+  AgentEventLogConflictError,
+  AgentMachineVersionMismatchError,
+  AgentSnapshotDivergedError,
+  getLogExecutionId,
+  getUsageFromEvents,
+  replay,
   createAgentSchemas,
+  createInMemoryEventLogStore,
   createTextLogic,
   AgentIllegalResumeEventError,
   inspectTransitions,
@@ -13,12 +29,26 @@ import {
   runAgent,
   setupAgent,
   type AgentDecisionRequest,
+  type AgentEventLogStore,
+  type AgentLogEntry,
   type AgentTextRequest,
   type AgentTools,
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
 import { getMachineStructuralHash } from "./index.js";
+
+/**
+ * A promise plus its resolver. Tests drive a run's timing off these instead of
+ * wall-clock sleeps, so a slow machine cannot turn a race into a flake.
+ */
+function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
 
 describe("runAgent", () => {
   test("done path: completes with typed output from a TextLogic invoke", async () => {
@@ -3469,5 +3499,906 @@ describe("machine input validation", () => {
 
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output).toEqual({ anything: 1 });
+  });
+});
+
+describe("runAgent event log", () => {
+  const answer = createTextLogic({ model: "test-model", prompt: () => "hello" });
+
+  /** asking --(model)--> waiting --APPROVE--> wrapping --(raised)--> done */
+  const makeLoggedMachine = (
+    overrides: { id?: string; version?: string; migrate?: (snapshot: unknown) => unknown } = {},
+  ) =>
+    setup({ actors: { answer } }).createMachine({
+      id: overrides.id ?? "logged",
+      ...(overrides.version !== undefined ? { version: overrides.version } : {}),
+      ...(overrides.migrate ? { migrate: overrides.migrate } : {}),
+      context: () => ({ answer: null as string | null }),
+      initial: "asking",
+      states: {
+        asking: {
+          invoke: {
+            id: "ask",
+            src: "answer",
+            input: () => ({}),
+            onDone: ({ output }: { output: string }) => ({
+              target: "waiting",
+              context: { answer: output },
+            }),
+          } as never,
+        },
+        waiting: { on: { APPROVE: { target: "wrapping" } } },
+        wrapping: {
+          entry: (_args: never, enqueue: { raise: (event: { type: string }) => void }) =>
+            enqueue.raise({ type: "CONTINUE" }),
+          on: { CONTINUE: { target: "done" } },
+        },
+        done: { type: "final", output: () => ({ ok: true }) },
+      },
+    } as never);
+
+  const executors = () => ({
+    generateText: async () => ({ output: "42", usage: { totalTokens: 7 } }),
+  });
+
+  const types = (entries: readonly AgentLogEntry[]) => entries.map((entry) => entry.event.type);
+
+  test("a fresh run yields a self-contained log of external inputs only", async () => {
+    const machine = makeLoggedMachine();
+    const streamed: AgentLogEntry[] = [];
+
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+      onEvent: (entry) => streamed.push(entry),
+    });
+
+    expect(first.status).toBe("idle");
+    // The reserved init entry comes first and names the lineage.
+    expect(first.events[0]!.event.type).toBe(AGENT_INIT_EVENT_TYPE);
+    expect(typeof getLogExecutionId(first.events)).toBe("string");
+    // External inputs are journaled: the invoke's completion and the reserved
+    // usage record. Nothing else — no `@xstate.init`.
+    expect(types(first.events)).toEqual([
+      AGENT_INIT_EVENT_TYPE,
+      AGENT_USAGE_EVENT_TYPE,
+      "xstate.done.actor",
+    ]);
+    // `onEvent` streamed exactly the same entries, in order, init first.
+    expect(streamed).toEqual(first.events);
+    // Every entry carries a verification hash, and the whole log folds back to
+    // the state the run reached.
+    expect(first.events.every((entry) => typeof entry.verification?.stateHash === "string")).toBe(
+      true,
+    );
+    const folded = replay(machine, first.events);
+    expect((folded.snapshot as AnyMachineSnapshot).matches("waiting")).toBe(true);
+
+    // Resuming continues the SAME log: same lineage, contiguous indices.
+    const second = await runAgent(machine, {
+      events: first.events,
+      snapshot: first.persist(),
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(second.status).toBe("done");
+    expect(getLogExecutionId(second.events)).toBe(getLogExecutionId(first.events));
+    expect(second.events.map((entry) => entry.index)).toEqual(
+      second.events.map((_entry, index) => index),
+    );
+    // The host's APPROVE is journaled; the machine's own raised CONTINUE is not
+    // (replay re-derives it).
+    expect(types(second.events)).toContain("APPROVE");
+    expect(types(second.events)).not.toContain("CONTINUE");
+    expect(replay(machine, second.events).snapshot.status).toBe("done");
+  });
+
+  test("verification: false omits the recorded state hashes", async () => {
+    const machine = makeLoggedMachine();
+    const result = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+      verification: false,
+    });
+    expect(result.events.length).toBeGreaterThan(1);
+    expect(result.events.every((entry) => entry.verification === undefined)).toBe(true);
+  });
+
+  test("events-only crash recovery: journaled calls are not re-run, and the in-flight call keeps its callKey", async () => {
+    const twoCallMachine = setup({ actors: { answer } }).createMachine({
+      id: "two-calls",
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: {
+          invoke: { id: "a", src: "answer", input: () => ({}), onDone: { target: "b" } } as never,
+        },
+        b: {
+          invoke: {
+            id: "b",
+            src: "answer",
+            input: () => ({}),
+            onDone: { target: "waiting" },
+          } as never,
+        },
+        waiting: { on: { GO: { target: "done" } } },
+        done: { type: "final" },
+      },
+    } as never);
+
+    const firstCalls: Array<{ requestId?: string; callKey?: string }> = [];
+    // The crash is driven by the run itself, not by the clock: abort only once
+    // the second call is actually in flight.
+    const controller = new AbortController();
+    const inFlight = deferred();
+    const crashed = await (async () => {
+      const running = runAgent(twoCallMachine, {
+        input: undefined,
+        signal: controller.signal,
+        executors: {
+          generateText: async (_request, info) => {
+            firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+            if (firstCalls.length === 1) return { output: "one" };
+            // The second call is the one still in flight at the crash.
+            inFlight.resolve();
+            return await new Promise<never>(() => {});
+          },
+        },
+      });
+      await inFlight.promise;
+      controller.abort();
+      return running;
+    })();
+
+    expect(crashed.status).toBe("error");
+    expect(firstCalls.map((call) => call.requestId)).toEqual(["a", "b"]);
+    expect(types(crashed.events)).toContain("xstate.done.actor");
+
+    const secondCalls: Array<{ requestId?: string; callKey?: string }> = [];
+    const recovered = await runAgent(twoCallMachine, {
+      // Log only — no snapshot survived the crash.
+      events: crashed.events,
+      executors: {
+        generateText: async (_request, info) => {
+          secondCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+          return { output: "two" };
+        },
+      },
+    });
+
+    expect(recovered.status).toBe("idle");
+    // `a` completed before the crash and folds back in from the log.
+    expect(secondCalls.map((call) => call.requestId)).toEqual(["b"]);
+    // Identical key across the crash: an executor-level cache can dedupe it.
+    expect(secondCalls[0]!.callKey).toBe(firstCalls[1]!.callKey);
+    expect(secondCalls[0]!.callKey).toMatch(/^[0-9a-f-]+:b#1$/);
+  });
+
+  test("decision retries get distinct, replay-stable callKeys", async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({}),
+      input: z.object({}),
+      events: { ATTACK: z.object({}) },
+    });
+    const chooseMove = createDecisionLogic({
+      model: "test-model",
+      prompt: "Choose a move.",
+      allowedEvents: ["ATTACK"] as const,
+    });
+    const agent = setupAgent({ schemas, actors: { chooseMove } });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "choosing",
+      states: {
+        choosing: {
+          invoke: { id: "choosing", src: "chooseMove", input: {} },
+          on: { ATTACK: { target: "attacked" } },
+        },
+        attacked: { type: "final" },
+      },
+    });
+
+    const run = async () => {
+      const keys: Array<string | undefined> = [];
+      const result = await runAgent(machine, {
+        input: {},
+        executors: {
+          decide: async (request, info) => {
+            keys.push(info?.callKey);
+            // The first attempt picks an event that is not a candidate, so
+            // `resolveDecision` rejects it and retries with feedback.
+            return request.attempts.length === 0
+              ? { event: { type: "NOPE" } as never }
+              : { event: { type: "ATTACK" } as never };
+          },
+        },
+      });
+      return { keys, result };
+    };
+
+    const first = await run();
+    expect(first.result.status).toBe("done");
+    expect(first.keys).toHaveLength(2);
+    // Same invoke, same occurrence — but the attempt ordinal keeps a compliant
+    // cache from returning the rejected first attempt for the retry.
+    expect(first.keys[0]).toMatch(/^[0-9a-f-]+:choosing#\d+\.0$/);
+    expect(first.keys[1]).toBe(`${first.keys[0]!.slice(0, -2)}.1`);
+
+    // The ordinal comes from `request.attempts.length`, so re-executing an
+    // attempt derives the same key rather than a fresh one.
+    const second = await run();
+    expect(second.keys.map((key) => key?.split(":")[1])).toEqual(
+      first.keys.map((key) => key?.split(":")[1]),
+    );
+  });
+
+  test("resume precedence: a tail-stamped snapshot is trusted, a stale one is not", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+    });
+    const cached = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
+
+    // Corrupt a MIDDLE entry's recorded hash: replaying this log throws, so a
+    // resume that succeeds proves the cached snapshot was trusted as-is.
+    const poisoned = (JSON.parse(JSON.stringify(first.events)) as AgentLogEntry[]).map((entry) =>
+      entry.index === 1 ? { ...entry, verification: { stateHash: "deadbeef" } } : entry,
+    );
+    expect(() => replay(machine, poisoned)).toThrow(/Replay diverged/);
+
+    const fastPath = await runAgent(machine, {
+      events: poisoned,
+      snapshot: cached,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(fastPath.status).toBe("done");
+
+    // The same poisoned log with no cache to trust must replay — and throw.
+    await expect(
+      runAgent(machine, {
+        events: poisoned,
+        executors: executors(),
+      }),
+    ).rejects.toThrow(/Replay diverged/);
+  });
+
+  test("a stale snapshot loses to the log, and a divergent one throws", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+    });
+    const staleSnapshot = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
+    const second = await runAgent(machine, {
+      events: first.events,
+      snapshot: staleSnapshot,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(second.status).toBe("done");
+
+    // `staleSnapshot` caches index 3 of a log that is now 5 entries long. It
+    // still agrees with the log at index 3, so the log simply wins.
+    expect(second.events.length).toBeGreaterThan(first.events.length);
+    const resumedFromStale = await runAgent(machine, {
+      events: second.events,
+      snapshot: staleSnapshot,
+      executors: executors(),
+    });
+    expect(resumedFromStale.status).toBe("done");
+
+    // A snapshot from another lineage that claims a position in THIS log is a
+    // host bug, not a resume.
+    const otherRun = await runAgent(machine, {
+      input: undefined,
+      executors: { generateText: async () => ({ output: "different" }) },
+    });
+    await expect(
+      runAgent(machine, {
+        events: first.events,
+        snapshot: JSON.parse(JSON.stringify(otherRun.persist())) as Snapshot<unknown>,
+        executors: executors(),
+      }),
+    ).rejects.toBeInstanceOf(AgentSnapshotDivergedError);
+  });
+
+  test("version bridge: a snapshot opens a new log segment, and its absence throws", async () => {
+    const v1 = makeLoggedMachine({ version: "1" });
+    const first = await runAgent(v1, {
+      input: undefined,
+      executors: executors(),
+    });
+    expect(first.status).toBe("idle");
+    const persisted = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
+
+    const v2 = makeLoggedMachine({
+      version: "2",
+      migrate: (snapshot) => ({ ...(snapshot as object), version: "2" }),
+    });
+
+    const bridged = await runAgent(v2, {
+      events: first.events,
+      snapshot: persisted,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(bridged.status).toBe("done");
+    const init = bridged.events[0]!;
+    expect(init.event.type).toBe(AGENT_INIT_EVENT_TYPE);
+    expect((init.event as { snapshot?: unknown }).snapshot).toBeDefined();
+    expect(init.machineVersion).toBe("2");
+    expect(init.metadata?.executionId).toBe(getLogExecutionId(first.events));
+    expect(init.metadata?.migratedFrom).toEqual({
+      machineVersion: "1",
+      logIndex: first.events.length,
+    });
+
+    await expect(
+      runAgent(v2, {
+        events: first.events,
+        executors: executors(),
+      }),
+    ).rejects.toBeInstanceOf(AgentMachineVersionMismatchError);
+  });
+
+  test("version bridge: only the log's own tail snapshot is accepted", async () => {
+    const v1 = makeLoggedMachine({ version: "1" });
+    const first = await runAgent(v1, { input: undefined, executors: executors() });
+    const tailOfFirst = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
+
+    // The thread moves on, so `tailOfFirst` now caches an INTERIOR index.
+    const second = await runAgent(v1, {
+      events: first.events,
+      snapshot: tailOfFirst,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(second.events.length).toBeGreaterThan(first.events.length);
+
+    const v2 = makeLoggedMachine({
+      version: "2",
+      migrate: (snapshot) => ({ ...(snapshot as object), version: "2" }),
+    });
+
+    // Bridging with it would roll the thread back past logged entries.
+    await expect(
+      runAgent(v2, {
+        events: second.events,
+        snapshot: tailOfFirst,
+        executors: executors(),
+      }),
+    ).rejects.toBeInstanceOf(AgentSnapshotDivergedError);
+
+    // Right index, wrong state: the tail entry's recorded hash catches it.
+    const tampered = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown> & {
+      context: { answer: string };
+    };
+    tampered.context.answer = "tampered";
+    await expect(
+      runAgent(v2, { events: first.events, snapshot: tampered, executors: executors() }),
+    ).rejects.toBeInstanceOf(AgentSnapshotDivergedError);
+
+    // The genuine tail still bridges.
+    const bridged = await runAgent(v2, {
+      events: first.events,
+      snapshot: tailOfFirst,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(bridged.status).toBe("done");
+  });
+
+  test("a log written by another machine is never a resume", async () => {
+    const machine = makeLoggedMachine({ version: "1" });
+    const other = makeLoggedMachine({ version: "1", id: "other-logged" });
+    const first = await runAgent(machine, { input: undefined, executors: executors() });
+
+    // Same version, different artifact: the entries fold against states this
+    // machine does not have.
+    await expect(
+      runAgent(other, {
+        events: first.events,
+        snapshot: JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>,
+        event: { type: "APPROVE" } as never,
+        executors: executors(),
+      }),
+    ).rejects.toBeInstanceOf(AgentMachineVersionMismatchError);
+  });
+
+  test("an unverified log outranks a snapshot that merely claims to cache it", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+      verification: false,
+    });
+    expect(first.events.every((entry) => entry.verification === undefined)).toBe(true);
+
+    // Correct `agentMeta`, wrong state: with no recorded hash to check it
+    // against, the log is replayed rather than the snapshot trusted.
+    const tampered = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown> & {
+      context: { answer: string };
+    };
+    tampered.context.answer = "tampered";
+    const resumed = await runAgent(machine, {
+      events: first.events,
+      snapshot: tampered,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+      verification: false,
+    });
+    expect(resumed.status).toBe("done");
+    expect((resumed.snapshot as AnyMachineSnapshot).context).toEqual({ answer: "42" });
+  });
+
+  test("snapshot-only resume starts a replayable log from that snapshot", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+    });
+    const second = await runAgent(machine, {
+      snapshot: JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>,
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(second.status).toBe("done");
+    expect(second.events[0]!.event.type).toBe(AGENT_INIT_EVENT_TYPE);
+    expect((second.events[0]!.event as { snapshot?: unknown }).snapshot).toBeDefined();
+    // A NEW lineage: the snapshot carried no log with it.
+    expect(getLogExecutionId(second.events)).not.toBe(getLogExecutionId(first.events));
+    expect(replay(machine, second.events).snapshot.status).toBe("done");
+  });
+
+  test("usage is journaled even when the machine declares no transition for it, and result.usage folds the log", async () => {
+    const machine = makeLoggedMachine();
+    const result = await runAgent(machine, {
+      input: undefined,
+      executors: {
+        generateText: async () => ({ output: "42", usage: { totalTokens: 7, inputTokens: 3 } }),
+      },
+    });
+    const usageEntries = result.events.filter(
+      (entry) => entry.event.type === AGENT_USAGE_EVENT_TYPE,
+    );
+    expect(usageEntries).toHaveLength(1);
+    expect(result.usage).toEqual({ totalTokens: 7, inputTokens: 3, modelCalls: 1 });
+    expect(getUsageFromEvents(result.events)).toEqual({ totalTokens: 7, inputTokens: 3 });
+    // The machine never reacted to it, so the log still folds cleanly.
+    expect(replay(machine, result.events).snapshot.status).toBe("active");
+  });
+
+  test("a call that settles after the run is still appended to the log", async () => {
+    const machine = makeLoggedMachine();
+    const streamed: AgentLogEntry[] = [];
+    const controller = new AbortController();
+    const inFlight = deferred();
+    const release = deferred();
+    const stragglerEntry = deferred<AgentLogEntry>();
+    let atSettle: number | undefined;
+
+    const running = runAgent(machine, {
+      input: undefined,
+      signal: controller.signal,
+      onEvent: (entry) => {
+        streamed.push(entry);
+        // Anything past the settle boundary is the straggler.
+        if (atSettle !== undefined && streamed.length > atSettle) {
+          stragglerEntry.resolve(entry);
+        }
+      },
+      executors: {
+        generateText: async () => {
+          inFlight.resolve();
+          await release.promise;
+          return { output: "late", usage: { totalTokens: 11 } };
+        },
+      },
+    });
+    await inFlight.promise;
+    controller.abort();
+    const result = await running;
+
+    expect(result.status).toBe("error");
+    atSettle = streamed.length;
+    expect(result.events).toHaveLength(atSettle);
+    release.resolve();
+    // The tokens were spent, so the record is appended (and streamed) even
+    // though the run had already returned.
+    const straggler = await stragglerEntry.promise;
+    expect(streamed.length).toBe(atSettle + 1);
+    expect(straggler.event.type).toBe(AGENT_USAGE_EVENT_TYPE);
+  });
+
+  test("timers are journaled and raised events are not; both round-trip through replay", async () => {
+    const timerMachine = setup({}).createMachine({
+      id: "timer-log",
+      context: () => ({}),
+      initial: "waiting",
+      states: {
+        waiting: { after: { 5: { target: "beeped" } } },
+        beeped: {
+          entry: (_args: never, enqueue: { raise: (event: { type: string }) => void }) =>
+            enqueue.raise({ type: "CONTINUE" }),
+          on: { CONTINUE: { target: "done" } },
+        },
+        done: { type: "final" },
+      },
+    } as never);
+
+    const result = await runAgent(timerMachine, { input: undefined, executors: {} });
+    expect(result.status).toBe("done");
+    expect(types(result.events)).toContain("xstate.timer");
+    expect(types(result.events)).not.toContain("CONTINUE");
+    expect(replay(timerMachine, result.events).snapshot.status).toBe("done");
+  });
+
+  test("a log whose last entry reached a final state settles immediately on resume", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runAgent(machine, {
+      input: undefined,
+      executors: executors(),
+    });
+    const finished = await runAgent(machine, {
+      events: first.events,
+      snapshot: first.persist(),
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(finished.status).toBe("done");
+
+    let called = 0;
+    const replayed = await runAgent(machine, {
+      events: finished.events,
+      executors: {
+        generateText: async () => {
+          called++;
+          return { output: "should not happen" };
+        },
+      },
+    });
+    expect(replayed.status).toBe("done");
+    expect(called).toBe(0);
+  });
+});
+
+describe("runAgent write-ahead store", () => {
+  const answer = createTextLogic({ model: "test-model", prompt: () => "hello" });
+
+  /** asking --(model)--> waiting --APPROVE--> done */
+  const makeMachine = () =>
+    setup({ actors: { answer } }).createMachine({
+      id: "stored",
+      context: () => ({}),
+      initial: "asking",
+      states: {
+        asking: {
+          invoke: { id: "ask", src: "answer", input: () => ({}), onDone: { target: "waiting" } },
+        },
+        waiting: { on: { APPROVE: { target: "done" } } },
+        done: { type: "final" },
+      },
+    } as never);
+
+  const executors = () => ({ generateText: async () => ({ output: "42" }) });
+
+  test("a fresh run writes every entry to the store, in index order", async () => {
+    const store = createInMemoryEventLogStore();
+    const result = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: executors(),
+    });
+
+    expect(result.status).toBe("idle");
+    const stored = await store.read("main");
+    expect(stored).toEqual(result.events);
+    expect(stored.map((entry) => entry.index)).toEqual(stored.map((_entry, index) => index));
+    expect(stored[0]!.event.type).toBe(AGENT_INIT_EVENT_TYPE);
+  });
+
+  test("the result resolves only after the last write lands", async () => {
+    const inner = createInMemoryEventLogStore();
+    let inFlight = 0;
+    const store: AgentEventLogStore = {
+      ...inner,
+      append: async (input) => {
+        inFlight++;
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        await inner.append(input);
+        inFlight--;
+      },
+    };
+
+    const result = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: executors(),
+    });
+
+    expect(inFlight).toBe(0);
+    expect(await store.read("main")).toEqual(result.events);
+  });
+
+  test("no model call is made until the preceding entry is durable", async () => {
+    const inner = createInMemoryEventLogStore();
+    const gates: Array<() => void> = [];
+    let holding = true;
+    const store: AgentEventLogStore = {
+      ...inner,
+      append: async (input) => {
+        if (holding) {
+          await new Promise<void>((resolve) => gates.push(resolve));
+        }
+        await inner.append(input);
+      },
+    };
+
+    let calls = 0;
+    const settled = runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: {
+        generateText: async () => {
+          calls++;
+          return { output: "42" };
+        },
+      },
+    });
+
+    // Several turns of the loop: the run is blocked on the init entry's write.
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toBe(0);
+
+    holding = false;
+    for (const release of gates.splice(0)) {
+      release();
+    }
+    const result = await settled;
+    expect(calls).toBe(1);
+    expect(result.status).toBe("idle");
+  });
+
+  test("resuming from the store alone continues the log without re-executing", async () => {
+    const twoCallMachine = setup({ actors: { answer } }).createMachine({
+      id: "two-calls",
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: { invoke: { id: "a", src: "answer", input: () => ({}), onDone: { target: "b" } } },
+        b: { invoke: { id: "b", src: "answer", input: () => ({}), onDone: { target: "waiting" } } },
+        waiting: { on: { GO: { target: "done" } } },
+        done: { type: "final" },
+      },
+    } as never);
+
+    const store = createInMemoryEventLogStore();
+    const firstCalls: Array<{ requestId?: string; callKey?: string }> = [];
+    const controller = new AbortController();
+    const inFlight = deferred();
+    const running = runAgent(twoCallMachine, {
+      input: undefined,
+      store,
+      threadId: "main",
+      signal: controller.signal,
+      executors: {
+        generateText: async (_request, info) => {
+          firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+          if (firstCalls.length === 1) return { output: "one" };
+          inFlight.resolve();
+          return await new Promise<never>(() => {});
+        },
+      },
+    });
+    await inFlight.promise;
+    controller.abort();
+    const crashed = await running;
+    expect(crashed.status).toBe("error");
+
+    const secondCalls: Array<{ requestId?: string; callKey?: string }> = [];
+    // No `events`, no snapshot: the thread's log in the store IS the resume.
+    const recovered = await runAgent(twoCallMachine, {
+      store,
+      threadId: "main",
+      executors: {
+        generateText: async (_request, info) => {
+          secondCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+          return { output: "two" };
+        },
+      },
+    });
+
+    expect(recovered.status).toBe("idle");
+    expect(secondCalls.map((call) => call.requestId)).toEqual(["b"]);
+    expect(secondCalls[0]!.callKey).toBe(firstCalls[1]!.callKey);
+    expect(recovered.events.slice(0, crashed.events.length)).toEqual(crashed.events);
+    expect(await store.read("main")).toEqual(recovered.events);
+  });
+
+  test("a conflicting writer stops the run with cause 'journal'", async () => {
+    const inner = createInMemoryEventLogStore();
+    let stolen = false;
+    const store: AgentEventLogStore = {
+      ...inner,
+      append: async (input) => {
+        if (!stolen) {
+          // A concurrent writer takes this index first.
+          stolen = true;
+          await inner.append({
+            ...input,
+            entries: input.entries.map((entry) => ({ ...entry, id: `${entry.id}_other` })),
+          });
+        }
+        await inner.append(input);
+      },
+    };
+
+    let calls = 0;
+    const result = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: {
+        generateText: async () => {
+          calls++;
+          return { output: "42" };
+        },
+      },
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.cause).toBe("journal");
+    expect(result.status === "error" && result.error).toBeInstanceOf(AgentEventLogConflictError);
+    // The barrier held the model call back until the write failed.
+    expect(calls).toBe(0);
+  });
+
+  test("`store` without `threadId` throws, and `events` must match the thread's length", async () => {
+    const store = createInMemoryEventLogStore();
+    await expect(
+      runAgent(makeMachine(), { input: undefined, store, executors: executors() }),
+    ).rejects.toMatchObject({ code: "missing-thread-id" });
+
+    const first = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: executors(),
+    });
+    await expect(
+      runAgent(makeMachine(), {
+        store,
+        threadId: "main",
+        events: first.events.slice(0, 1),
+        executors: executors(),
+      }),
+    ).rejects.toBeInstanceOf(AgentEventLogConflictError);
+  });
+
+  test("`events` of the right length but the wrong content are rejected", async () => {
+    const store = createInMemoryEventLogStore();
+    const first = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: executors(),
+    });
+
+    // Same length, one entry from somewhere else: appending onto this thread
+    // would splice two lineages together.
+    const altered = JSON.parse(JSON.stringify(first.events)) as AgentLogEntry[];
+    altered[1] = { ...altered[1]!, id: `${altered[1]!.id}_other` };
+    await expect(
+      runAgent(makeMachine(), {
+        store,
+        threadId: "main",
+        events: altered,
+        executors: executors(),
+      }),
+    ).rejects.toMatchObject({ code: "event-log-conflict" });
+
+    // The thread's own log still resumes.
+    const resumed = await runAgent(makeMachine(), {
+      store,
+      threadId: "main",
+      events: first.events,
+      snapshot: first.persist(),
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(resumed.status).toBe("done");
+  });
+
+  test("`events` whose payload keys are merely reordered still match the thread", async () => {
+    const store = createInMemoryEventLogStore();
+    const first = await runAgent(makeMachine(), {
+      input: undefined,
+      store,
+      threadId: "main",
+      executors: executors(),
+    });
+
+    // Same content, different key insertion order: a host that rebuilt the
+    // entries from a database row must not be told its own log diverged.
+    const reordered = (JSON.parse(JSON.stringify(first.events)) as AgentLogEntry[]).map(
+      (entry) => ({
+        ...entry,
+        event: Object.fromEntries(Object.entries(entry.event).reverse()) as AgentLogEntry["event"],
+      }),
+    );
+    const resumed = await runAgent(makeMachine(), {
+      store,
+      threadId: "main",
+      events: reordered,
+      snapshot: first.persist(),
+      event: { type: "APPROVE" } as never,
+      executors: executors(),
+    });
+    expect(resumed.status).toBe("done");
+  });
+
+  test("result.drain() waits for a straggler's write; the result itself does not", async () => {
+    const inner = createInMemoryEventLogStore();
+    const slowStore: AgentEventLogStore = {
+      ...inner,
+      append: async (input) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await inner.append(input);
+      },
+    };
+
+    const controller = new AbortController();
+    const inFlight = deferred();
+    const release = deferred();
+    const stragglerAppended = deferred();
+    let atSettle: number | undefined;
+    let streamed = 0;
+
+    const running = runAgent(makeMachine(), {
+      input: undefined,
+      store: slowStore,
+      threadId: "main",
+      signal: controller.signal,
+      onEvent: () => {
+        streamed++;
+        if (atSettle !== undefined && streamed > atSettle) {
+          stragglerAppended.resolve();
+        }
+      },
+      executors: {
+        generateText: async () => {
+          inFlight.resolve();
+          await release.promise;
+          return { output: "42", usage: { totalTokens: 5 } };
+        },
+      },
+    });
+    await inFlight.promise;
+    controller.abort();
+    const result = await running;
+    expect(result.status).toBe("error");
+
+    atSettle = streamed;
+    expect(await inner.read("main")).toHaveLength(atSettle);
+
+    // The straggler's usage entry is appended after the run returned, so its
+    // write is outside the result's own barrier...
+    release.resolve();
+    await stragglerAppended.promise;
+    expect(await inner.read("main")).toHaveLength(atSettle);
+
+    // ...and `drain()` is what waits for it.
+    await result.drain();
+    const stored = await inner.read("main");
+    expect(stored).toHaveLength(atSettle + 1);
+    expect(stored[stored.length - 1]!.event.type).toBe(AGENT_USAGE_EVENT_TYPE);
   });
 });

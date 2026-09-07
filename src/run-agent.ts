@@ -9,6 +9,7 @@ import {
   type AnyStateMachine,
   type EmittedFrom,
   type EventFromLogic,
+  type EventObject,
   type InputFrom,
   type InspectionEvent,
   type OutputFrom,
@@ -23,6 +24,7 @@ import type {
   WithAgentInputSchema,
 } from "./types.js";
 import { AgentError } from "./errors.js";
+import { AgentEventLogConflictError, type AgentEventLogStore } from "./event-log-store.js";
 import {
   findNonSerializableContextPaths,
   isStandardSchema,
@@ -31,7 +33,6 @@ import {
 } from "./utils.js";
 import { getAcceptedEvents, type AgentSchemas } from "./events.js";
 import {
-  AGENT_USAGE_TOKEN_FIELDS,
   GENERATE_TEXT_ACTOR,
   getCallUsage,
   isTextLogic,
@@ -66,6 +67,22 @@ import {
 } from "./internal/registry.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
+import {
+  AgentMachineVersionMismatchError,
+  agentCallOccurrence,
+  createReplayEntry,
+  getLogExecutionId,
+  getSnapshotStateHash,
+  getUsageFromEvents,
+  initEntry,
+  replay,
+  validateReplayEntries,
+  type AgentLogEntry,
+  type AgentLogInit,
+  type AgentPersistedSnapshot,
+  type JsonValue as AgentLogJsonValue,
+  canonicalEventJson,
+} from "./event-log.js";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -99,6 +116,66 @@ export class AgentIllegalResumeEventError extends AgentError {
     this.eventType = eventType;
     this.acceptedTypes = acceptedTypes;
   }
+}
+
+/**
+ * Thrown by {@link runAgent} when a resume is given BOTH an `events` log and a
+ * `snapshot` that claims a position in that log (`agentMeta.logIndex`), and the
+ * two disagree about the state at that position. The log is the source of
+ * truth, so this is a host bug (a snapshot cached from a different lineage, or
+ * a snapshot mutated out of band), not a recoverable resume: pass the log
+ * alone, or the matching snapshot.
+ */
+export class AgentSnapshotDivergedError extends AgentError {
+  constructor(
+    readonly expected: string,
+    readonly actual: string,
+    readonly logIndex: number,
+  ) {
+    super(
+      "snapshot-diverged",
+      `runAgent: the resume snapshot disagrees with the event log at index ${logIndex}: ` +
+        `the log replays to state hash '${expected}', the snapshot hashes '${actual}'.`,
+    );
+    this.name = "AgentSnapshotDivergedError";
+  }
+}
+
+/**
+ * The stamp {@link RunAgentResult.persist} writes onto the persisted snapshot:
+ * the machine identity that produced it plus the position in the event log it
+ * caches. Read back by the next resume to decide whether the snapshot can be
+ * trusted without replaying the log (see {@link RunAgentOptions.events}).
+ */
+export interface AgentRunMeta {
+  machineId: string;
+  version: string;
+  /** The log's `executionId` lineage, when the log carries one. */
+  logId?: string;
+  /** The log's length at the moment this snapshot was taken. */
+  logIndex: number;
+}
+
+// The recorded `verification.stateHash` of a log entry is taken from a
+// persisted snapshot BEFORE `persist()` stamps `agentMeta` onto it, so the
+// stamp must come back off before a cached snapshot is compared against the
+// log.
+function hashResumeSnapshot(snapshot: unknown): string {
+  if (snapshot !== null && typeof snapshot === "object" && "agentMeta" in snapshot) {
+    const rest: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(snapshot as Record<string, unknown>)) {
+      if (key !== "agentMeta") {
+        rest[key] = value;
+      }
+    }
+    return getSnapshotStateHash(rest);
+  }
+  return getSnapshotStateHash(snapshot);
+}
+
+function readAgentMeta(snapshot: unknown): Partial<AgentRunMeta> | undefined {
+  const meta = (snapshot as { agentMeta?: unknown } | undefined)?.agentMeta;
+  return meta !== null && typeof meta === "object" ? (meta as Partial<AgentRunMeta>) : undefined;
 }
 
 /** Handler for `agent.userInput` invokes passed as {@link RunAgentOptions.userInput}. Resolves to what the human typed. */
@@ -404,6 +481,52 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   snapshot?: Snapshot<unknown>;
   /** An event to send immediately after starting/resuming the actor (e.g. the human's answer to an idle-state prompt). */
   event?: EventFromLogic<TMachine>;
+  /**
+   * A prior run's `result.events` — the replayable log to resume from and keep
+   * appending to. THE LOG IS THE SOURCE OF TRUTH: journaled model/tool results
+   * are folded back in rather than re-executed, so a crashed run resumes from
+   * its log alone.
+   *
+   * A `snapshot` passed alongside is a CACHE of that log: it is trusted only
+   * when it is stamped (see {@link AgentRunMeta}) at the log's current tail and
+   * hashes to what the tail entry recorded; otherwise the log is replayed and
+   * the cache is verified against the position it claims (a genuine
+   * disagreement throws {@link AgentSnapshotDivergedError}).
+   *
+   * When the log was written by a DIFFERENT machine version, a `snapshot` is
+   * required (XState's own `migrate` applies on restore) and the run starts a
+   * NEW log segment whose init entry records where it bridged from; without one
+   * it throws `AgentMachineVersionMismatchError`.
+   */
+  events?: readonly AgentLogEntry[];
+  /**
+   * Durable log storage, write-ahead. With a `store` the run reads the thread's
+   * log to resume from (unless `events` is given, which wins) and writes every
+   * appended entry back through {@link AgentEventLogStore.append}, in log
+   * order. Writes are awaited before every model call, so a paid call is never
+   * made against an unpersisted log; pure transitions never wait. A rejected
+   * write (an {@link AgentEventLogConflictError} from a concurrent writer, or
+   * any other failure) stops the run: `{ status: 'error', cause: 'journal' }`.
+   *
+   * Requires {@link RunAgentOptions.threadId}.
+   */
+  store?: AgentEventLogStore;
+  /** The {@link RunAgentOptions.store} thread this run reads and appends to. Required whenever `store` is given. */
+  threadId?: string;
+  /**
+   * Called synchronously as each log entry is appended, init entry first. An
+   * observer, never awaited: persisting here is at-least-once and the run does
+   * not wait for it. Use {@link RunAgentOptions.store} for write-ahead
+   * durability.
+   */
+  onEvent?: (entry: AgentLogEntry) => void;
+  /**
+   * Record a `verification.stateHash` on every appended entry (default `true`).
+   * The hash is taken O(1) from the live actor's persisted snapshot right after
+   * that entry's transition, so `replay(machine, events)` can prove it lands on
+   * the same state. Set `false` for a smaller, unverifiable log.
+   */
+  verification?: boolean;
   // actor sources — sugar for machine.provide({ actors }) before the run
   /** Actor source implementations, merged onto the machine before binding — sugar for `machine.provide({ actors })` ahead of the run. */
   actors?: Record<string, AnyActorLogic>;
@@ -526,12 +649,35 @@ type RunAgentOutcome<TMachine extends AnyStateMachine> =
 
 export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<TMachine> & {
   /**
+   * The complete, self-contained replayable log for this run — the resumed
+   * prefix (if any) plus every entry this run appended, starting with the
+   * reserved `@agent.init` entry. Pass it back as
+   * {@link RunAgentOptions.events} to resume; fold it with
+   * `getUsageFromEvents` for cumulative spend; hand it to `replay` for
+   * crash recovery or time travel.
+   */
+  events: AgentLogEntry[];
+  /**
    * Returns XState's persisted snapshot while the run-owned actor is still
    * available, including active child state. Store this value and pass it back
    * as `snapshot` to resume. Persistence, migration, and retries remain XState
    * and host responsibilities.
+   *
+   * The returned object carries an {@link AgentRunMeta} stamp under
+   * `agentMeta`, naming the log position it caches — that is what lets a resume
+   * skip replaying the log. Only the persisted object is stamped; the live
+   * `snapshot` on the result is untouched.
    */
   persist(): Snapshot<unknown>;
+  /**
+   * Resolves once every {@link RunAgentOptions.store} write issued so far has
+   * landed — including a straggler `@agent.usage` entry appended by a call
+   * that settled after the run returned, which the result itself does not wait
+   * for. Await it before terminating the process if those entries matter.
+   * Resolves immediately when the run has no store, and never rejects: a
+   * failed write settles the run with `cause: 'journal'` instead.
+   */
+  drain(): Promise<void>;
   /**
    * Aggregated model-call usage for THIS run — `modelCalls` plus the token
    * fields every executor reported (see {@link AgentUsage} for the
@@ -552,13 +698,16 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
  *   (or wraps) a {@link AgentDecisionExhaustedError} that no `onError` handled.
  * - `'machine'` — any other machine error state.
  * - `'stopped'` — the actor was stopped externally (`status === 'stopped'`).
+ * - `'journal'` — a {@link RunAgentOptions.store} write rejected (a concurrent
+ *   writer's {@link AgentEventLogConflictError}, or any other storage failure).
  */
 export type RunAgentErrorCause =
   | "aborted"
   | "max-model-calls"
   | "decision-exhausted"
   | "machine"
-  | "stopped";
+  | "stopped"
+  | "journal";
 
 let nextRunAgentTraceId = 1;
 
@@ -924,6 +1073,23 @@ interface RunAgentBindContext {
   ) => void;
   /** The owning run's id (`run_<n>`), threaded to executors as `info.runId`. Unset off the runAgent path. */
   runId?: string;
+  /**
+   * Mints the per-call idempotency key threaded to executors as
+   * `info.callKey` (`${executionId}:${siteId}#${n}`). Memoized per invoked
+   * leaf actor (`self`), so every attempt of one decision invoke shares this
+   * invoke-level key; the decision wrap appends the attempt ordinal
+   * (`…#${n}.${attempts.length}`) so retries do not collide in a cache.
+   * Unset off the runAgent path, and when the log has no `executionId`.
+   */
+  callKey?: (siteId: string, self?: object) => string | undefined;
+  /**
+   * The write-ahead barrier: awaited immediately before every text/decision
+   * executor invocation, so no paid call is made against a log that is not yet
+   * durable. Resolves immediately when the run has no
+   * {@link RunAgentOptions.store}; rejects with the journal's failure once a
+   * write has rejected. Unset off the runAgent path.
+   */
+  awaitJournal?: () => Promise<void>;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
   actorHolder: { actorRef: AnyActorRef | undefined };
   /** Registered `setupAgent` schemas (for event `inputSchema`s), if any. */
@@ -1073,6 +1239,9 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
     runCtx.consumeModelCall();
     runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
     try {
+      const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+      // Write-ahead: the log up to this point must be durable before the call.
+      await runCtx.awaitJournal?.();
       const raw = await executor(requestWithTools as AgentExecutorTextRequest, {
         onChunk: (chunk: string) => {
           runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
@@ -1080,6 +1249,7 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
         signal,
         ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
         ...(id !== "" ? { requestId: id } : {}),
+        ...(callKey !== undefined ? { callKey } : {}),
       });
       const output = await normalizeGeneratorResult(raw, id, {
         request,
@@ -1159,6 +1329,20 @@ function createCountingDecide(
     runCtx.emitTrace?.({ type: "request.start", request: attemptRequest }, self);
     try {
       const { id } = selfIdAndSrc(self);
+      // The invoke-level key is memoized on `self`, so every attempt of this
+      // decision shares it — but each attempt is a DISTINCT paid call with a
+      // different request (the rejected attempts ride along as feedback), so
+      // the attempt ordinal is appended: `…#<n>.<attempt>`. Without it a
+      // compliant idempotency cache would replay the rejected first attempt
+      // for every retry. The ordinal comes from `request.attempts.length`, so
+      // a crash re-executing attempt k derives the same key again.
+      const invokeCallKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+      const callKey =
+        invokeCallKey === undefined
+          ? undefined
+          : `${invokeCallKey}.${attemptRequest.attempts?.length ?? 0}`;
+      // Write-ahead: the log up to this point must be durable before the call.
+      await runCtx.awaitJournal?.();
       // `runId` rides on the request like `signal` does: host-injected
       // correlation, never serialized into machine state. It also rides on the
       // `info` second argument, where generateText/streamText carry it.
@@ -1168,6 +1352,7 @@ function createCountingDecide(
           ...info,
           ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
           ...(info?.requestId === undefined && id !== "" ? { requestId: id } : {}),
+          ...(info?.callKey === undefined && callKey !== undefined ? { callKey } : {}),
         },
       );
       const usage = getCallUsage(result);
@@ -1427,7 +1612,7 @@ function provideBindContext(
         : undefined,
     consumeModelCall: () => {},
     recordUsage: (usage, source, self) => {
-      deliverUsageEvent(usage, source ?? {}, () => self?._parent);
+      deliverUsageEvent({ type: AGENT_USAGE_EVENT_TYPE, ...source, usage }, () => self?._parent);
     },
     actorHolder: { actorRef: undefined },
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
@@ -1435,11 +1620,14 @@ function provideBindContext(
 }
 
 /**
- * The single reserved-`@agent.usage` delivery seam, shared by both bind paths:
- * after a bound call settles with reported usage, send the event to the machine
- * actor `resolveActorRef` names — the run's root actor on the `runAgent` path,
+ * The single reserved-`@agent.usage` DELIVERY seam, shared by both bind paths:
+ * after a bound call settles with reported usage, send the prebuilt `event` to
+ * the machine actor `resolveActorRef` names — the run's root actor on the `runAgent` path,
  * the settling request actor's `self._parent` (always the invoking machine
  * under a live `createActor` tree) on the `provideExecutors` path.
+ *
+ * Journaling is separate and unconditional (see `recordUsage`): a call's tokens
+ * are recorded in the event log whether or not the machine reacts to them.
  *
  * Gating is identical on both: the target snapshot must be active, must declare
  * an `'@agent.usage'` transition — explicitly, or through a catch-all
@@ -1454,8 +1642,7 @@ function provideBindContext(
  * `provideExecutors` reports nothing. @internal
  */
 function deliverUsageEvent(
-  usage: AgentCallUsage,
-  source: AgentUsageEventSource,
+  event: AgentUsageEvent,
   resolveActorRef: () => AnyActorRef | undefined,
   onDropped?: (event: AgentUsageEvent) => boolean,
 ): void {
@@ -1467,7 +1654,6 @@ function deliverUsageEvent(
   if (snapshot?.status !== "active" || !declaresUsageTransition(snapshot)) {
     return;
   }
-  const event: AgentUsageEvent = { type: AGENT_USAGE_EVENT_TYPE, ...source, usage };
   if (onDropped?.(event)) {
     return;
   }
@@ -1684,11 +1870,70 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunAgentOptions<TMachine>,
 ): Promise<RunAgentResult<TMachine>> {
-  return createAgentSession(machine, options).settled();
+  const store = options.store;
+  if (store === undefined) {
+    // No store: the run starts synchronously, exactly as it always has.
+    return createAgentSession(machine, options).settled();
+  }
+  const threadId = options.threadId;
+  if (threadId === undefined || threadId === "") {
+    throw new AgentError(
+      "missing-thread-id",
+      "runAgent: `threadId` is required when `store` is given — it names the log thread to read and append to.",
+    );
+  }
+  if (options.events !== undefined) {
+    // An explicit log wins as the resume, but it must BE the thread's log:
+    // appending onto a store that has moved on — or onto a same-length log
+    // that says something else — would interleave two lineages.
+    const storedThread = await store.read(threadId);
+    if (storedThread.length !== options.events.length) {
+      throw new AgentEventLogConflictError(threadId, options.events.length, storedThread.length);
+    }
+    assertThreadMatchesEvents(threadId, storedThread, options.events);
+    return createAgentSession(machine, options).settled();
+  }
+  const stored = await store.read(threadId);
+  return createAgentSession(
+    machine,
+    stored.length > 0 ? { ...options, events: stored } : options,
+  ).settled();
 }
 
 interface AgentRunSession<TMachine extends AnyStateMachine> {
   settled(): Promise<RunAgentResult<TMachine>>;
+}
+
+/**
+ * Entry-by-entry check that the caller's `events` IS the store's thread. Equal
+ * lengths prove nothing: a fork, a rolled-back replay, or a concurrent writer
+ * that appended and truncated all produce a divergent log of the same size,
+ * and appending this run's entries onto it would splice two lineages together.
+ */
+function assertThreadMatchesEvents(
+  threadId: string,
+  stored: readonly AgentLogEntry[],
+  events: readonly AgentLogEntry[],
+): void {
+  for (let index = 0; index < stored.length; index++) {
+    const storedEntry = stored[index]!;
+    const givenEntry = events[index]!;
+    const storedHash = storedEntry.verification?.stateHash;
+    const givenHash = givenEntry.verification?.stateHash;
+    const same =
+      storedEntry.id === givenEntry.id &&
+      storedEntry.index === givenEntry.index &&
+      canonicalEventJson(storedEntry.event) === canonicalEventJson(givenEntry.event) &&
+      (storedHash === undefined || givenHash === undefined || storedHash === givenHash);
+    if (!same) {
+      throw new AgentError(
+        "event-log-conflict",
+        `runAgent: the given \`events\` diverge from thread "${threadId}" at index ${index} ` +
+          `(stored entry '${storedEntry.id}', given '${givenEntry.id}') — ` +
+          "the log passed in is not this thread's log.",
+      );
+    }
+  }
 }
 
 function createAgentSession<TMachine extends AnyStateMachine>(
@@ -1749,12 +1994,172 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     modelCallCount += 1;
   };
 
-  const tokenTotals: Partial<Record<keyof AgentCallUsage, number>> = {};
-
   // Bridges the session closure's `settled` flag (declared further down, once
   // the actor exists) to the usage delivery below, which is defined before it.
   // Nothing has resolved before the run starts.
   const cycleGate = { isResolved: () => false };
+
+  // ─── The replayable event log ───
+  //
+  // `logEntries` is this run's complete log segment: the resumed prefix (if
+  // any) plus every external input the root actor consumed, appended in order
+  // by the inspect handler below. It is the value returned as `result.events`,
+  // and the value `options.onEvent` streams entry by entry.
+  const logEntries: AgentLogEntry[] = [];
+
+  // ─── Write-ahead journaling (`options.store`) ───
+  //
+  // Every appended entry is queued onto ONE chain, so writes reach the store in
+  // log order and each carries its own index as `expectedIndex`. The chain is
+  // awaited at two points only: before a model call (`awaitJournal`, the
+  // barrier the executors call) and at settle. Pure transitions never wait.
+  // The first rejection wins, stops the run (`cause: 'journal'`) and blocks
+  // every later write and call.
+  const store = options.store;
+  const threadId = options.threadId;
+  if (store !== undefined && (threadId === undefined || threadId === "")) {
+    throw new AgentError(
+      "missing-thread-id",
+      "runAgent: `threadId` is required when `store` is given — it names the log thread to read and append to.",
+    );
+  }
+  let journalChain: Promise<void> = Promise.resolve();
+  let journalPending = 0;
+  let journalError: unknown;
+
+  const journalEntry = (entry: AgentLogEntry): void => {
+    if (store === undefined) {
+      return;
+    }
+    journalPending++;
+    journalChain = journalChain
+      .then(async () => {
+        if (journalError !== undefined) {
+          return;
+        }
+        await store.append({
+          threadId: threadId!,
+          expectedIndex: entry.index,
+          entries: [entry],
+        });
+      })
+      .catch((error: unknown) => {
+        journalError ??= error;
+        failRunOnJournalError(error);
+      })
+      .finally(() => {
+        journalPending--;
+      });
+  };
+
+  /**
+   * Every journal write ISSUED SO FAR, including the stragglers appended after
+   * the run settled. Re-reads the chain tail until it stops moving, so a write
+   * queued while an earlier one was in flight is covered too. Never rejects: a
+   * failed write already settled the run with `cause: 'journal'`.
+   */
+  const drainJournal = async (): Promise<void> => {
+    if (store === undefined) {
+      return;
+    }
+    let tail = journalChain;
+    for (;;) {
+      await tail;
+      if (journalPending === 0 && journalChain === tail) {
+        return;
+      }
+      tail = journalChain;
+    }
+  };
+
+  /** The barrier: settle the pending chain, then surface any failure. */
+  const awaitJournal = async (): Promise<void> => {
+    if (store === undefined) {
+      return;
+    }
+    while (journalPending > 0) {
+      await journalChain;
+    }
+    if (journalError !== undefined) {
+      throw journalError;
+    }
+  };
+
+  // A failed write means the log is no longer authoritative — abort the run.
+  // Settling stops the actor, which aborts every in-flight call's signal, and
+  // the barrier above rejects any call that has not started yet. Declared
+  // before `settle` exists; only ever called from a rejected write, i.e. after
+  // this function's synchronous body has run.
+  const failRunOnJournalError = (error: unknown): void => {
+    if (settled) {
+      return;
+    }
+    settle({
+      status: "error",
+      cause: "journal",
+      error,
+      snapshot: actor.getSnapshot() as SnapshotFrom<TMachine>,
+    });
+  };
+
+  // Where THIS run's own entries begin — the fold boundary for `runUsage`.
+  let resumedLogLength = 0;
+  // The lineage id pinned in the log's init entry metadata; also the prefix of
+  // every `callKey`.
+  let logExecutionId: string | undefined;
+  const verificationEnabled = options.verification !== false;
+  // The most recent ROOT snapshot this run observed, used to stamp an entry's
+  // verification hash in O(1) instead of re-folding the whole prefix.
+  let lastRootSnapshot: AnyMachineSnapshot | undefined;
+  // The machine the log is folded against: the authored machine with
+  // `options.actors` merged in, so every invoke src resolves. Assigned once
+  // `provided` exists, below; nothing folds before then. NOT the
+  // executor-bound machine — the log must fold the same way for a caller who
+  // calls `replay(machine, events)` with no host executors at all.
+  let logMachine: AnyStateMachine = machine;
+
+  // Cleared when this run cannot produce a self-contained log at all — a
+  // snapshot that is not JSON-safe, or a machine whose init entry cannot be
+  // built (see `appendInitEntry`). Journaling a suffix with no `@agent.init`
+  // entry would produce a log `replay` rejects, so nothing is journaled.
+  let loggingEnabled = true;
+
+  const appendLogEntry = (
+    event: EventObject,
+    snapshot?: AnyMachineSnapshot | AgentPersistedSnapshot,
+  ): AgentLogEntry | undefined => {
+    if (!loggingEnabled) {
+      return undefined;
+    }
+    const entry = createReplayEntry(logMachine, logEntries, event, {
+      machineVersion,
+      verification: verificationEnabled,
+      // With no snapshot, `createReplayEntry` re-folds the whole prefix to get
+      // the hash. Every journaled transition has one to hand, so that fallback
+      // is reserved for the rare out-of-band append (see `usageEntrySnapshot`).
+      ...(verificationEnabled && snapshot !== undefined ? { snapshot } : {}),
+    });
+    logEntries.push(entry);
+    journalEntry(entry);
+    options.onEvent?.(entry);
+    return entry;
+  };
+
+  // The snapshot an `@agent.usage` entry that was NOT delivered folds to.
+  // Replay feeds every journaled entry through `transition`, so the recorded
+  // hash must be the POST-transition state. When the live configuration
+  // declares no `@agent.usage` transition (the common case) that transition is
+  // a no-op and the current snapshot is exactly right. Otherwise the event was
+  // withheld from a machine that would have reacted (a guard, or a straggler
+  // after settle), so the live snapshot is NOT what replay produces — fall back
+  // to `createReplayEntry`'s own fold, which is correct by construction.
+  const usageEntrySnapshot = (): AnyMachineSnapshot | undefined => {
+    const current = lastRootSnapshot;
+    if (current && (current.status !== "active" || !declaresUsageTransition(current))) {
+      return current;
+    }
+    return undefined;
+  };
 
   // Reserved `@agent.usage` delivery — the seam that puts a settled call's
   // tokens in reach of the machine's own context and guards (see
@@ -1782,26 +2187,41 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // in here (see AgentUsage). Token fields are partial sums — a field stays
   // undefined until some call reports it. Scoped to THIS run only.
   const recordUsage = (usage: AgentCallUsage, source: AgentUsageEventSource = {}) => {
-    for (const field of AGENT_USAGE_TOKEN_FIELDS) {
-      const value = usage[field];
-      if (typeof value === "number" && Number.isFinite(value)) {
-        tokenTotals[field] = (tokenTotals[field] ?? 0) + value;
-      }
+    const event: AgentUsageEvent = { type: AGENT_USAGE_EVENT_TYPE, ...source, usage };
+    // Set for the duration of the delivery attempt below: if the machine takes
+    // the event, the inspect handler journals it (with the post-transition
+    // snapshot) and records the entry here, so this function does not append a
+    // second one.
+    const journal: { event: AgentUsageEvent; entry?: AgentLogEntry } = { event };
+    pendingUsageJournal = journal;
+    try {
+      deliverUsageEvent(
+        event,
+        () => actorHolder.actorRef,
+        (dropped) => {
+          if (!cycleGate.isResolved()) {
+            return false;
+          }
+          onTrace({ type: "usage.dropped", event: dropped, reason: "settled" });
+          return true;
+        },
+      );
+    } finally {
+      pendingUsageJournal = undefined;
     }
-    deliverUsageEvent(
-      usage,
-      source,
-      () => actorHolder.actorRef,
-      (event) => {
-        if (!cycleGate.isResolved()) {
-          return false;
-        }
-        onTrace({ type: "usage.dropped", event, reason: "settled" });
-        return true;
-      },
-    );
+    if (journal.entry === undefined) {
+      appendLogEntry(event, usageEntrySnapshot());
+    }
   };
-  const runUsage = (): AgentUsage => ({ ...tokenTotals, modelCalls: modelCallCount });
+  let pendingUsageJournal: { event: AgentUsageEvent; entry?: AgentLogEntry } | undefined;
+  // Run-scoped, and a pure projection of the log: fold the `@agent.usage`
+  // entries THIS run appended (everything past the resumed prefix). The prior
+  // leg's entries are still in `result.events`, so a caller that wants the
+  // cumulative total folds the whole log with `getUsageFromEvents`.
+  const runUsage = (): AgentUsage => ({
+    ...getUsageFromEvents(logEntries.slice(resumedLogLength)),
+    modelCalls: modelCallCount,
+  });
 
   // Dev-only: on idle settle, warn once if the snapshot's context holds values
   // that won't round-trip through JSON persistence. Skipped in production and
@@ -1834,6 +2254,8 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     actors: options.actors as never,
   }) as TMachine;
 
+  logMachine = provided;
+
   const effectiveSources = provided.sources.actors as Record<string, AnyActorLogic>;
 
   const registeredModels = getRegisteredAgentExecutionOptions(machine).models as
@@ -1855,6 +2277,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     consumeModelCall,
     recordUsage,
     actorHolder,
+    awaitJournal,
     runId,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
   };
@@ -1931,7 +2354,238 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   const isIntentionalIdle = (snapshot: AnyMachineSnapshot) =>
     isIdle(snapshot) || collectPendingUserInputs(snapshot).length > 0;
 
-  const effectiveSnapshot = options.snapshot;
+  // ─── Resume precedence: the log is truth, the snapshot is a cache ───
+  //
+  // 1. `events` at THIS machine version — continue that log. A `snapshot`
+  //    stamped at the log's tail (same lineage, same length, matching hash) is
+  //    trusted as-is; anything else replays the log and, when the snapshot
+  //    claims a position in it, hash-checks the snapshot there.
+  // 2. `events` at ANOTHER machine version — a `snapshot` is required (XState's
+  //    `migrate` applies on restore) and the run opens a NEW log segment whose
+  //    init entry carries the post-migration snapshot and `migratedFrom`.
+  // 3. `snapshot` only — restore it and start a self-contained log from it.
+  // 4. Neither — a fresh start, logged from `input`.
+  const resumeEvents = options.events;
+  let effectiveSnapshot: Snapshot<unknown> | undefined = options.snapshot;
+  /** Deferred until after the illegal-resume check, so a rejected resume emits no entries. */
+  let seedInitEntry: (() => void) | undefined;
+
+  // The persisted form of `options.snapshot` AFTER XState has restored it
+  // (which is where `createMachine({ migrate })` runs), so an init entry
+  // records the snapshot the machine will actually resume from. Undefined when
+  // this machine cannot restore it — the raw snapshot is then recorded instead,
+  // and the run fails on its own terms a few lines later.
+  const restoredPersistedSnapshot = (): AgentPersistedSnapshot | undefined => {
+    try {
+      const restored = (
+        logMachine as unknown as {
+          restoreSnapshot(persisted: AgentPersistedSnapshot): AnyMachineSnapshot;
+        }
+      ).restoreSnapshot(options.snapshot as AgentPersistedSnapshot);
+      return logMachine.getPersistedSnapshot(restored) as AgentPersistedSnapshot;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
+   * Appends the log's reserved first entry, trying each candidate `init` in
+   * turn and, for each, an unverified entry if the hash cannot be computed.
+   * A machine or snapshot that defeats every attempt leaves the run WITHOUT a
+   * log rather than failing it: `runAgent` predates the log, and an exotic
+   * machine that cannot be folded must still run.
+   */
+  const appendInitEntry = (
+    candidates: readonly AgentLogInit[],
+    metadata: Record<string, AgentLogJsonValue>,
+  ): void => {
+    for (const init of candidates) {
+      for (const verification of verificationEnabled ? [true, false] : [false]) {
+        try {
+          const entry = initEntry(logMachine, init, { machineVersion, verification, metadata });
+          logEntries.push(entry);
+          journalEntry(entry);
+          options.onEvent?.(entry);
+          return;
+        } catch {
+          // Try the next (less exact) form.
+        }
+      }
+    }
+    loggingEnabled = false;
+  };
+
+  /** Init forms for a snapshot resume, most faithful first. */
+  const snapshotInitCandidates = (): AgentLogInit[] => {
+    const restored = restoredPersistedSnapshot();
+    return [
+      ...(restored !== undefined ? [{ snapshot: restored } as AgentLogInit] : []),
+      { snapshot: options.snapshot as AgentPersistedSnapshot } as AgentLogInit,
+    ];
+  };
+
+  if (resumeEvents !== undefined && resumeEvents.length > 0) {
+    validateReplayEntries(resumeEvents);
+    const tail = resumeEvents[resumeEvents.length - 1]!;
+    const inheritedExecutionId = getLogExecutionId(resumeEvents);
+    // A log written by a DIFFERENT machine is never a resume for this one: its
+    // entries fold against states this machine does not have, and its snapshot
+    // caches another artifact's state. Only a version change is bridgeable.
+    if (resumeEvents[0]!.machineId !== machineId) {
+      throw new AgentMachineVersionMismatchError(
+        tail.id,
+        tail.index,
+        { machineId, machineVersion },
+        { machineId: resumeEvents[0]!.machineId, machineVersion: tail.machineVersion },
+      );
+    }
+    const sameMachine = tail.machineVersion === machineVersion;
+
+    if (sameMachine) {
+      logEntries.push(...resumeEvents);
+      resumedLogLength = logEntries.length;
+      logExecutionId = inheritedExecutionId;
+
+      // Lineage, not length: a snapshot cached at index N of ANOTHER log (a
+      // fork, a sibling thread) can trivially collide with this log's length,
+      // so the fast path also requires the log's `executionId` and the tail
+      // entry's recorded hash to agree. The hash must be PRESENT: an
+      // unverified log (`verification: false`) records none, and trusting a
+      // snapshot on its self-reported `agentMeta` alone would let a tampered
+      // cache override the log. No hash, no fast path — the log is the truth.
+      const cachedMeta = readAgentMeta(options.snapshot);
+      const tailStateHash = tail.verification?.stateHash;
+      const trustedCache =
+        options.snapshot !== undefined &&
+        inheritedExecutionId !== undefined &&
+        cachedMeta?.logId === inheritedExecutionId &&
+        cachedMeta.logIndex === resumeEvents.length &&
+        tailStateHash !== undefined &&
+        hashResumeSnapshot(options.snapshot) === tailStateHash;
+
+      if (!trustedCache) {
+        const cachedIndex = cachedMeta?.logIndex;
+        if (
+          options.snapshot !== undefined &&
+          typeof cachedIndex === "number" &&
+          cachedIndex >= 1 &&
+          cachedIndex <= resumeEvents.length &&
+          // Only a verified log can call a snapshot divergent: with
+          // verification off the caller opted out of hashes, so a disagreeing
+          // snapshot is simply ignored in favour of the log.
+          resumeEvents[cachedIndex - 1]!.verification?.stateHash !== undefined
+        ) {
+          const atCache = replay(logMachine, resumeEvents.slice(0, cachedIndex), {
+            machineVersion,
+            verify: false,
+          });
+          const expected = getSnapshotStateHash(atCache.persistedSnapshot);
+          const actual = hashResumeSnapshot(options.snapshot);
+          if (expected !== actual) {
+            throw new AgentSnapshotDivergedError(expected, actual, cachedIndex);
+          }
+        }
+        effectiveSnapshot = replay(logMachine, resumeEvents, {
+          machineVersion,
+          verify: true,
+        }).persistedSnapshot as Snapshot<unknown>;
+      }
+    } else {
+      // Version bridge. Without a snapshot there is nothing to migrate FROM:
+      // the log's entries were produced by transitions this machine no longer
+      // has, so folding them is not sound.
+      if (options.snapshot === undefined) {
+        throw new AgentMachineVersionMismatchError(
+          tail.id,
+          tail.index,
+          { machineId, machineVersion },
+          { machineId: tail.machineId, machineVersion: tail.machineVersion },
+        );
+      }
+      // The snapshot must BE the cache of THIS log's tail under the old
+      // version: the bridge cannot fold the log itself, so an older or foreign
+      // snapshot would silently roll the thread back to state the log has
+      // already moved past.
+      const bridgeMeta = readAgentMeta(options.snapshot);
+      if (inheritedExecutionId === undefined || bridgeMeta?.logId !== inheritedExecutionId) {
+        throw new AgentMachineVersionMismatchError(
+          tail.id,
+          tail.index,
+          { machineId, machineVersion },
+          { machineId: tail.machineId, machineVersion: tail.machineVersion },
+        );
+      }
+      const bridgeTailHash = tail.verification?.stateHash;
+      // Hashed BEFORE any migration: the recorded hash describes the snapshot
+      // as the old version persisted it.
+      const bridgeSnapshotHash = hashResumeSnapshot(options.snapshot);
+      if (bridgeMeta.logIndex !== resumeEvents.length) {
+        throw new AgentSnapshotDivergedError(
+          bridgeTailHash ?? "(unrecorded)",
+          bridgeSnapshotHash,
+          resumeEvents.length,
+        );
+      }
+      if (bridgeTailHash !== undefined && bridgeSnapshotHash !== bridgeTailHash) {
+        throw new AgentSnapshotDivergedError(
+          bridgeTailHash,
+          bridgeSnapshotHash,
+          resumeEvents.length,
+        );
+      }
+      logExecutionId = inheritedExecutionId;
+      const migratedFrom: Record<string, AgentLogJsonValue> = {
+        machineVersion: tail.machineVersion,
+        logIndex: resumeEvents.length,
+      };
+      seedInitEntry = () =>
+        appendInitEntry(snapshotInitCandidates(), {
+          ...(logExecutionId !== undefined ? { executionId: logExecutionId } : {}),
+          migratedFrom,
+        });
+    }
+  } else if (options.snapshot !== undefined) {
+    logExecutionId = crypto.randomUUID();
+    seedInitEntry = () =>
+      appendInitEntry(snapshotInitCandidates(), { executionId: logExecutionId! });
+  } else {
+    logExecutionId = crypto.randomUUID();
+    seedInitEntry = () =>
+      appendInitEntry([resolvedInput !== undefined ? { input: resolvedInput } : {}], {
+        executionId: logExecutionId!,
+      });
+  }
+
+  // ─── Per-call idempotency keys (`info.callKey`) ───
+  // `${executionId}:${siteId}#${n}`: the log lineage plus the occurrence of
+  // this call at this invoke site. `n` uses ONE counting rule
+  // (`agentCallOccurrence`) over the RESUMED prefix — the log as it stood when
+  // this run began — advanced by the calls this run has already started at that
+  // site. Reading the live log instead would race: XState starts the next
+  // invoke (and its executor) before the previous completion's entry is
+  // appended by the inspect handler, so two loop iterations would collide on
+  // `#1`. Seeding from the prefix keeps a resumed leg aligned: a crash recovery
+  // whose log holds one completion re-executes the in-flight call as `#2`,
+  // exactly the id a replay derives for it.
+  const resumedHistory: readonly AgentLogEntry[] = [...logEntries];
+  const siteCallCounts = new Map<string, number>();
+  const mintedCallKeys = new WeakMap<object, string>();
+  runCtx.callKey = (siteId: string, self?: object) => {
+    if (logExecutionId === undefined) {
+      return undefined;
+    }
+    const memoized = self === undefined ? undefined : mintedCallKeys.get(self);
+    if (memoized !== undefined) {
+      return memoized;
+    }
+    const startedHere = siteCallCounts.get(siteId) ?? 0;
+    siteCallCounts.set(siteId, startedHere + 1);
+    const key = `${logExecutionId}:${siteId}#${agentCallOccurrence(resumedHistory, siteId) + startedHere}`;
+    if (self !== undefined) {
+      mintedCallKeys.set(self, key);
+    }
+    return key;
+  };
 
   // Feature B: reject a resume `event` the restored state cannot take. Checked
   // here (before the actor starts, like the bind-time throws) against the
@@ -1953,8 +2607,14 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     }
   }
 
+  // The log's first entry is appended only once the run is actually going to
+  // start: a rejected resume event (above) must not emit an entry.
+  seedInitEntry?.();
+
   // One run = start (or resume event) to the next quiescence.
   let settled = false;
+  // The journal chain as it stood at settle (see `settle`).
+  let journalAtSettle: Promise<void> | undefined;
   // A call settling after the run resolved is a straggler (see
   // deliverUsageEvent): dropped after the run settles.
   cycleGate.isResolved = () => settled;
@@ -1984,16 +2644,34 @@ function createAgentSession<TMachine extends AnyStateMachine>(
         persistenceError = error;
       }
     }
+    // The log position this snapshot caches, frozen at settle: a straggler
+    // appended afterwards makes the cache stale, and the stamp says so.
+    const logIndexAtSettle = logEntries.length;
+    // Every write queued so far, in one promise: the result waits for these.
+    // A straggler `@agent.usage` entry appended after this point is still
+    // written, but chains behind and is not awaited.
+    journalAtSettle = journalChain;
     const persist = () => {
       if (persistenceError !== undefined) {
         throw persistenceError;
       }
       persistedSnapshot ??= actor.getPersistedSnapshot() as Snapshot<unknown>;
+      // Stamped on the PERSISTED object only — a plain enumerable field, so it
+      // survives a JSON round-trip and is read back by the next resume. The
+      // live `result.snapshot` is left exactly as XState produced it.
+      (persistedSnapshot as { agentMeta?: AgentRunMeta }).agentMeta = {
+        machineId,
+        version: machineVersion,
+        ...(logExecutionId !== undefined ? { logId: logExecutionId } : {}),
+        logIndex: logIndexAtSettle,
+      };
       return persistedSnapshot;
     };
     const result = {
       ...outcome,
+      events: [...logEntries],
       persist,
+      drain: drainJournal,
       usage: runUsage(),
     } as RunAgentResult<TMachine>;
     if (idleTimer !== undefined) {
@@ -2087,6 +2765,29 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       }
 
       const snapshot = event.snapshot as AnyMachineSnapshot;
+      lastRootSnapshot = snapshot;
+
+      // ─── Journaling ───
+      // The log is deliberately smaller than the trace: only EXTERNAL inputs
+      // are recorded, because replay re-derives everything else. A root
+      // transition is external when its event came from outside the root actor
+      // (a host `send`, the resume event, a child's
+      // `xstate.done.actor`/`xstate.error.actor`, the reserved `@agent.usage`
+      // and `agent.messages` events this library sends). `xstate.timer` is the
+      // one self-sent input that must be retained — a fired `after` delay is
+      // real time passing, not machine logic. Raised/internal events and
+      // `@xstate.init` are re-derived by `initialTransition`/`transition`.
+      if (
+        pendingUsageJournal !== undefined &&
+        (event.event as unknown) === (pendingUsageJournal.event as unknown)
+      ) {
+        pendingUsageJournal.entry = appendLogEntry(event.event as EventObject, snapshot);
+      } else if (
+        event.event.type !== "@xstate.init" &&
+        (event.sourceRef !== event.actorRef || event.event.type === "xstate.timer")
+      ) {
+        appendLogEntry(event.event as EventObject, snapshot);
+      }
 
       onTrace({
         type: "machine.transition",
@@ -2188,12 +2889,19 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   }
 
   const sessionApi: AgentRunSession<TMachine> = {
-    settled: () =>
-      settled && lastResult !== undefined
-        ? Promise.resolve(lastResult)
-        : new Promise<RunAgentResult<TMachine>>((resolve) => {
-            waiters.push(resolve);
-          }),
+    settled: async () => {
+      const result =
+        settled && lastResult !== undefined
+          ? lastResult
+          : await new Promise<RunAgentResult<TMachine>>((resolve) => {
+              waiters.push(resolve);
+            });
+      // The run resolves only once the log it reports is durable. A write that
+      // rejected has already settled the run with `cause: 'journal'`, so the
+      // failure is on the result, not thrown here.
+      await journalAtSettle;
+      return result;
+    },
   };
 
   if (options.signal) {
@@ -2224,6 +2932,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // to deliver a resume event to an actor XState has already stopped).
   if (!settled) {
     const startedSnapshot = actor.getSnapshot() as AnyMachineSnapshot;
+    lastRootSnapshot ??= startedSnapshot;
     if (startedSnapshot.status === "done") {
       settle({
         status: "done",

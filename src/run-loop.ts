@@ -1,5 +1,6 @@
 import type { AnyStateMachine, EventFromLogic } from "xstate";
 import { runAgent, type RunAgentOptions, type RunAgentResult } from "./run-agent.js";
+import type { AgentLogEntry } from "./event-log.js";
 import type { AgentUsage } from "./text-logic.js";
 
 export interface RunAgentLoopOptions<TMachine extends AnyStateMachine> extends Omit<
@@ -38,7 +39,10 @@ export async function runAgentLoop<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: RunAgentLoopOptions<TMachine>,
 ): Promise<RunAgentResult<TMachine>> {
-  const { onIdle, persist, maxTurns = 100, ...runOptions } = options;
+  // `events` is pulled OUT of the forwarded options: it is turn-scoped (see
+  // below), and leaving it in `runOptions` would re-assert turn 1's log on
+  // every later turn — a store-backed loop would then conflict on turn 2.
+  const { onIdle, persist, maxTurns = 100, events: initialEvents, ...runOptions } = options;
   if (!Number.isInteger(maxTurns) || maxTurns < 0) {
     throw new Error("runAgentLoop: maxTurns must be a non-negative integer.");
   }
@@ -46,12 +50,20 @@ export async function runAgentLoop<TMachine extends AnyStateMachine>(
   let usage: AgentUsage = { modelCalls: 0 };
   let snapshot: ReturnType<RunAgentResult<TMachine>["persist"]> | undefined;
   let event: EventFromLogic<TMachine> | undefined;
+  // Threaded turn to turn so the whole loop yields ONE continuous log rather
+  // than a fresh segment per turn. With a `store`, the log lives there: the
+  // caller's `events` seeds the FIRST turn only, and every later turn reads
+  // the thread back from the store instead.
+  const stored = options.store !== undefined;
+  let events: readonly AgentLogEntry[] | undefined = initialEvents;
 
   for (let turn = 0; ; turn++) {
     const result = await runAgent(machine, {
       ...runOptions,
+      ...(events ? { events } : {}),
       ...(snapshot ? { snapshot, event } : {}),
     } as RunAgentOptions<TMachine>);
+    events = stored ? undefined : result.events;
     usage = addUsage(usage, result.usage);
     const cumulative = { ...result, usage } as RunAgentResult<TMachine>;
 

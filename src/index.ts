@@ -84,9 +84,46 @@ export type { AgentRequest, AgentStepRequest } from "./steps.js";
 export { AGENT_USAGE_EVENT_TYPE } from "./usage.js";
 export type { AgentUsageEvent } from "./usage.js";
 export {
+  AGENT_EVENT_SCHEMA_VERSION,
+  AGENT_INIT_EVENT_TYPE,
+  AgentEventLogError,
+  AgentMachineVersionMismatchError,
+  AgentReplayDivergenceError,
+  NonSerializableAgentEventError,
+  agentCallOccurrence,
+  assertAgentLogEntry,
+  assertJsonSerializable,
+  createReplayEntry,
+  forkEventLog,
+  getLogExecutionId,
+  getSnapshotStateHash,
+  getUsageFromEvents,
+  initEntry,
+  rebindActorSession,
+  replay,
+  validateReplayEntries,
+} from "./event-log.js";
+export type {
+  AgentInitEvent,
+  AgentLogEntry,
+  AgentLogInit,
+  AgentLogVerification,
+  AgentPersistedSnapshot,
+  CreateReplayEntryOptions,
+  JsonValue,
+  ReplayOptions,
+  // Named return type of `replay`, so declaration emit can name it.
+  ReplayResult,
+} from "./event-log.js";
+export { AgentEventLogConflictError, createInMemoryEventLogStore } from "./event-log-store.js";
+export type { AgentEventLogStore } from "./event-log-store.js";
+export { assertEventLogStoreConformance } from "./event-log-store-conformance.js";
+export type { EventLogStoreConformanceHarness } from "./event-log-store-conformance.js";
+export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentIllegalResumeEventError,
   AgentMaxModelCallsExceededError,
+  AgentSnapshotDivergedError,
   inspectTransitions,
   isAgentIdle,
   runAgent,
@@ -99,6 +136,7 @@ export { runAgentLoop } from "./run-loop.js";
 export type { RunAgentLoopOptions } from "./run-loop.js";
 export type {
   AgentInputFrom,
+  AgentRunMeta,
   AgentTransitionHandler,
   AgentTraceEvent,
   AgentUserInputExecutor,
