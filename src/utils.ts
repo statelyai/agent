@@ -286,11 +286,17 @@ export function getStateMeta<
  * onTransition: (snapshot) => console.log(getStatePath(snapshot));
  * ```
  */
-export function getStatePath(snapshot: { value: StateValue } | StateValue): string {
-  const value =
-    typeof snapshot === "object" && snapshot !== null && "value" in snapshot
-      ? (snapshot as { value: StateValue }).value
-      : (snapshot as StateValue);
+export function getStatePath(
+  snapshot: { value: StateValue; status?: string } | StateValue,
+): string {
+  // A snapshot is recognised by its `status` field (or `matches` method), never
+  // by a `value` key alone: a state named `value` would otherwise be mistaken
+  // for one and lose its parent in the path.
+  const isSnapshot =
+    typeof snapshot === "object" &&
+    snapshot !== null &&
+    ("status" in snapshot || typeof (snapshot as { matches?: unknown }).matches === "function");
+  const value = isSnapshot ? (snapshot as { value: StateValue }).value : (snapshot as StateValue);
   return serializeStateValue(value);
 }
 

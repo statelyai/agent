@@ -298,6 +298,11 @@ describe("getStatePath", () => {
     expect(getStatePath({ p: { b: "two", a: "one" } })).toBe("p:{a.one,b.two}");
   });
 
+  test("does not mistake a state named `value` for a snapshot", () => {
+    expect(getStatePath({ value: "ready" })).toBe("value.ready");
+    expect(getStatePath({ value: "ready", status: "active" })).toBe("ready");
+  });
+
   test("accepts a snapshot as well as a raw state value", () => {
     const pathMachine = agent.createMachine({
       context: {},

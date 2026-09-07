@@ -440,11 +440,27 @@ export function createDecisionRequest(options: CreateDecisionRequestOptions): Ag
     kind: "decision",
     id: id ?? name ?? "decision",
     ...(name === undefined ? {} : { name }),
-    events: events.map((event) =>
-      typeof event === "string" ? { type: event, toolName: sanitizeEventToolName(event) } : event,
+    events: dedupeToolNames(
+      events.map((event) =>
+        typeof event === "string" ? { type: event, toolName: sanitizeEventToolName(event) } : event,
+      ),
     ),
     attempts: attempts ?? [],
   };
+}
+
+// Sanitizing collapses distinct event types onto one tool name (`foo.bar` and
+// `foo/bar` both become `foo_bar`), and executors pick the first match. Give
+// every later collision a numeric suffix so each candidate stays reachable.
+function dedupeToolNames<T extends { toolName?: string }>(candidates: T[]): T[] {
+  const taken = new Set<string>();
+  return candidates.map((candidate) => {
+    if (candidate.toolName === undefined) return candidate;
+    let toolName = candidate.toolName;
+    for (let n = 2; taken.has(toolName); n++) toolName = `${candidate.toolName}_${n}`;
+    taken.add(toolName);
+    return toolName === candidate.toolName ? candidate : { ...candidate, toolName };
+  });
 }
 
 /** Decision request after core has resolved its semantic identity. */

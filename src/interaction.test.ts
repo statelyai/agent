@@ -35,7 +35,7 @@ describe("interactions", () => {
             textEvent: "REJECT",
           },
         },
-        on: { APPROVE: {}, REJECT: {} },
+        on: { APPROVE: { target: "review" }, REJECT: { target: "review" } },
       },
     },
   });
@@ -82,7 +82,7 @@ describe("interactions", () => {
               textEvent: "HIDDEN",
             },
           },
-          on: { APPROVE: {} },
+          on: { APPROVE: { target: "review" } },
         },
       },
     });
@@ -127,6 +127,9 @@ describe("interactionMetaSchema", () => {
     expect(validate({ interaction: [] })).toMatchObject({
       issues: [{ path: ["interaction"] }],
     });
+    expect(validate({ interaction: { events: { APPROVE: ["Approve"] } } })).toMatchObject({
+      issues: [{ path: ["interaction", "events", "APPROVE"] }],
+    });
     expect(validate(null)).toMatchObject({ issues: [{ message: expect.any(String) }] });
   });
 
@@ -142,7 +145,7 @@ describe("interactionMetaSchema", () => {
       states: {
         review: {
           meta: { interaction: { label: "Approve {subject}?", events: { APPROVE: "Approve" } } },
-          on: { APPROVE: {} },
+          on: { APPROVE: { target: "review" } },
         },
       },
     });
@@ -165,7 +168,7 @@ describe("getInteraction whitespace", () => {
     states: {
       review: {
         meta: { interaction: { label: "Apply?\n{diff}", events: { APPROVE: "Approve  now" } } },
-        on: { APPROVE: {} },
+        on: { APPROVE: { target: "review" } },
       },
     },
   });
@@ -227,5 +230,33 @@ describe("interaction event typing", () => {
     expectTypeOf(interaction.events[0]!.type).toEqualTypeOf<
       "APPROVE" | "REJECT" | "agent.messages" | "@agent.usage"
     >();
+  });
+});
+
+describe("getInteraction respects guards on choice events", () => {
+  test("a choice the machine would refuse right now is not rendered", () => {
+    const agent = setupAgent({
+      context: z.object({ turns: z.number() }),
+      events: { AGAIN: z.object({}), END: z.object({}) },
+      meta: interactionMetaSchema,
+    });
+    const machine = agent.createMachine({
+      context: { turns: 0 },
+      initial: "waiting",
+      states: {
+        waiting: {
+          meta: { interaction: { label: "Go on?", events: { AGAIN: "Again", END: "End" } } },
+          on: {
+            AGAIN: ({ context }) => (context.turns >= 1 ? undefined : { target: "waiting" }),
+            END: { target: "done" },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    const fresh = machine.resolveState({ value: "waiting", context: { turns: 0 } });
+    const spent = machine.resolveState({ value: "waiting", context: { turns: 1 } });
+    expect(getInteraction(fresh)?.events.map((event) => event.type)).toEqual(["AGAIN", "END"]);
+    expect(getInteraction(spent)?.events.map((event) => event.type)).toEqual(["END"]);
   });
 });

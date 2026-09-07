@@ -12,8 +12,9 @@
  *     `agent.decide` over HANDOFF / KEEP, and the HANDOFF transition guard
  *     rejects a handoff to the agent that already holds the mic, so the
  *     decision retries instead of a no-op switch landing in context.
- *   - the loop is bounded: after `MAX_TURNS` replies SAY is no longer legal,
- *     so END (and the `finished` final state) is the only way out.
+ *   - the loop is bounded by a state: after `MAX_TURNS` replies the machine
+ *     idles in `budgetSpent`, which declares only END, so the host's
+ *     `getInteraction` call sees the bound instead of guessing at a guard.
  *   - the idle snapshot is JSON round-tripped between turns, proving the
  *     active agent survives a real persistence layer.
  *
@@ -119,7 +120,7 @@ export const swarmHandoffMachine = agentSetup.createMachine({
         src: "travelReply",
         input: ({ context }) => ({ message: context.message }),
         onDone: ({ context, output }) => ({
-          target: "waiting",
+          target: "checkingBudget",
           context: { reply: output, turns: context.turns + 1 },
         }),
         onError: { target: "failed" },
@@ -130,11 +131,29 @@ export const swarmHandoffMachine = agentSetup.createMachine({
         src: "foodReply",
         input: ({ context }) => ({ message: context.message }),
         onDone: ({ context, output }) => ({
-          target: "waiting",
+          target: "checkingBudget",
           context: { reply: output, turns: context.turns + 1 },
         }),
         onError: { target: "failed" },
       },
+    },
+    // The turn budget is a state, not a guard the host has to guess at:
+    // once it is spent the machine idles in `budgetSpent`, where SAY is not
+    // declared at all, so `getInteraction` shows END as the only way on.
+    checkingBudget: {
+      type: "choice",
+      choice: ({ context }) =>
+        context.turns >= MAX_TURNS ? { target: "budgetSpent" } : { target: "waiting" },
+    },
+    budgetSpent: {
+      tags: ["waiting"],
+      meta: {
+        interaction: {
+          label: "The {activeAgent} concierge answered. That was the last turn; end here.",
+          events: { END: { label: "End the conversation", style: "default" } },
+        },
+      },
+      on: { END: { target: "finished" } },
     },
     // No invoke: runAgent settles idle here. The host persists the snapshot,
     // then resumes with the human's next message (or END).
@@ -149,12 +168,7 @@ export const swarmHandoffMachine = agentSetup.createMachine({
         },
       },
       on: {
-        // Past the turn budget SAY is illegal, so END is the only way on and
-        // the conversation cannot loop forever.
-        SAY: ({ context, event }) =>
-          context.turns >= MAX_TURNS
-            ? undefined
-            : { target: "routing", context: { message: event.message } },
+        SAY: ({ event }) => ({ target: "routing", context: { message: event.message } }),
         END: { target: "finished" },
       },
     },

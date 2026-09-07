@@ -56,7 +56,7 @@ function issue(message: string, path: (string | number)[]) {
 // Validates one `meta.interaction.events` entry.
 function validateEventMeta(value: unknown, path: (string | number)[]) {
   if (typeof value === "string") return [];
-  if (!value || typeof value !== "object") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return [issue("Expected a label string or an interaction event descriptor", path)];
   }
   const descriptor = value as Record<string, unknown>;
@@ -168,6 +168,23 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
     .filter(([type]) => accepted.has(type))
     .map(([type, config]) => {
       const descriptor = typeof config === "string" ? { label: config } : config;
+      return [type, descriptor] as const;
+    })
+    // A choice's payload is its fixed fields, so ask the machine whether it
+    // would take the event right now: a guard or a function transition
+    // returning `undefined` hides the choice, and so does a targetless,
+    // action-less transition (XState's `can` counts that as a no-op). A
+    // choice whose schema needs fields the metadata does not fix cannot be
+    // checked this way and stays rendered; the free-text event is never
+    // checked because its payload is not known yet.
+    .filter(([type, descriptor]) => {
+      try {
+        return snapshot.can({ type, ...(descriptor.event ?? {}) } as never);
+      } catch {
+        return true;
+      }
+    })
+    .map(([type, descriptor]) => {
       return {
         type,
         label: interpolate(descriptor.label ?? type, snapshot.context, preserveWhitespace),

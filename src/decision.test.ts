@@ -37,6 +37,19 @@ describe("renderDecisionAttempts", () => {
 });
 
 describe("createDecisionRequest", () => {
+  test("keeps colliding sanitized tool names distinct", () => {
+    const request = createDecisionRequest({
+      model: "picker",
+      prompt: "Pick one.",
+      events: ["foo.bar", "foo/bar", "foo bar"],
+    });
+    const toolNames = request.events.map((event) => event.toolName);
+    expect(new Set(toolNames).size).toBe(3);
+    expect(toolNames[0]).toBe("send_event_foo_bar");
+    expect(toolNames[1]).toBe("send_event_foo_bar_2");
+    expect(toolNames[2]).toBe("send_event_foo_bar_3");
+  });
+
   test("fills in kind, id, attempts, and tool names", () => {
     expect(
       createDecisionRequest({

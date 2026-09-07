@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { createScriptedExecutors } from "@statelyai/agent";
+import { createScriptedExecutors, getInteraction } from "@statelyai/agent";
 import { runSwarmHandoffExample, swarmHandoffMachine, MAX_TURNS } from "./index.js";
 
 // Name-keyed script: `travelReply`/`foodReply` are request names, `route` is
@@ -54,14 +54,20 @@ test("a HANDOFF to the agent already holding the mic is rejected and retried", a
   assert.equal(food.activeAgent, "food");
 });
 
-test("SAY is illegal once the turn budget is spent, so only END remains", async () => {
+test("the spent turn budget is a state where only END is offered", async () => {
   const context = {
     message: "one more",
     activeAgent: "travel" as const,
     reply: "answered",
     turns: MAX_TURNS,
   };
-  const snapshot = swarmHandoffMachine.resolveState({ value: "waiting", context });
+  const snapshot = swarmHandoffMachine.resolveState({ value: "budgetSpent", context });
   assert.equal(snapshot.can({ type: "SAY", message: "again" }), false);
   assert.equal(snapshot.can({ type: "END" }), true);
+  const interaction = getInteraction(snapshot);
+  assert.equal(interaction?.textEvent, undefined);
+  assert.deepEqual(
+    interaction?.events.map((event) => event.type),
+    ["END"],
+  );
 });
