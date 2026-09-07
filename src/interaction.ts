@@ -1,6 +1,7 @@
 import type { AnyMachineSnapshot, EventObject } from "xstate";
 import { AgentIllegalResumeEventError } from "./run-agent.js";
 import { getAcceptedEvents, parseAgentEvent, type EventFromSnapshot } from "./events.js";
+import { agentExecutionOptions } from "./internal/registry.js";
 import { getStateMeta } from "./utils.js";
 import type { StandardSchemaV1 } from "./types.js";
 
@@ -159,6 +160,11 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
   if (!interaction) return undefined;
 
   const preserveWhitespace = options.preserveWhitespace ?? false;
+  // The event schemas `setupAgent` registered on this machine, so a choice's
+  // fixed payload can be judged complete before the guard is consulted.
+  const schemas = agentExecutionOptions.get(
+    (snapshot as { machine?: object }).machine ?? {},
+  )?.schemas;
   const accepted = new Set(getAcceptedEvents(snapshot).map((event) => event.type));
   const label =
     typeof interaction.label === "function"
@@ -170,19 +176,23 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
       const descriptor = typeof config === "string" ? { label: config } : config;
       return [type, descriptor] as const;
     })
-    // A choice's payload is its fixed fields, so ask the machine whether it
-    // would take the event right now: a guard or a function transition
-    // returning `undefined` hides the choice, and so does a targetless,
-    // action-less transition (XState's `can` counts that as a no-op). A
-    // choice whose schema needs fields the metadata does not fix cannot be
-    // checked this way and stays rendered; the free-text event is never
-    // checked because its payload is not known yet.
+    // A choice's payload is its fixed fields. When those fields satisfy the
+    // event's declared schema the payload is complete, so ask the machine
+    // whether it would take the event right now: a guard or a function
+    // transition returning `undefined` hides the choice, and so does a
+    // targetless, action-less transition (XState's `can` counts that as a
+    // no-op). When the schema needs fields the metadata does not fix, the
+    // guard would only see `undefined`, so the check is skipped and the
+    // choice stays rendered. The free-text event is never checked because
+    // its payload is not known yet.
     .filter(([type, descriptor]) => {
+      let complete: { type: string };
       try {
-        return snapshot.can({ ...(descriptor.event ?? {}), type } as never);
+        complete = parseAgentEvent(snapshot, { ...descriptor.event, type }, { schemas });
       } catch {
         return true;
       }
+      return snapshot.can(complete as never);
     })
     .map(([type, descriptor]) => {
       return {

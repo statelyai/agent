@@ -289,3 +289,31 @@ describe("getInteraction fixed fields", () => {
     expect(getInteraction(snapshot)?.events.map((event) => event.type)).toEqual(["GO"]);
   });
 });
+
+describe("getInteraction keeps choices whose payload is not fully fixed", () => {
+  test("a guard that reads a caller-supplied field does not hide the choice", () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { PICK: z.object({ seat: z.number() }), END: z.object({}) },
+      meta: interactionMetaSchema,
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: {
+          meta: { interaction: { label: "?", events: { PICK: "Pick a seat", END: "End" } } },
+          on: {
+            // `seat` comes from the caller, so the metadata cannot fix it; the
+            // guard must not be evaluated against `undefined`.
+            PICK: ({ event }) => (event.seat >= 0 ? { target: "done" } : undefined),
+            END: { target: "done" },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    const snapshot = machine.resolveState({ value: "waiting", context: {} });
+    expect(getInteraction(snapshot)?.events.map((event) => event.type)).toEqual(["PICK", "END"]);
+  });
+});
