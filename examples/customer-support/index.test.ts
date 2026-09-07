@@ -1,7 +1,15 @@
 import { readFileSync } from "node:fs";
-import { expect, test } from "vitest";
+import { beforeEach, expect, test } from "vitest";
 import type { AgentTool } from "@statelyai/agent";
-import { BOOKINGS, customerSupportMachine, runCustomerSupportExample } from "./index.js";
+import {
+  BOOKINGS,
+  customerSupportMachine,
+  resetBookings,
+  runCustomerSupportExample,
+} from "./index.js";
+
+// `executeAction` writes to BOOKINGS, so each test starts from the fixture.
+beforeEach(resetBookings);
 
 // Mock host: routes on `request.name` (the setupAgent request key). The
 // `classify` request returns a scripted intent; the `answer` request plays the
@@ -99,6 +107,22 @@ test("APPROVE resumes from the persisted snapshot and executes the action", asyn
   // The executeAction actor read the real booking and produced the confirmation.
   expect(result.message).toContain("AB1234");
   expect(result.message).toContain("cancelled");
+  // ...and it actually wrote the change: the booking is cancelled in the table.
+  expect(BOOKINGS.AB1234?.status).toBe("cancelled");
+});
+
+test("an unknown confirmation code fails the turn instead of reporting a change", async () => {
+  const result = await runCustomerSupportExample({
+    query: "Please cancel my booking ZZ9999.",
+    approve: true,
+    generateText: mockGenerateText({
+      intent: { intent: "cancel", confirmationCode: "ZZ9999" },
+    }),
+  });
+
+  expect(result.resolution).toBe("failed");
+  expect(result.progress.at(-1)).toBe("failed");
+  expect(result.message).toContain("No booking found");
 });
 
 test("the advertised cancel starter approves onto a real booking", async () => {
@@ -141,6 +165,8 @@ test("rebook APPROVE carries the new flight through to execution", async () => {
   });
   expect(result.message).toContain("AA106");
   expect(result.message).toContain("$75 change fee");
+  // The rebook was written through to the table, not just described.
+  expect(BOOKINGS.CD5678?.flight).toBe("AA106 JFK→LHR, 2026-09-14 09:00");
 });
 
 test("DENY resumes and skips the action, capturing the reason", async () => {
@@ -158,6 +184,8 @@ test("DENY resumes and skips the action, capturing the reason", async () => {
   expect(result.progress).not.toContain("executing");
   expect(result.progress.at(-1)).toBe("denied");
   expect(result.message).toContain("Actually I still need the flight.");
+  // The booking is genuinely untouched.
+  expect(BOOKINGS.AB1234?.status).toBe("confirmed");
 });
 
 test("machine exports a runnable definition", () => {

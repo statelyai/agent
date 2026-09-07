@@ -1,7 +1,12 @@
 import { describe, expect, test } from "vitest";
 import type { AgentMessage, AgentRequestExecutor } from "@statelyai/agent";
-import { getStateMeta, runAgent } from "@statelyai/agent";
-import { contextCompactionMachine, idlePrompt, runContextCompactionExample } from "./index.js";
+import { getInteraction, runAgent } from "@statelyai/agent";
+import {
+  contextCompactionMachine,
+  idlePrompt,
+  latestReply,
+  runContextCompactionExample,
+} from "./index.js";
 
 function textContent(message: AgentMessage | undefined): string {
   return typeof message?.content === "string" ? message.content : "";
@@ -91,6 +96,17 @@ describe("context-compaction", () => {
     expect(result.output).toHaveProperty("messages");
   });
 
+  test("keepRecent: 0 is rejected — it would never shrink the window", async () => {
+    const { generateText } = createModel();
+
+    await expect(
+      runAgent(contextCompactionMachine, {
+        input: { maxMessages: 4, keepRecent: 0 },
+        executors: { generateText },
+      }),
+    ).rejects.toThrow();
+  });
+
   test("settles idle in awaitingUser with interaction meta a host can drive", async () => {
     const { generateText } = createModel();
 
@@ -103,10 +119,10 @@ describe("context-compaction", () => {
     expect(first.status).toBe("idle");
     if (first.status !== "idle") return;
 
-    const interaction = getStateMeta(first.snapshot).interaction;
+    const interaction = getInteraction(first.snapshot);
     expect(interaction?.textEvent).toBe("USER_MESSAGE");
-    expect(interaction?.events?.USER_MESSAGE).toBeDefined();
-    // Labels interpolate `{contextKey}` against the snapshot context.
+    expect(interaction?.events.map((choice) => choice.type)).toEqual(["USER_MESSAGE"]);
+    // The label is a function of the context, rendered by `getInteraction`.
     expect(idlePrompt(first.snapshot)).toContain("turn 0");
 
     // Resuming from `result.persist()` with the text event advances one turn.
@@ -120,11 +136,11 @@ describe("context-compaction", () => {
     if (second.status !== "idle") return;
     expect(second.snapshot.context.turns).toBe(1);
     expect(textContent(second.snapshot.context.messages.at(-1))).toBe("reply 1");
-    // Mirrored out of `messages` so a context-rendering host can show it.
-    expect(second.snapshot.context.reply).toBe("reply 1");
+    // A host reads the latest reply off `messages`; it is not mirrored in context.
+    expect(latestReply(second.snapshot)).toBe("reply 1");
   });
 
-  test("context.reply tracks the latest answer, including across compaction", async () => {
+  test("the latest reply is readable from messages, including across compaction", async () => {
     const { generateText } = createModel();
 
     // maxMessages=4, keepRecent=2: turn 3 overflows the window and compacts.
@@ -144,7 +160,7 @@ describe("context-compaction", () => {
       });
       expect(result.status).toBe("idle");
       if (result.status !== "idle") return;
-      expect(result.snapshot.context.reply).toBe(`reply ${turn}`);
+      expect(latestReply(result.snapshot)).toBe(`reply ${turn}`);
       snapshot = result.persist();
     }
 

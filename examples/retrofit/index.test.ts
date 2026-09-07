@@ -5,7 +5,7 @@ import {
   type AgentRequestExecutors,
   type ChosenEvent,
 } from "@statelyai/agent";
-import { runRetrofitExample, supportMachine } from "./index.js";
+import { MAX_LOOKUPS, runRetrofitExample, supportMachine } from "./index.js";
 
 const TRIAGE = { category: "refund", sentiment: "neutral", summary: "Damaged item refund" };
 
@@ -35,8 +35,8 @@ test("preserves behavior: happy path — lookup then a small refund settles", as
   });
 
   expect(result.status).toBe("done");
+  // The outcome IS the final state — there is no `refunded` boolean beside it.
   expect(result.snapshot.value).toBe("refunded");
-  expect(result.snapshot.context.refunded).toBe(true);
   expect(result.snapshot.context.resolution).toContain("Refunded $50");
 });
 
@@ -53,7 +53,6 @@ test("preserves behavior: escalation path — a large refund pauses for approval
 
   expect(result.status).toBe("idle");
   expect(result.snapshot.value).toBe("awaitingApproval");
-  expect(result.snapshot.context.refunded).toBe(false);
   expect(result.snapshot.context.pendingRefund).toBe(5000);
 });
 
@@ -73,6 +72,34 @@ function mockExecutors(
     decide: async () => ({ event: queue.shift()! }),
   };
 }
+
+test("the lookup loop is bounded by MAX_LOOKUPS", async () => {
+  const result = await simulateAgent(supportMachine, {
+    input: { ticket: "Where is order A1001?" },
+    script: {
+      text: { triageTicket: [TRIAGE] },
+      // The model keeps asking for lookups; after MAX_LOOKUPS the transition is
+      // no longer taken, so the decision has to commit to an outcome.
+      decisions: {
+        "agent.decide": [
+          { type: "LOOKUP", orderId: "A1001" },
+          { type: "LOOKUP", orderId: "A1001" },
+          { type: "RESOLVE", message: "It ships Tuesday." },
+        ],
+      },
+      invokes: {
+        lookupOrder: [
+          "Order A1001: Standing desk, $240, Ada Lovelace",
+          "Order A1001: Standing desk, $240, Ada Lovelace",
+        ],
+      },
+    },
+  });
+
+  expect(result.status).toBe("done");
+  expect(result.snapshot.value).toBe("resolved");
+  expect(result.snapshot.context.lookups).toBe(MAX_LOOKUPS);
+});
 
 test("mock run reaches the refunded final state", async () => {
   const result = await runRetrofitExample({

@@ -1,7 +1,8 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, expectTypeOf, test } from "vitest";
 import { z } from "zod";
 import { createActor } from "xstate";
-import { getStateMeta, setupAgent } from "./index.js";
+import { getStateMeta, getStatePath, setupAgent } from "./index.js";
+import type { DoneActorEventOf } from "./index.js";
 import { getJsonSchema, getJsonSchemaSync, getMachineStructuralHash } from "./index.js";
 import { findNonSerializableContextPaths } from "./utils.js";
 import type { StandardSchemaV1 } from "./types.js";
@@ -280,5 +281,64 @@ describe("getJsonSchema / getJsonSchemaSync", () => {
     };
     expect(getJsonSchemaSync(asyncSchema)).toBeUndefined();
     await expect(getJsonSchema(asyncSchema)).resolves.toMatchObject({ async: true });
+  });
+});
+
+describe("getStatePath", () => {
+  test("renders atomic, nested, and parallel state values", () => {
+    expect(getStatePath("writing")).toBe("writing");
+    expect(getStatePath({ review: { editing: "draft" } })).toBe("review.editing.draft");
+    expect(getStatePath({ p: { left: "x", right: { a: "b" } } })).toBe("p:{left.x,right.a.b}");
+  });
+
+  test("is deterministic regardless of region key order", () => {
+    expect(getStatePath({ p: { b: "two", a: "one" } })).toBe(
+      getStatePath({ p: { a: "one", b: "two" } }),
+    );
+    expect(getStatePath({ p: { b: "two", a: "one" } })).toBe("p:{a.one,b.two}");
+  });
+
+  test("does not mistake a state named `value` for a snapshot", () => {
+    expect(getStatePath({ value: "ready" })).toBe("value.ready");
+    expect(getStatePath({ value: "ready", status: "active" })).toBe("ready");
+    expect(getStatePath({ status: "active" })).toBe("status.active");
+  });
+
+  test("accepts a snapshot as well as a raw state value", () => {
+    const pathMachine = agent.createMachine({
+      context: {},
+      initial: "review",
+      states: { review: { initial: "editing", states: { editing: {} } } },
+    });
+    const snapshot = createActor(pathMachine).getSnapshot();
+    expect(getStatePath(snapshot)).toBe("review.editing");
+    expect(getStatePath(snapshot)).toBe(getStatePath(snapshot.value));
+  });
+});
+
+describe("DoneActorEventOf", () => {
+  const researchLogic = setupAgent({
+    context: z.object({}),
+    output: z.object({ finding: z.string() }),
+  }).createMachine({
+    context: {},
+    initial: "done",
+    states: { done: { type: "final", output: () => ({ finding: "otters hold hands" }) } },
+  });
+
+  test("types a wildcard xstate.done.actor handler without a cast", () => {
+    const event = {
+      type: "xstate.done.actor",
+      actorId: "research-0",
+      sessionId: "x:0",
+      output: { finding: "otters hold hands" },
+    } as DoneActorEventOf<typeof researchLogic>;
+
+    expectTypeOf(event.output).toEqualTypeOf<{ finding: string }>();
+    expectTypeOf(event.actorId).toEqualTypeOf<string>();
+    expectTypeOf<
+      DoneActorEventOf<typeof researchLogic, "research-0">["actorId"]
+    >().toEqualTypeOf<"research-0">();
+    expect(event.output.finding).toBe("otters hold hands");
   });
 });

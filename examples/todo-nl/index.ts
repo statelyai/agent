@@ -17,10 +17,10 @@
  *     and resumes with `runAgent(machine, { snapshot: result.persist(),
  *     event })`. Nothing needs to answer a prompt callback. The default
  *     structural idle rule recognizes the state's external event handler.
- *   - Context-interpolated prompts: the label is
- *     "What should I do with your list? ({todosSummary})", and `{todosSummary}`
- *     resolves against the snapshot context, so the idle prompt lists the
- *     actual todos (numbered, with done/open markers), not just counts.
+ *   - Labels computed from context at render time: the interaction label is a
+ *     function of the snapshot context, so the idle prompt lists the actual
+ *     todos (numbered, with done/open markers) without a rendered string
+ *     living in — and being kept in sync in — context.
  *   - A multi-event command as an explicit loop in the statechart: the loop is
  *     a self-transition on `planning`, so every step, its exit condition, and
  *     the applied trail are visible in the machine — not hidden in a builtin.
@@ -35,6 +35,9 @@
  *     so the step is rejected (`failure: 'rejected-by-guard'`) and retried with
  *     that feedback. The machine keeps the model from acting on ids that
  *     don't exist.
+ *   - A bounded loop: at most `MAX_STEPS_PER_COMMAND` events are applied per
+ *     command. Past that the list-changing events are illegal, so `DONE` (or
+ *     QUIT) is the only legal choice and the loop always terminates.
  *   - QUIT exits the `planning` state straight to `done`.
  *
  * Companion: `imperative.ts` builds the SAME app with no @statelyai/agent
@@ -48,10 +51,12 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
-  getStateMeta,
+  getInteraction,
+  getStatePath,
+  interactionMetaSchema,
   runAgent,
   setupAgent,
-  type AgentDecisionExecutor,
+  type AgentRequestExecutors,
 } from "@statelyai/agent";
 import type { SnapshotFrom } from "xstate";
 
@@ -67,41 +72,19 @@ const models = defineModels({
   quick: openai("gpt-5.4-mini"),
 });
 
-/**
- * Typed `meta.interaction` hints. Hosts read them off the idle snapshot to
- * label the prompt and route free chat text to an event.
- */
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
-});
+/** Events one command may apply before only DONE / QUIT stay legal. */
+export const MAX_STEPS_PER_COMMAND = 6;
 
 export const todoSchemas = createAgentSchemas({
-  meta: metaSchema,
+  meta: interactionMetaSchema,
   context: z.object({
     todos: z.array(todoSchema),
     nextId: z.number(),
     // The command being planned, or null when waiting for fresh user input.
     pendingCommand: z.string().nullable(),
-    // One-line listing of the list (counts + numbered titles with done/open
-    // markers), kept in sync as todos change. Interaction labels interpolate
-    // it as `{todosSummary}`.
-    todosSummary: z.string(),
     // The events applied so far for the current command, in order — the trail
-    // the next decide step sees so it does not repeat itself.
+    // the next decide step sees so it does not repeat itself, and the step
+    // counter the loop bound is checked against.
     applied: z.array(z.string()),
     // Human-readable trail of everything that happened, for output/logging.
     log: z.array(z.string()),
@@ -133,10 +116,10 @@ function renderTodoList(todos: Todo[]): string {
 }
 
 /**
- * The list as shown in the idle prompt via `{todosSummary}`: counts plus the
- * numbered titles with done/open markers, so the waiting prompt shows the
- * actual todos. Hosts collapse whitespace in interaction labels, so the
- * listing stays on one line: `2 todos, 1 open: 1. [x] milk · 2. [ ] eggs`.
+ * The list as shown in the idle prompt: counts plus the numbered titles with
+ * done/open markers, so the waiting prompt shows the actual todos. Interaction
+ * labels collapse whitespace, so the listing stays on one line:
+ * `2 todos, 1 open: 1. [x] milk · 2. [ ] eggs`.
  */
 export function summarizeTodos(todos: Todo[]): string {
   if (todos.length === 0) return "list is empty";
@@ -158,7 +141,6 @@ export const todoMachine = agentSetup.createMachine({
     todos: input.todos,
     nextId: input.todos.reduce((max, todo) => Math.max(max, todo.id), 0) + 1,
     pendingCommand: null,
-    todosSummary: summarizeTodos(input.todos),
     applied: [],
     log: [],
   }),
@@ -171,9 +153,10 @@ export const todoMachine = agentSetup.createMachine({
       tags: ["waiting"],
       meta: {
         interaction: {
-          // `{todosSummary}` resolves against the snapshot's context when the
-          // label is shown, so the prompt reflects the live list.
-          label: "What should I do with your list? ({todosSummary})",
+          // Computed from the live context when the label is shown, so no
+          // rendered listing has to be kept in sync inside context.
+          label: ({ context }: { context: { todos: Todo[] } }) =>
+            `What should I do with your list? (${summarizeTodos(context.todos)})`,
           textEvent: "COMMAND",
           events: { COMMAND: { label: "Send", style: "primary" } },
         },
@@ -218,6 +201,7 @@ export const todoMachine = agentSetup.createMachine({
                   "Continue from here; do not repeat applied events.",
                 ]),
           ].join("\n"),
+          name: "planStep",
           allowedEvents: ["ADD_TODO", "TOGGLE_TODO", "DELETE_TODO", "QUIT", "DONE"] as const,
         }),
         // The decision couldn't produce a legal event (e.g. kept choosing a bad
@@ -235,12 +219,12 @@ export const todoMachine = agentSetup.createMachine({
         // Each applied event goes to `applying`, which loops straight back to
         // `planning` — that re-entry starts the next decide step.
         ADD_TODO: ({ context, event }) => {
+          if (context.applied.length >= MAX_STEPS_PER_COMMAND) return undefined;
           const todos = [...context.todos, { id: context.nextId, title: event.title, done: false }];
           return {
             target: "applying" as const,
             context: {
               todos,
-              todosSummary: summarizeTodos(todos),
               nextId: context.nextId + 1,
               applied: [...context.applied, `ADD_TODO ${JSON.stringify({ title: event.title })}`],
               log: [...context.log, `added #${context.nextId}: ${event.title}`],
@@ -248,10 +232,12 @@ export const todoMachine = agentSetup.createMachine({
           };
         },
 
-        // Guard: only togglable if the id exists. Returning `undefined` makes
-        // the transition illegal, so the decide step is rejected
-        // (failure: 'rejected-by-guard') and retried.
+        // Guards: past the per-command step budget, or an id that is not in the
+        // list. Returning `undefined` makes the transition illegal, so the
+        // decide step is rejected (failure: 'rejected-by-guard') and retried —
+        // and once the budget is spent only DONE and QUIT remain legal.
         TOGGLE_TODO: ({ context, event }) => {
+          if (context.applied.length >= MAX_STEPS_PER_COMMAND) return undefined;
           const found = context.todos.find((todo) => todo.id === event.id);
           if (!found) return undefined;
           const todos = context.todos.map((todo) =>
@@ -261,7 +247,6 @@ export const todoMachine = agentSetup.createMachine({
             target: "applying" as const,
             context: {
               todos,
-              todosSummary: summarizeTodos(todos),
               applied: [...context.applied, `TOGGLE_TODO ${JSON.stringify({ id: event.id })}`],
               log: [...context.log, `toggled #${event.id}`],
             },
@@ -270,6 +255,7 @@ export const todoMachine = agentSetup.createMachine({
 
         // Guard: only deletable if the id exists.
         DELETE_TODO: ({ context, event }) => {
+          if (context.applied.length >= MAX_STEPS_PER_COMMAND) return undefined;
           const found = context.todos.find((todo) => todo.id === event.id);
           if (!found) return undefined;
           const todos = context.todos.filter((todo) => todo.id !== event.id);
@@ -277,7 +263,6 @@ export const todoMachine = agentSetup.createMachine({
             target: "applying" as const,
             context: {
               todos,
-              todosSummary: summarizeTodos(todos),
               applied: [...context.applied, `DELETE_TODO ${JSON.stringify({ id: event.id })}`],
               log: [...context.log, `deleted #${event.id}`],
             },
@@ -315,21 +300,9 @@ export const todoMachine = agentSetup.createMachine({
 
 type TodoSnapshot = SnapshotFrom<typeof todoMachine>;
 
-/** `{key}` placeholders in interaction labels resolve against context. */
-export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
-  return label
-    .replace(/\{(\w+)\}/g, (_, key: string) => {
-      const value = context[key];
-      return typeof value === "string" || typeof value === "number" ? String(value) : "";
-    })
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /** The label a host shows while the machine is idle in `awaitingCommand`. */
 export function idlePrompt(snapshot: TodoSnapshot): string {
-  const label = getStateMeta(snapshot).interaction?.label ?? "What would you like to do?";
-  return resolveInteractionLabel(label, snapshot.context);
+  return getInteraction(snapshot)?.label || "What would you like to do?";
 }
 
 /**
@@ -339,7 +312,7 @@ export function idlePrompt(snapshot: TodoSnapshot): string {
  */
 export async function runTodoNlExample(options?: {
   input?: { todos?: Todo[] };
-  decide?: AgentDecisionExecutor;
+  executors?: AgentRequestExecutors;
   /** Scripted commands, consumed in order on each idle settle. */
   commands?: string[];
   onTransition?: (snapshot: TodoSnapshot) => void;
@@ -347,7 +320,7 @@ export async function runTodoNlExample(options?: {
   const queued = [...(options?.commands ?? [])];
 
   const shared = {
-    executors: options?.decide ? { decide: options.decide } : createAiSdkExecutors({ models }),
+    executors: options?.executors ?? createAiSdkExecutors({ models }),
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
   };
 
@@ -375,7 +348,7 @@ export async function runTodoNlExample(options?: {
 
 export async function main() {
   const output = await runTodoNlExample({
-    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+    onTransition: (snapshot) => console.log("[state]", getStatePath(snapshot)),
   });
 
   console.log("\nFinal todo list:");

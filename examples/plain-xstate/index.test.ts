@@ -9,7 +9,8 @@ describe("plain-xstate", () => {
     });
 
     expect(result.decisions).toEqual(["APPROVE"]);
-    expect(result.attempts).toBe(1);
+    expect(result.drafts).toBe(1);
+    expect(result.revisions).toBe(0);
     expect(result.retries).toBe(0);
     expect(result.draft).toBe("A crisp, concrete launch blurb.");
     expect(result.progress).toBe(
@@ -31,7 +32,7 @@ describe("plain-xstate", () => {
     // One failure, one retry, then the normal draft → judge → approve path.
     expect(calls).toBe(2);
     expect(result.retries).toBe(1);
-    expect(result.attempts).toBe(1);
+    expect(result.drafts).toBe(1);
     expect(result.decisions).toEqual(["APPROVE"]);
     expect(result.progress).toContain("1 retry after a failed attempt");
   });
@@ -49,7 +50,7 @@ describe("plain-xstate", () => {
     // First attempt plus two retries, then `failed` — no judging round happens.
     expect(calls).toBe(3);
     expect(result.retries).toBe(2);
-    expect(result.attempts).toBe(0);
+    expect(result.drafts).toBe(0);
     expect(result.decisions).toEqual([]);
     expect(result.progress).toBe("Draft failed after 2 retries.");
   });
@@ -67,7 +68,9 @@ describe("plain-xstate", () => {
 
     // draft → judge(REVISE) → draft → judge(REVISE) → draft → judge(APPROVE)
     expect(result.decisions).toEqual(["REVISE", "REVISE", "APPROVE"]);
-    expect(result.attempts).toBe(3);
+    expect(result.drafts).toBe(3);
+    // Exactly `maxRevisions` REVISEs were accepted — no off-by-one third one.
+    expect(result.revisions).toBe(2);
   });
 
   test("the guard — not the model — bounds the revision loop", () => {
@@ -77,11 +80,12 @@ describe("plain-xstate", () => {
       context: {
         topic: "x",
         maxRevisions: 2,
-        attempts: 3,
+        drafts: 3,
+        revisions: 2,
         retries: 0,
         maxRetries: 2,
         draft: "d",
-        progress: "",
+        failure: null,
       },
     });
     expect(spent.can({ type: "REVISE" })).toBe(false);
@@ -93,11 +97,12 @@ describe("plain-xstate", () => {
       context: {
         topic: "x",
         maxRevisions: 2,
-        attempts: 1,
+        drafts: 2,
+        revisions: 1,
         retries: 0,
         maxRetries: 2,
         draft: "d",
-        progress: "",
+        failure: null,
       },
     });
     expect(withinBudget.can({ type: "REVISE" })).toBe(true);

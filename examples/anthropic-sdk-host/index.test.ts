@@ -6,6 +6,7 @@ import { getJsonSchemaSync } from "@statelyai/agent";
 import type { AgentMessage } from "@statelyai/agent";
 import {
   createAnthropicExecutors,
+  toAgentCallUsage,
   toAnthropicCallSettings,
   toAnthropicEventTools,
   toAnthropicMessages,
@@ -296,7 +297,49 @@ function stubClient(create: (params: unknown) => Promise<Message>): Anthropic {
   return { messages: { create } } as unknown as Anthropic;
 }
 
+describe("toAgentCallUsage", () => {
+  test("maps Anthropic's snake_case usage onto the flat AgentCallUsage fields", () => {
+    expect(
+      toAgentCallUsage({
+        cache_creation: null,
+        cache_creation_input_tokens: null,
+        cache_read_input_tokens: 7,
+        input_tokens: 11,
+        output_tokens: 3,
+        server_tool_use: null,
+        service_tier: null,
+      } as Message["usage"]),
+    ).toEqual({ inputTokens: 11, outputTokens: 3, totalTokens: 14, cachedInputTokens: 7 });
+  });
+});
+
 describe("createAnthropicExecutors + runAgent", () => {
+  test("the run aggregates the tokens each call reported", async () => {
+    const client = stubClient(async () =>
+      toolUseMessage("respond_with_output", {
+        result: {
+          sentiment: "negative",
+          category: "billing",
+          reply: "Sorry about that, we will fix your invoice.",
+        },
+      }),
+    );
+
+    const { generateText } = createAnthropicExecutors({ client });
+    const result = await runAgent(triageMachine, {
+      input: { ticket: "My invoice is wrong and I am furious." },
+      executors: { generateText },
+    });
+
+    // The stub reports 1 input + 1 output token per call, and triage makes two.
+    expect(result.usage).toMatchObject({
+      modelCalls: 2,
+      inputTokens: 2,
+      outputTokens: 2,
+      totalTokens: 4,
+    });
+  });
+
   test("generateText: structured output via forced tool call drives the triage machine", async () => {
     // The forced tool's input schema is the `{ result }` envelope; the model
     // fills it in kind, and the host unwraps `.result` before validation.

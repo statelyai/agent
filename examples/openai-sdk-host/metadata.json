@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["OpenAI SDK", "SDK-neutral host adapters"],
-    "purpose": "Shows the generateText/streamText/decide executor contract implemented directly against the raw openai package's Chat Completions API, with no Vercel AI SDK in between."
+    "purpose": "Shows the generateText/streamText/decide executor contract implemented directly against the raw openai package's Chat Completions API, with no Vercel AI SDK in between. Every executor reports token usage; streamText is text-only by design and refuses tool or structured-output requests."
   },
   "starters": [],
   "manual": true

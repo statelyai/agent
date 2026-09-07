@@ -9,20 +9,31 @@
  *   - `planQuery`: a structured-output request → a typed `QueryPlan`
  *     (operation + column + optional category filter).
  *   - `awaitingApproval`: an idle state (no invoke) carrying a typed
- *     `meta.interaction` — read with `getStateMeta`. The host presents it and
- *     resumes with APPROVE / REJECT.
+ *     `meta.interaction` — read with `getInteraction`. The host presents it
+ *     and resumes with APPROVE / REJECT.
  *   - on APPROVE, the local `runQuery` engine executes the plan over the
  *     in-memory table, then `summarize` explains the result.
+ *   - three final states — `done`, `rejected`, `failed` — each with its own
+ *     `output`, so a rejected or failed run is never a successful-looking one
+ *     with a fabricated plan and a zero result.
  *
- * Dual-mode: `runSqlAgentExample(options?)` takes injectable executors (the
- * test passes mocks — keyless CI); the direct run below uses real models.
+ * Dual-mode: `runSqlAgentExample(question, options?)` takes injectable
+ * executors (the test passes mocks — keyless CI); the direct run below uses
+ * real models.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/sql-agent/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAsyncLogic, type SnapshotFrom } from "xstate";
-import { getStateMeta, runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
+import { createAsyncLogic } from "xstate";
+import {
+  getInteraction,
+  getStatePath,
+  interactionMetaSchema,
+  runAgent,
+  setupAgent,
+  type RunAgentOptions,
+} from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 // ─── In-memory sample table (the whole "database") ───
@@ -56,25 +67,6 @@ export function executeQuery(plan: QueryPlan, table: Order[] = orders): number {
   return rows.length ? total / rows.length : 0;
 }
 
-// Typed interaction protocol handed to the host for the approval step.
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
-});
-
 export const models = defineModels({
   planner: openai("gpt-5.4-mini"),
   summarizer: openai("gpt-5.4-mini"),
@@ -92,11 +84,12 @@ const agentSetup = setupAgent({
   context: contextSchema,
   input: z.object({ question: z.string() }),
   output: z.object({
-    plan: queryPlanSchema,
-    result: z.number(),
+    status: z.enum(["answered", "rejected", "failed"]),
+    plan: queryPlanSchema.nullable(),
+    result: z.number().nullable(),
     answer: z.string(),
   }),
-  meta: metaSchema,
+  meta: interactionMetaSchema,
   events: {
     APPROVE: z.object({}),
     REJECT: z.object({}),
@@ -114,6 +107,17 @@ const agentSetup = setupAgent({
     executing: { schemas: { context: contextSchema.extend({ plan: queryPlanSchema }) } },
     summarizing: {
       schemas: { context: contextSchema.extend({ plan: queryPlanSchema, result: z.number() }) },
+    },
+    rejected: { schemas: { context: contextSchema.extend({ plan: queryPlanSchema }) } },
+    failed: { schemas: { context: contextSchema.extend({ answer: z.string() }) } },
+    done: {
+      schemas: {
+        context: contextSchema.extend({
+          plan: queryPlanSchema,
+          result: z.number(),
+          answer: z.string(),
+        }),
+      },
     },
   },
   requests: {
@@ -156,11 +160,6 @@ export const sqlAgentMachine = agentSetup.createMachine({
     result: null,
     answer: null,
   }),
-  output: ({ context }) => ({
-    plan: context.plan ?? { operation: "count", column: "amount", category: null },
-    result: context.result ?? 0,
-    answer: context.answer ?? "",
-  }),
   initial: "planning",
   states: {
     planning: {
@@ -172,9 +171,9 @@ export const sqlAgentMachine = agentSetup.createMachine({
           target: "awaitingApproval",
           context: { plan: output },
         }),
-        // A failed planning call ends the run gracefully (best-effort output).
+        // No plan, no query: end in `failed`, not in a success-shaped output.
         onError: {
-          target: "rejected",
+          target: "failed",
           context: { answer: "Could not plan a query for this question." },
         },
       },
@@ -194,10 +193,7 @@ export const sqlAgentMachine = agentSetup.createMachine({
       },
       on: {
         APPROVE: { target: "executing" },
-        REJECT: {
-          target: "rejected",
-          context: { answer: "Query rejected by the reviewer." },
-        },
+        REJECT: { target: "rejected" },
       },
     },
     executing: {
@@ -211,6 +207,10 @@ export const sqlAgentMachine = agentSetup.createMachine({
           target: "summarizing",
           context: { result: output },
         }),
+        onError: {
+          target: "failed",
+          context: { answer: "The query engine failed to run the approved plan." },
+        },
       },
     },
     summarizing: {
@@ -230,43 +230,62 @@ export const sqlAgentMachine = agentSetup.createMachine({
         }),
       },
     },
-    rejected: { type: "final" },
-    done: { type: "final" },
+    rejected: {
+      type: "final",
+      output: ({ context }) => ({
+        status: "rejected" as const,
+        plan: context.plan,
+        result: null,
+        answer: "Query rejected by the reviewer.",
+      }),
+    },
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        status: "failed" as const,
+        plan: context.plan,
+        result: null,
+        answer: context.answer,
+      }),
+    },
+    done: {
+      type: "final",
+      output: ({ context }) => ({
+        status: "answered" as const,
+        plan: context.plan,
+        result: context.result,
+        answer: context.answer,
+      }),
+    },
   },
 });
 
-/** Reads the current state's typed interaction meta out of an idle snapshot — inferred from the machine's meta schema, no generics. */
-export function readInteraction(snapshot: SnapshotFrom<typeof sqlAgentMachine>) {
-  return getStateMeta(snapshot).interaction ?? null;
-}
-
 export async function runSqlAgentExample(
-  options?: RunAgentOptions<typeof sqlAgentMachine> & {
+  question: string,
+  options: RunAgentOptions<typeof sqlAgentMachine> & {
     approval?: "APPROVE" | "REJECT";
-  },
-  observe?: RunAgentOptions<typeof sqlAgentMachine>["onTransition"],
+  } = {},
 ) {
-  const { approval = "APPROVE", ...runOptions } = options ?? {};
-  const resolved: RunAgentOptions<typeof sqlAgentMachine> =
-    runOptions && Object.keys(runOptions).length > 0
-      ? runOptions
-      : { executors: createAiSdkExecutors({ models }) };
+  const { approval = "APPROVE", ...runOptions } = options;
+  // Spread-merge, so passing only `onTransition` keeps the default executors.
+  const resolved: RunAgentOptions<typeof sqlAgentMachine> = {
+    executors: createAiSdkExecutors({ models }),
+    ...runOptions,
+  };
 
-  const first = await runAgent(sqlAgentMachine, {
-    input: { question: "What is the total amount spent on electronics?" },
-    // Direct-run narrator; a caller's own `onTransition` in `resolved` wins.
-    onTransition: observe,
-    ...resolved,
-  });
+  const first = await runAgent(sqlAgentMachine, { input: { question }, ...resolved });
+  // Planning failed: the run is already in `failed`, with nothing to approve.
+  if (first.status === "done") {
+    return { interaction: undefined, output: first.output };
+  }
   if (first.status !== "idle") {
     throw new Error(`SQL agent did not settle idle for approval: ${first.status}`);
   }
-  const interaction = readInteraction(first.snapshot);
+  const interaction = getInteraction(first.snapshot);
 
   const second = await runAgent(sqlAgentMachine, {
     snapshot: first.persist(),
     event: { type: approval },
-    onTransition: observe,
     ...resolved,
   });
   if (second.status !== "done") {
@@ -283,10 +302,12 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const { interaction, output } = await runSqlAgentExample(undefined, (snapshot) =>
-      console.log("[state]", JSON.stringify(snapshot.value)),
+    const { interaction, output } = await runSqlAgentExample(
+      "What is the total amount spent on electronics?",
+      { onTransition: (snapshot) => console.log("[state]", getStatePath(snapshot)) },
     );
     console.log(`Approval prompt: ${interaction?.label}`);
+    console.log(`Status: ${output.status}`);
     console.log(`Plan: ${JSON.stringify(output.plan)}`);
     console.log(`Result: ${output.result}`);
     console.log(`\n${output.answer}`);

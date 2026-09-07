@@ -12,8 +12,11 @@
  *
  * Demonstrates:
  *   - durable memory as typed machine context, not raw chat history
- *   - event-driven idle states: they wait for DOCS_SIGNED and
+ *   - event-driven idle states: they wait for DOCS_SIGNED / DOCS_REJECTED and
  *     HARDWARE_DELIVERED, so no thread polls or stays blocked
+ *   - the waits that make it long-running: a rejected packet goes back to the
+ *     start, bounded by MAX_DOCS_REJECTIONS, and ESCALATE hands any stalled
+ *     wait to a human — both end in the `escalated` final state
  *   - multi-agent delegation: the coordinator invokes a specialized IT actor
  *     and stores its output before waiting again
  *   - pause/resume by persisted JSON snapshots across fresh runAgent calls
@@ -23,14 +26,19 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { createAsyncLogic } from "xstate";
+import { createAsyncLogic, type Snapshot, type StateValue } from "xstate";
 import {
-  getAcceptedEvents,
-  getStateMeta,
+  getInteraction,
+  getStatePath,
+  interactionMetaSchema,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
+  type RunAgentOptions,
 } from "@statelyai/agent";
+
+/** Rejected document rounds allowed before the case is escalated to a human. */
+export const MAX_DOCS_REJECTIONS = 2;
 
 export const models = defineModels({
   scheduler: openai("gpt-5.4-mini"),
@@ -52,22 +60,6 @@ const accountsSchema = z.object({
 type Accounts = z.infer<typeof accountsSchema>;
 
 const welcomePacketSchema = z.object({ packetId: z.string() });
-
-// The pause's `label`, plus a button `label`/`style` per accepted event so a
-// host can render each gate without knowing the state names.
-const interactionSchema = z.object({
-  label: z.string(),
-  events: z
-    .record(
-      z.string(),
-      z.object({
-        label: z.string().optional(),
-        style: z.enum(["primary", "danger", "default"]).optional(),
-      }),
-    )
-    .optional(),
-  textEvent: z.string().optional(),
-});
 
 // Stub IT system: it does NOT reach a real directory, so every identifier it
 // returns is derived from the employee's name and labelled simulated
@@ -95,27 +87,36 @@ const contextSchema = z.object({
   welcomePacketId: z.string().nullable(),
   docsSignedAt: z.string().nullable(),
   accounts: accountsSchema.nullable(),
-  // Plain-language record of what provisioning actually did — shown to whoever
-  // is waiting, so the fabricated identifiers are never read as real ones.
-  provisioningNote: z.string().nullable(),
   hardwareDeliveredAt: z.string().nullable(),
   schedule: z.string().nullable(),
+  /** Document rounds rejected so far; bounds the resend loop. */
+  docsRejections: z.number(),
+  /** Why the case left the happy path. `null` while it is still on it. */
+  escalation: z.string().nullable(),
 });
 
 const coordinatorSetup = setupAgent({
   models,
   context: contextSchema,
   input: z.object({ employee: employeeSchema }),
+  // An onboarding that stalls is a real outcome, so the output says which of
+  // the two final states the case ended in and leaves the rest nullable.
   output: z.object({
     employeeId: z.string(),
-    welcomePacketId: z.string(),
-    accounts: accountsSchema,
-    schedule: z.string(),
+    status: z.enum(["onboarded", "escalated"]),
+    welcomePacketId: z.string().nullable(),
+    accounts: accountsSchema.nullable(),
+    schedule: z.string().nullable(),
+    escalation: z.string().nullable(),
   }),
-  meta: z.object({ interaction: interactionSchema.optional() }),
+  meta: interactionMetaSchema,
   events: {
     DOCS_SIGNED: z.object({ signedAt: z.string() }),
+    /** HR sent the packet back: something in it was wrong. */
+    DOCS_REJECTED: z.object({ reason: z.string() }),
     HARDWARE_DELIVERED: z.object({ deliveredAt: z.string() }),
+    /** Any wait can be handed to a human instead of waiting longer. */
+    ESCALATE: z.object({ note: z.string() }),
   },
   actors: {
     sendWelcomePacket: createAsyncLogic({
@@ -204,9 +205,10 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
     welcomePacketId: null,
     docsSignedAt: null,
     accounts: null,
-    provisioningNote: null,
     hardwareDeliveredAt: null,
     schedule: null,
+    docsRejections: 0,
+    escalation: null,
   }),
   initial: "sendingWelcomePacket",
   states: {
@@ -218,21 +220,51 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
           target: "waitingForSignedDocs",
           context: { welcomePacketId: output.packetId },
         }),
+        onError: ({ event }) => ({
+          target: "escalated",
+          context: { escalation: `Welcome packet could not be sent: ${String(event.error)}` },
+        }),
       },
     },
     waitingForSignedDocs: {
       // `meta.interaction` is this machine's wait signal (see setupAgent above).
       meta: {
         interaction: {
-          // `{employee}` fields resolve against context when the label is shown.
-          label: "Waiting for the signed onboarding documents. Mark them signed to continue.",
-          events: { DOCS_SIGNED: { label: "Mark documents signed", style: "primary" } },
+          // `{path}` fields resolve against context when `getInteraction` reads
+          // the label.
+          label:
+            "Waiting on {employee.name}'s signed onboarding documents. Mark them signed, send them back, or escalate.",
+          events: {
+            DOCS_SIGNED: { label: "Mark documents signed", style: "primary" },
+            DOCS_REJECTED: { label: "Send the packet back" },
+            ESCALATE: { label: "Escalate to HR", style: "danger" },
+          },
         },
       },
       on: {
         DOCS_SIGNED: ({ event }) => ({
           target: "provisioningIt",
           context: { docsSignedAt: event.signedAt },
+        }),
+        // The wait that makes this long-running: a rejected packet goes back
+        // to the start, but only MAX_DOCS_REJECTIONS times. Past that the case
+        // is a person's problem, not the machine's.
+        DOCS_REJECTED: ({ context, event }) =>
+          context.docsRejections + 1 >= MAX_DOCS_REJECTIONS
+            ? {
+                target: "escalated",
+                context: {
+                  docsRejections: context.docsRejections + 1,
+                  escalation: `Onboarding documents rejected ${context.docsRejections + 1} times. Last reason: ${event.reason}`,
+                },
+              }
+            : {
+                target: "sendingWelcomePacket",
+                context: { docsRejections: context.docsRejections + 1 },
+              },
+        ESCALATE: ({ event }) => ({
+          target: "escalated",
+          context: { escalation: event.note },
         }),
       },
     },
@@ -242,27 +274,38 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
         input: ({ context }) => context.employee,
         onDone: ({ output }) => ({
           target: "waitingForHardware",
-          context: {
-            accounts: output,
-            provisioningNote:
-              `Simulated IT provisioning (ticket ${output.ticketId}): placeholder ` +
-              `mailbox ${output.email} and Slack handle ${output.slack} were derived ` +
-              `from the employee's name. No real accounts were created.`,
-          },
+          context: { accounts: output },
+        }),
+        onError: ({ event }) => ({
+          target: "escalated",
+          context: { escalation: `IT provisioning failed: ${String(event.error)}` },
         }),
       },
     },
     waitingForHardware: {
       meta: {
         interaction: {
-          label: "Waiting on hardware delivery. Mark the laptop delivered to continue.",
-          events: { HARDWARE_DELIVERED: { label: "Mark laptop delivered", style: "primary" } },
+          // The provisioning note is derived here rather than stored in
+          // context: the simulated identifiers are labelled as such wherever
+          // they are shown.
+          label: ({ context }) =>
+            `Simulated IT provisioning done (ticket ${context.accounts?.ticketId}): placeholder ` +
+            `mailbox ${context.accounts?.email} and Slack handle ${context.accounts?.slack} were ` +
+            `derived from the employee's name; no real accounts exist. Waiting on hardware delivery.`,
+          events: {
+            HARDWARE_DELIVERED: { label: "Mark laptop delivered", style: "primary" },
+            ESCALATE: { label: "Escalate to IT", style: "danger" },
+          },
         },
       },
       on: {
         HARDWARE_DELIVERED: ({ event }) => ({
           target: "preparingSchedule",
           context: { hardwareDeliveredAt: event.deliveredAt },
+        }),
+        ESCALATE: ({ event }) => ({
+          target: "escalated",
+          context: { escalation: event.note },
         }),
       },
     },
@@ -278,15 +321,35 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
           target: "onboarded",
           context: { schedule: output },
         }),
+        onError: ({ event }) => ({
+          target: "escalated",
+          context: { escalation: `Day-one schedule could not be written: ${String(event.error)}` },
+        }),
       },
     },
     onboarded: {
       type: "final",
       output: ({ context }) => ({
         employeeId: context.employee.id,
+        status: "onboarded" as const,
         welcomePacketId: context.welcomePacketId,
         accounts: context.accounts,
         schedule: context.schedule,
+        escalation: null,
+      }),
+    },
+    // The case left the happy path — too many rejected packets, a human
+    // escalation, or a failed step. It ends here with the reason, rather than
+    // reporting a completed onboarding that never happened.
+    escalated: {
+      type: "final",
+      output: ({ context }) => ({
+        employeeId: context.employee.id,
+        status: "escalated" as const,
+        welcomePacketId: context.welcomePacketId,
+        accounts: context.accounts,
+        schedule: context.schedule,
+        escalation: context.escalation ?? "escalated",
       }),
     },
   },
@@ -295,8 +358,29 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
 export interface RunLongRunningOnboardingOptions {
   employee?: z.infer<typeof employeeSchema>;
   generateText?: AgentRequestExecutors["generateText"];
-  onTransition?: (snapshot: { value: unknown }) => void;
+  onTransition?: (snapshot: { value: StateValue }) => void;
+  /**
+   * The human answers, in order, one per idle pause. Defaults to the happy
+   * path; a test can hand it a rejection or an escalation instead.
+   */
+  answers?: OnboardingEvent[];
 }
+
+/** What a host sends to unblock one of the machine's waits. */
+export type OnboardingEvent =
+  | { type: "DOCS_SIGNED"; signedAt: string }
+  | { type: "DOCS_REJECTED"; reason: string }
+  | { type: "HARDWARE_DELIVERED"; deliveredAt: string }
+  | { type: "ESCALATE"; note: string };
+
+const DEFAULT_ANSWERS: OnboardingEvent[] = [
+  { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
+  { type: "HARDWARE_DELIVERED", deliveredAt: "2026-07-28" },
+];
+
+/** Safety cap: a rejected packet re-enters `waitingForSignedDocs`, so the host
+ * loop needs its own bound as well as the machine's. */
+const MAX_PAUSES = 8;
 
 export interface LongRunningOnboardingResult {
   idleStates: string[];
@@ -304,9 +388,11 @@ export interface LongRunningOnboardingResult {
   idleEventTypes: string[][];
   output: {
     employeeId: string;
-    welcomePacketId: string;
-    accounts: Accounts;
-    schedule: string;
+    status: "onboarded" | "escalated";
+    welcomePacketId: string | null;
+    accounts: Accounts | null;
+    schedule: string | null;
+    escalation: string | null;
   };
 }
 
@@ -324,51 +410,46 @@ export async function runLongRunningOnboardingExample(
   const idleStates: string[] = [];
   const idlePrompts: string[] = [];
   const idleEventTypes: string[][] = [];
+  const answers = [...(options.answers ?? DEFAULT_ANSWERS)];
 
-  const first = await runAgent(longRunningOnboardingMachine, {
+  // One options object, built once: the mock replaces the real executors
+  // rather than layering over them.
+  const shared: Partial<RunAgentOptions<typeof longRunningOnboardingMachine>> = {
+    executors: options.generateText
+      ? { generateText: options.generateText }
+      : createAiSdkExecutors({ models }),
+    ...(options.onTransition ? { onTransition: options.onTransition } : {}),
+  };
+
+  let result = await runAgent(longRunningOnboardingMachine, {
     input: { employee },
-    ...(options.generateText
-      ? { executors: { generateText: options.generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    ...(options.onTransition ? { onTransition: options.onTransition } : {}),
+    ...shared,
   });
-  if (first.status !== "idle") {
-    throw new Error(`Expected waiting for signed docs, got '${first.status}'.`);
-  }
-  idleStates.push(String(first.snapshot.value));
-  idlePrompts.push(getStateMeta(first.snapshot).interaction?.label ?? "");
-  idleEventTypes.push(getAcceptedEvents(first.snapshot).map((event) => event.type));
 
-  const persistedAfterWelcome = first.persist();
-  const second = await runAgent(longRunningOnboardingMachine, {
-    snapshot: persistedAfterWelcome,
-    event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
-    ...(options.generateText
-      ? { executors: { generateText: options.generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    ...(options.onTransition ? { onTransition: options.onTransition } : {}),
-  });
-  if (second.status !== "idle") {
-    throw new Error(`Expected waiting for hardware, got '${second.status}'.`);
-  }
-  idleStates.push(String(second.snapshot.value));
-  idlePrompts.push(getStateMeta(second.snapshot).interaction?.label ?? "");
-  idleEventTypes.push(getAcceptedEvents(second.snapshot).map((event) => event.type));
+  // Days pass between these calls in a real deployment. Each pause persists to
+  // JSON and the next call resumes from it.
+  for (let pause = 0; pause < MAX_PAUSES && result.status === "idle"; pause++) {
+    const interaction = getInteraction(result.snapshot);
+    idleStates.push(getStatePath(result.snapshot));
+    idlePrompts.push(interaction?.label ?? "");
+    idleEventTypes.push(interaction?.events.map(({ type }) => type) ?? []);
 
-  const persistedAfterProvisioning = second.persist();
-  const third = await runAgent(longRunningOnboardingMachine, {
-    snapshot: persistedAfterProvisioning,
-    event: { type: "HARDWARE_DELIVERED", deliveredAt: "2026-07-28" },
-    ...(options.generateText
-      ? { executors: { generateText: options.generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    ...(options.onTransition ? { onTransition: options.onTransition } : {}),
-  });
-  if (third.status !== "done") {
-    throw new Error(`Expected onboarding done, got '${third.status}'.`);
+    const answer = answers.shift();
+    if (!answer)
+      throw new Error(`No answer scripted for pause at '${getStatePath(result.snapshot)}'.`);
+
+    result = await runAgent(longRunningOnboardingMachine, {
+      snapshot: JSON.parse(JSON.stringify(result.persist())) as Snapshot<unknown>,
+      event: answer,
+      ...shared,
+    });
   }
 
-  return { idleStates, idlePrompts, idleEventTypes, output: third.output };
+  if (result.status !== "done") {
+    throw new Error(`Onboarding did not reach a final state: ${result.status}`);
+  }
+
+  return { idleStates, idlePrompts, idleEventTypes, output: result.output };
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
@@ -379,13 +460,14 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   }
   void (async () => {
     const result = await runLongRunningOnboardingExample({
-      onTransition: ({ value }) => console.log("[state]", JSON.stringify(value)),
+      onTransition: (snapshot) => console.log("[state]", getStatePath(snapshot)),
     });
 
     console.log("Idle states:", result.idleStates.join(" -> "));
     console.log("Idle prompts:", result.idlePrompts.join(" / "));
+    console.log("Outcome:", result.output.status);
     console.log("Accounts:", result.output.accounts);
-    console.log("Schedule:", result.output.schedule);
+    console.log("Schedule:", result.output.schedule ?? result.output.escalation);
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

@@ -29,10 +29,12 @@
  * The web/file tools are represented by model requests; the hierarchy and the
  * routing loops are real child actors and real decisions.
  *
- * Each team returns a `log` of one-line worker results alongside its output, and
- * the coordinator folds those into a compact `teamReport` tree (team, worker,
- * result) as the teams finish. That tree, not the raw research prose, is what
- * the run leads with; the full research and report stay nested under `details`.
+ * Each team returns a `log` of structured worker steps (worker, status,
+ * result) alongside its output, and the coordinator collects those into a
+ * `teamReport` array as the teams finish. The tree is rendered from that array
+ * in `output`, not maintained as a string in context. That tree, not the raw
+ * research prose, is what the run leads with; the full research and report stay
+ * nested under `details`.
  *
  * Dual-mode: `runHierarchicalTeamsExample(options?)` takes injectable
  * `generateText`/`decide` (tests script them — keyless CI); the direct run
@@ -42,7 +44,7 @@
  */
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 export const models = defineModels({
@@ -57,6 +59,38 @@ export const models = defineModels({
 function oneLine(text: string, max = 64): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * One worker step, as data. The teams record what happened; only `output`
+ * turns it into text, so nothing has to keep a rendered string in sync with
+ * the run.
+ */
+const stepSchema = z.object({
+  worker: z.string(),
+  status: z.enum(["done", "failed"]),
+  result: z.string(),
+});
+export type TeamStep = z.infer<typeof stepSchema>;
+
+/** One block of the team tree: a team (or the coordinator) and its steps. */
+const reportEntrySchema = z.object({
+  team: z.string(),
+  steps: z.array(stepSchema),
+});
+export type TeamReportEntry = z.infer<typeof reportEntrySchema>;
+
+function renderStep(step: TeamStep): string {
+  return `  ${step.worker}. ${step.status}${step.result ? `. ${oneLine(step.result)}` : ""}`;
+}
+
+/** Renders the team tree: one line per team, indented one line per step. */
+export function renderTeamReport(entries: TeamReportEntry[]): string {
+  return entries
+    .map(({ team, steps }) =>
+      [team, ...(steps.length > 0 ? steps.map(renderStep) : ["  (no worker steps)"])].join("\n"),
+    )
+    .join("\n");
 }
 
 function renderResearchPrompt(context: { topic: string; notes: string[]; budget: number }): string {
@@ -78,12 +112,12 @@ const researchSetup = setupAgent({
   context: z.object({
     topic: z.string(),
     notes: z.array(z.string()),
-    // One line per worker step, handed up to the coordinator's team tree.
-    log: z.array(z.string()),
+    // One entry per worker step, handed up to the coordinator's team tree.
+    log: z.array(stepSchema),
     budget: z.number(),
   }),
   input: z.object({ topic: z.string(), priorNotes: z.array(z.string()).default([]) }),
-  output: z.object({ research: z.string(), log: z.array(z.string()) }),
+  output: z.object({ research: z.string(), log: z.array(stepSchema) }),
   events: {
     SEARCH: z.object({}),
     SCRAPE: z.object({}),
@@ -160,13 +194,16 @@ export const researchTeamMachine = researchSetup.createMachine({
           target: "supervising",
           context: {
             notes: [...context.notes, output],
-            log: [...context.log, `search. done. ${oneLine(output)}`],
+            log: [...context.log, { worker: "search", status: "done" as const, result: output }],
             budget: context.budget - 1,
           },
         }),
         onError: ({ context }) => ({
           target: "supervising",
-          context: { log: [...context.log, "search. failed"], budget: context.budget - 1 },
+          context: {
+            log: [...context.log, { worker: "search", status: "failed" as const, result: "" }],
+            budget: context.budget - 1,
+          },
         }),
       },
     },
@@ -178,13 +215,16 @@ export const researchTeamMachine = researchSetup.createMachine({
           target: "supervising",
           context: {
             notes: [...context.notes, output],
-            log: [...context.log, `scrape. done. ${oneLine(output)}`],
+            log: [...context.log, { worker: "scrape", status: "done" as const, result: output }],
             budget: context.budget - 1,
           },
         }),
         onError: ({ context }) => ({
           target: "supervising",
-          context: { log: [...context.log, "scrape. failed"], budget: context.budget - 1 },
+          context: {
+            log: [...context.log, { worker: "scrape", status: "failed" as const, result: "" }],
+            budget: context.budget - 1,
+          },
         }),
       },
     },
@@ -198,10 +238,10 @@ const writingSetup = setupAgent({
     research: z.string(),
     outline: z.string().nullable(),
     report: z.string().nullable(),
-    log: z.array(z.string()),
+    log: z.array(stepSchema),
   }),
   input: z.object({ research: z.string() }),
-  output: z.object({ report: z.string(), log: z.array(z.string()) }),
+  output: z.object({ report: z.string(), log: z.array(stepSchema) }),
   requests: {
     outline: {
       schemas: { input: z.object({ research: z.string() }), output: z.string() },
@@ -233,7 +273,16 @@ export const writingTeamMachine = writingSetup.createMachine({
         input: ({ context }) => ({ research: context.research }),
         onDone: ({ context, output }) => ({
           target: "writing",
-          context: { outline: output, log: [...context.log, `outline. done. ${oneLine(output)}`] },
+          context: {
+            outline: output,
+            log: [...context.log, { worker: "outline", status: "done" as const, result: output }],
+          },
+        }),
+        onError: ({ context }) => ({
+          target: "failed",
+          context: {
+            log: [...context.log, { worker: "outline", status: "failed" as const, result: "" }],
+          },
         }),
       },
     },
@@ -243,19 +292,25 @@ export const writingTeamMachine = writingSetup.createMachine({
         input: ({ context }) => ({ research: context.research, outline: context.outline ?? "" }),
         onDone: ({ context, output }) => ({
           target: "done",
-          context: { report: output, log: [...context.log, `write. done. ${oneLine(output)}`] },
+          context: {
+            report: output,
+            log: [...context.log, { worker: "write", status: "done" as const, result: output }],
+          },
+        }),
+        onError: ({ context }) => ({
+          target: "failed",
+          context: {
+            log: [...context.log, { worker: "write", status: "failed" as const, result: "" }],
+          },
         }),
       },
     },
     done: { type: "final" },
+    // The writing team could not produce a report. It says so in its log
+    // instead of handing the coordinator an empty string that looks like one.
+    failed: { type: "final" },
   },
 });
-
-/** Adds a team block to the tree: the team name, then its indented worker lines. */
-function appendTeam(tree: string, team: string, log: string[]): string {
-  const lines = log.length > 0 ? log : ["(no worker steps)"];
-  return `${tree}${team}\n${lines.map((line) => `  ${line}`).join("\n")}\n`;
-}
 
 function renderReviewPrompt(context: {
   research: string;
@@ -278,8 +333,9 @@ const coordinatorSetup = setupAgent({
     topic: z.string(),
     research: z.string().nullable(),
     report: z.string().nullable(),
-    // The team tree, one line per team and per worker, grown as teams finish.
-    teamReport: z.string(),
+    // The team tree as data — one entry per team, grown as teams finish. It
+    // becomes text only in `output`.
+    teamReport: z.array(reportEntrySchema),
     revisionsRemaining: z.number(),
   }),
   input: z.object({ topic: z.string() }),
@@ -302,11 +358,16 @@ export const hierarchicalTeamsMachine = coordinatorSetup.createMachine({
     topic: input.topic,
     research: null,
     report: null,
-    teamReport: "",
+    teamReport: [],
     revisionsRemaining: 1,
   }),
   output: ({ context }) => ({
-    teamReport: [context.teamReport.trimEnd(), "", "Report", context.report || "(none)"].join("\n"),
+    teamReport: [
+      renderTeamReport(context.teamReport),
+      "",
+      "Report",
+      context.report || "(none)",
+    ].join("\n"),
     details: { research: context.research ?? "", report: context.report ?? "" },
   }),
   initial: "researching",
@@ -323,13 +384,17 @@ export const hierarchicalTeamsMachine = coordinatorSetup.createMachine({
           target: "writing",
           context: {
             research: output.research,
-            teamReport: appendTeam(
-              context.teamReport,
-              context.revisionsRemaining === 0 ? "research team (revision)" : "research team",
-              output.log,
-            ),
+            teamReport: [
+              ...context.teamReport,
+              {
+                team:
+                  context.revisionsRemaining === 0 ? "research team (revision)" : "research team",
+                steps: output.log,
+              },
+            ],
           },
         }),
+        onError: { target: "done" },
       },
     },
     writing: {
@@ -341,9 +406,10 @@ export const hierarchicalTeamsMachine = coordinatorSetup.createMachine({
           target: "reviewing",
           context: {
             report: output.report,
-            teamReport: appendTeam(context.teamReport, "writing team", output.log),
+            teamReport: [...context.teamReport, { team: "writing team", steps: output.log }],
           },
         }),
+        onError: { target: "done" },
       },
     },
     // The top-level supervisor: accept the report, or send one round back to
@@ -371,13 +437,27 @@ export const hierarchicalTeamsMachine = coordinatorSetup.createMachine({
                 target: "researching",
                 context: {
                   revisionsRemaining: context.revisionsRemaining - 1,
-                  teamReport: `${context.teamReport}coordinator. revise\n`,
+                  teamReport: [
+                    ...context.teamReport,
+                    {
+                      team: "coordinator",
+                      steps: [{ worker: "review", status: "done" as const, result: "revise" }],
+                    },
+                  ],
                 },
               }
             : undefined,
         PUBLISH: ({ context }) => ({
           target: "done",
-          context: { teamReport: `${context.teamReport}coordinator. publish\n` },
+          context: {
+            teamReport: [
+              ...context.teamReport,
+              {
+                team: "coordinator",
+                steps: [{ worker: "review", status: "done" as const, result: "publish" }],
+              },
+            ],
+          },
         }),
       },
     },
@@ -404,14 +484,17 @@ export async function runHierarchicalTeamsExample(options: RunHierarchicalTeamsO
     onProgress,
   } = options;
 
+  // Mocks REPLACE the real executors; they are never layered over a live
+  // `createAiSdkExecutors`, which would leave any unmocked slot calling out.
+  const executors =
+    generateText || decide
+      ? { ...(generateText ? { generateText } : {}), ...(decide ? { decide } : {}) }
+      : createAiSdkExecutors({ models });
+
   const result = await runAgent(hierarchicalTeamsMachine, {
     input: { topic },
-    executors: {
-      ...createAiSdkExecutors({ models }),
-      ...(generateText ? { generateText } : {}),
-      ...(decide ? { decide } : {}),
-    },
-    ...(onProgress ? { onTransition: (snapshot) => onProgress(String(snapshot.value)) } : {}),
+    executors,
+    ...(onProgress ? { onTransition: (snapshot) => onProgress(getStatePath(snapshot)) } : {}),
   });
 
   if (result.status !== "done") {

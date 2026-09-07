@@ -29,7 +29,12 @@
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic, Snapshot, SnapshotFrom } from "xstate";
-import { createScriptedExecutors, matchesTrajectory, runAgent } from "@statelyai/agent";
+import {
+  createScriptedExecutors,
+  getStatePath,
+  matchesTrajectory,
+  runAgent,
+} from "@statelyai/agent";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { emailDrafter, models } from "../email-drafter/agent-logic.js";
 
@@ -101,10 +106,10 @@ function nextUserEvent(
 ): DrafterEvent | null {
   switch (snapshot.value) {
     case "prompting":
-      return { type: "PROMPT_SUBMITTED", prompt: drafterCase.prompt } as DrafterEvent;
+      return { type: "PROMPT_SUBMITTED", text: drafterCase.prompt } as DrafterEvent;
     case "needsMoreInfo":
       return drafterCase.details !== null && !detailsUsed
-        ? ({ type: "MORE_INFO", details: drafterCase.details } as DrafterEvent)
+        ? ({ type: "MORE_INFO", text: drafterCase.details } as DrafterEvent)
         : ({ type: "DRAFT_ANYWAY" } as DrafterEvent);
     case "reviewing":
       return { type: "SEND" } as DrafterEvent;
@@ -139,7 +144,7 @@ export async function runDrafterCase(
   for (let leg = 0; leg < maxLegs; leg++) {
     const event = liveSnapshot
       ? nextUserEvent(liveSnapshot, drafterCase, detailsUsed)
-      : ({ type: "PROMPT_SUBMITTED", prompt: drafterCase.prompt } as DrafterEvent);
+      : ({ type: "PROMPT_SUBMITTED", text: drafterCase.prompt } as DrafterEvent);
     if (!event) break;
     if (event.type === "MORE_INFO") detailsUsed = true;
 
@@ -148,7 +153,7 @@ export async function runDrafterCase(
       executors,
       onTransition: (next, causedBy) => {
         if (snapshot && (causedBy as { type: string }).type === "@xstate.init") return;
-        statePath.push(String(next.value));
+        statePath.push(getStatePath(next));
         eventTrajectory.push(causedBy.type);
       },
     });
@@ -187,11 +192,13 @@ export function scriptedExecutorsFor(drafterCase: DrafterCase): Partial<AgentReq
     outputTokens: 0,
     totalTokens: tokensPerCall,
   };
+  // Keyed by request name, not by position: a run that takes a different branch
+  // still gets the answer written for the call it actually makes.
   return createScriptedExecutors({
-    text: [
-      ...assessments.map((assessment) => ({ output: assessment, usage })),
-      { output: draft, usage },
-    ],
+    text: {
+      evaluatePrompt: assessments.map((assessment) => ({ output: assessment, usage })),
+      draftEmail: [{ output: draft, usage }],
+    },
   });
 }
 

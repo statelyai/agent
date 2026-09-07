@@ -3,27 +3,36 @@
  * setup, and the machine itself. Everything a host needs, in one file and with
  * nothing host-flavored in it.
  *
- * Every framework host in `examples/` (Mastra, Flue, Eve, Cloudflare, the
+ * Every framework host in `examples/` (Mastra, Flue, LangChain, Cloudflare, the
  * inspector, the CLI in `./index.ts`) imports this module and nothing else from
- * the example. Each state that needs the human carries a schema-typed
- * `meta.interaction` (text / select / confirm), so hosts render the
- * conversation generically — they never hardcode state names.
+ * the example. Each state that needs the human carries the library's own
+ * `meta.interaction` descriptor — validated by the shipped
+ * `interactionMetaSchema` and read back with `getInteraction` — so hosts render
+ * the conversation generically and never hardcode state names.
  *
  * Flow: prompting → evaluating → (needsMoreInfo)? → drafting → reviewing →
- * sending → sent → (another | done).
+ * sending → sent → (another | done), with `failed` for a request that errors.
+ * After MAX_REVISIONS revision rounds, drafting lands in `finalReview`, which
+ * accepts SEND and nothing else — the bound is a state, not a hidden guard.
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { defineModels } from "@statelyai/agent/ai-sdk";
 import {
+  type AgentInteraction,
   type AgentMessage,
+  type EventOf,
   assistantMessage,
   createAgentSchemas,
   createTextLogic,
+  interactionMetaSchema,
   setupAgent,
   userMessage,
 } from "@statelyai/agent";
+
+/** How many revision rounds `reviewing` allows before only SEND is legal. */
+export const MAX_REVISIONS = 2;
 
 const promptAssessmentSchema = z.object({
   satisfied: z.boolean(),
@@ -39,93 +48,37 @@ const emailDraftSchema = z.object({
 
 type EmailDraft = z.infer<typeof emailDraftSchema>;
 
-// State/transition meta is schema-typed: hosts get a typed interaction
-// protocol instead of Record<string, unknown>.
-// Every variant also carries the host-neutral chat vocabulary — an `events` map
-// of button label + style per accepted event, and `textEvent` naming the ONE
-// event free-typed text is delivered to. A chat host renders from those three
-// fields (`label` / `events` / `textEvent`) and ignores the CLI-only
-// `type`/`choices`/`field` details; the CLI renderer in `./index.ts` and the
-// framework hosts keep using those. Same meta, two renderers.
-const chatInteractionFields = {
-  events: z
-    .record(
-      z.string(),
-      z.object({
-        label: z.string().optional(),
-        style: z.enum(["primary", "danger", "default"]).optional(),
-      }),
-    )
-    .optional(),
-  textEvent: z.string().optional(),
-};
-
-export const metaSchema = z.object({
-  display: z.array(z.string()).optional(),
-  interaction: z
-    .discriminatedUnion("type", [
-      z.object({
-        type: z.literal("text"),
-        label: z.string(),
-        eventType: z.string(),
-        field: z.string(),
-        ...chatInteractionFields,
-      }),
-      z.object({
-        type: z.literal("select"),
-        label: z.string(),
-        choices: z.array(
-          z.object({
-            label: z.string(),
-            eventType: z.string(),
-            input: z
-              .object({
-                type: z.literal("text"),
-                label: z.string(),
-                field: z.string(),
-              })
-              .optional(),
-          }),
-        ),
-        ...chatInteractionFields,
-      }),
-      z.object({
-        type: z.literal("confirm"),
-        label: z.string(),
-        default: z.boolean().optional(),
-        trueEventType: z.string(),
-        falseEventType: z.string(),
-        ...chatInteractionFields,
-      }),
-    ])
-    .optional(),
-});
-
-/** One rendered interaction, as declared by the machine's `meta`. */
-export type Interaction = NonNullable<z.infer<typeof metaSchema>["interaction"]>;
-
-/** The event a host sends back after rendering an interaction. */
-export type DrafterEvent = { type: string; [field: string]: unknown };
-
 const contextSchema = z.object({
   prompt: z.string(),
   assessment: promptAssessmentSchema.nullable(),
   draft: emailDraftSchema.nullable(),
   sentEmails: z.array(emailDraftSchema),
-  messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+  // `messagesSchema` is the shipped validator, but nesting it in a zod object
+  // erases the element type, so the context schema keeps a typed `z.custom`.
+  messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
+  /** Revision rounds used so far; bounds the reviewing → drafting loop. */
+  revisions: z.number(),
+  /** Why the run failed, when it did. `null` on the happy path. */
+  failure: z.string().nullable(),
 });
 
+// Every event is a fact from the human. The three that carry free text use the
+// field name `text`, because that is what `eventFromInteraction(snapshot, {
+// text })` produces for the state's declared `textEvent`.
 const eventSchemas = {
-  PROMPT_SUBMITTED: z.object({ prompt: z.string() }),
-  MORE_INFO: z.object({ details: z.string() }),
+  PROMPT_SUBMITTED: z.object({ text: z.string() }),
+  MORE_INFO: z.object({ text: z.string() }),
   DRAFT_ANYWAY: z.object({}),
-  REQUEST_CHANGES: z.object({ changes: z.string() }),
+  REQUEST_CHANGES: z.object({ text: z.string() }),
   SEND: z.object({}),
   ANOTHER: z.object({}),
   END: z.object({}),
 };
 
-const outputSchema = z.object({ sentEmails: z.array(emailDraftSchema) });
+const outputSchema = z.object({
+  sentEmails: z.array(emailDraftSchema),
+  failure: z.string().nullable(),
+});
 
 export const models = defineModels({
   promptEvaluator: openai("gpt-5.4-mini"),
@@ -148,7 +101,7 @@ export const draftEmail = createTextLogic({
   schemas: {
     input: z.object({
       prompt: z.string(),
-      messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+      messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
     }),
     output: emailDraftSchema,
   },
@@ -163,7 +116,9 @@ export const emailDrafterSchemas = createAgentSchemas({
   context: contextSchema,
   events: eventSchemas,
   output: outputSchema,
-  meta: metaSchema,
+  // The library's own interaction protocol, not a per-machine restatement of
+  // it: `label` / `events` / `textEvent`, read back with `getInteraction`.
+  meta: interactionMetaSchema,
 });
 
 export const emailDrafterActors = {
@@ -185,13 +140,15 @@ const agentSetup = setupAgent({
 
 export const emailDrafter = agentSetup.createMachine({
   id: "email-drafter",
-  output: ({ context }) => ({ sentEmails: context.sentEmails }),
+  output: ({ context }) => ({ sentEmails: context.sentEmails, failure: context.failure }),
   context: {
     prompt: "",
     assessment: null,
     draft: null,
     sentEmails: [],
     messages: [],
+    revisions: 0,
+    failure: null,
   },
   initial: "prompting",
   states: {
@@ -199,10 +156,7 @@ export const emailDrafter = agentSetup.createMachine({
       tags: ["awaiting-user"],
       meta: {
         interaction: {
-          type: "text",
           label: "What email should I write? Who is it to, and what should it say?",
-          eventType: "PROMPT_SUBMITTED",
-          field: "prompt",
           events: { PROMPT_SUBMITTED: { label: "Draft it", style: "primary" } },
           textEvent: "PROMPT_SUBMITTED",
         },
@@ -211,10 +165,11 @@ export const emailDrafter = agentSetup.createMachine({
         PROMPT_SUBMITTED: ({ event }) => ({
           target: "evaluating",
           context: {
-            prompt: event.prompt,
+            prompt: event.text,
             assessment: null,
             draft: null,
-            messages: [userMessage(event.prompt)],
+            revisions: 0,
+            messages: [userMessage(event.text)],
           },
         }),
       },
@@ -224,20 +179,14 @@ export const emailDrafter = agentSetup.createMachine({
       invoke: {
         src: "evaluatePrompt",
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ output }) => {
-          if (output.satisfied) {
-            return {
-              target: "drafting",
-              context: { assessment: output },
-            };
-          }
-
-          return {
-            target: "needsMoreInfo",
-            context: { assessment: output },
-          };
-        },
-        onError: { target: "failed" },
+        onDone: ({ output }) => ({
+          target: output.satisfied ? "drafting" : "needsMoreInfo",
+          context: { assessment: output },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `evaluatePrompt failed: ${String(event.error)}` },
+        }),
       },
     },
 
@@ -245,16 +194,7 @@ export const emailDrafter = agentSetup.createMachine({
       tags: ["awaiting-user"],
       meta: {
         interaction: {
-          type: "select",
           label: "Some details are missing. Type them in, or draft anyway.",
-          choices: [
-            {
-              label: "Add details",
-              eventType: "MORE_INFO",
-              input: { type: "text", label: "More details", field: "details" },
-            },
-            { label: "Draft anyway", eventType: "DRAFT_ANYWAY" },
-          ],
           events: {
             MORE_INFO: { label: "Add details", style: "primary" },
             DRAFT_ANYWAY: { label: "Draft anyway" },
@@ -266,8 +206,8 @@ export const emailDrafter = agentSetup.createMachine({
         MORE_INFO: ({ context, event }) => ({
           target: "evaluating",
           context: {
-            prompt: `${context.prompt}\n\n${event.details}`,
-            messages: [...context.messages, userMessage(event.details)],
+            prompt: `${context.prompt}\n\n${event.text}`,
+            messages: [...context.messages, userMessage(event.text)],
           },
         }),
         DRAFT_ANYWAY: ({ context }) => ({
@@ -290,20 +230,23 @@ export const emailDrafter = agentSetup.createMachine({
           prompt: context.prompt,
           messages: context.messages,
         }),
-        onDone: ({ context, output }) => {
-          const draft = output;
-          return {
-            target: "reviewing",
-            context: {
-              draft,
-              messages: [
-                ...context.messages,
-                assistantMessage(`To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`),
-              ],
-            },
-          };
-        },
-        onError: { target: "failed" },
+        onDone: ({ context, output: draft }) => ({
+          // A spent revision budget is a different state, not a hidden guard:
+          // `finalReview` simply does not accept REQUEST_CHANGES, so every
+          // host — and `getInteraction` — stops offering it.
+          target: context.revisions >= MAX_REVISIONS ? "finalReview" : "reviewing",
+          context: {
+            draft,
+            messages: [
+              ...context.messages,
+              assistantMessage(`To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`),
+            ],
+          },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `draftEmail failed: ${String(event.error)}` },
+        }),
       },
     },
 
@@ -311,20 +254,7 @@ export const emailDrafter = agentSetup.createMachine({
       tags: ["awaiting-user"],
       meta: {
         interaction: {
-          type: "select",
           label: "Send the draft, or type the changes you want.",
-          choices: [
-            {
-              label: "Request changes",
-              eventType: "REQUEST_CHANGES",
-              input: {
-                type: "text",
-                label: "Requested changes",
-                field: "changes",
-              },
-            },
-            { label: "Send", eventType: "SEND" },
-          ],
           events: {
             SEND: { label: "Send email", style: "primary" },
             REQUEST_CHANGES: { label: "Request changes" },
@@ -337,10 +267,27 @@ export const emailDrafter = agentSetup.createMachine({
         REQUEST_CHANGES: ({ context, event }) => ({
           target: "drafting",
           context: {
-            prompt: `${context.prompt}\n\nRevision request: ${event.changes}`,
-            messages: [...context.messages, userMessage(`Revision request: ${event.changes}`)],
+            revisions: context.revisions + 1,
+            prompt: `${context.prompt}\n\nRevision request: ${event.text}`,
+            messages: [...context.messages, userMessage(`Revision request: ${event.text}`)],
           },
         }),
+        SEND: { target: "sending" },
+      },
+    },
+
+    // The same pause after MAX_REVISIONS rounds. The only difference is what
+    // it accepts, which is exactly what a bounded loop should look like from
+    // the outside.
+    finalReview: {
+      tags: ["awaiting-user"],
+      meta: {
+        interaction: {
+          label: "That is the last revision I can make. Send this draft?",
+          events: { SEND: { label: "Send email", style: "primary" } },
+        },
+      },
+      on: {
         SEND: { target: "sending" },
       },
     },
@@ -355,20 +302,18 @@ export const emailDrafter = agentSetup.createMachine({
             sentEmails: context.draft ? [...context.sentEmails, context.draft] : context.sentEmails,
           },
         }),
-        onError: { target: "failed" },
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `sendEmail failed: ${String(event.error)}` },
+        }),
       },
     },
 
     sent: {
       tags: ["awaiting-user"],
       meta: {
-        display: ["Email sent."],
         interaction: {
-          type: "confirm",
           label: "Email sent. Draft another one?",
-          default: false,
-          trueEventType: "ANOTHER",
-          falseEventType: "END",
           events: {
             ANOTHER: { label: "Draft another", style: "primary" },
             END: { label: "Finish up" },
@@ -382,21 +327,31 @@ export const emailDrafter = agentSetup.createMachine({
             prompt: "",
             assessment: null,
             draft: null,
+            revisions: 0,
           },
         },
         END: { target: "done" },
       },
     },
 
-    // Plain final states: `output` is natively typed against the machine's
-    // output schema, and becomes the machine output when reached.
+    // Two distinct final states, two distinct outputs: `failed` carries the
+    // reason a request errored, `done` never does.
     failed: {
       type: "final",
-      output: ({ context }) => ({ sentEmails: context.sentEmails }),
+      output: ({ context }) => ({
+        sentEmails: context.sentEmails,
+        failure: context.failure ?? "unknown failure",
+      }),
     },
     done: {
       type: "final",
-      output: ({ context }) => ({ sentEmails: context.sentEmails }),
+      output: ({ context }) => ({ sentEmails: context.sentEmails, failure: null }),
     },
   },
 });
+
+/** The machine's own event union. Hosts send these back after rendering. */
+export type DrafterEvent = EventOf<typeof emailDrafter>;
+
+/** One rendered interaction, as `getInteraction` returns it for this machine. */
+export type Interaction = AgentInteraction<DrafterEvent>;

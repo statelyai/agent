@@ -1,6 +1,6 @@
 {
   "name": "game-agent",
-  "title": "Turn-based combat & rock-paper-scissors",
+  "title": "Rock-paper-scissors from the saved event log",
   "kind": "agent-workflow",
   "machine": "rpsMachine",
   "origin": {
@@ -10,7 +10,7 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr", "Flowise"],
-    "purpose": "Play rock-paper-scissors against the model, first to 3 — it reads the round history saved in context to counter your habits; a narrated combat turn shows the same machine computing its legal moves from HP."
+    "purpose": "Play rock-paper-scissors against the model, first to 3 — it reads the round history saved in context to counter your habits. The saved event log is the agent's only memory."
   },
   "starters": [
     {

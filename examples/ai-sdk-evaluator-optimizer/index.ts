@@ -47,10 +47,8 @@ const contextSchema = z.object({
   translation: z.string().nullable(),
   /** The literal first pass, kept so the demo can show before/after. */
   firstDraft: z.string().nullable(),
-  /** One line: what the reviewer asked the improver to fix. */
-  revisionNotes: z.string().nullable(),
-  /** One line: the latest score and remaining issues. */
-  review: z.string().nullable(),
+  /** Issues the last revision was asked to fix; rendered only in `output`. */
+  revisedIssues: z.array(z.string()).nullable(),
   evaluation: translationEvaluationSchema.nullable(),
   iterations: z.number(),
   maxIterations: z.number(),
@@ -153,8 +151,7 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
     targetLanguage: input.targetLanguage,
     translation: null,
     firstDraft: null,
-    revisionNotes: null,
-    review: null,
+    revisedIssues: null,
     evaluation: null,
     iterations: 0,
     maxIterations: input.maxIterations,
@@ -176,8 +173,9 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
             context: { translation: output, firstDraft: output },
           };
         },
-        // On failure, finish with an empty translation (best-effort output).
-        onError: { target: "done", context: { translation: "", firstDraft: "" } },
+        // Nothing was translated, so there is no best-effort answer to give:
+        // the run ends in `failed`, not in `done` with an empty string.
+        onError: { target: "failed" },
       },
     },
     evaluating: {
@@ -196,14 +194,11 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
           });
           return {
             target: "checking",
-            context: {
-              evaluation: output,
-              review: reviewLine(output),
-              iterations: context.iterations + 1,
-            },
+            context: { evaluation: output, iterations: context.iterations + 1 },
           };
         },
-        // On failure, finish with the current (already-set) translation.
+        // A translation exists; only the review is missing. `done` reports it
+        // with whatever score the previous pass produced.
         onError: { target: "done" },
       },
     },
@@ -227,24 +222,25 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
           enq.emit({ type: "IMPROVED", translation: output });
           return {
             target: "evaluating",
-            context: {
-              translation: output,
-              revisionNotes: context.evaluation.specificIssues.join("; ") || "polish pass",
-            },
+            context: { translation: output, revisedIssues: context.evaluation.specificIssues },
           };
         },
-        // On failure, finish with the prior translation (best-effort output).
+        // The previous translation stands; `done` reports it unrevised.
         onError: { target: "done" },
       },
     },
     done: {
       type: "final",
+      // The prose summary is rendered here, from context, rather than kept in
+      // context and patched on every transition.
       output: ({ context }) => ({
         summary: [
           `**Final translation (${context.targetLanguage})**\n\n${context.translation}`,
           `**First draft**\n\n${context.firstDraft ?? context.translation}`,
-          `**Reviewer**\n\n${context.review ?? "not reviewed"}${
-            context.revisionNotes ? `\n\nRevised to fix: ${context.revisionNotes}` : ""
+          `**Reviewer**\n\n${context.evaluation ? reviewLine(context.evaluation) : "not reviewed"}${
+            context.revisedIssues?.length
+              ? `\n\nRevised to fix: ${context.revisedIssues.join("; ")}`
+              : ""
           }`,
         ].join("\n\n"),
         qualityScore: context.evaluation?.qualityScore ?? 0,
@@ -254,6 +250,17 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
           translation: context.translation,
           evaluation: context.evaluation,
         },
+      }),
+    },
+    // The first pass never produced a translation, so there is nothing to
+    // report but the failure itself.
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        summary: `Translation into ${context.targetLanguage} failed before a first draft existed.`,
+        qualityScore: 0,
+        iterations: context.iterations,
+        detail: { firstDraft: "", translation: "", evaluation: null },
       }),
     },
   },

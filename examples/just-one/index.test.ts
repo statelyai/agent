@@ -1,7 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { getStateMeta, runAgent } from "@statelyai/agent";
+import { z } from "zod";
+import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import { type GuesserEvent, idlePrompt, justOneMachine, PERSONAS } from "./index.js";
+
+/** The `writeClue` request input, as the executor receives it. */
+const clueRequestInput = z.object({
+  secretWord: z.string(),
+  persona: z.object({ name: z.string() }),
+});
 
 /** Every request the scripted clue-giver saw, as the executor received it. */
 interface CapturedRequest {
@@ -13,8 +20,9 @@ interface CapturedRequest {
 
 /**
  * Scripted clue-givers: one clue per persona, per round. The executor routes on
- * the persona name in the prompt — the only thing that distinguishes the three
- * otherwise identical requests.
+ * `request.name` and then on the structured `request.input.persona` — the three
+ * regions share one request definition, so the persona in the validated input
+ * is what tells them apart. Nothing here reads the prompt text.
  */
 function createClueGivers(script: Record<string, string[]>, captured: CapturedRequest[] = []) {
   const counts = new Map<string, number>();
@@ -25,8 +33,10 @@ function createClueGivers(script: Record<string, string[]>, captured: CapturedRe
       prompt: request.prompt,
       serialized: JSON.stringify(request),
     });
-    const persona = PERSONAS.find((entry) => request.prompt?.includes(`You are ${entry.name}.`));
-    if (!persona) throw new Error(`unrecognized clue request: ${request.prompt}`);
+    if (request.name !== "writeClue") {
+      throw new Error(`unexpected request: ${request.name ?? "(unnamed)"}`);
+    }
+    const { persona } = clueRequestInput.parse(request.input);
     const round = counts.get(persona.name) ?? 0;
     counts.set(persona.name, round + 1);
     const clue = script[persona.name]?.[round] ?? "";
@@ -54,16 +64,14 @@ async function play(options: PlayOptions) {
 
   while (result.status === "idle") {
     // Every idle state must advertise how a host can unblock it.
-    const interaction = getStateMeta(result.snapshot).interaction;
-    expect(
-      interaction,
-      `no interaction meta on ${JSON.stringify(result.snapshot.value)}`,
-    ).toBeDefined();
+    const interaction = getInteraction(result.snapshot);
+    expect(interaction, `no interaction meta on ${getStatePath(result.snapshot)}`).toBeDefined();
+    expect(interaction?.textEvent).toBe("GUESS");
     prompts.push(idlePrompt(result.snapshot));
 
     const event = queued.shift();
     if (!event) throw new Error(`ran out of guesser events at: ${prompts.at(-1)}`);
-    expect(result.snapshot.can(event as never)).toBe(true);
+    expect(result.snapshot.can(event)).toBe(true);
 
     result = await runAgent(justOneMachine, {
       snapshot: result.persist(),

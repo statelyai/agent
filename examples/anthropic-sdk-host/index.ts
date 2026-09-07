@@ -26,6 +26,10 @@
  * extension — Zod v4's `z.toJSONSchema` implements it). Schemas without that
  * extension fall back to plain text.
  *
+ * Every executor returns the call's `usage`, mapped from Anthropic's
+ * snake_case `usage` block onto the flat fields `runAgent` aggregates, so a
+ * machine's token budget and `result.usage` read real numbers.
+ *
  * Decisions force a tool call with `tool_choice: { type: 'any' }` and one
  * tool per candidate event (Anthropic has no "forced, but pick any of these
  * N tools" choice other than "any available tool" — since only the
@@ -50,6 +54,7 @@ import {
   parseStructuredEnvelope,
   renderDecisionAttempts,
   runAgent,
+  type AgentCallUsage,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
   type AgentEventDescriptor,
@@ -198,6 +203,26 @@ export function toDecisionMessages(
   return messages;
 }
 
+/**
+ * Maps Anthropic's snake_case `usage` block onto the flat {@link AgentCallUsage}
+ * fields `runAgent` aggregates, so a machine's token budget reads real numbers
+ * instead of zero. Anthropic reports no total, so it is summed here; cache
+ * creation tokens have no `AgentCallUsage` field and are dropped.
+ */
+export function toAgentCallUsage(usage: Message["usage"] | undefined): AgentCallUsage | undefined {
+  if (!usage) return undefined;
+  const inputTokens = usage.input_tokens;
+  const outputTokens = usage.output_tokens;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    ...(typeof usage.cache_read_input_tokens === "number"
+      ? { cachedInputTokens: usage.cache_read_input_tokens }
+      : {}),
+  };
+}
+
 /** The synthetic tool used to force structured output via a tool call. */
 const STRUCTURED_OUTPUT_TOOL_NAME = "respond_with_output";
 
@@ -280,6 +305,7 @@ export function createAnthropicExecutors(
         const parsed = parseStructuredEnvelope(request, toolUse?.input);
         return {
           output: parsed.result,
+          usage: toAgentCallUsage(response.usage),
           ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
         };
       }
@@ -292,7 +318,7 @@ export function createAnthropicExecutors(
       { ...common, ...(tools.length > 0 ? { tools } : {}) },
       { signal: info?.signal },
     );
-    return { output: extractText(response) };
+    return { output: extractText(response), usage: toAgentCallUsage(response.usage) };
   };
 
   const streamText = async (
@@ -314,7 +340,9 @@ export function createAnthropicExecutors(
       { signal: info?.signal },
     );
     stream.on("text", (delta) => info?.onChunk?.(delta));
-    return { output: await stream.finalText() };
+    // `finalMessage()` (not `finalText()`) so the stream's usage reaches the run.
+    const final = await stream.finalMessage();
+    return { output: extractText(final), usage: toAgentCallUsage(final.usage) };
   };
 
   const decide: AgentDecisionExecutor = async (request, info) => {
@@ -355,6 +383,7 @@ export function createAnthropicExecutors(
         ...(input && typeof input === "object" ? input : {}),
         type: chosenEvent.type,
       } as ChosenEvent,
+      usage: toAgentCallUsage(response.usage),
     };
   };
 

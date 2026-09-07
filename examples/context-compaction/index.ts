@@ -27,8 +27,9 @@
  * Human turns are machine events, not `agent.userInput`: `awaitingUser` has no
  * invoke, so the run settles **idle** there and a host (demo UI, test, or the
  * stdin loop below) resumes it with `USER_MESSAGE { text }`. The state carries
- * `meta.interaction` so hosts know what to label the input and where to route
- * free chat text (`textEvent`). Labels support `{contextKey}` interpolation.
+ * `meta.interaction` (the library's `interactionMetaSchema`) so hosts read the
+ * label and the free-text event off `getInteraction(snapshot)`; the label is a
+ * function of the context, so the window state is derived, never stored.
  *
  * Type `exit` to end; the machine outputs the final summary, recent messages,
  * and turn count.
@@ -44,34 +45,13 @@ import {
   type AgentRequestExecutor,
   assistantMessage,
   createAgentSchemas,
-  getStateMeta,
+  getInteraction,
+  interactionMetaSchema,
   runAgent,
   setupAgent,
   systemMessage,
   userMessage,
 } from "@statelyai/agent";
-
-/**
- * Typed `meta.interaction` hints. Hosts read them off the idle snapshot to
- * label the input box and route free chat text to an event.
- */
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
-});
 
 // Annotated so the exported const has a portable, nameable type (TS2742).
 export const models = defineModels({
@@ -80,28 +60,28 @@ export const models = defineModels({
 
 export const contextCompactionSchemas = createAgentSchemas({
   context: z.object({
-    messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+    // `messagesSchema` is a Standard Schema, and nesting one inside `z.object`
+    // erases the element type, so the context schema keeps a typed `z.custom`.
+    messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
     summary: z.string().nullable(),
     turns: z.number(),
     maxMessages: z.number(),
     keepRecent: z.number(),
     pendingInput: z.string().nullable(),
-    // The latest assistant reply, mirrored out of `messages` so a host that
-    // renders context (the demo UI) can show it — message arrays are plumbing.
-    reply: z.string(),
-    // Human-readable window state, interpolated into the interaction label.
-    windowStatus: z.string(),
   }),
-  meta: metaSchema,
+  // The library's own interaction protocol, not a per-machine restatement.
+  meta: interactionMetaSchema,
   events: {
     /** One human chat turn. The idle `awaitingUser` state waits for this. */
     USER_MESSAGE: z.object({ text: z.string() }),
   },
   input: z.object({
     // Compact once history grows past this many messages...
-    maxMessages: z.number().default(8),
-    // ...keeping this many recent messages verbatim after compaction.
-    keepRecent: z.number().default(4),
+    maxMessages: z.number().int().min(1).default(8),
+    // ...keeping this many recent messages verbatim after compaction. At least
+    // one: `keepRecent: 0` would slice nothing off and the window would never
+    // shrink, so compaction would run again on every turn forever.
+    keepRecent: z.number().int().min(1).default(4),
   }),
   output: z.object({
     summary: z.string().nullable(),
@@ -182,8 +162,6 @@ export const contextCompactionMachine = agentSetup.createMachine({
     maxMessages: input.maxMessages,
     keepRecent: input.keepRecent,
     pendingInput: null,
-    reply: "",
-    windowStatus: "0 messages in the window, no summary yet",
   }),
   initial: "awaitingUser",
   states: {
@@ -194,8 +172,11 @@ export const contextCompactionMachine = agentSetup.createMachine({
       tags: ["waiting"],
       meta: {
         interaction: {
-          // `{turns}` / `{windowStatus}` resolve against the snapshot context.
-          label: "Say something (turn {turns} — {windowStatus}). Type 'exit' to finish.",
+          // A function of the context: the window state is DERIVED here, not
+          // stored as a pre-rendered string a transition has to keep in sync.
+          label: ({ context }) =>
+            `Say something (turn ${context.turns} — ${describeWindow(context)}). ` +
+            "Type 'exit' to finish.",
           textEvent: "USER_MESSAGE",
           events: { USER_MESSAGE: { label: "Send", style: "primary" } },
         },
@@ -233,15 +214,7 @@ export const contextCompactionMachine = agentSetup.createMachine({
           ];
           return {
             target: "checkingWindow",
-            context: {
-              messages,
-              turns: context.turns + 1,
-              pendingInput: null,
-              reply: output,
-              windowStatus: `${messages.length}/${context.maxMessages} messages${
-                context.summary ? ", summary active" : ", no summary yet"
-              }`,
-            },
+            context: { messages, turns: context.turns + 1, pendingInput: null },
           };
         },
         // On a failed reply, drop back to the prompt rather than stalling.
@@ -271,7 +244,6 @@ export const contextCompactionMachine = agentSetup.createMachine({
           context: {
             summary: output.summary,
             messages: context.messages.slice(-context.keepRecent),
-            windowStatus: `compacted to ${context.keepRecent} recent messages, summary active`,
           },
         }),
         // If summarization fails, keep going without dropping history.
@@ -292,21 +264,27 @@ export const contextCompactionMachine = agentSetup.createMachine({
 
 type CompactionSnapshot = SnapshotFrom<typeof contextCompactionMachine>;
 
-/** `{key}` placeholders in interaction labels resolve against context. */
-export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
-  return label
-    .replace(/\{(\w+)\}/g, (_, key: string) => {
-      const value = context[key];
-      return typeof value === "string" || typeof value === "number" ? String(value) : "";
-    })
-    .replace(/\s+/g, " ")
-    .trim();
+/** "4/8 messages, no summary yet" — the window state, derived on demand. */
+function describeWindow(context: {
+  messages: AgentMessage[];
+  maxMessages: number;
+  summary: string | null;
+}): string {
+  return (
+    `${context.messages.length}/${context.maxMessages} messages` +
+    (context.summary ? ", summary active" : ", no summary yet")
+  );
+}
+
+/** The latest assistant reply, read off `messages` rather than mirrored into context. */
+export function latestReply(snapshot: CompactionSnapshot): string {
+  const last = snapshot.context.messages.at(-1);
+  return last?.role === "assistant" && typeof last.content === "string" ? last.content : "";
 }
 
 /** The prompt a host shows while the machine sits idle in `awaitingUser`. */
 export function idlePrompt(snapshot: CompactionSnapshot): string {
-  const label = getStateMeta(snapshot).interaction?.label ?? "You:";
-  return resolveInteractionLabel(label, snapshot.context);
+  return getInteraction(snapshot)?.label ?? "You:";
 }
 
 /**
@@ -364,10 +342,9 @@ export async function main() {
         console.log("\n[compacting context...]");
       }
       // Print the latest assistant reply as it lands.
-      const last = snapshot.context.messages.at(-1);
-      if (snapshot.value === "checkingWindow" && last?.role === "assistant") {
-        const text = typeof last.content === "string" ? last.content : "";
-        console.log(`Assistant: ${text}`);
+      if (snapshot.value === "checkingWindow") {
+        const text = latestReply(snapshot);
+        if (text) console.log(`Assistant: ${text}`);
       }
     },
   });

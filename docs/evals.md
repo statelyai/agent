@@ -25,7 +25,9 @@ const result = await runAgent(machine, {
 });
 ```
 
-Scripts route by semantic request `name`, not prompt text. `scripted.calls` records ordered request names, kinds, inputs, and request envelopes.
+Scripts route by semantic request `name`, not prompt text. Key `text` and `decisions` by the `setupAgent({ requests })` name, as above: it is the recommended form, because a renamed or reordered request fails loudly instead of silently taking another request's answer. A request whose name is not in the script throws an error naming the keys the script does have. Use `"*"` as a fallback route, and a flat array only when the machine makes one kind of request.
+
+`scripted.calls` records ordered request names, kinds, inputs, and request envelopes.
 
 ## Individual request evals
 

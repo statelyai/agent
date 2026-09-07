@@ -27,7 +27,14 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import type { SnapshotFrom } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { createAgentSchemas, getStateMeta, runAgent, setupAgent } from "@statelyai/agent";
+import {
+  createAgentSchemas,
+  getInteraction,
+  getStatePath,
+  interactionMetaSchema,
+  runAgent,
+  setupAgent,
+} from "@statelyai/agent";
 
 export const categorySchema = z.enum(["billing", "technical", "other"]);
 export const sentimentSchema = z.enum(["positive", "neutral", "negative"]);
@@ -48,15 +55,23 @@ export const triageSchema = z.object({
   reply: z.string(),
 });
 
-/** Machine output: a readable summary first, then the structured fields. */
+/**
+ * Machine output: a readable summary first, then the structured fields.
+ * `sentiment`/`category` are null only when classification itself failed.
+ */
 export const triageOutputSchema = z.object({
   summary: z.string(),
-  ...triageSchema.shape,
+  sentiment: sentimentSchema.nullable(),
+  category: categorySchema.nullable(),
+  reply: z.string(),
   escalated: z.boolean(),
 });
 
 /** Below this, a person decides the category before any reply is drafted. */
 export const CONFIDENCE_THRESHOLD = 0.6;
+
+/** Draft attempts one ticket gets before the run degrades to a holding reply. */
+export const MAX_REPLY_ATTEMPTS = 2;
 
 /** Simulated SLA: derived from the classification, no timers involved. */
 export function slaNoteFor(classification: z.infer<typeof classificationSchema>): string {
@@ -78,27 +93,8 @@ const contextSchema = z.object({
   replyAttempts: z.number(),
 });
 
-/** Typed `meta.interaction` hints, read off the idle snapshot by a host. */
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
-});
-
 const schemas = createAgentSchemas({
-  meta: metaSchema,
+  meta: interactionMetaSchema,
   context: contextSchema,
   input: z.object({ ticket: z.string() }),
   output: triageOutputSchema,
@@ -113,6 +109,11 @@ const schemas = createAgentSchemas({
 export const models = defineModels({
   ticketTriage: openai("gpt-5.4-mini"),
 });
+
+/** The narrowed context every post-classification state reads. */
+const classified = {
+  schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
+};
 
 const triageAgentSetup = setupAgent({
   schemas,
@@ -156,22 +157,14 @@ const triageAgentSetup = setupAgent({
         ].join("\n"),
     },
   },
-  // `classifying` assigns `classification` before any of these is entered —
-  // narrow it non-null so they can read it.
+  // `classifying` assigns `classification` before any of these is entered, so
+  // they share one narrowed context shape.
   states: {
-    checkingConfidence: {
-      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
-    },
-    escalating: {
-      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
-    },
-    replying: {
-      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
-    },
-    done: { schemas: { context: contextSchema.extend({ classification: classificationSchema }) } },
-    failed: {
-      schemas: { context: contextSchema.extend({ classification: classificationSchema }) },
-    },
+    checkingConfidence: classified,
+    escalating: classified,
+    replying: classified,
+    done: classified,
+    failed: classified,
   },
 });
 
@@ -198,6 +191,9 @@ export const triageMachine = triageAgentSetup.createMachine({
           target: "checkingConfidence",
           context: { classification: output, slaNote: slaNoteFor(output) },
         }),
+        // No classification, so nothing downstream can run: end in a terminal
+        // state that says so, with a holding reply.
+        onError: { target: "unclassified" },
       },
     },
     // The guard, as a state you can point at: confident enough to reply, or a
@@ -275,6 +271,9 @@ export const triageMachine = triageAgentSetup.createMachine({
       },
     },
     replying: {
+      // The attempt is counted on ENTRY, so every path in — the first draft,
+      // a human confirmation, the retry — spends from the same budget.
+      entry: ({ context }) => ({ context: { replyAttempts: context.replyAttempts + 1 } }),
       invoke: {
         src: "draftReply",
         input: ({ context }) => ({
@@ -284,17 +283,14 @@ export const triageMachine = triageAgentSetup.createMachine({
           slaNote: context.slaNote,
         }),
         onDone: ({ output }) => ({ target: "done", context: { reply: output.reply } }),
-        onError: ({ context }) => ({
-          target: "replyFailed",
-          context: { replyAttempts: context.replyAttempts + 1 },
-        }),
+        onError: { target: "replyFailed" },
       },
     },
     // One retry, then degrade. The budget is a typed guard, not a try/catch.
     replyFailed: {
       type: "choice",
       choice: ({ context }) =>
-        context.replyAttempts < 2
+        context.replyAttempts < MAX_REPLY_ATTEMPTS
           ? { target: "replying", context: { notice: "Reply generation failed; retrying once." } }
           : {
               target: "failed",
@@ -316,6 +312,17 @@ export const triageMachine = triageAgentSetup.createMachine({
         escalated: context.escalated,
       }),
     },
+    // The classifier never answered: no category, no sentiment, a holding reply.
+    unclassified: {
+      type: "final",
+      output: ({ context }) => ({
+        summary: `Could not classify this ticket. ${context.slaNote}`.trim(),
+        sentiment: null,
+        category: null,
+        reply: "We have your ticket and a support agent is picking it up now.",
+        escalated: true,
+      }),
+    },
     // Best-effort terminal: the draft never landed, so a holding reply ships
     // instead of an error.
     failed: {
@@ -333,21 +340,9 @@ export const triageMachine = triageAgentSetup.createMachine({
 
 export type TriageSnapshot = SnapshotFrom<typeof triageMachine>;
 
-/** `{key}` placeholders in interaction labels resolve against context. */
-export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
-  return label
-    .replace(/\{(\w+)\}/g, (_, key: string) => {
-      const value = context[key];
-      return typeof value === "string" || typeof value === "number" ? String(value) : "";
-    })
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /** The label a host shows while the run waits on a human. */
 export function escalationLabel(snapshot: TriageSnapshot): string {
-  const interaction = getStateMeta(snapshot).interaction;
-  return resolveInteractionLabel(interaction?.label ?? "Confirm the category.", snapshot.context);
+  return getInteraction(snapshot)?.label || "Confirm the category.";
 }
 
 // Sample data — a stand-in for a ticket pulled from your support inbox.
@@ -364,8 +359,7 @@ export async function main() {
 
   const shared = {
     executors,
-    onTransition: (snapshot: TriageSnapshot) =>
-      console.log("[state]", JSON.stringify(snapshot.value)),
+    onTransition: (snapshot: TriageSnapshot) => console.log("[state]", getStatePath(snapshot)),
   };
 
   let result = await runAgent(triageMachine, { input: { ticket }, ...shared });

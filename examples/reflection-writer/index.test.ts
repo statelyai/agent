@@ -1,9 +1,9 @@
 import { expect, test } from "vitest";
 import { reflectionWriterMachine, runReflectionWriterExample } from "./index.js";
 
-// Mock the two model calls by routing on `request.model` (the alias set in
-// `defineModels`). `writer` returns a bare essay string; `critic` returns the
-// structured `{ critique, satisfied }` verdict. Each side is scripted in order,
+// Mock the two model calls by routing on `request.name` (the key each request
+// was declared under). `writeEssay` returns a bare essay string; `critiqueEssay`
+// returns the structured `{ critique, satisfied }` verdict. Each side is scripted in order,
 // one entry per invocation. Only the model calls are mocked — the machine's
 // loop, guards, and transcript accumulation run for real.
 function scriptedGenerateText(scripts: {
@@ -11,8 +11,8 @@ function scriptedGenerateText(scripts: {
   critic: Array<{ critique: string; satisfied: boolean }>;
 }) {
   const cursors = { writer: 0, critic: 0 };
-  return async (request: { model: string }) => {
-    if (request.model === "writer") {
+  return async (request: { name?: string }) => {
+    if (request.name === "writeEssay") {
       const essay = scripts.writer[cursors.writer] ?? scripts.writer[scripts.writer.length - 1];
       cursors.writer++;
       return { output: essay };
@@ -93,8 +93,8 @@ test("the critic grades against the strict rubric, so one draft is never enough"
 
   const result = await runReflectionWriterExample({
     topic: "Carbon tax versus cap-and-trade",
-    generateText: async (request: { model: string; system?: string }) => {
-      if (request.model === "writer") return { output: drafts[cursors.writer++] };
+    generateText: async (request: { name?: string; system?: string }) => {
+      if (request.name === "writeEssay") return { output: drafts[cursors.writer++] };
       critiqueSystems.push(request.system ?? "");
       return { output: verdicts[cursors.critic++] };
     },
@@ -132,13 +132,15 @@ test("early exit when the critic is satisfied (improves on the fixed-count tutor
   expect(result.progress.filter((s) => s === "drafting")).toHaveLength(1);
   expect(result.details.essay).toBe("draft 1");
   expect(result.progress.at(-1)).toBe("done");
+  expect(result.failure).toBeNull();
 });
 
-test("model failure degrades to the best-effort current draft (onError, no throw)", async () => {
-  // First draft succeeds, then the critique call throws. onError routes to done
-  // carrying the draft we already have rather than erroring the run.
-  const generateText = async (request: { model: string }) => {
-    if (request.model === "writer") return { output: "the only draft" };
+test("model failure ends in `failed`, still reporting the draft it had", async () => {
+  // First draft succeeds, then the critique call throws. onError routes to
+  // `failed`, which reports the draft in hand AND why the run stopped — a
+  // caller can tell this apart from a run that finished normally.
+  const generateText = async (request: { name?: string }) => {
+    if (request.name === "writeEssay") return { output: "the only draft" };
     throw new Error("critic model unavailable");
   };
 
@@ -151,7 +153,9 @@ test("model failure degrades to the best-effort current draft (onError, no throw
   // Never reached a completed critique, so no revision counted and not satisfied.
   expect(result.revisions).toBe(0);
   expect(result.satisfied).toBe(false);
-  expect(result.progress.at(-1)).toBe("done");
+  expect(result.failure).toMatch(/^critiqueEssay failed: /);
+  expect(result.comparison).toContain("Stopped early");
+  expect(result.progress.at(-1)).toBe("failed");
 });
 
 test("machine exports a runnable definition", () => {

@@ -819,3 +819,121 @@ describe("scripted key taxonomy — userInput", () => {
     expect(report.terminals.some((terminal) => terminal.status === "needs-output")).toBe(false);
   });
 });
+
+describe("invoke-without-on-error", () => {
+  const agent = setupAgent({
+    context: z.object({ topic: z.string() }),
+    events: { RETRY: z.object({}) },
+  });
+
+  const makeMachine = (states: Record<string, unknown>) =>
+    agent.createMachine({
+      context: { topic: "otters" },
+      initial: "drafting",
+      states: states as never,
+    });
+
+  const findings = (machine: Parameters<typeof lintAgentMachine>[0]) =>
+    lintAgentMachine(machine).filter((d) => d.code === "invoke-without-on-error");
+
+  test("warns on an invoke with no onError anywhere", () => {
+    const diagnostics = findings(
+      makeMachine({
+        drafting: {
+          invoke: {
+            src: "agent.generateText",
+            input: () => ({ model: "quick", prompt: "draft" }),
+            onDone: { target: "done" },
+          },
+        },
+        done: { type: "final" },
+      }),
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ severity: "warning", path: "drafting" });
+    expect(diagnostics[0]!.message).toContain("agent.generateText");
+  });
+
+  test("is silent when the machine root handles actor errors", () => {
+    const machine = agent.createMachine({
+      context: { topic: "otters" },
+      initial: "drafting",
+      on: { "xstate.error.actor.*": { target: ".failed" } } as never,
+      states: {
+        drafting: {
+          invoke: {
+            src: "agent.generateText",
+            input: () => ({ model: "quick", prompt: "draft" }),
+            onDone: { target: "done" },
+          },
+        },
+        failed: { type: "final" },
+        done: { type: "final" },
+      } as never,
+    });
+    expect(findings(machine)).toEqual([]);
+  });
+
+  test("is silent when the invoke declares onError", () => {
+    expect(
+      findings(
+        makeMachine({
+          drafting: {
+            invoke: {
+              src: "agent.generateText",
+              input: () => ({ model: "quick", prompt: "draft" }),
+              onDone: { target: "done" },
+              onError: { target: "failed" },
+            },
+          },
+          done: { type: "final" },
+          failed: { type: "final" },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  test("is silent when an ancestor handles the actor error", () => {
+    expect(
+      findings(
+        makeMachine({
+          drafting: {
+            on: { "xstate.error.actor.*": { target: "failed" } },
+            initial: "working",
+            states: {
+              working: {
+                invoke: {
+                  src: "agent.generateText",
+                  input: () => ({ model: "quick", prompt: "draft" }),
+                  onDone: { target: "#done" },
+                },
+              },
+            },
+          },
+          done: { id: "done", type: "final" },
+          failed: { type: "final" },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  test("never fails assertAgentMachine by default (warning severity)", () => {
+    const machine = makeMachine({
+      drafting: {
+        invoke: {
+          src: "agent.generateText",
+          input: () => ({ model: "quick", prompt: "draft" }),
+          onDone: { target: "done" },
+        },
+      },
+      done: { type: "final" },
+    });
+    expect(() => lintAgentMachine(machine, { throw: true })).not.toThrow();
+    expect(() => lintAgentMachine(machine, { throw: true, warnings: true })).toThrow(
+      AgentLintError,
+    );
+    expect(
+      lintAgentMachine(machine, { disable: ["invoke-without-on-error"] }).map((d) => d.code),
+    ).not.toContain("invoke-without-on-error");
+  });
+});

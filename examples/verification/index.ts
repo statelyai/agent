@@ -40,6 +40,7 @@ import {
   canReach,
   createAgentSchemas,
   explorePaths,
+  interactionMetaSchema,
   lintAgentMachine,
   matchesTrajectory,
   setupAgent,
@@ -75,23 +76,7 @@ export const verificationSchemas = createAgentSchemas({
     approved: z.boolean(),
     summary: z.string(),
   }),
-  meta: z.object({
-    interaction: z
-      .object({
-        label: z.string(),
-        events: z
-          .record(
-            z.string(),
-            z.object({
-              label: z.string().optional(),
-              style: z.enum(["primary", "danger", "default"]).optional(),
-            }),
-          )
-          .optional(),
-        textEvent: z.string().optional(),
-      })
-      .optional(),
-  }),
+  meta: interactionMetaSchema,
   events: {
     ISSUE: z.object({ reasoning: z.string() }),
     ESCALATE: z.object({ reasoning: z.string() }),
@@ -172,7 +157,7 @@ export const refundMachine = agentSetup.createMachine({
     // approval means the guard leaked, and the run lands in a state that exists
     // only to be proven unreachable.
     issuing: {
-      always: ({ context }: { context: { amount: number; approved: boolean } }) =>
+      always: ({ context }) =>
         context.amount > APPROVAL_THRESHOLD && !context.approved
           ? { target: "illegallyIssued" }
           : { target: "issued" },
@@ -274,10 +259,9 @@ export async function main() {
   for (const diagnostic of diagnostics) {
     console.log(`  ${diagnostic.severity}  ${diagnostic.code}  ${diagnostic.path}`);
   }
-  // A finding reads like:
-  //   error  decide-without-events  classifying
-  //   State 'classifying' invokes decision source 'agent.decide', but neither
-  //   it nor any ancestor handles any event (no 'on:') ...
+  // This machine lints clean, so the loop above prints nothing. Had
+  // `classifying` omitted its `onError`, the line would read
+  // `warning  invoke-without-on-error  classifying`.
   console.log("  (lint is structural: it cannot decide the $100 rule — that is step 2)");
 
   // 2. Reachability — the safety argument, both directions.

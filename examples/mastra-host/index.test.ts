@@ -1,28 +1,30 @@
 import { describe, expect, test } from "vitest";
 import { noopObserve } from "@mastra/core/tools";
-import { AgentIllegalResumeEventError } from "@statelyai/agent";
-import {
-  emailHostAgent,
-  main,
-  resumeDraft,
-  resumeWorkflow,
-  startDraft,
-  startWorkflow,
-  unwrapToolResult,
-} from "./index.js";
+import { AgentIllegalResumeEventError, type AgentRequestExecutors } from "@statelyai/agent";
+import { createHost, keylessExecutors, main, unwrapToolResult } from "./index.js";
 
 const ctx = { observe: noopObserve };
 
-/** Call a tool the way Mastra's tool loop would, then narrow the widened return. */
-const start = async (prompt: string) =>
-  unwrapToolResult(await startWorkflow.execute!({ prompt }, ctx));
-
-const resume = async (handle: string, eventType: string, text: string | null = null) =>
-  unwrapToolResult(await resumeWorkflow.execute!({ handle, eventType, text }, ctx));
+/** A fresh host per test: no run, handle, or executor is shared between them. */
+function host() {
+  const { startWorkflow, resumeWorkflow, startDraft, resumeDraft, agent } = createHost({
+    executors: keylessExecutors,
+  });
+  return {
+    agent,
+    startDraft,
+    resumeDraft,
+    /** Call a tool the way Mastra's tool loop would, then narrow the widened return. */
+    start: async (prompt: string) =>
+      unwrapToolResult(await startWorkflow.execute!({ prompt }, ctx)),
+    resume: async (handle: string, eventType: string, text: string | null = null) =>
+      unwrapToolResult(await resumeWorkflow.execute!({ handle, eventType, text }, ctx)),
+  };
+}
 
 describe("mastra-host", () => {
   test("start_workflow drafts and pauses for review", async () => {
-    const result = await start("Tell the team the deploy pipeline is twice as fast.");
+    const result = await host().start("Tell the team the deploy pipeline is twice as fast.");
 
     expect(result.status).toBe("pending");
     if (result.status !== "pending") return;
@@ -30,17 +32,19 @@ describe("mastra-host", () => {
     // The machine drove itself past the prompt and both model calls to the
     // human review pause; the host never named a state to get there.
     expect(result.draft?.subject).toBe("Deploy pipeline is faster");
-    expect(result.interaction?.type).toBe("select");
+    expect(result.interaction?.events.map(({ type }) => type)).toEqual(["SEND", "REQUEST_CHANGES"]);
+    expect(result.interaction?.textEvent).toBe("REQUEST_CHANGES");
   });
 
   test("resume_workflow sends, then finishes with the sent email", async () => {
+    const { start, resume } = host();
     const started = await start("Announce the faster deploys.");
     if (started.status !== "pending") throw new Error("expected pending");
 
     const sent = await resume(started.handle, "SEND");
     expect(sent.status).toBe("pending");
     if (sent.status !== "pending") return;
-    expect(sent.interaction?.type).toBe("confirm");
+    expect(sent.interaction?.events.map(({ type }) => type)).toEqual(["ANOTHER", "END"]);
 
     const finished = await resume(started.handle, "END");
     expect(finished.status).toBe("done");
@@ -49,20 +53,22 @@ describe("mastra-host", () => {
     expect(finished.sentEmails[0]?.to).toBe("team@example.com");
   });
 
-  test("revision text is routed to the field the interaction declared", async () => {
+  test("revision text is routed to the event the interaction declared as its textEvent", async () => {
+    const { startDraft, resumeDraft } = host();
     const started = await startDraft("Announce the faster deploys.");
     if (started.status !== "pending") throw new Error("expected pending");
 
-    // REQUEST_CHANGES declares an input field (`changes`); the host derives that
-    // from `meta.interaction` rather than hardcoding the event's payload shape.
+    // The host reads `textEvent` off the rendered interaction rather than
+    // hardcoding REQUEST_CHANGES's payload shape.
     const revised = await resumeDraft(started.handle, "REQUEST_CHANGES", "Make it shorter.");
     expect(revised.status).toBe("pending");
     if (revised.status !== "pending") return;
-    expect(revised.interaction?.type).toBe("select");
     expect(revised.draft).not.toBeNull();
+    expect(revised.interaction?.events.map(({ type }) => type)).toContain("SEND");
   });
 
   test("the machine refuses an illegal resume", async () => {
+    const { startDraft, resumeDraft } = host();
     const started = await startDraft("Announce the faster deploys.");
     if (started.status !== "pending") throw new Error("expected pending");
 
@@ -73,12 +79,47 @@ describe("mastra-host", () => {
     );
   });
 
-  test("an unknown handle is rejected", async () => {
-    await expect(resumeDraft("draft-nope", "SEND")).rejects.toThrow(/Unknown handle/);
+  test("an unknown handle comes back as a tool error, not an exception", async () => {
+    const result = await host().resumeDraft("draft-nope", "SEND");
+    expect(result).toEqual({
+      status: "error",
+      error: "Unknown handle: draft-nope. Start a new workflow.",
+    });
+  });
+
+  test("two hosts never share a run store", async () => {
+    const first = host();
+    const started = await first.startDraft("Announce the faster deploys.");
+    if (started.status !== "pending") throw new Error("expected pending");
+
+    const second = host();
+    const result = await second.resumeDraft(started.handle, "SEND");
+    expect(result.status).toBe("error");
+  });
+
+  test("the injected executors are the ones the tools run with", async () => {
+    const markerExecutors: AgentRequestExecutors = {
+      generateText: async (request) =>
+        request.name === "evaluatePrompt"
+          ? { output: { satisfied: true, missing: [], questions: [] } }
+          : {
+              output: {
+                to: "marker@example.com",
+                subject: "MARKER SUBJECT",
+                body: "Written by the marker executor.",
+              },
+            },
+    };
+    const { startDraft } = createHost({ executors: markerExecutors });
+
+    const started = await startDraft("Announce the faster deploys.");
+    expect(started.status).toBe("pending");
+    if (started.status !== "pending") return;
+    expect(started.draft?.subject).toBe("MARKER SUBJECT");
   });
 
   test("the Mastra agent exposes both bridge tools under their model-facing names", async () => {
-    const tools = await emailHostAgent.listTools();
+    const tools = await host().agent.listTools();
     expect(Object.keys(tools).sort()).toEqual(["resume_workflow", "start_workflow"]);
   });
 

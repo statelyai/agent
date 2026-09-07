@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Idle review state with typed meta.interaction, REJECT-with-reason redraft loop, and a JSON snapshot round-trip across two runAgent calls."
+    "purpose": "Idle review state typed by interactionMetaSchema, a REJECT-with-feedback redraft loop bounded by a counter, and a real JSON snapshot round-trip between runAgent calls."
   },
   "starters": ["the new deploy pipeline", "our move to a four-day work week"]
 }

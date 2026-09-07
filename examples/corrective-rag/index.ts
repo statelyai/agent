@@ -18,17 +18,18 @@
  *                                                            └─ transform_query
  *                                                               → web_search → generate → END
  *
- * Here every node is a state and `decide_to_generate` is a `choice` state, so the
- * correction branch is a real transition you can point at, not control flow hidden
- * inside node return values:
+ * Here every node is a state and `decide_to_generate` is not a node at all: the
+ * grader's own `onDone` targets one branch or the other, so the correction is a
+ * real transition you can point at, not control flow hidden inside node return
+ * values (and not a flag in context that a later state has to re-read):
  *
- *   retrieving → grading → deciding ─┬─ generating → done
- *                                    └─ transformingQuery → webSearching → generating → done
+ *   retrieving → grading ─┬─ generating → done
+ *                         └─ transformingQuery → webSearching → generating → done
  *
  * What maps to what:
  *   - retrieve            → `retrieving`  (typed plain actor over a sample corpus)
  *   - grade_documents     → `grading`     (ONE model request grades ALL docs — see note)
- *   - decide_to_generate  → `deciding`    (a `choice` state; the conditional edge)
+ *   - decide_to_generate  → grading's two `onDone` targets (the conditional edge)
  *   - transform_query     → `transformingQuery` (a model request that rewrites the question)
  *   - web_search          → `webSearching` (a second sample-data actor, clearly labeled)
  *   - generate            → `generating`  (grounded answer over the working doc set)
@@ -41,9 +42,10 @@
  *     or `grading`, so at most ONE rewrite + web-search pass happens before
  *     `generating`. LangGraph relies on the same acyclic wiring (plus
  *     recursion_limit); here it's visible in the state graph itself.
- *   - Every model-call state has an `onError` route: grading/rewrite failures
- *     DEGRADE to answering from whatever docs exist; a generate failure lands in
- *     `failed` with a best-effort message. No unhandled model error aborts the run.
+ *   - Every invoke has an `onError` route: grading/rewrite/fallback failures
+ *     DEGRADE to answering from whatever docs exist; a retrieval or generate
+ *     failure lands in `failed` with a best-effort message. No unhandled error
+ *     aborts the run.
  *
  * Retrieval and web search are honest keyword-overlap actors over tiny in-file
  * corpora (NOT embeddings, NOT a live search API) — stand-ins with the same
@@ -59,7 +61,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 export const models = defineModels({
   crag: openai("gpt-5.4-mini"),
@@ -186,13 +188,38 @@ const cragContextSchema = z.object({
   rewrittenQuestion: z.string().nullable(),
   // The working document set: retrieved → filtered to relevant → web-augmented.
   documents: z.array(z.string()),
-  // decide_to_generate's flag: no relevant docs survived grading.
-  webSearchNeeded: z.boolean(),
-  usedFallbackIndex: z.boolean(),
-  // Plain-language trail of which index was used and whether correction ran.
-  retrievalNotice: z.string(),
+  // Counts, not prose: the retrieval trail is RENDERED from these in `output`.
+  // `null` means that step never ran.
+  retrievedCount: z.number(),
+  relevantCount: z.number().nullable(),
+  fallbackCount: z.number().nullable(),
   generation: z.string().nullable(),
 });
+
+type CragContext = z.infer<typeof cragContextSchema>;
+
+/** The plain-language retrieval trail, rendered from the counts in context. */
+function renderRetrievalNotice(context: CragContext, options: { answered: boolean }): string {
+  const parts = [
+    context.retrievedCount > 0
+      ? `Primary index returned ${context.retrievedCount} candidate document(s).`
+      : "Primary index returned no matching documents.",
+  ];
+  if (context.relevantCount !== null) {
+    parts.push(
+      `The grader kept ${context.relevantCount} of ${context.retrievedCount} as relevant.`,
+    );
+  }
+  if (context.fallbackCount !== null) {
+    parts.push(
+      "Corrected: rewrote the question and answered from the fallback sample web index " +
+        `(${context.fallbackCount} result(s)).`,
+    );
+  } else if (options.answered) {
+    parts.push("Answered from the primary index, no correction needed.");
+  }
+  return parts.join(" ");
+}
 
 const agentSetup = setupAgent({
   models,
@@ -299,9 +326,9 @@ export const correctiveRagMachine = agentSetup.createMachine({
     question: input.question,
     rewrittenQuestion: null,
     documents: [],
-    webSearchNeeded: false,
-    usedFallbackIndex: false,
-    retrievalNotice: "",
+    retrievedCount: 0,
+    relevantCount: null,
+    fallbackCount: null,
     generation: null,
   }),
   initial: "retrieving",
@@ -314,21 +341,10 @@ export const correctiveRagMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question }),
         onDone: ({ output }) =>
           output.length > 0
-            ? {
-                target: "grading",
-                context: {
-                  documents: output,
-                  retrievalNotice: `Primary index returned ${output.length} candidate document(s).`,
-                },
-              }
-            : {
-                target: "deciding",
-                context: {
-                  documents: output,
-                  webSearchNeeded: true,
-                  retrievalNotice: "Primary index returned no matching documents.",
-                },
-              },
+            ? { target: "grading", context: { documents: output, retrievedCount: output.length } }
+            : { target: "transformingQuery", context: { documents: [], retrievedCount: 0 } },
+        // The primary index is unreachable: there is no doc set to correct.
+        onError: { target: "failed" },
       },
     },
     // grade_documents: one request, a verdict per doc. Keep the relevant ones;
@@ -341,30 +357,19 @@ export const correctiveRagMachine = agentSetup.createMachine({
           question: context.question,
           documents: context.documents,
         }),
+        // decide_to_generate is this branch: relevant docs survived → generate;
+        // none survived → correct via rewrite + fallback index.
         onDone: ({ context, output }) => {
           const relevant = context.documents.filter(
             (_doc, i) => output.grades[i]?.relevant === true,
           );
           return {
-            target: "deciding",
-            context: {
-              documents: relevant,
-              webSearchNeeded: relevant.length === 0,
-              retrievalNotice:
-                `${context.retrievalNotice} The grader kept ${relevant.length} of ` +
-                `${context.documents.length} as relevant.`,
-            },
+            target: relevant.length > 0 ? "generating" : "transformingQuery",
+            context: { documents: relevant, relevantCount: relevant.length },
           };
         },
         onError: { target: "generating" },
       },
-    },
-    // decide_to_generate: the conditional edge as a visible choice state.
-    // Relevant docs survived → generate. None survived → correct via rewrite.
-    deciding: {
-      type: "choice",
-      choice: ({ context }) =>
-        context.webSearchNeeded ? { target: "transformingQuery" } : { target: "generating" },
     },
     // transform_query: rewrite the question for web search. A rewrite failure
     // degrades to generating from whatever docs we have.
@@ -391,12 +396,11 @@ export const correctiveRagMachine = agentSetup.createMachine({
           target: "generating",
           context: {
             documents: [...context.documents, ...output],
-            usedFallbackIndex: true,
-            retrievalNotice:
-              `${context.retrievalNotice} Corrected: rewrote the question and answered from ` +
-              `the fallback sample web index (${output.length} result(s)).`,
+            fallbackCount: output.length,
           },
         }),
+        // The fallback index is unreachable: answer from whatever survived.
+        onError: { target: "generating" },
       },
     },
     // generate: grounded answer. A generate failure lands in `failed` with a
@@ -408,15 +412,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
           question: context.rewrittenQuestion ?? context.question,
           documents: context.documents,
         }),
-        onDone: ({ context, output }) => ({
-          target: "done",
-          context: {
-            generation: output,
-            retrievalNotice: context.usedFallbackIndex
-              ? context.retrievalNotice
-              : `${context.retrievalNotice} Answered from the primary index, no correction needed.`,
-          },
-        }),
+        onDone: ({ output }) => ({ target: "done", context: { generation: output } }),
         onError: { target: "failed" },
       },
     },
@@ -424,20 +420,20 @@ export const correctiveRagMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         answer: context.generation,
-        retrievalNotice: context.retrievalNotice,
+        retrievalNotice: renderRetrievalNotice(context, { answered: true }),
         documents: context.documents,
-        usedFallbackIndex: context.usedFallbackIndex,
+        usedFallbackIndex: context.fallbackCount !== null,
         rewrittenQuestion: context.rewrittenQuestion,
       }),
     },
-    // Best-effort terminal: generation failed outright.
+    // Best-effort terminal: retrieval or generation failed outright.
     failed: {
       type: "final",
       output: ({ context }) => ({
         answer: "Unable to generate an answer for this question.",
-        retrievalNotice: context.retrievalNotice,
+        retrievalNotice: renderRetrievalNotice(context, { answered: false }),
         documents: context.documents,
-        usedFallbackIndex: context.usedFallbackIndex,
+        usedFallbackIndex: context.fallbackCount !== null,
         rewrittenQuestion: context.rewrittenQuestion,
       }),
     },
@@ -478,7 +474,7 @@ export async function runCorrectiveRagExample(
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
     onTransition: (snapshot) => {
-      const state = String(snapshot.value);
+      const state = getStatePath(snapshot);
       progress.push(state);
       onProgress?.(state);
     },

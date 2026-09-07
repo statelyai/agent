@@ -25,12 +25,12 @@ import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { createAgent } from "langchain";
 import {
-  getStateMeta,
+  getInteraction,
   runAgent,
   type RunAgentOptions,
   type RunAgentResult,
 } from "@statelyai/agent";
-import { emailDrafter, metaSchema } from "../email-drafter/agent-logic.js";
+import { emailDrafter, type DrafterEvent, type Interaction } from "../email-drafter/agent-logic.js";
 import { createLangChainExecutors } from "./executors.js";
 
 // ─── Shared shapes ───
@@ -38,12 +38,22 @@ import { createLangChainExecutors } from "./executors.js";
 const draftSchema = z.object({ to: z.string(), subject: z.string(), body: z.string() });
 
 /**
- * The machine's own interaction protocol, reused verbatim as the tools' result
- * shape. The host never redeclares what a pause looks like: `metaSchema` from
- * the email-drafter IS the contract.
+ * The library's `AgentInteraction`, restated in zod only because LangChain
+ * needs a JSON schema to show the model. The host never invents a protocol of
+ * its own: what fills this in is `getInteraction(snapshot)` on the machine.
  */
-const interactionSchema = metaSchema.shape.interaction.unwrap();
-type Interaction = z.infer<typeof interactionSchema>;
+const interactionSchema: z.ZodType<Interaction> = z.object({
+  label: z.string(),
+  events: z.array(
+    z.object({
+      type: z.string(),
+      label: z.string(),
+      style: z.string().optional(),
+      event: z.record(z.string(), z.unknown()).optional(),
+    }),
+  ),
+  textEvent: z.string().optional(),
+}) as z.ZodType<Interaction>;
 
 const resultSchema = z.discriminatedUnion("status", [
   z.object({
@@ -101,37 +111,23 @@ function currentRunOptions(): RunAgentOptions<typeof emailDrafter> {
 // ─── Bridge: runAgent <-> JSON-safe tool results ───
 
 /**
- * Which context field an event's payload goes in, read off the interaction the
- * machine just published. Generic: no event or state name is hardcoded.
- */
-function payloadFieldFor(interaction: Interaction | null, eventType: string): string | null {
-  if (!interaction) return null;
-  switch (interaction.type) {
-    case "text":
-      return interaction.eventType === eventType ? interaction.field : null;
-    case "select":
-      return (
-        interaction.choices.find((choice) => choice.eventType === eventType)?.input?.field ?? null
-      );
-    case "confirm":
-      return null;
-  }
-}
-
-/**
- * Build the machine event for `eventType`, attaching `text` to whichever field
- * the interaction says it belongs in. The cast is the one unavoidable seam: the
- * eventType arrives as a model-supplied string. `runAgent` still validates it
- * against the restored state and throws on anything illegal.
+ * Build the machine event for `eventType`. Free text goes to the interaction's
+ * declared `textEvent` as `text`; a listed choice contributes any fixed fields
+ * its metadata attached. The cast is the one unavoidable seam: the eventType
+ * arrives as a model-supplied string. `runAgent` still validates it against the
+ * restored state and throws on anything illegal.
  */
 function buildEvent(
   interaction: Interaction | null,
   eventType: string,
   text: string | null,
 ): EventFromLogic<typeof emailDrafter> {
-  const field = payloadFieldFor(interaction, eventType);
-  const event = field && text !== null ? { type: eventType, [field]: text } : { type: eventType };
-  return event as EventFromLogic<typeof emailDrafter>;
+  const choice = interaction?.events.find((candidate) => candidate.type === eventType);
+  const event =
+    text !== null && interaction?.textEvent === eventType
+      ? { type: eventType, text }
+      : { type: eventType, ...choice?.event };
+  return event as DrafterEvent as EventFromLogic<typeof emailDrafter>;
 }
 
 let nextHandle = 0;
@@ -144,8 +140,7 @@ function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: strin
     return { status: "done", sentEmails: result.output.sentEmails };
   }
 
-  const meta = getStateMeta<typeof result.snapshot, z.infer<typeof metaSchema>>(result.snapshot);
-  const interaction = meta.interaction ?? null;
+  const interaction = getInteraction(result.snapshot) ?? null;
   runs.set(handle, { snapshot: result.persist(), interaction });
 
   return {
@@ -158,8 +153,8 @@ function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: strin
 
 /**
  * Bridge #1: start the machine, hand it the user's request, run to the first
- * pause. The machine opens on a `text` interaction, so the request is delivered
- * through that interaction's own eventType/field rather than a literal
+ * pause. The machine opens on a pause that accepts free text, so the request is
+ * delivered through that interaction's own `textEvent` rather than a literal
  * `PROMPT_SUBMITTED`.
  */
 export async function startDraft(
@@ -173,7 +168,7 @@ export async function startDraft(
 
   return resumeDraft(
     handle,
-    pending.interaction?.type === "text" ? pending.interaction.eventType : "PROMPT_SUBMITTED",
+    pending.interaction?.textEvent ?? "PROMPT_SUBMITTED",
     prompt,
     runOptions,
   );

@@ -212,12 +212,12 @@ The canonical form covers most machines: a `models` registry, flat schema fields
 
 Each alternate form handles one specific need:
 
-| Form                                                                                                             | Use it when                                                                                                                                                                                                                                       |
-| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createAgentSchemas` pack, passed as `setupAgent({ schemas })`                                                   | You share one schema set across several machines or the [step helpers](steps.md).                                                                                                                                                                 |
-| String model refs with `resolveModel` (`model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`) | The machine must not name concrete models, for portability or for refs loaded from JSON [config](machines-as-data.md).                                                                                                                            |
-| `createTextLogic`, a standalone request value                                                                    | A request is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).                                                                            |
-| `logic.withExecutor(...)`                                                                                        | You bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runAgent`](hosts.md)'s executor slots. Registered dynamic spawns inherit through `actors`. See [Multi-agent composition](multi-agent.md). |
+| Form                                                                                                             | Use it when                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAgentSchemas` pack, passed as `setupAgent({ schemas })`                                                   | You share one schema set across several machines or the [step helpers](steps.md).                                                                                                                                                                                                            |
+| String model refs with `resolveModel` (`model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`) | The machine must not name concrete models, for portability or for refs loaded from JSON [config](machines-as-data.md).                                                                                                                                                                       |
+| `createTextLogic`, a standalone request value                                                                    | A request is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).                                                                                                                       |
+| `logic.withExecutor(...)`                                                                                        | You bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runAgent`](hosts.md#writing-your-own-executors)'s executor slots. Registered dynamic spawns inherit through `actors`. See [Multi-agent composition](multi-agent.md#dynamic-binding). |
 
 ## Machine creation
 
@@ -413,21 +413,19 @@ When the root declares no `output` and exactly one final state does, `createMach
 
 <!-- typed meta protocol from examples/email-drafter/agent-logic.ts -->
 
-The `meta` field attaches typed data to a state or transition. When you declare a `meta` schema on `setupAgent`, hosts read a typed interaction protocol instead of `Record<string, unknown>`:
+The `meta` field attaches typed data to a state or transition. Declare `meta: interactionMetaSchema` on `setupAgent` and hosts read the shipped interaction protocol through `getInteraction(snapshot)` instead of `Record<string, unknown>`. A `label` names the wait, `events` maps choice events to labels, and `textEvent` names the free-text event whose payload is `{ text }`:
 
 ```ts no-check
 // inside states: { ... }
 prompting: {
   meta: {
     interaction: {
-      type: 'text',
       label: 'Email draft request',
-      eventType: 'PROMPT_SUBMITTED',
-      field: 'prompt',
+      textEvent: 'PROMPT_SUBMITTED',
     },
   },
   on: {
-    PROMPT_SUBMITTED: ({ event }) => ({ target: 'evaluating', context: { prompt: event.prompt } }),
+    PROMPT_SUBMITTED: ({ event }) => ({ target: 'evaluating', context: { prompt: event.text } }),
   },
 }
 ```

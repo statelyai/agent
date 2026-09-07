@@ -44,7 +44,13 @@ import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { createAgentSchemas, getStateMeta, runAgent, setupAgent } from "@statelyai/agent";
+import {
+  createAgentSchemas,
+  getInteraction,
+  interactionMetaSchema,
+  runAgent,
+  setupAgent,
+} from "@statelyai/agent";
 
 /** Concrete, guessable words. Rounds take them in order, so runs are repeatable. */
 export const WORD_DECK = [
@@ -102,50 +108,32 @@ const judgedClueSchema = z.object({
 });
 type JudgedClue = z.infer<typeof judgedClueSchema>;
 
-/**
- * Typed `meta.interaction` hints. Hosts read them off the idle snapshot to
- * label the prompt, render buttons, and route free chat text to an event.
- */
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
+const contextSchema = z.object({
+  deck: z.array(z.string()),
+  roundIndex: z.number(),
+  rounds: z.number(),
+  secretWord: z.string(),
+  /**
+   * One slot per clue-giver. A region writes only its own slot; no region
+   * reads another's. Separate fields (rather than one array) keep the three
+   * concurrent context writes provably disjoint.
+   */
+  clueA: clueDraftSchema.nullable(),
+  clueB: clueDraftSchema.nullable(),
+  clueC: clueDraftSchema.nullable(),
+  /** The judged clues of the current round, struck flags included. */
+  clues: z.array(judgedClueSchema),
+  score: z.number(),
+  log: z.array(z.string()),
 });
+type JustOneContext = z.infer<typeof contextSchema>;
 
 export const justOneSchemas = createAgentSchemas({
-  meta: metaSchema,
-  context: z.object({
-    deck: z.array(z.string()),
-    roundIndex: z.number(),
-    rounds: z.number(),
-    secretWord: z.string(),
-    /**
-     * One slot per clue-giver. A region writes only its own slot; no region
-     * reads another's. Separate fields (rather than one array) keep the three
-     * concurrent context writes provably disjoint.
-     */
-    clueA: clueDraftSchema.nullable(),
-    clueB: clueDraftSchema.nullable(),
-    clueC: clueDraftSchema.nullable(),
-    /** The judged clues of the current round, struck flags included. */
-    clues: z.array(judgedClueSchema),
-    /** Surviving clue words, interpolated into the idle label. */
-    clueSummary: z.string(),
-    score: z.number(),
-    log: z.array(z.string()),
-  }),
+  // The shipped schema for `meta.interaction`: hosts read the label, the
+  // buttons, and the free-text event off the idle snapshot with
+  // `getInteraction(snapshot)`.
+  meta: interactionMetaSchema,
+  context: contextSchema,
   input: z.object({
     rounds: z.number().int().positive().default(3),
     /** Override the built-in deck (the tests pin the secret words this way). */
@@ -310,7 +298,6 @@ export const justOneMachine = agentSetup.createMachine({
     clueB: null,
     clueC: null,
     clues: [],
-    clueSummary: "",
     score: 0,
     log: [],
   }),
@@ -332,7 +319,6 @@ export const justOneMachine = agentSetup.createMachine({
           clueB: null,
           clueC: null,
           clues: [],
-          clueSummary: "",
         },
       }),
     },
@@ -418,7 +404,6 @@ export const justOneMachine = agentSetup.createMachine({
             target: "roundEnd",
             context: {
               clues,
-              clueSummary: "",
               log: [...context.log, roundLine, "All clues cancelled — round skipped."],
             },
           };
@@ -427,7 +412,6 @@ export const justOneMachine = agentSetup.createMachine({
           target: "guessing",
           context: {
             clues,
-            clueSummary: shown.map((clue) => clue.word).join(", "),
             log: [...context.log, roundLine],
           },
         };
@@ -440,7 +424,12 @@ export const justOneMachine = agentSetup.createMachine({
       tags: ["waiting"],
       meta: {
         interaction: {
-          label: "Clues: {clueSummary}. What is the secret word?",
+          // Derived at read time from the judged clues, so no rendered copy of
+          // them has to be kept in context and in sync.
+          label: ({ context }: { context: JustOneContext }) =>
+            `Clues: ${survivors(context.clues)
+              .map((clue) => clue.word)
+              .join(", ")}. What is the secret word?`,
           events: {
             GUESS: { label: "Guess", style: "primary" },
             PASS: { label: "Pass" },
@@ -491,24 +480,9 @@ type JustOneSnapshot = SnapshotFrom<typeof justOneMachine>;
 /** What a host sends to unblock an idle machine. */
 export type GuesserEvent = { type: "GUESS"; guess: string } | { type: "PASS" };
 
-/** `{key}` placeholders in interaction labels resolve against context. */
-export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
-  return label
-    .replace(/\{(\w+)\}/g, (_, key: string) => {
-      const value = context[key];
-      return typeof value === "string" || typeof value === "number" ? String(value) : "";
-    })
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /** The label a host shows on an idle guessing turn. */
 export function idlePrompt(snapshot: JustOneSnapshot): string {
-  const interaction = getStateMeta(snapshot).interaction;
-  return resolveInteractionLabel(
-    interaction?.label ?? "What is the secret word?",
-    snapshot.context,
-  );
+  return getInteraction(snapshot)?.label ?? "What is the secret word?";
 }
 
 /** Route free text to the idle state's `textEvent` (or `PASS` for "pass"). */

@@ -10,8 +10,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import type { AnyStateMachine, StateNode } from "xstate";
+import type { AnyStateMachine, AnyStateNode } from "xstate";
 import { isAgentIdle, setupAgent } from "../src/index.js";
+// Internal import on purpose: the public surface exposes `isAgentIdle` (the
+// default predicate) but no way to ask a machine which predicate it was
+// configured with, which is exactly what this test has to inspect.
 import { getMachineIdlePredicate } from "../src/internal/registry.js";
 
 const examplesDir = fileURLToPath(new URL(".", import.meta.url));
@@ -26,7 +29,7 @@ function isMachine(value: unknown): value is AnyStateMachine {
 
 function humanWaitStates(machine: AnyStateMachine): string[] {
   const found: string[] = [];
-  const walk = (node: StateNode<any, any>) => {
+  const walk = (node: AnyStateNode) => {
     const config = node.config as { after?: object; always?: unknown };
     const waits =
       node.type !== "final" &&
@@ -37,7 +40,7 @@ function humanWaitStates(machine: AnyStateMachine): string[] {
     if (waits && (node.meta as { interaction?: unknown } | undefined)?.interaction) {
       found.push(node.id);
     }
-    for (const child of Object.values(node.states ?? {})) walk(child as StateNode<any, any>);
+    for (const child of Object.values(node.states ?? {})) walk(child);
   };
   walk(machine.root);
   return found;
@@ -76,8 +79,37 @@ describe("example suspension predicates", () => {
       }
     }
 
-    expect(humanWaits.length).toBeGreaterThan(15);
-    expect(customPredicates.length).toBeGreaterThan(0);
+    // The exact set, not a lower bound: adding or removing a human wait should
+    // be a deliberate edit here, and a wait that silently disappears from an
+    // example is a regression this test exists to catch.
+    expect([...humanWaits].sort()).toEqual([
+      "chameleon#chameleonMachine",
+      "chat-with-pdf#chatWithPdfMachine",
+      "context-compaction#contextCompactionMachine",
+      "customer-support#customerSupportMachine",
+      "email-drafter#emailDrafter",
+      "game-agent#rpsMachine",
+      "game-loop-agent#gameMachine",
+      "human-in-the-loop#humanInTheLoopMachine",
+      "json-agent#jsonAgentMachine",
+      "just-one#justOneMachine",
+      "long-running-onboarding#longRunningOnboardingMachine",
+      "machine-as-tool#refundMachine",
+      "retrofit#supportMachine",
+      "review-tool-calls#reviewToolCallsMachine",
+      "review-tool-calls#toolCallingMachine",
+      "sql-agent#sqlAgentMachine",
+      "swarm-handoff#swarmHandoffMachine",
+      "todo-nl#todoMachine",
+      "triage#triageMachine",
+      "twenty-questions#twentyQuestionsMachine",
+      "verification#refundMachine",
+    ]);
+    // "Exactly one example carries an explicit predicate", as the docstring
+    // above claims — asserted as one, not as "more than zero".
+    expect(customPredicates.map(({ key }) => key)).toEqual([
+      "human-in-the-loop#humanInTheLoopMachine",
+    ]);
 
     const idleFixture = setupAgent({
       context: z.object({}),

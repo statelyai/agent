@@ -18,6 +18,17 @@
  * Decisions force a tool call with `tool_choice: 'required'` and one
  * function tool per candidate event (same recipe as the AI SDK adapter).
  *
+ * Every executor reports token `usage`, mapped from OpenAI's snake_case
+ * `response.usage` onto the framework's `AgentCallUsage`, so `runAgent`'s
+ * run-level budget and the usage event log are populated by this host too.
+ * Streaming asks for it explicitly with `stream_options.include_usage`.
+ *
+ * `streamText` here is deliberately TEXT-ONLY: it sends no tools and no
+ * `response_format`, because a chunk-by-chunk structured envelope has nothing
+ * useful to hand `onChunk` mid-stream. A request that declares tools or a
+ * structured output schema is rejected with a message pointing at
+ * `generateText`, rather than silently returning unstructured text.
+ *
  * Run: OPENAI_API_KEY=... npx tsx examples/openai-sdk-host/index.ts
  */
 import type OpenAI from "openai";
@@ -26,6 +37,7 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionToolChoiceOption,
 } from "openai/resources/chat/completions/completions.js";
+import type { CompletionUsage } from "openai/resources/completions.js";
 import {
   buildEnvelopeSchema,
   getAgentOutputMode,
@@ -35,6 +47,7 @@ import {
   parseStructuredEnvelope,
   renderDecisionAttempts,
   runAgent,
+  type AgentCallUsage,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
   type AgentEventDescriptor,
@@ -103,6 +116,31 @@ export function toOpenAiCallSettings(request: AgentTextRequest) {
     stop: request.stopSequences,
     // OpenAI Chat Completions has no top_k parameter — dropped.
   };
+}
+
+/**
+ * Maps OpenAI's snake_case usage block onto the framework's `AgentCallUsage`.
+ * Every executor returns it, so `result.usage` and the run's token budget
+ * reflect a raw-SDK host exactly as they do the AI SDK adapter. Fields OpenAI
+ * omits stay omitted rather than becoming zeros.
+ */
+export function toAgentCallUsage(usage: CompletionUsage | undefined): AgentCallUsage | undefined {
+  if (!usage) return undefined;
+  const reasoningTokens = usage.completion_tokens_details?.reasoning_tokens;
+  const cachedInputTokens = usage.prompt_tokens_details?.cached_tokens;
+  return {
+    ...(usage.prompt_tokens === undefined ? {} : { inputTokens: usage.prompt_tokens }),
+    ...(usage.completion_tokens === undefined ? {} : { outputTokens: usage.completion_tokens }),
+    ...(usage.total_tokens === undefined ? {} : { totalTokens: usage.total_tokens }),
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
+  };
+}
+
+/** Attaches `usage` to an executor result only when the response reported it. */
+function withUsage<T extends object>(result: T, usage: CompletionUsage | undefined): T {
+  const mapped = toAgentCallUsage(usage);
+  return mapped ? { ...result, usage: mapped } : result;
 }
 
 /** A tool `description` may be a string or, for an AI SDK v7 tool, a function
@@ -232,42 +270,66 @@ export function createOpenAiExecutors({
         const content = response.choices[0]?.message.content;
         // Validated unwrap of the { result, reasoning? } envelope — no cast.
         const parsed = parseStructuredEnvelope(request, content ? JSON.parse(content) : undefined);
-        return {
-          output: parsed.result,
-          ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
-        };
+        return withUsage(
+          {
+            output: parsed.result,
+            ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
+          },
+          response.usage,
+        );
       }
       // no structured output without a schema exposing ~standard.jsonSchema
       // — falls back to text.
     }
 
     const response = await client.chat.completions.create(common, { signal: info?.signal });
-    return { output: response.choices[0]?.message.content ?? "" };
+    return withUsage({ output: response.choices[0]?.message.content ?? "" }, response.usage);
   };
 
+  // Text-only by design: no tools, no `response_format`. Anything that needs
+  // either goes through `generateText`, and asking for it here is an error
+  // rather than a silent downgrade to unstructured text.
   const streamText = async (
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,
   ) => {
+    if (getAgentOutputMode(request.outputSchema) === "structured") {
+      throw new Error(
+        "createOpenAiExecutors: streamText is text-only — a request declaring a structured " +
+          "output schema must be routed to generateText.",
+      );
+    }
+    if (Object.keys(request.tools ?? {}).length > 0) {
+      throw new Error(
+        "createOpenAiExecutors: streamText is text-only — a request declaring tools must be " +
+          "routed to generateText.",
+      );
+    }
+
     const stream = await client.chat.completions.create(
       {
         model: resolveModel(request.model),
         messages: toOpenAiMessages(request),
         ...toOpenAiCallSettings(request),
         stream: true,
+        // Without this OpenAI reports no usage at all for a streamed call: the
+        // final chunk carries it, and only when asked for.
+        stream_options: { include_usage: true },
       },
       { signal: info?.signal },
     );
 
     let text = "";
+    let usage: CompletionUsage | undefined;
     for await (const chunk of stream) {
+      usage = chunk.usage ?? usage;
       const delta = chunk.choices[0]?.delta.content;
       if (delta) {
         text += delta;
         info?.onChunk?.(delta);
       }
     }
-    return { output: text };
+    return withUsage({ output: text }, usage);
   };
 
   const decide: AgentDecisionExecutor = async (request, info) => {
@@ -303,12 +365,15 @@ export function createOpenAiExecutors({
       ? JSON.parse(toolCall.function.arguments)
       : {};
 
-    return {
-      event: {
-        ...(args && typeof args === "object" ? args : {}),
-        type: chosenEvent.type,
-      } as ChosenEvent,
-    };
+    return withUsage(
+      {
+        event: {
+          ...(args && typeof args === "object" ? args : {}),
+          type: chosenEvent.type,
+        } as ChosenEvent,
+      },
+      response.usage,
+    );
   };
 
   return { generateText, streamText, decide };

@@ -5,6 +5,7 @@ import { runAgent } from "@statelyai/agent";
 import { getJsonSchema } from "@statelyai/agent";
 import {
   createOpenAiExecutors,
+  toAgentCallUsage,
   toDecisionMessages,
   toOpenAiCallSettings,
   toOpenAiEventTools,
@@ -106,6 +107,18 @@ describe("request -> OpenAI param mapping (pure helpers)", () => {
     ]);
     expect(tools).toHaveLength(2);
     expect(tools.map((t) => t.function.name)).toEqual(["send_event_ASK", "send_event_GUESS"]);
+  });
+
+  test("toAgentCallUsage maps OpenAI's snake_case usage, omitting what it omits", () => {
+    expect(
+      toAgentCallUsage({
+        prompt_tokens: 12,
+        completion_tokens: 7,
+        total_tokens: 19,
+        completion_tokens_details: { reasoning_tokens: 3 },
+      } as never),
+    ).toEqual({ inputTokens: 12, outputTokens: 7, totalTokens: 19, reasoningTokens: 3 });
+    expect(toAgentCallUsage(undefined)).toBeUndefined();
   });
 
   test("toDecisionMessages appends attempt feedback as user messages", () => {
@@ -243,6 +256,54 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     expect(result.output.guess).toBe("a cat");
   });
 
+  test("generateText reports the call's token usage", async () => {
+    const stubClient = {
+      chat: {
+        completions: {
+          create: async () => ({
+            choices: [{ message: { content: "hello" } }],
+            usage: { prompt_tokens: 4, completion_tokens: 2, total_tokens: 6 },
+          }),
+        },
+      },
+    };
+
+    const { generateText } = createOpenAiExecutors({ client: stubClient as never });
+    const result = await generateText!({
+      name: "demo",
+      model: "gpt-5.4-mini",
+      prompt: "hi",
+      tools: {},
+    } as never);
+    expect(result).toMatchObject({
+      output: "hello",
+      usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
+    });
+  });
+
+  test("streamText is text-only: a structured or tool-carrying request is refused", async () => {
+    const { streamText } = createOpenAiExecutors({ client: {} as never });
+
+    await expect(
+      streamText({
+        name: "demo",
+        model: "gpt-5.4-mini",
+        prompt: "hi",
+        outputSchema: z.object({ sentiment: z.string() }),
+        tools: {},
+      } as never),
+    ).rejects.toThrow(/text-only/);
+
+    await expect(
+      streamText({
+        name: "demo",
+        model: "gpt-5.4-mini",
+        prompt: "hi",
+        tools: { lookup: { inputSchema: z.object({ query: z.string() }) } },
+      } as never),
+    ).rejects.toThrow(/text-only/);
+  });
+
   test("streamText: forwards chunks to onChunk and resolves with the full text", async () => {
     const chunks = ["Why", " did", " the", " state machine cross the road?"];
     const stubClient = {
@@ -253,6 +314,11 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
               for (const chunk of chunks) {
                 yield { choices: [{ delta: { content: chunk } }] };
               }
+              // `stream_options.include_usage` makes OpenAI send usage last.
+              yield {
+                choices: [],
+                usage: { prompt_tokens: 9, completion_tokens: 11, total_tokens: 20 },
+              };
             },
           }),
         },

@@ -50,7 +50,6 @@ test("migration is pure and writes the current version", async () => {
     amountCents: 1234,
     currency: "USD",
     riskLevel: "low",
-    decision: "pending",
   });
 });
 
