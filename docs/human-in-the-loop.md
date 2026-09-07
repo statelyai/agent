@@ -73,6 +73,8 @@ const event = eventFromInteraction(paused.snapshot, { type: "APPROVE" });
 await runAgent(machine, { snapshot: paused.persist(), event, executors });
 ```
 
+When the answer arrives over the wire instead of from your own code, skip the separate validation step: `resumeEvent` takes the raw body and `runAgent` validates it against the restored state, settling `{ status: "error", cause: "invalid-event" }` if it does not fit. See [Persistence](persistence.md#resume-with-an-untrusted-event).
+
 ## Drive several turns
 
 ```ts no-check

@@ -100,6 +100,8 @@ Use deterministic executors when the test should exercise the real `runAgent` pa
 
 `simulateAgent(machine, { input, script, maxSteps? })` runs a deterministic, model-free transition playthrough. The `script` supplies responses as FIFO queues, so runs are reproducible.
 
+This script keys by invoke **src**, not by request name. It is not the `createScriptedExecutors` script, which keys by request name and runs the real `runAgent` path — see [Script keys](evals.md#script-keys).
+
 - `decisions` holds the `ChosenEvent` to apply per decision, keyed by decision src, usually `agent.decide`.
 - `text` holds output values for text requests, keyed by request src.
 - `invokes` holds answers for scripted invokes, keyed by invoke src.

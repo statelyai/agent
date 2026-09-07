@@ -23,15 +23,7 @@ import { createActor } from "xstate";
 
 import { setup } from "xstate";
 
-import { assign } from "xstate";
-
-import { fromPromise } from "xstate";
-
-import { sendTo } from "xstate";
-
-import { raise } from "xstate";
-
-import { spawnChild } from "xstate";
+import { createAsyncLogic } from "xstate";
 
 import type { AnyStateMachine } from "xstate";
 
@@ -48,12 +40,6 @@ import { describe } from "vitest";
 import { it } from "vitest";
 
 import { vi } from "vitest";
-
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
-
-import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
-
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 
 // --- generic placeholders -------------------------------------------------
 
@@ -81,6 +67,25 @@ declare const toolCallingMachine: AnyStateMachine;
 
 declare const emailDrafter: AnyStateMachine;
 
+import type { Tool } from "ai";
+
+declare const search: Tool;
+
+declare const emailSchema: z.ZodObject<{
+  to: z.ZodString;
+  subject: z.ZodString;
+  body: z.ZodString;
+}>;
+
+declare const sendEmailActor: import("xstate").AsyncActorLogic<
+  { id: string },
+  { to: string; subject: string; body: string }
+>;
+
+declare const approve: (draft: unknown) => Promise<boolean>;
+
+declare const onIdle: any;
+
 declare const actor: AnyActorRef;
 
 declare const model: LanguageModel;
@@ -96,7 +101,6 @@ declare const input: any;
 declare const output: any;
 
 declare let result: any;
-
 
 declare const rawOutput: any;
 

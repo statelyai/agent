@@ -134,7 +134,9 @@ const result = await runAgent(refundMachine, {
 });
 ```
 
-Scripted executors run the machine above end to end with no API key. A registry created by `defineModels` supplies the optional AI SDK executor by default; explicit `executors` override it. Core does not import the AI SDK. See [Hosts and executors](docs/hosts.md).
+Scripted executors run the machine above end to end with no API key. Answers are keyed by request name (a flat array works when there is only one request), each key is a queue consumed once per call, and a looping machine takes `repeat: true`. See [Script keys](docs/evals.md#script-keys).
+
+A registry created by `defineModels` supplies the optional AI SDK executor by default; explicit `executors` override it. Core does not import the AI SDK. See [Hosts and executors](docs/hosts.md).
 
 ## Architecture
 

@@ -5,7 +5,7 @@ import type { AgentUsage } from "./text-logic.js";
 
 export interface RunAgentLoopOptions<TMachine extends AnyStateMachine> extends Omit<
   RunAgentOptions<TMachine>,
-  "snapshot" | "event"
+  "snapshot" | "event" | "resumeEvent"
 > {
   /** Called whenever the machine pauses. Return its next event, or nothing to
    * leave the run paused. */

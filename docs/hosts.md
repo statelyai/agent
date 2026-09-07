@@ -87,6 +87,29 @@ const executors = {
 
 Tool-bearing calls are not retried here because tools may have side effects. Use the framework's own interruption and retry facilities when available; Stately Agent forwards messages and execution to it.
 
+## Untrusted resume events
+
+A host that resumes a run from an HTTP request or a socket frame does not need to replay the log to type-check the event first. Pass the raw body as `resumeEvent`:
+
+```ts no-check
+const result = await runAgent(machine, {
+  store,
+  threadId,
+  resumeEvent: await request.json(),
+  executors
+});
+
+if (result.status === "error" && result.cause === "invalid-event") {
+  return Response.json({ error: String(result.error) }, { status: 400 });
+}
+```
+
+`runAgent` restores the state, checks the event type against what that state accepts and the payload against the machine's registered event schema, and settles `{ status: "error", cause: "invalid-event" }` on a failure — before the actor starts and before any log entry is appended. The trusted, machine-typed `event` option is unchanged: an illegal type there still throws `AgentIllegalResumeEventError`. See [Persistence](persistence.md#resume-with-an-untrusted-event).
+
+## Script faults
+
+`createScriptedExecutors` is a host stand-in, so a broken script is a host failure, not a model failure. An unknown request name or an exhausted queue settles `{ status: "error", cause: "script" }` with the `AgentScriptedExecutorError` as `error`: the run stops instead of routing the fault through the machine's `onError`, where a misconfigured eval would read as a legitimate outcome.
+
 ## Uncontrolled XState actor
 
 ```ts no-check

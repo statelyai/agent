@@ -4,18 +4,21 @@
  * persisted (see ../../route.ts) and delivers the human's APPROVE / REJECT
  * event, running the machine to `done`.
  *
- * The request body is untrusted, so the event is validated before it reaches
- * `runAgent`: `restoreSnapshot` revives the paused state, and `parseAgentEvent`
- * checks the type against what that state currently accepts and the payload
- * against the machine's own event schemas. A bad event is a 400, not a 500.
+ * The request body is untrusted, so it is handed to `runAgent` as
+ * `resumeEvent` rather than as the typed `event`: `runAgent` restores the
+ * paused state, checks the type against what that state currently accepts and
+ * the payload against the machine's own event schemas, and settles
+ * `{ status: 'error', cause: 'invalid-event' }` when it does not fit. That is
+ * a 400, not a 500, and no snapshot or log is touched — so no hand-rolled
+ * validation pass lives here.
  *
  * Note `params` is a PROMISE and must be awaited — dynamic route params went
  * async in the App Router as of Next 15. This example is typed against the real
  * `next` package, so that is enforced rather than assumed.
  */
-import { parseAgentEvent, runAgent } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { NextResponse, type NextRequest } from "next/server";
-import { announceMachine, eventSchemas, snapshots } from "../../route";
+import { announceMachine, snapshots } from "../../route";
 import { resolveExecutors, maybeCreateRunInspection } from "../../../../../agent-runtime";
 
 export async function POST(
@@ -27,31 +30,20 @@ export async function POST(
   if (!snapshot) return NextResponse.json({ error: "unknown run id" }, { status: 404 });
 
   const body = (await request.json().catch(() => ({}))) as { event?: unknown };
-  const raw = body.event;
-  if (!raw || typeof raw !== "object" || typeof (raw as { type?: unknown }).type !== "string") {
-    return NextResponse.json({ error: "body.event must be { type, ... }" }, { status: 400 });
-  }
-
-  let event;
-  try {
-    event = parseAgentEvent(
-      announceMachine.restoreSnapshot(snapshot),
-      raw as { type: string } & Record<string, unknown>,
-      { events: eventSchemas },
-    );
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 400 },
-    );
-  }
 
   const result = await runAgent(announceMachine, {
     snapshot,
-    event,
+    resumeEvent: body.event,
     executors: resolveExecutors(),
     inspect: await maybeCreateRunInspection(),
   });
+
+  if (result.status === "error" && result.cause === "invalid-event") {
+    return NextResponse.json(
+      { error: result.error instanceof Error ? result.error.message : String(result.error) },
+      { status: 400 },
+    );
+  }
 
   if (result.status === "done") {
     snapshots.delete(id);

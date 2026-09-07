@@ -42,13 +42,11 @@
  *   curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"END"}'
  */
 import { Agent, routeAgentRequest, type Connection } from "agents";
-import type { EventFromLogic } from "xstate";
 import { createOpenAI } from "@ai-sdk/openai";
 import {
   createScriptedExecutors,
   getAcceptedEvents,
   getInteraction,
-  parseAgentEvent,
   runAgent,
   type AgentEventLogStore,
   type AgentRequestExecutors,
@@ -165,7 +163,7 @@ export class EmailDrafter extends Agent<Env> {
    * awaited before the next model call, so a crash mid-turn loses nothing but
    * the call that was in flight.
    */
-  async #run(event?: EventFromLogic<typeof emailDrafter>): Promise<Turn> {
+  async #run(resumeEvent?: unknown): Promise<Turn> {
     this.#executors ??= resolveExecutors(this.env);
 
     const result = await runAgent(emailDrafter, {
@@ -173,7 +171,11 @@ export class EmailDrafter extends Agent<Env> {
       threadId: THREAD_ID,
       // Used only when the thread's log is empty; a resume ignores it.
       input: undefined,
-      ...(event !== undefined ? { event } : {}),
+      // The client frame, unvalidated: `runAgent` checks the type against the
+      // restored state and the payload against the machine's event schemas
+      // before anything runs, and reports a failure as
+      // `{ status: 'error', cause: 'invalid-event' }`.
+      ...(resumeEvent !== undefined ? { resumeEvent } : {}),
       executors: this.#executors,
       onTransition: (snapshot) => {
         this.broadcast(
@@ -193,6 +195,11 @@ export class EmailDrafter extends Agent<Env> {
     // recorded — so an errored turn leaves `#last` where the journal is, and
     // the request reports the failure instead.
     if (result.status === "error") {
+      // A wire event the current state cannot take is a client mistake (400).
+      // Nothing was appended, so the thread is exactly where it was.
+      if (result.cause === "invalid-event") {
+        throw new RejectedEventError(messageOf(result.error));
+      }
       throw result.error instanceof Error ? result.error : new Error(messageOf(result.error));
     }
     this.#last = result;
@@ -206,15 +213,6 @@ export class EmailDrafter extends Agent<Env> {
    */
   async #current(): Promise<Turn> {
     return this.#last ?? (await this.#run());
-  }
-
-  /** Validates the event against the current state's accepted events + payload schemas. */
-  #parse(current: Turn, event: ClientEvent) {
-    try {
-      return parseAgentEvent(current.snapshot, event, { events: emailDrafterSchemas.events });
-    } catch (error) {
-      throw new RejectedEventError(messageOf(error));
-    }
   }
 
   onMessage(connection: Connection, message: string) {
@@ -234,8 +232,10 @@ export class EmailDrafter extends Agent<Env> {
 
     const accepted = event;
     void this.#enqueue(async () => {
-      const current = await this.#current();
-      await this.#run(this.#parse(current, accepted));
+      // Fold the journal back first, so a rejected event still leaves this DO
+      // with a view to report.
+      await this.#current();
+      await this.#run(accepted);
     }).catch((error: unknown) => this.#sendError(connection, messageOf(error)));
   }
 
@@ -273,8 +273,8 @@ export class EmailDrafter extends Agent<Env> {
       // One POST maps to one settled turn: the response is always an idle (or
       // final) state, with the journal already written.
       await this.#enqueue(async () => {
-        const current = await this.#current();
-        await this.#run(this.#parse(current, event));
+        await this.#current();
+        await this.#run(event);
       });
     } catch (error) {
       if (error instanceof RejectedEventError) {

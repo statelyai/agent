@@ -152,7 +152,8 @@ describe("cloudflare agent host", () => {
     const view = (await response.json()) as View;
 
     expect(response.status).toBe(400);
-    expect(view.error).toContain("not an accepted event");
+    // `runAgent` refuses the event itself: cause 'invalid-event', nothing run.
+    expect(view.error).toContain("does not accept");
     expect(view.state).toBe("prompting");
   });
 

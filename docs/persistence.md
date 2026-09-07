@@ -41,6 +41,29 @@ const resumed = await runAgent(machine, {
 
 An empty thread starts fresh from `input`. Pass `events` explicitly to resume from a log the host holds itself (the store's thread length must then match it).
 
+### Resume with an untrusted event
+
+In a route handler the event comes off the wire. Pass it as `resumeEvent` and `runAgent` validates it against the restored state before anything starts — the type against what that state accepts, the payload against the machine's registered event schema. No separate replay to type-check it first:
+
+```ts no-check
+const result = await runAgent(machine, {
+  store,
+  threadId,
+  resumeEvent: await request.json(),
+  executors
+});
+
+if (result.status === "error" && result.cause === "invalid-event") {
+  return Response.json({ error: String(result.error) }, { status: 400 });
+}
+```
+
+- `resumeEvent` is `unknown`: hand over the parsed JSON body as-is.
+- A rejection settles `{ status: "error", cause: "invalid-event", error }`. Nothing runs and no log entry is appended, so the thread is untouched and the next request can resume it.
+- `error` is `AgentIllegalResumeEventError` (code `illegal-resume-event`, with `acceptedTypes`) when the state cannot take that type, `AgentInvalidEventPayloadError` (code `invalid-event-payload`) when the fields are wrong.
+- On success the schema-parsed event is delivered — defaults filled, transforms applied.
+- `event` is the trusted counterpart: typed to the machine's event union, and an illegal type throws instead. Pass one or the other, never both.
+
 - Recorded results are replayed, never re-executed.
 - A request that was in flight when the log ended has no recorded completion, so it re-executes. Execution is at-least-once; key provider calls on [`info.callKey`](hosts.md#idempotency-keys).
 - A log that already reached a final state settles immediately with the recorded output.

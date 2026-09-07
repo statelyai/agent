@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
 import { z } from "zod";
-import { createScriptedExecutors, provideExecutors, runAgent, setupAgent } from "./index.js";
+import {
+  AgentScriptedExecutorError,
+  createScriptedExecutors,
+  provideExecutors,
+  runAgent,
+  setupAgent,
+} from "./index.js";
 
 const outcomeSchema = z.enum(["published", "flagged", "blocked"]);
 
@@ -592,5 +598,146 @@ describe("name-keyed scripts", () => {
     await expect(scripted.generateText(request as never)).resolves.toMatchObject({
       output: "second",
     });
+  });
+});
+
+describe("script keys for inline decisions", () => {
+  const guessSetup = setupAgent({
+    context: z.object({ guessed: z.array(z.string()) }),
+    input: z.object({}),
+    output: z.object({ guessed: z.array(z.string()) }),
+    events: { GUESS: z.object({ letter: z.string() }), QUIT: {} },
+  });
+
+  /** One inline `agent.decide`, parameterized by what identifies the request. */
+  const guessMachine = (identity: { name?: string; id?: string }) =>
+    guessSetup.createMachine({
+      context: { guessed: [] },
+      output: ({ context }) => ({ guessed: context.guessed }),
+      initial: "guessing",
+      states: {
+        guessing: {
+          invoke: {
+            ...(identity.id === undefined ? {} : { id: identity.id }),
+            src: "agent.decide",
+            input: () => ({
+              model: "fast",
+              ...(identity.name === undefined ? {} : { name: identity.name }),
+              allowedEvents: ["GUESS", "QUIT"] as const,
+            }),
+            // The shape that made a broken script look like a legitimate loss.
+            onError: { target: "done" },
+          },
+          on: {
+            GUESS: ({ context, event }) => ({
+              target: "done",
+              context: { guessed: [...context.guessed, event.letter] },
+            }),
+            QUIT: () => ({ target: "done" }),
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+
+  test("`name` on the decide input is the script key", async () => {
+    const scripted = createScriptedExecutors({
+      decisions: { guessLetter: [{ type: "GUESS", letter: "e" }] },
+    });
+    const result = await runAgent(guessMachine({ name: "guessLetter" }), {
+      input: {},
+      executors: scripted,
+    });
+
+    scripted.assertScriptOk();
+    expect(result.status).toBe("done");
+    expect(scripted.calls.map((call) => call.name)).toEqual(["guessLetter"]);
+  });
+
+  test("`name` wins over the invoke `id`", async () => {
+    const scripted = createScriptedExecutors({
+      decisions: { guessLetter: [{ type: "GUESS", letter: "e" }] },
+    });
+    await runAgent(guessMachine({ name: "guessLetter", id: "someInvokeId" }), {
+      input: {},
+      executors: scripted,
+    });
+
+    expect(scripted.calls.map((call) => call.name)).toEqual(["guessLetter"]);
+  });
+
+  test("with no `name`, the invoke `id` is the script key", async () => {
+    const scripted = createScriptedExecutors({
+      decisions: { guessLetter: [{ type: "GUESS", letter: "e" }] },
+    });
+    const result = await runAgent(guessMachine({ id: "guessLetter" }), {
+      input: {},
+      executors: scripted,
+    });
+
+    expect(result.status).toBe("done");
+    expect(scripted.calls.map((call) => call.name)).toEqual(["guessLetter"]);
+  });
+
+  test("with neither, the key falls back to the invoke's state path", async () => {
+    const scripted = createScriptedExecutors({ decisions: { "*": [{ type: "QUIT" }] } });
+    await runAgent(guessMachine({}), { input: {}, executors: scripted });
+
+    expect(scripted.calls[0]?.name).toContain("guessing");
+  });
+
+  test("an unknown key is an AgentScriptedExecutorError, not a model failure", async () => {
+    const scripted = createScriptedExecutors({
+      decisions: { someOtherName: [{ type: "QUIT" }] },
+    });
+    // A script fault stops the run: `runAgent` settles `cause: 'script'` rather
+    // than letting the machine's `onError` route it to a plausible outcome.
+    const result = await runAgent(guessMachine({ name: "guessLetter" }), {
+      input: {},
+      executors: scripted,
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.status === "error" ? result.cause : undefined).toBe("script");
+    expect(scripted.scriptError).toBeInstanceOf(AgentScriptedExecutorError);
+    expect(scripted.scriptError?.code).toBe("scripted-executors-unknown-name");
+    expect(() => scripted.assertScriptOk()).toThrow(/no entry for request name 'guessLetter'/);
+  });
+});
+
+describe("strict mode", () => {
+  const request = { name: "draft", model: "fast", prompt: "hi", tools: {} } as never;
+
+  test("poisons the executor set after the first fault", async () => {
+    const scripted = createScriptedExecutors({ text: { draft: ["one"] } });
+
+    await expect(scripted.generateText(request)).resolves.toMatchObject({ output: "one" });
+    await expect(scripted.generateText(request)).rejects.toThrow(/ran dry/);
+    // Without poisoning, an unrelated later call would be served normally.
+    await expect(
+      scripted.generateText({ name: "other", model: "fast", tools: {} } as never),
+    ).rejects.toThrow(/ran dry on a pending text request 'draft'/);
+    expect(scripted.scriptError).toBeInstanceOf(AgentScriptedExecutorError);
+  });
+
+  test("strict: false keeps the legacy per-call behavior", async () => {
+    const scripted = createScriptedExecutors({ text: { draft: ["one"] }, strict: false });
+
+    await expect(scripted.generateText(request)).resolves.toMatchObject({ output: "one" });
+    await expect(scripted.generateText(request)).rejects.toThrow(/ran dry/);
+    // A different name routes to the same script, which has no entry for it.
+    await expect(
+      scripted.generateText({ name: "other", model: "fast", tools: {} } as never),
+    ).rejects.toThrow(/no entry for request name 'other'/);
+    // The fault is still recorded, so `assertScriptOk` works either way.
+    expect(scripted.scriptError).toBeInstanceOf(AgentScriptedExecutorError);
+  });
+
+  test("repeat: true reuses the last routed entry instead of running dry", async () => {
+    const scripted = createScriptedExecutors({ text: { draft: ["one"] }, repeat: true });
+
+    await expect(scripted.generateText(request)).resolves.toMatchObject({ output: "one" });
+    await expect(scripted.generateText(request)).resolves.toMatchObject({ output: "one" });
+    expect(scripted.scriptError).toBeUndefined();
   });
 });

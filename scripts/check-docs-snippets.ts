@@ -56,6 +56,27 @@ function parseGlobals(source: string): Global[] {
 const GLOBALS = parseGlobals(globalsSource);
 
 /**
+ * The globals file is the ambient context every snippet resolves against, so a
+ * stale import in it silently degrades names to `any` inside snippets. Compile
+ * it on its own and report its diagnostics as failures.
+ */
+function checkGlobalsFile(): string[] {
+  const program = ts.createProgram([globalsFile], COMPILER_OPTIONS);
+  const source = program.getSourceFile(globalsFile);
+  if (!source) return [`docs/snippet-globals.ts could not be loaded`];
+  const diagnostics = [
+    ...program.getSyntacticDiagnostics(source),
+    ...program.getSemanticDiagnostics(source),
+  ];
+  return diagnostics.map((d) => {
+    const text = ts.flattenDiagnosticMessageText(d.messageText, " ");
+    const line =
+      d.file && d.start !== undefined ? d.file.getLineAndCharacterOfPosition(d.start).line + 1 : 0;
+    return `docs/snippet-globals.ts:${line}  TS${d.code}: ${text}`;
+  });
+}
+
+/**
  * Every export of the package's public entry points, mapped to the specifier it
  * should be imported from. Auto-derived so snippets stay in sync with the API.
  */
@@ -197,6 +218,14 @@ let checked = 0;
 let skipped = 0;
 const failures: string[] = [];
 
+const globalsErrors = checkGlobalsFile();
+if (globalsErrors.length) {
+  failures.push(
+    `docs/snippet-globals.ts (ambient snippet context)\n` +
+      globalsErrors.map((e) => `      ${e}`).join("\n"),
+  );
+}
+
 for (const file of files) {
   const rel = relative(root, file);
   const source = readFileSync(file, "utf8");
@@ -237,7 +266,7 @@ if (failures.length) {
 }
 
 console.log(
-  `docs:check — ${checked} block(s) checked, ${skipped} skipped, ${failures.length} failed`,
+  `docs:check — snippet-globals.ts + ${checked} block(s) checked, ${skipped} skipped, ${failures.length} failed`,
 );
 
 process.exit(failures.length ? 1 : 0);

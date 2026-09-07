@@ -20,6 +20,7 @@ The snippets below come from [Twenty Questions](../examples/twenty-questions/ind
 Author a decision inline on the invoke that needs one, using the builtin `agent.decide` actor source. Its input takes:
 
 - `model`: which model to use (a key from your models map).
+- `name` (optional): the request's semantic name. It identifies the decision in traces, host mocks, and eval scripts. Without it the name falls back to the invoke `id`, then to the invoke's state path. See [Script keys](evals.md#script-keys).
 - `system` (optional): system prompt.
 - `prompt` (optional): user prompt, usually built from `context`.
 - `allowedEvents` (optional): the candidate events (exact types or [patterns](#allowedevents-patterns)). Defaults to all currently-legal events.
@@ -29,10 +30,10 @@ Author a decision inline on the invoke that needs one, using the builtin `agent.
 // ...
 deciding: {
   invoke: {
-    id: 'chooseAction',
     src: 'agent.decide',
     input: ({ context }) => ({
       model: 'quick',
+      name: 'chooseAction',
       system: 'Ask one yes/no question at a time, but guess on the final turn.',
       prompt: `Questions remaining: ${context.questionsRemaining}`,
       allowedEvents: ['ASK', 'GUESS'],

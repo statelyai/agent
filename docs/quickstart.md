@@ -89,6 +89,21 @@ Requests have a semantic `name`, resolved `input`, model reference, schemas,
 prompt/messages, and tools. The machine owns control flow; the executor owns
 the provider call.
 
+The script keys by that request `name`, and each entry is the request's output
+value: a bare string here because `answer` declares `z.string()`, and the
+declared object for a structured request. Each key is a queue consumed once per
+call, so a machine that loops over one request takes `repeat: true`:
+
+```ts no-check
+const scripted = createScriptedExecutors({
+  text: { answer: ["Because transitions constrain behavior."] },
+  repeat: true,
+});
+```
+
+See [Evals](evals.md#script-keys) for the full rule, including how an inline
+`agent.decide` is named and what happens when a script key is wrong.
+
 ## Use a real model
 
 Leave the machine unchanged and replace only the host executors:

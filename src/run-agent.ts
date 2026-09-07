@@ -32,6 +32,8 @@ import {
   validateSchemaSync,
 } from "./utils.js";
 import { getAcceptedEvents, type AgentSchemas } from "./events.js";
+import { isRecord } from "./internal/is-record.js";
+import { AgentScriptedExecutorError } from "./scripted-executors.js";
 import {
   GENERATE_TEXT_ACTOR,
   getCallUsage,
@@ -116,6 +118,85 @@ export class AgentIllegalResumeEventError extends AgentError {
     this.eventType = eventType;
     this.acceptedTypes = acceptedTypes;
   }
+}
+
+/**
+ * The `error` on a `{ status: 'error', cause: 'invalid-event' }` result when an
+ * untrusted {@link RunAgentOptions.resumeEvent} is not an object with a string
+ * `type`, or when its payload fails the event's registered schema. The wrong
+ * *type* (accepted-but-not-here) is reported as
+ * {@link AgentIllegalResumeEventError} instead, so a host can tell "no such
+ * step right now" from "the fields are wrong".
+ */
+export class AgentInvalidEventPayloadError extends AgentError {
+  readonly eventType: string;
+  constructor(eventType: string, detail: string) {
+    super(
+      "invalid-event-payload",
+      `runAgent: the resume event '${eventType}' is not valid: ${detail}`,
+    );
+    this.name = "AgentInvalidEventPayloadError";
+    this.eventType = eventType;
+  }
+}
+
+/** Outcome of validating an untrusted {@link RunAgentOptions.resumeEvent} against the restored state. @internal */
+type ResumeEventValidation = { ok: true; event: EventObject } | { ok: false; error: AgentError };
+
+/**
+ * Validates an untrusted wire event against a RESTORED (not yet started)
+ * snapshot: it must be an object with a string `type`, that type must be one
+ * the restored state currently accepts, and its payload must satisfy the
+ * schema `setupAgent` registered for that type. Mirrors `parseAgentEvent`, but
+ * returns the failure as an {@link AgentError} instead of throwing, so
+ * `runAgent` can settle `{ status: 'error', cause: 'invalid-event' }`.
+ * @internal
+ */
+function validateResumeEvent(
+  snapshot: AnyMachineSnapshot,
+  raw: unknown,
+  schemas: AgentSchemas | undefined,
+): ResumeEventValidation {
+  if (!isRecord(raw) || typeof (raw as { type?: unknown }).type !== "string") {
+    return {
+      ok: false,
+      error: new AgentInvalidEventPayloadError(
+        "(unknown)",
+        "expected an object with a string `type`.",
+      ),
+    };
+  }
+  const event = raw as { type: string } & Record<string, unknown>;
+  const accepted = snapshot.status === "active" ? getAcceptedEvents(snapshot, { schemas }) : [];
+  const descriptor = accepted.find((candidate) => candidate.type === event.type);
+  if (!descriptor) {
+    return {
+      ok: false,
+      error: new AgentIllegalResumeEventError(
+        event.type,
+        accepted.map((candidate) => candidate.type),
+      ),
+    };
+  }
+  if (descriptor.inputSchema) {
+    const { type, ...payload } = event;
+    try {
+      const validatedPayload = validateSchemaSync(descriptor.inputSchema, payload) as Record<
+        string,
+        unknown
+      >;
+      return { ok: true, event: { ...validatedPayload, type } as EventObject };
+    } catch (error) {
+      return {
+        ok: false,
+        error: new AgentInvalidEventPayloadError(
+          event.type,
+          error instanceof Error ? error.message : String(error),
+        ),
+      };
+    }
+  }
+  return { ok: true, event: event as EventObject };
 }
 
 /**
@@ -479,8 +560,33 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   // resume
   /** A previously-settled run's `result.persist()`, to resume from instead of starting fresh. Pair with `event` to deliver the event that unblocks the resumed idle state. */
   snapshot?: Snapshot<unknown>;
-  /** An event to send immediately after starting/resuming the actor (e.g. the human's answer to an idle-state prompt). */
+  /** An event to send immediately after starting/resuming the actor (e.g. the human's answer to an idle-state prompt). Typed as the machine's event union and TRUSTED: a type the restored state cannot take throws {@link AgentIllegalResumeEventError}. For an event off the wire use {@link RunAgentOptions.resumeEvent}. */
   event?: EventFromLogic<TMachine>;
+  /**
+   * An UNTRUSTED wire event to resume with — the same delivery as `event`, but
+   * validated first and reported as a result instead of a throw. Before the
+   * actor starts, `runAgent` checks that it is an object with a string `type`,
+   * that the restored state accepts that type, and that its payload satisfies
+   * the schema `setupAgent` registered for it. A failure settles
+   * `{ status: 'error', cause: 'invalid-event', error }` — no log entry is
+   * appended and nothing runs. On success the SCHEMA-PARSED event (defaults
+   * filled, transforms applied) is delivered.
+   *
+   * Typed `unknown` on purpose: it is the JSON body of a request, so a host
+   * hands it straight over without replaying the log to type-check it first.
+   * Pass `event` OR `resumeEvent`, never both, and only when resuming
+   * (`snapshot`, `events`, or `store` + `threadId`).
+   *
+   * ```ts
+   * const result = await runAgent(machine, {
+   *   store, threadId, resumeEvent: await request.json(), executors,
+   * });
+   * if (result.status === "error" && result.cause === "invalid-event") {
+   *   return Response.json({ error: String(result.error) }, { status: 400 });
+   * }
+   * ```
+   */
+  resumeEvent?: unknown;
   /**
    * A prior run's `result.events` — the replayable log to resume from and keep
    * appending to. THE LOG IS THE SOURCE OF TRUTH: journaled model/tool results
@@ -700,6 +806,14 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
  * - `'stopped'` — the actor was stopped externally (`status === 'stopped'`).
  * - `'journal'` — a {@link RunAgentOptions.store} write rejected (a concurrent
  *   writer's {@link AgentEventLogConflictError}, or any other storage failure).
+ * - `'script'` — a scripted executor faulted (`AgentScriptedExecutorError`: an
+ *   unknown request name, or a queue that ran dry). A test-harness bug, not a
+ *   model failure, so the run is stopped rather than routed through the
+ *   machine's `onError`.
+ * - `'invalid-event'` — an untrusted {@link RunAgentOptions.resumeEvent} was
+ *   rejected before the actor started: the restored state does not accept that
+ *   type ({@link AgentIllegalResumeEventError}) or the payload failed its
+ *   schema ({@link AgentInvalidEventPayloadError}).
  */
 export type RunAgentErrorCause =
   | "aborted"
@@ -707,7 +821,9 @@ export type RunAgentErrorCause =
   | "decision-exhausted"
   | "machine"
   | "stopped"
-  | "journal";
+  | "journal"
+  | "script"
+  | "invalid-event";
 
 let nextRunAgentTraceId = 1;
 
@@ -1094,6 +1210,16 @@ interface RunAgentBindContext {
   actorHolder: { actorRef: AnyActorRef | undefined };
   /** Registered `setupAgent` schemas (for event `inputSchema`s), if any. */
   schemas?: AgentSchemas;
+  /**
+   * Called when a text/decision executor faults with an
+   * {@link AgentScriptedExecutorError} — a script CONFIGURATION bug (unknown
+   * request name, exhausted queue), not a model failure. `runAgent` settles
+   * `{ status: 'error', cause: 'script' }` from here, so the fault never
+   * reaches the machine's `onError` and cannot be mistaken for a legitimate
+   * outcome. Unset off the runAgent path (the `provideExecutors` path has no
+   * run to fail).
+   */
+  onScriptFault?: (error: AgentScriptedExecutorError) => void;
 }
 
 /**
@@ -1312,6 +1438,9 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
       return { output };
     } catch (error) {
       runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
+      if (error instanceof AgentScriptedExecutorError) {
+        runCtx.onScriptFault?.(error);
+      }
       throw error;
     }
   });
@@ -1382,6 +1511,9 @@ function createCountingDecide(
       return result;
     } catch (error) {
       runCtx.emitTrace?.({ type: "request.error", request: attemptRequest, error }, self);
+      if (error instanceof AgentScriptedExecutorError) {
+        runCtx.onScriptFault?.(error);
+      }
       throw error;
     }
   };
@@ -2102,6 +2234,23 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     });
   };
 
+  // A scripted executor faulted: the script itself is wrong (unknown request
+  // name, exhausted queue), so every later answer would be fiction. Settle
+  // immediately — which stops the actor and aborts in-flight calls — rather
+  // than letting the fault reach the invoke's `onError`, where a misconfigured
+  // eval reads as a legitimate outcome. Mirrors `failRunOnJournalError`.
+  const failRunOnScriptError = (error: AgentScriptedExecutorError): void => {
+    if (settled) {
+      return;
+    }
+    settle({
+      status: "error",
+      cause: "script",
+      error,
+      snapshot: actor.getSnapshot() as SnapshotFrom<TMachine>,
+    });
+  };
+
   // Where THIS run's own entries begin — the fold boundary for `runUsage`.
   let resumedLogLength = 0;
   // The lineage id pinned in the log's init entry metadata; also the prefix of
@@ -2280,6 +2429,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     awaitJournal,
     runId,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
+    onScriptFault: (error) => failRunOnScriptError(error),
   };
 
   // §3.2 step 2: wrap every effective TextLogic/DecisionLogic (and the
@@ -2587,16 +2737,54 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     return key;
   };
 
-  // Feature B: reject a resume `event` the restored state cannot take. Checked
-  // here (before the actor starts, like the bind-time throws) against the
-  // type-level legal set of the restored snapshot — a live-but-unstarted actor
-  // exposes it via getAcceptedEvents. A guard-rejected-but-type-legal event
-  // still appears here, so it is never treated as illegal. Always enforced.
-  if (effectiveSnapshot !== undefined && options.event !== undefined) {
+  // The event this run delivers after start: `options.event` verbatim, or the
+  // schema-parsed form of an untrusted `options.resumeEvent`.
+  let resumeEventToSend: EventFromLogic<TMachine> | undefined = options.event;
+  // Set when an untrusted `resumeEvent` failed validation: the run settles
+  // `cause: 'invalid-event'` right after the actor is constructed, having
+  // appended nothing and started nothing.
+  let invalidResumeEventError: AgentError | undefined;
+
+  if (options.resumeEvent !== undefined) {
+    if (options.event !== undefined) {
+      throw new AgentError(
+        "invalid-run-options",
+        "runAgent: pass either `event` (trusted, typed) or `resumeEvent` (untrusted wire event), not both.",
+      );
+    }
+    if (effectiveSnapshot === undefined) {
+      throw new AgentError(
+        "invalid-run-options",
+        "runAgent: `resumeEvent` is validated against a restored state — resume with `snapshot`, " +
+          "`events`, or `store` + `threadId`.",
+      );
+    }
+  }
+
+  // Reject a resume event the restored state cannot take. Checked here (before
+  // the actor starts, like the bind-time throws) against the type-level legal
+  // set of the restored snapshot — a live-but-unstarted actor exposes it via
+  // getAcceptedEvents. A guard-rejected-but-type-legal event still appears
+  // here, so it is never treated as illegal. Always enforced.
+  //
+  // The trusted `event` THROWS (a programmer error, as it always has); the
+  // untrusted `resumeEvent` settles `{ cause: 'invalid-event' }` and is also
+  // payload-validated against the machine's registered event schemas.
+  if (
+    effectiveSnapshot !== undefined &&
+    (options.event !== undefined || options.resumeEvent !== undefined)
+  ) {
     const restoredSnapshot = createActor(boundMachine, {
       snapshot: effectiveSnapshot,
     } as never).getSnapshot() as AnyMachineSnapshot;
-    if (restoredSnapshot.status === "active") {
+    if (options.resumeEvent !== undefined) {
+      const validation = validateResumeEvent(restoredSnapshot, options.resumeEvent, runCtx.schemas);
+      if (validation.ok) {
+        resumeEventToSend = validation.event as EventFromLogic<TMachine>;
+      } else {
+        invalidResumeEventError = validation.error;
+      }
+    } else if (restoredSnapshot.status === "active") {
       const acceptedTypes = getAcceptedEvents(restoredSnapshot, { schemas: runCtx.schemas }).map(
         (descriptor) => descriptor.type,
       );
@@ -2609,7 +2797,9 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
   // The log's first entry is appended only once the run is actually going to
   // start: a rejected resume event (above) must not emit an entry.
-  seedInitEntry?.();
+  if (invalidResumeEventError === undefined) {
+    seedInitEntry?.();
+  }
 
   // One run = start (or resume event) to the next quiescence.
   let settled = false;
@@ -2627,8 +2817,8 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // an `event` is still pending delivery. The restored state may itself be a
   // idle snapshot; without this guard, Feature A's immediate settle
   // would fire during `start()` and settle idle BEFORE the resume event is
-  // sent. Cleared right before `actor.send(options.event)`.
-  let deliveringResumeEvent = options.event !== undefined;
+  // sent. Cleared right before `actor.send(resumeEventToSend)`.
+  let deliveringResumeEvent = resumeEventToSend !== undefined;
 
   const settle = (outcome: RunAgentOutcome<TMachine>) => {
     if (settled) {
@@ -2904,6 +3094,18 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     },
   };
 
+  if (invalidResumeEventError !== undefined) {
+    // Nothing was appended and nothing starts: the actor exists only so the
+    // result can carry the restored snapshot and a working `persist()`.
+    settle({
+      status: "error",
+      cause: "invalid-event",
+      error: invalidResumeEventError,
+      snapshot: actor.getSnapshot(),
+    });
+    return sessionApi;
+  }
+
   if (options.signal) {
     if (options.signal.aborted) {
       settle({
@@ -2921,7 +3123,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     type: "run.start",
     ...(resolvedInput !== undefined ? { input: resolvedInput as InputFrom<TMachine> } : {}),
     ...(effectiveSnapshot !== undefined ? { snapshot: effectiveSnapshot } : {}),
-    ...(options.event !== undefined ? { event: options.event } : {}),
+    ...(resumeEventToSend !== undefined ? { event: resumeEventToSend } : {}),
   });
 
   actorStarted = true;
@@ -2955,10 +3157,10 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       });
     }
   }
-  if (options.event && !settled) {
+  if (resumeEventToSend && !settled) {
     // Restore transition is done; allow the post-event transition to settle.
     deliveringResumeEvent = false;
-    actor.send(options.event as never);
+    actor.send(resumeEventToSend as never);
   }
 
   return sessionApi;

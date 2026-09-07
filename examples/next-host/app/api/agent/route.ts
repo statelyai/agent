@@ -63,9 +63,6 @@ const agentSetup = setupAgent({
   },
 });
 
-/** The event payload schemas, so the resume route can validate a wire event. */
-export const eventSchemas = agentSetup.schemas.events;
-
 export const announceMachine = agentSetup.createMachine({
   id: "next-announce",
   context: ({ input }) => ({ topic: input.topic, draft: null, rejections: 0, reason: null }),

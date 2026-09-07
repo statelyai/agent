@@ -137,6 +137,7 @@ export type { EventLogStoreConformanceHarness } from "./event-log-store-conforma
 export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentIllegalResumeEventError,
+  AgentInvalidEventPayloadError,
   AgentMaxModelCallsExceededError,
   AgentSnapshotDivergedError,
   inspectTransitions,
@@ -204,7 +205,7 @@ export type {
   SeamSlice,
   SeamTurn,
 } from "./seam.js";
-export { createScriptedExecutors } from "./scripted-executors.js";
+export { AgentScriptedExecutorError, createScriptedExecutors } from "./scripted-executors.js";
 export type {
   ScriptedDecisionEntry,
   ScriptedDecisionValue,

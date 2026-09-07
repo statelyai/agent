@@ -24,6 +24,8 @@ import {
   createInMemoryEventLogStore,
   createTextLogic,
   AgentIllegalResumeEventError,
+  AgentInvalidEventPayloadError,
+  createScriptedExecutors,
   inspectTransitions,
   isAgentIdle,
   runAgent,
@@ -4400,5 +4402,176 @@ describe("runAgent write-ahead store", () => {
     const stored = await inner.read("main");
     expect(stored).toHaveLength(atSettle + 1);
     expect(stored[stored.length - 1]!.event.type).toBe(AGENT_USAGE_EVENT_TYPE);
+  });
+});
+
+describe("resumeEvent: untrusted wire events", () => {
+  const agent = setupAgent({
+    context: z.object({ reason: z.string() }),
+    input: z.object({}),
+    output: z.object({}),
+    events: {
+      APPROVE: z.object({}),
+      REJECT: z.object({ reason: z.string() }),
+    },
+  });
+  const machine = agent.createMachine({
+    context: { reason: "" },
+    initial: "reviewing",
+    states: {
+      reviewing: {
+        on: {
+          APPROVE: { target: "done" },
+          REJECT: ({ event }) => ({ target: "done", context: { reason: event.reason } }),
+        },
+      },
+      done: { type: "final", output: () => ({}) },
+    },
+  });
+  const executors = { generateText: async () => ({ output: {} }) };
+
+  const paused = async () => {
+    const first = await runAgent(machine, { input: {}, executors });
+    if (first.status !== "idle") throw new Error("expected idle");
+    return first;
+  };
+
+  test("a well-formed wire event resumes the run", async () => {
+    const first = await paused();
+    const result = await runAgent(machine, {
+      snapshot: first.persist(),
+      resumeEvent: JSON.parse('{"type":"REJECT","reason":"too terse"}'),
+      executors,
+    });
+    expect(result.status).toBe("done");
+    expect(result.snapshot.context.reason).toBe("too terse");
+  });
+
+  test("an unaccepted type settles cause 'invalid-event' with AgentIllegalResumeEventError", async () => {
+    const first = await paused();
+    const result = await runAgent(machine, {
+      snapshot: first.persist(),
+      resumeEvent: { type: "NOPE" },
+      executors,
+    });
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error("expected error");
+    expect(result.cause).toBe("invalid-event");
+    expect(result.error).toBeInstanceOf(AgentIllegalResumeEventError);
+    expect((result.error as AgentIllegalResumeEventError).acceptedTypes.slice().sort()).toEqual([
+      "APPROVE",
+      "REJECT",
+    ]);
+  });
+
+  test("a bad payload settles cause 'invalid-event' with AgentInvalidEventPayloadError", async () => {
+    const first = await paused();
+    const result = await runAgent(machine, {
+      snapshot: first.persist(),
+      resumeEvent: { type: "REJECT", reason: 42 },
+      executors,
+    });
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error("expected error");
+    expect(result.cause).toBe("invalid-event");
+    expect(result.error).toBeInstanceOf(AgentInvalidEventPayloadError);
+    expect(result.snapshot.value).toBe("reviewing");
+  });
+
+  test("a non-object wire body is rejected, not thrown", async () => {
+    const first = await paused();
+    const result = await runAgent(machine, {
+      snapshot: first.persist(),
+      resumeEvent: "APPROVE",
+      executors,
+    });
+    if (result.status !== "error") throw new Error("expected error");
+    expect(result.cause).toBe("invalid-event");
+    expect(result.error).toBeInstanceOf(AgentInvalidEventPayloadError);
+  });
+
+  test("a rejected resume appends nothing to the log and can be resumed again", async () => {
+    const store = createInMemoryEventLogStore();
+    const threadId = "t1";
+    const first = await runAgent(machine, { input: {}, executors, store, threadId });
+    if (first.status !== "idle") throw new Error("expected idle");
+    const before = (await store.read(threadId)).length;
+
+    const rejected = await runAgent(machine, {
+      store,
+      threadId,
+      resumeEvent: { type: "NOPE" },
+      executors,
+    });
+    expect(rejected.status === "error" && rejected.cause).toBe("invalid-event");
+    expect((await store.read(threadId)).length).toBe(before);
+
+    const ok = await runAgent(machine, {
+      store,
+      threadId,
+      resumeEvent: { type: "APPROVE" },
+      executors,
+    });
+    expect(ok.status).toBe("done");
+  });
+
+  test("`event` and `resumeEvent` together, or `resumeEvent` without a resume source, throw", async () => {
+    const first = await paused();
+    await expect(
+      runAgent(machine, {
+        snapshot: first.persist(),
+        event: { type: "APPROVE" },
+        resumeEvent: { type: "APPROVE" },
+        executors,
+      }),
+    ).rejects.toBeInstanceOf(AgentError);
+    await expect(
+      runAgent(machine, { input: {}, resumeEvent: { type: "APPROVE" }, executors }),
+    ).rejects.toBeInstanceOf(AgentError);
+  });
+});
+
+describe("script faults settle cause 'script'", () => {
+  const agent = setupAgent({
+    context: z.object({ failed: z.boolean() }),
+    input: z.object({}),
+    output: z.object({}),
+  });
+  const summarize = createTextLogic({ model: "test", name: "summarize", prompt: () => "go" });
+  const machine = agent.createMachine({
+    context: { failed: false },
+    initial: "summarizing",
+    states: {
+      summarizing: {
+        invoke: {
+          src: "summarize",
+          onDone: { target: "done" },
+          // A script fault must NOT reach this handler.
+          onError: { target: "failed" },
+        },
+      },
+      failed: { type: "final", output: () => ({}) },
+      done: { type: "final", output: () => ({}) },
+    },
+    actors: { summarize },
+  });
+
+  test("a misnamed script key errors the run and never reaches onError", async () => {
+    const scripted = createScriptedExecutors({ text: { summarise: ["oops"] } });
+    const result = await runAgent(machine, { input: {}, executors: scripted });
+
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error("expected error");
+    expect(result.cause).toBe("script");
+    expect((result.error as AgentError).code).toBe("scripted-executors-unknown-name");
+    expect(result.snapshot.value).not.toBe("failed");
+  });
+
+  test("an exhausted queue errors the run", async () => {
+    const scripted = createScriptedExecutors({ text: { summarize: [] } });
+    const result = await runAgent(machine, { input: {}, executors: scripted });
+    if (result.status !== "error") throw new Error("expected error");
+    expect(result.cause).toBe("script");
+    expect((result.error as AgentError).code).toBe("scripted-executors-exhausted");
   });
 });

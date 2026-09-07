@@ -18,6 +18,7 @@ Common errors:
 | Error | Meaning |
 | --- | --- |
 | `AgentIllegalResumeEventError` | The restored active state does not accept the supplied event type. |
+| `AgentInvalidEventPayloadError` | An untrusted `resumeEvent` was not `{ type, ... }`, or its payload failed the machine's event schema. |
 | `AgentDecisionExhaustedError` | Every proposed decision was unknown, invalid, or guard-rejected. |
 | `AgentMaxModelCallsExceededError` | The run exceeded its configured model-call budget. |
 | XState version error | The persisted snapshot version needs the machine's native `migrate` function. |
