@@ -42,11 +42,13 @@
 import { z } from "zod";
 import { tool } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { createAsyncLogic } from "xstate";
+import { createAsyncLogic, type StateValue } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   getAcceptedEvents,
-  getStateMeta,
+  getInteraction,
+  getStatePath,
+  interactionMetaSchema,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -65,7 +67,12 @@ export interface Booking {
   status: "confirmed" | "cancelled";
 }
 
-/** A tiny fixed booking table, keyed by confirmation code. */
+/**
+ * A tiny booking table, keyed by confirmation code — the stand-in for the
+ * tutorial's SQLite database, and the state `executeAction` really writes to.
+ * Approving a cancellation flips the stored `status`; call
+ * {@link resetBookings} between runs to get the fixture back.
+ */
 export const BOOKINGS: Record<string, Booking> = {
   AB1234: {
     passenger: "Ada Lovelace",
@@ -85,6 +92,14 @@ export const BOOKINGS: Record<string, Booking> = {
     status: "confirmed",
   },
 };
+
+const INITIAL_BOOKINGS: Record<string, Booking> = structuredClone(BOOKINGS);
+
+/** Restores the fixture table, so one run's approved cancellation cannot leak into the next. */
+export function resetBookings(): void {
+  for (const key of Object.keys(BOOKINGS)) delete BOOKINGS[key];
+  Object.assign(BOOKINGS, structuredClone(INITIAL_BOOKINGS));
+}
 
 /** A tiny policy table (stand-in for LangGraph's `lookup_policy` retriever). */
 export const POLICIES: Record<string, string> = {
@@ -116,14 +131,14 @@ const pendingActionSchema = z.object({
 });
 export type PendingAction = z.infer<typeof pendingActionSchema>;
 
-const resolutionSchema = z.enum(["answered", "executed", "denied"]);
+const resolutionSchema = z.enum(["answered", "executed", "denied", "failed"]);
 
 const contextSchema = z.object({
   query: z.string(),
   pendingAction: pendingActionSchema.nullable(),
-  answer: z.string().nullable(),
-  result: z.string().nullable(),
-  resolution: resolutionSchema.nullable(),
+  // The one line this turn will report, whichever way it ends. Which final
+  // state was reached IS the resolution — no mirror of it lives here.
+  message: z.string(),
 });
 
 const agentSetup = setupAgent({
@@ -131,43 +146,34 @@ const agentSetup = setupAgent({
   context: contextSchema,
   input: z.object({ query: z.string() }),
   output: z.object({ resolution: resolutionSchema, message: z.string() }),
-  // Typed interaction meta: the pause's `label`, a button `label`/`style` per
-  // accepted event, and `textEvent` naming the ONE event free text goes to.
-  meta: z.object({
-    interaction: z
-      .object({
-        label: z.string(),
-        events: z
-          .record(
-            z.string(),
-            z.object({
-              label: z.string().optional(),
-              style: z.enum(["primary", "danger", "default"]).optional(),
-            }),
-          )
-          .optional(),
-        textEvent: z.string().optional(),
-      })
-      .optional(),
-  }),
+  // The library's interaction protocol: the pause's `label`, a button
+  // `label`/`style` per accepted event, and `textEvent` naming the ONE event
+  // free text goes to.
+  meta: interactionMetaSchema,
   events: {
     APPROVE: z.object({}),
     DENY: z.object({ reason: z.string() }),
   },
   actors: {
-    // Applies the approved sensitive action. Reads the real booking table and
-    // returns a confirmation message. (A production host would persist the
-    // change and enforce policy here — see the tutorial's cancel_ticket.)
+    // Applies the approved sensitive action: it WRITES to the booking table,
+    // it does not merely describe the write. (A production host would hit its
+    // database here — see the tutorial's cancel_ticket.) A missing booking is
+    // an error, so the machine can route it to `failed` instead of reporting a
+    // change that never happened.
     executeAction: createAsyncLogic<string, PendingAction>({
       run: async ({ input }) => {
         const booking = BOOKINGS[input.confirmationCode];
         if (!booking) {
-          return `No booking found for ${input.confirmationCode}; nothing changed.`;
+          throw new Error(`No booking found for ${input.confirmationCode}; nothing changed.`);
         }
         if (input.type === "cancel") {
-          return `Booking ${input.confirmationCode} (${booking.flight}) is now cancelled. A refund will follow per policy.`;
+          const previousFlight = booking.flight;
+          booking.status = "cancelled";
+          return `Booking ${input.confirmationCode} (${previousFlight}) is now cancelled. A refund will follow per policy.`;
         }
-        return `Booking ${input.confirmationCode} moved from ${booking.flight} to ${input.newFlight}. A $75 change fee applies.`;
+        const previousFlight = booking.flight;
+        booking.flight = input.newFlight ?? booking.flight;
+        return `Booking ${input.confirmationCode} moved from ${previousFlight} to ${booking.flight}. A $75 change fee applies.`;
       },
     }),
   },
@@ -235,18 +241,7 @@ const agentSetup = setupAgent({
 
 export const customerSupportMachine = agentSetup.createMachine({
   id: "customer-support",
-  context: ({ input }) => ({
-    query: input.query,
-    pendingAction: null,
-    answer: null,
-    result: null,
-    resolution: null,
-  }),
-  // Single source of the done result, whichever final state is reached.
-  output: ({ context }) => ({
-    resolution: context.resolution ?? "answered",
-    message: context.answer ?? context.result ?? "",
-  }),
+  context: ({ input }) => ({ query: input.query, pendingAction: null, message: "" }),
   initial: "classifying",
   states: {
     // Classify intent, and (for sensitive intents) stage the pending action.
@@ -271,6 +266,10 @@ export const customerSupportMachine = agentSetup.createMachine({
                   },
           },
         }),
+        onError: {
+          target: "failed",
+          context: { message: "Could not classify the request." },
+        },
       },
     },
     // The typed analogue of LangGraph's `route_tools`: safe → answer, sensitive
@@ -286,13 +285,17 @@ export const customerSupportMachine = agentSetup.createMachine({
       invoke: {
         src: "answer",
         input: ({ context }) => ({ query: context.query }),
-        onDone: ({ output }) => ({
-          target: "answered",
-          context: { answer: output, resolution: "answered" },
-        }),
+        onDone: ({ output }) => ({ target: "answered", context: { message: output } }),
+        onError: {
+          target: "failed",
+          context: { message: "Could not answer this question." },
+        },
       },
     },
-    answered: { type: "final" },
+    answered: {
+      type: "final",
+      output: ({ context }) => ({ resolution: "answered" as const, message: context.message }),
+    },
     // Sensitive path, gate: no invoke → `runAgent` settles idle here. The host
     // reads `meta.interaction` (static label) + `context.pendingAction` (the
     // specifics) and legal events from `getAcceptedEvents(snapshot)`. This is
@@ -320,10 +323,7 @@ export const customerSupportMachine = agentSetup.createMachine({
         // without touching the booking.
         DENY: ({ event }) => ({
           target: "denied",
-          context: {
-            resolution: "denied",
-            result: `Action skipped at your request. Reason: ${event.reason}`,
-          },
+          context: { message: `Action skipped at your request. Reason: ${event.reason}` },
         }),
       },
     },
@@ -333,14 +333,28 @@ export const customerSupportMachine = agentSetup.createMachine({
       invoke: {
         src: "executeAction",
         input: ({ context }) => context.pendingAction,
-        onDone: ({ output }) => ({
-          target: "executed",
-          context: { result: output, resolution: "executed" },
+        onDone: ({ output }) => ({ target: "executed", context: { message: output } }),
+        // The booking table refused the write (no such booking): say so instead
+        // of reporting a change that never happened.
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { message: String((event.error as Error)?.message ?? event.error) },
         }),
       },
     },
-    executed: { type: "final" },
-    denied: { type: "final" },
+    executed: {
+      type: "final",
+      output: ({ context }) => ({ resolution: "executed" as const, message: context.message }),
+    },
+    denied: {
+      type: "final",
+      output: ({ context }) => ({ resolution: "denied" as const, message: context.message }),
+    },
+    // Nothing was changed and nothing was answered.
+    failed: {
+      type: "final",
+      output: ({ context }) => ({ resolution: "failed" as const, message: context.message }),
+    },
   },
 });
 
@@ -390,8 +404,8 @@ export async function runCustomerSupportExample(
     : { executors: createAiSdkExecutors({ models }) };
 
   const progress: string[] = [];
-  const track = (snapshot: { value: unknown }) => {
-    const state = String(snapshot.value);
+  const track = (snapshot: { value: StateValue }) => {
+    const state = getStatePath(snapshot);
     progress.push(state);
     onProgress?.(state);
   };
@@ -416,7 +430,7 @@ export async function runCustomerSupportExample(
   }
 
   // Idle at `confirming`: read what the host needs to show the human.
-  const { interaction } = getStateMeta(first.snapshot);
+  const interaction = getInteraction(first.snapshot);
   const legalEvents = getAcceptedEvents(first.snapshot).map((event) => event.type);
   const pendingAction = first.snapshot.context.pendingAction ?? undefined;
 
@@ -476,12 +490,12 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     let result = await runAgent(customerSupportMachine, {
       input: { query },
       executors,
-      onTransition: (snapshot) => console.log(`  → ${String(snapshot.value)}`),
+      onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
     });
 
     if (result.status === "idle") {
       const snapshot = result.snapshot;
-      const { interaction } = getStateMeta(snapshot);
+      const interaction = getInteraction(snapshot);
       const legalEvents = getAcceptedEvents(snapshot).map((event) => event.type);
 
       console.log("\n--- Approval required ---");
@@ -499,7 +513,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
         snapshot: persisted,
         event,
         executors,
-        onTransition: (snapshot) => console.log(`  → ${String(snapshot.value)}`),
+        onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
       });
     }
 

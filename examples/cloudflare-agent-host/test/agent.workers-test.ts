@@ -84,7 +84,7 @@ describe("cloudflare agent host", () => {
     const name = "journal-shape";
     await send(name, {
       type: "PROMPT_SUBMITTED",
-      prompt: "Email ana@example.com about Friday's launch",
+      text: "Email ana@example.com about Friday's launch",
     });
     const entries = await journal(name);
 
@@ -110,7 +110,7 @@ describe("cloudflare agent host", () => {
 
     const drafted = await send(name, {
       type: "PROMPT_SUBMITTED",
-      prompt: "Email ana@example.com about Friday's launch",
+      text: "Email ana@example.com about Friday's launch",
     });
     expect(drafted.state).toBe("reviewing");
     expect(drafted.draft?.subject).toBe("Friday's launch");
@@ -246,7 +246,7 @@ describe("cloudflare agent host", () => {
 
     const failed = await SELF.fetch(url(name), {
       method: "POST",
-      body: JSON.stringify({ type: "PROMPT_SUBMITTED", prompt: "Email ana@example.com" }),
+      body: JSON.stringify({ type: "PROMPT_SUBMITTED", text: "Email ana@example.com" }),
     });
     expect(failed.status).toBe(500);
 
@@ -259,7 +259,7 @@ describe("cloudflare agent host", () => {
   });
 
   it("keeps each :name in its own Durable Object", async () => {
-    await send("alice", { type: "PROMPT_SUBMITTED", prompt: "Email alice@example.com" });
+    await send("alice", { type: "PROMPT_SUBMITTED", text: "Email alice@example.com" });
     const bob = await get("bob");
 
     expect(bob.view.state).toBe("prompting");

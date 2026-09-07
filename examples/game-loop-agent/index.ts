@@ -36,7 +36,8 @@ import { z } from "zod";
 import type { InspectionEvent, SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
 import {
-  getStateMeta,
+  getInteraction,
+  interactionMetaSchema,
   runAgent,
   setupAgent,
   type AgentDecisionExecutor,
@@ -153,31 +154,12 @@ export const playerAgentMachine = playerAgentSetup.createMachine({
 
 // ─── Game machine: owns rounds, turn order, and the die ───
 
-/**
- * Typed `meta.interaction` hints. Hosts read them off the idle snapshot to
- * label buttons and route free chat text to an event.
- */
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
-});
-
 const gameSetup = setupAgent({
   models,
-  meta: metaSchema,
+  // The shipped interaction protocol: a `label` (a string with
+  // `{context.path}` interpolation, or a function of the context), an `events`
+  // map of choices, and a `textEvent` for free-typed answers.
+  meta: interactionMetaSchema,
   context: z.object({
     seed: z.number(),
     target: z.number(),
@@ -293,7 +275,8 @@ function humanPrompt(context: GameContext) {
   ].join("\n");
 }
 
-function freshRound(context: GameContext, winner: "human" | "agent"): GameContext {
+/** Reset the board for the next round. Wins were tallied by `roundOver`. */
+function freshRound(context: GameContext): GameContext {
   const starter = context.starter === "human" ? "agent" : "human";
   return {
     ...context,
@@ -302,8 +285,6 @@ function freshRound(context: GameContext, winner: "human" | "agent"): GameContex
     humanScore: 0,
     agentScore: 0,
     turnTotal: 0,
-    humanWins: context.humanWins + (winner === "human" ? 1 : 0),
-    agentWins: context.agentWins + (winner === "agent" ? 1 : 0),
     pendingReply: "",
     notice: `New round. ${starter} starts.`,
   };
@@ -337,6 +318,9 @@ export const gameMachine = gameSetup.createMachine({
       invoke: {
         id: "player",
         src: "player",
+        // If the opponent agent dies, the match stops rather than waiting
+        // forever for a move that will never arrive.
+        onError: { target: "#pig-game.stopped" },
       },
       initial: "humanTurn",
       states: {
@@ -407,6 +391,9 @@ export const gameMachine = gameSetup.createMachine({
             },
           },
         },
+        // The round is over here, so this is where the win is tallied — once,
+        // in the state that means "a round ended", instead of in each of the
+        // branches that ask what to do next.
         roundOver: {
           always: ({ context, children }, enq) => {
             const winner = roundWinner(context);
@@ -414,7 +401,14 @@ export const gameMachine = gameSetup.createMachine({
               type: "OBSERVE",
               note: `Round ${context.round} won by ${winner}.`,
             });
-            return { target: "askingNextRound", context: { notice: `${winner} won the round.` } };
+            return {
+              target: "askingNextRound",
+              context: {
+                humanWins: context.humanWins + (winner === "human" ? 1 : 0),
+                agentWins: context.agentWins + (winner === "agent" ? 1 : 0),
+                notice: `${winner} won the round.`,
+              },
+            };
           },
         },
         // Idle again, but for free text: the host sends the typed reply as
@@ -423,9 +417,9 @@ export const gameMachine = gameSetup.createMachine({
           tags: ["waiting"],
           meta: {
             interaction: {
-              // `{notice}` resolves against the snapshot's context when the
-              // label is shown (host convention; meta itself is static), so
-              // the question can say who won: "agent won the round. Another…".
+              // `getInteraction` interpolates `{path}` against the snapshot's
+              // context when the label is read, so the question can say who
+              // won: "agent won the round. Another…".
               label:
                 "{notice} Score: you {humanScore} · agent {agentScore} (wins {humanWins}–{agentWins}). Another round, or call it here?",
               textEvent: "ROUND_REPLY",
@@ -446,44 +440,23 @@ export const gameMachine = gameSetup.createMachine({
               reply: context.pendingReply,
               standings: standings(context),
             }),
+            // Wins are already tallied by `roundOver`; this branch only
+            // decides whether another round starts.
             onDone: ({ context, output }) => {
-              const winner = roundWinner(context);
               if (!output.playAgain) {
-                return {
-                  target: "#pig-game.stopped",
-                  context: {
-                    humanWins: context.humanWins + (winner === "human" ? 1 : 0),
-                    agentWins: context.agentWins + (winner === "agent" ? 1 : 0),
-                  },
-                };
+                return { target: "#pig-game.stopped" };
               }
-              const next = freshRound(context, winner);
+              const next = freshRound(context);
               // Round limit ends the match even if the user keeps saying yes.
               return next.round > context.maxRounds
-                ? {
-                    target: "#pig-game.roundLimit",
-                    context: {
-                      humanWins: next.humanWins,
-                      agentWins: next.agentWins,
-                      round: context.round,
-                    },
-                  }
+                ? { target: "#pig-game.roundLimit", context: { round: context.round } }
                 : {
                     target: next.starter === "human" ? "humanTurn" : "agentTurn",
                     context: next,
                   };
             },
             // If the classifier fails, stop rather than loop forever.
-            onError: ({ context }) => {
-              const winner = roundWinner(context);
-              return {
-                target: "#pig-game.stopped",
-                context: {
-                  humanWins: context.humanWins + (winner === "human" ? 1 : 0),
-                  agentWins: context.agentWins + (winner === "agent" ? 1 : 0),
-                },
-              };
-            },
+            onError: { target: "#pig-game.stopped" },
           },
         },
       },
@@ -552,7 +525,8 @@ export async function runGameLoopExample(options?: {
           ...(options?.generateText ? { generateText: options.generateText } : {}),
         }
       : createAiSdkExecutors({ models }),
-    actors: { player: playerAgentMachine },
+    // No `actors` here: `player` is already registered on the setup, and
+    // re-passing it would just restate what the machine already knows.
     ...(options?.inspect ? { inspect: options.inspect } : {}),
     onTransition: (snapshot: GameSnapshot) => {
       if (snapshot.context.notice !== lastNotice) {
@@ -592,22 +566,10 @@ export async function runGameLoopExample(options?: {
   return result.output;
 }
 
-/** `{key}` placeholders in interaction labels resolve against context. */
-export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
-  return label
-    .replace(/\{(\w+)\}/g, (_, key: string) => {
-      const value = context[key];
-      return typeof value === "string" || typeof value === "number" ? String(value) : "";
-    })
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /** Stdin prompt for whatever the idle state is waiting on. */
 function idlePrompt(snapshot: GameSnapshot): string {
-  const interaction = getStateMeta(snapshot).interaction;
   return snapshot.can({ type: "ROUND_REPLY", reply: "" })
-    ? resolveInteractionLabel(interaction?.label ?? "Another round?", snapshot.context)
+    ? (getInteraction(snapshot)?.label ?? "Another round?")
     : humanPrompt(snapshot.context);
 }
 

@@ -1,18 +1,20 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
+import { createScriptedExecutors } from "@statelyai/agent";
 import { correctiveRagMachine, runCorrectiveRagExample } from "./index.js";
 
-// Mock the model: return scripted outputs in call order, one per request
-// invocation (gradeDocuments → rewriteQuery → generateAnswer as the machine
-// reaches them). The retrieve/webSearch actors run REAL keyword logic — only the
-// model calls are mocked.
-function scriptedGenerateText(script: unknown[]) {
-  let i = 0;
-  return async (_request: { model: string }) => {
-    const action = script[i] ?? script[script.length - 1];
-    i++;
-    return { output: action };
-  };
+/**
+ * Mock the model, keyed by REQUEST NAME (`gradeDocuments` / `rewriteQuery` /
+ * `generateAnswer`), so an answer cannot land on the wrong call when the
+ * machine takes a different branch. The retrieve/webSearch actors run REAL
+ * keyword logic — only the model calls are mocked.
+ */
+function scriptedGenerateText(text: {
+  gradeDocuments?: unknown[];
+  rewriteQuery?: unknown[];
+  generateAnswer?: unknown[];
+}) {
+  return createScriptedExecutors({ text, repeat: true }).generateText;
 }
 
 const allRelevant = { grades: [{ relevant: true }, { relevant: true }, { relevant: true }] };
@@ -22,10 +24,10 @@ test("relevant docs → straight to generate (no correction)", async () => {
   const result = await runCorrectiveRagExample({
     // On-topic for the sample corpus.
     question: "How does long-term memory work for LLM agents?",
-    generateText: scriptedGenerateText([
-      allRelevant, // grade: keep the retrieved docs
-      "Long-term memory persists facts across sessions in an external store.", // generate
-    ]),
+    generateText: scriptedGenerateText({
+      gradeDocuments: [allRelevant],
+      generateAnswer: ["Long-term memory persists facts across sessions in an external store."],
+    }),
   });
 
   expect(result.answer).toContain("Long-term memory");
@@ -45,11 +47,13 @@ test("docs retrieved but all irrelevant → rewrite + web-search fallback", asyn
     // Overlaps the corpus ("agents") so retrieval is non-empty, but the grader
     // (mocked) judges every doc irrelevant — the CRAG correction trigger.
     question: "What is prompt injection and how do agents defend against it?",
-    generateText: scriptedGenerateText([
-      noneRelevant, // grade: nothing relevant → correct
-      "prompt injection attack defense for agents", // rewriteQuery
-      "Prompt injection overrides an agent's instructions; defend with sanitization and privilege separation.", // generate
-    ]),
+    generateText: scriptedGenerateText({
+      gradeDocuments: [noneRelevant],
+      rewriteQuery: ["prompt injection attack defense for agents"],
+      generateAnswer: [
+        "Prompt injection overrides an agent's instructions; defend with sanitization and privilege separation.",
+      ],
+    }),
   });
 
   expect(result.usedFallbackIndex).toBe(true);
@@ -72,10 +76,10 @@ test("no docs retrieved → skip grading, correct via web search", async () => {
   const result = await runCorrectiveRagExample({
     // Off-topic for the corpus → retrieval returns nothing → grading is skipped.
     question: "What is the weather forecast today?",
-    generateText: scriptedGenerateText([
-      "weather forecast today temperature", // rewriteQuery (grading skipped)
-      "Expect mild temperatures with scattered showers.", // generate
-    ]),
+    generateText: scriptedGenerateText({
+      rewriteQuery: ["weather forecast today temperature"],
+      generateAnswer: ["Expect mild temperatures with scattered showers."],
+    }),
   });
 
   expect(result.usedFallbackIndex).toBe(true);
@@ -98,15 +102,11 @@ test("starters behave as their labels advertise", async () => {
       question: starter.input.question,
       // Only the model calls are mocked; retrieve/webSearch run real keyword
       // logic over the sample corpora, so this test measures the corpora.
-      generateText: async (request) => {
-        if (request.system?.includes("relevance grader")) {
-          return {
-            output: { grades: Array.from({ length: 3 }, () => ({ relevant: keepDocs })) },
-          };
-        }
-        if (request.system?.includes("Rewrite")) return { output: starter.input.question };
-        return { output: "answer" };
-      },
+      generateText: scriptedGenerateText({
+        gradeDocuments: [{ grades: Array.from({ length: 3 }, () => ({ relevant: keepDocs })) }],
+        rewriteQuery: [starter.input.question],
+        generateAnswer: ["answer"],
+      }),
     });
     results.set(starter.label, result);
   }

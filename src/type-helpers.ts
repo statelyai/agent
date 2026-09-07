@@ -1,5 +1,7 @@
 import type {
+  AnyActorLogic,
   AnyStateMachine,
+  DoneActorEvent,
   ContextFrom,
   EventFromLogic,
   InputFrom,
@@ -56,3 +58,21 @@ export type MetaOf<T> = T extends { schemas: { meta: infer TSchema extends Stand
 export type RequestNamesOf<T> = T extends { requests: infer TRequests }
   ? keyof TRequests & string
   : never;
+
+/**
+ * XState's canonical `xstate.done.actor` event, typed with a specific actor
+ * logic's output (and optionally its id). Use it to type a wildcard
+ * `'xstate.done.actor'` handler that reduces dynamically spawned children,
+ * where the machine's own event union cannot name them.
+ *
+ * @example
+ * ```ts
+ * 'xstate.done.actor': ({ context, event }) => {
+ *   const { actorId, output } = event as DoneActorEventOf<typeof researchLogic>;
+ * }
+ * ```
+ */
+export type DoneActorEventOf<
+  TLogic extends AnyActorLogic,
+  TId extends string = string,
+> = DoneActorEvent<OutputFrom<TLogic>, TId>;

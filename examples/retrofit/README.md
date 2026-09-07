@@ -25,15 +25,17 @@ Each step compiles, runs, and preserves the observable behavior.
 
 ## Your code → where it went
 
-| In `before.ts` (the loop)           | In the machine                            |
-| ----------------------------------- | ----------------------------------------- |
-| `while (true)`                      | `runAgent` owns the loop                  |
-| `phase` string + boolean flags      | explicit states                           |
-| nested `if/else` tool dispatch      | `agent.decide` + typed events             |
-| `if (amount > 100)` refund limit    | a guard on the REFUND transition          |
-| retry/backoff wrapper               | a custom `generateText` executor          |
-| `{ pending }` sentinel + `resume()` | an idle state + `result.persist()`/resume |
-| duplicated transcript bookkeeping   | context, written once per transition      |
+| In `before.ts` (the loop)           | In the machine                                          |
+| ----------------------------------- | ------------------------------------------------------- |
+| `while (true)`                      | `runAgent` owns the loop                                |
+| `phase` string + boolean flags      | explicit states                                         |
+| nested `if/else` tool dispatch      | `agent.decide` + typed events                           |
+| `if (amount > 100)` refund limit    | a guard on the REFUND transition                        |
+| retry/backoff wrapper               | a custom `generateText` executor                        |
+| `{ pending }` sentinel + `resume()` | an idle state + `result.persist()`/resume               |
+| duplicated transcript bookkeeping   | context, written once per transition                    |
+| `refunded` / `escalated` booleans   | one final state per outcome, each with its own `output` |
+| unbounded tool loop                 | a `lookups` counter checked against `MAX_LOOKUPS`       |
 
 ## Run
 

@@ -33,8 +33,8 @@
  *      chameleon's advantage of speaking later is a fact about the graph.
  *
  * The vote is an idle state (no invoke) carrying `meta.interaction`: the
- * category and the four spoken words in the label, one `ACCUSE_P*` button per
- * player. Resume with
+ * category and the four spoken words in the label, and one `ACCUSE { seat }`
+ * event the host fills in with the seat you name. Resume with
  * `runAgent(machine, { snapshot: result.persist(), event })`.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/chameleon/index.ts
@@ -43,7 +43,13 @@ import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { createAgentSchemas, getStateMeta, runAgent, setupAgent } from "@statelyai/agent";
+import {
+  createAgentSchemas,
+  getInteraction,
+  interactionMetaSchema,
+  runAgent,
+  setupAgent,
+} from "@statelyai/agent";
 
 /** The table, in speaking order. Index doubles as the player's seat. */
 export const PLAYERS = ["Ada", "Bruno", "Cleo", "Dev"] as const;
@@ -68,49 +74,30 @@ const guessDraftSchema = z.object({
 /** The public record a player sees on their turn: who spoke, and what. */
 const publicWordSchema = z.object({ player: z.string(), word: z.string() });
 
-/**
- * Typed `meta.interaction` hints. Hosts read them off the idle snapshot to
- * label the prompt and render one button per suspect.
- */
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
+const outcomeSchema = z.enum(["detectives-win", "chameleon-steals", "chameleon-escapes"]);
+type Outcome = z.infer<typeof outcomeSchema>;
+
+const chameleonContextSchema = z.object({
+  category: z.string(),
+  secretWord: z.string(),
+  chameleonIndex: z.number(),
+  /** Seat order with roles resolved from `chameleonIndex`. */
+  players: z.array(z.object({ name: z.string(), isChameleon: z.boolean() })),
+  /** Whose turn it is in `clueRound`; also the index into `players`. */
+  turnIndex: z.number(),
+  /** Append-only, written by one state at a time — the round IS this array. */
+  words: z.array(spokenWordSchema),
+  /** Seat the detective accused; `null` until the vote is in. */
+  accusedIndex: z.number().nullable(),
+  log: z.array(z.string()),
 });
 
+type ChameleonContext = z.infer<typeof chameleonContextSchema>;
+
 export const chameleonSchemas = createAgentSchemas({
-  meta: metaSchema,
-  context: z.object({
-    category: z.string(),
-    secretWord: z.string(),
-    chameleonIndex: z.number(),
-    /** Seat order with roles resolved from `chameleonIndex`. */
-    players: z.array(z.object({ name: z.string(), isChameleon: z.boolean() })),
-    /** Whose turn it is in `clueRound`; also the index into `players`. */
-    turnIndex: z.number(),
-    /** Append-only, written by one state at a time — the round IS this array. */
-    words: z.array(spokenWordSchema),
-    /** The four spoken words, interpolated into the idle label. */
-    wordSummary: z.string(),
-    /** Seat the detective accused; `-1` until the vote is in. */
-    accusedIndex: z.number(),
-    /** The chameleon's steal attempt; empty unless it was caught. */
-    chameleonGuess: z.string(),
-    outcome: z.enum(["", "detectives-win", "chameleon-steals", "chameleon-escapes"]),
-    log: z.array(z.string()),
-  }),
+  // The library's own interaction protocol, not a per-machine restatement.
+  meta: interactionMetaSchema,
+  context: chameleonContextSchema,
   input: z.object({
     category: z.string().default("Ocean creatures"),
     secretWord: z.string().default("octopus"),
@@ -120,7 +107,7 @@ export const chameleonSchemas = createAgentSchemas({
   output: z.object({
     /** Headline: a readable narration of the whole game. */
     summary: z.string(),
-    outcome: z.enum(["detectives-win", "chameleon-steals", "chameleon-escapes"]),
+    outcome: outcomeSchema,
     chameleon: z.string(),
     secretWord: z.string(),
     accused: z.string(),
@@ -128,10 +115,14 @@ export const chameleonSchemas = createAgentSchemas({
     log: z.array(z.string()),
   }),
   events: {
-    ACCUSE_P0: z.object({}),
-    ACCUSE_P1: z.object({}),
-    ACCUSE_P2: z.object({}),
-    ACCUSE_P3: z.object({}),
+    /** The detective's one move: name the seat you suspect. */
+    ACCUSE: z.object({
+      seat: z
+        .number()
+        .int()
+        .min(0)
+        .max(PLAYERS.length - 1),
+    }),
   },
 });
 
@@ -182,25 +173,33 @@ function renderWords(words: SpokenWord[]): string {
   return words.map(({ player, word }) => `${player}: ${word || "(silent)"}`).join(", ");
 }
 
-/** Joins the log into readable prose for the machine output. */
-function narrate(context: {
-  category: string;
-  secretWord: string;
-  chameleonIndex: number;
-  words: SpokenWord[];
-  accusedIndex: number;
-  outcome: string;
-  log: string[];
-}): string {
-  const chameleon = PLAYERS[context.chameleonIndex] ?? "nobody";
-  const accused = PLAYERS[context.accusedIndex] ?? "nobody";
+/** The seat's player name, or "nobody" before the vote is in. */
+function seatName(seat: number | null): string {
+  return seat === null ? "nobody" : (PLAYERS[seat] ?? "nobody");
+}
+
+/**
+ * The finished game, as each final state reports it. The OUTCOME IS THE STATE:
+ * it is passed in by whichever final state was reached, never stored in context
+ * and read back.
+ */
+function finishGame(context: ChameleonContext, outcome: Outcome) {
+  const chameleon = seatName(context.chameleonIndex);
   const headline =
-    context.outcome === "detectives-win"
+    outcome === "detectives-win"
       ? `Detectives win. ${chameleon} was the chameleon and could not name "${context.secretWord}".`
-      : context.outcome === "chameleon-steals"
+      : outcome === "chameleon-steals"
         ? `Chameleon steals it. ${chameleon} was caught, then named "${context.secretWord}".`
-        : `Chameleon escapes. ${chameleon} was the chameleon; you accused ${accused}.`;
-  return `${headline}\n\n${context.log.join("\n")}`;
+        : `Chameleon escapes. ${chameleon} was the chameleon; you accused ${seatName(context.accusedIndex)}.`;
+  return {
+    summary: `${headline}\n\n${context.log.join("\n")}`,
+    outcome,
+    chameleon: PLAYERS[context.chameleonIndex] ?? "",
+    secretWord: context.secretWord,
+    accused: context.accusedIndex === null ? "" : (PLAYERS[context.accusedIndex] ?? ""),
+    words: context.words,
+    log: context.log,
+  };
 }
 
 // ─── Agent ───
@@ -306,24 +305,8 @@ export const chameleonMachine = agentSetup.createMachine({
     players: assignRoles(input.chameleonIndex),
     turnIndex: 0,
     words: [],
-    wordSummary: "",
-    accusedIndex: -1,
-    chameleonGuess: "",
-    outcome: "" as const,
+    accusedIndex: null,
     log: [],
-  }),
-  output: ({ context }) => ({
-    summary: narrate(context),
-    // `outcome` is written on the way into a final state, so it is never "".
-    outcome: (context.outcome || "chameleon-escapes") as
-      | "detectives-win"
-      | "chameleon-steals"
-      | "chameleon-escapes",
-    chameleon: PLAYERS[context.chameleonIndex] ?? "",
-    secretWord: context.secretWord,
-    accused: PLAYERS[context.accusedIndex] ?? "",
-    words: context.words,
-    log: context.log,
   }),
   initial: "dealing",
   states: {
@@ -391,36 +374,35 @@ export const chameleonMachine = agentSetup.createMachine({
               ? { target: "turn", context: { turnIndex: context.turnIndex + 1 } }
               : {
                   target: "spoken",
-                  context: {
-                    wordSummary: renderWords(context.words),
-                    log: [...context.log, `Words — ${renderWords(context.words)}.`],
-                  },
+                  context: { log: [...context.log, `Words — ${renderWords(context.words)}.`] },
                 },
         },
         spoken: { type: "final" },
       },
     },
 
-    // No invoke: the run settles idle here and a host resumes it with one
-    // `ACCUSE_P*` event, one per seat.
+    // No invoke: the run settles idle here and a host resumes it with ONE
+    // `ACCUSE` event naming the seat.
     voting: {
       tags: ["waiting"],
       meta: {
         interaction: {
-          label: "Category: {category}. {wordSummary}. Who is the chameleon?",
-          events: {
-            ACCUSE_P0: { label: "Ada" },
-            ACCUSE_P1: { label: "Bruno" },
-            ACCUSE_P2: { label: "Cleo" },
-            ACCUSE_P3: { label: "Dev" },
-          },
+          // A function of the context: the spoken words are rendered here, not
+          // kept as a second copy in context.
+          label: ({ context }) =>
+            `Category: ${context.category}. ${renderWords(context.words)}. ` +
+            `Who is the chameleon? (${PLAYERS.map((name, seat) => `${seat}=${name}`).join(", ")})`,
+          events: { ACCUSE: { label: "Accuse this seat" } },
         },
       },
       on: {
-        ACCUSE_P0: accuse(0),
-        ACCUSE_P1: accuse(1),
-        ACCUSE_P2: accuse(2),
-        ACCUSE_P3: accuse(3),
+        ACCUSE: ({ context, event }) => ({
+          target: "reveal",
+          context: {
+            accusedIndex: event.seat,
+            log: [...context.log, `You accused ${PLAYERS[event.seat]}.`],
+          },
+        }),
       },
     },
 
@@ -441,7 +423,6 @@ export const chameleonMachine = agentSetup.createMachine({
           : {
               target: "chameleonEscapes",
               context: {
-                outcome: "chameleon-escapes" as const,
                 log: [
                   ...context.log,
                   `Wrong — ${PLAYERS[context.chameleonIndex]} was the chameleon and walks away with it. The secret word was "${context.secretWord}".`,
@@ -465,8 +446,6 @@ export const chameleonMachine = agentSetup.createMachine({
           return {
             target: correct ? "chameleonSteals" : "detectivesWin",
             context: {
-              chameleonGuess: guess,
-              outcome: correct ? ("chameleon-steals" as const) : ("detectives-win" as const),
               log: [
                 ...context.log,
                 correct
@@ -479,7 +458,6 @@ export const chameleonMachine = agentSetup.createMachine({
         onError: ({ context }) => ({
           target: "detectivesWin",
           context: {
-            outcome: "detectives-win" as const,
             log: [
               ...context.log,
               `${PLAYERS[context.chameleonIndex]} had no guess. The secret word was "${context.secretWord}".`,
@@ -489,45 +467,33 @@ export const chameleonMachine = agentSetup.createMachine({
       },
     },
 
-    detectivesWin: { type: "final" },
-    chameleonSteals: { type: "final" },
-    chameleonEscapes: { type: "final" },
+    // Three terminals, three outcomes. Which state the game ended in IS the
+    // outcome; nothing mirrors it in context.
+    detectivesWin: {
+      type: "final",
+      output: ({ context }) => finishGame(context, "detectives-win"),
+    },
+    chameleonSteals: {
+      type: "final",
+      output: ({ context }) => finishGame(context, "chameleon-steals"),
+    },
+    chameleonEscapes: {
+      type: "final",
+      output: ({ context }) => finishGame(context, "chameleon-escapes"),
+    },
   },
 });
-
-/** One accusation transition per seat; the reveal branch does the rest. */
-function accuse(seat: number) {
-  return ({ context }: { context: { accusedIndex: number; log: string[] } }) => ({
-    target: "reveal" as const,
-    context: {
-      accusedIndex: seat,
-      log: [...context.log, `You accused ${PLAYERS[seat]}.`],
-    },
-  });
-}
 
 // ─── Host helpers ───
 
 type ChameleonSnapshot = SnapshotFrom<typeof chameleonMachine>;
 
 /** What a host sends to unblock the idle vote. */
-export type AccuseEvent = { type: `ACCUSE_P${0 | 1 | 2 | 3}` };
-
-/** `{key}` placeholders in interaction labels resolve against context. */
-export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
-  return label
-    .replace(/\{(\w+)\}/g, (_, key: string) => {
-      const value = context[key];
-      return typeof value === "string" || typeof value === "number" ? String(value) : "";
-    })
-    .replace(/\s+/g, " ")
-    .trim();
-}
+export type AccuseEvent = { type: "ACCUSE"; seat: number };
 
 /** The label a host shows on the idle vote. */
 export function idlePrompt(snapshot: ChameleonSnapshot): string {
-  const interaction = getStateMeta(snapshot).interaction;
-  return resolveInteractionLabel(interaction?.label ?? "Who is the chameleon?", snapshot.context);
+  return getInteraction(snapshot)?.label ?? "Who is the chameleon?";
 }
 
 /** Free text ("cleo", "2", "player 3") to an accusation, if it names a seat. */
@@ -535,9 +501,7 @@ export function toAccuseEvent(text: string): AccuseEvent | undefined {
   const trimmed = normalizeWord(text);
   const byName = PLAYERS.findIndex((name) => normalizeWord(name) === trimmed);
   const seat = byName >= 0 ? byName : Number.parseInt(trimmed.replace(/[^0-9]/g, ""), 10);
-  return seat >= 0 && seat < PLAYERS.length
-    ? ({ type: `ACCUSE_P${seat}` } as AccuseEvent)
-    : undefined;
+  return seat >= 0 && seat < PLAYERS.length ? { type: "ACCUSE", seat } : undefined;
 }
 
 // ─── Dual-mode entrypoint ───
@@ -552,9 +516,7 @@ export async function main() {
 
   // The vote settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
-    const text = await promptLine(
-      `${idlePrompt(result.snapshot)}\n(${PLAYERS.map((name, index) => `${index}=${name}`).join(", ")})\n> `,
-    );
+    const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
     const event = toAccuseEvent(text);
     if (!event) {
       console.log("Name a player or a seat number.");

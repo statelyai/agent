@@ -63,13 +63,13 @@ describe("curated XState setup examples", () => {
 
     actor.send({
       type: "PROMPT_SUBMITTED",
-      prompt: "Write a thank you email after the meeting.",
+      text: "Write a thank you email after the meeting.",
     });
     await waitFor(actor, (snapshot) => snapshot.matches("needsMoreInfo"));
 
     actor.send({
       type: "MORE_INFO",
-      details: "Send it to riley@example.com.",
+      text: "Send it to riley@example.com.",
     });
     await waitFor(actor, (snapshot) => snapshot.matches("reviewing"));
 
@@ -116,18 +116,19 @@ describe("curated XState setup examples", () => {
           body: "Hi Riley, thanks for meeting today.",
         },
       ],
+      failure: null,
     });
   });
 
   test("email drafter exports schemas for host-side event validation", () => {
     const result = emailDrafterSchemas.events.PROMPT_SUBMITTED["~standard"].validate({
       type: "PROMPT_SUBMITTED",
-      prompt: "Draft an email",
+      text: "Draft an email",
     });
 
     expect(result).toEqual({
       value: {
-        prompt: "Draft an email",
+        text: "Draft an email",
       },
     });
   });
@@ -159,15 +160,14 @@ describe("curated XState setup examples", () => {
 
     const finalStep = resolveAgentStep(gameMachine, attackStep, summarize, {
       summary: "You strike the goblin.",
-      playerHp: 20,
-      enemyHp: 9,
     });
 
     expect(finalStep.done).toBe(true);
     // The summary is a narrated log; the model's line is embedded in it.
     expect(finalStep.snapshot.output).toMatchObject({
       outcome: "continue",
-      playerHp: 20,
+      // The goblin counters for 4 after the hit: HP is machine-owned, not model-owned.
+      playerHp: 16,
       enemyHp: 9,
     });
     expect((finalStep.snapshot.output as { summary: string }).summary).toContain(

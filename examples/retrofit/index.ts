@@ -8,6 +8,9 @@
  *   - the `$100` `if` → a guard on the REFUND transition
  *   - the `{ pending }` sentinel → an idle `awaitingApproval` state you persist
  *   - the retry/backoff wrapper → a custom `generateText` executor (unchanged)
+ *   - the `refunded` / `escalated` booleans → gone: each final state declares
+ *     its own `output`, so the outcome is the state, not a flag beside it
+ *   - the unbounded tool loop → a `lookups` counter checked against MAX_LOOKUPS
  *
  * `step1/2/3.ts` walk this conversion one shippable step at a time. Dual-mode:
  * tests inject mock executors (keyless); a direct run uses real models.
@@ -20,8 +23,9 @@ import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
-  getAcceptedEvents,
-  getStateMeta,
+  getInteraction,
+  getStatePath,
+  interactionMetaSchema,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -29,6 +33,9 @@ import {
 
 /** Refunds at or below this settle automatically; above needs a human. */
 export const REFUND_LIMIT = 100;
+
+/** Order lookups one ticket may make before the model must commit to an action. */
+export const MAX_LOOKUPS = 2;
 
 /** A tiny fixed order table (stand-in for your orders DB). */
 export const ORDERS: Record<string, { customer: string; total: number; item: string }> = {
@@ -52,9 +59,12 @@ const schemas = createAgentSchemas({
     ticket: z.string(),
     triage: triageSchema.nullable(),
     order: z.string().nullable(),
+    /** The order id the last LOOKUP asked for; the invoke reads it from here
+     * rather than reaching back into the triggering event. */
+    lookupOrderId: z.string().nullable(),
+    /** Lookups made so far; bounds the deciding → lookingUp loop. */
+    lookups: z.number(),
     pendingRefund: z.number().nullable(),
-    refunded: z.boolean(),
-    escalated: z.boolean(),
     resolution: z.string().nullable(),
   }),
   input: z.object({ ticket: z.string() }),
@@ -71,25 +81,10 @@ const schemas = createAgentSchemas({
     APPROVE: z.object({}),
     DENY: z.object({ reason: z.string() }),
   },
-  // Typed interaction meta: the pause's `label`, a button `label`/`style` per
-  // accepted event, and `textEvent` naming the ONE event free text goes to.
-  meta: z.object({
-    interaction: z
-      .object({
-        label: z.string(),
-        events: z
-          .record(
-            z.string(),
-            z.object({
-              label: z.string().optional(),
-              style: z.enum(["primary", "danger", "default"]).optional(),
-            }),
-          )
-          .optional(),
-        textEvent: z.string().optional(),
-      })
-      .optional(),
-  }),
+  // The shipped interaction protocol, not a per-machine restatement of it: the
+  // pause's `label`, a button `label`/`style` per accepted event, and
+  // `textEvent` naming the ONE event free text goes to.
+  meta: interactionMetaSchema,
 });
 
 const agentSetup = setupAgent({
@@ -117,9 +112,12 @@ const agentSetup = setupAgent({
     },
   },
   states: {
-    // `pendingRefund` is set non-null before the machine reaches these.
+    // Each of these is only reachable once the field it needs is set.
     awaitingApproval: {
       schemas: { context: schemas.context.extend({ pendingRefund: z.number() }) },
+    },
+    lookingUp: {
+      schemas: { context: schemas.context.extend({ lookupOrderId: z.string() }) },
     },
   },
 });
@@ -130,15 +128,10 @@ export const supportMachine = agentSetup.createMachine({
     ticket: input.ticket,
     triage: null,
     order: null,
+    lookupOrderId: null,
+    lookups: 0,
     pendingRefund: null,
-    refunded: false,
-    escalated: false,
     resolution: null,
-  }),
-  output: ({ context }) => ({
-    refunded: context.refunded,
-    escalated: context.escalated,
-    resolution: context.resolution ?? "",
   }),
   initial: "triaging",
   states: {
@@ -147,6 +140,10 @@ export const supportMachine = agentSetup.createMachine({
         src: "triageTicket",
         input: ({ context }) => ({ ticket: context.ticket }),
         onDone: ({ output }) => ({ target: "deciding", context: { triage: output } }),
+        onError: ({ event }) => ({
+          target: "escalated",
+          context: { resolution: `Triage failed, escalated: ${String(event.error)}` },
+        }),
       },
     },
     // The tool-choice `if/else`, now a decision over typed events.
@@ -165,28 +162,43 @@ export const supportMachine = agentSetup.createMachine({
           ]
             .filter(Boolean)
             .join("\n"),
-          allowedEvents: ["LOOKUP", "REFUND", "ESCALATE", "RESOLVE"],
+          // Once the lookup budget is spent, LOOKUP is not even offered — the
+          // guard below is still the truth, this just saves a wasted retry.
+          allowedEvents:
+            context.lookups >= MAX_LOOKUPS
+              ? ["REFUND", "ESCALATE", "RESOLVE"]
+              : ["LOOKUP", "REFUND", "ESCALATE", "RESOLVE"],
           maxRetries: 2,
         }),
-        onError: { target: "escalated" },
+        onError: ({ event }) => ({
+          target: "escalated",
+          context: { resolution: `Decision failed, escalated: ${String(event.error)}` },
+        }),
       },
       on: {
-        LOOKUP: { target: "lookingUp" },
+        // Bounded: over the lookup budget the transition returns nothing, so
+        // LOOKUP is not an accepted event and the decision must commit.
+        LOOKUP: ({ context, event }) =>
+          context.lookups >= MAX_LOOKUPS
+            ? undefined
+            : {
+                target: "lookingUp",
+                // Carry the id in context: the invoke below then reads its own
+                // input from context instead of casting the triggering event.
+                context: { lookupOrderId: event.orderId, lookups: context.lookups + 1 },
+              },
         // The `$100` `if`, now a guard: small refunds settle; large refunds route
         // to the human-approval pause. No prompt can talk past it.
         REFUND: ({ event }) =>
           event.amount <= REFUND_LIMIT
             ? {
                 target: "refunded",
-                context: {
-                  refunded: true,
-                  resolution: `Refunded $${event.amount}: ${event.reason}`,
-                },
+                context: { resolution: `Refunded $${event.amount}: ${event.reason}` },
               }
             : { target: "awaitingApproval", context: { pendingRefund: event.amount } },
         ESCALATE: ({ event }) => ({
           target: "escalated",
-          context: { escalated: true, resolution: `Escalated: ${event.reason}` },
+          context: { resolution: `Escalated: ${event.reason}` },
         }),
         RESOLVE: ({ event }) => ({
           target: "resolved",
@@ -197,8 +209,14 @@ export const supportMachine = agentSetup.createMachine({
     lookingUp: {
       invoke: {
         src: "lookupOrder",
-        input: ({ event }) => ({ orderId: (event as { orderId: string }).orderId }),
+        // No cast: the id was written to context by the LOOKUP transition, and
+        // `states.lookingUp` narrows it to a non-null string.
+        input: ({ context }) => ({ orderId: context.lookupOrderId }),
         onDone: ({ output }) => ({ target: "deciding", context: { order: output } }),
+        onError: ({ event }) => ({
+          target: "escalated",
+          context: { resolution: `Order lookup failed, escalated: ${String(event.error)}` },
+        }),
       },
     },
     // The `{ pending }` sentinel, now a real idle state: no invoke, so `runAgent`
@@ -208,8 +226,8 @@ export const supportMachine = agentSetup.createMachine({
       tags: ["awaiting-approval"],
       meta: {
         interaction: {
-          // `{pendingRefund}` resolves against the snapshot's context when the
-          // label is shown (host convention; the meta itself is static).
+          // `{pendingRefund}` resolves against the snapshot's context when
+          // `getInteraction` renders the label.
           label:
             "The ${pendingRefund} refund exceeds the limit and needs approval. " +
             "Approve it, or type a reason to deny it.",
@@ -225,23 +243,43 @@ export const supportMachine = agentSetup.createMachine({
       on: {
         APPROVE: ({ context }) => ({
           target: "refunded",
-          context: {
-            refunded: true,
-            resolution: `Refunded $${context.pendingRefund} after approval`,
-          },
+          context: { resolution: `Refunded $${context.pendingRefund} after approval` },
         }),
         DENY: ({ context, event }) => ({
           target: "escalated",
           context: {
-            escalated: true,
             resolution: `Refund of $${context.pendingRefund} denied (${event.reason}); escalated`,
           },
         }),
       },
     },
-    refunded: { type: "final" },
-    escalated: { type: "final" },
-    resolved: { type: "final" },
+    // Three outcomes, three final states, each declaring its own output. The
+    // `refunded` / `escalated` booleans the loop kept in a mutable object are
+    // now the identity of the state the machine ends in.
+    refunded: {
+      type: "final",
+      output: ({ context }) => ({
+        refunded: true,
+        escalated: false,
+        resolution: context.resolution ?? "",
+      }),
+    },
+    escalated: {
+      type: "final",
+      output: ({ context }) => ({
+        refunded: false,
+        escalated: true,
+        resolution: context.resolution ?? "",
+      }),
+    },
+    resolved: {
+      type: "final",
+      output: ({ context }) => ({
+        refunded: false,
+        escalated: false,
+        resolution: context.resolution ?? "",
+      }),
+    },
   },
 });
 
@@ -304,8 +342,8 @@ export async function runRetrofitExample(
   } = options;
 
   const progress: string[] = [];
-  const track = (snapshot: { value: unknown }) => {
-    const state = String(snapshot.value);
+  const track = (snapshot: { value: Parameters<typeof getStatePath>[0] }) => {
+    const state = getStatePath(snapshot.value);
     progress.push(state);
     onProgress?.(state);
   };
@@ -323,8 +361,9 @@ export async function runRetrofitExample(
     throw new Error(`Expected idle or done, got '${first.status}'.`);
   }
 
-  const { interaction } = getStateMeta(first.snapshot);
-  const legalEvents = getAcceptedEvents(first.snapshot).map((event) => event.type);
+  // One call: the resolved label, and the choices XState will currently accept.
+  const interaction = getInteraction(first.snapshot);
+  const legalEvents = interaction?.events.map((choice) => choice.type) ?? [];
 
   const event = approve
     ? ({ type: "APPROVE" } as const)

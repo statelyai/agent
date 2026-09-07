@@ -30,6 +30,16 @@ for await (const event of runAgentStream(machine, { input, executors })) {
 
 The terminal kind is `done`, `idle`, or `error`. There is no Agent-specific failure status; domain failure is represented by the machine's typed final output.
 
+## State paths in logs
+
+`getStatePath(snapshot)` renders a state value as one deterministic string, so a log line or a progress field survives nesting and parallel regions. `String(snapshot.value)` renders every non-atomic value as `[object Object]`.
+
+```ts no-check
+onTransition: (snapshot) => log.info({ state: getStatePath(snapshot) });
+```
+
+An atomic state renders as `writing`, a nested one as `review.editing.draft`, and a parallel one as `p:{left.x,right.a.b}` with its regions sorted by name.
+
 ## OpenTelemetry
 
 Use `createOtelTraceHandler` from `@statelyai/agent/otel` as an `onTrace` sink. Framework telemetry and XState inspection remain composable with it.

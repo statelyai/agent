@@ -37,7 +37,7 @@
  *   pnpm --filter @statelyai/example-cloudflare-agent-host dev:live   # real model
  *
  *   curl -X POST localhost:3009/agents/email-drafter/demo \
- *     -d '{"type":"PROMPT_SUBMITTED","prompt":"Email ana@x.com about Friday'\''s launch"}'
+ *     -d '{"type":"PROMPT_SUBMITTED","text":"Email ana@x.com about Friday'\''s launch"}'
  *   curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"SEND"}'
  *   curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"END"}'
  */
@@ -47,12 +47,11 @@ import { createOpenAI } from "@ai-sdk/openai";
 import {
   createScriptedExecutors,
   getAcceptedEvents,
-  getStateMeta,
+  getInteraction,
   parseAgentEvent,
   runAgent,
   type AgentEventLogStore,
   type AgentRequestExecutors,
-  type AgentTextRequest,
   type RunAgentResult,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -90,31 +89,33 @@ const messageOf = (error: unknown) =>
 export const scriptedModelCalls = { count: 0 };
 
 /**
- * Keyless answers, routed on the request's model ref (`model: 'promptEvaluator'`
- * / `'emailDrafter'` in `../email-drafter/agent-logic.ts`) so an entry is valid
- * wherever it lands in the queue. Queues are FIFO and finite; this one is sized
- * for a handful of drafting rounds.
+ * Keyless answers, keyed by the request NAME the machine declares
+ * (`evaluatePrompt` / `draftEmail` in `../email-drafter/agent-logic.ts`), so
+ * each entry answers the request it was written for however many rounds the
+ * conversation takes. `repeat: true` reuses the last entry of each queue.
  */
-const scriptedAnswer = (request: AgentTextRequest) => {
-  scriptedModelCalls.count += 1;
-  switch (request.model) {
-    case "promptEvaluator":
-      return { satisfied: true, missing: [], questions: [] };
-    case "emailDrafter":
-      return {
-        to: "ana@example.com",
-        subject: "Friday's launch",
-        body: "Hi Ana — we ship Friday at 9am. Shout if anything is still open on your side.",
-      };
-    default:
-      throw new Error(`No scripted answer for model ref '${request.model}'.`);
-  }
+const countCall =
+  <T>(answer: T) =>
+  (): T => {
+    scriptedModelCalls.count += 1;
+    return answer;
+  };
+
+const scriptedText = {
+  evaluatePrompt: [countCall({ satisfied: true, missing: [], questions: [] })],
+  draftEmail: [
+    countCall({
+      to: "ana@example.com",
+      subject: "Friday's launch",
+      body: "Hi Ana — we ship Friday at 9am. Shout if anything is still open on your side.",
+    }),
+  ],
 };
 
 /** Live executors when the DO has a key, scripted (keyless) otherwise. */
 function resolveExecutors(env: Env): AgentRequestExecutors {
   if (!env.OPENAI_API_KEY) {
-    return createScriptedExecutors({ text: Array.from({ length: 12 }, () => scriptedAnswer) });
+    return createScriptedExecutors({ text: scriptedText, repeat: true });
   }
 
   // Bind the provider to the Worker's env: `openai(...)` from the module scope
@@ -296,12 +297,12 @@ export class EmailDrafter extends Agent<Env> {
       return { error: "No settled turn: the agent could not be resumed from its event log." };
     }
     const { snapshot } = result;
-    const { display, interaction } = getStateMeta(snapshot);
     return {
       status: snapshot.status,
       state: snapshot.value,
-      display,
-      interaction,
+      // The rendered interaction: label interpolated, choices filtered down to
+      // the events this state actually accepts.
+      interaction: getInteraction(snapshot),
       acceptedEvents: getAcceptedEvents(snapshot, { events: emailDrafterSchemas.events }).map(
         (candidate) => candidate.type,
       ),
@@ -316,7 +317,7 @@ const usage = [
   "",
   "  GET  /agents/email-drafter/:name   read the current state",
   "  POST /agents/email-drafter/:name   send a machine event, e.g.",
-  '       {"type":"PROMPT_SUBMITTED","prompt":"Email ana@example.com about Friday\'s launch"}',
+  '       {"type":"PROMPT_SUBMITTED","text":"Email ana@example.com about Friday\'s launch"}',
   "",
   "Each :name is its own Durable Object, i.e. its own conversation, backed by",
   "its own append-only event log in that Durable Object's SQLite storage.",

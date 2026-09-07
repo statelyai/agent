@@ -31,9 +31,10 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import type { AnyMachineSnapshot, AnyStateMachine } from "xstate";
+import type { AnyStateMachine } from "xstate";
 import {
   createScriptedExecutors,
+  getStatePath,
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
@@ -73,7 +74,19 @@ const agentSetup = setupAgent({
   models,
   context: contextSchema,
   input: z.object({ question: z.string() }),
-  output: z.object({ outline: z.string(), answer: z.string() }),
+  output: z.object({
+    status: z.enum(["answered", "failed"]),
+    outline: z.string().nullable(),
+    answer: z.string().nullable(),
+  }),
+  states: {
+    // `outlining` sets the outline before `answering` runs, and `answering`
+    // sets the answer before `done`, so `done`'s output needs no fallbacks.
+    answering: { schemas: { context: contextSchema.extend({ outline: z.string() }) } },
+    done: {
+      schemas: { context: contextSchema.extend({ outline: z.string(), answer: z.string() }) },
+    },
+  },
   requests: {
     // Two streamed requests: each becomes its own assistant message on the wire.
     streamOutline: {
@@ -106,11 +119,6 @@ export const tanstackAiStreamMachine = agentSetup.createMachine({
     outline: null,
     answer: null,
   }),
-  // Both fields are set before `done`; fall back to "" to satisfy the output type.
-  output: ({ context }) => ({
-    outline: context.outline ?? "",
-    answer: context.answer ?? "",
-  }),
   initial: "outlining",
   states: {
     outlining: {
@@ -122,6 +130,7 @@ export const tanstackAiStreamMachine = agentSetup.createMachine({
           target: "answering",
           context: { outline: output },
         }),
+        onError: { target: "failed" },
       },
     },
     answering: {
@@ -130,15 +139,32 @@ export const tanstackAiStreamMachine = agentSetup.createMachine({
         src: "streamAnswer",
         input: ({ context }) => ({
           question: context.question,
-          outline: context.outline ?? "",
+          outline: context.outline,
         }),
         onDone: ({ output }) => ({
           target: "done",
           context: { answer: output },
         }),
+        onError: { target: "failed" },
       },
     },
-    done: { type: "final" },
+    done: {
+      type: "final",
+      output: ({ context }) => ({
+        status: "answered" as const,
+        outline: context.outline,
+        answer: context.answer,
+      }),
+    },
+    // A model failure is a modeled outcome, not an unhandled actor error.
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        status: "failed" as const,
+        outline: context.outline,
+        answer: context.answer,
+      }),
+    },
   },
 });
 
@@ -208,6 +234,13 @@ export async function* agentRunToAgUiStream<TMachine extends AnyStateMachine>(
   const openMessages = new Set<string>();
   let currentStep: string | null = null;
 
+  // Ends only the messages a chunk actually opened, on either exit path: a
+  // TEXT_MESSAGE_END for a message that never started is a protocol error.
+  const closeOpen = () => {
+    for (const id of openMessages) emit({ type: EventType.TEXT_MESSAGE_END, messageId: id });
+    openMessages.clear();
+  };
+
   emit({ type: EventType.RUN_STARTED, threadId, runId });
 
   const run = runAgent(machine, {
@@ -236,7 +269,9 @@ export async function* agentRunToAgUiStream<TMachine extends AnyStateMachine>(
     },
     // Each machine state becomes an AG-UI step: close the previous, open the next.
     onTransition: (snapshot) => {
-      const stepName = String((snapshot as AnyMachineSnapshot).value);
+      // `getStatePath` renders nested and parallel state values; `String(value)`
+      // would collapse an object to "[object Object]".
+      const stepName = getStatePath(snapshot);
       if (stepName === currentStep) return;
       if (currentStep !== null) emit({ type: EventType.STEP_FINISHED, stepName: currentStep });
       emit({ type: EventType.STEP_STARTED, stepName });
@@ -244,8 +279,7 @@ export async function* agentRunToAgUiStream<TMachine extends AnyStateMachine>(
     },
   }).then(
     (result) => {
-      // Close anything still open (e.g. the run errored mid-stream), then the step.
-      for (const id of openMessages) emit({ type: EventType.TEXT_MESSAGE_END, messageId: id });
+      closeOpen();
       if (currentStep !== null) emit({ type: EventType.STEP_FINISHED, stepName: currentStep });
 
       if (result.status === "done") {
@@ -256,6 +290,7 @@ export async function* agentRunToAgUiStream<TMachine extends AnyStateMachine>(
       queue.close();
     },
     (error: unknown) => {
+      closeOpen();
       emit({
         type: EventType.RUN_ERROR,
         message: error instanceof Error ? error.message : String(error),

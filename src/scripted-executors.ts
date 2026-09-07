@@ -155,6 +155,28 @@ function namedQueues<T>(value: T[] | ScriptedByName<T> | undefined): {
   };
 }
 
+/**
+ * Fails fast when a name-keyed script has no route for this request: the
+ * generic "script ran dry" error cannot tell a typo apart from a missing
+ * entry, so name the known keys instead. @internal
+ */
+function assertRoutable<T>(
+  channel: { byName: Map<string, ScriptQueue<T>> },
+  name: string,
+  channelKey: "text" | "decisions",
+): void {
+  if (channel.byName.size === 0 || channel.byName.has(name) || channel.byName.has("*")) {
+    return;
+  }
+  throw new AgentError(
+    "scripted-executors-unknown-name",
+    `createScriptedExecutors: the \`${channelKey}\` script has no entry for request name ` +
+      `${name === "*" ? "(the request declares no `name`)" : `'${name}'`}. ` +
+      `Known names: ${[...channel.byName.keys()].join(", ")}. ` +
+      `Add a '${name}' key, or a '*' fallback entry.`,
+  );
+}
+
 function takeEntry<T>(
   channel: { fifo: ScriptQueue<T>; byName: Map<string, ScriptQueue<T>> },
   name: string,
@@ -275,6 +297,7 @@ export function createScriptedExecutors(script: ScriptedExecutorsScript = {}): S
   ) => {
     const name = request.name ?? "*";
     calls.push({ kind, name, input: request.input, request });
+    assertRoutable(text, name, "text");
     const entry = takeEntry(text, name, repeat);
     if (entry === undefined) {
       throw new AgentError(
@@ -320,6 +343,7 @@ export function createScriptedExecutors(script: ScriptedExecutorsScript = {}): S
     decide: async (request) => {
       const name = request.name ?? request.id;
       calls.push({ kind: "decide", name, input: request.input, request });
+      assertRoutable(decisions, name, "decisions");
       const entry = takeEntry(decisions, name, repeat);
       if (entry === undefined) {
         throw new AgentError(

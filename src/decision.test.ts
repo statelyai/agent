@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { renderDecisionAttempts } from "./decision.js";
+import { createDecisionRequest, renderDecisionAttempts, resolveDecision } from "./decision.js";
 
 describe("renderDecisionAttempts", () => {
   const events = [
@@ -33,5 +33,70 @@ describe("renderDecisionAttempts", () => {
       attempts: [{ failure: "unknown-event", reason: "nothing legal" }],
     });
     expect(message!.content).toContain("(none)");
+  });
+});
+
+describe("createDecisionRequest", () => {
+  test("keeps colliding sanitized tool names distinct", () => {
+    const request = createDecisionRequest({
+      model: "picker",
+      prompt: "Pick one.",
+      events: ["foo.bar", "foo/bar", "foo bar"],
+    });
+    const toolNames = request.events.map((event) => event.toolName);
+    expect(new Set(toolNames).size).toBe(3);
+    expect(toolNames[0]).toBe("send_event_foo_bar");
+    expect(toolNames[1]).toBe("send_event_foo_bar_2");
+    expect(toolNames[2]).toBe("send_event_foo_bar_3");
+  });
+
+  test("fills in kind, id, attempts, and tool names", () => {
+    expect(
+      createDecisionRequest({
+        model: "reviewer",
+        prompt: "Judge this draft.",
+        events: ["APPROVE", "REVISE"],
+      }),
+    ).toEqual({
+      kind: "decision",
+      id: "decision",
+      model: "reviewer",
+      prompt: "Judge this draft.",
+      events: [
+        { type: "APPROVE", toolName: "send_event_APPROVE" },
+        { type: "REVISE", toolName: "send_event_REVISE" },
+      ],
+      attempts: [],
+    });
+  });
+
+  test("defaults the id to the name and passes descriptors through", () => {
+    const request = createDecisionRequest({
+      name: "judge",
+      model: "reviewer",
+      events: [{ type: "APPROVE", toolName: "approve_it" }],
+      metadata: { round: 1 },
+    });
+    expect(request).toMatchObject({
+      id: "judge",
+      name: "judge",
+      events: [{ type: "APPROVE", toolName: "approve_it" }],
+      metadata: { round: 1 },
+    });
+  });
+
+  test("keeps an explicit id and prior attempts", () => {
+    const attempts = [{ failure: "rejected-by-guard" as const, reason: "over budget" }];
+    expect(
+      createDecisionRequest({ id: "d1", name: "judge", model: "m", events: [], attempts }),
+    ).toMatchObject({ id: "d1", attempts });
+  });
+
+  test("resolves through resolveDecision without a hand-written literal", async () => {
+    const chosen = await resolveDecision(
+      createDecisionRequest({ name: "judge", model: "m", events: ["APPROVE", "REVISE"] }),
+      { decide: async () => ({ event: { type: "REVISE" } }) },
+    );
+    expect(chosen).toEqual({ type: "REVISE" });
   });
 });

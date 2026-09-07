@@ -62,7 +62,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 export const models = defineModels({
   coder: openai("gpt-5.4-mini"),
@@ -166,7 +166,6 @@ const agentSetup = setupAgent({
     // Completed generate→execute attempts; the typed loop bound.
     attempts: z.number(),
     maxAttempts: z.number(),
-    passed: z.boolean(),
   }),
   input: z.object({
     spec: z.string(),
@@ -261,7 +260,6 @@ export const codeAssistantMachine = agentSetup.createMachine({
     rerunNote: "",
     attempts: 0,
     maxAttempts: input.maxAttempts,
-    passed: false,
   }),
   initial: "starting",
   states: {
@@ -313,20 +311,26 @@ export const codeAssistantMachine = agentSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "checking",
           context: {
-            passed: output.passed,
             failures: output.failures,
             attempts: context.attempts + 1,
             checkReport: checkReportFor(context.attempts + 1, context.checks.length, output),
           },
         }),
+        // The sandbox reports check failures as data; only a broken actor
+        // rejects, and there is no code to report on if it does.
+        onError: {
+          target: "failed",
+          context: { failures: ["Sandboxed execution failed."] },
+        },
       },
     },
-    // decide: the conditional edge as a visible choice state. Passed → done.
-    // Budget spent → failed. Otherwise reflect and retry.
+    // decide: the conditional edge as a visible choice state. "Passed" is not a
+    // flag in context — it is what an empty failure list from the last run
+    // means. Passed → done. Budget spent → failed. Otherwise reflect and retry.
     checking: {
       type: "choice",
       choice: ({ context }) =>
-        context.passed
+        context.failures.length === 0
           ? {
               target: "done",
               context: {
@@ -414,11 +418,18 @@ const DEFAULT_TASK = {
 export async function runCodeAssistantExample(
   options: RunCodeAssistantOptions = {},
 ): Promise<CodeAssistantResult> {
+  // The default task is a UNIT: its seeded buggy code only makes sense next to
+  // its own spec and checks, so `initialCode` defaults to the seed only when
+  // the caller brought no task of its own.
+  const usingDefaultTask =
+    options.spec === undefined &&
+    options.functionName === undefined &&
+    options.checks === undefined;
   const {
     spec = DEFAULT_TASK.spec,
     functionName = DEFAULT_TASK.functionName,
     checks = DEFAULT_TASK.checks,
-    initialCode = "",
+    initialCode = usingDefaultTask ? DEFAULT_TASK.initialCode : "",
     maxAttempts = 3,
     generateText,
     onProgress,
@@ -434,7 +445,7 @@ export async function runCodeAssistantExample(
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
     onTransition: (snapshot) => {
-      const state = String(snapshot.value);
+      const state = getStatePath(snapshot);
       progress.push(state);
       onProgress?.(state);
       for (const key of ["checkReport", "repairSummary", "rerunNote"] as const) {

@@ -18,7 +18,9 @@ import {
   createScriptedExecutors,
   runAgent,
   setupAgent,
+  type AgentEventLogStore,
 } from "@statelyai/agent";
+
 const crashRecoverySetup = setupAgent({
   context: z.object({
     topic: z.string(),
@@ -27,6 +29,24 @@ const crashRecoverySetup = setupAgent({
   }),
   input: z.object({ topic: z.string() }),
   output: z.object({ topic: z.string(), outline: z.string(), article: z.string() }),
+  // Named requests: the scripted executors below route on these names, not on
+  // call order, so a replayed run cannot pick up the wrong answer.
+  requests: {
+    outline: {
+      schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+      model: "writer",
+      prompt: ({ input }) => `Outline a short article about ${input.topic}.`,
+    },
+    draft: {
+      schemas: {
+        input: z.object({ topic: z.string(), outline: z.string() }),
+        output: z.string(),
+      },
+      model: "writer",
+      prompt: ({ input }) =>
+        `Write the article about ${input.topic} for this outline: ${input.outline}`,
+    },
+  },
 });
 
 export const crashRecoveryMachine = crashRecoverySetup.createMachine({
@@ -35,28 +55,18 @@ export const crashRecoveryMachine = crashRecoverySetup.createMachine({
   states: {
     outlining: {
       invoke: {
-        src: "agent.generateText",
-        input: ({ context }) => ({
-          model: "writer",
-          prompt: `Outline a short article about ${context.topic}.`,
-        }),
-        onDone: ({ event }) => ({
-          target: "drafting",
-          context: { outline: String(event.output) },
-        }),
+        src: "outline",
+        input: ({ context }) => ({ topic: context.topic }),
+        onDone: ({ output }) => ({ target: "drafting", context: { outline: output } }),
+        onError: { target: "failed" },
       },
     },
     drafting: {
       invoke: {
-        src: "agent.generateText",
-        input: ({ context }) => ({
-          model: "writer",
-          prompt: `Write the article about ${context.topic} for this outline: ${context.outline}`,
-        }),
-        onDone: ({ event }) => ({
-          target: "done",
-          context: { article: String(event.output) },
-        }),
+        src: "draft",
+        input: ({ context }) => ({ topic: context.topic, outline: context.outline ?? "" }),
+        onDone: ({ output }) => ({ target: "done", context: { article: output } }),
+        onError: { target: "failed" },
       },
     },
     done: {
@@ -67,31 +77,49 @@ export const crashRecoveryMachine = crashRecoverySetup.createMachine({
         article: context.article ?? "",
       }),
     },
+    // A crash is recoverable; a provider error is not. The run lands in its own
+    // terminal state, so a host reads the difference off `snapshot.matches`
+    // rather than guessing from an empty string.
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        topic: context.topic,
+        outline: context.outline ?? "",
+        article: "The writer request failed.",
+      }),
+    },
   },
 });
-
-/** Stands in for the host's database: an append-only log per thread. */
-export const store = createInMemoryEventLogStore();
 
 /**
  * First process: answers the outline call, hangs on the draft call, then
  * "crashes" — everything it journaled up to that point is in the store.
  */
-export async function runUntilCrash(topic = "state machines", threadId = crypto.randomUUID()) {
+export async function runUntilCrash({
+  store,
+  topic = "state machines",
+  threadId = crypto.randomUUID(),
+}: {
+  store: AgentEventLogStore;
+  topic?: string;
+  threadId?: string;
+}) {
   const abort = new AbortController();
   let inFlightCallKey: string | undefined;
 
   const executors = createScriptedExecutors({
-    text: [
-      () => `1. Intro to ${topic} 2. Body on ${topic} 3. Outro`,
-      (_request, info) => {
-        inFlightCallKey = info?.callKey;
-        // The draft call never resolves; the process dies while it is in flight,
-        // so no completion for it is ever journaled.
-        setTimeout(() => abort.abort(new Error("process crashed")), 10);
-        return new Promise<string>(() => {});
-      },
-    ],
+    text: {
+      outline: [() => `1. Intro to ${topic} 2. Body on ${topic} 3. Outro`],
+      draft: [
+        (_request, info) => {
+          inFlightCallKey = info?.callKey;
+          // The draft call never resolves; the process dies while it is in flight,
+          // so no completion for it is ever journaled.
+          setTimeout(() => abort.abort(new Error("process crashed")), 10);
+          return new Promise<string>(() => {});
+        },
+      ],
+    },
   });
 
   // Write-ahead: each entry reaches the store as it is appended, and the outline
@@ -114,18 +142,26 @@ export async function runUntilCrash(topic = "state machines", threadId = crypto.
  * Second process: read the log back and resume from it. No snapshot is passed
  * — nothing but the journal crossed the process boundary.
  */
-export async function recover(threadId: string) {
+export async function recover({
+  store,
+  threadId,
+}: {
+  store: AgentEventLogStore;
+  threadId: string;
+}) {
   let replayedCallKey: string | undefined;
 
-  // Exactly ONE scripted answer: if the recovered run re-executed the outline
-  // call, the script would run dry and throw.
+  // Only the `draft` request is scripted: if the recovered run re-executed the
+  // journaled `outline` call, the script would have no route for it and throw.
   const executors = createScriptedExecutors({
-    text: [
-      (request, info) => {
-        replayedCallKey = info?.callKey;
-        return `Draft based on: ${request.prompt}`;
-      },
-    ],
+    text: {
+      draft: [
+        (request, info) => {
+          replayedCallKey = info?.callKey;
+          return `Draft based on: ${request.prompt}`;
+        },
+      ],
+    },
   });
 
   // No `events`, no snapshot: the store's thread IS the resume, and the run
@@ -142,10 +178,12 @@ export async function recover(threadId: string) {
   return { recovered, replayedCallKey, calls: executors.calls.length };
 }
 
-const isMain = process.argv[1]?.endsWith("crash-recovery/index.ts");
-if (isMain) {
-  const { threadId, inFlightCallKey } = await runUntilCrash();
-  const { replayedCallKey } = await recover(threadId);
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  // Stands in for the host's database: an append-only log per thread. It is
+  // created here, not at module scope, so importing this file shares no state.
+  const store = createInMemoryEventLogStore();
+  const { threadId, inFlightCallKey } = await runUntilCrash({ store });
+  const { replayedCallKey } = await recover({ store, threadId });
   // Same key both times: the retry is safe to dedupe at the provider.
   console.log(`callKey matched: ${inFlightCallKey === replayedCallKey}`);
 }

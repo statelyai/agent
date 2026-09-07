@@ -18,6 +18,10 @@
  *     its event handlers, so no Agent-specific pause declaration is needed;
  *     the host persists the snapshot and resumes with
  *     `runAgent(machine, { snapshot, event, executors })`.
+ *   - three final states — `replied`, `escalated`, `failed` — each with its own
+ *     `output`. The outcome is the state that was reached, not a string kept in
+ *     context, and an invoke that errors lands in `failed` with the reason
+ *     instead of quietly resolving as if a human had decided something.
  *
  * `fromConfig(...)` requires a `compileSchema` option — the library does not
  * bundle a JSON Schema engine, so the config's JSON Schemas (context/events/
@@ -32,9 +36,11 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { type LanguageModel } from "ai";
+import type { StateValue } from "xstate";
 import { openai } from "@ai-sdk/openai";
 import Ajv from "ajv";
 import {
+  getStatePath,
   parseModelRef,
   runAgent,
   setupAgent,
@@ -90,8 +96,8 @@ function resolveModel(modelRef: string): LanguageModel {
 export async function runJsonAgentDemo(ticket: string) {
   const { generateText, decide } = createAiSdkExecutors({ resolveModel });
 
-  const onTransition = (snapshot: { value: unknown }) =>
-    console.log("[state]", JSON.stringify(snapshot.value));
+  const onTransition = (snapshot: { value: StateValue }) =>
+    console.log("[state]", getStatePath(snapshot));
 
   let result = await runAgent(jsonAgentMachine, {
     input: { ticket },

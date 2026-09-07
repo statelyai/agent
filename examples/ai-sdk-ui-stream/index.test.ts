@@ -85,7 +85,7 @@ test("machine exports a runnable definition", () => {
   expect(aiSdkUiStreamMachine.id).toBe("ai-sdk-ui-stream");
 });
 
-test("each finished stream leaves a timing lane in the output", async () => {
+test("each finished stream leaves a word-count lane in the output", async () => {
   const result = await runAgent(aiSdkUiStreamMachine, {
     input: { product: "a state-machine agent framework" },
     executors: { streamText: mockStreamText([TAGLINE, PITCH]) },
@@ -93,6 +93,27 @@ test("each finished stream leaves a timing lane in the output", async () => {
 
   expect(result.status).toBe("done");
   const summary = result.status === "done" ? result.output.streamSummary : "";
-  // One lane per stream, with its word count and a measured elapsed time.
-  expect(summary).toMatch(/^tagline 3 words in \d+ms · pitch 12 words in \d+ms$/);
+  // One lane per stream, rendered in `output` from the finished text.
+  expect(summary).toBe("tagline 3 words · pitch 12 words");
+});
+
+test("a stream that fails lands in `failed` with no pitch", async () => {
+  const result = await runAgent(aiSdkUiStreamMachine, {
+    input: { product: "a state-machine agent framework" },
+    executors: {
+      streamText: async (request) => {
+        if (request.name === "streamPitch") throw new Error("stream dropped");
+        return { output: TAGLINE };
+      },
+    },
+  });
+
+  expect(result.status).toBe("done");
+  if (result.status !== "done") return;
+  expect(result.snapshot.value).toBe("failed");
+  expect(result.output).toMatchObject({
+    pitch: "",
+    tagline: TAGLINE,
+    streamSummary: "stream failed",
+  });
 });

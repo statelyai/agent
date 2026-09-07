@@ -44,7 +44,7 @@ pnpm --filter @statelyai/example-cloudflare-agent-host dev        # keyless, scr
 pnpm --filter @statelyai/example-cloudflare-agent-host dev:live   # real models
 
 curl -X POST localhost:3009/agents/email-drafter/demo \
-  -d '{"type":"PROMPT_SUBMITTED","prompt":"Email ana@x.com about Friday'\''s launch"}'
+  -d '{"type":"PROMPT_SUBMITTED","text":"Email ana@x.com about Friday'\''s launch"}'
 curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"SEND"}'
 curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"END"}'
 ```

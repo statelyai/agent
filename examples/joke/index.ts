@@ -9,6 +9,11 @@
  * invoke; the state's own `on:` transitions define the legal choices, so the
  * state machine owns the loop.
  *
+ * The branch after each rating lives in a `type: "choice"` state
+ * (`checkingRating`), not inside an `onDone` handler, so `explorePaths` and
+ * `canReach` can see all three outcomes: revise, ask the model, or stop at the
+ * `MAX_JOKES` cap. Any request failure lands in a `failed` final state.
+ *
  * Dual-mode: `runAgent` takes host executors, so the same machine runs live
  * against real models (readline topic, streaming to stdout) or against mocked
  * executors in tests. See index.test.ts.
@@ -18,7 +23,13 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { createAgentSchemas, createTextLogic, runAgent, setupAgent } from "@statelyai/agent";
+import {
+  createAgentSchemas,
+  createTextLogic,
+  getStatePath,
+  runAgent,
+  setupAgent,
+} from "@statelyai/agent";
 
 const DEFAULT_TOPIC = "state machines";
 
@@ -51,19 +62,22 @@ export const jokeSchemas = createAgentSchemas({
     jokes: z.array(z.string()),
     lastRating: z.number().nullable(),
     lastExplanation: z.string().nullable(),
-    // The before/after pair the run shows off: the first attempt, kept as-is,
-    // and a note saying what it scored and why a revision followed.
-    firstJoke: z.string().nullable(),
-    revisionNotice: z.string().nullable(),
+    // What the critic said about the FIRST attempt. Kept so the run can show a
+    // before/after; the sentence itself is rendered in `output`, not stored.
+    firstRating: z.number().nullable(),
+    firstExplanation: z.string().nullable(),
+    error: z.string().nullable(),
   }),
   input: z.object({ topic: z.string().default(DEFAULT_TOPIC) }),
   output: z.object({
-    joke: z.string(),
+    status: z.enum(["told", "failed"]),
+    joke: z.string().nullable(),
     firstJoke: z.string().nullable(),
     revisionNotice: z.string().nullable(),
     topic: z.string(),
     jokes: z.array(z.string()),
     lastRating: z.number().nullable(),
+    error: z.string().nullable(),
   }),
   events: {
     // Loop-control events the model chooses between in `deciding`.
@@ -79,6 +93,9 @@ export const models = defineModels({
 
 export const tellJoke = createTextLogic({
   mode: "stream",
+  // Stamped onto every lowered request as `request.name`, so hosts, traces and
+  // test executors can route on it instead of sniffing the prompt.
+  name: "tellJoke",
   schemas: {
     input: z.object({
       topic: z.string(),
@@ -103,6 +120,7 @@ export const tellJoke = createTextLogic({
 });
 
 export const rateJoke = createTextLogic({
+  name: "rateJoke",
   schemas: {
     input: z.object({ joke: z.string() }),
     output: ratingSchema,
@@ -120,6 +138,28 @@ const jokeAgentSetup = setupAgent({
   actors: jokeActors,
 });
 
+type JokeContext = z.infer<typeof jokeSchemas.context>;
+
+/**
+ * The prose part of the run summary. Rendered here, at the end of the run,
+ * rather than stored in context: it is derived from `firstRating` /
+ * `firstExplanation` and would otherwise need hand-keeping in sync.
+ */
+function describeRun(context: JokeContext) {
+  return {
+    firstJoke: context.jokes[0] ?? null,
+    revisionNotice:
+      context.firstRating === null
+        ? null
+        : `First attempt scored ${context.firstRating}/10 (${context.firstExplanation ?? ""}). ` +
+          "Every run takes one improvement pass before deciding whether to stop.",
+    topic: context.topic,
+    jokes: context.jokes,
+    lastRating: context.lastRating,
+    error: context.error,
+  };
+}
+
 const DECIDE_SYSTEM =
   "You decide whether a joke-teller keeps going. If the last joke rated 7 or " +
   "higher it was good enough — END. Otherwise TELL_ANOTHER to try again.";
@@ -131,8 +171,9 @@ export const jokeMachine = jokeAgentSetup.createMachine({
     jokes: [],
     lastRating: null,
     lastExplanation: null,
-    firstJoke: null,
-    revisionNotice: null,
+    firstRating: null,
+    firstExplanation: null,
+    error: null,
   }),
   initial: "telling",
   states: {
@@ -151,37 +192,48 @@ export const jokeMachine = jokeAgentSetup.createMachine({
           target: "rating",
           context: { jokes: [...context.jokes, output] },
         }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { error: `tellJoke failed: ${String(event.error)}` },
+        }),
       },
     },
     rating: {
       invoke: {
         src: "rateJoke",
         input: ({ context }) => ({ joke: context.jokes.at(-1) ?? "" }),
-        onDone: ({ context, output }) => {
-          const rated = {
+        onDone: ({ output }) => ({
+          target: "checkingRating",
+          context: {
             lastRating: output.rating,
             lastExplanation: output.explanation,
+          },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { error: `rateJoke failed: ${String(event.error)}` },
+        }),
+      },
+    },
+    // The whole loop branch, in one named node. Three outcomes, all visible to
+    // `explorePaths`/`canReach`.
+    checkingRating: {
+      type: "choice",
+      choice: ({ context }) => {
+        // The first joke ALWAYS gets one improvement pass. The machine owns
+        // that rule, so the revision branch shows up on every run instead of
+        // depending on whatever the critic happened to score.
+        if (context.jokes.length === 1) {
+          return {
+            target: "telling",
+            context: {
+              firstRating: context.lastRating,
+              firstExplanation: context.lastExplanation,
+            },
           };
-          // The first joke ALWAYS gets one improvement pass. The machine owns
-          // that rule, so the revision branch shows up on every run instead of
-          // depending on whatever the critic happened to score.
-          if (context.jokes.length === 1) {
-            return {
-              target: "telling",
-              context: {
-                ...rated,
-                firstJoke: context.jokes[0]!,
-                revisionNotice:
-                  `First attempt scored ${output.rating}/10 (${output.explanation}). ` +
-                  "Every run takes one improvement pass before deciding whether to stop.",
-              },
-            };
-          }
-          // Past that, the model decides — unless the run hits its joke cap.
-          return context.jokes.length >= MAX_JOKES
-            ? { target: "done", context: rated }
-            : { target: "deciding", context: rated };
-        },
+        }
+        // Past that, the model decides — unless the run hits its joke cap.
+        return context.jokes.length >= MAX_JOKES ? { target: "done" } : { target: "deciding" };
       },
     },
     deciding: {
@@ -200,7 +252,10 @@ export const jokeMachine = jokeAgentSetup.createMachine({
           // automatically — its transition exits `deciding`, ending the invoke.
           maxRetries: 2,
         }),
-        onError: { target: "done" },
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { error: `agent.decide failed: ${String(event.error)}` },
+        }),
       },
       on: {
         TELL_ANOTHER: { target: "telling" },
@@ -210,12 +265,18 @@ export const jokeMachine = jokeAgentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        joke: context.jokes.at(-1) ?? "",
-        firstJoke: context.firstJoke,
-        revisionNotice: context.revisionNotice,
-        topic: context.topic,
-        jokes: context.jokes,
-        lastRating: context.lastRating,
+        status: "told" as const,
+        joke: context.jokes.at(-1) ?? null,
+        ...describeRun(context),
+      }),
+    },
+    // A request failure is its own outcome, not a `done` with an empty joke.
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        status: "failed" as const,
+        joke: null,
+        ...describeRun(context),
       }),
     },
   },
@@ -244,14 +305,17 @@ export async function main() {
     executors: createAiSdkExecutors({ models }),
     onChunk: (chunk) => process.stdout.write(chunk),
     onTransition: (snapshot) => {
-      const value = snapshot.value;
-      if (value === "telling") console.log(`\n${pick(funnyPhrases)}`);
-      if (value === "rating") console.log(`\n${pick(ratingPhrases)}`);
+      const path = getStatePath(snapshot);
+      if (path === "telling") console.log(`\n${pick(funnyPhrases)}`);
+      if (path === "rating") console.log(`\n${pick(ratingPhrases)}`);
     },
   });
 
   if (result.status !== "done") {
     throw new Error(`Joke agent did not complete: ${result.status}`);
+  }
+  if (result.output.status === "failed") {
+    throw new Error(result.output.error ?? "The joke agent failed.");
   }
   if (result.output.revisionNotice) console.log(`\n\n${result.output.revisionNotice}`);
   console.log(

@@ -1,25 +1,29 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
-import { escalationLabel, slaNoteFor, triageMachine } from "./index.js";
+import { escalationLabel, MAX_REPLY_ATTEMPTS, slaNoteFor, triageMachine } from "./index.js";
 
 const TICKET = "I was charged twice for my March subscription. Please refund the duplicate.";
 
 const REPLY = "Thanks for flagging the duplicate charge. We will refund it within 3 days.";
 
-/** Answers the classify call, then the draft call, in order. */
+/** Answers each request by name, not by call order. */
 function scriptedExecutor(
   classification: Record<string, unknown>,
   reply: string | Error = REPLY,
 ): { generateText: AgentRequestExecutor; prompts: (string | undefined)[] } {
   const prompts: (string | undefined)[] = [];
-  let call = 0;
   const generateText: AgentRequestExecutor = async (request) => {
     prompts.push(request.prompt);
-    call += 1;
-    if (call === 1) return { output: classification };
-    if (reply instanceof Error) throw reply;
-    return { output: { reply } };
+    switch (request.name) {
+      case "classifyTicket":
+        return { output: classification };
+      case "draftReply":
+        if (reply instanceof Error) throw reply;
+        return { output: { reply } };
+      default:
+        throw new Error(`Unexpected request '${request.name}'.`);
+    }
   };
   return { generateText, prompts };
 }
@@ -141,9 +145,9 @@ describe("ticket-triage", () => {
 
   test("a failing draft retries once, then degrades to a holding reply", async () => {
     let calls = 0;
-    const generateText: AgentRequestExecutor = async () => {
+    const generateText: AgentRequestExecutor = async (request) => {
       calls += 1;
-      if (calls === 1) {
+      if (request.name === "classifyTicket") {
         return { output: { sentiment: "negative", category: "billing", confidence: 0.9 } };
       }
       throw new Error("model unavailable");
@@ -156,13 +160,13 @@ describe("ticket-triage", () => {
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
-    // One classify call plus two draft attempts: the original and one retry.
-    expect(calls).toBe(3);
+    // One classify call plus MAX_REPLY_ATTEMPTS draft attempts.
+    expect(calls).toBe(1 + MAX_REPLY_ATTEMPTS);
     expect(result.output.reply).toContain("a support agent is picking it up now");
     expect(result.output.summary).toContain("failed twice");
   });
 
-  test("output is validated against the schema: an out-of-enum category settles a machine error", async () => {
+  test("an out-of-enum category fails validation and ends in `unclassified`", async () => {
     const generateText: AgentRequestExecutor = async () => ({
       // `category` is not one of billing|technical|other.
       output: { sentiment: "neutral", category: "not-a-category", confidence: 0.9 },
@@ -173,8 +177,14 @@ describe("ticket-triage", () => {
       executors: { generateText },
     });
 
-    // No onError handler on `classifying` -> schema validation surfaces as an error.
-    expect(result.status).toBe("error");
+    // The classify invoke's `onError` catches the schema violation, so the run
+    // finishes with a holding reply instead of an unmodeled error state.
+    expect(result.status).toBe("done");
+    if (result.status !== "done") throw new Error("expected done");
+    expect(result.output.category).toBe(null);
+    expect(result.output.sentiment).toBe(null);
+    expect(result.output.escalated).toBe(true);
+    expect(result.output.summary).toContain("Could not classify");
   });
 
   test("a classifier that omits confidence is taken at its word", async () => {

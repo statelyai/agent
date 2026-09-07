@@ -1,5 +1,5 @@
 /**
- * Vercel AI SDK UI message stream — bridge a `runAgent` run to the AI SDK v6 UI
+ * Vercel AI SDK UI message stream — bridge a `runAgent` run to the AI SDK v7 UI
  * message protocol so a `useChat` client streams it unchanged.
  *
  * LangGraph users get `toUIMessageStreamResponse()` from its streaming
@@ -16,9 +16,10 @@
  * with no changes.
  *
  * The machine is a two-step streaming copy chain (tagline → pitch) at the same
- * scale as the joke / marketing-chain examples. Each finished stream leaves a
- * lane in `streamSummary` (word count + elapsed ms), so the streaming story is
- * still readable once the run is over and the tokens have stopped moving.
+ * scale as the joke / marketing-chain examples. Its `output` renders a lane per
+ * stream (word counts), so the streaming story is still readable once the run is
+ * over and the tokens have stopped moving. Wall-clock timing is measured by the
+ * host, not stored in context: context has to replay identically from the log.
  *
  * Dual-mode: `runAiSdkUiStreamExample(options?)` takes an injectable `streamText`
  * (tests pass a mock — keyless CI); the direct run uses a real model and consumes
@@ -37,6 +38,7 @@ import {
 } from "ai";
 import type { AnyMachineSnapshot, AnyStateMachine } from "xstate";
 import {
+  getStatePath,
   runAgent,
   setupAgent,
   type AgentRequestExecutor,
@@ -55,15 +57,11 @@ const contextSchema = z.object({
   product: z.string(),
   tagline: z.string().nullable(),
   pitch: z.string().nullable(),
-  /** One lane per finished stream: word count and elapsed ms, measured here. */
-  streamSummary: z.string().nullable(),
-  /** When the current stream started — the clock for the lane above. */
-  startedAt: z.number(),
 });
 
-/** "tagline 4 words in 120ms" */
-function streamLane(label: string, text: string, elapsedMs: number) {
-  return `${label} ${text.trim().split(/\s+/).filter(Boolean).length} words in ${elapsedMs}ms`;
+/** "tagline 4 words" */
+function streamLane(label: string, text: string) {
+  return `${label} ${text.trim().split(/\s+/).filter(Boolean).length} words`;
 }
 
 const agentSetup = setupAgent({
@@ -98,19 +96,7 @@ export const aiSdkUiStreamSchemas = agentSetup.schemas;
 
 export const aiSdkUiStreamMachine = agentSetup.createMachine({
   id: "ai-sdk-ui-stream",
-  context: ({ input }) => ({
-    product: input.product,
-    tagline: null,
-    pitch: null,
-    streamSummary: null,
-    startedAt: Date.now(),
-  }),
-  // All three are set before `done`; fall back to "" to satisfy the output type.
-  output: ({ context }) => ({
-    pitch: context.pitch ?? "",
-    tagline: context.tagline ?? "",
-    streamSummary: context.streamSummary ?? "",
-  }),
+  context: ({ input }) => ({ product: input.product, tagline: null, pitch: null }),
   initial: "tagline",
   states: {
     tagline: {
@@ -118,18 +104,8 @@ export const aiSdkUiStreamMachine = agentSetup.createMachine({
         id: "tagline",
         src: "streamTagline",
         input: ({ context }) => ({ product: context.product }),
-        // Close this stream's lane and restart the clock for the next one.
-        onDone: ({ context, output }) => {
-          const now = Date.now();
-          return {
-            target: "pitch",
-            context: {
-              tagline: output,
-              startedAt: now,
-              streamSummary: streamLane("tagline", output, now - context.startedAt),
-            },
-          };
-        },
+        onDone: ({ output }) => ({ target: "pitch", context: { tagline: output } }),
+        onError: { target: "failed" },
       },
     },
     pitch: {
@@ -137,20 +113,32 @@ export const aiSdkUiStreamMachine = agentSetup.createMachine({
         id: "pitch",
         src: "streamPitch",
         input: ({ context }) => ({ product: context.product, tagline: context.tagline ?? "" }),
-        onDone: ({ context, output }) => {
-          const now = Date.now();
-          const lane = streamLane("pitch", output, now - context.startedAt);
-          return {
-            target: "done",
-            context: {
-              pitch: output,
-              streamSummary: `${context.streamSummary ?? ""} · ${lane}`.trim(),
-            },
-          };
-        },
+        onDone: ({ output }) => ({ target: "done", context: { pitch: output } }),
+        onError: { target: "failed" },
       },
     },
-    done: { type: "final" },
+    done: {
+      type: "final",
+      // The per-stream lanes are rendered here, from the finished text.
+      output: ({ context }) => ({
+        pitch: context.pitch ?? "",
+        tagline: context.tagline ?? "",
+        streamSummary: [
+          streamLane("tagline", context.tagline ?? ""),
+          streamLane("pitch", context.pitch ?? ""),
+        ].join(" · "),
+      }),
+    },
+    // A stream that died mid-flight has no pitch to render; the host reads the
+    // difference off the state, not off an empty string.
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        pitch: "",
+        tagline: context.tagline ?? "",
+        streamSummary: "stream failed",
+      }),
+    },
   },
 });
 
@@ -196,7 +184,7 @@ export function agentRunToUIMessageStream<TMachine extends AnyStateMachine>(
         },
         // Every machine transition surfaces as a data part the client can render.
         onTransition: (snapshot) => {
-          const state = String((snapshot as AnyMachineSnapshot).value);
+          const state = getStatePath(snapshot as AnyMachineSnapshot);
           writer.write({ type: AGENT_STATE_PART, data: { state } });
         },
       });
@@ -250,6 +238,8 @@ export interface AiSdkUiStreamResult {
   text: string;
   /** The `data-agent-state` parts, in order — every machine state entered. */
   states: string[];
+  /** Wall-clock time for the whole run, measured by the host — not in context. */
+  elapsedMs: number;
 }
 
 type MessagePart = UIMessage["parts"][number];
@@ -273,6 +263,7 @@ export async function runAiSdkUiStreamExample(
   const { product = "a state-machine agent framework", streamText, onMessage } = options;
   const executors = streamText ? { streamText } : createAiSdkExecutors({ models });
   const stream = agentRunToUIMessageStream(aiSdkUiStreamMachine, { input: { product }, executors });
+  const startedAt = Date.now();
 
   // readUIMessageStream yields the message re-materialized after each chunk; the
   // last snapshot carries every part.
@@ -289,6 +280,7 @@ export async function runAiSdkUiStreamExample(
       .map((part) => part.text)
       .join(""),
     states: parts.filter(isAgentStatePart).map((part) => part.data.state),
+    elapsedMs: Date.now() - startedAt,
   };
 }
 
@@ -319,7 +311,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       },
     });
 
-    console.log(`\n\nStates entered: ${result.states.join(" → ")}`);
+    console.log(`\n\nStates entered: ${result.states.join(" → ")} in ${result.elapsedMs}ms`);
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

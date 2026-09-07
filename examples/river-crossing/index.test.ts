@@ -102,6 +102,25 @@ describe("river-crossing", () => {
     expect(result.output.summary).toContain("3. Farmer crosses");
   });
 
+  test("the machine description reaches the decide prompt", async () => {
+    const requestsSeen: AgentDecisionRequest[] = [];
+    await runAgent(riverCrossingMachine, {
+      input: { maxMoves: 12 },
+      executors: {
+        generateText: async () => ({ output: "" }),
+        decide: async (request) => {
+          requestsSeen.push(request);
+          const type = OPTIMAL[requestsSeen.length - 1] ?? "CROSS_ALONE";
+          return { event: { type, reasoning: `scripted ${type}` } };
+        },
+      },
+    });
+
+    // Rendered once from the machine itself, after it was defined.
+    expect(requestsSeen[0]!.prompt).toContain("# River Crossing");
+    expect(requestsSeen[0]!.prompt).toContain("## Current world state");
+  });
+
   test("describeMachine renders states, events, and rules into markdown", () => {
     const md = describeMachine(riverCrossingMachine, riverCrossingSchemas, {
       title: "River Crossing",

@@ -39,11 +39,25 @@ import {
   type AgentMessage,
   assistantMessage,
   createAgentSchemas,
-  getStateMeta,
+  getInteraction,
+  getStatePath,
+  interactionMetaSchema,
+  messagesSchema,
   runAgent,
   setupAgent,
   userMessage,
+  type EventOf,
 } from "@statelyai/agent";
+
+/**
+ * The library's `messagesSchema` really validates roles, parts and media
+ * payloads. It is a Standard Schema rather than a zod one, so `z.object`
+ * cannot take it as a field directly; this adapter delegates to it.
+ */
+const messagesField = z.custom<AgentMessage[]>(
+  (value) => !("issues" in messagesSchema["~standard"].validate(value)),
+  { message: "Expected an array of agent messages" },
+);
 
 const transcriptTurnSchema = z.object({
   question: z.string(),
@@ -77,37 +91,15 @@ const models = defineModels({
   quick: openai("gpt-5.4-mini"),
 });
 
-/**
- * Typed `meta.interaction` hints. Hosts read them off the idle snapshot to
- * label buttons and route free chat text to an event.
- */
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
-});
-
 export const twentyQuestionsSchemas = createAgentSchemas({
-  meta: metaSchema,
+  meta: interactionMetaSchema,
   context: z.object({
     /** What the agent is currently waiting on; `{question}` in idle labels. */
     question: z.string(),
     maxQuestions: z.number(),
     questionsRemaining: z.number(),
     transcript: z.array(transcriptTurnSchema),
-    messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+    messages: messagesField,
     pendingRawAnswer: z.string().nullable(),
     pendingSideQuestion: z.string().nullable(),
     guess: z.string().nullable(),
@@ -156,7 +148,7 @@ const agentSetup = setupAgent({
         input: z.object({
           question: z.string(),
           rawAnswer: z.string(),
-          messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+          messages: messagesField,
           transcript: z.array(transcriptTurnSchema),
         }),
         output: answerClassificationSchema,
@@ -208,7 +200,7 @@ const agentSetup = setupAgent({
         input: z.object({
           guess: z.string(),
           rawAnswer: z.string(),
-          messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+          messages: messagesField,
         }),
         output: guessFeedbackClassificationSchema,
       },
@@ -231,7 +223,7 @@ const agentSetup = setupAgent({
       schemas: {
         input: z.object({
           rawAnswer: z.string(),
-          messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+          messages: messagesField,
         }),
         output: z.object({
           playAgain: z.boolean(),
@@ -641,38 +633,38 @@ const executors = createAiSdkExecutors({ models });
 
 type TwentyQuestionsSnapshot = SnapshotFrom<typeof twentyQuestionsMachine>;
 
-/** What a host (or the test) sends to unblock an idle machine. */
-export type PlayerEvent =
-  | { type: "ANSWER_YES" }
-  | { type: "ANSWER_NO" }
-  | { type: "GUESS_RIGHT" }
-  | { type: "GUESS_WRONG" }
-  | { type: "PLAY_AGAIN_YES" }
-  | { type: "PLAY_AGAIN_NO" }
-  | { type: "ANSWER"; rawAnswer: string }
-  | { type: "GUESS_FEEDBACK"; rawAnswer: string }
-  | { type: "PLAY_AGAIN"; rawAnswer: string };
-
-/** `{key}` placeholders in interaction labels resolve against context. */
-export function resolveInteractionLabel(label: string, context: Record<string, unknown>): string {
-  return label
-    .replace(/\{(\w+)\}/g, (_, key: string) => {
-      const value = context[key];
-      return typeof value === "string" || typeof value === "number" ? String(value) : "";
-    })
-    .replace(/\s+/g, " ")
-    .trim();
-}
+/**
+ * What a host (or the test) sends to unblock an idle machine: the player-facing
+ * slice of the machine's own event union, so payloads are never restated here.
+ */
+export type PlayerEvent = Extract<
+  EventOf<typeof twentyQuestionsMachine>,
+  {
+    type:
+      | "ANSWER"
+      | "ANSWER_NO"
+      | "ANSWER_YES"
+      | "GUESS_FEEDBACK"
+      | "GUESS_RIGHT"
+      | "GUESS_WRONG"
+      | "PLAY_AGAIN"
+      | "PLAY_AGAIN_NO"
+      | "PLAY_AGAIN_YES";
+  }
+>;
 
 /** Prompt for whatever the idle state is waiting on, from its meta hint. */
 export function idlePrompt(snapshot: TwentyQuestionsSnapshot): string {
-  const interaction = getStateMeta(snapshot).interaction;
-  return resolveInteractionLabel(interaction?.label ?? "?", snapshot.context);
+  return getInteraction(snapshot)?.label || "?";
 }
 
-/** Route free text to the idle state's `textEvent`. */
+/**
+ * Route free text to the idle state's `textEvent`. `eventFromInteraction` is
+ * not usable here: it always names the free-text field `text`, and these
+ * events carry it as `rawAnswer`.
+ */
 export function toPlayerEvent(snapshot: TwentyQuestionsSnapshot, text: string): PlayerEvent {
-  const textEvent = getStateMeta(snapshot).interaction?.textEvent ?? "ANSWER";
+  const textEvent = getInteraction(snapshot)?.textEvent ?? "ANSWER";
   return { type: textEvent, rawAnswer: text } as PlayerEvent;
 }
 
@@ -683,7 +675,7 @@ export async function main() {
       SIDE_ANSWER: ({ answer }: { answer: string }) => console.log(`[side answer] ${answer}`),
     },
     onTransition: (snapshot: TwentyQuestionsSnapshot) =>
-      console.log("[state]", JSON.stringify(snapshot.value)),
+      console.log("[state]", getStatePath(snapshot)),
   };
 
   let result = await runAgent(twentyQuestionsMachine, {

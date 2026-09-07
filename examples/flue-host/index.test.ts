@@ -38,7 +38,7 @@ describe("flue-host (machine-owned)", () => {
     // The machine drove itself past the prompt and both model calls to the
     // human review pause; the host never named a state to get there.
     expect(result.label).toContain("Send the draft");
-    expect(result.choices).toContain("SEND (Send)");
+    expect(result.choices).toContain("SEND (Send email)");
     expect(result.draft).toContain("Deploy pipeline is faster");
   });
 
@@ -54,11 +54,11 @@ describe("flue-host (machine-owned)", () => {
     expect(finished.sentCount).toBe(1);
   });
 
-  test("revision text is routed to the field the interaction declared", async () => {
+  test("revision text is delivered through the interaction's declared textEvent", async () => {
     const started = await start("Announce the faster deploys.");
 
-    // REQUEST_CHANGES declares an input field (`changes`); the host derives that
-    // from `meta.interaction` rather than hardcoding the event's payload shape.
+    // REQUEST_CHANGES is the reviewing pause's `textEvent`, so the host attaches
+    // the typed text to it without hardcoding the event's payload shape.
     const revised = await resume(started.handle!, "REQUEST_CHANGES", "Make it shorter.");
     expect(revised.status).toBe("pending");
     expect(revised.label).toContain("Send the draft");

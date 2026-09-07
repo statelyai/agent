@@ -105,6 +105,21 @@ test("seeded buggy code fails verification first, then the repair passes on reru
   expect(prompts[0]).toContain("sumArray([])");
 });
 
+test("with no task supplied, the default task's seeded bug is verified first", async () => {
+  const correctSum =
+    "function sumArray(numbers) { return numbers.reduce((total, n) => total + n, 0); }";
+  const { generateText, prompts } = scriptedGenerateText([correctSum]);
+
+  // No spec/checks/initialCode: the whole default task applies, seed included.
+  const result = await runCodeAssistantExample({ generateText });
+
+  expect(result.progress[0]).toBe("executing");
+  expect(result.passed).toBe(true);
+  expect(result.attempts).toBe(2);
+  // The one generation was a repair of the seeded code.
+  expect(prompts[0]).toContain("numbers.reduce((total, n) => total + n)");
+});
+
 test("machine exports a runnable definition", () => {
   expect(codeAssistantMachine.id).toBe("code-assistant");
 });

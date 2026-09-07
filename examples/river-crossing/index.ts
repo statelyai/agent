@@ -34,7 +34,13 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAgentSchemas, runAgent, type RunAgentOptions, setupAgent } from "@statelyai/agent";
+import {
+  createAgentSchemas,
+  runAgent,
+  setupAgent,
+  type ContextOf,
+  type RunAgentOptions,
+} from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import { describeMachine } from "./describe-machine.js";
 
@@ -213,26 +219,8 @@ const MACHINE_RULES = [
   "Solved when farmer, wolf, goat, and cabbage are all on the right bank.",
 ];
 
-// The machine description is static; render it lazily on first decide (the
-// machine `const` is declared below, so it isn't reachable at module eval).
-let machineDescription: string | undefined;
-function getMachineDescription(): string {
-  machineDescription ??= describeMachine(riverCrossingMachine, riverCrossingSchemas, {
-    title: "River Crossing",
-    rules: MACHINE_RULES,
-  });
-  return machineDescription;
-}
-
-type RiverContext = {
-  farmer: Bank;
-  wolf: Bank;
-  goat: Bank;
-  cabbage: Bank;
-  moves: number;
-  maxMoves: number;
-  log: string[];
-};
+/** The context type, read off the schema pack — never restated by hand. */
+type RiverContext = ContextOf<typeof agentSetup>;
 
 // A move transition: applies the physics, returns `undefined` when illegal so
 // the decision's `canTake` check rejects the choice and retries.
@@ -291,7 +279,7 @@ export const riverCrossingMachine = agentSetup.createMachine({
         input: ({ context }) => ({
           model: "planner",
           system: DECIDE_SYSTEM_PROMPT,
-          prompt: `${getMachineDescription()}\n\n${renderWorld(context)}`,
+          prompt: `${MACHINE_DESCRIPTION}\n\n${renderWorld(context)}`,
           // Typo'd event names are caught at compile time — allowedEvents is
           // typed against the machine's event-schema keys.
           allowedEvents: ["TAKE_WOLF", "TAKE_GOAT", "TAKE_CABBAGE", "CROSS_ALONE"],
@@ -315,7 +303,8 @@ export const riverCrossingMachine = agentSetup.createMachine({
     // move: solved when everything is on the right bank, failed when the move
     // budget is spent, otherwise back to deciding.
     checkWin: {
-      always: ({ context }: { context: RiverContext }) => {
+      type: "choice",
+      choice: ({ context }) => {
         if (allOnRight(context)) return { target: "solved" };
         if (context.moves >= context.maxMoves) return { target: "failed" };
         return { target: "deciding" };
@@ -323,17 +312,17 @@ export const riverCrossingMachine = agentSetup.createMachine({
     },
     solved: { type: "final" },
     // Reached on move-budget exhaustion or when the decide request exhausts
-    // retries.
-    failed: {
-      type: "final",
-      output: ({ context }: { context: RiverContext }) => ({
-        summary: narrate(context),
-        solved: false,
-        moves: context.moves,
-        log: context.log,
-      }),
-    },
+    // retries. The machine-level `output` already derives `solved` from the
+    // banks, so this state needs no output of its own.
+    failed: { type: "final" },
   },
+});
+
+// Rendered once, AFTER the machine exists — no module-level memo, and nothing
+// mutable for a second import to race on.
+const MACHINE_DESCRIPTION = describeMachine(riverCrossingMachine, riverCrossingSchemas, {
+  title: "River Crossing",
+  rules: MACHINE_RULES,
 });
 
 // ─── Dual-mode entrypoint ───
@@ -343,9 +332,8 @@ export async function runRiverCrossingExample(
 ) {
   const result = await runAgent(riverCrossingMachine, {
     input: { maxMoves: 12 },
-    ...(options && Object.keys(options).length > 0
-      ? options
-      : { executors: createAiSdkExecutors({ models }) }),
+    executors: createAiSdkExecutors({ models }),
+    ...options,
   });
   if (result.status !== "done") {
     throw new Error(`River crossing did not complete: ${result.status}`);

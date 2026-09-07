@@ -1,14 +1,22 @@
 /**
- * Swarm handoff — an active-agent conversation that hands off between two
- * specialists, with the active agent persisted across a snapshot round-trip.
+ * Swarm handoff — an active-agent conversation where the MODEL decides which
+ * specialist should take the next turn, with the active agent persisted across
+ * a JSON snapshot round-trip.
  *
  * Shows:
  *   - `context.activeAgent` tracks who is "holding the mic" ('travel' | 'food').
  *   - each agent has its own reply request (distinct model ref + system) that
  *     runs one conversation turn, then the machine settles idle in `waiting`.
- *   - a `HANDOFF` event switches `activeAgent` and re-enters `routing`; the
- *     idle snapshot is JSON round-tripped, proving the active agent survives a
- *     real persistence layer (two `runAgent` invocations).
+ *   - the human only supplies the next message (SAY) or ends the conversation
+ *     (END). Whether to hand off is a model decision: `routing` invokes
+ *     `agent.decide` over HANDOFF / KEEP, and the HANDOFF transition guard
+ *     rejects a handoff to the agent that already holds the mic, so the
+ *     decision retries instead of a no-op switch landing in context.
+ *   - the loop is bounded by a state: after `MAX_TURNS` replies the machine
+ *     idles in `budgetSpent`, which declares only END, so the host's
+ *     `getInteraction` call sees the bound instead of guessing at a guard.
+ *   - the idle snapshot is JSON round-tripped between turns, proving the
+ *     active agent survives a real persistence layer.
  *
  * Dual-mode: `runSwarmHandoffExample(options?)` takes injectable executors
  * (the test passes mocks — keyless CI); the direct run below uses real models.
@@ -18,54 +26,54 @@
 import { z } from "zod";
 import type { Snapshot as PersistedSnapshot } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { runAgent, setupAgent, type RunAgentOptions, type RunAgentResult } from "@statelyai/agent";
+import {
+  getInteraction,
+  interactionMetaSchema,
+  runAgent,
+  setupAgent,
+  type RunAgentOptions,
+  type RunAgentResult,
+} from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const agentName = z.enum(["travel", "food"]);
 
+/** Replies the conversation may run before only END is legal. */
+export const MAX_TURNS = 4;
+
 export const models = defineModels({
   travel: openai("gpt-5.4-mini"),
   food: openai("gpt-5.4-mini"),
-});
-
-// Typed interaction meta for the idle turn boundary: the pause's `label` plus a
-// button `label`/`style` per accepted event. No `textEvent` here — HANDOFF
-// carries two fields (`to` and `message`), so there is no single string field
-// for free text to land in, and a host must collect both.
-const metaSchema = z.object({
-  interaction: z
-    .object({
-      label: z.string(),
-      events: z
-        .record(
-          z.string(),
-          z.object({
-            label: z.string().optional(),
-            style: z.enum(["primary", "danger", "default"]).optional(),
-          }),
-        )
-        .optional(),
-      textEvent: z.string().optional(),
-    })
-    .optional(),
+  router: openai("gpt-5.4-mini"),
 });
 
 const agentSetup = setupAgent({
   models,
-  meta: metaSchema,
+  meta: interactionMetaSchema,
   context: z.object({
     message: z.string(),
     activeAgent: agentName,
     reply: z.string().nullable(),
+    turns: z.number().int(),
   }),
   input: z.object({
     message: z.string(),
     activeAgent: agentName.optional(),
   }),
-  output: z.object({ activeAgent: agentName, reply: z.string() }),
+  output: z.object({
+    activeAgent: agentName,
+    reply: z.string().nullable(),
+    turns: z.number().int(),
+  }),
   events: {
-    // Hand the mic to the other specialist and give them the next message.
-    HANDOFF: z.object({ to: agentName, message: z.string() }),
+    /** Human: the next message for whoever ends up holding the mic. */
+    SAY: z.object({ message: z.string() }),
+    /** Human: stop here. */
+    END: z.object({}),
+    /** Model: hand the mic to the other specialist. */
+    HANDOFF: z.object({ to: agentName }),
+    /** Model: the current specialist keeps the mic. */
+    KEEP: z.object({}),
   },
   requests: {
     travelReply: {
@@ -97,15 +105,12 @@ export const swarmHandoffMachine = agentSetup.createMachine({
     message: input.message,
     activeAgent: input.activeAgent ?? "travel",
     reply: null,
+    turns: 0,
   }),
-  output: ({ context }) => ({
-    activeAgent: context.activeAgent,
-    reply: context.reply ?? "",
-  }),
-  initial: "routing",
+  initial: "dispatching",
   states: {
     // Dispatch to whichever agent currently holds the mic.
-    routing: {
+    dispatching: {
       type: "choice",
       choice: ({ context }) =>
         context.activeAgent === "food" ? { target: "foodTurn" } : { target: "travelTurn" },
@@ -114,50 +119,122 @@ export const swarmHandoffMachine = agentSetup.createMachine({
       invoke: {
         src: "travelReply",
         input: ({ context }) => ({ message: context.message }),
-        onDone: ({ output }) => ({
-          target: "waiting",
-          context: { reply: output },
+        onDone: ({ context, output }) => ({
+          target: "checkingBudget",
+          context: { reply: output, turns: context.turns + 1 },
         }),
+        onError: { target: "failed" },
       },
     },
     foodTurn: {
       invoke: {
         src: "foodReply",
         input: ({ context }) => ({ message: context.message }),
-        onDone: ({ output }) => ({
-          target: "waiting",
-          context: { reply: output },
+        onDone: ({ context, output }) => ({
+          target: "checkingBudget",
+          context: { reply: output, turns: context.turns + 1 },
         }),
+        onError: { target: "failed" },
       },
     },
-    // No invoke: runAgent settles idle here. A HANDOFF switches the active
-    // agent and re-routes; the host persists the snapshot in between.
+    // The turn budget is a state, not a guard the host has to guess at:
+    // once it is spent the machine idles in `budgetSpent`, where SAY is not
+    // declared at all, so `getInteraction` shows END as the only way on.
+    checkingBudget: {
+      type: "choice",
+      choice: ({ context }) =>
+        context.turns >= MAX_TURNS ? { target: "budgetSpent" } : { target: "waiting" },
+    },
+    budgetSpent: {
+      tags: ["waiting"],
+      meta: {
+        interaction: {
+          label: "The {activeAgent} concierge answered. That was the last turn; end here.",
+          events: { END: { label: "End the conversation", style: "default" } },
+        },
+      },
+      on: { END: { target: "finished" } },
+    },
+    // No invoke: runAgent settles idle here. The host persists the snapshot,
+    // then resumes with the human's next message (or END).
     waiting: {
       tags: ["waiting"],
       meta: {
         interaction: {
           // `{activeAgent}` resolves against context when the label is shown.
-          label: "The {activeAgent} concierge answered. Hand the mic over with your next message.",
-          events: { HANDOFF: { label: "Hand off to the other concierge", style: "primary" } },
+          label: "The {activeAgent} concierge answered. Ask a follow-up, or end here.",
+          events: { END: { label: "End the conversation", style: "default" } },
+          textEvent: "SAY",
         },
       },
       on: {
-        HANDOFF: ({ event }) => ({
-          target: "routing",
-          context: { activeAgent: event.to, message: event.message },
-        }),
+        SAY: ({ event }) => ({ target: "routing", context: { message: event.message } }),
+        END: { target: "finished" },
       },
+    },
+    // The handoff decision belongs to the model, not to the host.
+    routing: {
+      invoke: {
+        src: "agent.decide",
+        input: ({ context }) => ({
+          name: "route",
+          model: "router",
+          system:
+            "Two concierges share one conversation: 'travel' (destinations, flights, " +
+            "itineraries) and 'food' (restaurants, dishes, dietary needs). Choose " +
+            "HANDOFF to move the message to the other concierge, or KEEP when the " +
+            "current one should answer it.",
+          prompt:
+            `Current concierge: ${context.activeAgent}\n` + `Next message: ${context.message}`,
+          allowedEvents: ["HANDOFF", "KEEP"],
+          maxRetries: 2,
+        }),
+        // A router outage is not a reason to drop the message: the current
+        // concierge answers it.
+        onError: { target: "dispatching" },
+      },
+      on: {
+        // Handing off to yourself is not a handoff: reject it so `agent.decide`
+        // retries with the rejection in its attempts.
+        HANDOFF: ({ context, event }) =>
+          event.to === context.activeAgent
+            ? undefined
+            : { target: "dispatching", context: { activeAgent: event.to } },
+        KEEP: { target: "dispatching" },
+      },
+    },
+    finished: {
+      type: "final",
+      output: ({ context }) => ({
+        activeAgent: context.activeAgent,
+        reply: context.reply,
+        turns: context.turns,
+      }),
+    },
+    failed: {
+      type: "final",
+      output: ({ context }) => ({
+        activeAgent: context.activeAgent,
+        reply: null,
+        turns: context.turns,
+      }),
     },
   },
 });
 
+/** A real persistence layer: the snapshot goes out as JSON and comes back. */
+export function roundTrip<T>(snapshot: T): T {
+  return JSON.parse(JSON.stringify(snapshot)) as T;
+}
+
 export async function runSwarmHandoffExample(
-  options?: RunAgentOptions<typeof swarmHandoffMachine>,
+  options: RunAgentOptions<typeof swarmHandoffMachine> = {},
 ) {
-  const resolved =
-    options && Object.keys(options).length > 0
-      ? options
-      : { executors: createAiSdkExecutors({ models }) };
+  // Spread-merge, so passing only `onTransition` keeps the default executors.
+  const resolved: RunAgentOptions<typeof swarmHandoffMachine> = {
+    executors: createAiSdkExecutors({ models }),
+    ...options,
+  };
 
   // Turn 1: the travel agent holds the mic and answers.
   const first = await runAgent(swarmHandoffMachine, {
@@ -169,18 +246,14 @@ export async function runSwarmHandoffExample(
   }
   const firstReply = first.snapshot.context.reply ?? "";
 
-  // Persist the snapshot (host's choice of store) — JSON round-trip it to
-  // prove `activeAgent` survives a real persistence layer.
-  const persisted = first.persist();
+  // Persist the snapshot the way a host would, through JSON.
+  const persisted = roundTrip(first.persist());
 
-  // ...later, new process: hand off to the food agent for the next turn.
+  // ...later, new process: the human asks a food question. The MODEL decides
+  // the travel concierge should hand it to the food concierge.
   const second = await runAgent(swarmHandoffMachine, {
     snapshot: persisted,
-    event: {
-      type: "HANDOFF",
-      to: "food",
-      message: "What are the must-try dishes there?",
-    },
+    event: { type: "SAY", message: "What are the must-try dishes there?" },
     ...resolved,
   });
   if (second.status !== "idle") {
@@ -197,10 +270,9 @@ export async function runSwarmHandoffExample(
 }
 
 /**
- * Interactive REPL: the user talks to whichever agent holds the mic, and can
- * hand off with `/travel <message>` or `/food <message>`. Each turn runs the
- * machine from the persisted idle snapshot; a handoff is a real HANDOFF event
- * that switches `activeAgent` and re-routes.
+ * Interactive REPL: the user talks to the conversation, and the model decides
+ * which concierge answers each message. Every turn resumes the persisted idle
+ * snapshot with a SAY event; an empty line sends END.
  */
 async function runInteractive() {
   const executors = createAiSdkExecutors({ models });
@@ -208,12 +280,12 @@ async function runInteractive() {
   let active: "travel" | "food" = "travel";
   console.log("Swarm handoff — two concierges share one conversation.");
   console.log(
-    "Type a message for the current agent, or hand off with " +
-      "`/travel <msg>` or `/food <msg>`. Ctrl-D or empty line to quit.\n",
+    "Type a message; the router decides which concierge answers. " +
+      "Empty line ends the conversation.\n",
   );
 
   // Turn 1 seeds the conversation from a fresh run; later turns resume the
-  // persisted snapshot with a HANDOFF event.
+  // persisted snapshot with a SAY event.
   type LiveSnapshot = ReturnType<typeof swarmHandoffMachine.resolveState>;
   let snapshot: PersistedSnapshot<unknown> | null = null;
 
@@ -224,22 +296,17 @@ async function runInteractive() {
     }
   };
 
-  // One turn: resume from the persisted snapshot with a HANDOFF, or seed a
-  // fresh run on the very first turn.
-  async function runTurn(
-    to: "travel" | "food",
-    message: string,
-  ): Promise<RunAgentResult<typeof swarmHandoffMachine>> {
+  async function runTurn(message: string): Promise<RunAgentResult<typeof swarmHandoffMachine>> {
     if (snapshot) {
       return runAgent(swarmHandoffMachine, {
         snapshot,
-        event: { type: "HANDOFF" as const, to, message },
+        event: { type: "SAY" as const, message },
         executors,
         onTransition,
       });
     }
     return runAgent(swarmHandoffMachine, {
-      input: { message, activeAgent: to },
+      input: { message, activeAgent: active },
       executors,
       onTransition,
     });
@@ -250,25 +317,22 @@ async function runInteractive() {
       const line: string = (await rl.question(`[${active}] you> `)).trim();
       if (!line) break;
 
-      let to: "travel" | "food" = active;
-      let message = line;
-      const match = /^\/(travel|food)\s+(.*)$/s.exec(line);
-      if (match) {
-        to = match[1] as "travel" | "food";
-        message = match[2] ?? "";
-      }
-      if (to !== active) {
-        console.log(`--- handoff: ${active} → ${to} ---`);
-      }
-
-      const result = await runTurn(to, message);
+      const result = await runTurn(line);
       if (result.status !== "idle") {
         console.error(`Conversation ended unexpectedly: ${result.status}`);
         break;
       }
-      active = result.snapshot.context.activeAgent;
-      snapshot = result.persist();
+      const handedTo = result.snapshot.context.activeAgent;
+      if (handedTo !== active) {
+        console.log(`--- handoff: ${active} → ${handedTo} ---`);
+      }
+      active = handedTo;
+      snapshot = roundTrip(result.persist());
       console.log(`[${active}] ${result.snapshot.context.reply ?? ""}\n`);
+      if (!getInteraction(result.snapshot)?.textEvent) {
+        console.log("Turn budget reached.");
+        break;
+      }
     }
   });
 }

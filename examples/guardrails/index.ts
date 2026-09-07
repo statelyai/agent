@@ -17,7 +17,11 @@
  *     branch on structured request output and shows up as its own node in the
  *     Stately visualizer, keeping the branching logic separate from the states
  *     that invoke the requests.
- *   - Attempt tracking in context to bound the revision loop.
+ *   - A revision counter in context compared against the `MAX_REVISIONS`
+ *     constant in the choice state, so the loop is bounded by the machine.
+ *   - Three final states, each declaring its own `output`. The reported
+ *     `status` IS the state the run settled in, not a flag re-derived from
+ *     context afterwards.
  *
  * Contrast with `ai-sdk-evaluator-optimizer`: that loops to *refine* output
  * toward higher quality and always returns its best attempt. Guardrails
@@ -29,7 +33,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
-import { createAgentSchemas, runAgent, setupAgent } from "@statelyai/agent";
+import { createAgentSchemas, getStatePath, runAgent, setupAgent } from "@statelyai/agent";
 
 const models = defineModels({
   quick: openai("gpt-5.4-mini"),
@@ -38,6 +42,9 @@ const models = defineModels({
 /** Scope the input guardrail enforces. Hardcoded so input is just the question. */
 const DEFAULT_TOPIC = "geography";
 
+/** Bound on the revision loop: the counter lives in context, the limit here. */
+const MAX_REVISIONS = 1;
+
 const guardrailsContextSchema = z.object({
   question: z.string(),
   topic: z.string().nullable(),
@@ -45,7 +52,6 @@ const guardrailsContextSchema = z.object({
   reason: z.string(),
   critique: z.string(),
   revisions: z.number(),
-  maxRevisions: z.number(),
   validated: z
     .object({ answerable: z.boolean(), inScope: z.boolean(), reason: z.string() })
     .nullable(),
@@ -158,25 +164,9 @@ export const guardrailsMachine = agentSetup.createMachine({
     reason: "",
     critique: "",
     revisions: 0,
-    maxRevisions: 1,
     validated: null,
     verified: null,
   }),
-  output: ({ context }) => {
-    // Derived from which final state we settled in: a supported answer is
-    // `answered`; an answer that exists but was not verified is `unverified`;
-    // no answer at all means the input guardrail refused it.
-    const status = context.verified?.supported
-      ? ("answered" as const)
-      : context.answer
-        ? ("unverified" as const)
-        : ("refused" as const);
-    return {
-      status,
-      answer: status === "answered" ? context.answer : null,
-      reason: context.reason,
-    };
-  },
   initial: "validatingQuestion",
   states: {
     // Input guardrail: gate the question before any answer exists.
@@ -247,8 +237,8 @@ export const guardrailsMachine = agentSetup.createMachine({
             context: { reason: "Answer verified by the output guardrail." },
           };
         }
-        // Unsupported: revise at most maxRevisions times, then flag.
-        if (context.revisions < context.maxRevisions) {
+        // Unsupported: revise at most MAX_REVISIONS times, then flag.
+        if (context.revisions < MAX_REVISIONS) {
           return { target: "revising" };
         }
         return {
@@ -282,9 +272,34 @@ export const guardrailsMachine = agentSetup.createMachine({
         },
       },
     },
-    answered: { type: "final" },
-    refused: { type: "final" },
-    unverified: { type: "final" },
+    // The three outcomes each declare their own output, so `status` is the
+    // final state the run settled in rather than a flag re-derived from
+    // context afterwards. Only `answered` hands back the answer; `unverified`
+    // flags it instead of returning content the guardrail could not vouch for.
+    answered: {
+      type: "final",
+      output: ({ context }) => ({
+        status: "answered" as const,
+        answer: context.answer,
+        reason: context.reason,
+      }),
+    },
+    refused: {
+      type: "final",
+      output: ({ context }) => ({
+        status: "refused" as const,
+        answer: null,
+        reason: context.reason,
+      }),
+    },
+    unverified: {
+      type: "final",
+      output: ({ context }) => ({
+        status: "unverified" as const,
+        answer: null,
+        reason: context.reason,
+      }),
+    },
   },
 });
 
@@ -296,7 +311,7 @@ export async function main() {
       question: "What is the capital of France?",
     },
     executors,
-    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+    onTransition: (snapshot) => console.log("[state]", getStatePath(snapshot)),
   });
 
   if (result.status !== "done") {

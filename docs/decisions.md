@@ -110,6 +110,17 @@ const event = await resolveDecision(request, executors, {
 });
 ```
 
+Build the request with `createDecisionRequest` rather than by hand. It fills in `kind`, an `id`, an empty `attempts` list, and each candidate event's `toolName`, and accepts either bare event types or the descriptors `getAcceptedEvents` returns:
+
+```ts no-check
+const request = createDecisionRequest({
+  name: "judge",
+  model: "reviewer",
+  prompt: `Judge this draft.\n\n${snapshot.context.draft}`,
+  events: getAcceptedEvents(snapshot)
+});
+```
+
 ## Validation and retries
 
 <!-- decision validation checks and retry behavior from src/decision.ts -->

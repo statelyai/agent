@@ -1,6 +1,7 @@
 export { AgentError } from "./errors.js";
 export type {
   ContextOf,
+  DoneActorEventOf,
   EventOf,
   InputOf,
   MetaOf,
@@ -9,7 +10,12 @@ export type {
   SnapshotOf,
   StateValueOf,
 } from "./type-helpers.js";
-export { AGENT_MESSAGES_EVENT_TYPE, appendMessages, messagesSchema } from "./messages.js";
+export {
+  AGENT_MESSAGES_EVENT_TYPE,
+  appendMessages,
+  isAgentMessages,
+  messagesSchema,
+} from "./messages.js";
 export type { AgentMessagesEvent, AgentMessagesEventPayload } from "./messages.js";
 export { createAgentSchemas, getAgentSchemas, setupAgent } from "./setup-agent.js";
 export type {
@@ -24,6 +30,7 @@ export type {
 export {
   AgentDecisionExhaustedError,
   createDecisionLogic,
+  createDecisionRequest,
   renderDecisionAttempts,
   resolveDecision,
 } from "./decision.js";
@@ -36,11 +43,19 @@ export type {
   // Return type of `createDecisionLogic`, so declaration emit can name it.
   DecisionLogic,
   DecisionLogicConfig,
+  CreateDecisionRequestOptions,
   ResolveDecisionOptions,
 } from "./decision.js";
 export { getAcceptedEvents, parseAgentEvent } from "./events.js";
-export { eventFromInteraction, getInteraction } from "./interaction.js";
-export type { AgentInteraction, AgentInteractionEvent } from "./interaction.js";
+export { eventFromInteraction, getInteraction, interactionMetaSchema } from "./interaction.js";
+export type {
+  AgentInteraction,
+  AgentInteractionDescriptor,
+  AgentInteractionEvent,
+  AgentInteractionEventMeta,
+  AgentInteractionMeta,
+  GetInteractionOptions,
+} from "./interaction.js";
 export type {
   AgentRequestOptions,
   // Named return type of `getAgentSchemas`, so declaration emit can name it.
@@ -205,6 +220,7 @@ export {
   getMessageText,
   getMachineStructuralHash,
   getStateMeta,
+  getStatePath,
   isStandardSchema,
   systemMessage,
   toolMessage,
