@@ -45,7 +45,7 @@ factory and trace; invalid input throws `AgentError` with code
 `invalid-machine-input`. Calling XState's `createActor` directly does not run
 this validation.
 
-To keep conversation history in context, add a `messages` field with the `z.custom<AgentMessage[]>` recipe. See [Messages](messages.md#store-messages-in-context).
+To keep conversation history in context, add a `messages` field with the `z.custom<AgentMessage[]>` recipe. See [Messages](messages.md).
 
 ### Event schemas
 
@@ -65,7 +65,7 @@ In a `HEAL` transition, `event.amount` is a `number`. Reading a field the event 
 
 ### Emitted event schemas
 
-Emitted event schemas type the progress events a machine emits with `enq.emit(...)`. Hosts receive them through [`runAgent`'s `on` handlers](observability.md#observation-callbacks). Declare them under `emitted`:
+Emitted event schemas type the progress events a machine emits with `enq.emit(...)`. Hosts receive them through `runAgent`'s `on` handlers. Declare them under `emitted`:
 
 ```ts no-check
 // setupAgent({ ... })
@@ -75,7 +75,7 @@ emitted: {
 // ...
 ```
 
-Both `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on: { EVALUATED: handler }` are then typed. An undeclared type or a wrong payload is a compile error.
+Both `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on: { EVALUATED: handler }` are then typed. An undeclared type or a wrong payload is a compile error. See [Observability](observability.md).
 
 > **Note:** To reuse one schema set across machines or the step helpers, declare it once with `createAgentSchemas({ context, input, output, events })` and pass it as `setupAgent({ schemas })`. This is equivalent to the inline form. See [Authoring forms](#authoring-forms).
 
@@ -85,6 +85,24 @@ When a generic host receives only a machine, call `getAgentSchemas(machine)` to
 recover its schema pack for validation or form generation. It returns
 `undefined` for plain XState machines. Read it before `machine.provide(...)`;
 the provided machine is a new object and does not carry the registration.
+
+### Type extraction
+
+<!-- public type helpers from src/type-helpers.ts and src/index.ts -->
+
+Use the exported `ContextOf`, `InputOf`, `OutputOf`, and `EventOf` helpers with
+either an Agent setup or a machine. Machine-only helpers are `SnapshotOf` and
+`StateValueOf`; `MetaOf` extracts declared metadata, and `RequestNamesOf`
+extracts a setup's registered request-name union.
+
+```ts
+import type { ContextOf, EventOf, RequestNamesOf, SnapshotOf } from "@statelyai/agent";
+
+type AgentContext = ContextOf<typeof agentSetup>;
+type AgentEvent = EventOf<typeof machine>;
+type AgentSnapshot = SnapshotOf<typeof machine>;
+type RequestName = RequestNamesOf<typeof agentSetup>;
+```
 
 ## Agent setup
 
@@ -96,7 +114,7 @@ The builtins `agent.generateText`, `agent.streamText`, `agent.decide`, and `agen
 
 ### Models
 
-The `models` map pairs a short alias with a resolved model. Request and decision `model:` values autocomplete against its keys. Pass the same map to the host adapter. See [Typed model aliases](hosts.md#typed-model-aliases).
+The `models` map pairs a short alias with a resolved model. Request and decision `model:` values autocomplete against its keys. Pass the same map to the host adapter. See [Models and providers](models-and-providers.md).
 
 ```ts
 import { openai } from "@ai-sdk/openai";

@@ -29,6 +29,13 @@ const machine = agent.createMachine({
 
 The default key is `messages`. Use `appendMessages({ key: "history" })` for another context field.
 
+<!-- AGENT_MESSAGES_EVENT_TYPE, appendMessages, and getMessageText from src/messages.ts, src/utils.ts, and src/index.ts -->
+
+Use `AGENT_MESSAGES_EVENT_TYPE` instead of the string literal when sharing the
+handler. `getMessageText(message)` returns the readable string content and
+joins text parts, including textual tool-result output, while ignoring
+non-text content.
+
 To validate the field at runtime, use the `isAgentMessages` guard. A zod object cannot nest a Standard Schema directly, so wrap it:
 
 ```ts no-check
