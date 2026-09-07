@@ -14,7 +14,7 @@ This page covers the APIs that check an agent machine before it runs. None of th
 
 Use these APIs to check that an LLM-generated machine is legal before you run it. See [authoring from scratch](quickstart.md). You can also use them to confirm that a refactor preserved behavior, so a machine converted [from a loop](from-a-loop.md) is safe to ship.
 
-> **Note:** Everything on this page runs on `machine.config` and the pure step path, with no provider, no network, and no keys. It is deterministic, so these checks work as ordinary unit tests in any test runner, such as vitest or jest, and as CI checks.
+> **Note:** Everything on this page runs on `machine.config` and deterministic transition traversal, with no provider, no network, and no keys. These checks work as ordinary unit tests in any test runner, such as vitest or jest, and as CI checks.
 
 ## Machine linting
 
@@ -41,16 +41,16 @@ skip checks by code.
 assertAgentMachine(machine, { warnings: true });
 ```
 
-| Code                       | Severity | Fires when                                                                                                                                                                                                                                                                         |
-| -------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `unreachable-state`        | error    | A state that no transition, `always`, `choice`, `onDone`, or `onError` can reach from the initial state. The check is conservative. Dynamic function transitions over-approximate, so it never reports a false positive. It is exact for `fromConfig` machines, because the lowering retains their declared targets.                 |
-| `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                                      |
-| `unserializable-context`   | warning  | The context schema exposes no JSON schema, for example a `z.custom` messages array, so its fields cannot be checked statically for JSON persist and resume.                                                                                                                                   |
-| `direct-object-src`        | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                                            |
-| `final-without-output`     | error    | The machine declares an output schema but a top-level final state has no `output`.                                                                                                                                                                                                 |
-| `final-output-reads-event` | warning  | A top-level final state's `output` function reads the entering `event`. Final `output` functions are evaluated more than once with different events, so `event` is unreliable. Read `context` only, and capture what you need into context in the transition that targets the final state. |
-| `undeclared-event`         | warning  | A state handles an event in `on:` that is not declared in `schemas.events` and is not a builtin or wildcard pattern. Its payload stays unvalidated. This is usually a typo. The check is skipped when the machine declares no events.                                                               |
-| `missing-final`            | warning  | The machine has no reachable final state, so it can only idle or loop. This is legal, but flagged.                                                                                                                                                                                                     |
+| Code                       | Severity | Fires when                                                                                                                                                                                                                                                                                                           |
+| -------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unreachable-state`        | error    | A state that no transition, `always`, `choice`, `onDone`, or `onError` can reach from the initial state. The check is conservative. Dynamic function transitions over-approximate, so it never reports a false positive. It is exact for `fromConfig` machines, because the lowering retains their declared targets. |
+| `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                                                                        |
+| `unserializable-context`   | warning  | The context schema exposes no JSON schema, for example a `z.custom` messages array, so its fields cannot be checked statically for JSON persist and resume.                                                                                                                                                          |
+| `direct-object-src`        | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                                                                                 |
+| `final-without-output`     | error    | The machine declares an output schema but a top-level final state has no `output`.                                                                                                                                                                                                                                   |
+| `final-output-reads-event` | warning  | A top-level final state's `output` function reads the entering `event`. Final `output` functions are evaluated more than once with different events, so `event` is unreliable. Read `context` only, and capture what you need into context in the transition that targets the final state.                           |
+| `undeclared-event`         | warning  | A state handles an event in `on:` that is not declared in `schemas.events` and is not a builtin or wildcard pattern. Its payload stays unvalidated. This is usually a typo. The check is skipped when the machine declares no events.                                                                                |
+| `missing-final`            | warning  | The machine has no reachable final state, so it can only idle or loop. This is legal, but flagged.                                                                                                                                                                                                                   |
 
 ## Test assertions
 
@@ -80,7 +80,7 @@ test("happy path settles done", async () => {
 });
 ```
 
-Guards stay in force throughout. `canReach` and `simulateAgent` walk the same step path that `runAgent` uses, so a graph path that a guard rejects never counts as reachable. These tests pin the machine's shape as prompts and models change.
+Guards stay in force throughout. `canReach` and `simulateAgent` traverse the same machine transitions as `runAgent`, so a graph path that a guard rejects never counts as reachable. These tests pin the machine's shape as prompts and models change.
 
 ## Deterministic executors
 
@@ -98,11 +98,11 @@ const machine = emailDrafter.provide({
 
 [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts) drives a full run this way, with fixed values and no model call.
 
-Use deterministic executors when the test should exercise the real `runAgent` path with canned model output. Use [`simulateAgent`](#scripted-playthroughs) when a scripted playthrough on the pure step path is enough.
+Use deterministic executors when the test should exercise the real `runAgent` path with canned model output. Use [`simulateAgent`](#scripted-playthroughs) when a model-free transition playthrough is enough.
 
 ## Scripted playthroughs
 
-`simulateAgent(machine, { input, script, maxSteps? })` runs a deterministic, model-free playthrough on the pure step path. The `script` supplies responses as FIFO queues, so runs are reproducible.
+`simulateAgent(machine, { input, script, maxSteps? })` runs a deterministic, model-free transition playthrough. The `script` supplies responses as FIFO queues, so runs are reproducible.
 
 - `decisions` holds the `ChosenEvent` to apply per decision, keyed by decision src, usually `agent.decide`.
 - `text` holds output values for text requests, keyed by request src.
@@ -154,7 +154,6 @@ if (result.status === "done") {
 
 <!-- viz: branch exploration tree for the refund machine: deciding -> AUTO_APPROVE (pruned by guard) / NEEDS_REVIEW -> awaitingHuman -> refunded, denied -->
 
-
 ```ts
 import { explorePaths } from "@statelyai/agent";
 
@@ -204,7 +203,7 @@ For machines authored as data, validate the config with `validateAgentConfig(con
 
 - [Debugging](debugging.md): scripted reproduction and the diagnostic codes in context.
 - [Evals](evals.md): scoring runs on output, trajectory, and budget.
-- [Hosts and executors](hosts.md#scripted-executors): keyless scripted executors for `runAgent`.
+- [Quickstart](quickstart.md#define-and-run-one-artifact): keyless scripted executors for `runAgent`.
 - [Machines as data](machines-as-data.md): verifying a machine lowered from a config.
 - [Migrating from a hand-rolled loop](from-a-loop.md): pinning behavior across a refactor.
 - [examples/verification](../examples/verification/index.ts): every API on this page run over one refund-approval machine, keyless, including `canReach` proving that an over-limit payout without human approval is unreachable.

@@ -239,7 +239,7 @@ To handle the human pause over HTTP, persist the snapshot with `runAgent` and re
 
 ## Behavior preservation
 
-Before you ship, pin the new machine's behavior with a deterministic playthrough that uses no model. `simulateAgent` scripts the decisions and runs the same step path that `runAgent` uses, with no API key and no network access.
+Before you ship, pin the new machine's behavior with a deterministic playthrough that uses no model. `simulateAgent` scripts the decisions and traverses the same machine transitions as `runAgent`, with no API key and no network access.
 
 ```ts
 import { simulateAgent } from "@statelyai/agent";

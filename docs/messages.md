@@ -29,6 +29,13 @@ const machine = agent.createMachine({
 
 The default key is `messages`. Use `appendMessages({ key: "history" })` for another context field.
 
+<!-- AGENT_MESSAGES_EVENT_TYPE, appendMessages, and getMessageText from src/messages.ts, src/utils.ts, and src/index.ts -->
+
+Use `AGENT_MESSAGES_EVENT_TYPE` instead of the string literal when sharing the
+handler. `getMessageText(message)` returns the readable string content and
+joins text parts, including textual tool-result output, while ignoring
+non-text content.
+
 This is deliberately transparent: the AI SDK executor returns AI SDK messages, another framework returns its own messages, and the machine stores those values unchanged. Tool calls and tool results remain part of that framework-native chat log.
 
 See the runnable [`tool-calling`](../examples/tool-calling) example for an AI

@@ -51,7 +51,7 @@ const agentSetup = setupAgent({
 
 ### Model references
 
-`model` is a key into the `models` registry, or any bare string that the [host](hosts.md#typed-model-aliases) resolves at run time. See [Authoring forms](machines.md#authoring-forms).
+`model` is a key into the `models` registry, or any bare string that the [host](hosts.md) resolves at run time. See [Authoring forms](machines.md#authoring-forms).
 
 ### Standalone requests
 
@@ -93,7 +93,7 @@ const answer = parseOutput(answerSchema, rawOutput); // typed as { answer: strin
 
 Output is structured when the schema describes an object, an array, or a top-level union of them built with `z.union` or `z.discriminatedUnion`. Otherwise the output is plain text. An `output: z.object({ ... })` schema returns a validated object. An `output: z.string()` schema returns the model's text.
 
-> **Note for host implementers:** Every structured request is sent wrapped in the [structured-output envelope](./hosts.md#the-structured-output-envelope), a root object `{ result: <your schema> }`. The host must unwrap it before validation. The envelope keeps a bare union or array root portable, because providers that reject a union or array at the root still accept it nested under `result`. Machine authors declare and receive the bare schema. The envelope is invisible to the machine.
+> **Note for host implementers:** Every structured request is sent in a root object `{ result: <your schema> }`. The host must unwrap it before validation. This envelope keeps a bare union or array root portable, because providers that reject one at the root still accept it nested under `result`. Machine authors declare and receive the bare schema.
 
 ```ts
 export const triageTicket = createTextLogic({
@@ -117,7 +117,7 @@ The mode is derived from the schema automatically. You never set it. See [exampl
 
 <!-- reasoning opt-in from src/text-logic.ts (AgentTextRequest.includeReasoning) -->
 
-Set `includeReasoning: true` on a structured request to add an optional string `reasoning` field to the [envelope](./hosts.md#the-structured-output-envelope). The field is listed before `result`, so the property order prompts the model to reason before answering:
+Set `includeReasoning: true` on a structured request to add an optional string `reasoning` field to the envelope. The field is listed before `result`, so the property order prompts the model to reason before answering:
 
 ```ts
 export const triageTicket = createTextLogic({
@@ -130,7 +130,7 @@ export const triageTicket = createTextLogic({
 
 The reasoning never enters machine context or output. It surfaces in three places: on the raw executor result as `result.reasoning` from the `generateText` executor of `createAiSdkExecutors`, on `runAgent`'s `onResult(request, { raw })`, and as a `reasoning` field on the `request.end` `onTrace` event. Text-mode requests ignore the option.
 
-`includeReasoning` is not the provider's reasoning-effort setting. Effort is the host's business, because what it means differs per provider: an enum for one, a thinking-token budget for another, nothing at all for a third. A machine that named an effort level would stop being portable. Set it where the executors are built, with [`createAiSdkExecutors({ settings })`](hosts.md#per-call-provider-settings).
+`includeReasoning` is not the provider's reasoning-effort setting. Effort is the host's business, because what it means differs per provider: an enum for one, a thinking-token budget for another, nothing at all for a third. A machine that named an effort level would stop being portable. Set it where the executors are built, with [`createAiSdkExecutors({ settings })`](models-and-providers.md#host-owned-model-settings).
 
 ## Streaming requests
 
