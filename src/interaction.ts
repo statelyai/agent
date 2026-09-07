@@ -186,13 +186,15 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
     // choice stays rendered. The free-text event is never checked because
     // its payload is not known yet.
     .filter(([type, descriptor]) => {
-      let complete: { type: string };
       try {
-        complete = parseAgentEvent(snapshot, { ...descriptor.event, type }, { schemas });
+        const complete = parseAgentEvent(snapshot, { ...descriptor.event, type }, { schemas });
+        return snapshot.can(complete as never);
       } catch {
+        // Either the payload is incomplete for the schema, or no schema is
+        // registered and a guard threw reading a field the metadata did not
+        // fix. Both mean the choice cannot be judged here: keep it.
         return true;
       }
-      return snapshot.can(complete as never);
     })
     .map(([type, descriptor]) => {
       return {
