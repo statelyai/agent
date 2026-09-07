@@ -971,19 +971,33 @@ export interface ExplorePathsOptions {
    * when it has only an error, only the failing one is. Each fork counts
    * against `maxDepth`, and the failing branch records
    * `{ type: 'xstate.error.actor.<id>' }` in the path.
+   *
+   * A decision invoke can be keyed here too — by its src (usually
+   * `agent.decide`) or by its invoke id — standing in for retry exhaustion.
+   * Its success branch is the usual per-candidate-event fork, so the failing
+   * branch is explored in addition to, not instead of, the candidates.
+   *
+   * A rejection that reaches no `onError` errors the machine, and that path
+   * ends in an `error` terminal.
    */
   errors?: Record<string, unknown>;
 }
 
 /** A single explored path's terminal outcome. */
 export interface AgentPathTerminal {
-  status: "done" | "idle" | "needs-output" | "max-depth";
+  /**
+   * `'error'` is a scripted failure the machine had no `onError` for: the
+   * snapshot is errored, exactly as a live run's unhandled invoke failure.
+   */
+  status: "done" | "idle" | "needs-output" | "max-depth" | "error";
   /** The chosen/applied events, in order, that produced this terminal. */
   path: ChosenEvent[];
   /** The final state value on this path. */
   state: unknown;
   /** For `needs-output`: the src whose canned output was missing. */
   missingSrc?: string;
+  /** For `error`: the failure value that errored the machine. */
+  error?: unknown;
 }
 
 /** The report returned by {@link explorePaths}. */
@@ -1014,6 +1028,13 @@ interface InvokeFork {
   src: string;
   hasOutput: boolean;
   output?: unknown;
+  /**
+   * A decision invoke has no canned output of its own — its success branch is
+   * the per-candidate-event fork the branch-point logic already does. So the
+   * fork rejects it, then falls through to that normal branching instead of
+   * resolving an output.
+   */
+  isDecision?: boolean;
 }
 
 function invokeFork(id: string, src: string, outputs: Record<string, unknown>): InvokeFork {
@@ -1092,7 +1113,22 @@ async function explore(
         continue;
       }
       if (request && request.kind === "decision") {
-        return { step: current };
+        // A decision request carries no `src` of its own: correlate it to its
+        // invoke the way simulateAgent does, and accept either the src
+        // (usually `agent.decide`) or the invoke id as the `errors` key.
+        const src = findInvokeMetadata(current, request.id)?.src;
+        const errorSrc =
+          src !== undefined && src in errorScript
+            ? src
+            : request.id in errorScript
+              ? request.id
+              : undefined;
+        return errorSrc !== undefined
+          ? {
+              step: current,
+              fork: { id: request.id, src: errorSrc, hasOutput: false, isDecision: true },
+            }
+          : { step: current };
       }
       // No request: maybe a pending scripted invoke (userInput), else a wait.
       const [invoke] = pendingInvokes(current);
@@ -1112,7 +1148,8 @@ async function explore(
     return { step: current };
   };
 
-  const visit = async (step: AgentStep, path: ChosenEvent[], depth: number): Promise<void> => {
+  const visit = async (step: AgentStep, path: ChosenEvent[], startDepth: number): Promise<void> => {
+    let depth = startDepth;
     if (witness !== undefined) {
       return;
     }
@@ -1139,12 +1176,20 @@ async function explore(
       const failed = rejectAgentStep(machine, settled, fork.id, errorScript[fork.src]);
       recordState(failed.snapshot);
       await visit(failed, [...path, { type: `xstate.error.actor.${fork.id}` }], depth + 1);
-      if (fork.hasOutput) {
-        const resolved = resolveAgentStep(machine, settled, fork.id, fork.output);
-        recordState(resolved.snapshot);
-        await visit(resolved, path, depth + 1);
+      if (!fork.isDecision) {
+        if (fork.hasOutput) {
+          const resolved = resolveAgentStep(machine, settled, fork.id, fork.output);
+          recordState(resolved.snapshot);
+          await visit(resolved, path, depth + 1);
+        }
+        return;
       }
-      return;
+      // A decision's success branch is the per-candidate-event fork below.
+      // The rejection already spent a level, so the branching starts a level in.
+      depth += 1;
+      if (witness !== undefined) {
+        return;
+      }
     }
 
     if (blockedSrc) {
@@ -1164,6 +1209,19 @@ async function explore(
     if (settled.done) {
       pathsExplored++;
       terminals.push({ status: "done", path, state: settled.snapshot.value });
+      return;
+    }
+
+    // A scripted failure with no `onError` in scope errors the machine, as it
+    // does in a live run. That is a terminal of its own, not an idle wait.
+    if ((settled.snapshot as AnyMachineSnapshot).status === "error") {
+      pathsExplored++;
+      terminals.push({
+        status: "error",
+        path,
+        state: settled.snapshot.value,
+        error: (settled.snapshot as AnyMachineSnapshot & { error?: unknown }).error,
+      });
       return;
     }
 

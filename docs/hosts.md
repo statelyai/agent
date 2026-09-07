@@ -94,6 +94,14 @@ await runAgent(machine, { input, executors });
 
 Structured output goes through `response_format: { type: 'json_schema' }` around the `{ result, reasoning? }` envelope, and is unwrapped before the machine validates it. Decisions force a tool call with `tool_choice: 'required'`, one function tool per candidate event.
 
+`generateText` runs the tool loop host-side. Each step that comes back with tool calls runs the request's tools, appends the assistant `tool_calls` message and one tool message per result, and asks again. The request's `maxSteps` bounds the number of OpenAI calls; the default is one, so a single-step request behaves as before. A tool that throws goes back to the model as an error result. The loop also ends early on a tool with no `execute` — a client-side tool, whose call is handed back with `finishReason: 'tool-calls'` and the raw response. Every step's `usage` is summed onto the one result the run aggregates.
+
+`toolChoice` maps onto `tool_choice`: `'auto'`, `'none'`, and `'required'` pass through, and `{ type: 'tool', name }` becomes `{ type: 'function', function: { name } }`. It is sent on the first step only, so a forced choice cannot re-fire every step and burn the step budget.
+
+Messages map part by part. Text and image parts become OpenAI content parts (`image_url`, with bytes and bare base64 wrapped in a data URL), assistant tool-call parts become `tool_calls`, and tool results become tool messages carrying their `tool_call_id`. A part Chat Completions cannot carry, such as a file part, throws rather than being dropped.
+
+`streamText` is text-only. A request that declares tools or a structured output schema is refused, not silently downgraded; route it to `generateText`.
+
 Every result reports `usage` on the flat `AgentCallUsage` field names, with `reasoning_tokens` and `cached_tokens` folded onto `reasoningTokens` and `cachedInputTokens`, plus the normalized `finishReason` and the untouched response on `raw`. Streams ask for `stream_options: { include_usage: true }`, so a stream reports usage too.
 
 ## Finish reasons and truncation
@@ -105,15 +113,25 @@ A `'length'` finish is the host's to interpret, because only the host sees it:
 - Text request: return the text the model did produce, with `finishReason: 'length'`. Do not throw.
 - Structured request: there is no usable output, so throw `AgentTruncatedError` with the `cause` and, when the model produced something, `partialOutput`.
 
-```ts no-check
+```ts
 import { AgentTruncatedError } from "@statelyai/agent";
+import type { AgentRequestExecutorInfo, AgentTextRequest } from "@statelyai/agent";
 
-throw new AgentTruncatedError(`Request '${request.name}' hit the output token limit.`, {
-  requestName: request.name,
-  requestId: info?.requestId,
-  partialOutput: partialText,
-  cause: error
-});
+function onTruncated(
+  request: AgentTextRequest,
+  info: AgentRequestExecutorInfo | undefined,
+  partialText: string,
+  cause: unknown
+): never {
+  // `request.name` is optional, and `requestName` is required.
+  const requestName = request.name ?? "(unnamed)";
+  throw new AgentTruncatedError(`Request '${requestName}' hit the output token limit.`, {
+    requestName,
+    requestId: info?.requestId,
+    partialOutput: partialText,
+    cause
+  });
+}
 ```
 
 The error's code is `'truncated'`, which is what a machine's `onError` branches on. Core never throws it.

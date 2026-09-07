@@ -122,7 +122,10 @@ describe("request -> OpenAI param mapping (pure helpers)", () => {
       { type: "ASK", toolName: "send_event_ASK" },
       { type: "GUESS", toolName: "send_event_GUESS" },
     ]);
-    expect(tools.map((t) => t.function.name)).toEqual(["send_event_ASK", "send_event_GUESS"]);
+    expect(tools.map((t) => (t as { function: { name: string } }).function.name)).toEqual([
+      "send_event_ASK",
+      "send_event_GUESS",
+    ]);
   });
 
   test("toDecisionMessages appends attempt feedback as user messages", () => {
@@ -390,5 +393,219 @@ describe("createOpenAiExecutors: decide", () => {
       client: stubClient(async () => ({ choices: [choice("I would rather not.")] })),
     });
     await expect(decide(decisionRequest)).rejects.toThrow("did not call an event tool");
+  });
+});
+
+// One choice whose message is a tool call, shaped the way OpenAI returns it.
+const toolCallChoice = (name: string, args: unknown, id = "call_1") => ({
+  index: 0,
+  finish_reason: "tool_calls",
+  message: {
+    role: "assistant",
+    content: null,
+    tool_calls: [{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }],
+  },
+});
+
+describe("message conversion: multi-part content", () => {
+  test("a user message's text and image parts map onto OpenAI content parts", () => {
+    const messages = toOpenAiMessages({
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "What is this?" },
+            { type: "image", image: "https://example.com/cat.png" },
+            { type: "image", image: "AAAA", mediaType: "image/png" },
+          ],
+        },
+      ],
+    } as Pick<AgentTextRequest, "system" | "prompt" | "messages">);
+    expect(messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "What is this?" },
+          { type: "image_url", image_url: { url: "https://example.com/cat.png" } },
+          { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+        ],
+      },
+    ]);
+  });
+
+  test("an assistant tool call round-trips through OpenAI `tool_calls` and back as a tool message", () => {
+    const messages = toOpenAiMessages({
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Looking it up." },
+            { type: "tool-call", toolCallId: "call_1", toolName: "lookup", input: { q: "cats" } },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call_1",
+              toolName: "lookup",
+              output: { type: "text", value: "9 lives" },
+            },
+          ],
+        },
+      ],
+    } as Pick<AgentTextRequest, "system" | "prompt" | "messages">);
+    expect(messages).toEqual([
+      {
+        role: "assistant",
+        content: "Looking it up.",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "lookup", arguments: JSON.stringify({ q: "cats" }) },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_1", content: "9 lives" },
+    ]);
+  });
+
+  test("a part Chat Completions cannot carry throws instead of being dropped", () => {
+    expect(() =>
+      toOpenAiMessages({
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "file", data: "AAAA", mediaType: "application/pdf" }],
+          },
+        ],
+      } as Pick<AgentTextRequest, "system" | "prompt" | "messages">),
+    ).toThrow(/type 'file' has no Chat Completions equivalent/);
+  });
+});
+
+describe("createOpenAiExecutors: tool loop", () => {
+  const tools = {
+    lookup: {
+      description: "Looks something up.",
+      inputSchema: z.object({ q: z.string() }),
+      execute: ({ q }: { q: string }) => `${q}: 9 lives`,
+    },
+  } as unknown as AgentTools;
+
+  test("runs the tool, feeds the result back, and returns the model's final text", async () => {
+    const create = vi.fn(async (_params: any) =>
+      create.mock.calls.length === 1
+        ? {
+            choices: [toolCallChoice("lookup", { q: "cats" })],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+          }
+        : {
+            choices: [choice("Cats have 9 lives.")],
+            usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
+          },
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+
+    const result = await generateText(textRequest({ tools, maxSteps: 4 } as never));
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(result.output).toBe("Cats have 9 lives.");
+    expect(result.finishReason).toBe("stop");
+    // The second call carries the assistant tool_calls message and the result.
+    expect(create.mock.calls[1]![0].messages.slice(-2)).toEqual([
+      expect.objectContaining({ role: "assistant" }),
+      { role: "tool", tool_call_id: "call_1", content: "cats: 9 lives" },
+    ]);
+    // Every step's usage is folded into the one result the run aggregates.
+    expect(result.usage).toEqual({ inputTokens: 30, outputTokens: 9, totalTokens: 39 });
+  });
+
+  test("`maxSteps` bounds the loop; the default is a single call", async () => {
+    const create = vi.fn(async (_params: any) => ({
+      choices: [toolCallChoice("lookup", { q: "cats" })],
+    }));
+    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+
+    const bounded = await generateText(textRequest({ tools, maxSteps: 3 } as never));
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(bounded.finishReason).toBe("tool-calls");
+
+    create.mockClear();
+    await generateText(textRequest({ tools } as never));
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  test("a tool with no `execute` ends the loop and hands the call back", async () => {
+    const create = vi.fn(async (_params: any) => ({
+      choices: [toolCallChoice("clientSide", {})],
+    }));
+    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+
+    const result = await generateText(
+      textRequest({
+        tools: { clientSide: { inputSchema: z.object({}) } },
+        maxSteps: 5,
+      } as never),
+    );
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(result.finishReason).toBe("tool-calls");
+  });
+
+  test("a thrown tool goes back to the model as an error result", async () => {
+    const create = vi.fn(async (_params: any) =>
+      create.mock.calls.length === 1
+        ? { choices: [toolCallChoice("lookup", { q: "cats" })] }
+        : { choices: [choice("Sorry, the lookup failed.")] },
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+
+    const result = await generateText(
+      textRequest({
+        tools: {
+          lookup: {
+            inputSchema: z.object({ q: z.string() }),
+            execute: () => {
+              throw new Error("boom");
+            },
+          },
+        },
+        maxSteps: 2,
+      } as never),
+    );
+    expect(create.mock.calls[1]![0].messages.at(-1)).toMatchObject({
+      role: "tool",
+      content: "Error: boom",
+    });
+    expect(result.output).toBe("Sorry, the lookup failed.");
+  });
+
+  test("`toolChoice` is mapped onto OpenAI's `tool_choice`, on the first step only", async () => {
+    const create = vi.fn(async (_params: any) =>
+      create.mock.calls.length === 1
+        ? { choices: [toolCallChoice("lookup", { q: "cats" })] }
+        : { choices: [choice("done")] },
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+
+    await generateText(
+      textRequest({ tools, maxSteps: 3, toolChoice: { type: "tool", name: "lookup" } } as never),
+    );
+    expect(create.mock.calls[0]![0].tool_choice).toEqual({
+      type: "function",
+      function: { name: "lookup" },
+    });
+    // Re-forcing a tool every step would burn the budget without an answer.
+    expect(create.mock.calls[1]![0]).not.toHaveProperty("tool_choice");
+
+    create.mockClear();
+    await generateText(textRequest({ tools, toolChoice: "required" } as never));
+    expect(create.mock.calls[0]![0].tool_choice).toBe("required");
+
+    create.mockClear();
+    await generateText(textRequest({ tools } as never));
+    expect(create.mock.calls[0]![0]).not.toHaveProperty("tool_choice");
   });
 });

@@ -140,16 +140,21 @@ Fan-out and repairs solve different halves of the problem. The three calls run c
 A `finishReason` of `'length'` makes the adapter throw an [`AgentTruncatedError`](text-requests.md#finish-reason-and-truncation) for a structured request. With separate invokes, that failure lands on one slot: its `onError` marks the slot settled with no draft, and the other two carry on. Only when every slot failed is `pending` empty, and then there is no partial output to repair from, so the machine stops:
 
 ```ts no-check
+// `event.error` is `unknown`: any value can reach an onError. `errorCode`
+// reads `code` only when the failure is an object that has one, so a thrown
+// string or a plain Error falls through to the generic message.
 onError: ({ context, event }) => ({
   context: {
     settled: context.settled + 1,
     failureReason:
-      event.error.code === "truncated"
+      errorCode(event.error) === "truncated"
         ? "The model ran out of output tokens before finishing a config. Ask for a smaller machine, or raise maxOutputTokens."
         : `Generating a config failed: ${errorMessage(event.error)}`,
   },
 }),
 ```
+
+Branch on the code, not on `instanceof AgentTruncatedError`: the error crosses a package boundary, and two copies of the library in one tree make the class check fail where the code still matches.
 
 ## Capping the loop
 
@@ -190,7 +195,7 @@ One queued answer per invoke: the fan-out makes three `generateConfig` calls, so
 
 - **One candidate is valid.** The run finishes with `repairs === 0`, and no repair request was ever built.
 - **All candidates are rejected, and the repair fixes it.** `repairs === 1`, and `matchesTrajectory` pins the path through `repairing` and back into `parsing`.
-- **No repair ever parses.** The run ends in `failed` with `repairs === maxRepairs`, `config` is `null`, and `result.usage.modelCalls` is `3 + maxRepairs`, which is the assertion that the cap held.
+- **No repair ever parses.** The run ends in `failed` with `repairs === maxRepairs`, `config` is `null`, and `result.usage.modelCalls` is `3 + maxRepairs`, which is the assertion that the cap held. `repairs` counts rounds that produced a candidate to re-parse: a repair *call* that fails goes straight to `failed` through `repairing`'s `onError` without spending a round, so that path ends with `repairs` below `maxRepairs`.
 
 `assertAgentMachine(machine)` covers the structure statically: a clean lint is the proof that `failed` is a target of some transition. [`canReach`](verify.md#reachability-checks) covers it dynamically. Exploration tracks every invoke a state is still waiting on, so it walks straight through the three-way fan-out, and a canned `parseConfig` failure drives the loop to the end of its repair budget.
 
@@ -220,7 +225,9 @@ const run = await runSeam(machine, {
   input: { prompt: "a turnstile that locks and unlocks" },
   seam: { request: "generateConfig" },
   candidate: generateText,
-  scripts: { repairConfig: [VALID] },
+  // The script is the whole call plan, seam slot included: three
+  // `generateConfig` calls fan out, and the live one still consumes its slot.
+  scripts: { generateConfig: [VALID, VALID, VALID], repairConfig: [VALID] },
 });
 
 // The branch the live candidate caused: straight to `done`, or through `repairing`.

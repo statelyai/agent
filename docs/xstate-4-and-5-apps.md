@@ -108,13 +108,38 @@ export async function POST(request: Request) {
 
 ## What can cross the boundary
 
-Persisted snapshots are JSON. `result.persist()` returns a plain JSON value, and `runAgent(machine, { snapshot })` takes one back, so a paused run can be stored by the app, in its own database, and resumed by a later call into the package.
+Persisted snapshots are JSON. `result.persist()` returns a plain JSON value, and `runAgent(machine, { snapshot, event })` takes one back, so a paused run can be stored by the app, in its own database, and resumed by a later call into the package. Pair `snapshot` with the `event` that unblocks the idle state: a resume with `snapshot` alone starts the run back at the same wait.
 
 ```ts no-check
 // Inside the package: the app stores and returns the value, and never reads it.
-export async function startGeneration(input: GenerationInput): Promise<{ snapshot: unknown }> {
-  const result = await runAgent(generationMachine, { input, executors });
+import type { Snapshot } from "xstate";
+
+export async function startGeneration(
+  input: GenerationInput,
+  deps: GenerationDeps,
+): Promise<{ snapshot: unknown }> {
+  const result = await runAgent(generationMachine(deps.lookup), {
+    input,
+    executors: createAiSdkExecutors({ models }),
+  });
   return { snapshot: result.status === "idle" ? result.persist() : null };
+}
+
+export async function resumeGeneration(
+  snapshot: unknown,
+  answer: string,
+  deps: GenerationDeps,
+): Promise<GenerationOutput> {
+  const result = await runAgent(generationMachine(deps.lookup), {
+    // Opaque to the app, typed again here at the package boundary.
+    snapshot: snapshot as Snapshot<unknown>,
+    event: { type: "ANSWER", answer },
+    executors: createAiSdkExecutors({ models }),
+  });
+  if (result.status !== "done") {
+    throw new Error(`Generation did not complete: ${result.status}`);
+  }
+  return result.output;
 }
 ```
 

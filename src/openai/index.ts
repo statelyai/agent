@@ -11,13 +11,18 @@
 import type OpenAI from "openai";
 import type {
   ChatCompletion,
+  ChatCompletionAssistantMessageParam,
   ChatCompletionChunk,
+  ChatCompletionContentPart,
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
-  ChatCompletionFunctionTool,
   ChatCompletionMessageParam,
+  // `ChatCompletionTool` spans the whole supported `openai` peer range; the
+  // narrower `ChatCompletionFunctionTool` name only exists in later releases.
+  ChatCompletionTool,
 } from "openai/resources/chat/completions/completions.js";
 import {
+  AGENT_USAGE_TOKEN_FIELDS,
   buildEnvelopeSchema,
   getAgentOutputMode,
   parseStructuredEnvelope,
@@ -29,10 +34,66 @@ import {
 import { AgentTruncatedError } from "../errors.js";
 import { renderDecisionAttempts, type AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
-import type { AgentMessage, AgentTool, AgentTools, ChosenEvent } from "../types.js";
+import type {
+  AgentMessage,
+  AgentTool,
+  AgentToolChoice,
+  AgentTools,
+  ChosenEvent,
+  DataContent,
+  ToolResultPart,
+} from "../types.js";
 import { getJsonSchema, getJsonSchemaSync, isStandardSchema } from "../utils.js";
 
 // ─── Request → OpenAI param mapping (pure, unit-testable) ───
+
+/** Thrown for a message part Chat Completions cannot carry — dropping it would
+ * silently change what the model sees. */
+function unsupportedPart(role: string, type: string): never {
+  throw new Error(
+    `createOpenAiExecutors: a ${role} message part of type '${type}' has no Chat Completions ` +
+      "equivalent. Send text, image, tool-call, or tool-result parts, or convert it before the " +
+      "request.",
+  );
+}
+
+/** A `DataContent`/`URL` image as the URL string OpenAI's `image_url` part wants:
+ * an http(s) or `data:` string and a `URL` pass through, a bare base64 string and
+ * raw bytes are wrapped in a data URL. */
+function toImageUrl(image: DataContent | URL, mediaType: string | undefined): string {
+  if (image instanceof URL) {
+    return image.href;
+  }
+  const type = mediaType ?? "image/jpeg";
+  if (typeof image === "string") {
+    return /^(https?:|data:)/.test(image) ? image : `data:${type};base64,${image}`;
+  }
+  const bytes = image instanceof Uint8Array ? image : new Uint8Array(image);
+  const encode = (globalThis as { btoa?: (data: string) => string }).btoa;
+  if (!encode) {
+    throw new Error(
+      "createOpenAiExecutors: binary image parts need a global `btoa` to base64-encode. Pass the " +
+        "image as a URL or a base64 string instead.",
+    );
+  }
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return `data:${type};base64,${encode(binary)}`;
+}
+
+/** One OpenAI tool message per `ToolResultPart` — the tool role is one message per result. */
+function toToolMessage(part: ToolResultPart): ChatCompletionMessageParam {
+  return {
+    role: "tool",
+    content:
+      part.output.type === "text" || part.output.type === "error-text"
+        ? part.output.value
+        : JSON.stringify(part.output.value),
+    tool_call_id: part.toolCallId,
+  };
+}
 
 /** Maps `AgentTextRequest.messages`/`system`/`prompt` to OpenAI chat messages. */
 export function toOpenAiMessages(
@@ -41,27 +102,73 @@ export function toOpenAiMessages(
   if (request.messages) {
     // AgentMessage's `system|user|assistant|tool` roles map 1:1 onto OpenAI's
     // message roles; string content is directly compatible with OpenAI's
-    // content union for each role.
+    // content union for each role. Multi-part content is mapped part by part,
+    // and a part Chat Completions cannot carry throws rather than vanishing.
     return request.messages.flatMap((message): ChatCompletionMessageParam[] => {
-      const content = typeof message.content === "string" ? message.content : "";
       switch (message.role) {
         case "system":
-          return [{ role: "system", content }];
-        case "user":
+          return [{ role: "system", content: message.content }];
+        case "user": {
+          if (typeof message.content === "string") {
+            return [{ role: "user", content: message.content }];
+          }
+          const content = message.content.map((part): ChatCompletionContentPart => {
+            switch (part.type) {
+              case "text":
+                return { type: "text", text: part.text };
+              case "image":
+                return {
+                  type: "image_url",
+                  image_url: { url: toImageUrl(part.image, part.mediaType) },
+                };
+              default:
+                return unsupportedPart("user", part.type);
+            }
+          });
           return [{ role: "user", content }];
-        case "assistant":
-          return [{ role: "assistant", content }];
+        }
+        case "assistant": {
+          if (typeof message.content === "string") {
+            return [{ role: "assistant", content: message.content }];
+          }
+          let text = "";
+          const toolCalls: NonNullable<ChatCompletionAssistantMessageParam["tool_calls"]> = [];
+          // A tool result carried inline on an assistant message becomes a
+          // separate tool message after it — where Chat Completions puts one.
+          const trailing: ChatCompletionMessageParam[] = [];
+          for (const part of message.content) {
+            switch (part.type) {
+              case "text":
+                text += part.text;
+                break;
+              case "tool-call":
+                toolCalls.push({
+                  id: part.toolCallId,
+                  type: "function",
+                  function: {
+                    name: part.toolName,
+                    arguments: JSON.stringify(part.input ?? {}),
+                  },
+                });
+                break;
+              case "tool-result":
+                trailing.push(toToolMessage(part));
+                break;
+              default:
+                unsupportedPart("assistant", part.type);
+            }
+          }
+          return [
+            {
+              role: "assistant",
+              content: text,
+              ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+            },
+            ...trailing,
+          ];
+        }
         case "tool":
-          // A `ToolMessage` carries one or more `ToolResultPart`s, each with
-          // its own `toolCallId`; OpenAI's tool role is one message per result.
-          return message.content.map((part) => ({
-            role: "tool",
-            content:
-              part.output.type === "text" || part.output.type === "error-text"
-                ? part.output.value
-                : JSON.stringify(part.output.value),
-            tool_call_id: part.toolCallId,
-          }));
+          return message.content.map(toToolMessage);
       }
     });
   }
@@ -118,7 +225,7 @@ function staticDescription(descriptor: AgentTool): string | undefined {
 }
 
 /** One OpenAI function tool per `AgentTools` entry. */
-export function toOpenAiTools(tools: AgentTools): ChatCompletionFunctionTool[] {
+export function toOpenAiTools(tools: AgentTools): ChatCompletionTool[] {
   return Object.entries(tools).flatMap(([name, descriptor]) => {
     if (!descriptor) {
       return [];
@@ -138,9 +245,24 @@ export function toOpenAiTools(tools: AgentTools): ChatCompletionFunctionTool[] {
   });
 }
 
+/**
+ * Maps an {@link AgentToolChoice} onto OpenAI's `tool_choice` —
+ * `{ type: 'tool', name }` becomes `{ type: 'function', function: { name } }`;
+ * `'auto'`/`'none'`/`'required'` are OpenAI's own vocabulary and pass through.
+ * `undefined` stays `undefined`, so the key is omitted.
+ */
+export function toOpenAiToolChoice(toolChoice: AgentToolChoice | undefined) {
+  if (toolChoice === undefined) {
+    return undefined;
+  }
+  return typeof toolChoice === "object"
+    ? { type: "function" as const, function: { name: toolChoice.name } }
+    : toolChoice;
+}
+
 /** One OpenAI function tool per candidate decision event — the "tool-per-event
  * + tool_choice: 'required'" recipe, mirroring `toAiSdkEventTools`. */
-export function toOpenAiEventTools(events: AgentEventDescriptor[]): ChatCompletionFunctionTool[] {
+export function toOpenAiEventTools(events: AgentEventDescriptor[]): ChatCompletionTool[] {
   return events.map((event) => ({
     type: "function" as const,
     function: {
@@ -364,9 +486,52 @@ function truncated(
 }
 
 // The `usage` key, present only when OpenAI reported one.
-function usageField(usage: OpenAiUsage | undefined): { usage?: AgentCallUsage } {
-  const mapped = toAgentCallUsage(usage);
-  return mapped ? { usage: mapped } : {};
+function usageField(usage: AgentCallUsage | undefined): { usage?: AgentCallUsage } {
+  return usage ? { usage } : {};
+}
+
+/**
+ * Adds two calls' usage together, field by field. A tool loop makes several
+ * OpenAI calls per request, and core folds ONE `usage` per executor result into
+ * the run's totals, so the steps' usages have to be summed here or the run
+ * undercounts. A field neither call reported stays absent.
+ */
+export function addAgentCallUsage(
+  total: AgentCallUsage | undefined,
+  next: AgentCallUsage | undefined,
+): AgentCallUsage | undefined {
+  if (!total || !next) {
+    return total ?? next;
+  }
+  const sum: AgentCallUsage = {};
+  for (const field of AGENT_USAGE_TOKEN_FIELDS) {
+    if (total[field] !== undefined || next[field] !== undefined) {
+      sum[field] = (total[field] ?? 0) + (next[field] ?? 0);
+    }
+  }
+  return sum;
+}
+
+/**
+ * The function that runs one of the request's tools host-side, or `undefined`
+ * when the tool has no `execute` (a client-side tool: the model's call is
+ * handed back to the caller instead of being answered here).
+ */
+function toolExecutor(tools: AgentTools, name: string): ((input: unknown) => unknown) | undefined {
+  const descriptor = tools[name];
+  if (!descriptor) {
+    return undefined;
+  }
+  if (typeof descriptor === "function") {
+    return (input) => descriptor(input);
+  }
+  const execute = descriptor.execute;
+  return typeof execute === "function" ? (input) => execute(input) : undefined;
+}
+
+// A tool's return value as the string an OpenAI tool message carries.
+function toToolContent(output: unknown): string {
+  return typeof output === "string" ? output : JSON.stringify(output ?? null);
 }
 
 /**
@@ -396,12 +561,13 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
   // settable, so the cast only re-asserts what the spreads preserve.
   const textParams = (
     request: AgentTextRequest & { tools: AgentTools },
+    messages: ChatCompletionMessageParam[],
     extra: Partial<ChatCompletionCreateParamsNonStreaming> = {},
   ): ChatCompletionCreateParamsNonStreaming => {
     const tools = toOpenAiTools(request.tools);
     return {
       model: resolveModel(request.model),
-      messages: toOpenAiMessages(request),
+      messages,
       ...callSettings(options, request),
       ...toOpenAiCallSettings(request),
       ...(tools.length > 0 ? { tools } : {}),
@@ -430,29 +596,81 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     info?: AgentRequestExecutorInfo,
   ): Promise<OpenAiGenerateResult> => {
     const jsonSchema = await envelopeSchema(request);
-    const params = textParams(
-      request,
-      jsonSchema
-        ? {
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                name: "output",
-                schema: jsonSchema,
-                // Arbitrary JSON Schema (e.g. from Zod) may use features
-                // outside OpenAI's strict-mode subset (defaults, unions, …) —
-                // leaving strict mode off keeps this general rather than
-                // requiring schema authors to hand-tune for OpenAI.
-                strict: false,
-              },
+    const responseFormat: Partial<ChatCompletionCreateParamsNonStreaming> = jsonSchema
+      ? {
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "output",
+              schema: jsonSchema,
+              // Arbitrary JSON Schema (e.g. from Zod) may use features
+              // outside OpenAI's strict-mode subset (defaults, unions, …) —
+              // leaving strict mode off keeps this general rather than
+              // requiring schema authors to hand-tune for OpenAI.
+              strict: false,
             },
-          }
-        : {},
-    );
+          },
+        }
+      : {};
 
-    const response = (await client.chat.completions.create(params, {
-      signal: info?.signal,
-    })) as ChatCompletion;
+    // The host-side tool loop. `maxSteps` bounds the number of OpenAI calls
+    // (default 1, single-step, like the AI SDK adapter): each step that comes
+    // back with tool calls runs them, appends the assistant `tool_calls`
+    // message and one tool message per result, and asks again. The loop ends on
+    // a step with no tool calls, on the step budget, or on a tool with no
+    // `execute` — a client-side tool, whose call belongs to the caller, so the
+    // result comes back with `finishReason: 'tool-calls'` and the raw response.
+    const maxSteps = typeof request.maxSteps === "number" ? Math.max(1, request.maxSteps) : 1;
+    const messages = toOpenAiMessages(request);
+    const toolChoice = toOpenAiToolChoice(request.toolChoice);
+    let response: ChatCompletion;
+    let usage: AgentCallUsage | undefined;
+    let step = 0;
+
+    for (;;) {
+      step++;
+      response = (await client.chat.completions.create(
+        textParams(request, messages, {
+          ...responseFormat,
+          // A forced choice applies to the FIRST step only: re-sending
+          // `'required'` after a tool ran would force another call every step
+          // and burn the budget without ever producing an answer.
+          ...(step === 1 && toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+        }),
+        { signal: info?.signal },
+      )) as ChatCompletion;
+      usage = addAgentCallUsage(usage, toAgentCallUsage(response.usage));
+
+      const message = response.choices[0]?.message;
+      const toolCalls = message?.tool_calls ?? [];
+      if (toolCalls.length === 0 || step >= maxSteps) {
+        break;
+      }
+      const executors = toolCalls.map((call) =>
+        call.type === "function" ? toolExecutor(request.tools, call.function.name) : undefined,
+      );
+      if (executors.some((execute) => !execute)) {
+        break;
+      }
+
+      messages.push(message as ChatCompletionMessageParam);
+      for (const [index, call] of toolCalls.entries()) {
+        const input: unknown =
+          call.type === "function" && call.function.arguments
+            ? JSON.parse(call.function.arguments)
+            : {};
+        let content: string;
+        try {
+          content = toToolContent(await executors[index]!(input));
+        } catch (error) {
+          // A thrown tool goes back to the model as an error result, the way
+          // the AI SDK's loop reports one, rather than failing the request.
+          content = `Error: ${error instanceof Error ? error.message : String(error)}`;
+        }
+        messages.push({ role: "tool", tool_call_id: call.id, content });
+      }
+    }
+
     // Validated unwrap of the `{ result, reasoning? }` envelope — no cast.
     const unwrap = (content: string | null | undefined) =>
       parseStructuredEnvelope(request, content ? JSON.parse(content) : undefined);
@@ -473,7 +691,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       return {
         output: parsed.result,
         ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
-        ...usageField(response.usage),
+        ...usageField(usage),
         finishReason,
         raw: response,
       };
@@ -483,7 +701,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     // with `finishReason: 'length'` — the machine decides what that is worth.
     return {
       output: content ?? "",
-      ...usageField(response.usage),
+      ...usageField(usage),
       finishReason,
       raw: response,
     };
@@ -544,7 +762,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       }
     }
 
-    return { output: text, ...usageField(usage), finishReason, raw: last };
+    return { output: text, ...usageField(toAgentCallUsage(usage)), finishReason, raw: last };
   };
 
   const decide = async (
@@ -586,7 +804,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         ...(args && typeof args === "object" ? args : {}),
         type: chosenEvent.type,
       } as ChosenEvent,
-      ...usageField(response.usage),
+      ...usageField(toAgentCallUsage(response.usage)),
       finishReason: toAgentFinishReason(response.choices[0]?.finish_reason),
       raw: response,
     };

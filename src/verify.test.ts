@@ -1094,6 +1094,36 @@ describe("simulateAgent — scripted invoke failures", () => {
   });
 });
 
+// A decide whose only candidate is ISSUE, so `exhausted` is reachable ONLY
+// through the decide invoke's `onError` — the retry-exhaustion branch.
+function createExhaustibleDecideMachine() {
+  const agent = setupAgent({
+    context: z.object({}),
+    events: { ISSUE: z.object({}) },
+  });
+  return agent.createMachine({
+    context: {},
+    initial: "classifying",
+    states: {
+      classifying: {
+        invoke: {
+          id: "decide",
+          src: "agent.decide",
+          input: () => ({
+            model: "quick",
+            prompt: "Issue?",
+            allowedEvents: ["ISSUE"] as const,
+          }),
+          onError: { target: "exhausted" },
+        },
+        on: { ISSUE: { target: "issued" } },
+      },
+      issued: { type: "final" },
+      exhausted: { type: "final" },
+    },
+  });
+}
+
 describe("explorePaths — scripted invoke failures fork a branch", () => {
   test("a src with only an error fails on every branch", async () => {
     const report = await explorePaths(createParsingMachine(), {
@@ -1131,6 +1161,55 @@ describe("explorePaths — scripted invoke failures fork a branch", () => {
     });
 
     expect(reachable).toBe(false);
+  });
+
+  test("a decision src in errors reaches the decide invoke's onError-only state", async () => {
+    const machine = createExhaustibleDecideMachine();
+
+    expect((await canReach(machine, "exhausted", {})).reachable).toBe(false);
+
+    const { reachable, witness } = await canReach(machine, "exhausted", {
+      errors: { "agent.decide": new Error("model would not choose") },
+    });
+
+    expect(reachable).toBe(true);
+    expect(witness).toEqual([{ type: "xstate.error.actor.decide" }]);
+  });
+
+  test("a decision fork explores the failure branch AND the candidate events", async () => {
+    const report = await explorePaths(createExhaustibleDecideMachine(), {
+      errors: { "agent.decide": new Error("model would not choose") },
+    });
+
+    expect(report.terminals.map((terminal) => terminal.state).sort()).toEqual([
+      "exhausted",
+      "issued",
+    ]);
+    expect(report.reachedStates).toEqual(["classifying", "exhausted", "issued"]);
+  });
+
+  test("a decision fork can also be keyed by the invoke id", async () => {
+    const { reachable } = await canReach(createExhaustibleDecideMachine(), "exhausted", {
+      errors: { decide: new Error("model would not choose") },
+    });
+
+    expect(reachable).toBe(true);
+  });
+
+  test("a scripted failure with no onError ends the path in an 'error' terminal", async () => {
+    const failure = { code: "truncated" };
+    const report = await explorePaths(createUncaughtParsingMachine(), {
+      errors: { parse: failure },
+    });
+
+    expect(report.terminals).toEqual([
+      {
+        status: "error",
+        path: [{ type: "xstate.error.actor.parse" }],
+        state: "parsing",
+        error: failure,
+      },
+    ]);
   });
 
   test("guard pruning and path counts are unchanged when no errors are scripted", async () => {
