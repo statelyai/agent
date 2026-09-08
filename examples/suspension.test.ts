@@ -83,8 +83,10 @@ describe("example suspension predicates", () => {
     // be a deliberate edit here, and a wait that silently disappears from an
     // example is a regression this test exists to catch.
     expect([...humanWaits].sort()).toEqual([
+      "booking-compensation#bookingCompensationMachine",
       "chameleon#chameleonMachine",
       "chat-with-pdf#chatWithPdfMachine",
+      "consensus-review#consensusReviewMachine",
       "context-compaction#contextCompactionMachine",
       "customer-support#customerSupportMachine",
       "email-drafter#emailDrafter",

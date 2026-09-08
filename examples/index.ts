@@ -200,3 +200,11 @@ export {
   parseGeneratedConfig,
   runGenerateAndRepairExample,
 } from "./generate-and-repair/index.js";
+
+// --- Statechart policies ----------------------------------------------------
+
+export { consensusReviewMachine, runConsensusReviewExample } from "./consensus-review/index.js";
+export {
+  bookingCompensationMachine,
+  runBookingCompensationExample,
+} from "./booking-compensation/index.js";
