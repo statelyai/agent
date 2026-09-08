@@ -16,7 +16,7 @@ Covered all public entrypoint families: root authoring/types, text and decision 
 
 Baseline: `pnpm vitest run`, 76 files and 952 tests passed. Runtime and compiler probes found defects outside that suite. “Reproduced” below means a local deterministic probe; it does not mean a production incident. “Source” means confirmed control flow without an independent runtime reproduction. All included findings have high confidence unless explicitly qualified.
 
-Not audited: deployed services, live SDK/provider calls, authenticated security boundaries, complete demo UI/accessibility, production load, platform certification, or formal exhaustive model checking. Dependency audit reported zero high/critical advisories; lower-severity findings in demo/host dependency chains did not establish an exploitable application path. No performance benchmarks were run.
+Not audited: deployed services, live SDK/provider calls, authenticated security boundaries, complete demo UI/accessibility, production load, platform certification, or formal exhaustive model checking. Production-only dependency audit reported zero high/critical advisories. A full dependency audit subsequently found one high, six moderate, and one low advisory; the high finding is a demo development dependency detailed in 24. No exploitable application path was established. No performance benchmarks were run.
 
 Current `next` contains event-log/store and OpenAI APIs. Earlier simplification notes described a different revision; recommendations below use current source.
 
@@ -49,6 +49,7 @@ Effort: S = hours, M = about a day, L = multiple days, including regression cove
 | 21 | CI omits existing docs/declaration gates | Tooling: published API/docs can regress while CI passes | S | Low | `.github/workflows/ci.yml:29–46`, `package.json` scripts; source, high |
 | 22 | JSON construction overstates validation | Docs/validation: lowering mistaken for schema validation | S–M | Low–medium | `src/workflow-config.ts:9–12,943–1001`, `src/validate/index.ts:54`; source, high |
 | 23 | Example adapters silently lose supported conversation parts | Portability: examples do not establish full parity | M–L | Medium | `examples/anthropic-sdk-host/index.ts:91–125`; source, high for loss |
+| 24 | Demo tooling retains vulnerable Undici 7.28.0 | Dependencies: high upstream cache advisory | S–M | Medium | `pnpm-lock.yaml:6721,13529`, `pnpm why undici -r`, Dependabot 139; high for affected dependency, exposure unproven |
 
 ### 01. Cancelled decisions
 
@@ -141,6 +142,14 @@ CI omits existing `docs:check` and `check:dts`; run both after build. Pin pnpm t
 JSON workflow construction compiles schemas and lowers config but does not call the optional published-schema validator. Its header implies full validation. Document `validateAgentConfig` → construction → lint/simulation, or offer one optional validated construction path. Successful construction alone is not proof of the published schema contract.
 
 The Anthropic example documents text-only simplifications, yet retains tool results after dropping assistant tool calls, and drops system-role history. This is an acknowledged limitation, not a newly discovered vulnerability. Make unsupported input fail explicitly or complete the mapper. A shared conformance fixture should cover message/tool pairs, system instructions, structured output, decisions, cancellation, chunks, usage, and errors. Publish supported capabilities per adapter rather than inferring universal parity from one triage run.
+
+### 24. Demo development dependency advisory
+
+Full `pnpm audit --json` reports one high, six moderate, and one low advisory. `pnpm why undici -r` locates vulnerable 7.28.0 under demo development tooling: `nitro-nightly → env-runner → miniflare@4.20260730.0 → undici@7.28.0`. Runtime AI SDK dependency paths resolve to patched 7.29.0.
+
+[Undici advisory GHSA-4cwx-7wf7-3272](https://github.com/nodejs/undici/security/advisories/GHSA-4cwx-7wf7-3272) identifies shared-cache disclosure and parser failure; 7.29.0 fixes the affected 7.x range. The disclosure requires use of its cache interceptor and particular upstream headers. Source search found no direct cache-interceptor use in core/examples/demo source; transitive tooling exposure is not established.
+
+Update the owning demo dependency chain or apply a justified compatible resolution, then rerun demo build/tests and the dependency audit. Do not represent the earlier `--prod` result as a clean full-workspace audit. No dependency change or alert dismissal is included here.
 
 ## API simplification and removal decisions
 
