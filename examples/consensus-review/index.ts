@@ -16,11 +16,13 @@ import {
 const vote = z.object({ approve: z.boolean(), reason: z.string() });
 const reviewer = z.enum(["security", "reliability", "maintainability"]);
 const agent = setupAgent({
-  // A host that passes its own patch should mark it "external": model votes then
-  // cannot auto-accept it, because the patch text is untrusted reviewer input.
+  // `source` is decided by host code, never by whoever supplied the patch: the
+  // patch text reaches every reviewer prompt, so a patch the host did not
+  // author is untrusted input and model votes cannot auto-accept it. There is
+  // no default on purpose; a host has to say which it is.
   input: z.object({
     patch: z.string(),
-    source: z.enum(["trusted", "external"]).default("trusted"),
+    source: z.enum(["trusted", "external"]),
   }),
   context: z.object({
     patch: z.string(),
@@ -178,17 +180,29 @@ export const consensusReviewMachine = agent.createMachine({
   },
 });
 
+const BUILT_IN_PATCH = "Validate input before writing to the database.";
+
+/**
+ * Runs the example. `source` is derived here, in host code, and cannot be
+ * supplied by the caller: the built-in patch is the only trusted one, and any
+ * patch passed in is `"external"`, so a caller cannot promote their own patch
+ * to auto-acceptance by claiming it is trusted.
+ */
 export function runConsensusReviewExample(
-  options?: RunAgentOptions<typeof consensusReviewMachine>,
+  options?: Omit<RunAgentOptions<typeof consensusReviewMachine>, "input"> & { patch?: string },
 ) {
+  const { patch, ...runOptions } = options ?? {};
   return runAgent(consensusReviewMachine, {
-    input: { patch: "Validate input before writing to the database." },
+    input:
+      patch === undefined
+        ? { patch: BUILT_IN_PATCH, source: "trusted" }
+        : { patch, source: "external" },
     executors: {
       generateText: async () => ({
         output: { approve: true, reason: "Scripted review; substitute a real model in your host." },
       }),
     },
-    ...options,
+    ...runOptions,
   });
 }
 
