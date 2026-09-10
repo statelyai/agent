@@ -20,18 +20,20 @@ const evaluationSchema = z.object({
   feedback: z.string(),
 });
 
+const reflectionContextSchema = z.object({
+  topic: z.string(),
+  /** The untouched first pass, kept so the before/after is visible at the end. */
+  firstDraft: z.string(),
+  draft: z.string(),
+  feedback: z.string().nullable(),
+  score: z.number().nullable(),
+  revisions: z.number(),
+  /** Plain-language result: target reached, or best effort once the budget ran out. */
+  verdict: z.string(),
+});
+
 const agentSetup = setupAgent({
-  context: z.object({
-    topic: z.string(),
-    /** The untouched first pass, kept so the before/after is visible at the end. */
-    firstDraft: z.string(),
-    draft: z.string(),
-    feedback: z.string().nullable(),
-    score: z.number().nullable(),
-    revisions: z.number(),
-    /** Plain-language result: target reached, or best effort once the budget ran out. */
-    verdict: z.string(),
-  }),
+  context: reflectionContextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({
     firstDraft: z.string(),
@@ -77,8 +79,7 @@ const agentSetup = setupAgent({
     },
   },
   states: {
-    evaluating: { context: { draft: z.string() } },
-    checking: { context: { draft: z.string(), score: z.number() } },
+    checking: { schemas: { context: reflectionContextSchema.extend({ score: z.number() }) } },
   },
 });
 

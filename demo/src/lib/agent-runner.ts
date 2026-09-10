@@ -51,6 +51,12 @@ export type ScenarioResult = {
   response: string;
   idle?: IdlePayload;
   output?: Json;
+  /**
+   * Set when the resumed state had no transition for the delivered event.
+   * `runAgent` ignores it (see docs/persistence.md) — the run settles
+   * unchanged, and the UI says nothing happened.
+   */
+  ignored?: { type: string };
 };
 
 export type ResumeEvent =
@@ -158,6 +164,9 @@ async function resolveExecutors(
 // ─── result shaping ───
 
 function describeResult(scenarioId: ScenarioId, result: RunAgentResult<AnyStateMachine>): string {
+  if (result.ignored) {
+    return `"${result.ignored.type}" isn't an accepted event in this state, so nothing happened.`;
+  }
   if (result.status === "done") {
     const output = result.output as Record<string, unknown>;
     switch (scenarioId) {
@@ -208,6 +217,7 @@ function toResult(
     trace,
     response: describeResult(scenarioId, result),
   };
+  if (result.ignored) base.ignored = { type: result.ignored.type };
   if (result.status === "done") base.output = result.output as Json;
   if (result.status === "idle") {
     base.idle = {
@@ -253,8 +263,8 @@ export async function resumeScenarioRun(
 ): Promise<ScenarioResult> {
   const { trace, onTransition } = createTraceRecorder();
   const machine = machineFor(scenarioId);
-  // runAgent rejects an event the restored state cannot accept — the
-  // snapshot-level validation the task requires.
+  // An event the restored state has no transition for is ignored, not an
+  // error: the run settles unchanged and reports `result.ignored`.
   const result = await runAgent(machine, {
     snapshot,
     event,
