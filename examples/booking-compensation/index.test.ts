@@ -18,10 +18,13 @@ test("approval gates reservations and a confirmed unavailable hotel compensates 
         return { status: "unavailable" };
       },
     }),
-    cancelFlight: createAsyncLogic<{ cancelled: true }, { bookingId: string; reference: string }>({
+    cancelFlight: createAsyncLogic<
+      { status: "cancelled" },
+      { bookingId: string; reference: string }
+    >({
       run: async ({ input }) => {
         calls.push(`cancel:${input.reference}`);
-        return { cancelled: true };
+        return { status: "cancelled" as const };
       },
     }),
   };
@@ -53,13 +56,14 @@ test("failed compensation preserves the reservation reference for manual recover
         { status: "unavailable" },
         { bookingId: string; item: string }
       >({ run: async () => ({ status: "unavailable" }) }),
-      cancelFlight: createAsyncLogic<{ cancelled: true }, { bookingId: string; reference: string }>(
-        {
-          run: async () => {
-            throw new Error("Cancellation unavailable");
-          },
+      cancelFlight: createAsyncLogic<
+        { status: "cancelled" },
+        { bookingId: string; reference: string }
+      >({
+        run: async () => {
+          throw new Error("Cancellation unavailable");
         },
-      ),
+      }),
     },
   });
   expect(result.status).toBe("done");
@@ -85,14 +89,15 @@ test("uncertain hotel outcome requires reconciliation, not blind compensation", 
           throw new Error("Reply lost; booking may exist");
         },
       }),
-      cancelFlight: createAsyncLogic<{ cancelled: true }, { bookingId: string; reference: string }>(
-        {
-          run: async () => {
-            compensations++;
-            return { cancelled: true };
-          },
+      cancelFlight: createAsyncLogic<
+        { status: "cancelled" },
+        { bookingId: string; reference: string }
+      >({
+        run: async () => {
+          compensations++;
+          return { status: "cancelled" as const };
         },
-      ),
+      }),
     },
   });
   expect(compensations).toBe(0);
@@ -137,5 +142,49 @@ test("uncertain flight outcome retains the booking identity even without provide
       outcome: "manualRecovery",
       flightReference: null,
       hotelReference: null,
+    });
+});
+
+test("a hotel reservation without a provider reference is not a booking", async () => {
+  const pending = await runBookingCompensationExample();
+  const result = await runBookingCompensationExample({
+    snapshot: pending.persist(),
+    event: { type: "APPROVE" },
+    actors: {
+      reserveHotel: createAsyncLogic<
+        { status: "reserved"; reference: string },
+        { bookingId: string; item: string }
+      >({
+        // A provider that reports success but returns no reference.
+        run: async () => ({ status: "reserved" }) as { status: "reserved"; reference: string },
+      }),
+    },
+  });
+  expect(result.status).toBe("done");
+  if (result.status === "done")
+    expect(result.output).toMatchObject({ outcome: "manualRecovery", hotelReference: null });
+});
+
+test("an unconfirmed cancellation is reported as manual recovery, not compensated", async () => {
+  const pending = await runBookingCompensationExample();
+  const result = await runBookingCompensationExample({
+    snapshot: pending.persist(),
+    event: { type: "APPROVE" },
+    actors: {
+      reserveHotel: createAsyncLogic<
+        { status: "unavailable" },
+        { bookingId: string; item: string }
+      >({ run: async () => ({ status: "unavailable" }) }),
+      cancelFlight: createAsyncLogic<
+        { status: "pending" },
+        { bookingId: string; reference: string }
+      >({ run: async () => ({ status: "pending" }) }),
+    },
+  });
+  expect(result.status).toBe("done");
+  if (result.status === "done")
+    expect(result.output).toMatchObject({
+      outcome: "manualRecovery",
+      flightReference: "simulated-flight:trip-1",
     });
 });

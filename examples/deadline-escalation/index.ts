@@ -8,7 +8,12 @@
  * Run: pnpm tsx examples/deadline-escalation/index.ts
  */
 import { z } from "zod";
-import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
+import {
+  interactionMetaSchema,
+  runAgent,
+  setupAgent,
+  type RunAgentOptions,
+} from "@statelyai/agent";
 
 const input = z.object({ requestId: z.string(), task: z.string(), deadline: z.number().finite() });
 const delivery = z.object({ requestId: z.string(), observedAt: z.number().finite() });
@@ -19,6 +24,7 @@ const agent = setupAgent({
     outcome: z.enum(["approved", "escalated", "failed"]),
     proposal: z.string().nullable(),
   }),
+  meta: interactionMetaSchema,
   events: { APPROVE: delivery, EXPIRE: delivery },
   requests: {
     propose: {
@@ -43,6 +49,15 @@ export const deadlineEscalationMachine = agent.createMachine({
       },
     },
     awaitingApproval: {
+      meta: {
+        interaction: {
+          label: "Approve the proposal before the host-owned deadline, or let it expire.",
+          events: {
+            APPROVE: { label: "Approve proposal" },
+            EXPIRE: { label: "Deadline reached" },
+          },
+        },
+      },
       // The authenticated host supplies timestamps and correlates deliveries;
       // never accept client-supplied observedAt as a trusted clock.
       on: {

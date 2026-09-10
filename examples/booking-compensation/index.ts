@@ -19,6 +19,7 @@ import {
 
 const itinerary = z.object({ flight: z.string(), hotel: z.string() });
 type HotelResult = { status: "reserved"; reference: string } | { status: "unavailable" };
+type CancelResult = { status: "cancelled" } | { status: "pending" };
 type BookingInput = { bookingId: string; item: string };
 const agent = setupAgent({
   input: z.object({ bookingId: z.string(), destination: z.string() }),
@@ -27,6 +28,7 @@ const agent = setupAgent({
     destination: z.string(),
     itinerary: itinerary.nullable(),
     hotelStatus: z.enum(["reserved", "unavailable"]).nullable(),
+    compensationStatus: z.enum(["cancelled"]).nullable(),
     flightReference: z.string().nullable(),
     hotelReference: z.string().nullable(),
   }),
@@ -48,8 +50,8 @@ const agent = setupAgent({
         reference: `simulated-hotel:${input.bookingId}`,
       }),
     }),
-    cancelFlight: createAsyncLogic<{ cancelled: true }, { bookingId: string; reference: string }>({
-      run: async () => ({ cancelled: true }),
+    cancelFlight: createAsyncLogic<CancelResult, { bookingId: string; reference: string }>({
+      run: async () => ({ status: "cancelled" }),
     }),
   },
   requests: {
@@ -62,12 +64,18 @@ const agent = setupAgent({
   },
 });
 
+function normalizeHotelStatus(output: HotelResult) {
+  if (output.status === "reserved") return output.reference ? "reserved" : null;
+  return output.status === "unavailable" ? "unavailable" : null;
+}
+
 export const bookingCompensationMachine = agent.createMachine({
   id: "booking-compensation",
   context: ({ input }) => ({
     ...input,
     itinerary: null,
     hotelStatus: null,
+    compensationStatus: null,
     flightReference: null,
     hotelReference: null,
   }),
@@ -110,11 +118,14 @@ export const bookingCompensationMachine = agent.createMachine({
           if (!context.itinerary) throw new Error("Missing approved itinerary");
           return { bookingId: context.bookingId, item: context.itinerary.hotel };
         },
+        // A result is only believed when it carries everything a reservation
+        // needs. "reserved" without a provider reference cannot be confirmed
+        // or later cancelled, so it stays unknown (`null`) and reconciles.
         onDone: ({ output }) => ({
           target: "hotelResult",
           context: {
-            hotelStatus: output.status,
-            hotelReference: output.status === "reserved" ? output.reference : null,
+            hotelStatus: normalizeHotelStatus(output),
+            hotelReference: output.status === "reserved" ? (output.reference ?? null) : null,
           },
         }),
         // An exception is an uncertain outcome. Reconcile before compensating.
@@ -123,8 +134,11 @@ export const bookingCompensationMachine = agent.createMachine({
     },
     hotelResult: {
       type: "choice",
-      choice: ({ context }) =>
-        context.hotelStatus === "reserved" ? { target: "booked" } : { target: "compensating" },
+      choice: ({ context }) => {
+        if (context.hotelStatus === "reserved") return { target: "booked" };
+        if (context.hotelStatus === "unavailable") return { target: "compensating" };
+        return { target: "manualRecovery" };
+      },
     },
     compensating: {
       invoke: {
@@ -134,9 +148,20 @@ export const bookingCompensationMachine = agent.createMachine({
             throw new Error("Missing flight reservation to compensate");
           return { bookingId: context.bookingId, reference: context.flightReference };
         },
-        onDone: { target: "compensated" },
+        // An unconfirmed cancellation is not a compensation.
+        onDone: ({ output }) => ({
+          target: "compensationResult",
+          context: { compensationStatus: output.status === "cancelled" ? "cancelled" : null },
+        }),
         onError: { target: "manualRecovery" },
       },
+    },
+    compensationResult: {
+      type: "choice",
+      choice: ({ context }) =>
+        context.compensationStatus === "cancelled"
+          ? { target: "compensated" }
+          : { target: "manualRecovery" },
     },
     booked: {
       type: "final",

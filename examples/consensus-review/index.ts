@@ -16,9 +16,15 @@ import {
 const vote = z.object({ approve: z.boolean(), reason: z.string() });
 const reviewer = z.enum(["security", "reliability", "maintainability"]);
 const agent = setupAgent({
-  input: z.object({ patch: z.string() }),
+  // A host that passes its own patch should mark it "external": model votes then
+  // cannot auto-accept it, because the patch text is untrusted reviewer input.
+  input: z.object({
+    patch: z.string(),
+    source: z.enum(["trusted", "external"]).default("trusted"),
+  }),
   context: z.object({
     patch: z.string(),
+    source: z.enum(["trusted", "external"]),
     votes: z.array(vote.extend({ reviewer })),
     abstentions: z.array(reviewer),
   }),
@@ -42,7 +48,12 @@ const agent = setupAgent({
 
 export const consensusReviewMachine = agent.createMachine({
   id: "consensus-review",
-  context: ({ input }) => ({ patch: input.patch, votes: [], abstentions: [] }),
+  context: ({ input }) => ({
+    patch: input.patch,
+    source: input.source,
+    votes: [],
+    abstentions: [],
+  }),
   initial: "reviewing",
   states: {
     reviewing: {
@@ -118,14 +129,20 @@ export const consensusReviewMachine = agent.createMachine({
     },
     counting: {
       type: "choice",
+      // An external patch always reaches a human: its text reaches every reviewer
+      // prompt, so model votes on it are not a trust decision the machine honors.
       choice: ({ context }) => ({
-        target: context.votes.filter((v) => v.approve).length >= 2 ? "accepted" : "humanReview",
+        target:
+          context.source === "trusted" && context.votes.filter((v) => v.approve).length >= 2
+            ? "accepted"
+            : "humanReview",
       }),
     },
     humanReview: {
       meta: {
         interaction: {
-          label: "Review the votes before accepting this patch.",
+          label:
+            "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved.",
           events: { APPROVE: { label: "Accept patch" }, REJECT: { label: "Reject patch" } },
         },
       },

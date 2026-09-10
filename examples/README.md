@@ -89,7 +89,7 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 
 - [consensus-review](consensus-review): two-of-three reviewer approval, abstentions, and human escalation
 - [booking-compensation](booking-compensation): approval before effects, compensation, and uncertain-outcome reconciliation
-- [deadline-escalation](deadline-escalation): scheduler-driven approval deadlines and stale-event rejection; CLI/custom host
+- [deadline-escalation](deadline-escalation): scheduler-driven approval deadlines and stale-event rejection; `manual: true` because it needs a two-phase CLI and a trusted host clock, not a provider key
 
 All three run offline with `pnpm tsx examples/<name>/index.ts`. See [Statechart policy examples](../docs/statechart-policy-examples.md) for sources, tests, and host contracts.
 

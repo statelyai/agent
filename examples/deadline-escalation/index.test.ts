@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { lintAgentMachine } from "@statelyai/agent";
+import { getInteraction, lintAgentMachine } from "@statelyai/agent";
 import { deadlineEscalationMachine, runDeadlineEscalationExample } from "./index.js";
 
 test.each([
@@ -19,6 +19,14 @@ test.each([
   expect(result.status).toBe(status);
   if (result.status === "done") expect(result.output.outcome).toBe(outcome);
   else expect(result.ignored).toEqual({ type, requestId, observedAt });
+});
+
+test("the approval wait is host-discoverable through interaction metadata", async () => {
+  const pending = await runDeadlineEscalationExample();
+  expect(pending.status).toBe("idle");
+  const interaction = getInteraction(pending.snapshot);
+  expect(interaction?.label).toContain("deadline");
+  expect(interaction?.events.map((event) => event.type)).toEqual(["APPROVE", "EXPIRE"]);
 });
 
 test("expiry wins once applied; delayed approval cannot reopen a completed run", async () => {

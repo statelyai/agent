@@ -6,7 +6,7 @@ Three offline examples put consequential decisions in visible machine states. Ea
 
 | Example | Machine policy | Verification |
 | --- | --- | --- |
-| [consensus-review](../examples/consensus-review/index.ts) | Three concurrent reviewers, two approvals required, failures abstain, human fallback | Concurrent starts, reordered completions, malformed votes, JSON restoration, native XState host parity |
+| [consensus-review](../examples/consensus-review/index.ts) | Three concurrent reviewers, two approvals required, failures abstain, external patches always reach a human, human fallback | Concurrent starts, reordered completions, malformed votes, an adversarial external patch, JSON restoration, native XState host parity |
 | [booking-compensation](../examples/booking-compensation/index.ts) | Human approval before reservations; confirmed hotel unavailability compensates the flight; uncertain outcomes require reconciliation | No reservation before approval, compensation order, compensation failure, uncertain outcome, success/cancel paths |
 | [deadline-escalation](../examples/deadline-escalation/index.ts) | Matching request identity and host timestamp determine whether approval or expiry is accepted | Deadline equality, stale identities, early expiry, late approval, JSON restoration |
 
@@ -23,6 +23,8 @@ The first CLI accepts three scripted votes. The second restores an approval chec
 ## Reviewer quorum
 
 [Anthropic's voting pattern](https://www.anthropic.com/engineering/building-effective-agents) motivates independent reviews aggregated by policy. This example uses a two-of-three approval threshold, not unanimity: a security dissent can be outweighed. Change the machine policy if a particular reviewer must veto. Model votes do not prove a patch is safe.
+
+Trust is a machine rule, not a prompt instruction. The patch text is embedded in all three reviewer prompts, so a patch the host did not author is untrusted input. Input carries `source: "trusted" | "external"`, defaulting to `"trusted"` for the built-in demo patch; a host passing its own patch marks it `"external"`. The `counting` choice state routes any `"external"` patch to `humanReview` regardless of the tally, so model votes can only auto-accept trusted input, and the interaction label tells the human why they were asked. A native XState host parses no input schema and supplies `source` itself.
 
 Each reviewer is a named parallel region invoking the same typed request. No host `Promise.all` hides the topology. All regions reach a final state even when their request fails; the parent then counts votes. Human review persists both successful votes and abstentions.
 
