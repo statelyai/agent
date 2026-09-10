@@ -1,0 +1,22 @@
+{
+  "name": "deadline-escalation",
+  "title": "Approval with a host-owned deadline",
+  "kind": "pattern",
+  "origin": {
+    "type": "adapted",
+    "source": "Original XState example inspired by the linked pattern",
+    "url": "https://docs.langchain.com/oss/javascript/langgraph/interrupts"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Persist an approval wait and resume with a correlated scheduler expiry; stale and late approvals cannot pass the machine guard. Requires a host clock and scheduler; run the offline CLI to simulate delivery."
+  },
+  "starters": [
+    {
+      "requestId": "proposal-1",
+      "task": "Schedule maintenance",
+      "deadline": 1000
+    }
+  ],
+  "manual": true
+}

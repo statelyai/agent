@@ -1,0 +1,19 @@
+{
+  "name": "consensus-review",
+  "title": "Parallel reviewer consensus",
+  "kind": "pattern",
+  "origin": {
+    "type": "adapted",
+    "source": "Original XState example inspired by the linked pattern",
+    "url": "https://www.anthropic.com/engineering/building-effective-agents"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Independent model votes, an explicit two-of-three threshold, abstentions, and human escalation."
+  },
+  "starters": [
+    {
+      "patch": "Validate input before a database write."
+    }
+  ]
+}

@@ -22,6 +22,7 @@ The examples are non-trivial state machines, not special runner APIs.
 - [Review tool calls](../examples/review-tool-calls)
 - [SQL approval](../examples/sql-agent)
 - [Context compaction](../examples/context-compaction)
+- [Statechart policy examples](statechart-policy-examples.md): reviewer quorum, booking compensation, and scheduler-driven approval deadlines
 
 ## Host portability
 
