@@ -14,8 +14,10 @@
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
 
+const approvalContextSchema = z.object({ topic: z.string(), draft: z.string().nullable() });
+
 const agentSetup = setupAgent({
-  context: z.object({ topic: z.string(), draft: z.string().nullable() }),
+  context: approvalContextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ published: z.boolean(), draft: z.string() }),
   meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
@@ -34,8 +36,8 @@ const agentSetup = setupAgent({
   },
   // `reviewing`/`published` are reachable only after a draft exists — narrow it.
   states: {
-    reviewing: { context: { draft: z.string() } },
-    published: { context: { draft: z.string() } },
+    reviewing: { schemas: { context: approvalContextSchema.extend({ draft: z.string() }) } },
+    published: { schemas: { context: approvalContextSchema.extend({ draft: z.string() }) } },
   },
 });
 

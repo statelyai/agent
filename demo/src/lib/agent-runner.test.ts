@@ -47,12 +47,19 @@ describe("scenario outcomes (scripted)", () => {
     expect((result.output as { outcome: string }).outcome).toBe("needs-details");
   });
 
-  test("resumeScenario rejects an event the snapshot does not accept", async () => {
+  test("an event the snapshot does not accept is ignored, leaving the state put", async () => {
     const first = await start("refund", "Refund $500 please.");
     expect(first.status).toBe("idle");
-    await expect(
-      resume("refund", first.idle!.snapshot, { type: "NOT_A_REAL_EVENT" }),
-    ).rejects.toThrow();
+
+    const second = await resume("refund", first.idle!.snapshot, { type: "NOT_A_REAL_EVENT" });
+
+    // runAgent ignores an unhandled event instead of throwing.
+    expect(second.ignored).toEqual({ type: "NOT_A_REAL_EVENT" });
+    // Still idle at the same wait, offering the same events.
+    expect(second.status).toBe("idle");
+    expect(second.idle?.events).toEqual(first.idle?.events);
+    // What the UI shows for "nothing happened".
+    expect(second.response).toContain("nothing happened");
   });
 
   test("approval drafts, settles idle, then publishes on APPROVE", async () => {

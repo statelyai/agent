@@ -11,14 +11,16 @@
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
 
+const pipelineContextSchema = z.object({
+  task: z.string(),
+  plan: z.string().nullable(),
+  draft: z.string().nullable(),
+  verification: z.string().nullable(),
+  failedAt: z.string().nullable(),
+});
+
 const agentSetup = setupAgent({
-  context: z.object({
-    task: z.string(),
-    plan: z.string().nullable(),
-    draft: z.string().nullable(),
-    verification: z.string().nullable(),
-    failedAt: z.string().nullable(),
-  }),
+  context: pipelineContextSchema,
   input: z.object({ task: z.string() }),
   output: z.object({
     plan: z.string(),
@@ -50,8 +52,10 @@ const agentSetup = setupAgent({
     },
   },
   states: {
-    executing: { context: { plan: z.string() } },
-    verifying: { context: { plan: z.string(), draft: z.string() } },
+    executing: { schemas: { context: pipelineContextSchema.extend({ plan: z.string() }) } },
+    verifying: {
+      schemas: { context: pipelineContextSchema.extend({ plan: z.string(), draft: z.string() }) },
+    },
   },
 });
 

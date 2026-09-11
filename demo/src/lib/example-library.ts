@@ -59,7 +59,7 @@ export const startExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => startExampleInput.parse(input))
   .handler(async ({ data }): Promise<MachineChatResult> => {
     const [
-      { getExampleMachine, getExampleMachineSource, exampleBudgetMs, exampleSuspendedTag },
+      { getExampleMachine, getExampleMachineSource, exampleBudgetMs },
       { startMachineChat },
       { getRequest },
     ] = await Promise.all([
@@ -74,7 +74,6 @@ export const startExample = createServerFn({ method: "POST" })
     return startMachineChat(machine, data.input, {
       signal: getRequest().signal,
       budgetMs: exampleBudgetMs(data.id),
-      suspendedTag: exampleSuspendedTag(data.id),
       machineSource,
     });
   });
@@ -83,7 +82,7 @@ export const resumeExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => resumeExampleInput.parse(input))
   .handler(async ({ data }): Promise<MachineChatResult> => {
     const [
-      { getExampleMachine, getExampleMachineSource, exampleBudgetMs, exampleSuspendedTag },
+      { getExampleMachine, getExampleMachineSource, exampleBudgetMs },
       { resumeMachineChat },
       { getRequest },
     ] = await Promise.all([
@@ -102,8 +101,7 @@ export const resumeExample = createServerFn({ method: "POST" })
       {
         signal: getRequest().signal,
         budgetMs: exampleBudgetMs(data.id),
-        suspendedTag: exampleSuspendedTag(data.id),
-        machineSource,
+          machineSource,
       },
     );
   });

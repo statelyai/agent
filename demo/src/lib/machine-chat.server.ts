@@ -285,24 +285,11 @@ export type RunLimits = {
   signal?: AbortSignal;
   /** Wall-clock budget for the whole run; examples override via metadata. */
   budgetMs?: number;
-  /**
-   * Human-wait state tag from metadata `suspendedTag` — deterministic idle
-   * for plain XState machines with no setupAgent isIdle predicate.
-   */
-  suspendedTag?: string;
   /** Raw source passed to Viz so v6 function transitions remain visible. */
   machineSource?: string;
 };
 
 export const DEFAULT_RUN_BUDGET_MS = 120_000;
-
-/** metadata `suspendedTag` → an isIdle predicate, or undefined. */
-function suspendedPredicate(
-  limits: RunLimits,
-): ((snapshot: AnyMachineSnapshot) => boolean) | undefined {
-  const tag = limits.suspendedTag;
-  return tag ? (snapshot) => snapshot.hasTag(tag) : undefined;
-}
 
 /** One signal for runAgent: request abort OR time budget, whichever first. */
 export function runSignal(limits: RunLimits): AbortSignal {
@@ -437,12 +424,17 @@ function toChatResult(
     // prompt ships separately in `idle` and renders in the waiting box, so
     // approvals aren't asked for sight unseen.
     const work = renderIdleWork(result.snapshot.context, changedKeys, omitValues);
+    // An event the state has no transition for is ignored, not an error: say
+    // so instead of re-showing the work as if the event had applied.
+    const ignoredNote = result.ignored
+      ? `"${result.ignored.type}" isn't an accepted event in this state, so nothing happened.`
+      : null;
     return {
       mode: "live",
       model,
       status: "idle",
       trace,
-      response: work ?? idle.prompt ?? "The machine is idle, waiting for input.",
+      response: ignoredNote ?? work ?? idle.prompt ?? "The machine is idle, waiting for input.",
       // Resume from the run's persisted snapshot, not the live one — it
       // round-trips invoked children WITH their state (a long-lived agent
       // keeps its context across chat turns).
@@ -516,7 +508,6 @@ export async function startMachineChat(
     input: input as never,
     executors: live.executors,
     signal: runSignal(limits),
-    isIdle: suspendedPredicate(limits),
     onTransition,
     inspect: maybeCreateRunInspection(machine, limits.machineSource),
   });
@@ -577,7 +568,6 @@ export async function resumeMachineChat(
     event: parsed as never,
     executors: live.executors,
     signal: runSignal(limits),
-    isIdle: suspendedPredicate(limits),
     onTransition,
     inspect: maybeCreateRunInspection(machine, limits.machineSource),
   });

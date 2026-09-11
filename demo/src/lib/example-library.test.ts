@@ -6,7 +6,7 @@ describe("example library auto-discovery", () => {
     const summaries = listExampleSummaries();
     const ids = summaries.map((summary) => summary.id);
     expect(ids).toContain("joke");
-    expect(ids).toContain("react-agent");
+    expect(ids).toContain("plan-and-execute");
     expect(ids.length).toBeGreaterThan(40);
     // Sorted by title for the sidebar.
     const titles = summaries.map((summary) => summary.title);
@@ -38,11 +38,13 @@ describe("example library auto-discovery", () => {
   });
 
   it("puts the selected machine first when a source file exports several", async () => {
-    const detail = await getExampleDetail("game-agent");
-    const machine = detail.machines.find((entry) => entry.exportName === "rpsMachine");
+    // hierarchical-teams exports three machines; metadata nominates the
+    // coordinator, so a non-default selection must still be prepended.
+    const detail = await getExampleDetail("hierarchical-teams");
+    const machine = detail.machines.find((entry) => entry.exportName === "researchTeamMachine");
 
-    expect(machine?.vizConfig.indexOf("rpsSetup.createMachine")).toBeLessThan(
-      machine?.vizConfig.indexOf("gameAgentSetup.createMachine") ?? -1,
+    expect(machine?.vizConfig.indexOf("researchSetup.createMachine")).toBeLessThan(
+      machine?.vizConfig.indexOf("coordinatorSetup.createMachine") ?? -1,
     );
   });
 
