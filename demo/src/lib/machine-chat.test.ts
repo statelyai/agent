@@ -196,6 +196,18 @@ describe("run output rendering", () => {
     ]);
   });
 
+  test("nested output fields render as fenced JSON instead of vanishing", () => {
+    const text = renderOutput({
+      answer: "Refund issued for the damaged order.",
+      amount: 45,
+      details: { orderId: "ORD-1", items: ["mug"] },
+    });
+    expect(text.startsWith("Refund issued")).toBe(true);
+    expect(text).toContain("- Amount: 45");
+    expect(text).toContain("**Details**");
+    expect(text).toContain('"orderId": "ORD-1"');
+  });
+
   test("plain strings and non-string objects are unchanged", () => {
     expect(renderOutput("done")).toBe("done");
     expect(renderOutput({ score: 9 })).toContain("```json");

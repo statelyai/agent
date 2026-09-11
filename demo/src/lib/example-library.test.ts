@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getExampleDetail, listExampleSummaries } from "./example-library.server";
+import {
+  getExampleDetail,
+  isAuthoredInSource,
+  listExampleSummaries,
+  machineInitializer,
+} from "./example-library.server";
 
 describe("example library auto-discovery", () => {
   it("discovers every examples/* folder with an index.ts", () => {
@@ -31,6 +36,23 @@ describe("example library auto-discovery", () => {
       id: expect.any(String),
       states: expect.any(Object),
     });
+  });
+
+  it("classifies each export by its own initializer in a mixed-authoring file", () => {
+    const source = [
+      'export const authored = setup({}).createMachine({ initial: "a", states: { a: {} } });',
+      "export const { machine: lowered } = setupAgent.fromConfig(workflowConfig);",
+      "export const built = setupAgent.fromConfig(workflowConfig).machine;",
+      "export const derived = authored.provide({ actors: {} });",
+    ].join("\n");
+    expect(machineInitializer(source, "lowered")).toContain("fromConfig");
+    expect(isAuthoredInSource(source, "authored")).toBe(true);
+    // A `.provide()` of a local createMachine binding is still that source.
+    expect(isAuthoredInSource(source, "derived")).toBe(true);
+    // Neither JSON-lowered export borrows the sibling's createMachine call.
+    expect(isAuthoredInSource(source, "lowered")).toBe(false);
+    expect(isAuthoredInSource(source, "built")).toBe(false);
+    expect(isAuthoredInSource(source, "missing")).toBe(false);
   });
 
   it("passes v6 example source directly to Viz", async () => {

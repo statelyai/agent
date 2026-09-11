@@ -182,16 +182,24 @@ function summaryFor(id: string): ExampleSummary {
   };
 }
 
-function machineInitializer(source: string, exportName: string): string | null {
+/** Whether a binding pattern names `exportName`, e.g. `{ machine: exportName }`. */
+function bindsName(name: ts.BindingName, exportName: string): boolean {
+  if (ts.isIdentifier(name)) return name.text === exportName;
+  return name.elements.some(
+    (element) => ts.isBindingElement(element) && bindsName(element.name, exportName),
+  );
+}
+
+/**
+ * Source text of the expression that initializes `exportName` — an identifier
+ * binding (`export const x = …`) or a destructured one
+ * (`export const { machine: x } = …`). Null when the source has no such binding.
+ */
+export function machineInitializer(source: string, exportName: string): string | null {
   const file = ts.createSourceFile("example.ts", source, ts.ScriptTarget.Latest, true);
   let initializer: ts.Expression | undefined;
   const visit = (node: ts.Node) => {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === exportName &&
-      node.initializer
-    ) {
+    if (ts.isVariableDeclaration(node) && node.initializer && bindsName(node.name, exportName)) {
       initializer = node.initializer;
       return;
     }
@@ -200,6 +208,21 @@ function machineInitializer(source: string, exportName: string): string | null {
   visit(file);
 
   return initializer?.getText(file) ?? null;
+}
+
+/**
+ * Viz needs source only when this export is built by a `createMachine` call
+ * it can find: directly, or through a local binding it derives from
+ * (`export const x = base.provide({…})` where `base` is the call). A machine
+ * lowered from JSON (`fromConfig`) has none, and in a mixed file the other
+ * export's call must not stand in for it.
+ */
+export function isAuthoredInSource(source: string, exportName: string, hops = 3): boolean {
+  const initializer = machineInitializer(source, exportName);
+  if (!initializer) return false;
+  if (/createMachine\(/.test(initializer)) return true;
+  const base = /^([A-Za-z_$][\w$]*)\b/.exec(initializer)?.[1];
+  return !!base && base !== exportName && hops > 0 && isAuthoredInSource(source, base, hops - 1);
 }
 
 function sourceForMachine(source: string, exportName: string, machineCount: number): string {
@@ -257,7 +280,7 @@ async function loadDetail(id: string): Promise<ExampleDetail> {
         const inputInfo = describeMachineInput(value as AnyStateMachine);
         machines.push({
           exportName,
-          vizConfig: /createMachine\(/.test(machineSource)
+          vizConfig: isAuthoredInSource(machineSource, exportName)
             ? sourceForMachine(machineSource, exportName, exportedMachines.length)
             : (toVizConfig(value as AnyStateMachine) as JsonObject),
           initial: typeof config.initial === "string" ? config.initial : null,

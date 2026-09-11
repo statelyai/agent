@@ -347,10 +347,19 @@ export function renderOutput(output: unknown): string {
           key !== bodyKey &&
           (typeof value === "string" || typeof value === "number" || typeof value === "boolean"),
       );
-      if (body !== null && !rest.length) return body;
       // Bullets: a bare newline is not a line break in markdown.
       const list = rest.map(([key, value]) => `- ${humanizeFieldName(key)}: ${String(value)}`);
-      return body === null ? list.join("\n") : `${body}\n\n${list.join("\n")}`;
+      // Nested values are still output — fenced JSON under their own heading,
+      // never dropped.
+      const nested = entries
+        .filter(([key, value]) => key !== bodyKey && value !== null && typeof value === "object")
+        .map(
+          ([key, value]) =>
+            `**${humanizeFieldName(key)}**\n\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``,
+        );
+      return [body, list.length ? list.join("\n") : null, ...nested]
+        .filter((section): section is string => section !== null)
+        .join("\n\n");
     }
   }
   try {
