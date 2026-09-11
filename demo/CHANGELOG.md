@@ -1,5 +1,16 @@
 # @statelyai/agent-demo
 
+## 0.0.1-alpha.12
+
+### Patch Changes
+
+- [#127](https://github.com/statelyai/agent/pull/127) [`6b542ab`](https://github.com/statelyai/agent/commit/6b542abe62ab2a63230f97d3866557fb028bd4d4) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `examples/triage`: the classifier's `confidence` is required. Its default made OpenAI strict structured output reject every classification, so every live run escalated as unclassified. `examples/consensus-review` starters carry `source`; `examples/snapshot-migration`, `examples/plain-xstate`, and `examples/portable-xstate-loop` describe their idle states.
+
+  Demo: resolves the library from `src/` (a stale `dist/` no longer runs old code under new examples), keeps the viz embed mounted across example switches and drives it through `@statelyai/sdk`'s `createStatelyEmbed`, sends JSON-authored machines to Viz as config, runs text starters on machines without a prompt input, and shows chat-loop replies kept only in message history.
+
+- Updated dependencies [[`6b542ab`](https://github.com/statelyai/agent/commit/6b542abe62ab2a63230f97d3866557fb028bd4d4)]:
+  - @statelyai/agent@2.0.0-alpha.24
+
 ## 0.0.1-alpha.11
 
 ### Patch Changes
