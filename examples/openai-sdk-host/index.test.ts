@@ -26,6 +26,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
                       result: {
                         sentiment: "negative",
                         category: "billing",
+                        confidence: 0.95,
                         reply: "Sorry about that — we will fix your invoice.",
                       },
                     }),

@@ -10,6 +10,18 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      // Resolve the library to its source, not `dist/`: the package `exports`
+      // point at the build, so a stale `dist/` (or none, in a fresh worktree)
+      // silently runs old library code under new examples. Subpaths first:
+      // the bare alias below would prefix-match them too, and the first
+      // matching entry wins.
+      ...Object.fromEntries(
+        ["ai-sdk", "machines", "openai", "otel"].map((sub) => [
+          `@statelyai/agent/${sub}`,
+          fileURLToPath(new URL(`../src/${sub}/index.ts`, import.meta.url)),
+        ]),
+      ),
+      "@statelyai/agent": fileURLToPath(new URL("../src/index.ts", import.meta.url)),
     },
   },
   // The examples library lazily imports every `examples/*` module on the

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getExampleDetail, listExampleSummaries } from "./example-library.server";
+import {
+  getExampleDetail,
+  isAuthoredInSource,
+  listExampleSummaries,
+  machineInitializer,
+} from "./example-library.server";
 
 describe("example library auto-discovery", () => {
   it("discovers every examples/* folder with an index.ts", () => {
@@ -20,6 +25,34 @@ describe("example library auto-discovery", () => {
     const machine = detail.machines.find((entry) => entry.exportName === "jokeMachine");
     expect(machine).toBeDefined();
     expect(machine!.vizConfig).toBe(detail.source);
+  });
+
+  it("serializes a JSON-authored machine's config for Viz (no createMachine in source)", async () => {
+    const detail = await getExampleDetail("json-agent");
+    const machine = detail.machines.find((entry) => entry.exportName === "jsonAgentMachine");
+
+    expect(detail.source).not.toContain("createMachine(");
+    expect(machine?.vizConfig).toMatchObject({
+      id: expect.any(String),
+      states: expect.any(Object),
+    });
+  });
+
+  it("classifies each export by its own initializer in a mixed-authoring file", () => {
+    const source = [
+      'export const authored = setup({}).createMachine({ initial: "a", states: { a: {} } });',
+      "export const { machine: lowered } = setupAgent.fromConfig(workflowConfig);",
+      "export const built = setupAgent.fromConfig(workflowConfig).machine;",
+      "export const derived = authored.provide({ actors: {} });",
+    ].join("\n");
+    expect(machineInitializer(source, "lowered")).toContain("fromConfig");
+    expect(isAuthoredInSource(source, "authored")).toBe(true);
+    // A `.provide()` of a local createMachine binding is still that source.
+    expect(isAuthoredInSource(source, "derived")).toBe(true);
+    // Neither JSON-lowered export borrows the sibling's createMachine call.
+    expect(isAuthoredInSource(source, "lowered")).toBe(false);
+    expect(isAuthoredInSource(source, "built")).toBe(false);
+    expect(isAuthoredInSource(source, "missing")).toBe(false);
   });
 
   it("passes v6 example source directly to Viz", async () => {
@@ -43,8 +76,10 @@ describe("example library auto-discovery", () => {
     const detail = await getExampleDetail("hierarchical-teams");
     const machine = detail.machines.find((entry) => entry.exportName === "researchTeamMachine");
 
-    expect(machine?.vizConfig.indexOf("researchSetup.createMachine")).toBeLessThan(
-      machine?.vizConfig.indexOf("coordinatorSetup.createMachine") ?? -1,
+    const source = machine?.vizConfig;
+    if (typeof source !== "string") throw new Error("expected source");
+    expect(source.indexOf("researchSetup.createMachine")).toBeLessThan(
+      source.indexOf("coordinatorSetup.createMachine"),
     );
   });
 

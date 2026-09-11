@@ -187,7 +187,7 @@ describe("ticket-triage", () => {
     expect(result.output.summary).toContain("Could not classify");
   });
 
-  test("a classifier that omits confidence is taken at its word", async () => {
+  test("a classifier that omits confidence is not trusted: the ticket escalates", async () => {
     const { generateText } = scriptedExecutor({ sentiment: "neutral", category: "technical" });
 
     const result = await runAgent(triageMachine, {
@@ -197,7 +197,8 @@ describe("ticket-triage", () => {
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
-    expect(result.output.escalated).toBe(false);
+    expect(result.output.escalated).toBe(true);
+    expect(result.output.summary).toContain("Could not classify");
   });
 
   test("the simulated SLA tightens for negative tickets", () => {

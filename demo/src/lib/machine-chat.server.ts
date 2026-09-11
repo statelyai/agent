@@ -178,7 +178,8 @@ export function jsonSchemaOf(schema: unknown): JsonObject | null {
 // ─── interaction hints (meta.interaction convention) ───
 
 type InteractionHints = {
-  label?: string;
+  /** A string with `{key}` placeholders, or a function of the context (see `interactionMetaSchema`). */
+  label?: string | ((args: { context: unknown }) => string);
   events?: Record<string, { label?: string; style?: string }>;
   textEvent?: string;
   /** Custom composer renderer for this state ("rating", "cards", …). */
@@ -198,8 +199,17 @@ function interactionHints(snapshot: AnyMachineSnapshot): InteractionHints {
 export function resolveLabel(label: string, context: unknown): string {
   const source = context && typeof context === "object" ? (context as Record<string, unknown>) : {};
   return label
-    .replace(/\{(\w+)\}/g, (_, key: string) => {
-      const value = source[key];
+    .replace(/\{([\w.]+)\}/g, (_, path: string) => {
+      // Dotted paths read nested context: `{employee.name}`.
+      const value = path
+        .split(".")
+        .reduce<unknown>(
+          (current, key) =>
+            current && typeof current === "object"
+              ? (current as Record<string, unknown>)[key]
+              : undefined,
+          source,
+        );
       return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
         ? String(value)
         : "";
@@ -254,7 +264,12 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
 
   // Prompt: the interaction label, else the active state node's description.
   // Both go through resolveLabel so `{key}` placeholders resolve either way.
-  const rawPrompt = typeof hints.label === "string" ? hints.label : activeDescription(snapshot);
+  const rawPrompt =
+    typeof hints.label === "function"
+      ? hints.label({ context: snapshot.context })
+      : typeof hints.label === "string"
+        ? hints.label
+        : activeDescription(snapshot);
 
   return {
     prompt: rawPrompt ? resolveLabel(rawPrompt, snapshot.context) : null,
@@ -321,17 +336,30 @@ export function renderOutput(output: unknown): string {
       (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== "",
     );
     if (strings.length) {
-      const [bodyKey, body] = strings.reduce((longest, entry) =>
-        entry[1].length > longest[1].length ? entry : longest,
+      const longest = strings.reduce((best, entry) =>
+        entry[1].length > best[1].length ? entry : best,
       );
+      // Only prose leads. An identifier-like longest string (a reference
+      // code, a slug) is one more "Key: value" line, not the body.
+      const [bodyKey, body] = /\s/.test(longest[1].trim()) ? longest : [null, null];
       const rest = entries.filter(
         ([key, value]) =>
           key !== bodyKey &&
           (typeof value === "string" || typeof value === "number" || typeof value === "boolean"),
       );
-      if (!rest.length) return body;
-      const list = rest.map(([key, value]) => `${humanizeFieldName(key)}: ${String(value)}`);
-      return `${body}\n\n${list.join("\n")}`;
+      // Bullets: a bare newline is not a line break in markdown.
+      const list = rest.map(([key, value]) => `- ${humanizeFieldName(key)}: ${String(value)}`);
+      // Nested values are still output — fenced JSON under their own heading,
+      // never dropped.
+      const nested = entries
+        .filter(([key, value]) => key !== bodyKey && value !== null && typeof value === "object")
+        .map(
+          ([key, value]) =>
+            `**${humanizeFieldName(key)}**\n\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``,
+        );
+      return [body, list.length ? list.join("\n") : null, ...nested]
+        .filter((section): section is string => section !== null)
+        .join("\n\n");
     }
   }
   try {
@@ -346,7 +374,9 @@ export function renderOutput(output: unknown): string {
  * context values the run changed (per the trace recorder), most recent first.
  * Strings render before objects so prose (drafts, answers, SQL) leads; small
  * non-string values render as fenced JSON. Echoes of what the user just sent
- * (`omitValues`) and message-history arrays are plumbing, not work — skipped.
+ * (`omitValues`) are plumbing, not work — skipped. A message-history array
+ * renders only its newest assistant message: the reply a chat loop keeps in
+ * `messages` instead of a dedicated field.
  * Null when the run changed nothing presentable — the idle prompt alone is
  * then the whole story.
  */
@@ -368,9 +398,28 @@ export function renderIdleWork(
 
   const strings: Array<{ key: string; body: string }> = [];
   const objects: Array<{ key: string; body: string }> = [];
+  const latestReply = (history: unknown[]): string | null => {
+    const last = history[history.length - 1] as { role: unknown; content: unknown };
+    if (last.role !== "assistant") return null;
+    const parts = Array.isArray(last.content) ? last.content : [last.content];
+    const text = parts
+      .map((part) =>
+        typeof part === "string"
+          ? part
+          : part &&
+              typeof part === "object" &&
+              typeof (part as { text?: unknown }).text === "string"
+            ? (part as { text: string }).text
+            : "",
+      )
+      .join("")
+      .trim();
+    return text || null;
+  };
+
   for (const key of changedKeys) {
-    const value = source[key];
-    if (isMessageHistory(value)) continue;
+    const rawValue = source[key];
+    const value = isMessageHistory(rawValue) ? latestReply(rawValue as unknown[]) : rawValue;
     if (typeof value === "string") {
       const text = value.trim();
       if (!text || omitted.has(text)) continue;

@@ -43,9 +43,10 @@ export const sentimentSchema = z.enum(["positive", "neutral", "negative"]);
 export const classificationSchema = z.object({
   sentiment: sentimentSchema,
   category: categorySchema,
-  // A classifier that does not hedge is taken at its word; anything it flags
-  // below the threshold goes to a person.
-  confidence: z.number().min(0).max(1).default(1),
+  // Always required: OpenAI's strict structured output rejects optional
+  // fields, so a default here fails every classification instead of hedging.
+  // Anything the classifier flags below the threshold goes to a person.
+  confidence: z.number().min(0).max(1),
 });
 
 /** The classic triage shape, kept stable for hosts that read it. */

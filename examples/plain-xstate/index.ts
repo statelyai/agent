@@ -183,6 +183,7 @@ export const plainWriterMachine = setup({
       // name. `isAgentIdle` does not need it: an active state that accepts an
       // external event is already idle by the library's definition.
       tags: ["waiting"],
+      description: "Approve the draft, or ask for a revision ({revisions} of {maxRevisions} used).",
       on: {
         APPROVE: { target: "approved" },
         // The revision budget, expressed as an ordinary guarded transition:

@@ -320,6 +320,7 @@ describe("createAnthropicExecutors + runAgent", () => {
         result: {
           sentiment: "negative",
           category: "billing",
+          confidence: 0.95,
           reply: "Sorry about that, we will fix your invoice.",
         },
       }),
@@ -348,6 +349,7 @@ describe("createAnthropicExecutors + runAgent", () => {
         result: {
           sentiment: "negative",
           category: "billing",
+          confidence: 0.95,
           reply: "Sorry about that, we will fix your invoice.",
         },
       }),

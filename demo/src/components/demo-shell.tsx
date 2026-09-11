@@ -307,8 +307,17 @@ export function DemoShell() {
     return { id: nextTurnId, epoch };
   };
 
-  /** Starts a library-example run with the given machine input. */
-  const startExampleRun = (label: string, machineInput: Record<string, unknown>) => {
+  /**
+   * Starts a library-example run with the given machine input. `followUpText`
+   * is delivered as the idle text event once the run first waits for one — a
+   * text starter on a machine whose input isn't a prompt (a chat loop that
+   * starts idle) still runs in one click.
+   */
+  const startExampleRun = (
+    label: string,
+    machineInput: Record<string, unknown>,
+    followUpText?: string,
+  ) => {
     if (!activeMachine || loading) return;
     const signal = beginRun();
     const { id, epoch } = pushTurn(label, "user", "loading");
@@ -320,7 +329,13 @@ export function DemoShell() {
       },
       signal,
     }).then(
-      (result) => settle(epoch, id, result),
+      (result) => {
+        settle(epoch, id, result);
+        const textEvent = result?.status === "idle" ? result.idle?.textEvent : null;
+        if (followUpText && textEvent && store.getSnapshot().context.epoch === epoch) {
+          sendEvent({ type: textEvent.type, [textEvent.field]: followUpText });
+        }
+      },
       (error) => fail(epoch, id, error),
     );
   };
@@ -331,12 +346,20 @@ export function DemoShell() {
     if (!idleSnapshot || loading) return;
     const descriptor = idle?.events.find((candidate) => candidate.type === event.type);
     const { type: _type, ...payload } = event;
+    // A message typed into the composer reads as what was said, not as
+    // `Send · {"text":"…"}`: the transition log below names the event.
+    const textField = idle?.textEvent?.type === event.type ? idle.textEvent.field : null;
+    const spokenText =
+      textField && Object.keys(payload).length === 1 && typeof payload[textField] === "string"
+        ? payload[textField]
+        : null;
     const payloadNote = Object.keys(payload).length
       ? ` · ${JSON.stringify(payload).slice(0, 60)}`
       : "";
-    const label = `${descriptor?.label ?? humanizeEventType(event.type)}${payloadNote}`;
+    const label =
+      spokenText ?? `${descriptor?.label ?? humanizeEventType(event.type)}${payloadNote}`;
     const signal = beginRun();
-    const { id, epoch } = pushTurn(label, "action", "loading", event.type);
+    const { id, epoch } = pushTurn(label, spokenText ? "user" : "action", "loading", event.type);
     const deliver = isScenario
       ? resumeScenario({
           data: { scenarioId: scenario.id, snapshot: idleSnapshot as never, event },
@@ -472,11 +495,14 @@ export function DemoShell() {
       : (exampleSummary?.starters ?? []).flatMap((starter) => {
           if (starter.kind === "text") {
             const field = activeMachine.promptField;
-            if (!field) return [];
             return [
               {
                 label: starter.label,
-                onStart: () => startExampleRun(starter.text, { [field]: starter.text }),
+                onStart: () =>
+                  field
+                    ? startExampleRun(starter.text, { [field]: starter.text })
+                    : // No prompt input: start with defaults, then say it.
+                      startExampleRun(`Start · ${activeMachine.exportName}`, {}, starter.text),
               },
             ];
           }
