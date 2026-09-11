@@ -129,8 +129,8 @@ importers:
         specifier: workspace:*
         version: link:..
       '@statelyai/sdk':
-        specifier: ^0.26.1
-        version: 0.26.1(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
+        specifier: ^0.31.1
+        version: 0.31.1(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
       '@tanstack/react-router':
         specifier: ^1.170.32
         version: 1.170.32(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -3915,8 +3915,8 @@ packages:
     engines: {node: '>=22.4'}
     hasBin: true
 
-  '@statelyai/sdk@0.26.1':
-    resolution: {integrity: sha512-6C8sV+oVrscWT2KReKb3PPHgZYYP5a4vM8dlxZ03MC6xcRvCet++c5GR/vZbKnid2A3HdjnkjBRvBpnrNICMDg==, tarball: https://registry.npmjs.org/@statelyai/sdk/-/sdk-0.26.1.tgz}
+  '@statelyai/sdk@0.31.1':
+    resolution: {integrity: sha512-eirvZL1cMMFDFvnWMuyHEL0rd7nk7JGx2R8FKdtIakXdYgNgVbmkJJwr+5b0+CX1mGNRm6TcfjUz10nIrnwZBg==, tarball: https://registry.npmjs.org/@statelyai/sdk/-/sdk-0.31.1.tgz}
     engines: {node: '>=22.4'}
     hasBin: true
 
@@ -10322,7 +10322,7 @@ snapshots:
       - webcola
       - zod
 
-  '@statelyai/sdk@0.26.1(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)':
+  '@statelyai/sdk@0.31.1(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)':
     dependencies:
       '@statelyai/graph': 2.3.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
       esbuild: 0.27.7

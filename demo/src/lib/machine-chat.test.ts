@@ -153,6 +153,21 @@ describe("idle prompt fallbacks", () => {
     const actor = createActor(machine).start();
     expect(describeIdle(machine, actor.getSnapshot() as never).prompt).toBe("Your move, Ada.");
   });
+
+  test("resolves dotted placeholders against nested context", async () => {
+    const machine = createMachine({
+      initial: "waiting",
+      context: { employee: { name: "Jordan" } },
+      states: {
+        waiting: { description: "Waiting on {employee.name}'s documents.", on: { GO: "done" } },
+        done: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+    const actor = createActor(machine).start();
+    expect(describeIdle(machine, actor.getSnapshot() as never).prompt).toBe(
+      "Waiting on Jordan's documents.",
+    );
+  });
 });
 
 describe("run output rendering", () => {
@@ -168,6 +183,19 @@ describe("run output rendering", () => {
     expect(text).not.toContain("```");
   });
 
+  test("identifier-like strings never lead: every field lists as Key: value", () => {
+    const text = renderOutput({
+      bookingId: "trip-1",
+      outcome: "booked",
+      flightReference: "simulated-flight:trip-1",
+    });
+    expect(text.split("\n")).toEqual([
+      "- Booking id: trip-1",
+      "- Outcome: booked",
+      "- Flight reference: simulated-flight:trip-1",
+    ]);
+  });
+
   test("plain strings and non-string objects are unchanged", () => {
     expect(renderOutput("done")).toBe("done");
     expect(renderOutput({ score: 9 })).toContain("```json");
@@ -176,6 +204,18 @@ describe("run output rendering", () => {
 
 describe("idle work rendering (changed context surfaces before approval)", () => {
   const fakeSnapshot = (context: Record<string, unknown>) => ({ value: "s", context }) as never;
+
+  test("a changed message history renders its newest assistant reply only", () => {
+    const messages = [
+      { role: "user", content: "Tell me about state machines" },
+      { role: "assistant", content: [{ type: "text", text: "A state machine is…" }] },
+    ];
+    expect(renderIdleWork({ messages, turns: 1 }, ["messages", "turns"])).toBe(
+      "A state machine is…",
+    );
+    // A history that ends on the user's own turn has no reply to show.
+    expect(renderIdleWork({ messages: [messages[0]] }, ["messages"])).toBeNull();
+  });
 
   test("recorder tracks keys changed after init, most recent first", () => {
     const recorder = createTraceRecorder();

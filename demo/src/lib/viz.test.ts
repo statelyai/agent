@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
 import { scenarioVizConfig, scenarioSource, toVizConfig } from "./scenarios";
 import { refundMachine } from "@/agents/refund";
-import { getTargetOrigin, isTrustedVizMessage } from "./viz-transport";
 import { machineForInspection } from "./inspection.server";
 
 test("viz config is plain JSON with static transition targets, no functions", () => {
@@ -30,14 +29,5 @@ test("every scenario has a serializable viz config and raw source", () => {
 test("inspection sends the primary machine as raw source", () => {
   expect(machineForInspection({ logic: refundMachine }, refundMachine, scenarioSource.refund)).toBe(
     scenarioSource.refund,
-  );
-});
-
-test("viz message trust check matches source frame and origin", () => {
-  const frame = {} as Window;
-  const origin = getTargetOrigin("https://editor.stately.ai/embed?auth=message");
-  expect(isTrustedVizMessage({ origin, source: frame }, frame, origin)).toBe(true);
-  expect(isTrustedVizMessage({ origin: "https://evil.test", source: frame }, frame, origin)).toBe(
-    false,
   );
 });

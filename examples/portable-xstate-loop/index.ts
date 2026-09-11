@@ -65,7 +65,10 @@ export const portableLoopMachine = portableLoopSetup.createMachine({
         }),
       },
     },
-    reviewing: { on: { APPROVE: { target: "done" } } },
+    reviewing: {
+      description: "Approve the drafted release notes to finish.",
+      on: { APPROVE: { target: "done" } },
+    },
     done: {
       type: "final",
       output: ({ context }) => ({ draft: context.draft, failure: null }),

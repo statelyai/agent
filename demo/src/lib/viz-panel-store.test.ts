@@ -131,6 +131,23 @@ describe("viz panel store", () => {
     });
   });
 
+  it("re-inits a ready embed in place when the machine changes", () => {
+    const store = createVizPanelStore();
+    const post = vi.fn();
+    store.on("post", ({ message }) => post(message));
+    store.trigger.iframeReady({ fallbackMessages: [] });
+
+    // The transient null while an example's detail loads posts nothing.
+    store.trigger.machineChanged({ initMessage: null });
+    expect(post).not.toHaveBeenCalled();
+
+    const init = { type: "@statelyai.init" };
+    store.trigger.machineChanged({ initMessage: init });
+    expect(post).toHaveBeenCalledWith(init);
+    // Same frame, no reload: the embed reloads content, not the editor.
+    expect(store.getSnapshot().context).toMatchObject({ status: "ready", frameKey: 0 });
+  });
+
   it("keeps the selected actor and final state after it stops", () => {
     const store = createVizPanelStore();
     store.trigger.systemInit({

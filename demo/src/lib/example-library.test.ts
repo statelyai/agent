@@ -22,6 +22,17 @@ describe("example library auto-discovery", () => {
     expect(machine!.vizConfig).toBe(detail.source);
   });
 
+  it("serializes a JSON-authored machine's config for Viz (no createMachine in source)", async () => {
+    const detail = await getExampleDetail("json-agent");
+    const machine = detail.machines.find((entry) => entry.exportName === "jsonAgentMachine");
+
+    expect(detail.source).not.toContain("createMachine(");
+    expect(machine?.vizConfig).toMatchObject({
+      id: expect.any(String),
+      states: expect.any(Object),
+    });
+  });
+
   it("passes v6 example source directly to Viz", async () => {
     const detail = await getExampleDetail("customer-support");
     const machine = detail.machines.find((entry) => entry.exportName === "customerSupportMachine");
@@ -43,8 +54,10 @@ describe("example library auto-discovery", () => {
     const detail = await getExampleDetail("hierarchical-teams");
     const machine = detail.machines.find((entry) => entry.exportName === "researchTeamMachine");
 
-    expect(machine?.vizConfig.indexOf("researchSetup.createMachine")).toBeLessThan(
-      machine?.vizConfig.indexOf("coordinatorSetup.createMachine") ?? -1,
+    const source = machine?.vizConfig;
+    if (typeof source !== "string") throw new Error("expected source");
+    expect(source.indexOf("researchSetup.createMachine")).toBeLessThan(
+      source.indexOf("coordinatorSetup.createMachine"),
     );
   });
 

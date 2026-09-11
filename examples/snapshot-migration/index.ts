@@ -26,6 +26,7 @@ export const orderApprovalMachineV1 = v1.createMachine({
   states: {
     reviewing: {
       tags: ["awaiting-approval"],
+      description: "Order {orderId} ({total}) is waiting for a reviewer.",
       on: { APPROVE: { target: "approved" }, REJECT: { target: "rejected" } },
     },
     // The outcome is the state, not a `decision` field mirroring it.
@@ -112,6 +113,8 @@ export const orderApprovalMachine = v2.createMachine({
   states: {
     awaitingApproval: {
       tags: ["awaiting-approval"],
+      description:
+        "Order {orderId} ({amountCents} {currency}, {riskLevel} risk) is waiting for a reviewer.",
       on: { APPROVE: { target: "approved" }, REJECT: { target: "rejected" } },
     },
     approved: {

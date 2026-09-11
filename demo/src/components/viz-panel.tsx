@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createWebSocketTransport } from "@statelyai/sdk";
+import { createStatelyEmbed, type MachineInitOptions } from "@statelyai/sdk/embed";
 import { useSelector } from "@xstate/store-react";
 import { ExternalLink, RefreshCcw } from "lucide-react";
-import { getTargetOrigin, isTrustedVizMessage } from "@/lib/viz-transport";
 import { createVizPanelStore, type SystemMessage } from "@/lib/viz-panel-store";
 import type { VizFrame } from "@/hooks/use-trace-player";
 
-const defaultVizUrl = "https://editor.stately.ai/embed?auth=message";
+/**
+ * Origin of the hosted editor. `VITE_VIZ_URL` may name the origin or a full
+ * `/embed` URL (the pre-SDK form); only its origin is used — the SDK builds
+ * the embed URL and drives the protocol handshake.
+ */
+const defaultVizUrl = "https://editor.stately.ai";
 
 export type LiveWs = { relayUrl: string; roomId: string };
 
@@ -88,32 +93,34 @@ export function VizPanel({
   );
 }
 
+/**
+ * The embed init, carried through the store as a `@statelyai.init` message
+ * and handed to `embed.init()` by the panel (the SDK sends it once the
+ * editor's ready handshake completes).
+ */
 function createInitMessage(
   machine: unknown,
   theme: "light" | "dark",
   documents: VizDocument[],
 ): SystemMessage {
-  return {
-    type: "@statelyai.init",
+  const options: MachineInitOptions = {
     machine,
     mode: "inspecting",
     theme,
     readOnly: true,
+    depth: 2,
     capabilities: {
       edit: false,
       export: false,
       ai: false,
       simulate: false,
       inspect: true,
-      navigateHierarchy: false,
-      maxDepth: 2,
       panels: ["documents"],
     },
     documents,
-    leftPanels: ["documents"],
-    rightPanels: [],
-    activePanels: ["documents"],
+    panels: [{ id: "documents", position: "left", initiallyOpen: true }],
   };
+  return { type: "@statelyai.init", ...options };
 }
 
 function createFrameMessage(frame: VizFrame): SystemMessage {
@@ -146,25 +153,33 @@ function EmbedVizPanel({
   onSystemMessage,
 }: Omit<VizPanelProps, "liveUrl">) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const embedRef = useRef<ReturnType<typeof createStatelyEmbed> | null>(null);
   const latestRef = useRef({ vizConfig, frame, theme, documents });
   const [store] = useState(createVizPanelStore);
   const status = useSelector(store, (snapshot) => snapshot.context.status);
   const transportError = useSelector(store, (snapshot) => snapshot.context.error);
   const frameKey = useSelector(store, (snapshot) => snapshot.context.frameKey);
-  const fitEpoch = useSelector(store, (snapshot) => snapshot.context.fitEpoch);
   const ready = status === "ready";
   const timedOut = status === "timedOut";
   const failed = status === "failed";
   const vizUrl = import.meta.env.VITE_VIZ_URL || defaultVizUrl;
-  const targetOrigin = useMemo(() => getTargetOrigin(vizUrl), [vizUrl]);
+  const vizOrigin = new URL(vizUrl).origin;
 
   latestRef.current = { vizConfig, frame, theme, documents };
 
+  // Protocol messages the SDK wraps go through it (init, theme); inspection
+  // frames post directly. The SDK queues anything sent before the editor's
+  // handshake completes.
   const post = useCallback(
     (message: Record<string, unknown>) => {
-      iframeRef.current?.contentWindow?.postMessage(message, targetOrigin);
+      const embed = embedRef.current;
+      if (!embed) return;
+      const { type, ...rest } = message;
+      if (type === "@statelyai.init") embed.init(rest as unknown as MachineInitOptions);
+      else if (type === "@statelyai.setTheme") embed.setTheme(rest.theme as "light" | "dark");
+      else iframeRef.current?.contentWindow?.postMessage(message, vizOrigin);
     },
-    [targetOrigin],
+    [vizOrigin],
   );
 
   useEffect(() => {
@@ -172,16 +187,15 @@ function EmbedVizPanel({
     return () => subscription.unsubscribe();
   }, [post, store]);
 
+  // One SDK embed per frame: it sets the iframe src, verifies message origin
+  // and source, runs the version handshake, and reports ready/loaded/error.
   useEffect(() => {
-    function onMessage(event: MessageEvent) {
-      if (!isTrustedVizMessage(event, iframeRef.current?.contentWindow ?? null, targetOrigin))
-        return;
-      // The graph finished loading/laying out — the one reliable moment to
-      // fit the camera on a cold editor load.
-      if (event.data?.type === "@statelyai.loaded") {
-        post({ type: "@statelyai.camera.fit" });
-      }
-      if (event.data?.type === "@statelyai.ready") {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const embed = createStatelyEmbed({
+      baseUrl: vizOrigin,
+      iframe,
+      onReady: () => {
         const latest = latestRef.current;
         store.trigger.iframeReady({
           fallbackMessages: createStaticMessages(
@@ -191,11 +205,17 @@ function EmbedVizPanel({
             latest.documents,
           ),
         });
-      }
-    }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [post, store, targetOrigin]);
+      },
+      onError: (error) => store.trigger.transportFailed({ message: error.message }),
+    });
+    embedRef.current = embed;
+    return () => {
+      embedRef.current = null;
+      embed.destroy();
+    };
+    // frameKey remounts the iframe; the embed follows it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameKey, post, store, vizOrigin]);
 
   // Reset live inspection only when the selected machine changes. In
   // particular, do not clear observations when the iframe becomes ready.
@@ -217,17 +237,6 @@ function EmbedVizPanel({
     previousTheme.current = theme;
     store.trigger.themeChanged({ message: { type: "@statelyai.setTheme", theme } });
   }, [store, theme]);
-
-  // The editor never fits the camera on its own, so freshly loaded content
-  // starts off-viewport. After each content load (init, machine switch, live
-  // system init) fit once right away and once after layout settles.
-  useEffect(() => {
-    if (fitEpoch === 0) return;
-    const fit = () => post({ type: "@statelyai.camera.fit" });
-    fit();
-    const timeout = window.setTimeout(fit, 800);
-    return () => window.clearTimeout(timeout);
-  }, [fitEpoch, post]);
 
   // Fallback replay frames (only used when live inspection is unavailable).
   useEffect(() => {
@@ -274,11 +283,14 @@ function EmbedVizPanel({
   useEffect(() => {
     const timeout = window.setTimeout(() => store.trigger.timeout(), 9000);
     return () => window.clearTimeout(timeout);
-  }, [frameKey, store, vizUrl]);
+  }, [frameKey, store, vizOrigin]);
 
   return (
     <section className="viz-shell" aria-label={`Live statechart for ${title}`}>
       <div className="viz-canvas">
+        {/* The embed stays mounted while an example's detail loads (vizConfig
+            is briefly null on every switch): unmounting it would reload the
+            whole editor and leave the pane blank, with the store still "ready". */}
         {!vizConfig ? (
           <div className="viz-state" role="status">
             <strong>No machine to inspect</strong>
@@ -300,25 +312,25 @@ function EmbedVizPanel({
                   <button type="button" className="viz-chip" onClick={() => store.trigger.retry()}>
                     <RefreshCcw size={13} aria-hidden="true" /> Retry
                   </button>
-                  <a className="viz-chip" href={vizUrl} target="_blank" rel="noreferrer">
+                  <a className="viz-chip" href={vizOrigin} target="_blank" rel="noreferrer">
                     Open Viz <ExternalLink size={12} aria-hidden="true" />
                   </a>
                 </div>
               </div>
             )}
-            <iframe
-              key={frameKey}
-              ref={iframeRef}
-              className="viz-embed"
-              data-ready={ready || undefined}
-              title={`Live statechart for ${title}`}
-              src={vizUrl}
-              allow="clipboard-read; clipboard-write"
-              sandbox="allow-scripts allow-same-origin"
-              referrerPolicy="strict-origin"
-            />
           </>
         )}
+        {/* No `src`: the SDK sets it on attach, then owns the handshake. */}
+        <iframe
+          key={frameKey}
+          ref={iframeRef}
+          className="viz-embed"
+          data-ready={(ready && !!vizConfig) || undefined}
+          title={`Live statechart for ${title}`}
+          allow="clipboard-read; clipboard-write"
+          sandbox="allow-scripts allow-same-origin"
+          referrerPolicy="strict-origin"
+        />
       </div>
     </section>
   );

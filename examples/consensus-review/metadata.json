@@ -13,7 +13,12 @@
   },
   "starters": [
     {
-      "patch": "Validate input before a database write."
+      "label": "Trusted patch (host-authored)",
+      "input": { "patch": "Validate input before a database write.", "source": "trusted" }
+    },
+    {
+      "label": "External patch (needs human review)",
+      "input": { "patch": "Validate input before a database write.", "source": "external" }
     }
   ]
 }
