@@ -1,5 +1,12 @@
 # @statelyai/example-cloudflare-workers-ai-host
 
+## 0.0.1-alpha.11
+
+### Patch Changes
+
+- Updated dependencies [[`8375f50`](https://github.com/statelyai/agent/commit/8375f50bd0f548136ff21d514979cfa4790b3028), [`685a54e`](https://github.com/statelyai/agent/commit/685a54e73fe8c0fe0b3fd09b3763cdfb43e9e6a7), [`77879cb`](https://github.com/statelyai/agent/commit/77879cbf0b230dc620a1dc5af470ca4c130568b1), [`8b7f21a`](https://github.com/statelyai/agent/commit/8b7f21a01b30c26520a0b90cdc72211fff0b9c6e), [`5a384af`](https://github.com/statelyai/agent/commit/5a384af797275048c76ef56eb61016a04af07c2f), [`f953f5e`](https://github.com/statelyai/agent/commit/f953f5e5bd3f60aace430067fbaf6c7ec48dc975), [`f953f5e`](https://github.com/statelyai/agent/commit/f953f5e5bd3f60aace430067fbaf6c7ec48dc975), [`2cf061e`](https://github.com/statelyai/agent/commit/2cf061e3031cb8b63c351d36ff4e0ac04891056e), [`77879cb`](https://github.com/statelyai/agent/commit/77879cbf0b230dc620a1dc5af470ca4c130568b1), [`4bd87d9`](https://github.com/statelyai/agent/commit/4bd87d93b7fcb1b85393b7beeca4d2dceaa890ee), [`5a384af`](https://github.com/statelyai/agent/commit/5a384af797275048c76ef56eb61016a04af07c2f), [`f953f5e`](https://github.com/statelyai/agent/commit/f953f5e5bd3f60aace430067fbaf6c7ec48dc975), [`5ec7e57`](https://github.com/statelyai/agent/commit/5ec7e577c338a2d66183694a2f333915344e6991), [`5a384af`](https://github.com/statelyai/agent/commit/5a384af797275048c76ef56eb61016a04af07c2f)]:
+  - @statelyai/agent@2.0.0-alpha.23
+
 ## 0.0.1-alpha.10
 
 ### Patch Changes

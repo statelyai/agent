@@ -1,5 +1,205 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.23
+
+### Minor Changes
+
+- [#115](https://github.com/statelyai/agent/pull/115) [`8375f50`](https://github.com/statelyai/agent/commit/8375f50bd0f548136ff21d514979cfa4790b3028) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Simplify the alpha API around a single portable XState machine artifact.
+
+  - Add semantic request names/inputs, name-keyed scripted executors, exported type helpers, framework-native `agent.messages` events, typed `appendMessages`, `getInteraction`, `eventFromInteraction`, `isAgentIdle`, `runAgentLoop`, and `runAgentStream`.
+  - Let `defineModels` provide optional AI SDK executors without adding an AI SDK dependency to core.
+  - Use native XState persisted snapshots, machine `version`/`migrate`, structural idle states, and framework-owned durability/storage/retry behavior.
+  - Remove the Agent event log, replay/durable runners, SQLite adapters, implicit request extraction, hidden message state, host idle override, `generateResult`/`createAgentActor`, custom per-state schema sugar, general XState lint rules, and Agent-specific failure status proposal.
+  - Reduce and rewrite the example/docs catalog around named requests, native snapshots, interactions, evals, and non-trivial state-machine control flow.
+
+- [#119](https://github.com/statelyai/agent/pull/119) [`77879cb`](https://github.com/statelyai/agent/commit/77879cbf0b230dc620a1dc5af470ca4c130568b1) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **The event log is the source of truth for a run.** `runAgent` journals the root machine's external inputs as `AgentLogEntry` values, and a run resumes from that log.
+
+  - `result.events` is a complete, self-contained log segment: a reserved `@agent.init` entry (carrying `input` or a persisted `snapshot`, plus a per-lineage `metadata.executionId`), then every host event, child completion, timer, `@agent.usage`, and `agent.messages` event. Raised events are re-derived on replay.
+  - `onEvent(entry)` observes each entry as it is appended. `verification` (default on) stamps a per-entry `stateHash` from the live snapshot.
+  - `runAgent({ events })` resumes by replay. Recorded results are never re-executed; an in-flight request re-executes with the same `info.callKey`.
+  - A `snapshot` alongside the log is a cache: trusted when its `agentMeta` lineage id, index, and hash match the tail, otherwise the log wins. A diverged cache throws `AgentSnapshotDivergedError` (`snapshot-diverged`). `persist()` stamps `agentMeta: { machineId, version, logId, logIndex }`.
+  - Across a `machine.version` change, pass the old `events` and the migrated `snapshot`; the result starts a new segment whose init entry records `metadata.migratedFrom`. Old events without a snapshot throw `AgentMachineVersionMismatchError`.
+  - Snapshot-only resume also yields a replayable log.
+  - `@agent.usage` entries are always journaled; `result.usage` folds them via `getUsageFromEvents`. Delivery to the machine is still gated on a declared transition.
+  - Executors receive `info.callKey` (`<executionId>:<requestId>#<n>`), identical across crash re-execution, for provider and tool idempotency.
+  - New exports: `replay`, `forkEventLog`, `getLogExecutionId`, `getSnapshotStateHash`, `agentCallOccurrence`, `AgentEventLogStore`, `createInMemoryEventLogStore`, `assertEventLogStoreConformance`, `AgentEventLogConflictError`, `AgentReplayDivergenceError`, `AgentEventLogError`.
+  - Durability stays with the host. No durable runner and no SQLite subpath; the Cloudflare Durable Object example persists the journal in SQLite and drives each turn with `runAgent`.
+
+- [#119](https://github.com/statelyai/agent/pull/119) [`8b7f21a`](https://github.com/statelyai/agent/commit/8b7f21a01b30c26520a0b90cdc72211fff0b9c6e) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add the event log as the source of truth for a run; a snapshot is a verified cache over it.
+
+  - `runAgent` journals the root machine's external inputs as `AgentLogEntry` values: the reserved `@agent.init` entry, host events, child completions, timers, `@agent.usage`, and `agent.messages`. `result.events` is a complete, self-contained log; `onEvent` delivers each entry as it is appended; `verification` (default on) stamps a per-entry state hash computed from the live snapshot.
+  - `runAgent({ events })` resumes by replaying the log. Recorded results are reused, never re-executed; a request that was in flight re-executes with the same `info.callKey`. A `snapshot` passed alongside the log is trusted only when its `agentMeta` lineage id, index, and hash match the log's tail; otherwise the log wins, and a diverged cache throws `AgentSnapshotDivergedError`.
+  - Across a `machine.version` change, pass the old `events` and the migrated `snapshot`; the result starts a new log segment whose init entry carries the snapshot and `metadata.migratedFrom`. Old events without a snapshot throw `AgentMachineVersionMismatchError`.
+  - Every `@agent.usage` event is journaled as a spend record whether or not the machine handles it; `result.usage` folds the log (`getUsageFromEvents`).
+  - Executors receive `info.callKey`, a deterministic per-call idempotency key (`<executionId>:<requestId>#<n>`).
+  - New exports: `replay`, `forkEventLog`, `initEntry`, `createReplayEntry`, `validateReplayEntries`, `getLogExecutionId`, `getSnapshotStateHash`, `agentCallOccurrence`, `rebindActorSession`, `AgentEventLogStore`, `createInMemoryEventLogStore`, `assertEventLogStoreConformance`, `AgentEventLogConflictError`, `AgentReplayDivergenceError`, `AgentEventLogError`, `NonSerializableAgentEventError`.
+  - Durability stays with the host. The Cloudflare Durable Object example persists the journal in SQLite through the store interface and drives each turn with `runAgent`.
+
+- [#123](https://github.com/statelyai/agent/pull/123) [`5a384af`](https://github.com/statelyai/agent/commit/5a384af797275048c76ef56eb61016a04af07c2f) Thanks [@davidkpiano](https://github.com/davidkpiano)! - One `runAgent` addition for human-in-the-loop resume:
+
+  - **Explicit suspension detection.** Declare what "suspended" means for a machine with `setupAgent({ isSuspended: (snapshot) => boolean })`: a wait-state predicate the machine carries (it survives `machine.provide(...)`), so `runAgent` settles those resting snapshots idle deterministically instead of relying on the `setTimeout(0)` timing heuristic. You choose the signal: a tag, a state match, or a `meta` field (e.g. `(s) => s.hasTag('awaiting-review')` or `(s) => getStateMeta(s).interaction !== undefined`). `RunAgentOptions.isSuspended?: (snapshot) => boolean` remains a per-run host override. Resolution order: host option → machine-carried predicate → timing heuristic (when neither is present). Whole-machine idle semantics and the `agent.userInput` placeholder exemption are unchanged; a machine with no predicate falls back to the heuristic exactly as before. (Provisional name: `isSuspended` may change before 2.0.) **Breaking:** the previously exported `WAIT_TAG` constant and the `hasTag(WAIT_TAG)` default are removed. Declare your own signal via `setupAgent({ isSuspended })` or the `runAgent` option.
+
+- [#122](https://github.com/statelyai/agent/pull/122) [`f953f5e`](https://github.com/statelyai/agent/commit/f953f5e5bd3f60aace430067fbaf6c7ec48dc975) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Normalized `finishReason`.** Executor results can report why a call stopped, as `'stop' | 'length' | 'tool-calls' | 'content-filter' | 'other'` (the `AgentFinishReason` type). `createAiSdkExecutors` sets it on every text, structured, and streamed result, mapping the provider's vocabulary onto those five and leaving the raw value on `raw`. `runAgent` lifts it onto the `request.end` trace event next to `usage`, and `serializeTraceEvent` passes it through.
+
+  **`AgentTruncatedError`.** A `'length'` finish costs different things for different requests, so the adapter throws only when it would otherwise return nothing usable:
+
+  - Text request: the text it did produce comes back, with `finishReason: 'length'`. Nothing throws.
+  - Structured request: an envelope that never closed is not an answer, so `createAiSdkExecutors` throws.
+
+  The error extends `AgentError` with the code `'truncated'` and carries `requestName`, `requestId`, and `partialOutput`, so an invoke branches on it without an `instanceof` check across bundles:
+
+  ```ts
+  onError: [
+    {
+      guard: ({ event }) => event.error.code === "truncated",
+      target: "askingForLess",
+    },
+    { target: "failed" },
+  ];
+  ```
+
+  Core never throws it. Truncation is a host observation — only an adapter knows a call ran out of tokens.
+
+- [#122](https://github.com/statelyai/agent/pull/122) [`f953f5e`](https://github.com/statelyai/agent/commit/f953f5e5bd3f60aace430067fbaf6c7ec48dc975) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Raw OpenAI SDK adapter.** `@statelyai/agent/openai` is a new package entry: `createOpenAiExecutors` builds the `{ generateText, streamText, decide }` executor set over the `openai` package's Chat Completions API, with no Vercel AI SDK in between. It was the `openai-sdk-host` example; the mapping now ships, and the example is just the host around it.
+
+  ```ts
+  import OpenAI from "openai";
+  import { createOpenAiExecutors } from "@statelyai/agent/openai";
+
+  const executors = createOpenAiExecutors({
+    client: new OpenAI(),
+    resolveModel: (modelRef) =>
+      modelRef === "deep" ? "gpt-5.4" : "gpt-5.4-mini",
+    settings: {
+      deep: { reasoning_effort: "high" },
+    },
+  });
+
+  await runAgent(machine, { input, executors });
+  ```
+
+  `openai` is an optional peer dependency, accepted at `>=5.0.0 <8` and imported for types only — the client is injected, so the API key, base URL, and transport stay with the host.
+
+  `resolveModel` maps a machine's model ref to a real OpenAI model id, defaulting to identity. `settings` carries the provider knobs that are the host's business rather than the machine's, mirroring `createAiSdkExecutors({ settings })`: key it by model ref to give a ref a persona, or pass a function of the request. Settings merge under what the request declared, so a request that set `maxOutputTokens` still wins.
+
+  Beyond what the example did:
+
+  - A structured request that hit the token limit throws `AgentTruncatedError` with the partial text on `partialOutput`. A text request that hit it returns its text with `finishReason: 'length'`.
+  - Every result reports `usage` on the flat `AgentCallUsage` field names, folding `completion_tokens_details.reasoning_tokens` and `prompt_tokens_details.cached_tokens` onto `reasoningTokens` and `cachedInputTokens`, plus a `finishReason` normalized from OpenAI's `finish_reason` and the untouched response on `raw`. Streams ask for `stream_options: { include_usage: true }`, so they report usage too.
+
+- [#119](https://github.com/statelyai/agent/pull/119) [`77879cb`](https://github.com/statelyai/agent/commit/77879cbf0b230dc620a1dc5af470ca4c130568b1) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`runAgent` can own the event log's durability.** Pass a store and a thread and the run reads its resume log from storage and writes every entry back, write-ahead.
+
+  ```ts
+  const result = await runAgent(machine, {
+    store,
+    threadId: "session-1",
+    input,
+    executors,
+  });
+  ```
+
+  - `store` (an `AgentEventLogStore`) plus `threadId` (required with it, `AgentError` code `missing-thread-id` otherwise). With no `events`, the thread's log is the resume — an empty thread starts fresh from `input`.
+  - Each entry is appended at its own `index` as `expectedIndex`, so a concurrent writer conflicts instead of interleaving.
+  - **Append-before-execute.** No text or decision call starts until every entry before it is durable; pure transitions never wait. The result resolves only once the run's writes have landed.
+  - A rejected write aborts in-flight work and settles `{ status: 'error', cause: 'journal' }` — a new `RunAgentErrorCause`. No further calls run.
+  - Passing `events` as well keeps that log as the resume, and the thread's length must match it.
+  - `onEvent` is unchanged: a synchronous observer, never awaited. Persisting there stays at-least-once; `store` is the write-ahead seam.
+  - `runAgentLoop` threads `store`/`threadId` through, reading the thread each turn instead of carrying the log itself.
+
+- [#123](https://github.com/statelyai/agent/pull/123) [`5a384af`](https://github.com/statelyai/agent/commit/5a384af797275048c76ef56eb61016a04af07c2f) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `createScriptedExecutors` is now one rule: answers keyed by request name, consumed in order, with the last entry for a name repeating forever.
+
+  ```ts
+  createScriptedExecutors({
+    text: { draft: ["first pass", "revised"] },
+    decisions: { route: [{ type: "PUBLISH" }] },
+  });
+  ```
+
+  Removed: `repeat`, `strict`, positional (un-named) arrays, `scripted.scriptError`, `scripted.assertScriptOk()`, and the exported `AgentScriptedExecutorError`. A request the script has no route for throws a plain `Error("No scripted answer for request 'x'. Known: a, b")` from inside the executor, which reaches the machine as an ordinary actor error. `scripted.calls` still records every call, so assert exact call counts through it.
+
+  `"*"` remains the fallback key, and `userInput` remains a flat array.
+
+  Docs: the quickstart's first run is a three-line inline executor (`executors: { generateText: async () => ({ output: "…" }) }`) with no helper import; `createScriptedExecutors` is documented in `evals.md`, and `models-and-providers.md` shows the AI SDK's own `MockLanguageModelV3` from `ai/test` for testing the adapter path.
+
+- [#122](https://github.com/statelyai/agent/pull/122) [`f953f5e`](https://github.com/statelyai/agent/commit/f953f5e5bd3f60aace430067fbaf6c7ec48dc975) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Scripted invoke failures.** `simulateAgent`, `explorePaths`, and `canReach` can now fail a request instead of resolving it, so a state that only an invoke's `onError` reaches is testable with no model and no keys.
+
+  A `SimulationScript` gains an `errors` channel, keyed by the same srcs as `text`/`invokes`/`decisions`. An entry is consumed before that src's output queue, so the first call fails and later calls fall through to the outputs as usual.
+
+  ```ts
+  const result = await simulateAgent(machine, {
+    script: {
+      errors: { parse: [{ code: "truncated" }] },
+      text: { parse: [{ total: 42 }] }, // still queued: the error was taken first
+    },
+  });
+  // result.snapshot.value → the target of the `parse` invoke's onError
+  ```
+
+  A failure value is any value. An `Error` is the usual one, and a plain object reaches the `onError` transition as `event.error` untouched, so a machine that branches on `event.error.code` needs no provider error class to test. An entry keyed by a decision src stands in for retry exhaustion. A rejection nothing catches errors the machine and throws, as a live run does.
+
+  Every `trail` entry's `resolvedRequest` now reports an `outcome` of `'output'` or `'error'`, and a rejected one carries the failure value on `error`.
+
+  `explorePaths` and `canReach` take a matching `errors` map of one canned failure per src. A src listed there forks an extra branch where the invoke is rejected — both branches when the src also has an output, the failing one alone when it does not. Each fork counts against `maxDepth`, and the failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, so a witness names the failure that got there.
+
+  ```ts
+  const failure = await canReach(machine, "failed", {
+    errors: { parse: new Error("truncated response") },
+  });
+  // failure.reachable → true; failure.witness → [{ type: 'xstate.error.actor.parse' }]
+  ```
+
+- [#120](https://github.com/statelyai/agent/pull/120) [`5ec7e57`](https://github.com/statelyai/agent/commit/5ec7e577c338a2d66183694a2f333915344e6991) Thanks [@davidkpiano](https://github.com/davidkpiano)! - New exports for the interaction, decision, and verification surfaces:
+
+  - `interactionMetaSchema` (plus the `AgentInteractionMeta`, `AgentInteractionDescriptor`, and `AgentInteractionEventMeta` types) validates the `meta.interaction` shape `getInteraction` reads, so machines stop restating it.
+  - `getInteraction(snapshot, { preserveWhitespace })` keeps deliberately multi-line labels intact; the default still collapses whitespace.
+  - `getInteraction` and `eventFromInteraction` are now generic over the snapshot, so the returned choices and event are typed as the machine's own event union instead of `EventObject`.
+  - `createDecisionRequest({ model, events, ... })` builds an `AgentDecisionRequest` for `resolveDecision`, filling in `kind`, `id`, `attempts`, and each candidate's `toolName`.
+  - `getStatePath(snapshot)` renders nested and parallel state values as one deterministic string (`review.editing`, `p:{left.x,right.y}`).
+  - `DoneActorEventOf<TLogic, TId?>` types a wildcard `xstate.done.actor` handler for dynamically spawned children.
+  - `lintAgentMachine` adds the `invoke-without-on-error` warning for an invoke with no `onError` and no ancestor error handling.
+  - `createScriptedExecutors` now fails with a clear error naming the known script keys when a name-keyed `text`/`decisions` script has no route for a request name.
+  - `isAgentMessages(value)` is the type guard behind `messagesSchema`, for zod context schemas: `messages: z.custom<AgentMessage[]>(isAgentMessages)`. A zod object cannot nest a Standard Schema directly; the `messagesSchema` doc comment now says so.
+
+- [#123](https://github.com/statelyai/agent/pull/123) [`5a384af`](https://github.com/statelyai/agent/commit/5a384af797275048c76ef56eb61016a04af07c2f) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Events off the wire are parsed at the boundary, and an event the state does not handle is ignored rather than refused.
+
+  State machines ignore events they have no transition for. The library no longer turns that into an error.
+
+  **`parseAgentEvent(machineOrSnapshot, payload, options?)`** is the one boundary parser. It takes `unknown` (hand it `await request.json()`), reads the event schemas `setupAgent` registered on the machine, and returns the event typed as the machine's event union. It throws the new `AgentInvalidEventPayloadError` (code `invalid-event-payload`) when the payload is not an object with a string `type`, names a reserved `@agent.*` type, or fails its registered schema. It does not look at the current state: payload shape is what a schema can check.
+
+  ```ts
+  let event;
+  try {
+    event = parseAgentEvent(machine, await request.json());
+  } catch (error) {
+    return Response.json({ error: String(error) }, { status: 400 });
+  }
+
+  const result = await runAgent(machine, { store, threadId, event, executors });
+
+  if (result.ignored) {
+    return Response.json(
+      { error: `'${result.ignored.type}' does not apply here` },
+      { status: 409 }
+    );
+  }
+  ```
+
+  **`result.ignored`** is the resume event the root actor took no transition for (no state change, no actions). The run settles normally, usually back to `idle` at the same state. The event is still journaled like any other external input, so a replay ignores it again. A host that wants a 4xx checks this; nothing else has to.
+
+  **Breaking (alpha):**
+
+  - `AgentIllegalResumeEventError` is removed. `runAgent({ snapshot, event })` no longer throws when the restored state has no transition for `event` — it sends it and reports `result.ignored`.
+  - `parseAgentEvent` no longer throws on an event type the current state does not accept, and no longer takes `eventToolName`. It now accepts a machine as well as a snapshot, and an `unknown` payload.
+  - `eventFromInteraction` throws `AgentInvalidEventPayloadError` instead of `AgentIllegalResumeEventError` for a choice the interaction does not offer.
+
+### Patch Changes
+
+- [#126](https://github.com/statelyai/agent/pull/126) [`685a54e`](https://github.com/statelyai/agent/commit/685a54e73fe8c0fe0b3fd09b3763cdfb43e9e6a7) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `examples/consensus-review`: `runConsensusReviewExample` takes `patch` instead of `input`. The host decides whether a patch is trusted; a caller-supplied patch is always external and always reaches human review.
+
+- [#124](https://github.com/statelyai/agent/pull/124) [`2cf061e`](https://github.com/statelyai/agent/commit/2cf061e3031cb8b63c351d36ff4e0ac04891056e) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add offline examples for parallel reviewer quorum, booking compensation, and host-scheduled approval deadlines, with typed machines, failure-path tests, and host ownership documentation.
+
+- [#123](https://github.com/statelyai/agent/pull/123) [`4bd87d9`](https://github.com/statelyai/agent/commit/4bd87d93b7fcb1b85393b7beeca4d2dceaa890ee) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Registered schemas now survive `machine.provide(...)`. `runAgent` starts its actor from a rebound machine, so `parseAgentEvent(result.snapshot, ...)` and `getInteraction(result.snapshot)` found no schemas and skipped validation: a bad payload passed through unchecked, and a choice whose payload the schema says is incomplete was judged against an `undefined` field. The registry is now keyed on the machine's root `config` as well as the machine object — `config` is shared by reference across `.provide` — so a result snapshot resolves the same pack `setupAgent` registered. `getAgentSchemas` reads through the same fallback.
+
 ## 2.0.0-alpha.22
 
 ### Minor Changes
