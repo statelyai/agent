@@ -1,6 +1,6 @@
 # Statechart policy examples
 
-Three offline examples put consequential decisions in visible machine states. Each exports its machine and a runner accepting `RunAgentOptions`. Replace the scripted `generateText` executor with an SDK implementation; override booking actors through native XState `actors` bindings.
+Three offline examples put consequential decisions in visible machine states. Each exports its machine and a runner accepting `RunAgentOptions`. The consensus-review runner takes `patch` instead of `input`, because the host, not the caller, decides whether a patch is trusted. Replace the scripted `generateText` executor with an SDK implementation; override booking actors through native XState `actors` bindings.
 
 <!-- policy example catalog derived from examples/consensus-review, examples/booking-compensation, and examples/deadline-escalation -->
 

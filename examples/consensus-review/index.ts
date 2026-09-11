@@ -191,18 +191,27 @@ const BUILT_IN_PATCH = "Validate input before writing to the database.";
 export function runConsensusReviewExample(
   options?: Omit<RunAgentOptions<typeof consensusReviewMachine>, "input"> & { patch?: string },
 ) {
-  const { patch, ...runOptions } = options ?? {};
+  // `input` is stripped at runtime too, not only by the type: a caller passing
+  // it through an untyped object must not be able to overwrite `source`.
+  const {
+    patch,
+    input: _ignored,
+    ...runOptions
+  } = (options ?? {}) as typeof options & {
+    input?: unknown;
+  };
   return runAgent(consensusReviewMachine, {
-    input:
-      patch === undefined
-        ? { patch: BUILT_IN_PATCH, source: "trusted" }
-        : { patch, source: "external" },
     executors: {
       generateText: async () => ({
         output: { approve: true, reason: "Scripted review; substitute a real model in your host." },
       }),
     },
     ...runOptions,
+    // Last on purpose: the host-derived input wins over anything spread above.
+    input:
+      patch === undefined
+        ? { patch: BUILT_IN_PATCH, source: "trusted" }
+        : { patch, source: "external" },
   });
 }
 

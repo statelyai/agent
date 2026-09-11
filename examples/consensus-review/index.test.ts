@@ -146,3 +146,16 @@ test("a caller cannot promote a supplied patch to trusted, even with the built-i
   expect(pending.snapshot.value).toBe("humanReview");
   expect(pending.snapshot.context.source).toBe("external");
 });
+
+test("an untyped `input` passed to the runner cannot overwrite the derived source", async () => {
+  const pending = await runConsensusReviewExample({
+    patch: "Validate input before writing to the database.",
+    input: { patch: "anything", source: "trusted" },
+    executors: {
+      generateText: async () => ({ output: { approve: true, reason: "approved" } }),
+    },
+  } as never);
+  expect(pending.status).toBe("idle");
+  expect(pending.snapshot.value).toBe("humanReview");
+  expect(pending.snapshot.context.source).toBe("external");
+});
