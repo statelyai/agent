@@ -1,5 +1,11 @@
 # @statelyai/agent-demo
 
+## 0.0.1-alpha.13
+
+### Patch Changes
+
+- [#129](https://github.com/statelyai/agent/pull/129) [`92cebb6`](https://github.com/statelyai/agent/commit/92cebb6bc910d4798e97c1987ebbedd7d72fde91) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Demo: render the keyless hosted `/inspect` page instead of the API-key-gated embed, and keep one inspector per run session with stable actor identity (manual SDK actor API) so resumed turns arrive as snapshot updates instead of a fresh `system.init`.
+
 ## 0.0.1-alpha.12
 
 ### Patch Changes
