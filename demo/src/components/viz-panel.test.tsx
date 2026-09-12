@@ -2,43 +2,32 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { VizPanel } from "./viz-panel";
 
-const frame = {
-  value: "idle",
-  status: "active" as const,
-  context: {},
-  event: { type: "xstate.init" },
-};
-
-function renderPanel(liveUrl: string | null, vizConfig: unknown = { id: "test" }) {
+function renderPanel(liveUrl: string | null, hasMachine = true) {
   return renderToStaticMarkup(
     <VizPanel
       title="Test machine"
-      machineKey="test"
-      vizConfig={vizConfig}
-      frame={frame}
+      hasMachine={hasMachine}
       liveWs={null}
       liveUrl={liveUrl}
-      theme="light"
-      documents={[]}
     />,
   );
 }
 
-describe("VizPanel iframe permissions", () => {
-  it.each([
-    ["embedded Viz", null],
-    ["live inspection", "https://editor.stately.ai/inspect"],
-  ])("allows clipboard access for %s", (_mode, liveUrl) => {
-    expect(renderPanel(liveUrl)).toContain('allow="clipboard-read; clipboard-write"');
+describe("VizPanel", () => {
+  it("renders the /inspect page when a run is live", () => {
+    const html = renderPanel("https://editor.stately.ai/inspect?ws=wss%3A%2F%2Frelay&r=room");
+    expect(html).toContain('src="https://editor.stately.ai/inspect?ws=wss%3A%2F%2Frelay&amp;r=room"');
+    expect(html).toContain('allow="clipboard-read; clipboard-write"');
   });
-});
 
-describe("VizPanel embed lifetime", () => {
-  it("keeps the embed mounted while there is no machine (detail still loading)", () => {
-    // Unmounting would reload the whole editor on every example switch.
-    const html = renderPanel(null, null);
+  it("waits for a run before showing the statechart", () => {
+    const html = renderPanel(null);
+    expect(html).toContain("Start a run to inspect");
+    expect(html).not.toContain("<iframe");
+  });
+
+  it("says so when the example exports no machine", () => {
+    const html = renderPanel(null, false);
     expect(html).toContain("No machine to inspect");
-    expect(html).toContain("<iframe");
-    expect(html).not.toContain("data-ready");
   });
 });
