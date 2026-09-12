@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useSelector } from "@xstate/store-react";
 import { AppPanel, type TextPolicy, type Turn } from "@/components/app-panel";
-import type { SystemMessage } from "@/lib/viz-panel-store";
 import { liveTraceStep, type TraceStep } from "@/lib/trace-view";
 import { ExampleIntro, ScenarioIntro, type StarterAction } from "@/components/chat-intros";
 import { SiteHeader } from "@/components/site-header";
-import { VizPanel } from "@/components/viz-panel";
-import { useTracePlayer } from "@/hooks/use-trace-player";
+import { VizPanel, type SystemMessage } from "@/components/viz-panel";
 import {
   getExample,
   getInspection,
@@ -19,7 +17,7 @@ import {
 } from "@/lib/example-library";
 import { humanizeEventType } from "@/lib/machine-ui";
 import { resumeScenario, startScenario } from "@/lib/run-demo-agent";
-import { getScenario, scenarioSource, scenarioVizConfig, scenarios } from "@/lib/scenarios";
+import { getScenario, scenarios } from "@/lib/scenarios";
 import type { Selection } from "@/lib/selection";
 import {
   createShellStore,
@@ -55,12 +53,14 @@ function hashFromSelection(selection: Selection) {
 }
 
 /**
- * Optional full /inspect page (VITE_VIZ_INSPECT_URL). The hosted route is
- * login-free now. Default: the embed + WS bridge inside VizPanel, which
- * connects to hosted Stately Sky and forwards live messages via postMessage.
- * A local ws:// relay still needs an http viewer to avoid mixed content.
+ * The hosted `/inspect` page renders the live system on its own: given `?ws=`
+ * and `?r=` it joins the inspection room directly, no API key and no embed
+ * handshake. Derived from `VITE_VIZ_URL`'s origin; `VITE_VIZ_INSPECT_URL`
+ * replaces the whole URL (a local viz app, which a `ws://` relay needs to
+ * avoid mixed content).
  */
-const inspectOverride = import.meta.env.VITE_VIZ_INSPECT_URL || null;
+const vizOrigin = new URL(import.meta.env.VITE_VIZ_URL || "https://editor.stately.ai").origin;
+const inspectUrl = import.meta.env.VITE_VIZ_INSPECT_URL || `${vizOrigin}/inspect`;
 
 function createLiveInspectUrl(baseUrl: string, inspection: InspectionInfo): string {
   const url = new URL(baseUrl);
@@ -94,13 +94,11 @@ export function DemoShell() {
     : null;
   const activeMachine = exampleDetail?.machines[machineIndex] ?? exampleDetail?.machines[0] ?? null;
 
-  const machineKey = isScenario
-    ? `scenario:${scenario.id}`
-    : `example:${selection.id}:${activeMachine?.exportName ?? "none"}`;
-  const initialValue = isScenario
-    ? ((scenarioVizConfig[scenario.id] as { initial?: string }).initial ?? null)
-    : (activeMachine?.initial ?? null);
-  const player = useTracePlayer(machineKey, initialValue);
+
+  // A resumed turn reuses the session's inspector, so no init/actorRegistered
+  // arrives for the root — remember its session id across turns;
+  // a reset or a new selection forgets it so replayed frames are not misread.
+  const lastRootSessionId = useRef<string | null>(null);
 
   // Apply the persisted theme attribute on mount (SSR renders light).
   useEffect(() => {
@@ -117,12 +115,12 @@ export function DemoShell() {
       const current = store.getSnapshot().context.selection;
       if (fromHash && (fromHash.type !== current.type || fromHash.id !== current.id)) {
         store.trigger.exampleSelected({ selection: fromHash });
-        player.reset();
+        lastRootSessionId.current = null;
       }
     }
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
-  }, [player, store]);
+  }, [store]);
 
   // Live inspection: use Sky by default; boot a local relay only when opted in.
   const [inspection, setInspection] = useState<InspectionInfo | null>(null);
@@ -205,7 +203,7 @@ export function DemoShell() {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    liveRun.current = { sessionId: null, startedAt: Date.now() };
+    liveRun.current = { sessionId: lastRootSessionId.current, startedAt: Date.now() };
     setLiveSteps([]);
     return controller.signal;
   };
@@ -226,6 +224,7 @@ export function DemoShell() {
       // A fresh system means a fresh run — drop any replayed leftovers.
       if (root) {
         run.sessionId = root.sessionId;
+        lastRootSessionId.current = root.sessionId;
         setLiveSteps([]);
       }
       return;
@@ -236,6 +235,7 @@ export function DemoShell() {
       typeof message.sessionId === "string"
     ) {
       run.sessionId = message.sessionId;
+      lastRootSessionId.current = message.sessionId;
       setLiveSteps([]);
       return;
     }
@@ -250,8 +250,8 @@ export function DemoShell() {
   }, []);
 
   const resetRun = () => {
+    lastRootSessionId.current = null;
     store.trigger.runReset();
-    player.reset();
   };
 
   /** Rewind to a stored idle checkpoint; the next answer forks a new branch. */
@@ -262,21 +262,18 @@ export function DemoShell() {
   };
 
   const select = (next: Selection) => {
+    lastRootSessionId.current = null;
     store.trigger.exampleSelected({ selection: next });
-    player.reset();
   };
 
   const selectMachine = (index: number) => {
+    lastRootSessionId.current = null;
     store.trigger.machineSelected({ index });
-    player.reset();
   };
 
   const settle = (epoch: number, turnId: number, result: AnyRunResult) => {
     endRun();
     store.trigger.turnSettled({ epoch, id: turnId, result });
-    // With live inspection the viz already showed the run in real time; the
-    // trace replay only backs the no-relay fallback.
-    if (!inspection && store.getSnapshot().context.epoch === epoch) player.play(result.trace);
   };
 
   const fail = (epoch: number, turnId: number, error: unknown) => {
@@ -544,46 +541,16 @@ export function DemoShell() {
   );
 
   const liveUrl =
-    inspection && inspectOverride && started
-      ? createLiveInspectUrl(inspectOverride, inspection)
-      : null;
+    inspection && started ? createLiveInspectUrl(inspectUrl, inspection) : null;
   const liveWs = inspection;
-  const vizDocuments = isScenario
-    ? [
-        {
-          path: `src/agents/${scenario.id}.ts`,
-          content: scenarioSource[scenario.id],
-        },
-        {
-          path: `docs/${scenario.id}.md`,
-          content: `# ${scenario.name}\n\n${scenario.description}`,
-        },
-      ]
-    : [
-        {
-          path: `examples/${selection.id}/index.ts`,
-          content: exampleDetail?.source ?? "// Loading…",
-        },
-      ];
 
   const vizPanel = (
     <VizPanel
       title={headerName}
-      machineKey={machineKey}
-      vizConfig={
-        isScenario
-          ? // The embed's init takes serialized machine config, not TS source —
-            // source in this slot renders as an empty canvas.
-            scenarioVizConfig[scenario.id]
-          : exampleDetail
-            ? (activeMachine?.vizConfig ?? null)
-            : null
-      }
-      frame={player.frame}
+      hasMachine={isScenario || !!activeMachine?.vizConfig}
+      inspectionUnavailable={started && !inspection}
       liveWs={liveWs}
       liveUrl={liveUrl}
-      theme={theme}
-      documents={vizDocuments}
       onSystemMessage={handleSystemMessage}
     />
   );

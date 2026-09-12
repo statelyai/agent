@@ -558,7 +558,7 @@ export async function startMachineChat(
     executors: live.executors,
     signal: runSignal(limits),
     onTransition,
-    inspect: maybeCreateRunInspection(machine, limits.machineSource),
+    inspect: maybeCreateRunInspection(machine, limits.machineSource, "start"),
   });
   return toChatResult(
     machine,
@@ -618,7 +618,7 @@ export async function resumeMachineChat(
     executors: live.executors,
     signal: runSignal(limits),
     onTransition,
-    inspect: maybeCreateRunInspection(machine, limits.machineSource),
+    inspect: maybeCreateRunInspection(machine, limits.machineSource, "resume"),
   });
   return toChatResult(
     machine,

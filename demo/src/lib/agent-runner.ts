@@ -246,7 +246,7 @@ export async function startScenarioRun(
     executors,
     ...(signal ? { signal } : {}),
     onTransition,
-    inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId]),
+    inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "start"),
   });
   return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
 }
@@ -271,7 +271,7 @@ export async function resumeScenarioRun(
     executors,
     ...(signal ? { signal } : {}),
     onTransition,
-    inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId]),
+    inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "resume"),
   });
   return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
 }
