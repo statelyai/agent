@@ -13,6 +13,12 @@
  *
  * One secure room capability per dev-server process and one producer. The viz
  * side connects once and every run replaces that producer's replay checkpoint.
+ *
+ * SINGLE-USER BY DESIGN: the room, the inspector, and its actor-id maps are
+ * process-wide, so two browsers on the same dev server share one inspection
+ * stream (a start in one replaces the other's run). The demo is a local,
+ * one-person tool; per-session rooms would need connection info, start,
+ * resume, and rewind to all carry a session key, and are out of scope here.
  */
 import { randomUUID } from "node:crypto";
 import { createInspectionRelay } from "@statelyai/sdk/relay";
