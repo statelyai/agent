@@ -2,11 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { VizPanel } from "./viz-panel";
 
-function renderPanel(liveUrl: string | null, hasMachine = true) {
+function renderPanel(liveUrl: string | null, hasMachine = true, inspectionUnavailable = false) {
   return renderToStaticMarkup(
     <VizPanel
       title="Test machine"
       hasMachine={hasMachine}
+      inspectionUnavailable={inspectionUnavailable}
       liveWs={null}
       liveUrl={liveUrl}
     />,
@@ -23,6 +24,12 @@ describe("VizPanel", () => {
   it("waits for a run before showing the statechart", () => {
     const html = renderPanel(null);
     expect(html).toContain("Start a run to inspect");
+    expect(html).not.toContain("<iframe");
+  });
+
+  it("says so when a run started without an inspection relay", () => {
+    const html = renderPanel(null, true, true);
+    expect(html).toContain("Live inspection unavailable");
     expect(html).not.toContain("<iframe");
   });
 

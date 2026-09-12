@@ -26,6 +26,8 @@ type VizPanelProps = {
   title: string;
   /** Whether the selected example exports a machine at all. */
   hasMachine: boolean;
+  /** A run started but the inspection relay never became available. */
+  inspectionUnavailable?: boolean;
   /**
    * Live inspection relay. The panel joins the room as a viewer purely to
    * mirror the stream to `onSystemMessage` — the /inspect page connects to the
@@ -44,7 +46,14 @@ type VizPanelProps = {
   onSystemMessage?: (message: SystemMessage) => void;
 };
 
-export function VizPanel({ title, hasMachine, liveWs, liveUrl, onSystemMessage }: VizPanelProps) {
+export function VizPanel({
+  title,
+  hasMachine,
+  inspectionUnavailable = false,
+  liveWs,
+  liveUrl,
+  onSystemMessage,
+}: VizPanelProps) {
   // The hosted /inspect page renders the system; this socket exists only so
   // the chat's transition log can follow the same run.
   useEffect(() => {
@@ -79,6 +88,11 @@ export function VizPanel({ title, hasMachine, liveWs, liveUrl, onSystemMessage }
             allow="clipboard-read; clipboard-write"
             referrerPolicy="strict-origin"
           />
+        ) : hasMachine && inspectionUnavailable ? (
+          <div className="viz-state" role="status">
+            <strong>Live inspection unavailable</strong>
+            <p>The demo could not reach the inspection relay, so this run is not visualized.</p>
+          </div>
         ) : hasMachine ? (
           <div className="viz-state" role="status">
             <strong>Start a run to inspect</strong>

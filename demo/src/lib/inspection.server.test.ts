@@ -113,7 +113,7 @@ describe("manual inspection identity", () => {
       type: "@xstate.actor",
       actorRef: root,
       rootId: "x:1",
-      snapshot: root.getSnapshot(),
+      snapshot: (root as { getSnapshot(): unknown }).getSnapshot(),
     } as never);
 
     const inspector = currentInspector();
