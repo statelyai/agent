@@ -113,10 +113,32 @@ function renderRevisionLog(critiques: ReflectionContext["critiques"]): string {
     .join("\n");
 }
 
+/**
+ * Why the loop ended, in the reader's words. A run that stops with
+ * `satisfied: false` did not fail — it spent its revision budget — and saying
+ * so is the difference between "the critic approved this" and "this is the
+ * best it managed in two rounds".
+ */
+function renderStopReason(context: ReflectionContext): string {
+  if (context.failure) return `Stopped early: ${context.failure}`;
+  const last = context.critiques[context.critiques.length - 1];
+  if (last?.satisfied) {
+    return `The critic signed off after ${context.critiques.length} round${
+      context.critiques.length === 1 ? "" : "s"
+    }.`;
+  }
+  return (
+    `Best effort: the critic was still not satisfied after ${context.maxRevisions} ` +
+    `revision${context.maxRevisions === 1 ? "" : "s"}, which is the budget.`
+  );
+}
+
 /** The comparison view: original draft, final draft, and the revision log. */
 function renderComparison(context: ReflectionContext): string {
   const revisions = context.critiques.length;
   return [
+    renderStopReason(context),
+    "",
     "Original draft",
     context.firstDraft || "(none)",
     "",
@@ -125,7 +147,6 @@ function renderComparison(context: ReflectionContext): string {
     "",
     "Revision log",
     renderRevisionLog(context.critiques) || "(no critique completed)",
-    ...(context.failure ? ["", "Stopped early", context.failure] : []),
   ].join("\n");
 }
 

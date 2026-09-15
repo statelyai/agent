@@ -46,8 +46,12 @@ import {
  *   `invalid-payload`, `rejected-by-guard`) before retrying. The guard turning
  *   down an illegal choice is the clearest evidence the machine is doing its
  *   job, and it used to be invisible.
+ * - `leg` — a second run starting inside one story. Multi-run examples (a
+ *   crash and its recovery, a snapshot resumed on a new machine version) record
+ *   both runs into one trace, and without a marker the seam between them — the
+ *   whole point of those examples — reads as just another transition.
  */
-export type TraceEntryKind = "transition" | "emitted" | "rejected";
+export type TraceEntryKind = "transition" | "emitted" | "rejected" | "leg";
 
 export type TraceEntry = {
   event: { type: string } & Record<string, Json>;
@@ -102,7 +106,7 @@ export function createTraceRecorder(baselineContext?: unknown): {
   };
   if (baselineContext !== undefined) observe(baselineContext, false);
 
-  // Between-transition entries carry the state the run was in when they
+  // Entries that are not transitions carry the state the run was in when they
   // happened, so a row still reads as part of the sequence around it.
   let lastValue: Json = null;
   const seenAttempts = new Set<string>();
@@ -121,7 +125,11 @@ export function createTraceRecorder(baselineContext?: unknown): {
     trace,
     onTransition: (snapshot, event) => {
       const type = String((event as { type?: unknown } | null)?.type ?? "");
-      observe(snapshot.context, type !== "xstate.init" && type !== "@xstate.init");
+      const isInit = type === "xstate.init" || type === "@xstate.init";
+      // An init after work has already been recorded is a NEW run continuing
+      // the same story, not the beginning of one.
+      if (isInit && trace.length > 0) push("leg", { type: "run.resumed" });
+      observe(snapshot.context, !isInit);
       latest = snapshot.context;
       lastValue = snapshot.value as Json;
       trace.push({

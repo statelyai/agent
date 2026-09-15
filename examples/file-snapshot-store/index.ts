@@ -21,6 +21,7 @@
  * Run: npx tsx examples/file-snapshot-store/index.ts
  */
 import { mkdtempSync } from "node:fs";
+import type { ExampleRunOptions } from "../run-options.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -66,11 +67,13 @@ export async function loadSnapshot(
 export async function runFileSnapshotStoreExample(
   directory: string,
   executors: AgentRequestExecutors,
+  observers: Omit<ExampleRunOptions, "executors"> = {},
 ): Promise<{ draft: string }> {
   const runId = "release-42";
 
   // Request/process one: run until the machine waits for approval.
   const paused = await runAgent(portableLoopMachine, {
+    ...(observers as object),
     input: { topic: "framework-owned storage" },
     executors,
   });
@@ -81,6 +84,7 @@ export async function runFileSnapshotStoreExample(
   const snapshot = await loadSnapshot(directory, runId);
   if (!snapshot) throw new Error(`No snapshot stored for '${runId}'.`);
   const resumed = await runAgent(portableLoopMachine, {
+    ...(observers as object),
     snapshot,
     event: { type: "APPROVE" },
     executors,
@@ -100,10 +104,12 @@ export async function runFileSnapshotStoreExample(
 export async function runLongLivedActor(
   topic: string,
   executors: AgentRequestExecutors,
+  observers: Omit<ExampleRunOptions, "executors"> = {},
 ): Promise<{ draft: string; states: string[] }> {
   const states: string[] = [];
   const actor = createActor(provideExecutors(portableLoopMachine, executors), {
     input: { topic },
+    ...(observers.inspect ? { inspect: observers.inspect } : {}),
   });
   actor.subscribe((snapshot) => states.push(getStatePath(snapshot)));
   actor.start();
@@ -118,6 +124,37 @@ export async function runLongLivedActor(
   }
 
   return { draft: done.output.draft, states };
+}
+
+/**
+ * Both halves in one call: a run persisted to disk and resumed in what stands
+ * in for a second process, then the same run kept alive in one actor with
+ * nothing persisted. Neither half is a single machine a host can drive, so the
+ * example exports this — see {@link ExampleRunOptions}.
+ */
+export async function runFileSnapshotStoreDemo(options: ExampleRunOptions = {}) {
+  const { executors, ...observers } = options;
+  // Routed on `request.name` so a stand-in fails loudly if the machine grows
+  // a second request; a host with real executors passes its own instead.
+  const stand_in: AgentRequestExecutors = {
+    generateText: async (request) => {
+      if (request.name !== "draft") throw new Error(`unexpected request: ${request.name}`);
+      return { output: "Drafted without a model — this half is about storage." };
+    },
+  };
+  const directory = mkdtempSync(join(tmpdir(), "stately-agent-snapshots-"));
+  const stored = await runFileSnapshotStoreExample(directory, executors ?? stand_in, observers);
+  const live = await runLongLivedActor(
+    "application-owned actors",
+    executors ?? stand_in,
+    observers,
+  );
+  return {
+    storageOwnedByTheApplication: stored.draft,
+    lifetimeOwnedByTheApplication: live.draft,
+    statesSeenByTheApplication: live.states,
+    snapshotDirectory: directory,
+  };
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {

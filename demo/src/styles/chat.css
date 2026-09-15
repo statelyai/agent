@@ -793,6 +793,18 @@
   box-shadow: inset 0 0 0 1px var(--primary);
 }
 
+/* The seam between two runs of one story: a crash and its recovery, a
+   snapshot resumed on a new machine version. */
+.transition-chip[data-kind="leg"] {
+  margin: 4px 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.transition-chip[data-kind="leg"] .transition-chip__dot {
+  background: var(--muted);
+}
+
 /* A refused decision: the machine turning down an illegal choice. Dimmed so a
    retry loop reads as texture, not as a wall of errors. */
 .transition-chip[data-kind="rejected"] {

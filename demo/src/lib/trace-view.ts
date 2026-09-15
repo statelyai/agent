@@ -129,7 +129,14 @@ export function summarizePayload(event: Record<string, unknown>): string {
  * progress, a rejection is a choice the machine refused before retrying.
  * Neither moves the machine, so neither renders an arrow or a target state.
  */
-export type TraceStepKind = "model" | "done" | "error" | "system" | "emit" | "rejected";
+export type TraceStepKind =
+  | "model"
+  | "done"
+  | "error"
+  | "system"
+  | "emit"
+  | "rejected"
+  | "leg";
 
 /** How a refused decision reads in the log. */
 const FAILURE_LABELS: Record<string, string> = {
@@ -172,6 +179,9 @@ export function traceSteps(trace: TraceEntry[]): TraceStep[] {
   return trace
     .filter((entry) => entry.event.type !== "xstate.init" && entry.event.type !== "@xstate.init")
     .map((entry): TraceStep => {
+      if (entry.kind === "leg") {
+        return { label: "resumed", state: "", payload: "", kind: "leg", at: entry.at };
+      }
       if (entry.kind === "emitted") {
         return {
           label: entry.event.type,

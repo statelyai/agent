@@ -161,8 +161,10 @@ function describeInput(input: JsonObject): string {
 }
 
 function startersOf(metadata: ExampleMetadata): ExampleStarter[] {
-  if (!Array.isArray(metadata.starters)) return [];
+  // Runners are appended whether or not there are input starters: an example
+  // whose story spans several runs often has nothing else to offer.
   const out: ExampleStarter[] = [];
+  if (!Array.isArray(metadata.starters)) return runnersOf(metadata);
   for (const entry of metadata.starters) {
     if (typeof entry === "string") {
       if (entry.trim()) out.push({ kind: "text", label: entry, text: entry });

@@ -11,5 +11,10 @@
     "targets": ["Redis", "Postgres", "KV", "filesystem storage", "XState createActor"],
     "purpose": "Two halves of one axis: persisting and resuming native XState snapshots through ordinary file I/O, and keeping a single long-lived actor alive across the same run with nothing persisted. Neither needs an Agent-specific storage adapter or actor supervisor."
   },
-  "starters": ["framework-owned storage", "application-owned actors"]
+  "runners": [
+    {
+      "label": "Persist to disk, resume, then keep one actor alive",
+      "export": "runFileSnapshotStoreDemo"
+    }
+  ]
 }
