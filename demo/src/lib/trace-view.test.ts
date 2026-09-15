@@ -44,6 +44,12 @@ describe("transition payload summaries", () => {
     expect(summarizePayload({ type: "FOUND", sources: ["a", "b", "c"] })).toBe("sources: 3 items");
   });
 
+  it("phrases a server-summarized collection the same way the live stream does", () => {
+    // `smallEvent` collapses an array before it leaves the server, so the two
+    // paths must agree: a row should never read `sources: Array(3)`.
+    expect(summarizePayload({ type: "FOUND", sources: "3 items" })).toBe("sources: 3 items");
+  });
+
   it("reports a failure's message", () => {
     expect(
       summarizePayload({ type: "xstate.error.actor.0.draft", error: new Error("rate limited") }),

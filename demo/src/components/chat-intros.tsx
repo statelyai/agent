@@ -72,6 +72,7 @@ export function ExampleIntro({
               key={machine.exportName}
               className="chat-intro__machine"
               data-active={index === machineIndex || undefined}
+              aria-pressed={index === machineIndex}
               onClick={() => onSelectMachine(index)}
             >
               {machine.exportName}

@@ -50,6 +50,9 @@ const crashRecoverySetup = setupAgent({
 });
 
 export const crashRecoveryMachine = crashRecoverySetup.createMachine({
+  // Named so inspected actors read `crash-recovery.outlining` rather than
+  // XState's `(machine)` placeholder for an anonymous root.
+  id: "crash-recovery",
   context: ({ input }) => ({ topic: input.topic, outline: null, article: null }),
   initial: "outlining",
   states: {

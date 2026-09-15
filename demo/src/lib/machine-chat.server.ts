@@ -125,7 +125,9 @@ function smallEventValue(value: unknown, nested: boolean): Json | undefined {
     return value.length > TRACE_STRING_CHARS ? `${value.slice(0, TRACE_STRING_CHARS)}…` : value;
   }
   if (value instanceof Error) return smallEventValue(value.message, nested);
-  if (Array.isArray(value)) return `Array(${value.length})`;
+  // Phrased, not `Array(3)`: this lands in a chat row a person reads, and the
+  // live-inspection path summarizes the same value the same way.
+  if (Array.isArray(value)) return value.length === 1 ? "1 item" : `${value.length} items`;
   // One level only: an actor's `output` is the work a step produced, and it is
   // usually a small object. Deeper than that is a record, not a chat row.
   if (!nested && value !== null && typeof value === "object") {
