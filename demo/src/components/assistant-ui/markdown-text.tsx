@@ -209,9 +209,13 @@ const defaultComponents = memoizeMarkdownComponents({
     <sup className={cn("aui-md-sup [&>a]:text-xs [&>a]:no-underline", className)} {...props} />
   ),
   pre: ({ className, ...props }) => (
+    // Wrapped, not scrolled: the chat column is narrow and these blocks are
+    // machine source and JSON payloads, which a reader scans rather than
+    // copies line by line. `break-words` catches the long unbroken strings
+    // (ids, URLs) that would otherwise still push the column sideways.
     <pre
       className={cn(
-        "aui-md-pre border-border/50 bg-muted/30 overflow-x-auto rounded-t-none rounded-b-xl border border-t-0 p-3.5 text-[13px] leading-relaxed",
+        "aui-md-pre border-border/50 bg-muted/30 rounded-t-none rounded-b-xl border border-t-0 p-3.5 text-[13px] leading-relaxed break-words whitespace-pre-wrap",
         className,
       )}
       {...props}
