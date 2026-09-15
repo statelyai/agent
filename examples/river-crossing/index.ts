@@ -18,13 +18,20 @@
  *     (`failure: 'rejected-by-guard'`) and retried — same pattern as
  *     twenty-questions' final-turn ASK guard. The model cannot cheat the
  *     rules; it can only learn them.
+ *   - The machine solves itself: `REQUEST_PLAN` invokes a `planning` state that
+ *     traverses `puzzleMachine` — the same physics, as a bare XState machine —
+ *     with `xstate/graph`'s `getShortestPaths`. The guards that reject an
+ *     illegal move at runtime are the guards that prune the search, so the
+ *     route handed back cannot contain a move the run would refuse. The model
+ *     never has to be good at search; it only has to ask. Following the route
+ *     consumes it, and deviating from it abandons it.
  *   - Machine-description-in-context: `describeMachine(...)` (an experimental
  *     prototype in ./describe-machine.ts) renders the machine's states, events
  *     (with their payload schemas), transitions, and the puzzle's explicit
  *     rules into compact markdown that is injected into the decide prompt — the
  *     model is handed knowledge of the whole machine it is driving.
  *
- * Runs autonomously: no human input, no tools. The output's headline is
+ * Runs autonomously: no human input. The output's headline is
  * `summary`, a readable move-by-move narration ("Farmer crosses left → right
  * with the goat. Left: wolf, cabbage | Right: farmer, goat"), built from the
  * `log: string[]` the machine appends to on every applied move. `solved`,
@@ -34,6 +41,8 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
+import { createAsyncLogic, setup } from "xstate";
+import { getShortestPaths } from "xstate/graph";
 import {
   createAgentSchemas,
   runAgent,
@@ -65,9 +74,17 @@ export const riverCrossingSchemas = createAgentSchemas({
     moves: z.number(),
     maxMoves: z.number(),
     log: z.array(z.string()),
+    /** The solution the machine computed for itself, once asked for it. */
+    plan: z.array(z.string()).nullable(),
   }),
   input: z.object({
     maxMoves: z.number().default(12),
+    // The puzzle can be started from any legal world, not just all-left. The
+    // planner uses this to traverse the machine FROM THE CURRENT position.
+    farmer: bankSchema.default("left"),
+    wolf: bankSchema.default("left"),
+    goat: bankSchema.default("left"),
+    cabbage: bankSchema.default("left"),
   }),
   output: z.object({
     // Headline: a human-readable move-by-move narration of the crossing.
@@ -81,6 +98,12 @@ export const riverCrossingSchemas = createAgentSchemas({
     TAKE_GOAT: z.object({ reasoning: z.string() }),
     TAKE_CABBAGE: z.object({ reasoning: z.string() }),
     CROSS_ALONE: z.object({ reasoning: z.string() }),
+    /**
+     * Ask the machine to solve itself. The model does not have to be good at
+     * search — the machine IS the search space, so it can hand back the
+     * shortest legal route from wherever the puzzle currently stands.
+     */
+    REQUEST_PLAN: z.object({ reasoning: z.string() }),
   },
 });
 
@@ -171,17 +194,113 @@ function narrate(context: Pick<RiverContext, "log" | "moves" | "maxMoves"> & Wor
   return `${headline}\n\n${body}`;
 }
 
+// ─── The machine solving itself ───
+
+/**
+ * The puzzle as a bare XState machine: no agent, no model, no budget — just
+ * the world in context and the four crossings as guarded transitions. It is
+ * the SEARCH SPACE, and it shares `applyMove` with the agent machine's own
+ * guards, so a route found here is a route the run will accept. There is no
+ * second model of the rules to keep in sync.
+ *
+ * It is a separate machine rather than the agent machine itself because an
+ * actor that traverses the machine it is invoked from is a type cycle: the
+ * machine's type would depend on its own actor's type.
+ */
+const puzzleSetup = setup({
+  schemas: {
+    context: worldStateSchema,
+    input: worldStateSchema,
+    events: {
+      TAKE_WOLF: z.object({}),
+      TAKE_GOAT: z.object({}),
+      TAKE_CABBAGE: z.object({}),
+      CROSS_ALONE: z.object({}),
+    },
+  },
+});
+
+export const puzzleMachine = puzzleSetup.createMachine({
+  id: "river-crossing-puzzle",
+  context: ({ input }) => input,
+  initial: "crossing",
+  states: {
+    crossing: {
+      on: {
+        TAKE_WOLF: crossing("wolf"),
+        TAKE_GOAT: crossing("goat"),
+        TAKE_CABBAGE: crossing("cabbage"),
+        CROSS_ALONE: crossing(null),
+      },
+    },
+  },
+});
+
+/** One crossing in the search space: illegal moves return `undefined`. */
+function crossing(item: Items | null) {
+  return ({ context }: { context: WorldState }) => {
+    const next = applyMove(context, item);
+    return next ? { target: "crossing" as const, context: next } : undefined;
+  };
+}
+
+/** The move events the traversal is allowed to try. */
+const MOVE_EVENTS = [
+  { type: "TAKE_WOLF" as const },
+  { type: "TAKE_GOAT" as const },
+  { type: "TAKE_CABBAGE" as const },
+  { type: "CROSS_ALONE" as const },
+];
+
+/**
+ * The shortest legal route from `from` to the goal, or `null` when there is
+ * none. Traverses {@link puzzleMachine} with `xstate/graph` — the guards prune
+ * every unsafe world for free, so the search never has to know the rules.
+ */
+export function shortestRoute(from: WorldState): string[] | null {
+  const paths = getShortestPaths(puzzleMachine, {
+    input: from,
+    events: MOVE_EVENTS,
+    // The puzzle lives in context, not in the state value, so the visited key
+    // has to be the world — otherwise every path looks identical and the
+    // traversal stops after one step.
+    serializeState: (snapshot) => JSON.stringify(snapshot.context) as never,
+    stopWhen: (snapshot) => allOnRight(snapshot.context),
+  });
+  const solved = paths
+    .filter((path) => allOnRight(path.state.context))
+    .sort((a, b) => a.steps.length - b.steps.length)[0];
+  if (!solved) return null;
+  return solved.steps.map((step) => step.event.type).filter((type) => !type.startsWith("@"));
+}
+
+/**
+ * The tool the model can reach for. Asking the machine to solve itself is one
+ * event away, so a model that is bad at search does not have to be good at it.
+ */
+const solvePuzzle = createAsyncLogic<string[], WorldState>({
+  run: async ({ input }) => {
+    const route = shortestRoute(input);
+    if (!route) throw new Error("No legal route to the goal from here.");
+    return route;
+  },
+});
+
 // ─── Agent + machine ───
 
 const agentSetup = setupAgent({
   schemas: riverCrossingSchemas,
   models,
+  actors: { solvePuzzle },
 });
 
 const DECIDE_SYSTEM_PROMPT =
   "You are solving a river-crossing puzzle by driving a state machine. Each " +
   "turn, choose exactly one legal move event. Illegal moves are rejected by " +
-  "the machine and you must try again, so reason about safety before choosing.";
+  "the machine and you must try again, so reason about safety before choosing. " +
+  "You do not have to search for the solution yourself: REQUEST_PLAN asks the " +
+  "machine for the shortest legal route from the current position, and once " +
+  "you have it you only need to follow it move by move.";
 
 function renderWorld(context: {
   farmer: Bank;
@@ -191,6 +310,7 @@ function renderWorld(context: {
   moves: number;
   maxMoves: number;
   log: string[];
+  plan: string[] | null;
 }): string {
   return [
     "## Current world state",
@@ -205,6 +325,17 @@ function renderWorld(context: {
       ? "(none yet)"
       : context.log.map((entry, i) => `${i + 1}. ${entry}`).join("\n"),
     "",
+    ...(context.plan === null || context.plan.length === 0
+      ? []
+      : [
+          "",
+          "## The machine's own route, from where you are standing now",
+          `NEXT MOVE: ${context.plan[0]}`,
+          ...(context.plan.length > 1 ? [`Then: ${context.plan.slice(1).join(", ")}`] : []),
+          "This route is recomputed from the current world, so the first entry " +
+            "is always the move to make now.",
+        ]),
+    "",
     "Goal: get the farmer, wolf, goat, and cabbage all to the right bank. " +
       "Pick one move event now.",
   ].join("\n");
@@ -217,10 +348,32 @@ const MACHINE_RULES = [
   "CROSS_ALONE crosses the farmer with no item.",
   "A move is illegal if it leaves the wolf and goat together, or the goat and cabbage together, on a bank without the farmer.",
   "Solved when farmer, wolf, goat, and cabbage are all on the right bank.",
+  "REQUEST_PLAN asks the machine to solve itself and hand back the shortest " +
+    "legal route from the current position. It is available once per run.",
 ];
 
 /** The context type, read off the schema pack — never restated by hand. */
 type RiverContext = ContextOf<typeof agentSetup>;
+
+/** The event type that ferries `item` — the name the plan is written in. */
+const MOVE_EVENT = {
+  wolf: "TAKE_WOLF",
+  goat: "TAKE_GOAT",
+  cabbage: "TAKE_CABBAGE",
+  null: "CROSS_ALONE",
+} as const;
+
+/**
+ * A plan is only ever the route FROM HERE, so following it consumes it: the
+ * move just made is dropped off the front. A move that is not the next one in
+ * the route abandons it — the plan no longer describes this world, and the
+ * model may ask for a fresh one. Without this the route sits in the prompt
+ * unchanged and a model happily replays step 1 until the budget is gone.
+ */
+function advancePlan(plan: string[] | null, taken: string): string[] | null {
+  if (plan === null) return null;
+  return plan[0] === taken ? plan.slice(1) : null;
+}
 
 // A move transition: applies the physics, returns `undefined` when illegal so
 // the decision's `canTake` check rejects the choice and retries.
@@ -237,6 +390,7 @@ function moveTransition(item: Items | null) {
         cabbage: next.cabbage,
         moves: context.moves + 1,
         log: [...context.log, moveLabel(item, context.farmer, next)],
+        plan: advancePlan(context.plan, MOVE_EVENT[item ?? "null"]),
       },
     };
   };
@@ -254,15 +408,16 @@ function allOnRight(context: Pick<RiverContext, "farmer" | "wolf" | "goat" | "ca
 
 export const riverCrossingMachine = agentSetup.createMachine({
   id: "river-crossing",
-  // Everything starts on the left bank.
+  // Everything starts on the left bank unless the input seeds another world.
   context: ({ input }): RiverContext => ({
-    farmer: "left",
-    wolf: "left",
-    goat: "left",
-    cabbage: "left",
+    farmer: input.farmer,
+    wolf: input.wolf,
+    goat: input.goat,
+    cabbage: input.cabbage,
     moves: 0,
     maxMoves: input.maxMoves,
     log: [],
+    plan: null,
   }),
   // Headline output is the narration; the structured fields ride along.
   output: ({ context }) => ({
@@ -282,7 +437,7 @@ export const riverCrossingMachine = agentSetup.createMachine({
           prompt: `${MACHINE_DESCRIPTION}\n\n${renderWorld(context)}`,
           // Typo'd event names are caught at compile time — allowedEvents is
           // typed against the machine's event-schema keys.
-          allowedEvents: ["TAKE_WOLF", "TAKE_GOAT", "TAKE_CABBAGE", "CROSS_ALONE"],
+          allowedEvents: ["TAKE_WOLF", "TAKE_GOAT", "TAKE_CABBAGE", "CROSS_ALONE", "REQUEST_PLAN"],
           maxRetries: 3,
         }),
         onError: { target: "failed" },
@@ -297,6 +452,23 @@ export const riverCrossingMachine = agentSetup.createMachine({
         TAKE_GOAT: moveTransition("goat"),
         TAKE_CABBAGE: moveTransition("cabbage"),
         CROSS_ALONE: moveTransition(null),
+        // Asking for a plan is a move like any other — legal exactly once,
+        // so the model cannot spend its budget re-asking instead of crossing.
+        // A second request is refused by this guard and shows up in the log
+        // as a rejected decision, like any other illegal choice.
+        REQUEST_PLAN: ({ context }) => (context.plan === null ? { target: "planning" } : undefined),
+      },
+    },
+    // The machine solving itself. A real state, so the run shows the model
+    // stopping to ask rather than the plan appearing out of nowhere.
+    planning: {
+      invoke: {
+        src: "solvePuzzle",
+        input: ({ context }) => worldOf(context),
+        onDone: ({ output }) => ({ target: "deciding", context: { plan: output } }),
+        // No route from here (the model painted itself into a corner): carry
+        // on without one rather than ending the run.
+        onError: () => ({ target: "deciding", context: { plan: [] } }),
       },
     },
     // An always function-transition decides the outcome after each applied
