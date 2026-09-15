@@ -118,6 +118,7 @@ function transitionPartsFor(turnId: number, steps: TraceStep[], idPrefix: string
       state: step.state,
       payload: step.payload,
       kind: step.kind,
+      detail: step.detail,
       gap: index === 0 ? 0 : step.at - steps[index - 1].at,
     },
     result: step.state,

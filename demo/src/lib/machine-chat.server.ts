@@ -61,6 +61,13 @@ export type TraceEntry = {
   at: number;
   /** Defaults to `transition` when absent, so older traces still read. */
   kind?: TraceEntryKind;
+  /**
+   * The step unabridged, for the row's expandable detail: the whole event and
+   * (for a transition) the whole context it landed in. `event`/`context` above
+   * are cut down to what fits one line; this is what a reader opens the row to
+   * see — the model's full output, the context field that actually changed.
+   */
+  detail?: { event: Json | null; context?: Json | null };
 };
 
 /**
@@ -118,6 +125,7 @@ export function createTraceRecorder(baselineContext?: unknown): {
       value: lastValue,
       context: {},
       kind,
+      detail: { event: traceDetail(event) },
     });
   };
 
@@ -138,6 +146,7 @@ export function createTraceRecorder(baselineContext?: unknown): {
         value: snapshot.value as Json,
         context: smallContext(snapshot.context),
         kind: "transition",
+        detail: { event: traceDetail(event), context: traceDetail(snapshot.context) },
       });
     },
     onEmitted: (event) => push("emitted", event),
@@ -183,6 +192,72 @@ export function smallContext(context: unknown): Record<string, Json> {
     }
   }
   return out;
+}
+
+/**
+ * Bounds for the expandable detail. Generous — the point of opening a row is
+ * to read what the step actually produced — but never unbounded: a trace rides
+ * the chat response, and one runaway field would take the turn with it.
+ */
+const DETAIL_STRING_CHARS = 4000;
+const DETAIL_ARRAY_ITEMS = 40;
+const DETAIL_DEPTH = 6;
+const DETAIL_CHARS = 24_000;
+
+/**
+ * Event fields that carry a whole actor rather than data about the step. The
+ * live inspection stream attaches these, and either one alone dwarfs every
+ * other field in the detail view.
+ */
+const DETAIL_OMITTED_FIELDS = new Set(["snapshot", "machine"]);
+
+function detailValue(value: unknown, depth: number): Json | undefined {
+  if (value === null) return null;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
+  if (typeof value === "string") {
+    return value.length > DETAIL_STRING_CHARS ? `${value.slice(0, DETAIL_STRING_CHARS)}…` : value;
+  }
+  if (value instanceof Error) return { name: value.name, message: value.message };
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== "object") return undefined; // functions, symbols, undefined
+  if (depth >= DETAIL_DEPTH) return "(deeper)";
+  if (Array.isArray(value)) {
+    const items: Json[] = value
+      .slice(0, DETAIL_ARRAY_ITEMS)
+      .map((item) => detailValue(item, depth + 1) ?? null);
+    if (value.length > DETAIL_ARRAY_ITEMS) {
+      items.push(`… ${value.length - DETAIL_ARRAY_ITEMS} more`);
+    }
+    return items;
+  }
+  const out: Record<string, Json> = {};
+  for (const [key, field] of Object.entries(value as Record<string, unknown>)) {
+    if (DETAIL_OMITTED_FIELDS.has(key)) continue;
+    const kept = detailValue(field, depth + 1);
+    if (kept !== undefined) out[key] = kept;
+  }
+  return out;
+}
+
+/**
+ * A JSON-safe, bounded copy of an event or a context, for {@link TraceEntry}'s
+ * `detail`. Null when there is nothing to open — an empty object, a value that
+ * cannot cross the wire, or one so large that showing a prefix would mislead.
+ */
+export function traceDetail(value: unknown): Json | null {
+  const detail = detailValue(value, 0);
+  if (detail === undefined || detail === null) return null;
+  let json: string;
+  try {
+    json = JSON.stringify(detail) ?? "";
+  } catch {
+    return null;
+  }
+  if (!json || json === "{}" || json === "[]") return null;
+  return json.length > DETAIL_CHARS
+    ? `(${Math.round(json.length / 1000)} KB — too large to show)`
+    : detail;
 }
 
 /** Longest string kept on a trace event; the chat truncates further to a row. */

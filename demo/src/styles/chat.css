@@ -750,19 +750,94 @@
   flex-direction: column;
   gap: 3px;
   margin: 6px 0 10px;
-  padding: 8px 0 8px 12px;
+  padding: 8px 0 8px 6px;
   border-left: 2px solid var(--line);
 }
 
 .transition-chip {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--quiet);
+}
+
+/* The row itself — a `summary` when the step has detail to open, a plain div
+   when the row already is the whole step. */
+.transition-chip__row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+summary.transition-chip__row {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.transition-chip__row::-webkit-details-marker {
+  display: none;
+}
+
+summary.transition-chip__row:hover,
+details.transition-chip[open] > summary.transition-chip__row {
+  color: var(--ink);
+}
+
+summary.transition-chip__row:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.transition-chip__caret {
+  flex: none;
+  width: 7px;
+  font-size: 9px;
+  transition: transform 120ms ease;
+}
+
+/* A row with nothing to open keeps the caret's space, not its glyph. */
+.transition-chip__caret[data-empty] {
+  visibility: hidden;
+}
+
+details.transition-chip[open] > summary .transition-chip__caret {
+  transform: rotate(90deg);
+}
+
+.transition-chip__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 8px 14px;
+  padding: 7px 9px;
+  border-radius: 5px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+}
+
+.transition-chip__section-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.transition-chip__json {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink);
+  /* Wrapped, not scrolled sideways: a model's output is prose inside JSON. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .transition-chip__dot {

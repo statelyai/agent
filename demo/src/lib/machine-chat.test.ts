@@ -11,6 +11,7 @@ import {
   renderIdleWork,
   renderOutput,
   runSignal,
+  traceDetail,
 } from "./machine-chat.server";
 import {
   humanizeEventType,
@@ -292,6 +293,40 @@ describe("idle work rendering (changed context surfaces before approval)", () =>
         "draft",
       ]),
     ).toBe("Dear team…");
+  });
+});
+
+describe("expandable trace detail", () => {
+  test("a transition records the whole event and context the row had to cut", () => {
+    const recorder = createTraceRecorder();
+    const answer = "A carbon tax ".repeat(30);
+    recorder.onTransition({ value: "answered", context: { answer, sources: [1, 2, 3] } } as never, {
+      type: "answer.done",
+      output: { answer },
+    });
+
+    const [entry] = recorder.trace;
+    // The row keeps a 140-char preview; the detail keeps what was said.
+    expect(String((entry.event.output as { answer: string }).answer)).toContain("…");
+    expect(entry.detail?.event).toEqual({ type: "answer.done", output: { answer } });
+    expect(entry.detail?.context).toEqual({ answer, sources: [1, 2, 3] });
+  });
+
+  test("keeps the detail bounded, and says so rather than showing a prefix", () => {
+    expect(traceDetail({ report: "x".repeat(9000) })).toEqual({
+      report: `${"x".repeat(4000)}…`,
+    });
+    expect(traceDetail({ rows: Array.from({ length: 50 }, (_, index) => index) })).toEqual({
+      rows: [...Array.from({ length: 40 }, (_, index) => index), "… 10 more"],
+    });
+    // The relay attaches a whole actor to a snapshot message; that is plumbing.
+    expect(traceDetail({ type: "T", snapshot: { huge: true }, machine: {} })).toEqual({
+      type: "T",
+    });
+    expect(traceDetail({})).toBeNull();
+    expect(traceDetail({ pages: Array.from({ length: 40 }, () => "y".repeat(3000)) })).toMatch(
+      /too large to show/,
+    );
   });
 });
 

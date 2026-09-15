@@ -4,6 +4,7 @@
  * captured from `runAgent`.
  */
 import type { TraceEntry } from "./agent-runner";
+import type { Json } from "./machine-ui";
 
 /** Flattens an XState state value (string or nested object) to a readable label. */
 export function stateValueLabel(value: unknown): string {
@@ -145,6 +146,13 @@ const FAILURE_LABELS: Record<string, string> = {
   "unknown-event": "not an accepted event",
 };
 
+/**
+ * The step unabridged — what a row expands to show. The one-line `payload` is
+ * a glance; this is the whole event the machine handled and, for a committed
+ * transition, the whole context it landed in.
+ */
+export type TraceDetail = { event: Json | null; context: Json | null };
+
 export type TraceStep = {
   /** Event label (no status glyphs — `kind` carries done/error). */
   label: string;
@@ -155,14 +163,43 @@ export type TraceStep = {
   kind: TraceStepKind;
   /** Milliseconds since run start (from the server-captured trace). */
   at: number;
+  /** Null when the step carries nothing beyond what the row already says. */
+  detail: TraceDetail | null;
 };
+
+/** Whether a detail section has anything a reader would open the row for. */
+function hasDetail(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "object") return Object.keys(value as object).length > 0;
+  return true;
+}
+
+/**
+ * The detail for one step, or null when both halves are empty. An event whose
+ * only field is `type` says nothing the row's own label doesn't, so it does
+ * not earn a disclosure.
+ */
+function stepDetail(event: unknown, context: unknown): TraceDetail | null {
+  const fields =
+    event && typeof event === "object"
+      ? Object.entries(event as Record<string, unknown>).filter(([key]) => key !== "type")
+      : [];
+  const keptEvent = fields.length > 0 ? (event as Json) : null;
+  const keptContext = hasDetail(context) ? (context as Json) : null;
+  return keptEvent || keptContext ? { event: keptEvent, context: keptContext } : null;
+}
 
 /**
  * Builds a TraceStep from a live inspection `actorSnapshot` message, so the
  * chat's transition log can fill in DURING a run (the authoritative server
  * trace replaces it at settle). Lifecycle noise (`init`/`stop`) returns null.
  */
-export function liveTraceStep(event: unknown, stateValue: unknown, at: number): TraceStep | null {
+export function liveTraceStep(
+  event: unknown,
+  stateValue: unknown,
+  at: number,
+  context?: unknown,
+): TraceStep | null {
   const source = event && typeof event === "object" ? (event as Record<string, unknown>) : null;
   const rawType = source?.type;
   if (typeof rawType !== "string") return null;
@@ -171,7 +208,22 @@ export function liveTraceStep(event: unknown, stateValue: unknown, at: number): 
   const { label, kind } = prettifyEvent({ ...source, type } as { type: string });
   if (kind === "system") return null;
   const payload = summarizePayload(source ?? {});
-  return { label, state: stateValueLabel(stateValue), payload, kind, at };
+  // The relay attaches the whole actor to a snapshot message; the row's detail
+  // wants the step, so those two fields stay out of it (the server trace drops
+  // them the same way — see `traceDetail`).
+  const detailEvent = source
+    ? Object.fromEntries(
+        Object.entries(source).filter(([key]) => key !== "snapshot" && key !== "machine"),
+      )
+    : null;
+  return {
+    label,
+    state: stateValueLabel(stateValue),
+    payload,
+    kind,
+    at,
+    detail: stepDetail(detailEvent, context),
+  };
 }
 
 /** Derives the transition steps shown in the app panel from a trace. */
@@ -179,8 +231,21 @@ export function traceSteps(trace: TraceEntry[]): TraceStep[] {
   return trace
     .filter((entry) => entry.event.type !== "xstate.init" && entry.event.type !== "@xstate.init")
     .map((entry): TraceStep => {
+      // Prefer the unabridged copy the server recorded; a trace from before it
+      // existed still opens to the row-sized event it has.
+      const detail = stepDetail(
+        entry.detail ? entry.detail.event : entry.event,
+        entry.detail ? (entry.detail.context ?? null) : entry.context,
+      );
       if (entry.kind === "leg") {
-        return { label: "resumed", state: "", payload: "", kind: "leg", at: entry.at };
+        return {
+          label: "resumed",
+          state: "",
+          payload: "",
+          kind: "leg",
+          at: entry.at,
+          detail: null,
+        };
       }
       if (entry.kind === "emitted") {
         return {
@@ -189,6 +254,7 @@ export function traceSteps(trace: TraceEntry[]): TraceStep[] {
           payload: summarizePayload(entry.event),
           kind: "emit",
           at: entry.at,
+          detail,
         };
       }
       if (entry.kind === "rejected") {
@@ -205,10 +271,11 @@ export function traceSteps(trace: TraceEntry[]): TraceStep[] {
           payload: reason && !restatesLabel ? `${why} — ${reason}` : why,
           kind: "rejected",
           at: entry.at,
+          detail,
         };
       }
       const { label, kind } = prettifyEvent(entry.event);
       const payload = summarizePayload(entry.event);
-      return { label, state: stateValueLabel(entry.value), payload, kind, at: entry.at };
+      return { label, state: stateValueLabel(entry.value), payload, kind, at: entry.at, detail };
     });
 }

@@ -77,6 +77,7 @@ describe("between-transition rows", () => {
       payload: "revision: 0, length: 979",
       kind: "emit",
       at,
+      detail: { event: { type: "DRAFTED", revision: 0, length: 979 }, context: null },
     });
   });
 
@@ -113,7 +114,10 @@ describe("transition labels", () => {
   it("names the actor, without the system index an anonymous invoke carries", () => {
     const [step] = traceSteps([
       {
-        event: { type: "xstate.done.actor.0.reflection.drafting", actorId: "0.reflection.drafting" },
+        event: {
+          type: "xstate.done.actor.0.reflection.drafting",
+          actorId: "0.reflection.drafting",
+        },
         value: "evaluating",
         context: {},
         at: 0,
@@ -137,6 +141,48 @@ describe("transition labels", () => {
   });
 });
 
+describe("expandable step detail", () => {
+  it("keeps the whole output the row had to cut", () => {
+    const answer = "A carbon tax ".repeat(40);
+    const [step] = traceSteps([
+      {
+        event: { type: "xstate.done.actor.0.answer", output: { answer } },
+        value: "answered",
+        context: { answer, attempts: 2 },
+        at: 0,
+        kind: "transition",
+        detail: {
+          event: { type: "xstate.done.actor.0.answer", output: { answer } },
+          context: { answer, attempts: 2 },
+        },
+      },
+    ]);
+
+    expect(step?.payload).toContain("…");
+    expect(step?.detail?.event).toEqual({
+      type: "xstate.done.actor.0.answer",
+      output: { answer },
+    });
+    expect(step?.detail?.context).toEqual({ answer, attempts: 2 });
+  });
+
+  it("opens to the row-sized event when a trace predates the detail", () => {
+    const [step] = traceSteps([
+      { event: { type: "APPROVE", note: "ship it" }, value: "approved", context: {}, at: 0 },
+    ]);
+
+    expect(step?.detail).toEqual({ event: { type: "APPROVE", note: "ship it" }, context: null });
+  });
+
+  it("gives a bare event no disclosure to open", () => {
+    const [step] = traceSteps([
+      { event: { type: "APPROVE" }, value: "approved", context: {}, at: 0 },
+    ]);
+
+    expect(step?.detail).toBeNull();
+  });
+});
+
 describe("trace steps", () => {
   it("summarizes both the server trace and the live inspection stream alike", () => {
     const event = { type: "xstate.done.actor.0.plan", actorId: "plan", output: { steps: 2 } };
@@ -150,6 +196,8 @@ describe("trace steps", () => {
       payload: "steps: 2",
       kind: "done",
       at: 120,
+      // The row cuts the output to one line; the disclosure keeps it whole.
+      detail: { event, context: null },
     });
     expect(live).toEqual(fromTrace);
   });

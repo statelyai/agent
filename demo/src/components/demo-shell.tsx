@@ -280,10 +280,15 @@ export function DemoShell() {
       return;
     }
     if (message.type === "@statelyai.system.actorSnapshot" && message.sessionId === run.sessionId) {
+      const snapshot = message.snapshot as
+        | { value?: unknown; context?: unknown }
+        | null
+        | undefined;
       const step = liveTraceStep(
         message.event,
-        (message.snapshot as { value?: unknown } | null | undefined)?.value,
+        snapshot?.value,
         Date.now() - run.startedAt,
+        snapshot?.context,
       );
       if (step) setLiveSteps((previous) => [...previous, step]);
     }
