@@ -13,7 +13,7 @@
  * a node, and "am I paused?" is read off `snapshot.next` outside the graph.
  *
  * Here the same shape is explicit, typed states:
- *   classifying → routing → (answering | confirming → executing/denied)
+ *   classifying → routing → (answering ⇄ awaitingInfo | confirming → executing/denied)
  *
  *   - Non-sensitive Q&A: ONE `answer` request carries real `tools`
  *     (`lookupBooking`, `searchPolicies` over a small sample table) and the host
@@ -23,6 +23,16 @@
  *   - Intent routing: a structured-output `classify` request returns a
  *     discriminated union (question | cancel | rebook); a `choice` state routes
  *     on it — the typed analogue of `route_tools`.
+ *   - TWO KINDS OF PAUSE, and the machine tells them apart. `confirming` blocks
+ *     a write until a human approves it. `awaitingInfo` blocks an ANSWER until
+ *     the customer supplies something only they know — which booking, which
+ *     flight. Both are idle states with no invoke, and the difference matters:
+ *     a bot that replies "send me your confirmation code" has not answered
+ *     anything, and a turn that reports `answered` there has lied about its own
+ *     outcome. The `answer` request returns `{ needsInfo, text }` so the
+ *     distinction is data the machine routes on, not a sentence a human has to
+ *     read. Asking is bounded by MAX_CLARIFICATIONS; past it the turn ends
+ *     `unresolved` with the question still outstanding.
  *   - Sensitive action: instead of an `interrupt_before` flag, the machine
  *     *transitions into an idle `confirming` state* — no invoke, tags
  *     `['awaiting-approval']`, a static `meta.interaction` label, and the pending
@@ -131,11 +141,27 @@ const pendingActionSchema = z.object({
 });
 export type PendingAction = z.infer<typeof pendingActionSchema>;
 
-const resolutionSchema = z.enum(["answered", "executed", "denied", "failed"]);
+const resolutionSchema = z.enum(["answered", "executed", "denied", "failed", "unresolved"]);
+
+/**
+ * What one answer attempt produced. Answering and asking are different shapes,
+ * so the machine routes on the branch rather than on a flag the model might
+ * set carelessly.
+ */
+const answerSchema = z.union([
+  z.object({ status: z.literal("answered"), answer: z.string() }),
+  z.object({ status: z.literal("needsInfo"), question: z.string() }),
+]);
 
 const contextSchema = z.object({
   query: z.string(),
   pendingAction: pendingActionSchema.nullable(),
+  /** Details the customer supplied when asked — a confirmation code, which
+   * flight — appended in order and fed back into the next answer attempt. */
+  details: z.array(z.string()),
+  /** Questions asked so far, so the bot cannot interrogate forever. */
+  clarifications: z.number(),
+  maxClarifications: z.number(),
   // The one line this turn will report, whichever way it ends. Which final
   // state was reached IS the resolution — no mirror of it lives here.
   message: z.string(),
@@ -153,6 +179,10 @@ const agentSetup = setupAgent({
   events: {
     APPROVE: z.object({}),
     DENY: z.object({ reason: z.string() }),
+    /** The detail the bot asked for. */
+    PROVIDE_INFO: z.object({ text: z.string() }),
+    /** The customer would rather not say. */
+    STOP_ASKING: z.object({}),
   },
   actors: {
     // Applies the approved sensitive action: it WRITES to the booking table,
@@ -199,15 +229,34 @@ const agentSetup = setupAgent({
     // Safe Q&A: one request, real read-only tools, host-run tool loop.
     answer: {
       schemas: {
-        input: z.object({ query: z.string() }),
-        output: z.string(),
+        input: z.object({ query: z.string(), details: z.array(z.string()) }),
+        // A discriminated union, for the same reason `intentSchema` is one: a
+        // branch the model has to NAME is far harder to get wrong than a
+        // boolean sitting beside free text. With a `{ needsInfo, text }` pair
+        // the model cheerfully reported `needsInfo: false` while `text` asked
+        // for a confirmation code — and the turn settled `answered` having
+        // answered nothing. Here there is nowhere to put a question except
+        // the branch called `question`.
+        output: answerSchema,
       },
       model: "assistant",
       system:
-        "You are an airline support agent. Answer in one or two friendly " +
-        "sentences. Use lookupBooking to read a booking by confirmation code, " +
-        "and searchPolicies for fees, baggage, cancellation, or change rules.",
-      prompt: ({ input }) => input.query,
+        "You are an airline support agent. Use lookupBooking to read a booking " +
+        "by confirmation code, and searchPolicies for fees, baggage, " +
+        "cancellation, or change rules.\n" +
+        "Return { status: 'answered', answer } when you can answer, in one or " +
+        "two friendly sentences.\n" +
+        "Return { status: 'needsInfo', question } when a detail only the " +
+        "customer has is missing — which booking, which flight. Anything you " +
+        "would end by asking the customer for something belongs in this " +
+        "branch, never in `answer`. Never ask for what the tools can tell you.",
+      prompt: ({ input }) =>
+        [
+          input.query,
+          ...input.details.map(
+            (detail, index) => `Detail ${index + 1} from the customer: ${detail}`,
+          ),
+        ].join("\n"),
       tools: {
         lookupBooking: tool({
           description: "Look up a booking by its confirmation code.",
@@ -239,9 +288,19 @@ const agentSetup = setupAgent({
   },
 });
 
+/** Questions the bot may ask before it answers with whatever it has. */
+export const MAX_CLARIFICATIONS = 2;
+
 export const customerSupportMachine = agentSetup.createMachine({
   id: "customer-support",
-  context: ({ input }) => ({ query: input.query, pendingAction: null, message: "" }),
+  context: ({ input }) => ({
+    query: input.query,
+    pendingAction: null,
+    details: [],
+    clarifications: 0,
+    maxClarifications: MAX_CLARIFICATIONS,
+    message: "",
+  }),
   initial: "classifying",
   states: {
     // Classify intent, and (for sensitive intents) stage the pending action.
@@ -284,17 +343,64 @@ export const customerSupportMachine = agentSetup.createMachine({
     answering: {
       invoke: {
         src: "answer",
-        input: ({ context }) => ({ query: context.query }),
-        onDone: ({ output }) => ({ target: "answered", context: { message: output } }),
+        input: ({ context }) => ({ query: context.query, details: context.details }),
+        // "I need your confirmation code" is not an answer. Routed on the
+        // request's own `needsInfo` flag, it becomes a state the customer can
+        // reply into — instead of a final state that reports `answered`
+        // having answered nothing.
+        onDone: ({ context, output }) => {
+          if (output.status === "answered") {
+            return { target: "answered", context: { message: output.answer } };
+          }
+          // Bounded: past the budget the bot stops asking and says what it can.
+          if (context.clarifications >= context.maxClarifications) {
+            return { target: "unresolved", context: { message: output.question } };
+          }
+          return { target: "awaitingInfo", context: { message: output.question } };
+        },
         onError: {
           target: "failed",
           context: { message: "Could not answer this question." },
         },
       },
     },
+    // The OTHER kind of human pause. `confirming` asks permission to act;
+    // this asks for something only the customer knows. Both are idle states
+    // with no invoke, and telling them apart in the machine is the whole
+    // point: one blocks a write, the other blocks an answer.
+    awaitingInfo: {
+      tags: ["awaiting-info"],
+      meta: {
+        interaction: {
+          // `{message}` resolves against the snapshot's context, so the label
+          // IS the question the agent just asked.
+          label: "{message}",
+          events: {
+            STOP_ASKING: { label: "I'd rather not say", style: "danger" },
+          },
+          textEvent: "PROVIDE_INFO",
+        },
+      },
+      on: {
+        PROVIDE_INFO: ({ context, event }) => ({
+          target: "answering",
+          context: {
+            details: [...context.details, event.text],
+            clarifications: context.clarifications + 1,
+          },
+        }),
+        STOP_ASKING: { target: "unresolved" },
+      },
+    },
     answered: {
       type: "final",
       output: ({ context }) => ({ resolution: "answered" as const, message: context.message }),
+    },
+    // The turn ends with a question outstanding, and says so. Reporting this
+    // as `answered` is what made the old run look like it had helped.
+    unresolved: {
+      type: "final",
+      output: ({ context }) => ({ resolution: "unresolved" as const, message: context.message }),
     },
     // Sensitive path, gate: no invoke → `runAgent` settles idle here. The host
     // reads `meta.interaction` (static label) + `context.pendingAction` (the
@@ -368,6 +474,8 @@ export interface RunCustomerSupportOptions {
   approve?: boolean;
   /** Reason attached to a DENY (the tutorial's denial explanation). */
   denyReason?: string;
+  /** Answers to the bot's questions, in order. Running out declines to say more. */
+  replies?: string[];
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** Observes each machine transition across both runAgent calls. */
@@ -389,9 +497,12 @@ export interface CustomerSupportResult {
 }
 
 /**
- * Runs one support turn. Direct-answer queries finish in a single `runAgent`
- * call. Sensitive queries settle idle at `confirming`; this then persists the
- * snapshot (JSON round-trip) and resumes with APPROVE or DENY in a second call.
+ * Runs one support turn across as many `runAgent` calls as the turn needs.
+ * A direct answer finishes in one. A sensitive query settles idle at
+ * `confirming` and resumes with APPROVE or DENY. A question the bot cannot
+ * answer alone settles idle at `awaitingInfo` and resumes with the detail it
+ * asked for — as many times as it asks, until the machine's own budget stops
+ * it. Every leg persists and JSON-round-trips the snapshot.
  */
 export async function runCustomerSupportExample(
   options: RunCustomerSupportOptions = {},
@@ -414,12 +525,25 @@ export async function runCustomerSupportExample(
     onProgress?.(state);
   };
 
-  // Phase 1: classify, then either answer (done) or settle idle for approval.
-  const first = await runAgent(customerSupportMachine, {
+  // Phase 1: classify, then either answer (done) or settle idle.
+  let first = await runAgent(customerSupportMachine, {
     input: { query },
     ...executors,
     onTransition: track,
   });
+
+  // Every question the bot asks is another leg. The machine decides when to
+  // stop asking; the host only decides what to say.
+  const pending = [...(options.replies ?? [])];
+  while (first.status === "idle" && first.snapshot.hasTag("awaiting-info")) {
+    const reply = pending.shift();
+    first = await runAgent(customerSupportMachine, {
+      snapshot: first.persist(),
+      event: reply === undefined ? { type: "STOP_ASKING" } : { type: "PROVIDE_INFO", text: reply },
+      ...executors,
+      onTransition: track,
+    });
+  }
 
   if (first.status === "done") {
     return {
