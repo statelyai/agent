@@ -44,6 +44,28 @@ const resumeInput = z.object({
   ]),
 });
 
+/**
+ * Publishes the selected scenario's machine to the inspection room before any
+ * run exists, so the visualizer draws its statechart instead of waiting. The
+ * payload matches what the root actor registers with once a run starts.
+ */
+export const declareScenarioMachine = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ scenarioId }).parse(input))
+  .handler(async ({ data }): Promise<{ declared: boolean }> => {
+    const [{ machineFor }, { scenarioSource }, inspection] = await Promise.all([
+      import("./agent-runner"),
+      import("./scenarios"),
+      import("./inspection.server"),
+    ]);
+    await inspection.ensureInspectionRelay();
+    const id = data.scenarioId as ScenarioId;
+    return {
+      declared: inspection.declareInspectionMachine(
+        inspection.rootMachinePayload(machineFor(id), scenarioSource[id]),
+      ),
+    };
+  });
+
 /** Request abort (Cancel / closed tab) OR the default time budget. */
 async function requestRunSignal(): Promise<AbortSignal> {
   const [{ getRequest }, { runSignal }] = await Promise.all([

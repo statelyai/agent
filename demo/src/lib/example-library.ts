@@ -33,6 +33,33 @@ export const getInspection = createServerFn({ method: "GET" }).handler(
 
 const detailInput = z.object({ id: z.string().regex(/^[a-z0-9-]+$/) });
 
+const declareInput = z.object({
+  id: z.string().regex(/^[a-z0-9-]+$/),
+  exportName: z.string().regex(/^\w+$/),
+});
+
+/**
+ * Publishes the selected example's machine to the inspection room before any
+ * run exists, so the visualizer draws its statechart instead of waiting.
+ *
+ * The payload is the one the root actor will register with once a run starts,
+ * so the graph on screen does not change when the first turn begins.
+ */
+export const declareExampleMachine = createServerFn({ method: "POST" })
+  .validator((input: unknown) => declareInput.parse(input))
+  .handler(async ({ data }): Promise<{ declared: boolean }> => {
+    const [
+      { getExampleMachine, getExampleMachineSource },
+      { declareInspectionMachine, ensureInspectionRelay, rootMachinePayload },
+    ] = await Promise.all([import("./example-library.server"), import("./inspection.server")]);
+    await ensureInspectionRelay();
+    const [machine, source] = await Promise.all([
+      getExampleMachine(data.id, data.exportName),
+      getExampleMachineSource(data.id, data.exportName),
+    ]);
+    return { declared: declareInspectionMachine(rootMachinePayload(machine, source)) };
+  });
+
 export const getExample = createServerFn({ method: "GET" })
   .validator((input: unknown) => detailInput.parse(input))
   .handler(async ({ data }): Promise<ExampleDetail> => {

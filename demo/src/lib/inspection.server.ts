@@ -14,6 +14,11 @@
  * One secure room capability per dev-server process and one producer. The viz
  * side connects once and every run replaces that producer's replay checkpoint.
  *
+ * The room does not wait for a run: `declareInspectionMachine` publishes the
+ * selected machine's graph (SDK >= 0.33) as soon as an example is picked, so
+ * the visualizer draws the statechart immediately and the first run lights up
+ * states on a chart that is already on screen.
+ *
  * SINGLE-USER BY DESIGN: the room, the inspector, and its actor-id maps are
  * process-wide, so two browsers on the same dev server share one inspection
  * stream (a start in one replaces the other's run). The demo is a local,
@@ -119,6 +124,12 @@ type InspectionGlobals = {
   actorIds?: WeakMap<object, string>;
   idCounts?: Map<string, number>;
   registeredIds?: Set<string>;
+  /** Root machine published to the room ahead of any actor, so the viz can
+   * render the selected example before a run exists. */
+  declaredMachine?: unknown;
+  /** The current inspector exists only to carry that declaration, so the next
+   * declaration can swap its graph in place instead of rebuilding the room. */
+  declarationOnly?: boolean;
 };
 const globals = globalThis as typeof globalThis & { __agentDemoInspection?: InspectionGlobals };
 const state: InspectionGlobals = (globals.__agentDemoInspection ??= {});
@@ -200,9 +211,91 @@ export function machineForInspection(
 ): unknown {
   // runAgent binds actor implementations with two `.provide(...)` calls, which
   // creates new machine logic objects while preserving the authored config.
-  if (actor.logic?.config === primaryMachine.config && primarySource) return primarySource;
+  if (actor.logic?.config === primaryMachine.config && primarySource) {
+    return rootMachinePayload(primaryMachine, primarySource);
+  }
   const config = actor.logic?.config;
   return isMachineConfig(config) ? toVizConfig({ config } as never) : null;
+}
+
+/**
+ * What the root actor shows in the visualizer: the authored source when the
+ * demo has it (executable expressions survive), otherwise a plain config.
+ *
+ * `declareInspectionMachine` publishes exactly this ahead of the run, so the
+ * graph the viz draws before a run is the same one the root actor registers
+ * with — no swap when the first turn starts.
+ */
+export function rootMachinePayload(machine: AnyStateMachine, source?: string): unknown {
+  return source ?? (isMachineConfig(machine.config) ? toVizConfig(machine) : null);
+}
+
+/**
+ * Creates the room's inspector and resets the per-session id bookkeeping.
+ * `machines` seeds the system checkpoint so a declared root machine survives
+ * the inspector being rebuilt for a new run session.
+ *
+ * `pinSelection` is for run sessions only. The visualizer clears its declared
+ * machine the moment an init names a selected session, whether or not that
+ * actor exists yet — so pinning the root before a run has actors would hide
+ * the very graph the declaration is there to show.
+ */
+function createRoomInspector({ pinSelection }: { pinSelection: boolean }): Inspector {
+  const inspector = createInspector({
+    url: inspectionWsUrl(),
+    roomId: inspectionRoomId(),
+    producerId: INSPECTION_PRODUCER_ID,
+    launch: "none",
+    name: "Stately Agent Lab",
+    // Manual ids go on the wire as `<producer>:<id>`; a resumed turn may
+    // register a child before the root, so pin the selection explicitly.
+    ...(pinSelection ? { selectedSessionId: `${INSPECTION_PRODUCER_ID}:${ROOT_ID}` } : {}),
+    ...(state.declaredMachine !== undefined
+      ? { machines: { [ROOT_ID]: state.declaredMachine } }
+      : {}),
+    readOnly: true,
+    panels: [],
+    capabilities: {
+      edit: false,
+      export: false,
+      ai: false,
+      simulate: false,
+      inspect: true,
+      maxDepth: 2,
+      panels: [],
+    },
+  });
+  state.actorIds = new WeakMap();
+  state.idCounts = new Map();
+  state.registeredIds = new Set();
+  return inspector;
+}
+
+/**
+ * Publishes a machine to the inspection room before any actor exists, so the
+ * viz renders the selected example's statechart instead of an empty room.
+ *
+ * `inspector.machine(ROOT_ID, ...)` refreshes the system checkpoint in place,
+ * so switching examples replaces the graph on the already-connected /inspect
+ * page rather than reloading it. Returns whether anything was published — a
+ * machine the demo cannot serialize, or a request that arrives before any viz
+ * client asked for inspection, publishes nothing.
+ */
+export function declareInspectionMachine(payload: unknown): boolean {
+  if (!state.inspectionEnabled || payload == null) return false;
+  state.declaredMachine = payload;
+  // Selecting an example resets the run, so an inspector a run session owns
+  // goes with it — otherwise that run's actors would sit in the room beside a
+  // machine they do not belong to. One that only ever carried a declaration
+  // has nothing to drop, so it keeps its connection and swaps graphs in place.
+  if (!state.declarationOnly) {
+    state.inspector?.destroy();
+    state.inspector = undefined;
+  }
+  if (state.inspector) state.inspector.machine(ROOT_ID, payload);
+  else state.inspector = createRoomInspector({ pinSelection: false });
+  state.declarationOnly = true;
+  return true;
 }
 
 /**
@@ -232,33 +325,19 @@ export function maybeCreateRunInspection(
   phase: "start" | "resume" = "start",
 ): ((event: InspectionEvent) => void) | undefined {
   if (!state.inspectionEnabled) return undefined;
+  // The run is the authority on what the room's machine is: a headless run
+  // (no viz client, so nothing declared) must not inherit whatever a previous
+  // selection left behind when the inspector is rebuilt below.
+  const rootPayload = rootMachinePayload(primaryMachine, primarySource);
+  if (rootPayload != null) state.declaredMachine = rootPayload;
+  // A run always opens its own inspector: a declaration-only one was built
+  // without the root selection pin (see `createRoomInspector`), and that
+  // option is fixed at construction.
   if (phase === "start" || !state.inspector) {
     state.inspector?.destroy();
-    state.inspector = createInspector({
-      url: inspectionWsUrl(),
-      roomId: inspectionRoomId(),
-      producerId: INSPECTION_PRODUCER_ID,
-      launch: "none",
-      name: "Stately Agent Lab",
-      // Manual ids go on the wire as `<producer>:<id>`; a resumed turn may
-      // register a child before the root, so pin the selection explicitly.
-      selectedSessionId: `${INSPECTION_PRODUCER_ID}:${ROOT_ID}`,
-      readOnly: true,
-      panels: [],
-      capabilities: {
-        edit: false,
-        export: false,
-        ai: false,
-        simulate: false,
-        inspect: true,
-        maxDepth: 2,
-        panels: [],
-      },
-    });
-    state.actorIds = new WeakMap();
-    state.idCounts = new Map();
-    state.registeredIds = new Set();
+    state.inspector = createRoomInspector({ pinSelection: true });
   }
+  state.declarationOnly = false;
   const inspector = state.inspector;
   const actorIds = (state.actorIds ??= new WeakMap());
   const idCounts = (state.idCounts ??= new Map());

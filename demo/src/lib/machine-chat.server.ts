@@ -115,14 +115,44 @@ export function smallContext(context: unknown): Record<string, Json> {
   return out;
 }
 
+/** Longest string kept on a trace event; the chat truncates further to a row. */
+const TRACE_STRING_CHARS = 140;
+
+/** One event field, bounded and JSON-safe, or `undefined` to drop it. */
+function smallEventValue(value: unknown, nested: boolean): Json | undefined {
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    return value.length > TRACE_STRING_CHARS ? `${value.slice(0, TRACE_STRING_CHARS)}…` : value;
+  }
+  if (value instanceof Error) return smallEventValue(value.message, nested);
+  if (Array.isArray(value)) return `Array(${value.length})`;
+  // One level only: an actor's `output` is the work a step produced, and it is
+  // usually a small object. Deeper than that is a record, not a chat row.
+  if (!nested && value !== null && typeof value === "object") {
+    const inner: Record<string, Json> = {};
+    for (const [key, field] of Object.entries(value as Record<string, unknown>)) {
+      const small = smallEventValue(field, true);
+      if (small !== undefined) inner[key] = small;
+    }
+    return Object.keys(inner).length > 0 ? inner : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A trace event, bounded for the wire. Actor results (`output`) and failures
+ * (`error`) keep one level of structure: without it the chat's transition log
+ * can only say that a request finished, never what it produced — which is the
+ * only part of an intermediate step worth reading.
+ */
 export function smallEvent(event: unknown): { type: string } & Record<string, Json> {
   if (!event || typeof event !== "object") return { type: String(event) };
   const source = event as Record<string, unknown>;
   const out: { type: string } & Record<string, Json> = { type: String(source.type ?? "event") };
   for (const [key, value] of Object.entries(source)) {
     if (key === "type") continue;
-    if (typeof value === "number" || typeof value === "boolean") out[key] = value;
-    else if (typeof value === "string" && value.length <= 60) out[key] = value;
+    const small = smallEventValue(value, false);
+    if (small !== undefined) out[key] = small;
   }
   return out;
 }

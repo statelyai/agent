@@ -26,7 +26,7 @@ type VizPanelProps = {
   title: string;
   /** Whether the selected example exports a machine at all. */
   hasMachine: boolean;
-  /** A run started but the inspection relay never became available. */
+  /** The inspection relay was reached for and never became available. */
   inspectionUnavailable?: boolean;
   /**
    * Live inspection relay. The panel joins the room as a viewer purely to
@@ -36,7 +36,7 @@ type VizPanelProps = {
   liveWs: LiveWs | null;
   /**
    * Full viz `/inspect` page URL, pointed at the current inspection room.
-   * Null until a run starts.
+   * Null until the selected machine has been published to that room.
    */
   liveUrl: string | null;
   /**
@@ -80,7 +80,14 @@ export function VizPanel({
   return (
     <section className="viz-shell" aria-label={`Live statechart for ${title}`}>
       <div className="viz-canvas">
-        {liveUrl ? (
+        {!hasMachine ? (
+          // Checked before `liveUrl`: the room outlives a selection, so an
+          // example with no machine must not keep showing the previous one.
+          <div className="viz-state" role="status">
+            <strong>No machine to inspect</strong>
+            <p>This example does not export a state machine from its index.ts.</p>
+          </div>
+        ) : liveUrl ? (
           <iframe
             className="viz-embed"
             title={`Live inspection for ${title}`}
@@ -88,20 +95,17 @@ export function VizPanel({
             allow="clipboard-read; clipboard-write"
             referrerPolicy="strict-origin"
           />
-        ) : hasMachine && inspectionUnavailable ? (
+        ) : inspectionUnavailable ? (
           <div className="viz-state" role="status">
             <strong>Live inspection unavailable</strong>
-            <p>The demo could not reach the inspection relay, so this run is not visualized.</p>
-          </div>
-        ) : hasMachine ? (
-          <div className="viz-state" role="status">
-            <strong>Start a run to inspect</strong>
-            <p>The live statechart appears here once the machine is running.</p>
+            <p>
+              The demo could not reach the inspection relay, so this machine is not visualized.
+            </p>
           </div>
         ) : (
           <div className="viz-state" role="status">
-            <strong>No machine to inspect</strong>
-            <p>This example does not export a state machine from its index.ts.</p>
+            <strong>Loading the statechart</strong>
+            <p>Publishing this machine to the inspection room.</p>
           </div>
         )}
       </div>

@@ -6,6 +6,7 @@ import { ExampleIntro, ScenarioIntro, type StarterAction } from "@/components/ch
 import { SiteHeader } from "@/components/site-header";
 import { VizPanel, type SystemMessage } from "@/components/viz-panel";
 import {
+  declareExampleMachine,
   getExample,
   getInspection,
   listExamples,
@@ -16,7 +17,7 @@ import {
   type InspectionInfo,
 } from "@/lib/example-library";
 import { humanizeEventType } from "@/lib/machine-ui";
-import { resumeScenario, startScenario } from "@/lib/run-demo-agent";
+import { declareScenarioMachine, resumeScenario, startScenario } from "@/lib/run-demo-agent";
 import { getScenario, scenarios } from "@/lib/scenarios";
 import type { Selection } from "@/lib/selection";
 import {
@@ -124,14 +125,19 @@ export function DemoShell() {
 
   // Live inspection: use Sky by default; boot a local relay only when opted in.
   const [inspection, setInspection] = useState<InspectionInfo | null>(null);
+  const [inspectionChecked, setInspectionChecked] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void getInspection().then(
       (info) => {
-        if (!cancelled) setInspection(info);
+        if (cancelled) return;
+        setInspection(info);
+        setInspectionChecked(true);
       },
       () => {
-        if (!cancelled) setInspection(null);
+        if (cancelled) return;
+        setInspection(null);
+        setInspectionChecked(true);
       },
     );
     return () => {
@@ -187,6 +193,39 @@ export function DemoShell() {
       cancelled = true;
     };
   }, [selection]);
+
+  // Publish the selected machine to the inspection room BEFORE any run, so the
+  // visualizer draws its statechart on selection instead of an empty room. The
+  // /inspect URL is the room, not the run, so it stays mounted across
+  // selections: each declaration swaps the graph in place rather than
+  // reloading the page.
+  const [machineDeclared, setMachineDeclared] = useState(false);
+  const inspectScenarioId = isScenario ? scenario.id : null;
+  const inspectExampleId = !isScenario && activeMachine ? selection.id : null;
+  const inspectExportName = !isScenario && activeMachine ? activeMachine.exportName : null;
+  useEffect(() => {
+    if (!inspection) return;
+    let cancelled = false;
+    const onDeclared = ({ declared }: { declared: boolean }) => {
+      if (!cancelled && declared) setMachineDeclared(true);
+    };
+    // A failed declaration is not worth surfacing: the panel keeps whatever it
+    // was showing, and the run's own inspection still lights the chart up.
+    const ignore = () => {};
+    if (inspectScenarioId) {
+      void declareScenarioMachine({ data: { scenarioId: inspectScenarioId } }).then(
+        onDeclared,
+        ignore,
+      );
+    } else if (inspectExampleId && inspectExportName) {
+      void declareExampleMachine({
+        data: { id: inspectExampleId, exportName: inspectExportName },
+      }).then(onDeclared, ignore);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [inspection, inspectScenarioId, inspectExampleId, inspectExportName]);
 
   // ─── run control: one AbortController per in-flight turn + live feed ───
   //
@@ -540,15 +579,17 @@ export function DemoShell() {
     />
   );
 
+  // The room, not the run: once a machine is published the chart is worth
+  // showing, and the first turn animates a diagram already on screen.
   const liveUrl =
-    inspection && started ? createLiveInspectUrl(inspectUrl, inspection) : null;
+    inspection && machineDeclared ? createLiveInspectUrl(inspectUrl, inspection) : null;
   const liveWs = inspection;
 
   const vizPanel = (
     <VizPanel
       title={headerName}
       hasMachine={isScenario || !!activeMachine?.vizConfig}
-      inspectionUnavailable={started && !inspection}
+      inspectionUnavailable={inspectionChecked && !inspection}
       liveWs={liveWs}
       liveUrl={liveUrl}
       onSystemMessage={handleSystemMessage}
