@@ -27,7 +27,8 @@ convention in a prompt.
 - [code-assistant](code-assistant): a retry budget around code that really runs and really fails
 - [corrective-rag](corrective-rag): a grade-then-branch choice state picks answering or a rewritten fallback lookup
 - [plan-and-execute](plan-and-execute): a step budget that can be exhausted — the run ends in `failed` instead of answering from a half-executed plan
-- [river-crossing](river-crossing): the machine is ground truth; guards reject the illegal crossings the model proposes
+- [river-crossing](river-crossing): the machine is ground truth and solves itself — `REQUEST_PLAN` traverses it with `xstate/graph` and hands back the shortest legal route, and guards reject any crossing the model proposes off it
+- [route-replanning](route-replanning): a plan is a prediction — the machine plans the whole route, drives it a leg at a time without recomputing, and replans from where it stands when a road turns out to be shut
 - [todo-nl](todo-nl): one free-text command becomes a bounded sequence of typed events via an explicit decide loop
 - [context-compaction](context-compaction): an explicit `compacting` state, entered when the window overflows
 - [chat-with-pdf](chat-with-pdf): one question per state entry, and a refresh guard instead of "after 3-4 questions"
