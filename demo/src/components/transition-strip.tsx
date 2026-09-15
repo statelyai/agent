@@ -32,13 +32,20 @@ export const TransitionChip: ToolCallMessagePartComponent = ({ toolName, args })
       <span className="transition-chip__dot" aria-hidden="true" />
       <span className="transition-chip__event">
         {toolName}
-        {kind === "done" ? " ✓" : kind === "error" ? " ✗" : ""}
+        {kind === "done" ? " ✓" : kind === "error" || kind === "rejected" ? " ✗" : ""}
       </span>
       {payload ? <span className="transition-chip__payload">{payload}</span> : null}
-      <span className="transition-chip__arrow" aria-hidden="true">
-        →
-      </span>
-      <span className="transition-chip__state">{state}</span>
+      {/* An emit or a refused decision moves nothing, so it gets no target. */}
+      {kind === "emit" || kind === "rejected" ? null : (
+        <>
+          <span className="transition-chip__arrow" aria-hidden="true">
+            →
+          </span>
+          <span className="transition-chip__state" title={state}>
+            {state}
+          </span>
+        </>
+      )}
       {gap >= 100 ? (
         <span className="transition-chip__time">+{(gap / 1000).toFixed(1)}s</span>
       ) : null}

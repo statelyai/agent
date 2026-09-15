@@ -786,6 +786,30 @@
   background: var(--line-strong);
 }
 
+/* An emit is the machine narrating its own progress: present, but quieter
+   than a transition, because it did not move anything. */
+.transition-chip[data-kind="emit"] .transition-chip__dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+/* A refused decision: the machine turning down an illegal choice. Dimmed so a
+   retry loop reads as texture, not as a wall of errors. */
+.transition-chip[data-kind="rejected"] {
+  opacity: 0.72;
+}
+
+.transition-chip[data-kind="rejected"] .transition-chip__dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+.transition-chip[data-kind="rejected"] .transition-chip__event {
+  color: var(--danger);
+  opacity: 0.9;
+  text-decoration: line-through;
+}
+
 .transition-chip__event {
   flex: none;
   color: var(--ink);
@@ -810,10 +834,11 @@
 
 .transition-chip__state {
   flex: none;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* A parallel state value ("a.working · b.done · c.working") is at its most
+     informative exactly when it is longest, so it wraps rather than being
+     ellipsed away; `title` carries the full value either way. */
+  max-width: 55%;
+  overflow-wrap: anywhere;
 }
 
 .transition-chip__time {

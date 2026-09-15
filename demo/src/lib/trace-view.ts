@@ -124,6 +124,20 @@ export function summarizePayload(event: Record<string, unknown>): string {
   return clamp(summary, PAYLOAD_CHARS);
 }
 
+/**
+ * `emit` and `rejected` are not transitions: an emit announces work in
+ * progress, a rejection is a choice the machine refused before retrying.
+ * Neither moves the machine, so neither renders an arrow or a target state.
+ */
+export type TraceStepKind = "model" | "done" | "error" | "system" | "emit" | "rejected";
+
+/** How a refused decision reads in the log. */
+const FAILURE_LABELS: Record<string, string> = {
+  "rejected-by-guard": "rejected by a guard",
+  "invalid-payload": "payload failed its schema",
+  "unknown-event": "not an accepted event",
+};
+
 export type TraceStep = {
   /** Event label (no status glyphs — `kind` carries done/error). */
   label: string;
@@ -131,7 +145,7 @@ export type TraceStep = {
   state: string;
   /** What the step produced, as one short line — see {@link summarizePayload}. */
   payload: string;
-  kind: "model" | "done" | "error" | "system";
+  kind: TraceStepKind;
   /** Milliseconds since run start (from the server-captured trace). */
   at: number;
 };
@@ -157,7 +171,32 @@ export function liveTraceStep(event: unknown, stateValue: unknown, at: number): 
 export function traceSteps(trace: TraceEntry[]): TraceStep[] {
   return trace
     .filter((entry) => entry.event.type !== "xstate.init" && entry.event.type !== "@xstate.init")
-    .map((entry) => {
+    .map((entry): TraceStep => {
+      if (entry.kind === "emitted") {
+        return {
+          label: entry.event.type,
+          state: "",
+          payload: summarizePayload(entry.event),
+          kind: "emit",
+          at: entry.at,
+        };
+      }
+      if (entry.kind === "rejected") {
+        const failure = String(entry.event["failure"] ?? "");
+        const reason = String(entry.event["reason"] ?? "");
+        const why = FAILURE_LABELS[failure] ?? failure ?? "rejected";
+        // The library's guard reason restates the event type it just refused
+        // ("'TAKE_GOAT' is not currently takeable"), which the row already
+        // shows. A schema failure's reason says something new, so it stays.
+        const restatesLabel = reason.startsWith(`'${entry.event.type}'`);
+        return {
+          label: entry.event.type,
+          state: "",
+          payload: reason && !restatesLabel ? `${why} — ${reason}` : why,
+          kind: "rejected",
+          at: entry.at,
+        };
+      }
       const { label, kind } = prettifyEvent(entry.event);
       const payload = summarizePayload(entry.event);
       return { label, state: stateValueLabel(entry.value), payload, kind, at: entry.at };

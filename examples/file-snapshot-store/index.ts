@@ -33,6 +33,11 @@ import {
 } from "@statelyai/agent";
 import { portableLoopMachine } from "../portable-xstate-loop/index.js";
 
+// The machine this example persists and resumes. Re-exported so the library
+// can render its statechart beside the run, rather than reporting that this
+// example has no machine to inspect.
+export { portableLoopMachine };
+
 // --- 1. Application-owned storage -------------------------------------------
 
 /** Ordinary application I/O; use the equivalent APIs from your framework. */

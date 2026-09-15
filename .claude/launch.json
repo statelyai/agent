@@ -1,0 +1,8 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "agent-demo", "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@statelyai/agent-demo", "exec", "vite", "dev", "--port", "4317"],
+      "port": 4317 }
+  ]
+}

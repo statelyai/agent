@@ -35,12 +35,28 @@ import {
 
 // ─── trace capture (shared with the curated scenario runner) ───
 
+/**
+ * What a trace entry records. `transition` is a committed machine transition;
+ * the other two are the work that happens BETWEEN transitions and would
+ * otherwise never reach the reader:
+ *
+ * - `emitted` — an `enq.emit(...)` the machine author chose to announce, so a
+ *   long run says what it is doing instead of going quiet.
+ * - `rejected` — a decision the machine refused (`unknown-event`,
+ *   `invalid-payload`, `rejected-by-guard`) before retrying. The guard turning
+ *   down an illegal choice is the clearest evidence the machine is doing its
+ *   job, and it used to be invisible.
+ */
+export type TraceEntryKind = "transition" | "emitted" | "rejected";
+
 export type TraceEntry = {
   event: { type: string } & Record<string, Json>;
   value: Json;
   context: Record<string, Json>;
   /** Milliseconds since run start — the client replays with proportional timing. */
   at: number;
+  /** Defaults to `transition` when absent, so older traces still read. */
+  kind?: TraceEntryKind;
 };
 
 /**
@@ -52,6 +68,10 @@ export type TraceEntry = {
 export function createTraceRecorder(baselineContext?: unknown): {
   trace: TraceEntry[];
   onTransition: (snapshot: AnyMachineSnapshot, event: unknown) => void;
+  /** `runAgent`'s `on` handler: records an `enq.emit(...)` the machine made. */
+  onEmitted: (event: unknown) => void;
+  /** `runAgent`'s `trace` handler: records decisions the machine refused. */
+  onTrace: (entry: unknown) => void;
   changedKeys: () => string[];
   /** The last full context seen — the "work so far" when a run is cut short. */
   latestContext: () => unknown;
@@ -82,17 +102,59 @@ export function createTraceRecorder(baselineContext?: unknown): {
   };
   if (baselineContext !== undefined) observe(baselineContext, false);
 
+  // Between-transition entries carry the state the run was in when they
+  // happened, so a row still reads as part of the sequence around it.
+  let lastValue: Json = null;
+  const seenAttempts = new Set<string>();
+
+  const push = (kind: TraceEntryKind, event: unknown) => {
+    trace.push({
+      at: Date.now() - startedAt,
+      event: smallEvent(event),
+      value: lastValue,
+      context: {},
+      kind,
+    });
+  };
+
   return {
     trace,
     onTransition: (snapshot, event) => {
       const type = String((event as { type?: unknown } | null)?.type ?? "");
       observe(snapshot.context, type !== "xstate.init" && type !== "@xstate.init");
       latest = snapshot.context;
+      lastValue = snapshot.value as Json;
       trace.push({
         at: Date.now() - startedAt,
         event: smallEvent(event),
         value: snapshot.value as Json,
         context: smallContext(snapshot.context),
+        kind: "transition",
+      });
+    },
+    onEmitted: (event) => push("emitted", event),
+    onTrace: (entry) => {
+      // A decision retries by re-issuing `request.start` with the failed
+      // attempts appended, so each attempt is recorded once, the first time
+      // it appears. There is no dedicated "rejected" trace event to listen to.
+      const step = entry as { type?: unknown; request?: { id?: unknown; attempts?: unknown } };
+      if (step?.type !== "request.start") return;
+      const attempts = step.request?.attempts;
+      if (!Array.isArray(attempts)) return;
+      attempts.forEach((attempt, index) => {
+        const key = `${String(step.request?.id ?? "")}#${index}`;
+        if (seenAttempts.has(key)) return;
+        seenAttempts.add(key);
+        const { event, failure, reason } = (attempt ?? {}) as {
+          event?: { type?: unknown };
+          failure?: unknown;
+          reason?: unknown;
+        };
+        push("rejected", {
+          type: typeof event?.type === "string" ? event.type : "(no event)",
+          failure: String(failure ?? "rejected"),
+          reason: String(reason ?? ""),
+        });
       });
     },
     changedKeys: () => [...changedAt.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key),
@@ -584,12 +646,15 @@ export async function startMachineChat(
       response: "Running library examples needs OPENAI_API_KEY set for the demo server.",
     };
   }
-  const { trace, onTransition, changedKeys, latestContext } = createTraceRecorder();
+  const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
+    createTraceRecorder();
   const result = await runAgent(machine, {
     input: input as never,
     executors: live.executors,
     signal: runSignal(limits),
     onTransition,
+    on: { "*": onEmitted },
+    onTrace,
     inspect: maybeCreateRunInspection(machine, limits.machineSource, "start"),
   });
   return toChatResult(
@@ -626,7 +691,7 @@ export async function resumeMachineChat(
   }
   // Baseline: context restored from the snapshot is prior turns' work, not
   // this turn's — only new changes should render as produced output.
-  const { trace, onTransition, changedKeys, latestContext } = createTraceRecorder(
+  const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } = createTraceRecorder(
     (snapshot as { context?: unknown }).context,
   );
   // Validate the wire event against the restored snapshot's accepted events
@@ -650,6 +715,8 @@ export async function resumeMachineChat(
     executors: live.executors,
     signal: runSignal(limits),
     onTransition,
+    on: { "*": onEmitted },
+    onTrace,
     inspect: maybeCreateRunInspection(machine, limits.machineSource, "resume"),
   });
   return toChatResult(

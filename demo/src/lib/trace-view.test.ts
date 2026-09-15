@@ -63,6 +63,52 @@ describe("transition payload summaries", () => {
   });
 });
 
+describe("between-transition rows", () => {
+  const at = 0;
+  const entry = (kind: "emitted" | "rejected", event: Record<string, string | number | boolean>) =>
+    [{ event: event as never, value: "deciding", context: {}, at, kind }] as never;
+
+  it("renders an emit as its own row with no target state", () => {
+    const [step] = traceSteps(entry("emitted", { type: "DRAFTED", revision: 0, length: 979 }));
+
+    expect(step).toEqual({
+      label: "DRAFTED",
+      state: "",
+      payload: "revision: 0, length: 979",
+      kind: "emit",
+      at,
+    });
+  });
+
+  it("names the guard that refused a decision, without restating the event", () => {
+    const [step] = traceSteps(
+      entry("rejected", {
+        type: "TAKE_GOAT",
+        failure: "rejected-by-guard",
+        reason: "'TAKE_GOAT' is not currently takeable (guard rejected it).",
+      }),
+    );
+
+    expect(step?.kind).toBe("rejected");
+    expect(step?.payload).toBe("rejected by a guard");
+    expect(step?.state).toBe("");
+  });
+
+  it("keeps a reason that says something the row does not", () => {
+    const [step] = traceSteps(
+      entry("rejected", {
+        type: "REFUND",
+        failure: "invalid-payload",
+        reason: "amount: expected number, received string",
+      }),
+    );
+
+    expect(step?.payload).toBe(
+      "payload failed its schema — amount: expected number, received string",
+    );
+  });
+});
+
 describe("transition labels", () => {
   it("names the actor, without the system index an anonymous invoke carries", () => {
     const [step] = traceSteps([
