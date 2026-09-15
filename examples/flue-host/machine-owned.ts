@@ -33,10 +33,11 @@
  */
 import assert from "node:assert/strict";
 import type { z } from "zod";
-import type { EventFromLogic, Snapshot } from "xstate";
+import type { Snapshot } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getInteraction,
+  parseAgentEvent,
   runAgent,
   type AgentTextRequest,
   type RunAgentOptions,
@@ -137,23 +138,25 @@ export function useLiveExecutors() {
 /**
  * Build the machine event for `eventType`. Free text goes to the interaction's
  * declared `textEvent` as `text`; a listed choice contributes any fixed fields
- * the metadata attached to it. The cast is the one unavoidable seam: the
- * eventType arrives as a model-supplied string, so there is nothing static to
- * infer from — unlike ./flue-owned.ts, where events are code-authored and
- * `EventFromLogic` types them for free. `runAgent` still validates the event
- * against the machine's event schemas.
+ * the metadata attached to it. The eventType arrives as a model-supplied
+ * string, so there is nothing static to infer from — unlike ./flue-owned.ts,
+ * where events are code-authored and `EventFromLogic` types them for free.
+ * `parseAgentEvent` PARSES that boundary instead of casting through it: it
+ * validates the payload against the machine's own event schemas and returns
+ * the machine's event union, throwing on one that does not fit.
  */
 function buildEvent(
   interaction: Interaction | null,
   eventType: string,
   text: string | null,
-): EventFromLogic<typeof emailDrafter> {
+): DrafterEvent {
   const choice = interaction?.events.find((candidate) => candidate.type === eventType);
-  const event =
+  return parseAgentEvent(
+    emailDrafter,
     text !== null && interaction?.textEvent === eventType
       ? { type: eventType, text }
-      : { type: eventType, ...choice?.event };
-  return event as DrafterEvent as EventFromLogic<typeof emailDrafter>;
+      : { type: eventType, ...choice?.event },
+  );
 }
 
 let nextHandle = 0;

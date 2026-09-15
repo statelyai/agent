@@ -89,21 +89,21 @@ function respondFor(input: SeamCaseInput) {
   return ({ state }: SeamTurn<typeof emailDrafter>): DrafterEvent | null => {
     switch (state) {
       case "prompting":
-        return { type: "PROMPT_SUBMITTED", text: input.prompt } as DrafterEvent;
+        return { type: "PROMPT_SUBMITTED", text: input.prompt };
       case "needsMoreInfo":
         if (input.details !== null && !used.details) {
           used.details = true;
-          return { type: "MORE_INFO", text: input.details } as DrafterEvent;
+          return { type: "MORE_INFO", text: input.details };
         }
-        return { type: "DRAFT_ANYWAY" } as DrafterEvent;
+        return { type: "DRAFT_ANYWAY" };
       case "reviewing":
         if (input.changes !== null && !used.changes) {
           used.changes = true;
-          return { type: "REQUEST_CHANGES", text: input.changes } as DrafterEvent;
+          return { type: "REQUEST_CHANGES", text: input.changes };
         }
-        return { type: "SEND" } as DrafterEvent;
+        return { type: "SEND" };
       case "sent":
-        return { type: "END" } as DrafterEvent;
+        return { type: "END" };
       default:
         return null;
     }

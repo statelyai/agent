@@ -64,7 +64,6 @@ import {
   type AgentTextRequest,
   type AgentTool,
   type AgentTools,
-  type ChosenEvent,
 } from "@statelyai/agent";
 import { triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
@@ -382,7 +381,7 @@ export function createAnthropicExecutors(
       event: {
         ...(input && typeof input === "object" ? input : {}),
         type: chosenEvent.type,
-      } as ChosenEvent,
+      },
       usage: toAgentCallUsage(response.usage),
     };
   };

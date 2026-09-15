@@ -106,15 +106,15 @@ function nextUserEvent(
 ): DrafterEvent | null {
   switch (snapshot.value) {
     case "prompting":
-      return { type: "PROMPT_SUBMITTED", text: drafterCase.prompt } as DrafterEvent;
+      return { type: "PROMPT_SUBMITTED", text: drafterCase.prompt };
     case "needsMoreInfo":
       return drafterCase.details !== null && !detailsUsed
-        ? ({ type: "MORE_INFO", text: drafterCase.details } as DrafterEvent)
-        : ({ type: "DRAFT_ANYWAY" } as DrafterEvent);
+        ? { type: "MORE_INFO", text: drafterCase.details }
+        : { type: "DRAFT_ANYWAY" };
     case "reviewing":
-      return { type: "SEND" } as DrafterEvent;
+      return { type: "SEND" };
     case "sent":
-      return { type: "END" } as DrafterEvent;
+      return { type: "END" };
     default:
       return null;
   }
@@ -142,9 +142,9 @@ export async function runDrafterCase(
   let sentEmails: DrafterOutcome["sentEmails"] = [];
 
   for (let leg = 0; leg < maxLegs; leg++) {
-    const event = liveSnapshot
+    const event: DrafterEvent | null = liveSnapshot
       ? nextUserEvent(liveSnapshot, drafterCase, detailsUsed)
-      : ({ type: "PROMPT_SUBMITTED", text: drafterCase.prompt } as DrafterEvent);
+      : { type: "PROMPT_SUBMITTED", text: drafterCase.prompt };
     if (!event) break;
     if (event.type === "MORE_INFO") detailsUsed = true;
 

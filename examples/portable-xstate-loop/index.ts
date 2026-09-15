@@ -19,8 +19,8 @@
  * Run: npx tsx examples/portable-xstate-loop/index.ts
  */
 import { z } from "zod";
-import type { AnyEventObject, Snapshot } from "xstate";
-import { createDurable, type DurableExecution } from "xstate/durable";
+import type { AnyEventObject } from "xstate";
+import { createDurable, type DurableExecution, type DurableSnapshot } from "xstate/durable";
 import {
   isAgentIdle,
   provideExecutors,
@@ -81,7 +81,10 @@ export const portableLoopMachine = portableLoopSetup.createMachine({
 });
 
 type LoopMachine = typeof portableLoopMachine;
-type LoopSnapshot = ReturnType<LoopMachine["restoreSnapshot"]>;
+// `DurableSnapshot` is the machine's own snapshot intersected with the base
+// `Snapshot` union, so the `status`/`output`/`error` discriminant stays visible
+// — no casting a snapshot back to `Snapshot<unknown>` just to read `.status`.
+type LoopSnapshot = DurableSnapshot<LoopMachine>;
 
 /**
  * One durable execution plus the in-memory mailbox its adapter parks on. A
@@ -115,7 +118,7 @@ async function advance(
   await execution.executeEffects(effects);
   // `isAgentIdle` is the stop condition, not a state name: an active snapshot
   // that accepts an external event is resting on the host, not on work.
-  while ((state as Snapshot<unknown>).status === "active" && !isAgentIdle(state)) {
+  while (state.status === "active" && !isAgentIdle(state)) {
     const event = await execution.waitForEvent();
     [state, effects] = execution.transition(state, event);
     await execution.executeEffects(effects);
@@ -144,9 +147,9 @@ export async function runPortableXstateLoop(
 
   // ── Pass 1: run to the first pause (or to a terminal state). ──
   const first = createExecution(machine);
-  let state = await advance(first, first.initialTransition({ topic }) as never);
+  let state = await advance(first, first.initialTransition({ topic }));
 
-  if ((state as Snapshot<unknown>).status !== "active") {
+  if (state.status !== "active") {
     return { ...settle(state), resumedFromSnapshot: false };
   }
 
@@ -155,11 +158,11 @@ export async function runPortableXstateLoop(
 
   // ── Pass 2: a brand new execution, rehydrated from the stored snapshot. ──
   const second = createExecution(machine);
-  let resumed = machine.restoreSnapshot(JSON.parse(stored)) as LoopSnapshot;
-  while ((resumed as Snapshot<unknown>).status === "active") {
+  let resumed = machine.restoreSnapshot(JSON.parse(stored));
+  while (resumed.status === "active") {
     const event = externalEvents.shift();
     if (!event) throw new Error("The host has no external event to deliver.");
-    resumed = await advance(second, second.transition(resumed, event) as never);
+    resumed = await advance(second, second.transition(resumed, event));
     if (isAgentIdle(resumed)) continue;
     break;
   }

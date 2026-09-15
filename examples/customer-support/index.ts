@@ -338,7 +338,11 @@ export const customerSupportMachine = agentSetup.createMachine({
         // of reporting a change that never happened.
         onError: ({ event }) => ({
           target: "failed",
-          context: { message: String((event.error as Error)?.message ?? event.error) },
+          // `event.error` is `unknown` — narrow it rather than asserting it is
+          // an `Error`, since a thrown string reaches here just as easily.
+          context: {
+            message: event.error instanceof Error ? event.error.message : String(event.error),
+          },
         }),
       },
     },

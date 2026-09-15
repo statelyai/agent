@@ -34,7 +34,6 @@ import {
   type AgentTextRequest,
   type AgentTools,
   type AgentCallUsage,
-  type ChosenEvent,
 } from "@statelyai/agent";
 
 // ─── Request → LangChain mapping (pure, unit-testable) ───
@@ -291,7 +290,7 @@ export function createLangChainExecutors({
     }
 
     return {
-      event: { ...toolCall.args, type: chosenEvent.type } as ChosenEvent,
+      event: { ...toolCall.args, type: chosenEvent.type },
     };
   };
 
