@@ -1,5 +1,6 @@
 /** Native XState snapshot versioning and migration through `runAgent`. */
 import { z } from "zod";
+import type { ExampleRunOptions } from "../run-options.js";
 import type { ContextFrom, Snapshot } from "xstate";
 import { runAgent, setupAgent } from "@statelyai/agent";
 
@@ -140,14 +141,26 @@ export const orderApprovalMachine = v2.createMachine({
   },
 });
 
+/**
+ * The whole story in one call: pause on the deployed machine, ship a new
+ * version, resume the paused snapshot on it. The migration happens BETWEEN the
+ * two runs, so a host that drives only one machine cannot show it — see
+ * {@link ExampleRunOptions}, whose observers are threaded into both legs.
+ */
 export async function runSnapshotMigrationExample(
-  input: { orderId?: string; total?: number } = {},
+  options: { orderId?: string; total?: number } & ExampleRunOptions = {},
 ) {
-  const { orderId = "ORD-4417", total = 812.5 } = input;
-  const paused = await runAgent(orderApprovalMachineV1, { input: { orderId, total } });
+  const { orderId = "ORD-4417", total = 812.5, ...observers } = options;
+  const paused = await runAgent(orderApprovalMachineV1, {
+    ...(observers as object),
+    input: { orderId, total },
+  });
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
   const persisted = persistSnapshot(paused.persist());
+  // The version bump: the paused snapshot is resumed on a machine that has
+  // shipped since, through XState's own `version` + `migrate` contract.
   const resumed = await runAgent(orderApprovalMachine, {
+    ...(observers as object),
     snapshot: persisted,
     event: { type: "APPROVE" },
   });

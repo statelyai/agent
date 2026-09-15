@@ -628,6 +628,52 @@ async function liveExecutors(): Promise<{
   return { model, executors: createAiSdkExecutors({ resolveModel: () => openai(model) }) };
 }
 
+/**
+ * Runs an example that tells its story across SEVERAL runs (a crash and its
+ * recovery, a snapshot resumed on a new machine version). There is no single
+ * machine to drive, so the example exports one function and this threads the
+ * same observers through it that a single-machine run gets — the transition
+ * log, the emits and the refused decisions all read the same either way.
+ */
+export async function runExampleRunner(
+  runner: (options: Record<string, unknown>) => Promise<unknown>,
+  limits: RunLimits = {},
+): Promise<MachineChatResult> {
+  const live = await liveExecutors();
+  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
+  try {
+    const output = await runner({
+      ...(live ? { executors: live.executors } : {}),
+      signal: runSignal(limits),
+      onTransition,
+      on: { "*": onEmitted },
+      onTrace,
+      inspect: maybeCreateRunInspection(
+        // Multi-run stories re-enter `runAgent` several times; the inspection
+        // session spans all of them, so the root keeps one identity.
+        { config: {} } as never,
+        limits.machineSource,
+        "start",
+      ),
+    });
+    return {
+      mode: "live",
+      ...(live?.model ? { model: live.model } : {}),
+      status: "done",
+      trace,
+      response: renderOutput(output),
+      output: smallEventValue(output, false) ?? null,
+    };
+  } catch (error) {
+    return {
+      mode: "live",
+      status: "error",
+      trace,
+      response: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export function hasLiveExecutors(): boolean {
   return Boolean(process.env.OPENAI_API_KEY);
 }

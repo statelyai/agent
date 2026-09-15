@@ -11,6 +11,7 @@ import {
   getInspection,
   listExamples,
   resumeExample,
+  runExample,
   startExample,
   type ExampleDetail,
   type ExampleSummary,
@@ -376,6 +377,24 @@ export function DemoShell() {
     );
   };
 
+  /**
+   * Starts an example whose story spans several runs. There is no machine to
+   * drive, so the server calls the example's own exported function; the result
+   * settles into the thread exactly like a machine run's does.
+   */
+  const startExampleRunner = (label: string, exportName: string) => {
+    if (loading) return;
+    const signal = beginRun();
+    const { id, epoch } = pushTurn(label, "user", "loading");
+    void runExample({
+      data: { id: selection.type === "example" ? selection.id : "", exportName },
+      signal,
+    }).then(
+      (result) => settle(epoch, id, result),
+      (error) => fail(epoch, id, error),
+    );
+  };
+
   /** Delivers a typed event to the idle machine (either run path). */
   const sendEvent = (event: { type: string; [key: string]: unknown }) => {
     const { idleSnapshot, pendingIdle: idle } = store.getSnapshot().context;
@@ -526,9 +545,19 @@ export function DemoShell() {
   // the machine input verbatim.
   const starters: StarterAction[] = isScenario
     ? scenario.starters.map((text) => ({ label: text, onStart: () => submit(text) }))
-    : !exampleDetail?.runnable || !activeMachine
+    : !exampleDetail?.runnable
       ? []
       : (exampleSummary?.starters ?? []).flatMap((starter) => {
+          // A runner needs no machine: it IS the whole story.
+          if (starter.kind === "runner") {
+            return [
+              {
+                label: starter.label,
+                onStart: () => startExampleRunner(starter.label, starter.exportName),
+              },
+            ];
+          }
+          if (!activeMachine) return [];
           if (starter.kind === "text") {
             const field = activeMachine.promptField;
             return [

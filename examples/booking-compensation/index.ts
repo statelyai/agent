@@ -44,11 +44,16 @@ const agent = setupAgent({
     reserveFlight: createAsyncLogic<string, BookingInput>({
       run: async ({ input }) => `simulated-flight:${input.bookingId}`,
     }),
+    /**
+     * The simulated provider refuses a booking whose id ends in `-sold-out`.
+     * Without a way to fail, the compensation and reconciliation states this
+     * example exists to show are unreachable outside its tests.
+     */
     reserveHotel: createAsyncLogic<HotelResult, BookingInput>({
-      run: async ({ input }) => ({
-        status: "reserved",
-        reference: `simulated-hotel:${input.bookingId}`,
-      }),
+      run: async ({ input }) =>
+        input.bookingId.endsWith("-sold-out")
+          ? { status: "unavailable" }
+          : { status: "reserved", reference: `simulated-hotel:${input.bookingId}` },
     }),
     cancelFlight: createAsyncLogic<CancelResult, { bookingId: string; reference: string }>({
       run: async () => ({ status: "cancelled" }),

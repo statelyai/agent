@@ -13,8 +13,18 @@
   },
   "starters": [
     {
-      "bookingId": "trip-1",
-      "destination": "Lisbon"
+      "label": "Book a trip to Lisbon",
+      "input": {
+        "bookingId": "trip-1",
+        "destination": "Lisbon"
+      }
+    },
+    {
+      "label": "Lisbon, but the hotel is sold out — watch it compensate",
+      "input": {
+        "bookingId": "trip-2-sold-out",
+        "destination": "Lisbon"
+      }
     }
   ]
 }

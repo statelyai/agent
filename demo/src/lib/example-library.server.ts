@@ -25,10 +25,16 @@ export type Json = string | number | boolean | null | Json[] | { [key: string]: 
  * - `"some prompt"` — plain text for single-prompt machines (`kind: "text"`)
  * - `{ maxRounds: 3 }` — the machine input verbatim (`kind: "input"`)
  * - `{ label: "Short game", input: { maxRounds: 3 } }` — labelled input
+ *
+ * A `runner` chip comes from metadata.json `runners` instead: an example whose
+ * story spans several runs (a crash and its recovery, a snapshot resumed on a
+ * new machine version) exports one function for the whole thing, because there
+ * is no single machine to drive. See `examples/run-options.ts`.
  */
 export type ExampleStarter =
   | { kind: "text"; label: string; text: string }
-  | { kind: "input"; label: string; input: JsonObject };
+  | { kind: "input"; label: string; input: JsonObject }
+  | { kind: "runner"; label: string; exportName: string };
 
 export type ExampleSummary = {
   id: string;
@@ -74,6 +80,8 @@ type ExampleMetadata = {
   kind?: string;
   comparison?: { purpose?: string };
   starters?: unknown;
+  /** Exports that run a whole multi-run story: `[{ label, export }]`. */
+  runners?: unknown;
   /** Opt out of the demo library: CLI-only scripts and host adapters. */
   manual?: boolean;
   /** Export name of the machine to list first / preselect. */
@@ -168,7 +176,40 @@ function startersOf(metadata: ExampleMetadata): ExampleStarter[] {
     }
     out.push({ kind: "input", label: describeInput(entry), input: entry });
   }
+  out.push(...runnersOf(metadata));
   return out;
+}
+
+/** Runner chips, normalized from metadata.json `runners`. */
+function runnersOf(metadata: ExampleMetadata): ExampleStarter[] {
+  if (!Array.isArray(metadata.runners)) return [];
+  const out: ExampleStarter[] = [];
+  for (const entry of metadata.runners) {
+    if (!isPlainObject(entry)) continue;
+    const exportName = entry["export"];
+    const label = entry["label"];
+    if (typeof exportName !== "string" || !/^\w+$/.test(exportName)) continue;
+    out.push({ kind: "runner", label: typeof label === "string" ? label : exportName, exportName });
+  }
+  return out;
+}
+
+/**
+ * The multi-run entry point named by metadata `runners`. Unlike a machine,
+ * this is called directly: the host threads its observers in and reads the
+ * value back.
+ */
+export async function getExampleRunner(
+  id: string,
+  exportName: string,
+): Promise<(options: Record<string, unknown>) => Promise<unknown>> {
+  const loadModule = moduleById.get(id);
+  if (!loadModule) throw new Error(`Unknown example: ${id}`);
+  const runner = (await loadModule())[exportName];
+  if (typeof runner !== "function") {
+    throw new Error(`Example '${id}' has no runner export named '${exportName}'.`);
+  }
+  return runner as (options: Record<string, unknown>) => Promise<unknown>;
 }
 
 function summaryFor(id: string): ExampleSummary {

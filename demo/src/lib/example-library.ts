@@ -60,6 +60,28 @@ export const declareExampleMachine = createServerFn({ method: "POST" })
     return { declared: declareInspectionMachine(rootMachinePayload(machine, source)) };
   });
 
+/**
+ * Runs an example whose story spans several runs. The demo cannot drive these
+ * as a machine — the interesting part happens between runs — so the example
+ * exports one function and this calls it, threading the same observers a
+ * single-machine run gets.
+ */
+export const runExample = createServerFn({ method: "POST" })
+  .validator((input: unknown) => declareInput.parse(input))
+  .handler(async ({ data }): Promise<MachineChatResult> => {
+    const [{ getExampleRunner, exampleBudgetMs }, { runExampleRunner }, { getRequest }] =
+      await Promise.all([
+        import("./example-library.server"),
+        import("./machine-chat.server"),
+        import("@tanstack/react-start/server"),
+      ]);
+    const runner = await getExampleRunner(data.id, data.exportName);
+    return runExampleRunner(runner, {
+      signal: getRequest().signal,
+      budgetMs: exampleBudgetMs(data.id),
+    });
+  });
+
 export const getExample = createServerFn({ method: "GET" })
   .validator((input: unknown) => detailInput.parse(input))
   .handler(async ({ data }): Promise<ExampleDetail> => {
