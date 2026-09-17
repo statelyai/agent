@@ -103,69 +103,6 @@
   text-decoration: underline;
 }
 
-/* ─── checkpoint rail (time travel: rewind + fork) ─── */
-
-.checkpoint-rail {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.checkpoint-rail__title {
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-right: 2px;
-}
-
-.checkpoint-rail__chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  /* The rail wraps, so a lone chip may take the full row before truncating —
-     a clipped "Amount exceeds the $100 auto-r…" with room to spare reads as
-     a bug. */
-  max-width: 100%;
-  padding: 3px 10px 3px 4px;
-  border: 1px solid var(--line, rgba(127, 127, 127, 0.35));
-  border-radius: 999px;
-  background: none;
-  color: var(--ink, inherit);
-  cursor: pointer;
-  transition: border-color 120ms ease;
-}
-
-.checkpoint-rail__chip:hover:not(:disabled) {
-  border-color: var(--accent, #7aa2f7);
-}
-
-.checkpoint-rail__chip[data-current] {
-  cursor: default;
-  border-style: dashed;
-  opacity: 0.7;
-}
-
-.checkpoint-rail__index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--line, rgba(127, 127, 127, 0.25));
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-}
-
-.checkpoint-rail__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* One line stating the split-pane premise; the machine pane it points at is
    hidden behind a tab on mobile, so the hint hides with it. */
 .chat-intro__hint {
@@ -750,19 +687,94 @@
   flex-direction: column;
   gap: 3px;
   margin: 6px 0 10px;
-  padding: 8px 0 8px 12px;
+  padding: 8px 0 8px 6px;
   border-left: 2px solid var(--line);
 }
 
 .transition-chip {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--quiet);
+}
+
+/* The row itself — a `summary` when the step has detail to open, a plain div
+   when the row already is the whole step. */
+.transition-chip__row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+summary.transition-chip__row {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.transition-chip__row::-webkit-details-marker {
+  display: none;
+}
+
+summary.transition-chip__row:hover,
+details.transition-chip[open] > summary.transition-chip__row {
+  color: var(--ink);
+}
+
+summary.transition-chip__row:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.transition-chip__caret {
+  flex: none;
+  width: 7px;
+  font-size: 9px;
+  transition: transform 120ms ease;
+}
+
+/* A row with nothing to open keeps the caret's space, not its glyph. */
+.transition-chip__caret[data-empty] {
+  visibility: hidden;
+}
+
+details.transition-chip[open] > summary .transition-chip__caret {
+  transform: rotate(90deg);
+}
+
+.transition-chip__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 8px 14px;
+  padding: 7px 9px;
+  border-radius: 5px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+}
+
+.transition-chip__section-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.transition-chip__json {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink);
+  /* Wrapped, not scrolled sideways: a model's output is prose inside JSON. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .transition-chip__dot {
@@ -784,6 +796,42 @@
 
 .transition-chip[data-kind="system"] .transition-chip__dot {
   background: var(--line-strong);
+}
+
+/* An emit is the machine narrating its own progress: present, but quieter
+   than a transition, because it did not move anything. */
+.transition-chip[data-kind="emit"] .transition-chip__dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+/* The seam between two runs of one story: a crash and its recovery, a
+   snapshot resumed on a new machine version. */
+.transition-chip[data-kind="leg"] {
+  margin: 4px 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.transition-chip[data-kind="leg"] .transition-chip__dot {
+  background: var(--muted);
+}
+
+/* A refused decision: the machine turning down an illegal choice. Dimmed so a
+   retry loop reads as texture, not as a wall of errors. */
+.transition-chip[data-kind="rejected"] {
+  opacity: 0.72;
+}
+
+.transition-chip[data-kind="rejected"] .transition-chip__dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+
+.transition-chip[data-kind="rejected"] .transition-chip__event {
+  color: var(--danger);
+  opacity: 0.9;
+  text-decoration: line-through;
 }
 
 .transition-chip__event {
@@ -810,10 +858,11 @@
 
 .transition-chip__state {
   flex: none;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* A parallel state value ("a.working · b.done · c.working") is at its most
+     informative exactly when it is longest, so it wraps rather than being
+     ellipsed away; `title` carries the full value either way. */
+  max-width: 55%;
+  overflow-wrap: anywhere;
 }
 
 .transition-chip__time {

@@ -4,6 +4,7 @@ import type { AgentTool } from "@statelyai/agent";
 import {
   BOOKINGS,
   customerSupportMachine,
+  MAX_CLARIFICATIONS,
   resetBookings,
   runCustomerSupportExample,
 } from "./index.js";
@@ -22,17 +23,26 @@ function executeTool(tool: AgentTool | undefined, input: unknown) {
 interface MockScript {
   intent: unknown;
   answerTool?: { name: string; input: unknown };
+  /** Questions the answer request asks before it answers, in order. */
+  asks?: string[];
 }
 
 function mockGenerateText(script: MockScript) {
+  let asked = 0;
   return async (request: { name?: string; tools?: Record<string, AgentTool | undefined> }) => {
     if (request.name === "classify") {
       return { output: script.intent };
     }
+    // The answer request now reports whether it actually answered.
+    const ask = script.asks?.[asked];
+    if (ask !== undefined) {
+      asked += 1;
+      return { output: { status: "needsInfo", question: ask } };
+    }
     // answer request: run the requested read-only tool, then answer with it.
     const call = script.answerTool!;
     const result = await executeTool(request.tools?.[call.name], call.input);
-    return { output: `Answer: ${JSON.stringify(result)}` };
+    return { output: { status: "answered", answer: `Answer: ${JSON.stringify(result)}` } };
   };
 }
 
@@ -66,6 +76,56 @@ test("lookupBooking tool reads the sample booking table", async () => {
 
   expect(result.message).toContain("Ada Lovelace");
   expect(result.message).toContain("BA249");
+});
+
+test("a question it cannot answer alone pauses for the detail instead of ending", async () => {
+  const result = await runCustomerSupportExample({
+    query: "What's the carry-on baggage allowance on my ticket?",
+    replies: ["AB1234"],
+    generateText: mockGenerateText({
+      intent: { intent: "question" },
+      asks: ["Which booking is this? Please send your confirmation code."],
+      answerTool: { name: "lookupBooking", input: { confirmationCode: "AB1234" } },
+    }),
+  });
+
+  // The old machine reported `answered` here having answered nothing.
+  expect(result.resolution).toBe("answered");
+  expect(result.message).toContain("Ada Lovelace");
+  // The pause is a state, and the customer's reply drove a second attempt.
+  expect(result.progress).toContain("awaitingInfo");
+  expect(result.progress.filter((state) => state === "answering")).toHaveLength(2);
+});
+
+test("declining to answer ends the turn unresolved, not answered", async () => {
+  const result = await runCustomerSupportExample({
+    query: "What's the carry-on baggage allowance on my ticket?",
+    replies: [], // the customer says nothing, so the host sends STOP_ASKING
+    generateText: mockGenerateText({
+      intent: { intent: "question" },
+      asks: ["Which booking is this?"],
+    }),
+  });
+
+  expect(result.resolution).toBe("unresolved");
+  expect(result.progress.at(-1)).toBe("unresolved");
+});
+
+test("the machine stops asking once its clarification budget is spent", async () => {
+  const asks = Array.from({ length: MAX_CLARIFICATIONS + 1 }, (_, i) => `Question ${i + 1}?`);
+  const result = await runCustomerSupportExample({
+    query: "What's my allowance?",
+    // Always willing to answer: the bound has to come from the machine.
+    replies: asks.map((_, index) => `reply ${index + 1}`),
+    generateText: mockGenerateText({ intent: { intent: "question" }, asks }),
+  });
+
+  expect(result.resolution).toBe("unresolved");
+  // One attempt to answer, then one more per clarification it was allowed to
+  // ask for — and then it stops, however willing the customer still is.
+  expect(result.progress.filter((state) => state === "answering")).toHaveLength(
+    MAX_CLARIFICATIONS + 1,
+  );
 });
 
 test("sensitive path settles idle with the pending action, label, and legal events", async () => {

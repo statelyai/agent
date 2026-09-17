@@ -20,12 +20,13 @@
  * ../next-host); swap it for Redis/Postgres and the tools are unchanged.
  */
 import { z } from "zod";
-import type { EventFromLogic, Snapshot } from "xstate";
+import type { Snapshot } from "xstate";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { createAgent } from "langchain";
 import {
   getInteraction,
+  parseAgentEvent,
   runAgent,
   type RunAgentOptions,
   type RunAgentResult,
@@ -113,21 +114,23 @@ function currentRunOptions(): RunAgentOptions<typeof emailDrafter> {
 /**
  * Build the machine event for `eventType`. Free text goes to the interaction's
  * declared `textEvent` as `text`; a listed choice contributes any fixed fields
- * its metadata attached. The cast is the one unavoidable seam: the eventType
- * arrives as a model-supplied string. `runAgent` still validates it against the
- * machine's event schemas.
+ * its metadata attached. The eventType arrives as a model-supplied string, so
+ * the payload is PARSED at this boundary rather than cast through it:
+ * `parseAgentEvent` validates it against the machine's own event schemas and
+ * hands back the machine's event union, throwing on a payload that does not fit.
  */
 function buildEvent(
   interaction: Interaction | null,
   eventType: string,
   text: string | null,
-): EventFromLogic<typeof emailDrafter> {
+): DrafterEvent {
   const choice = interaction?.events.find((candidate) => candidate.type === eventType);
-  const event =
+  return parseAgentEvent(
+    emailDrafter,
     text !== null && interaction?.textEvent === eventType
       ? { type: eventType, text }
-      : { type: eventType, ...choice?.event };
-  return event as DrafterEvent as EventFromLogic<typeof emailDrafter>;
+      : { type: eventType, ...choice?.event },
+  );
 }
 
 let nextHandle = 0;

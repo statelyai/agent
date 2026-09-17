@@ -11,6 +11,7 @@ import {
   renderIdleWork,
   renderOutput,
   runSignal,
+  traceDetail,
 } from "./machine-chat.server";
 import {
   humanizeEventType,
@@ -18,6 +19,7 @@ import {
   schemaFields,
   schemaNeedsPayload,
   singleStringField,
+  type Json,
 } from "./machine-ui";
 import { scriptedExecutorsFor } from "./scripted-executors";
 
@@ -292,6 +294,90 @@ describe("idle work rendering (changed context surfaces before approval)", () =>
         "draft",
       ]),
     ).toBe("Dear team…");
+  });
+});
+
+describe("refused decisions in the trace", () => {
+  const start = (id: string, attempts: Array<{ type: string; failure: string }>) => ({
+    type: "request.start",
+    request: { id, attempts: attempts.map((attempt) => ({ event: { type: attempt.type }, failure: attempt.failure, reason: "" })) },
+  });
+
+  test("records each attempt once as a decision retries", () => {
+    const recorder = createTraceRecorder();
+    recorder.onTrace(start("decide", [{ type: "TAKE_GOAT", failure: "rejected-by-guard" }]));
+    recorder.onTrace(
+      start("decide", [
+        { type: "TAKE_GOAT", failure: "rejected-by-guard" },
+        { type: "TAKE_WOLF", failure: "rejected-by-guard" },
+      ]),
+    );
+
+    expect(recorder.trace.map((entry) => entry.event.type)).toEqual(["TAKE_GOAT", "TAKE_WOLF"]);
+  });
+
+  test("keeps recording when the machine re-enters the same decision", () => {
+    // The id is the invoke id, so a second visit to `deciding` reuses it. A
+    // list no longer than the last one is a new invocation, not a retry.
+    const recorder = createTraceRecorder();
+    recorder.onTrace(start("decide", [{ type: "TAKE_GOAT", failure: "rejected-by-guard" }]));
+    recorder.onTrace(start("decide", [{ type: "TAKE_CABBAGE", failure: "rejected-by-guard" }]));
+
+    expect(recorder.trace.map((entry) => entry.event.type)).toEqual(["TAKE_GOAT", "TAKE_CABBAGE"]);
+  });
+});
+
+describe("expandable trace detail", () => {
+  test("a transition records the whole event and context the row had to cut", () => {
+    const recorder = createTraceRecorder();
+    const answer = "A carbon tax ".repeat(30);
+    recorder.onTransition({ value: "answered", context: { answer, sources: [1, 2, 3] } } as never, {
+      type: "answer.done",
+      output: { answer },
+    });
+
+    const [entry] = recorder.trace;
+    // The row keeps a 140-char preview; the detail keeps what was said.
+    expect(String((entry.event.output as { answer: string }).answer)).toContain("…");
+    expect(entry.detail?.event).toEqual({ type: "answer.done", output: { answer } });
+    expect(entry.detail?.context).toEqual({ answer, sources: [1, 2, 3] });
+  });
+
+  test("caps a wide event at both levels", () => {
+    const wide = Object.fromEntries(
+      Array.from({ length: 80 }, (_, index) => [`field${index}`, index]),
+    );
+    const recorder = createTraceRecorder();
+    recorder.onTransition({ value: "s", context: {} } as never, {
+      type: "RESUME",
+      payload: wide,
+    });
+
+    const [entry] = recorder.trace;
+    const nested = entry.event["payload"] as Record<string, Json>;
+    // 64 fields kept plus the marker, at the top level and one level down.
+    expect(Object.keys(nested)).toHaveLength(65);
+    expect(nested["…"]).toBe("16 more fields");
+    expect((entry.detail?.event as Record<string, Json>)["payload"]).toMatchObject({
+      "…": "16 more fields",
+    });
+  });
+
+  test("keeps the detail bounded, and says so rather than showing a prefix", () => {
+    expect(traceDetail({ report: "x".repeat(9000) })).toEqual({
+      report: `${"x".repeat(4000)}…`,
+    });
+    expect(traceDetail({ rows: Array.from({ length: 50 }, (_, index) => index) })).toEqual({
+      rows: [...Array.from({ length: 40 }, (_, index) => index), "… 10 more"],
+    });
+    // The relay attaches a whole actor to a snapshot message; that is plumbing.
+    expect(traceDetail({ type: "T", snapshot: { huge: true }, machine: {} })).toEqual({
+      type: "T",
+    });
+    expect(traceDetail({})).toBeNull();
+    expect(traceDetail({ pages: Array.from({ length: 40 }, () => "y".repeat(3000)) })).toMatch(
+      /too large to show/,
+    );
   });
 });
 

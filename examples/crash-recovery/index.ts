@@ -19,7 +19,20 @@ import {
   runAgent,
   setupAgent,
   type AgentEventLogStore,
+  type RunAgentOptions,
 } from "@statelyai/agent";
+import type { AnyStateMachine } from "xstate";
+
+/**
+ * The seams a host threads through every leg of a multi-run example: its
+ * executors, its cancellation signal, and the observers that make one story
+ * out of several `runAgent` calls. Declared here, not imported, so the example
+ * stays a single self-contained file (see CONTRIBUTING).
+ */
+type ExampleRunOptions = Pick<
+  RunAgentOptions<AnyStateMachine>,
+  "executors" | "signal" | "onTransition" | "on" | "onTrace" | "inspect"
+>;
 
 const crashRecoverySetup = setupAgent({
   context: z.object({
@@ -50,6 +63,9 @@ const crashRecoverySetup = setupAgent({
 });
 
 export const crashRecoveryMachine = crashRecoverySetup.createMachine({
+  // Named so inspected actors read `crash-recovery.outlining` rather than
+  // XState's `(machine)` placeholder for an anonymous root.
+  id: "crash-recovery",
   context: ({ input }) => ({ topic: input.topic, outline: null, article: null }),
   initial: "outlining",
   states: {
@@ -99,11 +115,13 @@ export async function runUntilCrash({
   store,
   topic = "state machines",
   threadId = crypto.randomUUID(),
+  ...observers
 }: {
   store: AgentEventLogStore;
   topic?: string;
   threadId?: string;
-}) {
+  // Executors are the example's own: the script is what stages the crash.
+} & Omit<ExampleRunOptions, "executors" | "signal">) {
   const abort = new AbortController();
   let inFlightCallKey: string | undefined;
 
@@ -125,6 +143,7 @@ export async function runUntilCrash({
   // Write-ahead: each entry reaches the store as it is appended, and the outline
   // call cannot start until the entries before it are durable.
   const crashed = await runAgent(crashRecoveryMachine, {
+    ...(observers as object),
     input: { topic },
     store,
     threadId,
@@ -145,10 +164,11 @@ export async function runUntilCrash({
 export async function recover({
   store,
   threadId,
+  ...observers
 }: {
   store: AgentEventLogStore;
   threadId: string;
-}) {
+} & Omit<ExampleRunOptions, "executors" | "signal">) {
   let replayedCallKey: string | undefined;
 
   // Only the `draft` request is scripted: if the recovered run re-executed the
@@ -166,7 +186,12 @@ export async function recover({
 
   // No `events`, no snapshot: the store's thread IS the resume, and the run
   // keeps appending to it, so the thread stays replayable end to end.
-  const recovered = await runAgent(crashRecoveryMachine, { store, threadId, executors });
+  const recovered = await runAgent(crashRecoveryMachine, {
+    ...(observers as object),
+    store,
+    threadId,
+    executors,
+  });
 
   console.log(`recovered with status '${recovered.status}'`);
   console.log(`model calls during recovery: ${executors.calls.length}`); // 1 — only the draft
@@ -178,9 +203,46 @@ export async function recover({
   return { recovered, replayedCallKey, calls: executors.calls.length };
 }
 
+/**
+ * Both halves in one call: crash, then recover from the log alone. The
+ * interesting part is the boundary BETWEEN them, so a host that drives a
+ * single machine cannot show it — see {@link ExampleRunOptions}.
+ */
+export async function runCrashRecoveryExample(options: ExampleRunOptions = {}) {
+  const { executors: _executors, signal: _signal, ...observers } = options;
+  // Stands in for the host's database: an append-only log per thread.
+  const store = createInMemoryEventLogStore();
+  const {
+    threadId,
+    inFlightCallKey,
+    calls: callsBeforeCrash,
+  } = await runUntilCrash({
+    store,
+    ...observers,
+  });
+  const {
+    recovered,
+    replayedCallKey,
+    calls: callsDuringRecovery,
+  } = await recover({
+    store,
+    threadId,
+    ...observers,
+  });
+  return {
+    // The headline: the in-flight call re-executes under the SAME key, so the
+    // retry is safe to dedupe at the provider.
+    callKeyMatched: inFlightCallKey === replayedCallKey,
+    status: recovered.status,
+    callsBeforeCrash,
+    callsDuringRecovery,
+    journalEntries: recovered.events.length,
+    article: recovered.status === "done" ? recovered.output.article : null,
+  };
+}
+
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  // Stands in for the host's database: an append-only log per thread. It is
-  // created here, not at module scope, so importing this file shares no state.
+  // Created here, not at module scope, so importing this file shares no state.
   const store = createInMemoryEventLogStore();
   const { threadId, inFlightCallKey } = await runUntilCrash({ store });
   const { replayedCallKey } = await recover({ store, threadId });

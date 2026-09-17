@@ -1,0 +1,23 @@
+{
+  "name": "route-replanning",
+  "title": "Deliver a parcel, replanning when a road closes",
+  "kind": "pattern",
+  "machine": "routeReplanningMachine",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Plan-execute-replan over a graph the machine traverses itself",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph plan-and-execute", "ReWOO", "hand-rolled replanning loops"],
+    "purpose": "A plan is a prediction, and the world gets a vote. The machine plans the whole route by traversing itself with xstate/graph, then drives it one leg at a time with no model call and no recomputation. When a leg reports a closed road the plan is dead: the closure joins the world, the route is recomputed from where the courier is standing, and the run carries on. Contrast river-crossing, whose closed world means one plan always holds."
+  },
+  "starters": [
+    {
+      "label": "Deliver the parcel",
+      "input": {
+        "parcel": "a birthday cake"
+      }
+    }
+  ]
+}

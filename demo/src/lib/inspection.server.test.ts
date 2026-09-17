@@ -3,6 +3,7 @@ import { createMachine } from "xstate";
 const createInspectorMock = vi.hoisted(() =>
   vi.fn((_options: unknown) => ({
     actor: vi.fn(),
+    machine: vi.fn(),
     snapshot: vi.fn(),
     event: vi.fn(),
     stop: vi.fn(),
@@ -12,12 +13,14 @@ const createInspectorMock = vi.hoisted(() =>
 vi.mock("@statelyai/sdk/inspect", () => ({ createInspector: createInspectorMock }));
 
 import {
+  declareInspectionMachine,
   ensureInspectionRelay,
   inspectionRelayUrl,
   inspectionRoomId,
   inspectionWsUrl,
   machineForInspection,
   maybeCreateRunInspection,
+  rootMachinePayload,
   shouldStartLocalInspectionRelay,
 } from "./inspection.server";
 
@@ -63,6 +66,74 @@ describe("demo inspection transport", () => {
     const options = createInspectorMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
     expect(options).not.toHaveProperty("extractMachine");
     expect(options).not.toHaveProperty("extractMachineConfig");
+  });
+
+  it("publishes the selected machine to the room before any run", async () => {
+    await ensureInspectionRelay();
+    const machine = createMachine({ id: "declared", initial: "idle", states: { idle: {} } });
+    const source = "export const machine = createMachine({ states: {} });";
+
+    expect(declareInspectionMachine(rootMachinePayload(machine, source))).toBe(true);
+
+    const inspector = createInspectorMock.mock.results.at(-1)?.value as { machine: Mock };
+    // Seeded on the new inspector rather than pushed onto it: nothing was
+    // connected yet, so the declaration rides the first system checkpoint.
+    expect(createInspectorMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      machines: { root: source },
+    });
+    expect(inspector.machine).not.toHaveBeenCalled();
+  });
+
+  it("swaps the declared machine in place while no run has used the inspector", async () => {
+    await ensureInspectionRelay();
+    declareInspectionMachine("first source");
+    const created = createInspectorMock.mock.calls.length;
+    const inspector = createInspectorMock.mock.results.at(-1)?.value as {
+      machine: Mock;
+      destroy: Mock;
+    };
+
+    declareInspectionMachine("second source");
+
+    // A selection change must not reload the /inspect page that is already
+    // drawing this room.
+    expect(createInspectorMock.mock.calls.length).toBe(created);
+    expect(inspector.destroy).not.toHaveBeenCalled();
+    expect(inspector.machine).toHaveBeenCalledWith("root", "second source");
+  });
+
+  it("pins the root selection for a run but never for a bare declaration", async () => {
+    await ensureInspectionRelay();
+
+    declareInspectionMachine("declared source");
+    // The visualizer drops its declared machine as soon as an init names a
+    // selected session, so a pre-run checkpoint must not name one.
+    expect(createInspectorMock.mock.calls.at(-1)?.[0]).not.toHaveProperty("selectedSessionId");
+
+    maybeCreateRunInspection({} as never, "declared source", "start");
+    // The same `<producer>:<id>` shape the actors carry on the wire.
+    expect(createInspectorMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      selectedSessionId: "agent-demo-runner:root",
+      machines: { root: "declared source" },
+    });
+  });
+
+  it("declares the source the root actor will register with", () => {
+    const machine = createMachine({ id: "test", initial: "idle", states: { idle: {} } });
+    const source = "export const machine = createMachine({ states: {} });";
+    const boundMachine = machine.provide({}).provide({});
+
+    // Same payload both ways, so starting a run does not swap the graph the
+    // viz is already drawing.
+    expect(rootMachinePayload(machine, source)).toBe(
+      machineForInspection({ logic: boundMachine }, machine, source),
+    );
+  });
+
+  it("falls back to a serialized config when there is no source", () => {
+    const machine = createMachine({ id: "test", initial: "idle", states: { idle: {} } });
+
+    expect(rootMachinePayload(machine)).toMatchObject({ id: "test", initial: "idle" });
   });
 
   it("keeps one inspector per run session: a new start replaces it, a resume reuses it", async () => {

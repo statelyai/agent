@@ -239,13 +239,15 @@ export async function startScenarioRun(
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
 ): Promise<ScenarioResult> {
-  const { trace, onTransition } = createTraceRecorder();
+  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   const machine = machineFor(scenarioId);
   const result = await runAgent(machine, {
     input: inputFor(scenarioId, prompt),
     executors,
     ...(signal ? { signal } : {}),
     onTransition,
+    on: { "*": onEmitted },
+    onTrace,
     inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "start"),
   });
   return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
@@ -261,7 +263,7 @@ export async function resumeScenarioRun(
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
 ): Promise<ScenarioResult> {
-  const { trace, onTransition } = createTraceRecorder();
+  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   const machine = machineFor(scenarioId);
   // An event the restored state has no transition for is ignored, not an
   // error: the run settles unchanged and reports `result.ignored`.
@@ -271,6 +273,8 @@ export async function resumeScenarioRun(
     executors,
     ...(signal ? { signal } : {}),
     onTransition,
+    on: { "*": onEmitted },
+    onTrace,
     inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "resume"),
   });
   return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);

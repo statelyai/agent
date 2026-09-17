@@ -6,17 +6,19 @@ import { ExampleIntro, ScenarioIntro, type StarterAction } from "@/components/ch
 import { SiteHeader } from "@/components/site-header";
 import { VizPanel, type SystemMessage } from "@/components/viz-panel";
 import {
+  declareExampleMachine,
   getExample,
   getInspection,
   listExamples,
   resumeExample,
+  runExample,
   startExample,
   type ExampleDetail,
   type ExampleSummary,
   type InspectionInfo,
 } from "@/lib/example-library";
 import { humanizeEventType } from "@/lib/machine-ui";
-import { resumeScenario, startScenario } from "@/lib/run-demo-agent";
+import { declareScenarioMachine, resumeScenario, startScenario } from "@/lib/run-demo-agent";
 import { getScenario, scenarios } from "@/lib/scenarios";
 import type { Selection } from "@/lib/selection";
 import {
@@ -79,7 +81,6 @@ export function DemoShell() {
   const mobileView = useSelector(store, (s) => s.context.mobileView);
   const turns = useSelector(store, (s) => s.context.turns);
   const pendingIdle = useSelector(store, (s) => s.context.pendingIdle);
-  const checkpoints = useSelector(store, (s) => s.context.checkpoints);
 
   const [examples, setExamples] = useState<ExampleSummary[]>([]);
   const [exampleDetail, setExampleDetail] = useState<ExampleDetail | null>(null);
@@ -124,14 +125,19 @@ export function DemoShell() {
 
   // Live inspection: use Sky by default; boot a local relay only when opted in.
   const [inspection, setInspection] = useState<InspectionInfo | null>(null);
+  const [inspectionChecked, setInspectionChecked] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void getInspection().then(
       (info) => {
-        if (!cancelled) setInspection(info);
+        if (cancelled) return;
+        setInspection(info);
+        setInspectionChecked(true);
       },
       () => {
-        if (!cancelled) setInspection(null);
+        if (cancelled) return;
+        setInspection(null);
+        setInspectionChecked(true);
       },
     );
     return () => {
@@ -188,6 +194,48 @@ export function DemoShell() {
     };
   }, [selection]);
 
+  // Publish the selected machine to the inspection room BEFORE any run, so the
+  // visualizer draws its statechart on selection instead of an empty room. The
+  // /inspect URL is the room, not the run, so it stays mounted across
+  // selections: each declaration swaps the graph in place rather than
+  // reloading the page.
+  // Which machine the room is currently showing, not merely that something was
+  // declared once: the /inspect page stays mounted across selections, so a
+  // `liveUrl` that ignored the key would keep the PREVIOUS example's chart on
+  // screen while the new declaration is still in flight (or after it failed).
+  const [declaredKey, setDeclaredKey] = useState<string | null>(null);
+  const inspectScenarioId = isScenario ? scenario.id : null;
+  const inspectExampleId = !isScenario && activeMachine ? selection.id : null;
+  const inspectExportName = !isScenario && activeMachine ? activeMachine.exportName : null;
+  const inspectKey = inspectScenarioId
+    ? `scenario:${inspectScenarioId}`
+    : inspectExampleId && inspectExportName
+      ? `example:${inspectExampleId}#${inspectExportName}`
+      : null;
+  useEffect(() => {
+    if (!inspection) return;
+    let cancelled = false;
+    const onDeclared = ({ declared }: { declared: boolean }) => {
+      if (!cancelled && declared) setDeclaredKey(inspectKey);
+    };
+    // A failed declaration is not worth surfacing: the panel keeps whatever it
+    // was showing, and the run's own inspection still lights the chart up.
+    const ignore = () => {};
+    if (inspectScenarioId) {
+      void declareScenarioMachine({ data: { scenarioId: inspectScenarioId } }).then(
+        onDeclared,
+        ignore,
+      );
+    } else if (inspectExampleId && inspectExportName) {
+      void declareExampleMachine({
+        data: { id: inspectExampleId, exportName: inspectExportName },
+      }).then(onDeclared, ignore);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [inspection, inspectKey, inspectScenarioId, inspectExampleId, inspectExportName]);
+
   // ─── run control: one AbortController per in-flight turn + live feed ───
   //
   // The controller's signal rides the server-fn request; aborting it (Cancel,
@@ -240,10 +288,15 @@ export function DemoShell() {
       return;
     }
     if (message.type === "@statelyai.system.actorSnapshot" && message.sessionId === run.sessionId) {
+      const snapshot = message.snapshot as
+        | { value?: unknown; context?: unknown }
+        | null
+        | undefined;
       const step = liveTraceStep(
         message.event,
-        (message.snapshot as { value?: unknown } | null | undefined)?.value,
+        snapshot?.value,
         Date.now() - run.startedAt,
+        snapshot?.context,
       );
       if (step) setLiveSteps((previous) => [...previous, step]);
     }
@@ -252,13 +305,6 @@ export function DemoShell() {
   const resetRun = () => {
     lastRootSessionId.current = null;
     store.trigger.runReset();
-  };
-
-  /** Rewind to a stored idle checkpoint; the next answer forks a new branch. */
-  const rewindTo = (turnId: number) => {
-    abortRef.current?.abort();
-    endRun();
-    store.trigger.rewound({ turnId });
   };
 
   const select = (next: Selection) => {
@@ -333,6 +379,24 @@ export function DemoShell() {
           sendEvent({ type: textEvent.type, [textEvent.field]: followUpText });
         }
       },
+      (error) => fail(epoch, id, error),
+    );
+  };
+
+  /**
+   * Starts an example whose story spans several runs. There is no machine to
+   * drive, so the server calls the example's own exported function; the result
+   * settles into the thread exactly like a machine run's does.
+   */
+  const startExampleRunner = (label: string, exportName: string) => {
+    if (loading) return;
+    const signal = beginRun();
+    const { id, epoch } = pushTurn(label, "user", "loading");
+    void runExample({
+      data: { id: selection.type === "example" ? selection.id : "", exportName },
+      signal,
+    }).then(
+      (result) => settle(epoch, id, result),
       (error) => fail(epoch, id, error),
     );
   };
@@ -487,9 +551,19 @@ export function DemoShell() {
   // the machine input verbatim.
   const starters: StarterAction[] = isScenario
     ? scenario.starters.map((text) => ({ label: text, onStart: () => submit(text) }))
-    : !exampleDetail?.runnable || !activeMachine
-      ? []
-      : (exampleSummary?.starters ?? []).flatMap((starter) => {
+    : (exampleSummary?.starters ?? []).flatMap((starter) => {
+          // A runner needs no machine — it IS the whole story — and no API
+          // key: a multi-run example scripts its own executors, so these chips
+          // stay offered on a server that cannot run anything else.
+          if (starter.kind === "runner") {
+            return [
+              {
+                label: starter.label,
+                onStart: () => startExampleRunner(starter.label, starter.exportName),
+              },
+            ];
+          }
+          if (!exampleDetail?.runnable || !activeMachine) return [];
           if (starter.kind === "text") {
             const field = activeMachine.promptField;
             return [
@@ -534,21 +608,23 @@ export function DemoShell() {
       onSendEvent={sendEvent}
       onCancel={cancelRun}
       onRestart={resetRun}
-      checkpoints={checkpoints.map(({ turnId, label }) => ({ turnId, label }))}
-      onRewind={rewindTo}
       textPolicy={textPolicy}
     />
   );
 
+  // The room, not the run: once a machine is published the chart is worth
+  // showing, and the first turn animates a diagram already on screen.
   const liveUrl =
-    inspection && started ? createLiveInspectUrl(inspectUrl, inspection) : null;
+    inspection && declaredKey !== null && declaredKey === inspectKey
+      ? createLiveInspectUrl(inspectUrl, inspection)
+      : null;
   const liveWs = inspection;
 
   const vizPanel = (
     <VizPanel
       title={headerName}
       hasMachine={isScenario || !!activeMachine?.vizConfig}
-      inspectionUnavailable={started && !inspection}
+      inspectionUnavailable={inspectionChecked && !inspection}
       liveWs={liveWs}
       liveUrl={liveUrl}
       onSystemMessage={handleSystemMessage}

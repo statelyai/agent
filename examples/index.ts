@@ -49,6 +49,12 @@ export {
 export { jokeActors, jokeMachine, jokeSchemas, rateJoke, tellJoke } from "./joke/index.js";
 export { reflectionWriterMachine, runReflectionWriterExample } from "./reflection-writer/index.js";
 export {
+  planFrom,
+  roadNetwork,
+  routeReplanningMachine,
+  runRouteReplanningExample,
+} from "./route-replanning/index.js";
+export {
   codeAssistantMachine,
   executeCode,
   runCodeAssistantExample,

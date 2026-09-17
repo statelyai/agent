@@ -182,12 +182,19 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
                           key={`${row.selection.type}:${row.selection.id}`}
                           className="switcher-row"
                           data-active={active || undefined}
+                          // Named by title and described by purpose: without
+                          // this the accessible name is the whole purpose
+                          // paragraph, which for some rows runs 60 words.
+                          aria-label={row.title}
+                          aria-describedby={`switcher-purpose-${row.selection.type}-${row.selection.id}`}
                           onClick={() => onSelect(row.selection)}
                         >
                           <span className="switcher-row__dot" aria-hidden="true" />
                           <span className="switcher-row__text">
                             <strong>{row.title}</strong>
-                            <small>{row.purpose}</small>
+                            <small id={`switcher-purpose-${row.selection.type}-${row.selection.id}`}>
+                              {row.purpose}
+                            </small>
                           </span>
                           {active && <Check size={13} aria-label="Current example" />}
                         </button>

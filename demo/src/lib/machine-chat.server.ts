@@ -35,12 +35,39 @@ import {
 
 // ─── trace capture (shared with the curated scenario runner) ───
 
+/**
+ * What a trace entry records. `transition` is a committed machine transition;
+ * the other two are the work that happens BETWEEN transitions and would
+ * otherwise never reach the reader:
+ *
+ * - `emitted` — an `enq.emit(...)` the machine author chose to announce, so a
+ *   long run says what it is doing instead of going quiet.
+ * - `rejected` — a decision the machine refused (`unknown-event`,
+ *   `invalid-payload`, `rejected-by-guard`) before retrying. The guard turning
+ *   down an illegal choice is the clearest evidence the machine is doing its
+ *   job, and it used to be invisible.
+ * - `leg` — a second run starting inside one story. Multi-run examples (a
+ *   crash and its recovery, a snapshot resumed on a new machine version) record
+ *   both runs into one trace, and without a marker the seam between them — the
+ *   whole point of those examples — reads as just another transition.
+ */
+export type TraceEntryKind = "transition" | "emitted" | "rejected" | "leg";
+
 export type TraceEntry = {
   event: { type: string } & Record<string, Json>;
   value: Json;
   context: Record<string, Json>;
   /** Milliseconds since run start — the client replays with proportional timing. */
   at: number;
+  /** Defaults to `transition` when absent, so older traces still read. */
+  kind?: TraceEntryKind;
+  /**
+   * The step unabridged, for the row's expandable detail: the whole event and
+   * (for a transition) the whole context it landed in. `event`/`context` above
+   * are cut down to what fits one line; this is what a reader opens the row to
+   * see — the model's full output, the context field that actually changed.
+   */
+  detail?: { event: Json | null; context?: Json | null };
 };
 
 /**
@@ -52,6 +79,10 @@ export type TraceEntry = {
 export function createTraceRecorder(baselineContext?: unknown): {
   trace: TraceEntry[];
   onTransition: (snapshot: AnyMachineSnapshot, event: unknown) => void;
+  /** `runAgent`'s `on` handler: records an `enq.emit(...)` the machine made. */
+  onEmitted: (event: unknown) => void;
+  /** `runAgent`'s `trace` handler: records decisions the machine refused. */
+  onTrace: (entry: unknown) => void;
   changedKeys: () => string[];
   /** The last full context seen — the "work so far" when a run is cut short. */
   latestContext: () => unknown;
@@ -82,17 +113,70 @@ export function createTraceRecorder(baselineContext?: unknown): {
   };
   if (baselineContext !== undefined) observe(baselineContext, false);
 
+  // Entries that are not transitions carry the state the run was in when they
+  // happened, so a row still reads as part of the sequence around it.
+  let lastValue: Json = null;
+  // Attempts recorded so far per request id, so a retry's growing list is
+  // recorded once. The id is the invoke id, which repeats when a machine
+  // re-enters the same decision, so a list that is no longer than the last one
+  // is a NEW invocation rather than more of the old one.
+  const attemptsSeen = new Map<string, number>();
+
+  const push = (kind: TraceEntryKind, event: unknown) => {
+    trace.push({
+      at: Date.now() - startedAt,
+      event: smallEvent(event),
+      value: lastValue,
+      context: {},
+      kind,
+      detail: { event: traceDetail(event) },
+    });
+  };
+
   return {
     trace,
     onTransition: (snapshot, event) => {
       const type = String((event as { type?: unknown } | null)?.type ?? "");
-      observe(snapshot.context, type !== "xstate.init" && type !== "@xstate.init");
+      const isInit = type === "xstate.init" || type === "@xstate.init";
+      // An init after work has already been recorded is a NEW run continuing
+      // the same story, not the beginning of one.
+      if (isInit && trace.length > 0) push("leg", { type: "run.resumed" });
+      observe(snapshot.context, !isInit);
       latest = snapshot.context;
+      lastValue = snapshot.value as Json;
       trace.push({
         at: Date.now() - startedAt,
         event: smallEvent(event),
         value: snapshot.value as Json,
         context: smallContext(snapshot.context),
+        kind: "transition",
+        detail: { event: traceDetail(event), context: traceDetail(snapshot.context) },
+      });
+    },
+    onEmitted: (event) => push("emitted", event),
+    onTrace: (entry) => {
+      // A decision retries by re-issuing `request.start` with the failed
+      // attempts appended, so only the ones this start added are recorded.
+      // There is no dedicated "rejected" trace event to listen to.
+      const step = entry as { type?: unknown; request?: { id?: unknown; attempts?: unknown } };
+      if (step?.type !== "request.start") return;
+      const attempts = step.request?.attempts;
+      if (!Array.isArray(attempts)) return;
+      const id = String(step.request?.id ?? "");
+      const recorded = attemptsSeen.get(id) ?? 0;
+      const from = attempts.length > recorded ? recorded : 0;
+      attemptsSeen.set(id, attempts.length);
+      attempts.slice(from).forEach((attempt) => {
+        const { event, failure, reason } = (attempt ?? {}) as {
+          event?: { type?: unknown };
+          failure?: unknown;
+          reason?: unknown;
+        };
+        push("rejected", {
+          type: typeof event?.type === "string" ? event.type : "(no event)",
+          failure: String(failure ?? "rejected"),
+          reason: String(reason ?? ""),
+        });
       });
     },
     changedKeys: () => [...changedAt.entries()].sort((a, b) => b[1] - a[1]).map(([key]) => key),
@@ -115,14 +199,127 @@ export function smallContext(context: unknown): Record<string, Json> {
   return out;
 }
 
+/**
+ * Bounds for the expandable detail. Generous — the point of opening a row is
+ * to read what the step actually produced — but never unbounded: a trace rides
+ * the chat response, and one runaway field would take the turn with it.
+ */
+const DETAIL_STRING_CHARS = 4000;
+const DETAIL_ARRAY_ITEMS = 40;
+const DETAIL_OBJECT_FIELDS = 64;
+const DETAIL_DEPTH = 6;
+const DETAIL_CHARS = 24_000;
+
+/**
+ * Event fields that carry a whole actor rather than data about the step. The
+ * live inspection stream attaches these, and either one alone dwarfs every
+ * other field in the detail view.
+ */
+const DETAIL_OMITTED_FIELDS = new Set(["snapshot", "machine"]);
+
+function detailValue(value: unknown, depth: number): Json | undefined {
+  if (value === null) return null;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
+  if (typeof value === "string") {
+    return value.length > DETAIL_STRING_CHARS ? `${value.slice(0, DETAIL_STRING_CHARS)}…` : value;
+  }
+  if (value instanceof Error) return { name: value.name, message: value.message };
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== "object") return undefined; // functions, symbols, undefined
+  if (depth >= DETAIL_DEPTH) return "(deeper)";
+  if (Array.isArray(value)) {
+    const items: Json[] = value
+      .slice(0, DETAIL_ARRAY_ITEMS)
+      .map((item) => detailValue(item, depth + 1) ?? null);
+    if (value.length > DETAIL_ARRAY_ITEMS) {
+      items.push(`… ${value.length - DETAIL_ARRAY_ITEMS} more`);
+    }
+    return items;
+  }
+  const out: Record<string, Json> = {};
+  const entries = Object.entries(value as Record<string, unknown>);
+  // An event's own shape is the machine author's; a resumed one carries
+  // whatever the client sent. A wide object is capped rather than trusted.
+  for (const [key, field] of entries.slice(0, DETAIL_OBJECT_FIELDS)) {
+    if (DETAIL_OMITTED_FIELDS.has(key)) continue;
+    const kept = detailValue(field, depth + 1);
+    if (kept !== undefined) out[key] = kept;
+  }
+  if (entries.length > DETAIL_OBJECT_FIELDS) {
+    out["…"] = `${entries.length - DETAIL_OBJECT_FIELDS} more fields`;
+  }
+  return out;
+}
+
+/**
+ * A JSON-safe, bounded copy of an event or a context, for {@link TraceEntry}'s
+ * `detail`. Null when there is nothing to open — an empty object, a value that
+ * cannot cross the wire, or one so large that showing a prefix would mislead.
+ */
+export function traceDetail(value: unknown): Json | null {
+  const detail = detailValue(value, 0);
+  if (detail === undefined || detail === null) return null;
+  let json: string;
+  try {
+    json = JSON.stringify(detail) ?? "";
+  } catch {
+    return null;
+  }
+  if (!json || json === "{}" || json === "[]") return null;
+  return json.length > DETAIL_CHARS
+    ? `(${Math.round(json.length / 1000)} KB — too large to show)`
+    : detail;
+}
+
+/** Longest string kept on a trace event; the chat truncates further to a row. */
+const TRACE_STRING_CHARS = 140;
+
+/** One event field, bounded and JSON-safe, or `undefined` to drop it. */
+function smallEventValue(value: unknown, nested: boolean): Json | undefined {
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    return value.length > TRACE_STRING_CHARS ? `${value.slice(0, TRACE_STRING_CHARS)}…` : value;
+  }
+  if (value instanceof Error) return smallEventValue(value.message, nested);
+  // Phrased, not `Array(3)`: this lands in a chat row a person reads, and the
+  // live-inspection path summarizes the same value the same way.
+  if (Array.isArray(value)) return value.length === 1 ? "1 item" : `${value.length} items`;
+  // One level only: an actor's `output` is the work a step produced, and it is
+  // usually a small object. Deeper than that is a record, not a chat row.
+  if (!nested && value !== null && typeof value === "object") {
+    const inner: Record<string, Json> = {};
+    const entries = Object.entries(value as Record<string, unknown>);
+    // Capped like the top level: a resumed event's payload is the client's,
+    // and one wide nested object should not become the whole response.
+    for (const [key, field] of entries.slice(0, DETAIL_OBJECT_FIELDS)) {
+      const small = smallEventValue(field, true);
+      if (small !== undefined) inner[key] = small;
+    }
+    if (entries.length > DETAIL_OBJECT_FIELDS) {
+      inner["…"] = `${entries.length - DETAIL_OBJECT_FIELDS} more fields`;
+    }
+    return Object.keys(inner).length > 0 ? inner : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A trace event, bounded for the wire. Actor results (`output`) and failures
+ * (`error`) keep one level of structure: without it the chat's transition log
+ * can only say that a request finished, never what it produced — which is the
+ * only part of an intermediate step worth reading.
+ */
 export function smallEvent(event: unknown): { type: string } & Record<string, Json> {
   if (!event || typeof event !== "object") return { type: String(event) };
   const source = event as Record<string, unknown>;
   const out: { type: string } & Record<string, Json> = { type: String(source.type ?? "event") };
-  for (const [key, value] of Object.entries(source)) {
+  // The row shows three fields at most (see `summarizePayload`); the cap is
+  // generous next to that, and keeps a wide client event off the wire.
+  for (const [key, value] of Object.entries(source).slice(0, DETAIL_OBJECT_FIELDS)) {
     if (key === "type") continue;
-    if (typeof value === "number" || typeof value === "boolean") out[key] = value;
-    else if (typeof value === "string" && value.length <= 60) out[key] = value;
+    const small = smallEventValue(value, false);
+    if (small !== undefined) out[key] = small;
   }
   return out;
 }
@@ -534,6 +731,52 @@ async function liveExecutors(): Promise<{
   return { model, executors: createAiSdkExecutors({ resolveModel: () => openai(model) }) };
 }
 
+/**
+ * Runs an example that tells its story across SEVERAL runs (a crash and its
+ * recovery, a snapshot resumed on a new machine version). There is no single
+ * machine to drive, so the example exports one function and this threads the
+ * same observers through it that a single-machine run gets — the transition
+ * log, the emits and the refused decisions all read the same either way.
+ */
+export async function runExampleRunner(
+  runner: (options: Record<string, unknown>) => Promise<unknown>,
+  limits: RunLimits = {},
+): Promise<MachineChatResult> {
+  const live = await liveExecutors();
+  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
+  try {
+    const output = await runner({
+      ...(live ? { executors: live.executors } : {}),
+      signal: runSignal(limits),
+      onTransition,
+      on: { "*": onEmitted },
+      onTrace,
+      inspect: maybeCreateRunInspection(
+        // Multi-run stories re-enter `runAgent` several times; the inspection
+        // session spans all of them, so the root keeps one identity.
+        { config: {} } as never,
+        limits.machineSource,
+        "start",
+      ),
+    });
+    return {
+      mode: "live",
+      ...(live?.model ? { model: live.model } : {}),
+      status: "done",
+      trace,
+      response: renderOutput(output),
+      output: smallEventValue(output, false) ?? null,
+    };
+  } catch (error) {
+    return {
+      mode: "live",
+      status: "error",
+      trace,
+      response: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export function hasLiveExecutors(): boolean {
   return Boolean(process.env.OPENAI_API_KEY);
 }
@@ -552,12 +795,15 @@ export async function startMachineChat(
       response: "Running library examples needs OPENAI_API_KEY set for the demo server.",
     };
   }
-  const { trace, onTransition, changedKeys, latestContext } = createTraceRecorder();
+  const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
+    createTraceRecorder();
   const result = await runAgent(machine, {
     input: input as never,
     executors: live.executors,
     signal: runSignal(limits),
     onTransition,
+    on: { "*": onEmitted },
+    onTrace,
     inspect: maybeCreateRunInspection(machine, limits.machineSource, "start"),
   });
   return toChatResult(
@@ -594,7 +840,7 @@ export async function resumeMachineChat(
   }
   // Baseline: context restored from the snapshot is prior turns' work, not
   // this turn's — only new changes should render as produced output.
-  const { trace, onTransition, changedKeys, latestContext } = createTraceRecorder(
+  const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } = createTraceRecorder(
     (snapshot as { context?: unknown }).context,
   );
   // Validate the wire event against the restored snapshot's accepted events
@@ -618,6 +864,8 @@ export async function resumeMachineChat(
     executors: live.executors,
     signal: runSignal(limits),
     onTransition,
+    on: { "*": onEmitted },
+    onTrace,
     inspect: maybeCreateRunInspection(machine, limits.machineSource, "resume"),
   });
   return toChatResult(

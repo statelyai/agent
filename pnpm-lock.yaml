@@ -96,8 +96,8 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@20.19.43)(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.12)(yaml@2.9.0))
       xstate:
-        specifier: 6.0.0-alpha.48
-        version: 6.0.0-alpha.48
+        specifier: 6.0.0-alpha.57
+        version: 6.0.0-alpha.57
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -129,8 +129,8 @@ importers:
         specifier: workspace:*
         version: link:..
       '@statelyai/sdk':
-        specifier: ^0.31.1
-        version: 0.31.1(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
+        specifier: ^0.33.0
+        version: 0.33.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
       '@tanstack/react-router':
         specifier: ^1.170.32
         version: 1.170.32(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -174,8 +174,8 @@ importers:
         specifier: ^8.21.3
         version: 8.21.3
       xstate:
-        specifier: 6.0.0-alpha.48
-        version: 6.0.0-alpha.48
+        specifier: 6.0.0-alpha.57
+        version: 6.0.0-alpha.57
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -232,8 +232,8 @@ importers:
         specifier: ^7.0.0
         version: 7.0.77(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.48
-        version: 6.0.0-alpha.48
+        specifier: 6.0.0-alpha.57
+        version: 6.0.0-alpha.57
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -260,8 +260,8 @@ importers:
         specifier: ^7.0.0
         version: 7.0.77(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.48
-        version: 6.0.0-alpha.48
+        specifier: 6.0.0-alpha.57
+        version: 6.0.0-alpha.57
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -312,8 +312,8 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
       xstate:
-        specifier: 6.0.0-alpha.48
-        version: 6.0.0-alpha.48
+        specifier: 6.0.0-alpha.57
+        version: 6.0.0-alpha.57
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -342,8 +342,8 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
       xstate:
-        specifier: 6.0.0-alpha.48
-        version: 6.0.0-alpha.48
+        specifier: 6.0.0-alpha.57
+        version: 6.0.0-alpha.57
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -3915,8 +3915,8 @@ packages:
     engines: {node: '>=22.4'}
     hasBin: true
 
-  '@statelyai/sdk@0.31.1':
-    resolution: {integrity: sha512-eirvZL1cMMFDFvnWMuyHEL0rd7nk7JGx2R8FKdtIakXdYgNgVbmkJJwr+5b0+CX1mGNRm6TcfjUz10nIrnwZBg==, tarball: https://registry.npmjs.org/@statelyai/sdk/-/sdk-0.31.1.tgz}
+  '@statelyai/sdk@0.33.0':
+    resolution: {integrity: sha512-in05dlvAUGQv4b7tEQzEIdkAkg1mpzbW/HpNQ27OIj7IjZZAFbH1Lhqb3/41qsrP5rLiUKyP7CLNzc3eKfV/hQ==, tarball: https://registry.npmjs.org/@statelyai/sdk/-/sdk-0.33.0.tgz}
     engines: {node: '>=22.4'}
     hasBin: true
 
@@ -7089,8 +7089,8 @@ packages:
   xstate@5.32.5:
     resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.32.5.tgz}
 
-  xstate@6.0.0-alpha.48:
-    resolution: {integrity: sha512-w5wzjvV17BeMOe/VIb+IFq6ZQzsdz1MjDPSmH++bbgS3nt/IpW6sRefXOpLM1q94xMuofwyL5ITKL/w83qkNTA==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.48.tgz}
+  xstate@6.0.0-alpha.57:
+    resolution: {integrity: sha512-Tg7zJ9uft+mihyB35Ups0lm8RmaVNjT8vbchz104WsK6d558GmY5cBabDiWoI6qQPCTddRTSPEEyNi5ICSrK5w==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.57.tgz}
     hasBin: true
 
   xxhash-wasm@1.1.0:
@@ -10322,7 +10322,7 @@ snapshots:
       - webcola
       - zod
 
-  '@statelyai/sdk@0.31.1(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)':
+  '@statelyai/sdk@0.33.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)':
     dependencies:
       '@statelyai/graph': 2.3.0(cytoscape@3.34.0)(d3-force@3.0.0)(zod@4.4.3)
       esbuild: 0.27.7
@@ -13867,7 +13867,7 @@ snapshots:
 
   xstate@5.32.5: {}
 
-  xstate@6.0.0-alpha.48:
+  xstate@6.0.0-alpha.57:
     dependencies:
       saxes: 6.0.0
 

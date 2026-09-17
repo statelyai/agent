@@ -8,6 +8,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import type { Snapshot } from "xstate";
 
+import { nextDeclaration } from "./declaration-ticket";
 import type { ExampleDetail } from "./example-library.server";
 import type { MachineChatResult } from "./machine-chat.server";
 
@@ -32,6 +33,61 @@ export const getInspection = createServerFn({ method: "GET" }).handler(
 );
 
 const detailInput = z.object({ id: z.string().regex(/^[a-z0-9-]+$/) });
+
+const declareInput = z.object({
+  id: z.string().regex(/^[a-z0-9-]+$/),
+  exportName: z.string().regex(/^\w+$/),
+});
+
+/**
+ * Publishes the selected example's machine to the inspection room before any
+ * run exists, so the visualizer draws its statechart instead of waiting.
+ *
+ * The payload is the one the root actor will register with once a run starts,
+ * so the graph on screen does not change when the first turn begins.
+ */
+export const declareExampleMachine = createServerFn({ method: "POST" })
+  .validator((input: unknown) => declareInput.parse(input))
+  .handler(async ({ data }): Promise<{ declared: boolean }> => {
+    // Claimed before the first await — the dynamic imports below included:
+    // two quick selections must land in the order they were asked for, not
+    // the order their modules happened to resolve in.
+    const declaration = nextDeclaration();
+    const [
+      { getExampleMachine, getExampleMachineSource },
+      { declareInspectionMachine, ensureInspectionRelay, rootMachinePayload },
+    ] = await Promise.all([import("./example-library.server"), import("./inspection.server")]);
+    await ensureInspectionRelay();
+    const [machine, source] = await Promise.all([
+      getExampleMachine(data.id, data.exportName),
+      getExampleMachineSource(data.id, data.exportName),
+    ]);
+    return {
+      declared: declareInspectionMachine(rootMachinePayload(machine, source), declaration),
+    };
+  });
+
+/**
+ * Runs an example whose story spans several runs. The demo cannot drive these
+ * as a machine — the interesting part happens between runs — so the example
+ * exports one function and this calls it, threading the same observers a
+ * single-machine run gets.
+ */
+export const runExample = createServerFn({ method: "POST" })
+  .validator((input: unknown) => declareInput.parse(input))
+  .handler(async ({ data }): Promise<MachineChatResult> => {
+    const [{ getExampleRunner, exampleBudgetMs }, { runExampleRunner }, { getRequest }] =
+      await Promise.all([
+        import("./example-library.server"),
+        import("./machine-chat.server"),
+        import("@tanstack/react-start/server"),
+      ]);
+    const runner = await getExampleRunner(data.id, data.exportName);
+    return runExampleRunner(runner, {
+      signal: getRequest().signal,
+      budgetMs: exampleBudgetMs(data.id),
+    });
+  });
 
 export const getExample = createServerFn({ method: "GET" })
   .validator((input: unknown) => detailInput.parse(input))

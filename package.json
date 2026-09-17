@@ -111,7 +111,7 @@
     "check:dts": "tsc -p fixtures/dts-consumer/tsconfig.json",
     "test": "vitest",
     "test:live": "LIVE_TESTS=1 vitest --run",
-    "test:ci": "vitest --run && pnpm run test:cloudflare && pnpm run build && pnpm --filter @statelyai/agent-demo test",
+    "test:ci": "vitest --run && pnpm run build && pnpm run test:cloudflare && pnpm --filter @statelyai/agent-demo test",
     "prepublishOnly": "tsdown",
     "changeset": "changeset",
     "release": "changeset publish",
@@ -147,7 +147,7 @@
     "typescript": "^5.9.3",
     "valibot": "^1.4.2",
     "vitest": "^4.1.11",
-    "xstate": "6.0.0-alpha.48",
+    "xstate": "6.0.0-alpha.57",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
@@ -155,7 +155,7 @@
     "ai": "^7.0.0",
     "ajv": "^8.20.0",
     "openai": ">=5.0.0 <8",
-    "xstate": ">=6.0.0-alpha.46 <6.0.0"
+    "xstate": ">=6.0.0-alpha.57 <6.0.0"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/api": {

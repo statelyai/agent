@@ -21,17 +21,34 @@
  * Run: npx tsx examples/file-snapshot-store/index.ts
  */
 import { mkdtempSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createActor, waitFor, type Snapshot } from "xstate";
+import { createActor, waitFor, type AnyStateMachine, type Snapshot } from "xstate";
 import {
   getStatePath,
   provideExecutors,
   runAgent,
   type AgentRequestExecutors,
+  type RunAgentOptions,
 } from "@statelyai/agent";
 import { portableLoopMachine } from "../portable-xstate-loop/index.js";
+
+// The machine this example persists and resumes. Re-exported so the library
+// can render its statechart beside the run, rather than reporting that this
+// example has no machine to inspect.
+export { portableLoopMachine };
+
+/**
+ * The seams a host threads through every leg of a multi-run example: its
+ * executors, its cancellation signal, and the observers that make one story
+ * out of several `runAgent` calls. Declared here, not imported, so the example
+ * stays a single self-contained file (see CONTRIBUTING).
+ */
+type ExampleRunOptions = Pick<
+  RunAgentOptions<AnyStateMachine>,
+  "executors" | "signal" | "onTransition" | "on" | "onTrace" | "inspect"
+>;
 
 // --- 1. Application-owned storage -------------------------------------------
 
@@ -61,11 +78,13 @@ export async function loadSnapshot(
 export async function runFileSnapshotStoreExample(
   directory: string,
   executors: AgentRequestExecutors,
+  observers: Omit<ExampleRunOptions, "executors"> = {},
 ): Promise<{ draft: string }> {
   const runId = "release-42";
 
   // Request/process one: run until the machine waits for approval.
   const paused = await runAgent(portableLoopMachine, {
+    ...(observers as object),
     input: { topic: "framework-owned storage" },
     executors,
   });
@@ -76,6 +95,7 @@ export async function runFileSnapshotStoreExample(
   const snapshot = await loadSnapshot(directory, runId);
   if (!snapshot) throw new Error(`No snapshot stored for '${runId}'.`);
   const resumed = await runAgent(portableLoopMachine, {
+    ...(observers as object),
     snapshot,
     event: { type: "APPROVE" },
     executors,
@@ -95,24 +115,80 @@ export async function runFileSnapshotStoreExample(
 export async function runLongLivedActor(
   topic: string,
   executors: AgentRequestExecutors,
+  observers: Omit<ExampleRunOptions, "executors"> = {},
 ): Promise<{ draft: string; states: string[] }> {
   const states: string[] = [];
   const actor = createActor(provideExecutors(portableLoopMachine, executors), {
     input: { topic },
+    ...(observers.inspect ? { inspect: observers.inspect } : {}),
   });
   actor.subscribe((snapshot) => states.push(getStatePath(snapshot)));
+  // Cancellation is the application's job here too: `runAgent` would wire the
+  // signal up itself, but this half owns the actor, so stopping it is what a
+  // cancelled request means. A stopped actor settles its `waitFor`s.
+  const stop = () => actor.stop();
+  // A listener only catches what happens next: a signal that is already
+  // aborted (a turn cancelled before this half began) must not start the
+  // actor at all, or its draft request runs after the cancellation.
+  if (observers.signal?.aborted) {
+    throw new Error("The run was cancelled before the long-lived actor started.");
+  }
+  observers.signal?.addEventListener("abort", stop, { once: true });
   actor.start();
 
-  await waitFor(actor, (snapshot) => snapshot.matches("reviewing"));
-  actor.send({ type: "APPROVE" });
-  const done = await waitFor(actor, (snapshot) => snapshot.status === "done");
-  actor.stop();
+  try {
+    await waitFor(actor, (snapshot) => snapshot.matches("reviewing"));
+    actor.send({ type: "APPROVE" });
+    const done = await waitFor(actor, (snapshot) => snapshot.status === "done");
+    actor.stop();
 
-  if (!done.output) {
-    throw new Error("The completed actor did not produce an output.");
+    if (!done.output) {
+      throw new Error("The completed actor did not produce an output.");
+    }
+
+    return { draft: done.output.draft, states };
+  } finally {
+    observers.signal?.removeEventListener("abort", stop);
+    actor.stop();
   }
+}
 
-  return { draft: done.output.draft, states };
+/**
+ * Both halves in one call: a run persisted to disk and resumed in what stands
+ * in for a second process, then the same run kept alive in one actor with
+ * nothing persisted. Neither half is a single machine a host can drive, so the
+ * example exports this — see {@link ExampleRunOptions}.
+ */
+export async function runFileSnapshotStoreDemo(options: ExampleRunOptions = {}) {
+  const { executors, ...observers } = options;
+  // Routed on `request.name` so a stand-in fails loudly if the machine grows
+  // a second request; a host with real executors passes its own instead.
+  const stand_in: AgentRequestExecutors = {
+    generateText: async (request) => {
+      if (request.name !== "draft") throw new Error(`unexpected request: ${request.name}`);
+      return { output: "Drafted without a model — this half is about storage." };
+    },
+  };
+  const directory = mkdtempSync(join(tmpdir(), "stately-agent-snapshots-"));
+  try {
+    const stored = await runFileSnapshotStoreExample(directory, executors ?? stand_in, observers);
+    const live = await runLongLivedActor(
+      "application-owned actors",
+      executors ?? stand_in,
+      observers,
+    );
+    return {
+      storageOwnedByTheApplication: stored.draft,
+      lifetimeOwnedByTheApplication: live.draft,
+      statesSeenByTheApplication: live.states,
+      snapshotDirectory: `${directory} (removed after the run)`,
+    };
+  } finally {
+    // The snapshot has already been written, read back and resumed from by the
+    // time this runs — the directory was scratch space, not output. A host
+    // calls this on every click, so leaving them behind accumulates.
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {

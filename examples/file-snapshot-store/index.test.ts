@@ -35,3 +35,21 @@ test("one actor stays alive from the model draft through the APPROVE event to do
   // Every snapshot the application observed on its own subscription.
   expect(result.states).toEqual(["drafting", "reviewing", "done"]);
 });
+
+test("refuses to start the long-lived actor when the run is already cancelled", async () => {
+  let called = false;
+  await expect(
+    runLongLivedActor(
+      "cancelled before it began",
+      {
+        generateText: async () => {
+          called = true;
+          return { output: "should never run" };
+        },
+      },
+      { signal: AbortSignal.abort() },
+    ),
+  ).rejects.toThrow(/cancelled/);
+
+  expect(called).toBe(false);
+});

@@ -26,7 +26,13 @@
  */
 import assert from "node:assert/strict";
 import * as v from "valibot";
-import { createMachine, initialTransition, transition, type EventFromLogic } from "xstate";
+import {
+  createMachine,
+  initialTransition,
+  transition,
+  type EventFromLogic,
+  type StateValueFromStateSchema,
+} from "xstate";
 import { defineSkill, init, useModel, usePersistentState, useSkill, useTool } from "@flue/runtime";
 import { start } from "@flue/runtime/node";
 import {
@@ -60,11 +66,11 @@ export const steps = createMachine({
 });
 
 /**
- * The literal step union, inferred from the machine's own states (in this
- * xstate alpha, `machine.states` carries the config schema, hence the double
- * index).
+ * The literal step union, inferred from the machine's own state schema —
+ * `machine.states` carries that schema, and `StateValueFromStateSchema` turns
+ * it into the values a snapshot can hold.
  */
-type StepValue = keyof (typeof steps)["states"]["states"];
+type StepValue = StateValueFromStateSchema<(typeof steps)["states"]>;
 /** Inferred from the machine — never hand-written. */
 type StepEvent = EventFromLogic<typeof steps>;
 
@@ -114,10 +120,7 @@ export function FlueOwnedAgent() {
   // Flue's `usePersistentState('step', 'drafting')`, upgraded: the persisted
   // value is a machine state, so the step can only change along a declared
   // transition.
-  const [step, setStep] = usePersistentState<StepValue>(
-    "step",
-    initialTransition(steps)[0].value as StepValue,
-  );
+  const [step, setStep] = usePersistentState<StepValue>("step", initialTransition(steps)[0].value);
   const [draft, setDraft] = usePersistentState<EmailDraft | null>("draft", null);
 
   /**
@@ -131,7 +134,7 @@ export function FlueOwnedAgent() {
     if (next.value === step) {
       throw new Error(`Illegal event ${event.type} in step ${step}`);
     }
-    setStep(next.value as StepValue);
+    setStep(next.value);
   };
 
   // The docs' if-blocks, made exhaustive: `satisfies never` turns a missed or

@@ -73,6 +73,25 @@ function parseJsonFromText(text: string): unknown {
 }
 
 /**
+ * The decision path's parse. A model with no tool calling can reply with JSON
+ * that is well-formed but is not an event at all, so the shape is CHECKED here
+ * rather than asserted with a cast: a reply without a string `type` throws like
+ * a syntax error does, and the retry-with-feedback path below tells the model
+ * what was wrong instead of handing the machine `{ type: undefined }`.
+ */
+function parseChosenEventFromText(text: string): ChosenEvent {
+  const parsed: unknown = parseJsonFromText(text);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new SyntaxError(`Expected a JSON object, got: ${text.slice(0, 200)}`);
+  }
+  const { type, ...fields } = parsed as { type?: unknown } & Record<string, unknown>;
+  if (typeof type !== "string") {
+    throw new SyntaxError(`JSON object has no string "type": ${text.slice(0, 200)}`);
+  }
+  return { type, ...fields };
+}
+
+/**
  * Maps Workers AI's `usage` block onto the flat {@link AgentCallUsage} fields
  * `runAgent` aggregates, so a machine's token budget and `result.usage` read
  * real numbers instead of zero. Models that report no usage return `undefined`.
@@ -227,7 +246,7 @@ async function runWorkersAiDecision(
 
   const first = await ask(prompt);
   try {
-    return { event: parseJsonFromText(first.text) as ChosenEvent, usage: first.usage };
+    return { event: parseChosenEventFromText(first.text), usage: first.usage };
   } catch (firstError) {
     // Same recover-with-feedback as the text path: ask once more, saying what
     // was wrong with the last reply.
@@ -241,7 +260,7 @@ async function runWorkersAiDecision(
     );
     const usage = addUsage(first.usage, retry.usage);
     try {
-      return { event: parseJsonFromText(retry.text) as ChosenEvent, usage };
+      return { event: parseChosenEventFromText(retry.text), usage };
     } catch (retryError) {
       // Throw rather than invent an event type out of the parse error. A
       // fabricated `{ type: '<unparsed response: …>' }` would reach the machine

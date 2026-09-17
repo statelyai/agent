@@ -2,6 +2,7 @@
   "name": "river-crossing",
   "title": "River crossing puzzle",
   "kind": "agent-workflow",
+  "machine": "riverCrossingMachine",
   "origin": {
     "type": "stately-agent",
     "source": "Ported in spirit from the v1 examples (river-crossing.ts on the next branch)",
@@ -14,15 +15,21 @@
   "starters": [
     {
       "label": "Solve (max 12 moves)",
-      "input": { "maxMoves": 12 }
+      "input": {
+        "maxMoves": 12
+      }
     },
     {
       "label": "Tight budget (max 7 moves)",
-      "input": { "maxMoves": 7 }
+      "input": {
+        "maxMoves": 7
+      }
     },
     {
       "label": "Watch it fail (max 4 moves)",
-      "input": { "maxMoves": 4 }
+      "input": {
+        "maxMoves": 4
+      }
     }
   ]
 }

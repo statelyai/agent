@@ -15,11 +15,25 @@
   "starters": [
     {
       "label": "Small order ($25.00)",
-      "input": { "orderId": "ORD-2", "amountCents": 2500, "currency": "USD" }
+      "input": {
+        "orderId": "ORD-2",
+        "amountCents": 2500,
+        "currency": "USD"
+      }
     },
     {
       "label": "High-risk order ($812.50)",
-      "input": { "orderId": "ORD-4417", "amountCents": 81250, "currency": "USD" }
+      "input": {
+        "orderId": "ORD-4417",
+        "amountCents": 81250,
+        "currency": "USD"
+      }
+    }
+  ],
+  "runners": [
+    {
+      "label": "Pause on v1, ship v2, resume the snapshot",
+      "export": "runSnapshotMigrationExample"
     }
   ]
 }

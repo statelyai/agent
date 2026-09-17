@@ -36,7 +36,7 @@ import {
   type UIMessage,
   type UIMessageChunk,
 } from "ai";
-import type { AnyMachineSnapshot, AnyStateMachine } from "xstate";
+import type { AnyStateMachine } from "xstate";
 import {
   getStatePath,
   runAgent,
@@ -184,7 +184,7 @@ export function agentRunToUIMessageStream<TMachine extends AnyStateMachine>(
         },
         // Every machine transition surfaces as a data part the client can render.
         onTransition: (snapshot) => {
-          const state = getStatePath(snapshot as AnyMachineSnapshot);
+          const state = getStatePath(snapshot);
           writer.write({ type: AGENT_STATE_PART, data: { state } });
         },
       });

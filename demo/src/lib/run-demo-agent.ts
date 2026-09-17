@@ -14,6 +14,7 @@ import {
   startScenario as startScenarioRun,
   type ResumeEvent,
 } from "./agent-runner";
+import { nextDeclaration } from "./declaration-ticket";
 import type { ScenarioId } from "./scenarios";
 
 export type { ScenarioResult, TraceEntry, IdlePayload, RunMode } from "./agent-runner";
@@ -43,6 +44,32 @@ const resumeInput = z.object({
     z.object({ type: z.string().min(1) }).passthrough(),
   ]),
 });
+
+/**
+ * Publishes the selected scenario's machine to the inspection room before any
+ * run exists, so the visualizer draws its statechart instead of waiting. The
+ * payload matches what the root actor registers with once a run starts.
+ */
+export const declareScenarioMachine = createServerFn({ method: "POST" })
+  .validator((input: unknown) => z.object({ scenarioId }).parse(input))
+  .handler(async ({ data }): Promise<{ declared: boolean }> => {
+    // Claimed before the first await, so a slower earlier selection cannot
+    // land on top of a newer one.
+    const declaration = nextDeclaration();
+    const [{ machineFor }, { scenarioSource }, inspection] = await Promise.all([
+      import("./agent-runner"),
+      import("./scenarios"),
+      import("./inspection.server"),
+    ]);
+    await inspection.ensureInspectionRelay();
+    const id = data.scenarioId as ScenarioId;
+    return {
+      declared: inspection.declareInspectionMachine(
+        inspection.rootMachinePayload(machineFor(id), scenarioSource[id]),
+        declaration,
+      ),
+    };
+  });
 
 /** Request abort (Cancel / closed tab) OR the default time budget. */
 async function requestRunSignal(): Promise<AbortSignal> {

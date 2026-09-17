@@ -41,6 +41,7 @@ import {
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getInteraction,
+  parseAgentEvent,
   runAgent,
   type AgentRequestExecutors,
   type RunAgentResult,
@@ -168,9 +169,11 @@ export function createHost({ executors, store = createInMemoryRunStore() }: Crea
   /**
    * Build the machine event for `eventType`, attaching `text` to the event the
    * interaction named as its `textEvent` and merging any fixed fields the
-   * choice declared. The cast is the one unavoidable seam: the eventType
-   * arrives as a model-supplied string. If the state has no transition for it,
-   * the machine ignores it and the run reports `result.ignored`.
+   * choice declared. The eventType arrives as a model-supplied string, so the
+   * payload is PARSED at this boundary instead of cast through it:
+   * `parseAgentEvent` checks it against the machine's own event schemas and
+   * returns the machine's event union. If the state has no transition for the
+   * event, the machine ignores it and the run reports `result.ignored`.
    */
   function buildEvent(
     interaction: Interaction | null,
@@ -179,7 +182,7 @@ export function createHost({ executors, store = createInMemoryRunStore() }: Crea
   ): DrafterEvent {
     const choice = interaction?.events.find((candidate) => candidate.type === eventType);
     const payload = text !== null && interaction?.textEvent === eventType ? { text } : {};
-    return { ...choice?.event, ...payload, type: eventType } as DrafterEvent;
+    return parseAgentEvent(emailDrafter, { ...choice?.event, ...payload, type: eventType });
   }
 
   /** Fold a run result into a JSON-safe tool result, persisting on every pause. */
