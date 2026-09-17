@@ -127,6 +127,11 @@ type InspectionGlobals = {
   /** Root machine published to the room ahead of any actor, so the viz can
    * render the selected example before a run exists. */
   declaredMachine?: unknown;
+  /** Ticket counter for declarations, and the newest ticket already applied.
+   * Declarations load their payload asynchronously, so an older one can finish
+   * last; without this it would put the previous selection back on screen. */
+  declarationSeq?: number;
+  declarationApplied?: number;
   /** The current inspector exists only to carry that declaration, so the next
    * declaration can swap its graph in place instead of rebuilding the room. */
   declarationOnly?: boolean;
@@ -272,6 +277,17 @@ function createRoomInspector({ pinSelection }: { pinSelection: boolean }): Inspe
 }
 
 /**
+ * Takes the next declaration ticket. A handler claims one BEFORE it starts
+ * loading a machine, and passes it to {@link declareInspectionMachine}, so
+ * declarations land in the order they were requested rather than the order
+ * their payloads happened to finish.
+ */
+export function nextDeclaration(): number {
+  state.declarationSeq = (state.declarationSeq ?? 0) + 1;
+  return state.declarationSeq;
+}
+
+/**
  * Publishes a machine to the inspection room before any actor exists, so the
  * viz renders the selected example's statechart instead of an empty room.
  *
@@ -281,8 +297,11 @@ function createRoomInspector({ pinSelection }: { pinSelection: boolean }): Inspe
  * machine the demo cannot serialize, or a request that arrives before any viz
  * client asked for inspection, publishes nothing.
  */
-export function declareInspectionMachine(payload: unknown): boolean {
+export function declareInspectionMachine(payload: unknown, declaration?: number): boolean {
   if (!state.inspectionEnabled || payload == null) return false;
+  // Something newer already claimed the room while this payload was loading.
+  if (declaration !== undefined && declaration < (state.declarationApplied ?? 0)) return false;
+  if (declaration !== undefined) state.declarationApplied = declaration;
   state.declaredMachine = payload;
   // Selecting an example resets the run, so an inspector a run session owns
   // goes with it — otherwise that run's actors would sit in the room beside a
@@ -329,7 +348,12 @@ export function maybeCreateRunInspection(
   // (no viz client, so nothing declared) must not inherit whatever a previous
   // selection left behind when the inspector is rebuilt below.
   const rootPayload = rootMachinePayload(primaryMachine, primarySource);
-  if (rootPayload != null) state.declaredMachine = rootPayload;
+  // Assigned either way: a run whose machine cannot be serialized publishes
+  // nothing, and must not leave the previous selection's graph behind for the
+  // inspector below to seed.
+  state.declaredMachine = rootPayload ?? undefined;
+  // A run outranks any declaration still in flight.
+  state.declarationApplied = nextDeclaration();
   // A run always opens its own inspector: a declaration-only one was built
   // without the root selection pin (see `createRoomInspector`), and that
   // option is fixed at construction.

@@ -9,20 +9,6 @@ export type MobileView = "app" | "machine";
 /** A settled result from either run path (curated scenario or library example). */
 export type AnyRunResult = ChatTurnResult & { idle?: ChatIdle & { snapshot: Json } };
 
-/**
- * One persisted idle wait: enough to rewind the conversation to this point and
- * fork it with a different answer. The library side of time travel is just
- * "resume any stored snapshot"; the checkpoint rail makes that visible.
- */
-export type Checkpoint = {
-  /** The turn whose settle produced this idle wait (rewind keeps turns ≤ it). */
-  turnId: number;
-  /** Rail label: the idle prompt, else a generic ordinal. */
-  label: string;
-  pendingIdle: ChatIdle;
-  snapshot: Json;
-};
-
 type ShellContext = {
   selection: Selection;
   machineIndex: number;
@@ -34,8 +20,6 @@ type ShellContext = {
   pendingIdle: ChatIdle | null;
   /** Snapshot to resume from while the machine idles awaiting human input. */
   idleSnapshot: Json | null;
-  /** Every idle wait this run has settled at, oldest first. */
-  checkpoints: Checkpoint[];
   /**
    * Run generation. Bumped on every reset/selection change; async settle events
    * carry the epoch they started under and are dropped on mismatch.
@@ -64,8 +48,6 @@ type ShellEvents = {
   };
   turnSettled: { epoch: number; id: number; result: AnyRunResult };
   turnFailed: { epoch: number; id: number; message: string };
-  /** Rewind to a stored checkpoint: truncate later turns, restore its idle wait. */
-  rewound: { turnId: number };
 };
 
 const themeStorageKey = "stately-agent-demo-theme";
@@ -89,7 +71,6 @@ function resetRunState(context: ShellContext): ShellContext {
     turns: [],
     pendingIdle: null,
     idleSnapshot: null,
-    checkpoints: [],
     epoch: context.epoch + 1,
   };
 }
@@ -106,7 +87,6 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
       turns: [],
       pendingIdle: null,
       idleSnapshot: null,
-      checkpoints: [],
       epoch: 0,
       nextTurnId: 1,
     },
@@ -171,20 +151,6 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
           ),
           pendingIdle,
           idleSnapshot,
-          checkpoints:
-            pendingIdle && idleSnapshot
-              ? [
-                  ...context.checkpoints,
-                  {
-                    turnId: event.id,
-                    label:
-                      pendingIdle.prompt?.slice(0, 80) ??
-                      `Checkpoint ${context.checkpoints.length + 1}`,
-                    pendingIdle,
-                    snapshot: idleSnapshot,
-                  },
-                ]
-              : context.checkpoints,
         };
       },
       turnFailed: (context, event) => {
@@ -194,21 +160,6 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
           turns: context.turns.map((turn) =>
             turn.id === event.id ? { ...turn, status: "error", error: event.message } : turn,
           ),
-        };
-      },
-      rewound: (context, event) => {
-        const checkpoint = context.checkpoints.find((entry) => entry.turnId === event.turnId);
-        if (!checkpoint) return context;
-        return {
-          ...context,
-          // Keep history up to and including the turn that settled at this
-          // wait; the next message forks a fresh branch from its snapshot.
-          turns: context.turns.filter((turn) => turn.id <= event.turnId),
-          checkpoints: context.checkpoints.filter((entry) => entry.turnId <= event.turnId),
-          pendingIdle: checkpoint.pendingIdle,
-          idleSnapshot: checkpoint.snapshot,
-          // A rewind invalidates any in-flight settle from the abandoned branch.
-          epoch: context.epoch + 1,
         };
       },
     },

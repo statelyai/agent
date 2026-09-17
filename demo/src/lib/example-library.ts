@@ -50,14 +50,19 @@ export const declareExampleMachine = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{ declared: boolean }> => {
     const [
       { getExampleMachine, getExampleMachineSource },
-      { declareInspectionMachine, ensureInspectionRelay, rootMachinePayload },
+      { declareInspectionMachine, ensureInspectionRelay, nextDeclaration, rootMachinePayload },
     ] = await Promise.all([import("./example-library.server"), import("./inspection.server")]);
+    // Claimed before the machine loads: two quick selections must land in the
+    // order they were asked for, not the order their modules finished.
+    const declaration = nextDeclaration();
     await ensureInspectionRelay();
     const [machine, source] = await Promise.all([
       getExampleMachine(data.id, data.exportName),
       getExampleMachineSource(data.id, data.exportName),
     ]);
-    return { declared: declareInspectionMachine(rootMachinePayload(machine, source)) };
+    return {
+      declared: declareInspectionMachine(rootMachinePayload(machine, source), declaration),
+    };
   });
 
 /**

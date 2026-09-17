@@ -21,16 +21,16 @@
  * Run: npx tsx examples/file-snapshot-store/index.ts
  */
 import { mkdtempSync } from "node:fs";
-import type { ExampleRunOptions } from "../run-options.js";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createActor, waitFor, type Snapshot } from "xstate";
+import { createActor, waitFor, type AnyStateMachine, type Snapshot } from "xstate";
 import {
   getStatePath,
   provideExecutors,
   runAgent,
   type AgentRequestExecutors,
+  type RunAgentOptions,
 } from "@statelyai/agent";
 import { portableLoopMachine } from "../portable-xstate-loop/index.js";
 
@@ -38,6 +38,17 @@ import { portableLoopMachine } from "../portable-xstate-loop/index.js";
 // can render its statechart beside the run, rather than reporting that this
 // example has no machine to inspect.
 export { portableLoopMachine };
+
+/**
+ * The seams a host threads through every leg of a multi-run example: its
+ * executors, its cancellation signal, and the observers that make one story
+ * out of several `runAgent` calls. Declared here, not imported, so the example
+ * stays a single self-contained file (see CONTRIBUTING).
+ */
+type ExampleRunOptions = Pick<
+  RunAgentOptions<AnyStateMachine>,
+  "executors" | "signal" | "onTransition" | "on" | "onTrace" | "inspect"
+>;
 
 // --- 1. Application-owned storage -------------------------------------------
 
@@ -112,18 +123,28 @@ export async function runLongLivedActor(
     ...(observers.inspect ? { inspect: observers.inspect } : {}),
   });
   actor.subscribe((snapshot) => states.push(getStatePath(snapshot)));
+  // Cancellation is the application's job here too: `runAgent` would wire the
+  // signal up itself, but this half owns the actor, so stopping it is what a
+  // cancelled request means. A stopped actor settles its `waitFor`s.
+  const stop = () => actor.stop();
+  observers.signal?.addEventListener("abort", stop, { once: true });
   actor.start();
 
-  await waitFor(actor, (snapshot) => snapshot.matches("reviewing"));
-  actor.send({ type: "APPROVE" });
-  const done = await waitFor(actor, (snapshot) => snapshot.status === "done");
-  actor.stop();
+  try {
+    await waitFor(actor, (snapshot) => snapshot.matches("reviewing"));
+    actor.send({ type: "APPROVE" });
+    const done = await waitFor(actor, (snapshot) => snapshot.status === "done");
+    actor.stop();
 
-  if (!done.output) {
-    throw new Error("The completed actor did not produce an output.");
+    if (!done.output) {
+      throw new Error("The completed actor did not produce an output.");
+    }
+
+    return { draft: done.output.draft, states };
+  } finally {
+    observers.signal?.removeEventListener("abort", stop);
+    actor.stop();
   }
-
-  return { draft: done.output.draft, states };
 }
 
 /**
@@ -143,18 +164,25 @@ export async function runFileSnapshotStoreDemo(options: ExampleRunOptions = {}) 
     },
   };
   const directory = mkdtempSync(join(tmpdir(), "stately-agent-snapshots-"));
-  const stored = await runFileSnapshotStoreExample(directory, executors ?? stand_in, observers);
-  const live = await runLongLivedActor(
-    "application-owned actors",
-    executors ?? stand_in,
-    observers,
-  );
-  return {
-    storageOwnedByTheApplication: stored.draft,
-    lifetimeOwnedByTheApplication: live.draft,
-    statesSeenByTheApplication: live.states,
-    snapshotDirectory: directory,
-  };
+  try {
+    const stored = await runFileSnapshotStoreExample(directory, executors ?? stand_in, observers);
+    const live = await runLongLivedActor(
+      "application-owned actors",
+      executors ?? stand_in,
+      observers,
+    );
+    return {
+      storageOwnedByTheApplication: stored.draft,
+      lifetimeOwnedByTheApplication: live.draft,
+      statesSeenByTheApplication: live.states,
+      snapshotDirectory: `${directory} (removed after the run)`,
+    };
+  } finally {
+    // The snapshot has already been written, read back and resumed from by the
+    // time this runs — the directory was scratch space, not output. A host
+    // calls this on every click, so leaving them behind accumulates.
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {

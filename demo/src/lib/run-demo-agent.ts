@@ -57,11 +57,15 @@ export const declareScenarioMachine = createServerFn({ method: "POST" })
       import("./scenarios"),
       import("./inspection.server"),
     ]);
+    // Claimed before the machine is built, so a slower earlier selection
+    // cannot land on top of a newer one.
+    const declaration = inspection.nextDeclaration();
     await inspection.ensureInspectionRelay();
     const id = data.scenarioId as ScenarioId;
     return {
       declared: inspection.declareInspectionMachine(
         inspection.rootMachinePayload(machineFor(id), scenarioSource[id]),
+        declaration,
       ),
     };
   });

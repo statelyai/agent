@@ -29,9 +29,10 @@
  *     flight. Both are idle states with no invoke, and the difference matters:
  *     a bot that replies "send me your confirmation code" has not answered
  *     anything, and a turn that reports `answered` there has lied about its own
- *     outcome. The `answer` request returns `{ needsInfo, text }` so the
- *     distinction is data the machine routes on, not a sentence a human has to
- *     read. Asking is bounded by MAX_CLARIFICATIONS; past it the turn ends
+ *     outcome. The `answer` request returns a discriminated union —
+ *     `{ status: 'answered', answer }` or `{ status: 'needsInfo', question }` —
+ *     so the distinction is data the machine routes on, not a sentence a human
+ *     has to read. Asking is bounded by MAX_CLARIFICATIONS; past it the turn ends
  *     `unresolved` with the question still outstanding.
  *   - Sensitive action: instead of an `interrupt_before` flag, the machine
  *     *transitions into an idle `confirming` state* — no invoke, tags
@@ -621,25 +622,37 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
     });
 
-    if (result.status === "idle") {
+    // Two kinds of pause, so two kinds of prompt: `confirming` wants a
+    // decision about a write, `awaitingInfo` wants a detail only the customer
+    // has. Asking to approve something in the second case sends an event the
+    // state does not accept, and the turn never finishes.
+    while (result.status === "idle") {
       const snapshot = result.snapshot;
       const interaction = getInteraction(snapshot);
       const legalEvents = getAcceptedEvents(snapshot).map((event) => event.type);
-
-      console.log("\n--- Approval required ---");
-      console.log("Pending action:", snapshot.context.pendingAction?.summary);
-      console.log(interaction?.label ?? "");
-      console.log("Legal events:", legalEvents.join(", "));
-
       const persisted = result.persist();
-      const answer = (await promptLine("approve / deny? ")).toLowerCase();
-      const event = answer.startsWith("a")
-        ? ({ type: "APPROVE" } as const)
-        : ({ type: "DENY", reason: await promptLine("Reason: ") } as const);
+
+      let event: { type: string } & Record<string, unknown>;
+      if (snapshot.hasTag("awaiting-info")) {
+        console.log("\n--- More information needed ---");
+        console.log(interaction?.label ?? "");
+        console.log("Legal events:", legalEvents.join(", "));
+        const detail = await promptLine("your answer (blank = decline) > ");
+        event = detail ? { type: "PROVIDE_INFO", text: detail } : { type: "STOP_ASKING" };
+      } else {
+        console.log("\n--- Approval required ---");
+        console.log("Pending action:", snapshot.context.pendingAction?.summary);
+        console.log(interaction?.label ?? "");
+        console.log("Legal events:", legalEvents.join(", "));
+        const answer = (await promptLine("approve / deny? ")).toLowerCase();
+        event = answer.startsWith("a")
+          ? { type: "APPROVE" }
+          : { type: "DENY", reason: await promptLine("Reason: ") };
+      }
 
       result = await runAgent(customerSupportMachine, {
         snapshot: persisted,
-        event,
+        event: event as never,
         executors,
         onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
       });

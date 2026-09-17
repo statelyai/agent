@@ -95,6 +95,12 @@ describe("between-transition rows", () => {
     expect(step?.state).toBe("");
   });
 
+  it("still names a refusal that arrives without a failure kind", () => {
+    const [step] = traceSteps(entry("rejected", { type: "REFUND", reason: "" }));
+
+    expect(step?.payload).toBe("rejected");
+  });
+
   it("keeps a reason that says something the row does not", () => {
     const [step] = traceSteps(
       entry("rejected", {

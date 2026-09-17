@@ -116,7 +116,11 @@ export function createTraceRecorder(baselineContext?: unknown): {
   // Entries that are not transitions carry the state the run was in when they
   // happened, so a row still reads as part of the sequence around it.
   let lastValue: Json = null;
-  const seenAttempts = new Set<string>();
+  // Attempts recorded so far per request id, so a retry's growing list is
+  // recorded once. The id is the invoke id, which repeats when a machine
+  // re-enters the same decision, so a list that is no longer than the last one
+  // is a NEW invocation rather than more of the old one.
+  const attemptsSeen = new Map<string, number>();
 
   const push = (kind: TraceEntryKind, event: unknown) => {
     trace.push({
@@ -152,16 +156,17 @@ export function createTraceRecorder(baselineContext?: unknown): {
     onEmitted: (event) => push("emitted", event),
     onTrace: (entry) => {
       // A decision retries by re-issuing `request.start` with the failed
-      // attempts appended, so each attempt is recorded once, the first time
-      // it appears. There is no dedicated "rejected" trace event to listen to.
+      // attempts appended, so only the ones this start added are recorded.
+      // There is no dedicated "rejected" trace event to listen to.
       const step = entry as { type?: unknown; request?: { id?: unknown; attempts?: unknown } };
       if (step?.type !== "request.start") return;
       const attempts = step.request?.attempts;
       if (!Array.isArray(attempts)) return;
-      attempts.forEach((attempt, index) => {
-        const key = `${String(step.request?.id ?? "")}#${index}`;
-        if (seenAttempts.has(key)) return;
-        seenAttempts.add(key);
+      const id = String(step.request?.id ?? "");
+      const recorded = attemptsSeen.get(id) ?? 0;
+      const from = attempts.length > recorded ? recorded : 0;
+      attemptsSeen.set(id, attempts.length);
+      attempts.slice(from).forEach((attempt) => {
         const { event, failure, reason } = (attempt ?? {}) as {
           event?: { type?: unknown };
           failure?: unknown;
@@ -201,6 +206,7 @@ export function smallContext(context: unknown): Record<string, Json> {
  */
 const DETAIL_STRING_CHARS = 4000;
 const DETAIL_ARRAY_ITEMS = 40;
+const DETAIL_OBJECT_FIELDS = 64;
 const DETAIL_DEPTH = 6;
 const DETAIL_CHARS = 24_000;
 
@@ -232,10 +238,16 @@ function detailValue(value: unknown, depth: number): Json | undefined {
     return items;
   }
   const out: Record<string, Json> = {};
-  for (const [key, field] of Object.entries(value as Record<string, unknown>)) {
+  const entries = Object.entries(value as Record<string, unknown>);
+  // An event's own shape is the machine author's; a resumed one carries
+  // whatever the client sent. A wide object is capped rather than trusted.
+  for (const [key, field] of entries.slice(0, DETAIL_OBJECT_FIELDS)) {
     if (DETAIL_OMITTED_FIELDS.has(key)) continue;
     const kept = detailValue(field, depth + 1);
     if (kept !== undefined) out[key] = kept;
+  }
+  if (entries.length > DETAIL_OBJECT_FIELDS) {
+    out["…"] = `${entries.length - DETAIL_OBJECT_FIELDS} more fields`;
   }
   return out;
 }
@@ -296,7 +308,9 @@ export function smallEvent(event: unknown): { type: string } & Record<string, Js
   if (!event || typeof event !== "object") return { type: String(event) };
   const source = event as Record<string, unknown>;
   const out: { type: string } & Record<string, Json> = { type: String(source.type ?? "event") };
-  for (const [key, value] of Object.entries(source)) {
+  // The row shows three fields at most (see `summarizePayload`); the cap is
+  // generous next to that, and keeps a wide client event off the wire.
+  for (const [key, value] of Object.entries(source).slice(0, DETAIL_OBJECT_FIELDS)) {
     if (key === "type") continue;
     const small = smallEventValue(value, false);
     if (small !== undefined) out[key] = small;

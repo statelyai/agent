@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getExampleDetail,
+  getExampleRunner,
   isAuthoredInSource,
   listExampleSummaries,
   machineInitializer,
@@ -111,5 +112,21 @@ describe("example library auto-discovery", () => {
 
   it("rejects unknown example ids", async () => {
     await expect(getExampleDetail("does-not-exist")).rejects.toThrow(/Unknown example/);
+  });
+});
+
+describe("runner execution", () => {
+  it("runs a runner the example declares", async () => {
+    const runner = await getExampleRunner("crash-recovery", "runCrashRecoveryExample");
+
+    expect(typeof runner).toBe("function");
+  });
+
+  it("refuses an export the example does not declare as a runner", async () => {
+    // The export name arrives from the client. `route-replanning` declares no
+    // runners, and calling its exported entry point would spend model calls.
+    await expect(
+      getExampleRunner("route-replanning", "runRouteReplanningExample"),
+    ).rejects.toThrow(/does not declare a runner/);
   });
 });

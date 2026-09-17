@@ -81,7 +81,6 @@ export function DemoShell() {
   const mobileView = useSelector(store, (s) => s.context.mobileView);
   const turns = useSelector(store, (s) => s.context.turns);
   const pendingIdle = useSelector(store, (s) => s.context.pendingIdle);
-  const checkpoints = useSelector(store, (s) => s.context.checkpoints);
 
   const [examples, setExamples] = useState<ExampleSummary[]>([]);
   const [exampleDetail, setExampleDetail] = useState<ExampleDetail | null>(null);
@@ -200,15 +199,24 @@ export function DemoShell() {
   // /inspect URL is the room, not the run, so it stays mounted across
   // selections: each declaration swaps the graph in place rather than
   // reloading the page.
-  const [machineDeclared, setMachineDeclared] = useState(false);
+  // Which machine the room is currently showing, not merely that something was
+  // declared once: the /inspect page stays mounted across selections, so a
+  // `liveUrl` that ignored the key would keep the PREVIOUS example's chart on
+  // screen while the new declaration is still in flight (or after it failed).
+  const [declaredKey, setDeclaredKey] = useState<string | null>(null);
   const inspectScenarioId = isScenario ? scenario.id : null;
   const inspectExampleId = !isScenario && activeMachine ? selection.id : null;
   const inspectExportName = !isScenario && activeMachine ? activeMachine.exportName : null;
+  const inspectKey = inspectScenarioId
+    ? `scenario:${inspectScenarioId}`
+    : inspectExampleId && inspectExportName
+      ? `example:${inspectExampleId}#${inspectExportName}`
+      : null;
   useEffect(() => {
     if (!inspection) return;
     let cancelled = false;
     const onDeclared = ({ declared }: { declared: boolean }) => {
-      if (!cancelled && declared) setMachineDeclared(true);
+      if (!cancelled && declared) setDeclaredKey(inspectKey);
     };
     // A failed declaration is not worth surfacing: the panel keeps whatever it
     // was showing, and the run's own inspection still lights the chart up.
@@ -226,7 +234,7 @@ export function DemoShell() {
     return () => {
       cancelled = true;
     };
-  }, [inspection, inspectScenarioId, inspectExampleId, inspectExportName]);
+  }, [inspection, inspectKey, inspectScenarioId, inspectExampleId, inspectExportName]);
 
   // ─── run control: one AbortController per in-flight turn + live feed ───
   //
@@ -297,13 +305,6 @@ export function DemoShell() {
   const resetRun = () => {
     lastRootSessionId.current = null;
     store.trigger.runReset();
-  };
-
-  /** Rewind to a stored idle checkpoint; the next answer forks a new branch. */
-  const rewindTo = (turnId: number) => {
-    abortRef.current?.abort();
-    endRun();
-    store.trigger.rewound({ turnId });
   };
 
   const select = (next: Selection) => {
@@ -550,10 +551,10 @@ export function DemoShell() {
   // the machine input verbatim.
   const starters: StarterAction[] = isScenario
     ? scenario.starters.map((text) => ({ label: text, onStart: () => submit(text) }))
-    : !exampleDetail?.runnable
-      ? []
-      : (exampleSummary?.starters ?? []).flatMap((starter) => {
-          // A runner needs no machine: it IS the whole story.
+    : (exampleSummary?.starters ?? []).flatMap((starter) => {
+          // A runner needs no machine — it IS the whole story — and no API
+          // key: a multi-run example scripts its own executors, so these chips
+          // stay offered on a server that cannot run anything else.
           if (starter.kind === "runner") {
             return [
               {
@@ -562,7 +563,7 @@ export function DemoShell() {
               },
             ];
           }
-          if (!activeMachine) return [];
+          if (!exampleDetail?.runnable || !activeMachine) return [];
           if (starter.kind === "text") {
             const field = activeMachine.promptField;
             return [
@@ -607,8 +608,6 @@ export function DemoShell() {
       onSendEvent={sendEvent}
       onCancel={cancelRun}
       onRestart={resetRun}
-      checkpoints={checkpoints.map(({ turnId, label }) => ({ turnId, label }))}
-      onRewind={rewindTo}
       textPolicy={textPolicy}
     />
   );
@@ -616,7 +615,9 @@ export function DemoShell() {
   // The room, not the run: once a machine is published the chart is worth
   // showing, and the first turn animates a diagram already on screen.
   const liveUrl =
-    inspection && machineDeclared ? createLiveInspectUrl(inspectUrl, inspection) : null;
+    inspection && declaredKey !== null && declaredKey === inspectKey
+      ? createLiveInspectUrl(inspectUrl, inspection)
+      : null;
   const liveWs = inspection;
 
   const vizPanel = (

@@ -296,6 +296,36 @@ describe("idle work rendering (changed context surfaces before approval)", () =>
   });
 });
 
+describe("refused decisions in the trace", () => {
+  const start = (id: string, attempts: Array<{ type: string; failure: string }>) => ({
+    type: "request.start",
+    request: { id, attempts: attempts.map((attempt) => ({ event: { type: attempt.type }, failure: attempt.failure, reason: "" })) },
+  });
+
+  test("records each attempt once as a decision retries", () => {
+    const recorder = createTraceRecorder();
+    recorder.onTrace(start("decide", [{ type: "TAKE_GOAT", failure: "rejected-by-guard" }]));
+    recorder.onTrace(
+      start("decide", [
+        { type: "TAKE_GOAT", failure: "rejected-by-guard" },
+        { type: "TAKE_WOLF", failure: "rejected-by-guard" },
+      ]),
+    );
+
+    expect(recorder.trace.map((entry) => entry.event.type)).toEqual(["TAKE_GOAT", "TAKE_WOLF"]);
+  });
+
+  test("keeps recording when the machine re-enters the same decision", () => {
+    // The id is the invoke id, so a second visit to `deciding` reuses it. A
+    // list no longer than the last one is a new invocation, not a retry.
+    const recorder = createTraceRecorder();
+    recorder.onTrace(start("decide", [{ type: "TAKE_GOAT", failure: "rejected-by-guard" }]));
+    recorder.onTrace(start("decide", [{ type: "TAKE_CABBAGE", failure: "rejected-by-guard" }]));
+
+    expect(recorder.trace.map((entry) => entry.event.type)).toEqual(["TAKE_GOAT", "TAKE_CABBAGE"]);
+  });
+});
+
 describe("expandable trace detail", () => {
   test("a transition records the whole event and context the row had to cut", () => {
     const recorder = createTraceRecorder();

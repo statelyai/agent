@@ -13,14 +13,26 @@
  * npx tsx examples/crash-recovery/index.ts
  */
 import { z } from "zod";
-import type { ExampleRunOptions } from "../run-options.js";
 import {
   createInMemoryEventLogStore,
   createScriptedExecutors,
   runAgent,
   setupAgent,
   type AgentEventLogStore,
+  type RunAgentOptions,
 } from "@statelyai/agent";
+import type { AnyStateMachine } from "xstate";
+
+/**
+ * The seams a host threads through every leg of a multi-run example: its
+ * executors, its cancellation signal, and the observers that make one story
+ * out of several `runAgent` calls. Declared here, not imported, so the example
+ * stays a single self-contained file (see CONTRIBUTING).
+ */
+type ExampleRunOptions = Pick<
+  RunAgentOptions<AnyStateMachine>,
+  "executors" | "signal" | "onTransition" | "on" | "onTrace" | "inspect"
+>;
 
 const crashRecoverySetup = setupAgent({
   context: z.object({

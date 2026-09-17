@@ -207,6 +207,15 @@ export async function getExampleRunner(
 ): Promise<(options: Record<string, unknown>) => Promise<unknown>> {
   const loadModule = moduleById.get(id);
   if (!loadModule) throw new Error(`Unknown example: ${id}`);
+  // `metadata.runners` is the allowlist, not a listing: the export name
+  // arrives from the client, and an example's other exports are not offered
+  // for execution — some of them would spend a model call to find out.
+  const declared = runnersOf(metadataById.get(id) ?? {}).some(
+    (starter) => starter.kind === "runner" && starter.exportName === exportName,
+  );
+  if (!declared) {
+    throw new Error(`Example '${id}' does not declare a runner named '${exportName}'.`);
+  }
   const runner = (await loadModule())[exportName];
   if (typeof runner !== "function") {
     throw new Error(`Example '${id}' has no runner export named '${exportName}'.`);

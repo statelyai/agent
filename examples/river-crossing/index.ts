@@ -43,13 +43,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic, setup } from "xstate";
 import { getShortestPaths } from "xstate/graph";
-import {
-  createAgentSchemas,
-  runAgent,
-  setupAgent,
-  type ContextOf,
-  type RunAgentOptions,
-} from "@statelyai/agent";
+import { createAgentSchemas, runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import { describeMachine } from "./describe-machine.js";
 
@@ -349,11 +343,19 @@ const MACHINE_RULES = [
   "A move is illegal if it leaves the wolf and goat together, or the goat and cabbage together, on a bank without the farmer.",
   "Solved when farmer, wolf, goat, and cabbage are all on the right bank.",
   "REQUEST_PLAN asks the machine to solve itself and hand back the shortest " +
-    "legal route from the current position. It is available once per run.",
+    "legal route from the current position. It is available whenever there is " +
+    "no current plan — before the first one, and again if a move leaves the " +
+    "plan behind — but never while a plan is still being followed.",
 ];
 
-/** The context type, read off the schema pack — never restated by hand. */
-type RiverContext = ContextOf<typeof agentSetup>;
+/**
+ * The context type, read off the schema pack — never restated by hand. Off the
+ * SCHEMAS rather than the setup on purpose: `ContextOf<typeof agentSetup>`
+ * says the same thing, but naming the setup object drags its inferred type
+ * (cyclic, and too large for TypeScript to serialize) into the declarations of
+ * everything that touches this type.
+ */
+type RiverContext = z.infer<typeof riverCrossingSchemas.context>;
 
 /** The event type that ferries `item` — the name the plan is written in. */
 const MOVE_EVENT = {
@@ -452,10 +454,13 @@ export const riverCrossingMachine = agentSetup.createMachine({
         TAKE_GOAT: moveTransition("goat"),
         TAKE_CABBAGE: moveTransition("cabbage"),
         CROSS_ALONE: moveTransition(null),
-        // Asking for a plan is a move like any other — legal exactly once,
-        // so the model cannot spend its budget re-asking instead of crossing.
-        // A second request is refused by this guard and shows up in the log
-        // as a rejected decision, like any other illegal choice.
+        // Asking for a plan is a move like any other, and legal only when
+        // there is no plan in hand: while one is being followed the model
+        // cannot spend its budget re-asking instead of crossing. Deviating
+        // discards the plan (see `advancePlan`), which makes REQUEST_PLAN
+        // legal again — that is the replan. A request made while a plan
+        // stands is refused by this guard and shows up in the log as a
+        // rejected decision, like any other illegal choice.
         REQUEST_PLAN: ({ context }) => (context.plan === null ? { target: "planning" } : undefined),
       },
     },

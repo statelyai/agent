@@ -260,7 +260,7 @@ export function traceSteps(trace: TraceEntry[]): TraceStep[] {
       if (entry.kind === "rejected") {
         const failure = String(entry.event["failure"] ?? "");
         const reason = String(entry.event["reason"] ?? "");
-        const why = FAILURE_LABELS[failure] ?? failure ?? "rejected";
+        const why = FAILURE_LABELS[failure] || failure || "rejected";
         // The library's guard reason restates the event type it just refused
         // ("'TAKE_GOAT' is not currently takeable"), which the row already
         // shows. A schema failure's reason says something new, so it stays.
