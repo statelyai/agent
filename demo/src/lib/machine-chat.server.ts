@@ -510,7 +510,8 @@ export function runSignal(limits: RunLimits): AbortSignal {
 }
 
 export type MachineChatResult = {
-  mode: "live";
+  /** `walkthrough` when the server has no API key and placeholders stood in for the model. */
+  mode: "live" | "walkthrough";
   model?: string;
   status: "done" | "idle" | "error";
   trace: TraceEntry[];
@@ -717,18 +718,35 @@ function toChatResult(
   };
 }
 
-/** Live AI SDK executors that resolve EVERY model ref to one OpenAI model. */
-async function liveExecutors(): Promise<{
-  model: string;
+/** Decision rotation shared across resumes, so a paused loop keeps cycling. */
+const walkthroughTurns = new Map<string, number>();
+
+type ResolvedExecutors = {
+  mode: "live" | "walkthrough";
+  model?: string;
   executors: Partial<AgentRequestExecutors>;
-} | null> {
-  if (!process.env.OPENAI_API_KEY) return null;
+};
+
+/**
+ * Live AI SDK executors that resolve EVERY model ref to one OpenAI model — or,
+ * with no key on the server, schema-driven placeholders that let every
+ * example's machine run anyway (see `walkthrough-executors.ts`).
+ */
+async function resolveExecutors(): Promise<ResolvedExecutors> {
+  if (!process.env.OPENAI_API_KEY) {
+    const { createWalkthroughExecutors } = await import("./walkthrough-executors");
+    return { mode: "walkthrough", executors: createWalkthroughExecutors(walkthroughTurns) };
+  }
   const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
   const model = process.env.OPENAI_MODEL || "gpt-5.4-mini";
-  return { model, executors: createAiSdkExecutors({ resolveModel: () => openai(model) }) };
+  return {
+    mode: "live",
+    model,
+    executors: createAiSdkExecutors({ resolveModel: () => openai(model) }),
+  };
 }
 
 /**
@@ -742,7 +760,9 @@ export async function runExampleRunner(
   runner: (options: Record<string, unknown>) => Promise<unknown>,
   limits: RunLimits = {},
 ): Promise<MachineChatResult> {
-  const live = await liveExecutors();
+  // A runner scripts its own executors; live ones are offered, placeholders
+  // are not — the story it tells is deterministic by design.
+  const live = process.env.OPENAI_API_KEY ? await resolveExecutors() : null;
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   try {
     const output = await runner({
@@ -786,15 +806,7 @@ export async function startMachineChat(
   input: Record<string, unknown>,
   limits: RunLimits = {},
 ): Promise<MachineChatResult> {
-  const live = await liveExecutors();
-  if (!live) {
-    return {
-      mode: "live",
-      status: "error",
-      trace: [],
-      response: "Running library examples needs OPENAI_API_KEY set for the demo server.",
-    };
-  }
+  const live = await resolveExecutors();
   const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
     createTraceRecorder();
   const result = await runAgent(machine, {
@@ -806,16 +818,19 @@ export async function startMachineChat(
     onTrace,
     inspect: maybeCreateRunInspection(machine, limits.machineSource, "start"),
   });
-  return toChatResult(
-    machine,
-    live.model,
-    result as RunAgentResult<AnyStateMachine>,
-    trace,
-    changedKeys(),
-    stringValuesOf(input),
-    latestContext(),
-    limits,
-  );
+  return {
+    ...toChatResult(
+      machine,
+      live.model,
+      result as RunAgentResult<AnyStateMachine>,
+      trace,
+      changedKeys(),
+      stringValuesOf(input),
+      latestContext(),
+      limits,
+    ),
+    mode: live.mode,
+  };
 }
 
 /** The string values of an input/event object — user-typed text to not echo. */
@@ -829,20 +844,11 @@ export async function resumeMachineChat(
   event: { type: string } & Record<string, unknown>,
   limits: RunLimits = {},
 ): Promise<MachineChatResult> {
-  const live = await liveExecutors();
-  if (!live) {
-    return {
-      mode: "live",
-      status: "error",
-      trace: [],
-      response: "Running library examples needs OPENAI_API_KEY set for the demo server.",
-    };
-  }
+  const live = await resolveExecutors();
   // Baseline: context restored from the snapshot is prior turns' work, not
   // this turn's — only new changes should render as produced output.
-  const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } = createTraceRecorder(
-    (snapshot as { context?: unknown }).context,
-  );
+  const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
+    createTraceRecorder((snapshot as { context?: unknown }).context);
   // Validate the wire event against the restored snapshot's accepted events
   // (and payload schema, when registered) before delivering it. If the
   // snapshot can't be rehydrated for validation, runAgent still rejects an
@@ -868,14 +874,17 @@ export async function resumeMachineChat(
     onTrace,
     inspect: maybeCreateRunInspection(machine, limits.machineSource, "resume"),
   });
-  return toChatResult(
-    machine,
-    live.model,
-    result as RunAgentResult<AnyStateMachine>,
-    trace,
-    changedKeys(),
-    stringValuesOf(parsed),
-    latestContext(),
-    limits,
-  );
+  return {
+    ...toChatResult(
+      machine,
+      live.model,
+      result as RunAgentResult<AnyStateMachine>,
+      trace,
+      changedKeys(),
+      stringValuesOf(parsed),
+      latestContext(),
+      limits,
+    ),
+    mode: live.mode,
+  };
 }

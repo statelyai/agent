@@ -7,7 +7,9 @@
  * on `refunded` directly — it routes through the `checkingLimit` choice state,
  * so the policy, not the model, decides whether an amount can be auto-approved.
  * Over-limit amounts settle idle in `awaitingApproval`, waiting for a human
- * `APPROVE` / `DENY` event.
+ * `APPROVE` / `DENY` event. A request with no amount settles idle in
+ * `askingAmount` and asks once; the machine, not the model, bounds how many
+ * times it asks (`clarifications`).
  *
  * Mirrors the README quickstart, with the amount extracted by the decision
  * (carried on the chosen event) instead of supplied as input.
@@ -19,6 +21,8 @@ const agentSetup = setupAgent({
   context: z.object({
     request: z.string(),
     amount: z.number().nullable(),
+    /** Times the machine has asked for missing details; capped at one. */
+    clarifications: z.number(),
   }),
   input: z.object({ request: z.string() }),
   output: z.object({
@@ -32,6 +36,7 @@ const agentSetup = setupAgent({
     interaction: z
       .object({
         label: z.string(),
+        textEvent: z.string().optional(),
         events: z
           .record(
             z.string(),
@@ -49,15 +54,17 @@ const agentSetup = setupAgent({
     NEEDS_DETAILS: z.object({}),
     APPROVE: z.object({}),
     DENY: z.object({}),
+    /** The customer's reply to "how much?" — free text the model re-reads. */
+    DETAILS: z.object({ text: z.string() }),
   },
-  // `awaitingApproval` is an idle human-wait state — declare it as the suspend
-  // signal so runAgent settles idle deterministically instead of timing out.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
+  // Human-wait states carry this tag — declare it as the suspend signal so
+  // runAgent settles idle deterministically instead of timing out.
+  isIdle: (snapshot) => snapshot.hasTag("awaiting-human"),
 });
 
 export const refundMachine = agentSetup.createMachine({
   id: "refund",
-  context: ({ input }) => ({ request: input.request, amount: null }),
+  context: ({ input }) => ({ request: input.request, amount: null, clarifications: 0 }),
   initial: "deciding",
   states: {
     deciding: {
@@ -84,7 +91,29 @@ export const refundMachine = agentSetup.createMachine({
           target: "awaitingApproval",
           context: ({ event }) => ({ amount: event.amount }),
         },
-        NEEDS_DETAILS: { target: "needsDetails" },
+        // Ask once. A second NEEDS_DETAILS ends the run: the bound is the
+        // machine's, so the model cannot keep the customer in a loop.
+        NEEDS_DETAILS: ({ context }) =>
+          context.clarifications < 1
+            ? { target: "askingAmount", context: { clarifications: context.clarifications + 1 } }
+            : { target: "needsDetails" },
+      },
+    },
+    // Idle: the customer left out the amount. Free text comes back as DETAILS
+    // and the model reads the request again with the reply appended.
+    askingAmount: {
+      tags: ["awaiting-human"],
+      meta: {
+        interaction: {
+          label: "How much was the charge? Reply with the amount.",
+          textEvent: "DETAILS",
+        },
+      },
+      on: {
+        DETAILS: ({ context, event }) => ({
+          target: "deciding",
+          context: { request: `${context.request}\nCustomer added: ${event.text}` },
+        }),
       },
     },
     // The policy gate. A choice state is a pure machine decision: no model runs
@@ -97,7 +126,7 @@ export const refundMachine = agentSetup.createMachine({
     // Idle: waits for a human. `meta.interaction` labels the prompt; the legal
     // events (APPROVE / DENY) come from the snapshot via getAcceptedEvents.
     awaitingApproval: {
-      tags: ["awaiting-approval"],
+      tags: ["awaiting-human"],
       meta: {
         interaction: {
           label: "Amount exceeds the $100 auto-refund limit. Approve or deny.",

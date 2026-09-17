@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createWebSocketTransport } from "@statelyai/sdk";
+import { StateOutline } from "@/components/state-outline";
 
 export type LiveWs = { relayUrl: string; roomId: string };
 
@@ -29,6 +30,13 @@ type VizPanelProps = {
   /** The inspection relay was reached for and never became available. */
   inspectionUnavailable?: boolean;
   /**
+   * Plain-JSON machine config for the static outline shown when the relay is
+   * unavailable. Null when the selected machine has no JSON view.
+   */
+  outlineConfig?: Record<string, unknown> | null;
+  /** The latest snapshot `value` of the run, for the outline's active state. */
+  outlineValue?: unknown;
+  /**
    * Live inspection relay. The panel joins the room as a viewer purely to
    * mirror the stream to `onSystemMessage` — the /inspect page connects to the
    * relay itself for rendering.
@@ -50,19 +58,36 @@ export function VizPanel({
   title,
   hasMachine,
   inspectionUnavailable = false,
+  outlineConfig = null,
+  outlineValue = null,
   liveWs,
   liveUrl,
   onSystemMessage,
 }: VizPanelProps) {
+  // The server may reach the relay while this browser cannot (a corporate
+  // proxy, an offline demo). The viewer socket below is the canary: if it is
+  // not ready within a few seconds, or errors, the embed would be blank too,
+  // so the static outline takes the pane instead.
+  const [socketUnavailable, setSocketUnavailable] = useState(false);
+
   // The hosted /inspect page renders the system; this socket exists only so
   // the chat's transition log can follow the same run.
   useEffect(() => {
     if (!liveWs) return;
+    setSocketUnavailable(false);
     const transport = createWebSocketTransport({
       url: liveWs.relayUrl,
       role: "viewer",
       metadata: { name: "Stately Agent Lab" },
     });
+    const deadline = window.setTimeout(() => {
+      if (!transport.ready) setSocketUnavailable(true);
+    }, 6000);
+    const unsubscribeReady = transport.onReady(() => {
+      window.clearTimeout(deadline);
+      setSocketUnavailable(false);
+    });
+    const unsubscribeError = transport.onError?.(() => setSocketUnavailable(true));
     const unsubscribeMessage = transport.onMessage((protocolMessage) => {
       const message = protocolMessage as SystemMessage;
       if (message.type === "@statelyai.system.init") {
@@ -72,10 +97,15 @@ export function VizPanel({
       }
     });
     return () => {
+      window.clearTimeout(deadline);
+      unsubscribeReady();
+      unsubscribeError?.();
       unsubscribeMessage();
       transport.destroy();
     };
   }, [liveWs?.relayUrl, onSystemMessage]);
+
+  const showOutline = (inspectionUnavailable || socketUnavailable) && outlineConfig;
 
   return (
     <section className="viz-shell" aria-label={`Live statechart for ${title}`}>
@@ -87,6 +117,8 @@ export function VizPanel({
             <strong>No machine to inspect</strong>
             <p>This example does not export a state machine from its index.ts.</p>
           </div>
+        ) : showOutline ? (
+          <StateOutline title={title} config={outlineConfig} value={outlineValue} />
         ) : liveUrl ? (
           <iframe
             className="viz-embed"
@@ -98,9 +130,7 @@ export function VizPanel({
         ) : inspectionUnavailable ? (
           <div className="viz-state" role="status">
             <strong>Live inspection unavailable</strong>
-            <p>
-              The demo could not reach the inspection relay, so this machine is not visualized.
-            </p>
+            <p>The demo could not reach the inspection relay, so this machine is not visualized.</p>
           </div>
         ) : (
           <div className="viz-state" role="status">

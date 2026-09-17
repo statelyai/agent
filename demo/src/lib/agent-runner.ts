@@ -11,11 +11,7 @@
  * `*Run` functions directly and inject scripted executors — no API key, no
  * network.
  */
-import {
-  runAgent,
-  type AgentRequestExecutors,
-  type RunAgentResult,
-} from "@statelyai/agent";
+import { runAgent, type AgentRequestExecutors, type RunAgentResult } from "@statelyai/agent";
 import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
 import { maybeCreateRunInspection } from "./inspection.server";
 import { createTraceRecorder, describeIdle, type TraceEntry } from "./machine-chat.server";
@@ -197,7 +193,11 @@ function describeResult(scenarioId: ScenarioId, result: RunAgentResult<AnyStateM
   if (result.status === "idle") {
     const context = result.snapshot.context as Record<string, unknown>;
     if (scenarioId === "approval") return String(context.draft ?? "Draft ready for review.");
-    if (scenarioId === "refund") return "Amount exceeds the auto-refund limit. Awaiting approval.";
+    if (scenarioId === "refund") {
+      return result.snapshot.value === "askingAmount"
+        ? "No amount in the request. Asking the customer how much was charged."
+        : "Amount exceeds the auto-refund limit. Awaiting approval.";
+    }
     return "Waiting for input.";
   }
   return "The run ended with an error.";

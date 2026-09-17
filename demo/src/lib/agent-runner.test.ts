@@ -41,10 +41,28 @@ describe("scenario outcomes (scripted)", () => {
     expect((second.output as { outcome: string }).outcome).toBe("approved");
   });
 
-  test("refund with no amount asks for details", async () => {
-    const result = await start("refund", "I want my money back.");
-    expect(result.status).toBe("done");
-    expect((result.output as { outcome: string }).outcome).toBe("needs-details");
+  test("refund with no amount asks once, then decides on the reply", async () => {
+    const first = await start("refund", "I want my money back.");
+    expect(first.status).toBe("idle");
+    expect(first.idle?.textEvent).toEqual({ type: "DETAILS", field: "text" });
+    expect(first.idle?.prompt).toContain("How much");
+    const second = await resume("refund", first.idle!.snapshot, {
+      type: "DETAILS",
+      text: "It was $60.",
+    });
+    expect(second.status).toBe("done");
+    expect((second.output as { outcome: string; amount: number }).outcome).toBe("refunded");
+    expect((second.output as { amount: number }).amount).toBe(60);
+  });
+
+  test("refund gives up after one unanswered clarification", async () => {
+    const first = await start("refund", "I want my money back.");
+    const second = await resume("refund", first.idle!.snapshot, {
+      type: "DETAILS",
+      text: "I don't remember.",
+    });
+    expect(second.status).toBe("done");
+    expect((second.output as { outcome: string }).outcome).toBe("needs-details");
   });
 
   test("an event the snapshot does not accept is ignored, leaving the state put", async () => {
