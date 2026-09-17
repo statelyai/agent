@@ -621,20 +621,30 @@ export function DemoShell() {
       : null;
   const liveWs = inspection;
 
-  // Fallback outline: the JSON view of the machine (scenarios always have
-  // one; an example has one when its machine was lowered from config) and
-  // the latest state the run reached.
+  // Without live inspection the pane draws the machine itself: the SDK embed
+  // takes the machine's source (examples) or JSON config (scenarios), and the
+  // plain outline is the last resort. Both light the latest settled step.
+  const machineConfig: unknown = isScenario
+    ? scenarioVizConfig[scenario.id]
+    : (activeMachine?.vizConfig ?? null);
   const outlineConfig = isScenario
     ? scenarioVizConfig[scenario.id]
     : activeMachine && typeof activeMachine.vizConfig === "object"
       ? activeMachine.vizConfig
       : null;
-  const outlineValue = (() => {
+  const latestStep = (() => {
     for (let index = turns.length - 1; index >= 0; index--) {
       const turn = turns[index];
       if (turn.status !== "ready" || !turn.result) continue;
       const last = turn.result.trace[turn.result.trace.length - 1];
-      if (last) return last.value;
+      if (!last) continue;
+      const status =
+        turn.result.status === "done"
+          ? "done"
+          : turn.result.status === "error"
+            ? "error"
+            : "active";
+      return { value: last.value, context: last.context, event: last.event, status } as const;
     }
     return null;
   })();
@@ -644,8 +654,11 @@ export function DemoShell() {
       title={headerName}
       hasMachine={isScenario || !!activeMachine?.vizConfig}
       inspectionUnavailable={inspectionChecked && !inspection}
+      machineKey={inspectKey ?? ""}
+      machineConfig={machineConfig}
       outlineConfig={outlineConfig}
-      outlineValue={outlineValue}
+      step={latestStep}
+      theme={theme}
       liveWs={liveWs}
       liveUrl={liveUrl}
       onSystemMessage={handleSystemMessage}
