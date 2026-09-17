@@ -111,7 +111,7 @@
     "check:dts": "tsc -p fixtures/dts-consumer/tsconfig.json",
     "test": "vitest",
     "test:live": "LIVE_TESTS=1 vitest --run",
-    "test:ci": "vitest --run && pnpm run test:cloudflare && pnpm run build && pnpm --filter @statelyai/agent-demo test",
+    "test:ci": "vitest --run && pnpm run build && pnpm run test:cloudflare && pnpm --filter @statelyai/agent-demo test",
     "prepublishOnly": "tsdown",
     "changeset": "changeset",
     "release": "changeset publish",
