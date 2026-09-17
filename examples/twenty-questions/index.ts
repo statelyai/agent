@@ -34,7 +34,7 @@
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   type AgentMessage,
   assistantMessage,
@@ -87,9 +87,9 @@ const guessFeedbackClassificationSchema = z.object({
   reasoning: z.string(),
 });
 
-const models = defineModels({
+const models = {
   quick: openai("gpt-5.4-mini"),
-});
+};
 
 export const twentyQuestionsSchemas = createAgentSchemas({
   meta: interactionMetaSchema,

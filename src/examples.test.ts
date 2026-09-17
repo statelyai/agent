@@ -29,7 +29,7 @@ describe("curated XState setup examples", () => {
           calls.push(request);
           const satisfied = calls.filter((call) => call.system?.includes("Evaluate")).length > 1;
           return {
-            output: {
+            result: {
               satisfied,
               missing: satisfied ? [] : ["recipient"],
               questions: satisfied ? [] : ["Who should receive it?"],
@@ -39,7 +39,7 @@ describe("curated XState setup examples", () => {
         draftEmail: draftEmail.withExecutor(async ({ request }) => {
           calls.push(request);
           return {
-            output: {
+            result: {
               to: "riley@example.com",
               subject: "Thanks for meeting",
               body: "Hi Riley, thanks for meeting today.",
@@ -207,10 +207,10 @@ describe("curated XState setup examples", () => {
         tellJoke: tellJokeLogic.withExecutor(async ({ input }) => {
           const joke = `joke ${jokes.length + 1} about ${input.topic}`;
           jokes.push(joke);
-          return { output: joke };
+          return { result: joke };
         }),
         rateJoke: rateJokeLogic.withExecutor(async () => ({
-          output: { rating: jokes.length === 1 ? 3 : 9, explanation: "because" },
+          result: { rating: jokes.length === 1 ? 3 : 9, explanation: "because" },
         })),
       },
     });
@@ -226,7 +226,7 @@ describe("curated XState setup examples", () => {
     const result = await runAgent(machine, {
       input: { topic: "state machines" },
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide: async (request) => {
           decisionPrompts.push(request.prompt ?? "");
           return { event: { type: "END" } };
@@ -260,7 +260,7 @@ describe("curated XState setup examples", () => {
     const result = await runAgent(machine, {
       input: { topic: "state machines" },
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide: async () => {
           decisions += 1;
           return { event: { type: "TELL_ANOTHER" } };

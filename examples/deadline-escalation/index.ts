@@ -95,7 +95,7 @@ export function runDeadlineEscalationExample(
   return runAgent(deadlineEscalationMachine, {
     input: { requestId: "proposal-1", task: "Schedule a maintenance window", deadline: 1000 },
     executors: {
-      generateText: async () => ({ output: "Proposed maintenance: Saturday, 09:00 UTC." }),
+      generateText: async () => ({ result: "Proposed maintenance: Saturday, 09:00 UTC." }),
     },
     ...options,
   });

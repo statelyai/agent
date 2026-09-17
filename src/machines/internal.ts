@@ -175,7 +175,7 @@ export function entrySrc(name: string, entry: PresetEntry): string {
 
 /**
  * The value an entry's invoke produced: a child machine's output as-is, or the
- * validated `result` off the `{ result, messages }` envelope a text request
+ * validated `result` off the `{ result, messages }` a text request
  * resolves with. @internal
  */
 export function entryOutput(entry: PresetEntry, output: unknown): unknown {

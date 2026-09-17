@@ -59,7 +59,7 @@ describe("provideExecutors", () => {
     const bound = provideExecutors(machine, {
       generateText: async (request) => {
         seen.push(request.prompt ?? "");
-        return { output: "a draft about cats" };
+        return { result: "a draft about cats" };
       },
     });
 
@@ -103,11 +103,11 @@ describe("provideExecutors", () => {
     const bound = provideExecutors(
       machine,
       {
-        generateText: async () => ({ output: "" }),
+        generateText: async () => ({ result: "" }),
         streamText: async (_request, info) => {
           info?.onChunk?.("he");
           info?.onChunk?.("llo");
-          return { output: "hello" };
+          return { result: "hello" };
         },
       },
       { onChunk: (chunk) => chunks.push(chunk) },
@@ -145,7 +145,7 @@ describe("provideExecutors", () => {
     });
 
     const bound = provideExecutors(machine, {
-      generateText: async () => ({ output: "" }),
+      generateText: async () => ({ result: "" }),
       decide: async () => ({ event: { type: "ATTACK" } }),
     });
 
@@ -178,7 +178,7 @@ describe("provideExecutors", () => {
       },
     });
 
-    expect(() => provideExecutors(machine, { generateText: async () => ({ output: "" }) })).toThrow(
+    expect(() => provideExecutors(machine, { generateText: async () => ({ result: "" }) })).toThrow(
       /no 'decide' executor/,
     );
   });
@@ -214,9 +214,9 @@ describe("provideExecutors", () => {
     // untouched rather than rebinding it to `executors.generateText`.
     const bound = provideExecutors(
       machine,
-      { generateText: async () => ({ output: "from executors.generateText" }) },
+      { generateText: async () => ({ result: "from executors.generateText" }) },
       {
-        actors: { draftText: draftText.withExecutor(async () => ({ output: "overridden" })) },
+        actors: { draftText: draftText.withExecutor(async () => ({ result: "overridden" })) },
       },
     );
 
@@ -262,11 +262,11 @@ describe("provideExecutors onTrace / traceTransitions", () => {
   };
 
   const streamExecutors = () => ({
-    generateText: async () => ({ output: "" }),
+    generateText: async () => ({ result: "" }),
     streamText: async (_request: unknown, info?: { onChunk?: (chunk: string) => void }) => {
       info?.onChunk?.("he");
       info?.onChunk?.("llo");
-      return { output: "hello" };
+      return { result: "hello" };
     },
   });
 
@@ -361,7 +361,7 @@ describe("provideExecutors onTrace / traceTransitions", () => {
     const bound = provideExecutors(
       machine,
       {
-        generateText: async () => ({ output: "ok" }),
+        generateText: async () => ({ result: "ok" }),
       } as never,
       { onTrace: push },
     );
@@ -463,7 +463,7 @@ describe("provideExecutors + '@agent.usage'", () => {
     });
 
   const usageExecutors = {
-    generateText: async () => ({ output: "a fact", usage: { totalTokens: 400, inputTokens: 300 } }),
+    generateText: async () => ({ result: "a fact", usage: { totalTokens: 400, inputTokens: 300 } }),
   };
 
   test("delivers a settled call's usage to the invoking machine actor, so a guard can stop it", async () => {
@@ -669,7 +669,7 @@ describe("provideExecutors recursive child binding", () => {
     const bound = provideExecutors(buildParent(), {
       generateText: async (request: { model: string }) => {
         models.push(request.model);
-        return { output: "written by the grandchild" };
+        return { result: "written by the grandchild" };
       },
     } as never);
 
@@ -686,7 +686,7 @@ describe("provideExecutors recursive child binding", () => {
     const traced: string[] = [];
     const bound = provideExecutors(
       buildParent(),
-      { generateText: async () => ({ output: "ok" }) } as never,
+      { generateText: async () => ({ result: "ok" }) } as never,
       { onTrace: (event) => traced.push(event.type) },
     );
 
@@ -761,7 +761,7 @@ describe("provideExecutors recursive child binding", () => {
 
     // Passing generateText is not enough: the child needs streamText.
     expect(() =>
-      provideExecutors(parent, { generateText: async () => ({ output: "x" }) } as never),
+      provideExecutors(parent, { generateText: async () => ({ result: "x" }) } as never),
     ).toThrow(
       /provideExecutors: actor source 'child > streamLogic' is a streaming text source but no 'streamText' executor/,
     );

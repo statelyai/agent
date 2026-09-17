@@ -48,7 +48,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -68,9 +68,9 @@ const todoSchema = z.object({
 
 type Todo = z.infer<typeof todoSchema>;
 
-const models = defineModels({
+const models = {
   quick: openai("gpt-5.4-mini"),
-});
+};
 
 /** Events one command may apply before only DONE / QUIT stay legal. */
 export const MAX_STEPS_PER_COMMAND = 6;

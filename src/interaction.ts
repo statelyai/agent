@@ -37,21 +37,26 @@ export type AgentInteractionEventMeta =
       event?: Record<string, unknown>;
     };
 
-/** The `interaction` descriptor {@link getInteraction} reads off a state's meta. */
-export interface AgentInteractionDescriptor {
+/**
+ * The `interaction` descriptor {@link getInteraction} reads off a state's meta.
+ * `TEvent` is the machine's event-type union, so a choice or `textEvent` that
+ * names an event the machine never declared is a compile error.
+ */
+export interface AgentInteractionDescriptor<TEvent extends string = string> {
   /** Label text, or a function of the machine context. `{path.to.field}` interpolates. */
   label?: string | ((args: { context: any }) => string);
-  events?: Record<string, AgentInteractionEventMeta>;
-  textEvent?: string;
+  events?: { [K in TEvent]?: AgentInteractionEventMeta };
+  textEvent?: TEvent;
 }
 
 /**
- * The state-meta shape the interaction protocol reads. Use it as the `meta`
- * type when the machine's only metadata is an interaction; see
- * {@link interactionMetaSchema} for the runtime schema.
+ * The state-meta shape the interaction protocol reads. `setupAgent` types
+ * every state's `meta` as this by default, with `TEvent` narrowed to the
+ * machine's declared events; see {@link interactionMetaSchema} for the runtime
+ * schema when a machine declares its own `meta` schema.
  */
-export interface AgentInteractionMeta {
-  interaction?: AgentInteractionDescriptor;
+export interface AgentInteractionMeta<TEvent extends string = string> {
+  interaction?: AgentInteractionDescriptor<TEvent>;
 }
 
 function issue(message: string, path: (string | number)[]) {
@@ -83,9 +88,10 @@ function validateEventMeta(value: unknown, path: (string | number)[]) {
  * A {@link StandardSchemaV1} for the state metadata {@link getInteraction}
  * reads: an object whose optional `interaction` declares a `label` (a string
  * with `{context.path}` interpolation, or a function of the context), an
- * `events` map of choices, and a `textEvent` for free-text answers. Pass it
- * straight to `createAgentSchemas({ meta: interactionMetaSchema })` instead of
- * restating the shape per machine.
+ * `events` map of choices, and a `textEvent` for free-text answers. This is
+ * the default `meta` type `setupAgent` gives a machine; pass it to
+ * `createAgentSchemas({ meta: interactionMetaSchema })` only when building a
+ * schema pack by hand.
  */
 export const interactionMetaSchema: StandardSchemaV1<AgentInteractionMeta> = {
   "~standard": {
@@ -173,7 +179,10 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
       ? interaction.label({ context: snapshot.context })
       : (interaction.label ?? "");
   const events = Object.entries(interaction.events ?? {})
-    .filter(([type]) => accepted.has(type))
+    .filter(
+      (entry): entry is [string, AgentInteractionEventMeta] =>
+        entry[1] !== undefined && accepted.has(entry[0]),
+    )
     .map(([type, config]) => {
       const descriptor = typeof config === "string" ? { label: config } : config;
       return [type, descriptor] as const;

@@ -284,7 +284,7 @@ describe("serializeTraceEvent", () => {
     const trace: AgentTraceEvent<typeof machine>[] = [];
     const result = await runAgent(machine, {
       onTrace: (event) => trace.push(event),
-      executors: { generateText: async () => ({ output: "a draft", raw: { provider: {} } }) },
+      executors: { generateText: async () => ({ result: "a draft", raw: { provider: {} } }) },
     });
 
     expect(result.status).toBe("done");

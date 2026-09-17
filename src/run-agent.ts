@@ -191,7 +191,7 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
       output: unknown;
       raw: unknown;
       /** The model's reasoning, lifted off the raw executor result when the
-       * request opted into the structured-output envelope's `reasoning` field.
+       * request opted into the provider output's `reasoning` field.
        * Present only when the executor surfaced a string `reasoning`. */
       reasoning?: string;
       /** This call's token usage, lifted off the raw executor result's `usage`.
@@ -526,7 +526,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * result (tool calls, usage, …) — the seam for tracing/observability and
    * event-sourced replay logging.
    */
-  onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
+  onResult?: (request: AgentStepRequest, result: { result: unknown; raw: unknown }) => void;
   /** Fires a single ordered stream of run/request/chunk/transition/emit/end events. Intended for eval traces, JSONL logs, and adapter-owned telemetry/exporters. */
   onTrace?: (event: AgentTraceEvent<TMachine>) => void;
   /**
@@ -1095,7 +1095,7 @@ interface TraceSinks {
   /** Envelope-stamping trace sink (run-scoped on the runAgent path, per-root-actor on the provide path). */
   onTrace?: (payload: AgentTraceEventPayload, self?: BoundActorSelf) => void;
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
-  onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
+  onResult?: (request: AgentStepRequest, result: { result: unknown; raw: unknown }) => void;
   onTransition?: (
     snapshot: SnapshotFrom<AnyStateMachine>,
     event: EventFromLogic<AnyStateMachine>,
@@ -1122,7 +1122,7 @@ function createTraceDispatch(sinks: TraceSinks): TraceDispatch {
         sinks.onChunk?.(payload.chunk, { request: payload.request });
         return;
       case "request.end":
-        sinks.onResult?.(payload.request, { output: payload.output, raw: payload.raw });
+        sinks.onResult?.(payload.request, { result: payload.output, raw: payload.raw });
         sinks.onTrace?.(payload, self);
         return;
       case "machine.transition":
@@ -1220,8 +1220,8 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
       });
       const output = await normalizeGeneratorResult(raw, id);
 
-      // Lift `reasoning` off the raw executor result (structured-output
-      // envelope opt-in) onto the request.end trace — never into machine output.
+      // Lift `reasoning` off the raw executor result (the provider output's
+      // opt-in field) onto the request.end trace — never into machine output.
       const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
       const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
 
@@ -1256,7 +1256,7 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
         self,
       );
 
-      return { output, messages: responseMessagesOf(raw) };
+      return { result: output, messages: responseMessagesOf(raw) };
     } catch (error) {
       runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
       throw error;
@@ -1806,7 +1806,7 @@ function rebindChildMachine(
  * console.log(r.output);
  * ```
  *
- * Each executor is a plain function returning an `{ output }` envelope, or
+ * Each executor is a plain function returning `{ result }` (plus optional `messages`/`usage`), or
  * an adapter's set: `createAiSdkExecutors` from '@statelyai/agent/ai-sdk' or
  * `createOpenAiExecutors` from '@statelyai/agent/openai' supply all three.
  */

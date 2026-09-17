@@ -19,10 +19,10 @@ import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { runAgent } from "@statelyai/agent";
 import { createToolLoopMachine } from "@statelyai/agent/machines";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
 
 // Model IDs here are illustrative; substitute your provider's current models.
-const models = defineModels({ quick: openai("gpt-5.4-mini") });
+const models = { quick: openai("gpt-5.4-mini") };
 
 const calculate = tool({
   description: "Evaluate an arithmetic expression.",

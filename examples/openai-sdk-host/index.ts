@@ -20,7 +20,7 @@
  * `stream_options.include_usage`.
  *
  * The adapter's `streamText` is deliberately TEXT-ONLY: it sends no tools and
- * no `response_format`, because a chunk-by-chunk structured envelope has
+ * no `response_format`, because a chunk-by-chunk structured object has
  * nothing useful to hand `onChunk` mid-stream. A request that declares tools
  * or a structured output schema is rejected with a message pointing at
  * `generateText`, rather than silently returning unstructured text.

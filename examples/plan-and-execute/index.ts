@@ -38,16 +38,16 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const stepSchema = z.object({ id: z.string(), question: z.string() });
 const planSchema = z.object({ steps: z.array(stepSchema) });
 
-export const models = defineModels({
+const models = {
   planner: openai("gpt-5.4-mini"),
   worker: openai("gpt-5.4-mini"),
   solver: openai("gpt-5.4-mini"),
-});
+};
 
 /** Hard cap on plan steps the loop will run, whatever the planner returns. */
 export const MAX_STEPS = 4;

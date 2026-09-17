@@ -27,7 +27,7 @@ function createMockReferee(replies: boolean[]) {
   const generateText: AgentRequestExecutor = async (request) => {
     prompts.push(request.prompt ?? "");
     const playAgain = replies[prompts.length - 1] ?? false;
-    return { output: { playAgain, reasoning: "scripted" } };
+    return { result: { playAgain, reasoning: "scripted" } };
   };
   return { generateText, prompts };
 }

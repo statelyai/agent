@@ -62,7 +62,7 @@ function mockExecutors(
   const queue = [...events];
   return {
     generateText: async (request: { name?: string }) => {
-      if (request.name === "triageTicket") return { output: TRIAGE };
+      if (request.name === "triageTicket") return { result: TRIAGE };
       throw new Error(`unexpected generateText request: ${request.name}`);
     },
     decide: async () => ({ event: queue.shift()! }),

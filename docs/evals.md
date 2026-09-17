@@ -7,7 +7,7 @@ Agent requests are independently executable, while the machine gives them meanin
 Any function satisfies an executor slot, so a one-off stand-in needs no helper:
 
 ```ts no-check
-executors: { generateText: async () => ({ output: "a draft" }) }
+executors: { generateText: async () => ({ result: "a draft" }) }
 ```
 
 ## Scripted executors
@@ -17,8 +17,8 @@ executors: { generateText: async () => ({ output: "a draft" }) }
 ```ts no-check
 const scripted = createScriptedExecutors({
   text: {
-    evaluatePrompt: [{ output: assessment }],
-    draftEmail: [{ output: draft }]
+    evaluatePrompt: [assessment],
+    draftEmail: [draft]
   },
   decisions: {
     chooseRoute: [{ type: "DRAFT" }]
@@ -35,7 +35,7 @@ const result = await runAgent(machine, {
 });
 ```
 
-`scripted.calls` records ordered request names, kinds, inputs, and request envelopes.
+`scripted.calls` records ordered request names, kinds, inputs, and the full requests.
 
 ### Script keys
 
@@ -80,7 +80,7 @@ text: {
 }
 ```
 
-An entry is read as the executor envelope instead only when its own keys are `output` plus, optionally, `usage` and `raw`. That is how an entry reports token usage, and it is why `{ output: assessment }` and `assessment` mean the same thing for any `assessment` that has no `output` key of its own. A structured request whose declared output is itself `{ output }` needs one more wrap: `{ output: { output: "…" } }`.
+An entry is read as an executor result instead only when its own keys are `result` plus, optionally, `messages`, `usage` and `raw`. That is how an entry reports token usage: `{ result: draft, usage: { totalTokens: 120 } }`. It is also why `{ result: assessment }` and `assessment` mean the same thing for any `assessment` that has no `result` key of its own. A structured request whose declared output is itself `{ result }` needs one more wrap: `{ result: { result: "…" } }`.
 
 An entry may also be a function of the request, which is how one script serves a machine that loops or branches: `text: { answer: [(request) => "Draft about " + request.prompt] }`.
 

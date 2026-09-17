@@ -31,7 +31,7 @@ import { z } from "zod";
 import { createAsyncLogic } from "xstate";
 import { openai } from "@ai-sdk/openai";
 import { runAgent, setupAgent, type AgentTextResult } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 /** How many repair rounds one run may spend before giving up. */
 export const MAX_REPAIRS = 2;
@@ -116,10 +116,10 @@ export const parseConfigActor = createAsyncLogic<GeneratedMachineConfig, { text:
   run: async ({ input }) => parseGeneratedConfig(input.text),
 });
 
-export const models = defineModels({
+const models = {
   author: openai("gpt-5.4-mini"),
   repairer: openai("gpt-5.4-mini"),
-});
+};
 
 const SHAPE_RULES = [
   "Reply with one fenced ```json code block and nothing else.",

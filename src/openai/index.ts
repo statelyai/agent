@@ -23,9 +23,9 @@ import type {
 } from "openai/resources/chat/completions/completions.js";
 import {
   AGENT_USAGE_TOKEN_FIELDS,
-  buildEnvelopeSchema,
+  providerOutputSchema,
   getAgentOutputMode,
-  parseStructuredEnvelope,
+  parseProviderOutput,
   type AgentCallUsage,
   type AgentFinishReason,
   type AgentRequestExecutorInfo,
@@ -408,13 +408,13 @@ function callSettings(
 }
 
 /**
- * Raw result shape from {@link OpenAiExecutors.generateText} — the `{ output }`
- * envelope (the validated structured object for structured-output requests, or
- * the model's text otherwise) plus the call metadata. Core only reads `output`; everything else flows
- * verbatim to `runAgent`'s `onResult(request, { raw })`.
+ * Raw result shape from {@link OpenAiExecutors.generateText} — `result` (the
+ * validated structured object for structured-output requests, or the model's
+ * text otherwise) plus the call metadata. Core reads `result` and `usage`;
+ * everything else flows verbatim to `runAgent`'s `onResult(request, { raw })`.
  */
 export type OpenAiGenerateResult = {
-  output: unknown;
+  result: unknown;
   /** The model's reasoning, present only when the request opted in via
    * `includeReasoning` and the model produced it. Never enters machine
    * context/output. */
@@ -430,7 +430,7 @@ export type OpenAiGenerateResult = {
 
 /** Raw result shape from {@link OpenAiExecutors.streamText} — the accumulated text once the stream finishes (chunks are delivered separately via `onChunk`), plus the stream's final usage/finish metadata. */
 export type OpenAiStreamResult = {
-  output: string;
+  result: string;
   /** Present when the stream carried a usage chunk (the adapter asks for one via `stream_options`). */
   usage?: AgentCallUsage;
   finishReason: AgentFinishReason;
@@ -540,7 +540,7 @@ function toToolContent(output: unknown): string {
  * same shape, different SDK underneath.
  *
  * Structured output uses `response_format: { type: 'json_schema' }` around the
- * uniform `{ result, reasoning? }` envelope, and decisions force a tool call
+ * `{ result, reasoning? }` provider output schema, and decisions force a tool call
  * with `tool_choice: 'required'`, one function tool per candidate event.
  *
  * @example
@@ -575,19 +575,19 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     } as ChatCompletionCreateParamsNonStreaming;
   };
 
-  // The JSON Schema for the `{ result, reasoning? }` envelope, or `undefined`
+  // The JSON Schema for the `{ result, reasoning? }` provider output, or `undefined`
   // when the request's schema doesn't expose the `~standard.jsonSchema`
   // extension — in which case the call falls back to plain text.
-  const envelopeSchema = async (request: AgentTextRequest) => {
+  const structuredSchema = async (request: AgentTextRequest) => {
     if (getAgentOutputMode(request.outputSchema) !== "structured") {
       return undefined;
     }
-    // THE structured-output envelope contract (see docs/hosts.md): send the
-    // declared schema wrapped as `{ result, reasoning? }` — a root object is
-    // universally accepted — then unwrap `.result` before returning, so the
-    // machine validates the bare schema it declared.
+    // The structured-output contract (see docs/hosts.md): send the declared
+    // schema wrapped as `{ result, reasoning? }` — a root object is universally
+    // accepted — and return the parsed `result`, which the machine validates
+    // against the bare schema it declared.
     return getJsonSchema(
-      buildEnvelopeSchema(request.outputSchema!, { reasoning: request.includeReasoning }),
+      providerOutputSchema(request.outputSchema!, { reasoning: request.includeReasoning }),
     );
   };
 
@@ -595,7 +595,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,
   ): Promise<OpenAiGenerateResult> => {
-    const jsonSchema = await envelopeSchema(request);
+    const jsonSchema = await structuredSchema(request);
     const responseFormat: Partial<ChatCompletionCreateParamsNonStreaming> = jsonSchema
       ? {
           response_format: {
@@ -677,9 +677,9 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       }
     }
 
-    // Validated unwrap of the `{ result, reasoning? }` envelope — no cast.
+    // Validated parse of the `{ result, reasoning? }` provider output — no cast.
     const unwrap = (content: string | null | undefined) =>
-      parseStructuredEnvelope(request, content ? JSON.parse(content) : undefined);
+      parseProviderOutput(request, content ? JSON.parse(content) : undefined);
 
     const choice = response.choices[0];
     const finishReason = toAgentFinishReason(choice?.finish_reason);
@@ -687,7 +687,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
 
     if (jsonSchema) {
       // A structured request that ran out of tokens has no usable output: the
-      // envelope never closed, and even a closed one only closed because the
+      // JSON object never closed, and even a closed one only closed because the
       // model stopped mid-thought. Either way, not a final answer for a
       // machine — `partialOutput` carries whatever text did arrive.
       if (finishReason === "length") {
@@ -695,7 +695,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       }
       const parsed = unwrap(content);
       return {
-        output: parsed.result,
+        result: parsed.result,
         ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
         ...usageField(usage),
         finishReason,
@@ -706,7 +706,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     // A text request that ran out of tokens still has its text. It comes back
     // with `finishReason: 'length'` — the machine decides what that is worth.
     return {
-      output: content ?? "",
+      result: content ?? "",
       ...usageField(usage),
       finishReason,
       raw: response,
@@ -718,7 +718,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     info?: AgentRequestExecutorInfo,
   ): Promise<OpenAiStreamResult> => {
     // Text-only by design: no tools, no `response_format`. A chunk-by-chunk
-    // structured envelope has nothing useful to hand `onChunk` mid-stream, so
+    // structured object has nothing useful to hand `onChunk` mid-stream, so
     // a request that needs either is refused rather than silently downgraded
     // to unstructured text.
     if (getAgentOutputMode(request.outputSchema) === "structured") {
@@ -768,7 +768,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       }
     }
 
-    return { output: text, ...usageField(toAgentCallUsage(usage)), finishReason, raw: last };
+    return { result: text, ...usageField(toAgentCallUsage(usage)), finishReason, raw: last };
   };
 
   const decide = async (

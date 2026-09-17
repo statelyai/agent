@@ -118,12 +118,12 @@ The `models` map pairs a short alias with a resolved model. Request and decision
 
 ```ts
 import { openai } from "@ai-sdk/openai";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import { } from "@statelyai/agent/ai-sdk";
 
-const models = defineModels({
+const models = {
   quick: openai("gpt-5.4-mini"),
   careful: openai("gpt-5.4"),
-});
+};
 
 const agentSetup = setupAgent({
   models,

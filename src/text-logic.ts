@@ -63,7 +63,7 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>, TMessage 
   /**
    * Opt-in reasoning for a structured-output request: when `true`, adapters add
    * an optional string `reasoning` property (listed BEFORE `result`) to the
-   * structured-output envelope schema, nudging the model to reason before
+   * provider output schema, nudging the model to reason before
    * committing to the result. The reasoning is surfaced on the executor's raw
    * result (never in machine context/output). Ignored for text-mode requests.
    *
@@ -188,15 +188,15 @@ export const AGENT_USAGE_TOKEN_FIELDS = [
  * Reads a settled call's per-call {@link AgentCallUsage} off a RAW executor
  * result's `usage` field, keeping only finite numbers — the same normalization
  * `runAgent` applies before it delivers `'@agent.usage'`. Returns `undefined`
- * when the result reports no usage at all. Works for our `{ output, usage }`
- * envelope, for a raw Vercel AI SDK result (its `LanguageModelUsage` carries
+ * when the result reports no usage at all. Works for our `{ result, usage }`
+ * shape, for a raw Vercel AI SDK result (its `LanguageModelUsage` carries
  * the same flat field names), and for any custom executor that follows the
  * shape.
  *
  * The seam for the step-loop path, where the host holds the raw result itself:
  *
  * ```ts
- * const { output, raw } = await executeAgentRequest(effect, executors);
+ * const { result, messages } = await executeAgentRequest(effect, executors);
  * const usage = getCallUsage(raw);
  * if (usage) append({ type: AGENT_USAGE_EVENT_TYPE, usage }); // journal + transition, like any event
  * append(effect.toDoneEvent(output));
@@ -240,7 +240,7 @@ export interface AgentTextResult<TOutput = unknown, TMessage = AgentMessage> {
 }
 
 /**
- * The response messages off an executor result envelope, or none. Fields
+ * The response messages off an executor result, or none. Fields
  * holding `undefined` are dropped on the way in: SDK message objects often
  * carry optional slots as explicit `undefined` (the AI SDK's
  * `providerOptions`, for one), and the messages now travel inside the
@@ -388,7 +388,7 @@ function createBuiltinTextActor(
       return validateSchemaSync(agentTextInputSchema, input);
     },
     async execute(input: AgentTextRequest, executors: AgentRequestExecutors) {
-      const { output, raw } = await executeAgentTextRequest(
+      const { result: output, raw } = await executeAgentTextRequest(
         mode,
         src,
         validateSchemaSync(agentTextInputSchema, input),
@@ -506,7 +506,7 @@ export interface TextLogicConfig<
   messages?: ResolveTextLogicValue<any[] | undefined, InferOutput<TInputSchema>>;
   tools?: ResolveTextLogicValue<AgentTools | undefined, InferOutput<TInputSchema>>;
   toolChoice?: ResolveTextLogicValue<AgentToolChoice | undefined, InferOutput<TInputSchema>>;
-  /** Opt into the structured-output envelope's `reasoning` field (see {@link AgentTextRequest.includeReasoning}). */
+  /** Opt into the provider output's `reasoning` field (see {@link AgentTextRequest.includeReasoning}). */
   includeReasoning?: ResolveTextLogicValue<boolean | undefined, InferOutput<TInputSchema>>;
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   maxOutputTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -529,7 +529,7 @@ export interface TextLogicExecuteArgs<TInput, TMetadata = Record<string, unknown
   emit: (emitted: EventObject) => void;
 }
 
-/** Host implementation bound to a specific {@link TextLogic} via `withExecutor`/`createTextLogic`'s second argument — resolves one text request to an `{ output }` envelope typed from the logic's output schema (`{ output: T }`). Passthrough fields (usage, raw, …) are allowed alongside `output`. */
+/** Host implementation bound to a specific {@link TextLogic} via `withExecutor`/`createTextLogic`'s second argument — resolves one text request to a `{ result }` typed from the logic's output schema (`{ result: T }`). Passthrough fields (messages, usage, raw, …) are allowed alongside `result`. */
 export type TextLogicExecutor<
   TInputSchema extends StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1,
@@ -681,7 +681,7 @@ export function createTextLogic<
     schemas,
     request,
     async execute(input: TInput, executors: AgentRequestExecutors) {
-      const { output, raw } = await executeAgentTextRequest(
+      const { result: output, raw } = await executeAgentTextRequest(
         config.mode ?? "generate",
         "textLogic",
         request(input),
@@ -710,7 +710,7 @@ export function createTextLogic<
  * {@link AgentRequestExecutor} (the `generateText`/`streamText` shape hosts
  * implement). Encapsulates the `withExecutor` idiom child agents repeat:
  * default the request's `tools` to `{}`, forward the actor `signal`, call the
- * executor, and return its `{ output }` envelope. Use this to share ONE
+ * executor, and return its `{ result }`. Use this to share ONE
  * executor across a parent and its nested children.
  *
  * @example
@@ -732,11 +732,11 @@ export function bindRequestExecutor<
   info?: Pick<AgentRequestExecutorInfo, "onChunk">,
 ): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
   return logic.withExecutor(async ({ request, signal }) => {
-    const { output } = await executor(
+    const { result, messages } = await executor(
       { ...request, tools: request.tools ?? {} } as AgentExecutorTextRequest,
       { signal, onChunk: info?.onChunk },
     );
-    return { output } as AgentRequestExecutorResult<InferOutput<TOutputSchema>>;
+    return { result, messages } as AgentRequestExecutorResult<InferOutput<TOutputSchema>>;
   });
 }
 
@@ -751,11 +751,13 @@ export function isTextLogic(value: unknown): value is TextLogic {
 }
 
 /**
- * The envelope an {@link AgentRequestExecutor} must return: `{ output }` where
- * `output` is the request's value (a text string or a structured object).
- * Passthrough fields (toolCalls, finishReason, raw, …) are allowed alongside
- * `output` and preserved on the raw result. {@link normalizeGeneratorResult}
- * unwraps `output`; a non-envelope return is a runtime error.
+ * What an {@link AgentRequestExecutor} returns: the same `{ result, messages }`
+ * shape the machine receives in the invoke's `onDone` (see
+ * {@link AgentTextResult}), with `messages` optional. `result` is the
+ * request's value (a text string or a structured object). Passthrough fields
+ * (toolCalls, finishReason, raw, …) are allowed alongside it and preserved on
+ * the raw result. {@link normalizeGeneratorResult} unwraps `result`; a return
+ * without it is a runtime error.
  *
  * `usage` is the one passthrough field core reads: report this call's tokens
  * there and `runAgent` folds them into the run's aggregated
@@ -763,8 +765,8 @@ export function isTextLogic(value: unknown): value is TextLogic {
  * toward `modelCalls`.
  */
 export type AgentRequestExecutorResult<TOutput = unknown, TMessage = unknown> = {
-  output: TOutput;
-  /** Framework-native response messages, preserved without normalization. */
+  result: TOutput;
+  /** The provider's response messages for this call (the assistant turn, tool calls and results). */
   messages?: TMessage[];
   /** This call's token usage, aggregated into the run result's {@link AgentUsage}. */
   usage?: AgentCallUsage;
@@ -831,8 +833,8 @@ export type AgentExecutorTextRequest<TMetadata = Record<string, unknown>> = Omit
 
 /**
  * Host implementation of one text call (`generateText` or `streamText`):
- * resolves a lowered {@link AgentExecutorTextRequest} to an `{ output }`
- * envelope (see {@link AgentRequestExecutorResult}). Adapters such as
+ * resolves a lowered {@link AgentExecutorTextRequest} to a `{ result, messages? }`
+ * (see {@link AgentRequestExecutorResult}). Adapters such as
  * `createAiSdkExecutors` and `createOpenAiExecutors` produce this shape; a
  * hand-written executor is a plain async function returning it.
  */
@@ -898,16 +900,16 @@ export function isStructuredOutputSchema(schema?: StandardSchemaV1): boolean {
   return getAgentOutputMode(schema) === "structured";
 }
 
-/** The unwrapped shape a {@link buildEnvelopeSchema} validate returns: the inner
+/** What a {@link providerOutputSchema} validate returns: the declared schema's
  * `result` value plus, when opted in and present, the model's `reasoning`. */
-export interface StructuredOutputEnvelope {
+export interface ProviderStructuredOutput {
   result: unknown;
   reasoning?: string;
 }
 
 /**
- * Builds the uniform structured-output envelope schema every structured request
- * is sent to the provider as: a root object `{ result: <inner> }`, plus — when
+ * Builds the schema every structured request is sent to the provider as: a
+ * root object `{ result: <inner> }` wrapping the declared schema, plus — when
  * `options.reasoning` is `true` — an optional string `reasoning` property listed
  * BEFORE `result` (property order nudges the model to reason first). This is THE
  * wire contract for structured output: a root object is universally accepted as
@@ -915,17 +917,16 @@ export interface StructuredOutputEnvelope {
  * reject.
  *
  * The returned {@link StandardSchemaV1} validates the `{ reasoning?, result }`
- * envelope (unwrapping `result` through the original schema, capturing a string
- * `reasoning` when present) and exposes the enveloped JSON Schema. Adapters read
- * `.result` off the provider output before the machine validates it — so this is
- * transparent: user-facing output types stay the declared (un-enveloped) schema,
- * and `reasoning` is surfaced only on the raw executor result, never in machine
- * context/output.
+ * object (validating `result` through the original schema, capturing a string
+ * `reasoning` when present) and exposes the wrapped JSON Schema. An executor
+ * returns the parsed `{ result, reasoning? }` as-is: `result` is what the
+ * machine validates against the declared schema, and `reasoning` stays on the
+ * raw executor result, never in machine context/output.
  */
-export function buildEnvelopeSchema(
+export function providerOutputSchema(
   inner: StandardSchemaV1,
   options: { reasoning?: boolean } = {},
-): StandardSchemaV1<StructuredOutputEnvelope> {
+): StandardSchemaV1<ProviderStructuredOutput> {
   const includeReasoning = options.reasoning === true;
   const buildJson = (innerJson: unknown) => ({
     type: "object",
@@ -945,7 +946,7 @@ export function buildEnvelopeSchema(
       vendor: "statelyai-agent",
       validate(value: unknown) {
         if (!value || typeof value !== "object" || !("result" in value)) {
-          return { issues: [{ message: "Expected a { result } envelope object" }] };
+          return { issues: [{ message: "Expected a { result } object" }] };
         }
         const innerResult = inner["~standard"].validate((value as { result: unknown }).result);
         if (innerResult instanceof Promise) {
@@ -954,12 +955,12 @@ export function buildEnvelopeSchema(
         if (innerResult.issues) {
           return innerResult;
         }
-        const envelope: StructuredOutputEnvelope = { result: innerResult.value };
+        const parsed: ProviderStructuredOutput = { result: innerResult.value };
         const reasoning = (value as { reasoning?: unknown }).reasoning;
         if (typeof reasoning === "string") {
-          envelope.reasoning = reasoning;
+          parsed.reasoning = reasoning;
         }
-        return { value: envelope };
+        return { value: parsed };
       },
       jsonSchema: {
         input: () => {
@@ -968,27 +969,27 @@ export function buildEnvelopeSchema(
         },
       },
     },
-  } as StandardSchemaV1<StructuredOutputEnvelope>;
+  } as StandardSchemaV1<ProviderStructuredOutput>;
 }
 
 /**
- * Validates a raw provider value against the structured-output envelope for
+ * Validates a raw provider value against the provider output schema for
  * `request` and returns the unwrapped `{ result, reasoning? }` — the checked
- * replacement for `raw as StructuredOutputEnvelope` in hand-written hosts.
- * Pair with {@link buildEnvelopeSchema} (which produced the schema the
+ * replacement for `raw as ProviderStructuredOutput` in hand-written hosts.
+ * Pair with {@link providerOutputSchema} (which produced the schema the
  * provider was asked to satisfy).
  */
-export function parseStructuredEnvelope(
+export function parseProviderOutput(
   request: Pick<AgentTextRequest, "outputSchema" | "includeReasoning">,
   value: unknown,
-): StructuredOutputEnvelope {
+): ProviderStructuredOutput {
   if (!request.outputSchema) {
-    throw new Error("parseStructuredEnvelope: the request declares no outputSchema.");
+    throw new Error("parseProviderOutput: the request declares no outputSchema.");
   }
-  const envelope = buildEnvelopeSchema(request.outputSchema, {
+  const schema = providerOutputSchema(request.outputSchema, {
     reasoning: request.includeReasoning,
   });
-  return validateSchemaSync<StructuredOutputEnvelope>(envelope, value);
+  return validateSchemaSync<ProviderStructuredOutput>(schema, value);
 }
 
 /**
@@ -1008,7 +1009,7 @@ export async function executeAgentTextRequest(
   executors: Partial<AgentRequestExecutors>,
   tools: AgentTools = {},
   info?: AgentRequestExecutorInfo,
-): Promise<{ output: unknown; raw: unknown }> {
+): Promise<{ result: unknown; raw: unknown }> {
   const request = {
     ...input,
     name: input.name ?? id,
@@ -1033,13 +1034,13 @@ export async function executeAgentTextRequest(
 
   // The runtime object is a plain lowered request with `tools` merged in.
   const raw = await executor(request as AgentExecutorTextRequest, info);
-  return { output: await normalizeGeneratorResult(raw, id), raw };
+  return { result: await normalizeGeneratorResult(raw, id), raw };
 }
 
 /**
- * Unwraps an executor result into the request's final output: awaits and
- * returns `output` from the `{ output }` {@link AgentRequestExecutorResult}
- * envelope. Anything else is a runtime error naming `id`. This is
+ * Unwraps an executor result into the request's final value: awaits and
+ * returns `result` from the `{ result }` {@link AgentRequestExecutorResult}.
+ * Anything else is a runtime error naming `id`. This is
  * generator-result unwrapping only — decision results are extracted separately
  * by `resolveDecision`.
  *
@@ -1050,18 +1051,17 @@ export async function normalizeGeneratorResult(
   id = "text request",
 ): Promise<unknown> {
   const resolved = await result;
-  if (!resolved || typeof resolved !== "object" || !("output" in resolved)) {
+  if (!resolved || typeof resolved !== "object" || !("result" in resolved)) {
     throw invalidGeneratorResult(id);
   }
-  return await (resolved as { output: unknown }).output;
+  return await (resolved as { result: unknown }).result;
 }
 
 function invalidGeneratorResult(id: string): Error {
   return new Error(
     `Executor for '${id}' returned an invalid result: executors must return ` +
-      `{ output } (an envelope with the text string or structured object as ` +
-      `\`output\`, plus optional passthrough fields). Raw Vercel AI SDK ` +
-      `generateText/streamText results ({ text } or { textStream }) are also ` +
-      `accepted.`,
+      `{ result } (the text string or structured object as \`result\`, plus ` +
+      `optional \`messages\`, \`usage\` and other passthrough fields). Wrap a ` +
+      `raw SDK result with an adapter such as createAiSdkExecutors.`,
   );
 }

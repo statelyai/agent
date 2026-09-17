@@ -23,7 +23,7 @@ import type { ChosenEvent } from "./types.js";
 
 /**
  * A scripted `decide` answer: either the {@link ChosenEvent} itself (an object
- * with a string `type`), or the executor envelope `{ event, reason?, usage? }`
+ * with a string `type`), or the executor result `{ event, reason?, usage? }`
  * when the entry also reports a `reason` or token `usage`.
  */
 export type ScriptedDecisionValue =
@@ -48,13 +48,13 @@ export type ScriptedDecisionEntry =
  * object a structured request declares), or a function of the
  * {@link AgentTextRequest} returning one.
  *
- * An entry is taken as the raw executor envelope (instead of the value itself)
- * only when its OWN keys are an `output` plus, optionally, `usage`/`raw` —
- * that is how an entry reports token `usage`. Anything else, including an
- * object that merely happens to have an `output` key alongside its own data
- * (`{ output: 'draft', confidence: 0.9 }`), is the output value. For a
- * structured request whose declared output is exactly `{ output }` (or
- * `{ output, usage }`), wrap it once more: `{ output: { output: '…' } }`.
+ * An entry is taken as the executor result (instead of the value itself)
+ * only when its OWN keys are a `result` plus, optionally, `messages`/`usage`/
+ * `raw` — that is how an entry reports token `usage`. Anything else, including
+ * an object that merely happens to have a `result` key alongside its own data
+ * (`{ result: 'draft', confidence: 0.9 }`), is the output value. For a
+ * structured request whose declared output is exactly `{ result }` (or
+ * `{ result, usage }`), wrap it once more: `{ result: { result: '…' } }`.
  */
 export type ScriptedTextEntry =
   | ((request: AgentTextRequest, info?: AgentRequestExecutorInfo) => unknown)
@@ -145,37 +145,37 @@ function noAnswer(name: string, queues: Map<string, unknown>): Error {
   return new Error(`No scripted answer for request '${name}'. Known: ${known}`);
 }
 
-/** The only own keys an executor-result envelope carries. @internal */
-const TEXT_ENVELOPE_KEYS = new Set(["output", "usage", "raw"]);
+/** The only own keys an executor result carries. @internal */
+const TEXT_RESULT_KEYS = new Set(["result", "messages", "usage", "raw"]);
 
 /**
- * True when a scripted entry is the executor envelope rather than the output
- * value: it owns an `output` key and owns NOTHING outside the envelope's own
- * vocabulary. Bare `'output' in value` would swallow an output object's
- * siblings (`{ output: 'draft', confidence: 0.9 }` would lose `confidence`)
- * and would also match an inherited `output`. @internal
+ * True when a scripted entry is the executor result rather than the output
+ * value: it owns a `result` key and owns NOTHING outside the result's own
+ * vocabulary. Bare `'result' in value` would swallow an output object's
+ * siblings (`{ result: 'draft', confidence: 0.9 }` would lose `confidence`)
+ * and would also match an inherited `result`. @internal
  */
-function isTextEnvelope(value: Record<string, unknown>): boolean {
+function isTextResult(value: Record<string, unknown>): boolean {
   return (
-    Object.hasOwn(value, "output") && Object.keys(value).every((key) => TEXT_ENVELOPE_KEYS.has(key))
+    Object.hasOwn(value, "result") && Object.keys(value).every((key) => TEXT_RESULT_KEYS.has(key))
   );
 }
 
 /**
  * Resolves ONE scripted text entry to an executor result: a function entry is
- * called with the request, and the value is taken as the raw envelope only when
- * it is one (see {@link isTextEnvelope}). Shared with `runSeam`, whose routed
+ * called with the request, and the value is taken as the executor result only
+ * when it is one (see {@link isTextResult}). Shared with `runSeam`, whose routed
  * queues follow the same entry conventions. @internal
  */
 export async function resolveScriptedTextEntry(
   entry: ScriptedTextEntry,
   request: AgentTextRequest,
   info?: AgentRequestExecutorInfo,
-): Promise<{ output: unknown; usage?: AgentCallUsage }> {
+): Promise<{ result: unknown; usage?: AgentCallUsage }> {
   const value = typeof entry === "function" ? await entry(request, info) : entry;
-  return isRecord(value) && isTextEnvelope(value)
-    ? (value as { output: unknown; usage?: AgentCallUsage })
-    : { output: value };
+  return isRecord(value) && isTextResult(value)
+    ? (value as { result: unknown; usage?: AgentCallUsage })
+    : { result: value };
 }
 
 /**
@@ -193,9 +193,9 @@ export function describeText(request: AgentTextRequest): string {
  * with `runSeam`, whose scripted answers stream the same way. @internal
  */
 export function emitScriptedChunk(result: unknown, info?: AgentRequestExecutorInfo): void {
-  const output = isRecord(result) ? result["output"] : undefined;
-  if (typeof output === "string") {
-    info?.onChunk?.(output);
+  const text = isRecord(result) ? result["result"] : undefined;
+  if (typeof text === "string") {
+    info?.onChunk?.(text);
   }
 }
 
@@ -268,7 +268,7 @@ export function createScriptedExecutors(script: ScriptedExecutorsScript = {}): S
           typeof streamEntry === "function" ? await streamEntry(request, info) : streamEntry;
         const chunks = typeof resolved === "string" ? [resolved] : [...resolved];
         for (const chunk of chunks) info?.onChunk?.(chunk);
-        return withDefaultUsage({ output: chunks.join("") });
+        return withDefaultUsage({ result: chunks.join("") });
       }
       const result = await nextText("streamText", request, info);
       emitScriptedChunk(result, info);
@@ -283,7 +283,7 @@ export function createScriptedExecutors(script: ScriptedExecutorsScript = {}): S
       }
       const value = typeof entry === "function" ? await entry(request) : entry;
       // A string `type` wins: chosen events may legitimately carry an `event`
-      // payload field. Only an untyped object owning `event` is the envelope.
+      // payload field. Only an untyped object owning `event` is the executor result.
       const result =
         isRecord(value) &&
         typeof (value as Record<string, unknown>)["type"] !== "string" &&

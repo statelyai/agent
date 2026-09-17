@@ -7,7 +7,7 @@ test("runs one artifact through XState's transition/effect loop, across a persis
   const result = await runPortableXstateLoop("snapshots", {
     generateText: async (request) => {
       prompts.push(request.prompt ?? "");
-      return { output: "Snapshots make continuation explicit." };
+      return { result: "Snapshots make continuation explicit." };
     },
   });
 
@@ -23,7 +23,7 @@ test("runs one artifact through XState's transition/effect loop, across a persis
 
 test("the loop's stop condition is `isAgentIdle`, and `reviewing` satisfies it", () => {
   const machine = provideExecutors(portableLoopMachine, {
-    generateText: async () => ({ output: "draft" }),
+    generateText: async () => ({ result: "draft" }),
   });
   const reviewing = machine.resolveState({
     value: "reviewing",

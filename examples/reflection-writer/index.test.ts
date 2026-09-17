@@ -15,11 +15,11 @@ function scriptedGenerateText(scripts: {
     if (request.name === "writeEssay") {
       const essay = scripts.writer[cursors.writer] ?? scripts.writer[scripts.writer.length - 1];
       cursors.writer++;
-      return { output: essay };
+      return { result: essay };
     }
     const critique = scripts.critic[cursors.critic] ?? scripts.critic[scripts.critic.length - 1];
     cursors.critic++;
-    return { output: critique };
+    return { result: critique };
   };
 }
 
@@ -94,9 +94,9 @@ test("the critic grades against the strict rubric, so one draft is never enough"
   const result = await runReflectionWriterExample({
     topic: "Carbon tax versus cap-and-trade",
     generateText: async (request: { name?: string; system?: string }) => {
-      if (request.name === "writeEssay") return { output: drafts[cursors.writer++] };
+      if (request.name === "writeEssay") return { result: drafts[cursors.writer++] };
       critiqueSystems.push(request.system ?? "");
-      return { output: verdicts[cursors.critic++] };
+      return { result: verdicts[cursors.critic++] };
     },
   });
 
@@ -140,7 +140,7 @@ test("model failure ends in `failed`, still reporting the draft it had", async (
   // `failed`, which reports the draft in hand AND why the run stopped — a
   // caller can tell this apart from a run that finished normally.
   const generateText = async (request: { name?: string }) => {
-    if (request.name === "writeEssay") return { output: "the only draft" };
+    if (request.name === "writeEssay") return { result: "the only draft" };
     throw new Error("critic model unavailable");
   };
 

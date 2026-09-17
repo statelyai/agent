@@ -20,7 +20,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -43,10 +43,10 @@ export const ORDERS: Record<string, { customer: string; total: number; item: str
   B2002: { customer: "Alan Turing", total: 60, item: "Mechanical keyboard" },
 };
 
-export const models = defineModels({
+const models = {
   triageModel: openai("gpt-5.4-mini"),
   agent: openai("gpt-5.4-mini"),
-});
+};
 
 const triageSchema = z.object({
   category: z.enum(["refund", "question", "complaint"]),

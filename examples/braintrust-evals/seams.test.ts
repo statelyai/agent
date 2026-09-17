@@ -48,7 +48,7 @@ describe("seam evals", () => {
     const row = clarifySeam[0]!;
     // Candidate under test: an evaluator that waves the vague prompt through.
     const output = await runSeamCase(row.input, async () => ({
-      output: { satisfied: true, missing: [], questions: [] },
+      result: { satisfied: true, missing: [], questions: [] },
     }));
 
     expect(output.status).toBe("done");
@@ -64,7 +64,7 @@ describe("seam evals", () => {
   test("the state-path scorer reports where it diverged", async () => {
     const row = clarifySeam[0]!;
     const output = await runSeamCase(row.input, async () => ({
-      output: { satisfied: true, missing: [], questions: [] },
+      result: { satisfied: true, missing: [], questions: [] },
     }));
 
     expect(scoreSeamStatePath(output, row.expected).metadata.firstMiss).toMatchObject({
@@ -77,7 +77,7 @@ describe("seam evals", () => {
     const seen: string[] = [];
     const output = await runSeamCase(row.input, async (request) => {
       seen.push(request.model);
-      return { output: { to: "team@example.com", subject: "Ship", body: "The deploy is faster." } };
+      return { result: { to: "team@example.com", subject: "Ship", body: "The deploy is faster." } };
     });
 
     // One clarification round plus one draft: three model calls, one candidate.
@@ -91,7 +91,7 @@ describe("seam evals", () => {
     const output = await runSeamCase(row.input, async (request) => {
       seen.push(request.model);
       // A candidate that ignores the revision request.
-      return { output: { to: "team@example.com", subject: "Deploy", body: "Unchanged." } };
+      return { result: { to: "team@example.com", subject: "Deploy", body: "Unchanged." } };
     });
 
     expect(seen).toEqual(["emailDrafter"]);

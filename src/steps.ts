@@ -452,7 +452,7 @@ export async function executeAgentRequest(
 
   assertTextExecutor(request, executors);
 
-  const { output, raw } = await executeAgentTextRequest(
+  const { result, raw } = await executeAgentTextRequest(
     request.mode ?? "generate",
     request.id,
     request.input,
@@ -462,8 +462,8 @@ export async function executeAgentRequest(
 
   return {
     result: request.input.outputSchema
-      ? validateSchemaSync(request.input.outputSchema, output)
-      : output,
+      ? validateSchemaSync(request.input.outputSchema, result)
+      : result,
     messages: responseMessagesOf(raw),
     raw,
   };

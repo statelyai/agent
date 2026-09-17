@@ -37,10 +37,10 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic, setup } from "xstate";
 import { getShortestPaths } from "xstate/graph";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
 
-const models = defineModels({ dispatcher: openai("gpt-5.4-mini") });
+const models = { dispatcher: openai("gpt-5.4-mini") };
 
 // ─── The road network ───
 

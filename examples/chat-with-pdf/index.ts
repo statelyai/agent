@@ -43,7 +43,7 @@ import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { createAsyncLogic } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -244,9 +244,9 @@ const resultSchema = z.object({
   explanation: z.string(),
 });
 
-const models = defineModels({
+const models = {
   quiz: openai("gpt-5.4-mini"),
-});
+};
 
 export const chatWithPdfSchemas = createAgentSchemas({
   // The library's own interaction protocol, not a per-machine restatement.

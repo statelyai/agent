@@ -12,7 +12,7 @@ test("plan-and-execute plans steps, gathers per-step evidence, and solves from t
         // Routed on the request NAME, never on the model ref or prompt text.
         if (request.name === "planTask") {
           return {
-            output: {
+            result: {
               steps: [
                 { id: "E1", question: "What is library A?" },
                 { id: "E2", question: "What is library B?" },
@@ -22,12 +22,12 @@ test("plan-and-execute plans steps, gathers per-step evidence, and solves from t
         }
         if (request.name === "gatherEvidence") {
           workerQuestions.push(request.prompt ?? "");
-          return { output: `evidence for: ${request.prompt}` };
+          return { result: `evidence for: ${request.prompt}` };
         }
         // solver — its prompt embeds the whole evidence map.
         assert.ok(request.prompt?.includes("E1:"));
         assert.ok(request.prompt?.includes("E2:"));
-        return { output: "final answer from evidence" };
+        return { result: "final answer from evidence" };
       },
     },
   });
@@ -71,7 +71,7 @@ test("an over-budget plan spends at most MAX_STEPS and then ends in `failed`", a
       generateText: async (request: AgentTextRequest) => {
         if (request.name === "planTask") {
           return {
-            output: {
+            result: {
               steps: Array.from({ length: planned }, (_, index) => ({
                 id: `E${index + 1}`,
                 question: `Question ${index + 1}?`,
@@ -81,10 +81,10 @@ test("an over-budget plan spends at most MAX_STEPS and then ends in `failed`", a
         }
         if (request.name === "gatherEvidence") {
           workerCalls += 1;
-          return { output: "evidence" };
+          return { result: "evidence" };
         }
         solverCalls += 1;
-        return { output: "final answer" };
+        return { result: "final answer" };
       },
     },
   });
@@ -110,7 +110,7 @@ test("a plan that fits the budget still solves and lands in `done`", async () =>
       generateText: async (request: AgentTextRequest) => {
         if (request.name === "planTask") {
           return {
-            output: {
+            result: {
               steps: Array.from({ length: MAX_STEPS }, (_, index) => ({
                 id: `E${index + 1}`,
                 question: `Question ${index + 1}?`,
@@ -118,8 +118,8 @@ test("a plan that fits the budget still solves and lands in `done`", async () =>
             },
           };
         }
-        if (request.name === "gatherEvidence") return { output: "evidence" };
-        return { output: "final answer" };
+        if (request.name === "gatherEvidence") return { result: "evidence" };
+        return { result: "final answer" };
       },
     },
   });
@@ -136,9 +136,9 @@ test("a failing solver ends in `failed`, not in a done run with an empty answer"
     executors: {
       generateText: async (request: AgentTextRequest) => {
         if (request.name === "planTask") {
-          return { output: { steps: [{ id: "E1", question: "What is library A?" }] } };
+          return { result: { steps: [{ id: "E1", question: "What is library A?" }] } };
         }
-        if (request.name === "gatherEvidence") return { output: "evidence for A" };
+        if (request.name === "gatherEvidence") return { result: "evidence for A" };
         throw new Error("solver offline");
       },
     },
@@ -158,7 +158,7 @@ test("a step whose worker errors is marked skipped and the loop continues", asyn
       generateText: async (request: AgentTextRequest) => {
         if (request.name === "planTask") {
           return {
-            output: {
+            result: {
               steps: [
                 { id: "E1", question: "What is library A?" },
                 { id: "E2", question: "What is library B?" },
@@ -168,9 +168,9 @@ test("a step whose worker errors is marked skipped and the loop continues", asyn
         }
         if (request.name === "gatherEvidence") {
           if (request.prompt?.includes("library A")) throw new Error("worker offline");
-          return { output: "evidence for B" };
+          return { result: "evidence for B" };
         }
-        return { output: "final answer" };
+        return { result: "final answer" };
       },
     },
   });

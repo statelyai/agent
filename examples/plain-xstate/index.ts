@@ -32,7 +32,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createActor, createAsyncLogic, setup, waitFor } from "xstate";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createDecisionRequest,
   getAcceptedEvents,
@@ -42,10 +42,10 @@ import {
   type AgentRequestExecutors,
 } from "@statelyai/agent";
 
-export const models = defineModels({
+const models = {
   writer: openai("gpt-5.4-mini"),
   judge: openai("gpt-5.4-mini"),
-});
+};
 
 // ─── The plain machine: only `xstate`, no `@statelyai/agent` ───
 
@@ -242,7 +242,7 @@ export async function runPlainXstateExample(
             system: "You are a concise product copywriter.",
             messages: [userMessage(draftPrompt(input))],
           });
-          return String(result.output);
+          return String(result.result);
         },
       }),
     },

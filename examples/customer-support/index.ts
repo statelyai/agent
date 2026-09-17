@@ -54,7 +54,7 @@ import { z } from "zod";
 import { tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic, type StateValue } from "xstate";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getAcceptedEvents,
   getInteraction,
@@ -65,10 +65,10 @@ import {
   type AgentRequestExecutors,
 } from "@statelyai/agent";
 
-export const models = defineModels({
+const models = {
   router: openai("gpt-5.4-mini"),
   assistant: openai("gpt-5.4-mini"),
-});
+};
 
 // ─── sample data (stand-ins for the tutorial's SQLite airline DB) ───
 

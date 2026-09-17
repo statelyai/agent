@@ -84,14 +84,14 @@ async function main() {
   const v1 = results.summaries.find((summary) => summary.machine === "v1");
   if (!v1) throw new Error("Run email-drafter-compare.ts first; no v1 summary found.");
 
-  const [{ createAiSdkExecutors, defineModels }, { openai }] = await Promise.all([
+  const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
   const model = process.env.OPENAI_PROPOSER_MODEL || "gpt-5.4";
   const result = await runAgent(proposerMachine, {
     input: { source, summary: renderEvidence(v1) },
-    executors: createAiSdkExecutors({ models: defineModels({ reasoner: openai(model) }) }),
+    executors: createAiSdkExecutors({ models: { reasoner: openai(model) } }),
   });
   if (result.status !== "done") throw new Error(`Proposer did not finish: ${result.status}`);
 

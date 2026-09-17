@@ -141,18 +141,18 @@ To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and use 
 
 For OpenAI itself, `@statelyai/agent/openai` maps the three executors onto the raw `openai` package's Chat Completions API, with no `ai` dependency. See [Hosts](hosts.md#openai-sdk-adapter).
 
-To avoid depending on `ai` or `openai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. For structured output, `buildEnvelopeSchema` and `getJsonSchema` from `@statelyai/agent` build the `{ result, reasoning? }` envelope schema to send; on the way back, `parseStructuredEnvelope` validates the model's JSON against that envelope and unwraps it to `{ result, reasoning? }`. Use `parseOutput` when you validate an unwrapped value on its own, against the schema the request declared. Use `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
+To avoid depending on `ai` or `openai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. For structured output, `providerOutputSchema` and `getJsonSchema` from `@statelyai/agent` build the `{ result, reasoning? }` schema to send; on the way back, `parseProviderOutput` validates the model's JSON against it and returns `{ result, reasoning? }`, which is already the shape an executor returns. Use `parseOutput` when you validate a bare value on its own, against the schema the request declared. Use `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
 
 ## Testing with a mock model
 
-To exercise the adapter path itself without a provider, hand `defineModels` one of the AI SDK's own mock models from `ai/test`.
+To exercise the adapter path itself without a provider, put one of the AI SDK's own mock models from `ai/test` in the `models` map.
 
 ```ts
 import { MockLanguageModelV3 } from "ai/test";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
 
 const executors = createAiSdkExecutors({
-  models: defineModels({
+  models: {
     fast: new MockLanguageModelV3({
       doGenerate: async () => ({
         content: [{ type: "text", text: "Because transitions constrain behavior." }],
@@ -164,7 +164,7 @@ const executors = createAiSdkExecutors({
         warnings: [],
       }),
     }),
-  }),
+  },
 });
 ```
 
@@ -178,7 +178,7 @@ When the adapter is not what is under test, a plain function executor or `create
 | `createOpenAiExecutors` | yes            | yes          | yes      | yes               |
 | Hand-written executors  | yes            | yes          | yes      | yes (you map it)  |
 
-The `decide` executor maps each machine event to a forced tool call, and structured output rides the `{ result, reasoning? }` envelope. Both live in the adapter layer, so an executor is either an adapter's or a function of yours that returns `{ output }`. See [Text requests](text-requests.md) and [Decisions](decisions.md).
+The `decide` executor maps each machine event to a forced tool call, and structured output is requested as `{ result, reasoning? }`. Both live in the adapter layer, so an executor is either an adapter's or a function of yours that returns `{ result }`. See [Text requests](text-requests.md) and [Decisions](decisions.md).
 
 ## Reference hosts by provider
 

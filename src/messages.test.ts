@@ -37,7 +37,7 @@ test("request actors resolve with the executor's framework-native messages on ou
     input: {},
     executors: {
       generateText: async () => ({
-        output: "ok",
+        result: "ok",
         messages: [{ kind: "native", body: "framework response" }],
       }),
     },

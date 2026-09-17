@@ -166,7 +166,7 @@ export async function runFileSnapshotStoreDemo(options: ExampleRunOptions = {}) 
   const stand_in: AgentRequestExecutors = {
     generateText: async (request) => {
       if (request.name !== "draft") throw new Error(`unexpected request: ${request.name}`);
-      return { output: "Drafted without a model — this half is about storage." };
+      return { result: "Drafted without a model — this half is about storage." };
     },
   };
   const directory = mkdtempSync(join(tmpdir(), "stately-agent-snapshots-"));
@@ -199,7 +199,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     {
       generateText: async (request) => {
         if (request.name !== "draft") throw new Error(`unexpected request: ${request.name}`);
-        return { output: "Stored the framework way." };
+        return { result: "Stored the framework way." };
       },
     },
   );
@@ -208,7 +208,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   const live = await runLongLivedActor("application-owned actors", {
     generateText: async (request) => {
       if (request.name !== "draft") throw new Error(`unexpected request: ${request.name}`);
-      return { output: "The application owns this actor." };
+      return { result: "The application owns this actor." };
     },
   });
   console.log("Lifetime owned by the application (never persisted):", live);

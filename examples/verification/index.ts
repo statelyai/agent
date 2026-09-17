@@ -46,13 +46,13 @@ import {
   type AgentPathReport,
   type SimulateAgentResult,
 } from "@statelyai/agent/testing";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import {} from "@statelyai/agent/ai-sdk";
 
 // Declared so the machine is playable against a real model; the report below
 // never calls it.
-const models = defineModels({
+const models = {
   reviewer: openai("gpt-5.4-mini"),
-});
+};
 
 /** The business rule, in one number. Refunds above this need a human. */
 export const APPROVAL_THRESHOLD = 100;

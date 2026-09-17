@@ -48,11 +48,11 @@ import type {
   ToolChoice,
 } from "@anthropic-ai/sdk/resources/messages.js";
 import {
-  buildEnvelopeSchema,
+  providerOutputSchema,
   getAgentOutputMode,
   getJsonSchemaSync,
   isStandardSchema,
-  parseStructuredEnvelope,
+  parseProviderOutput,
   renderDecisionAttempts,
   runAgent,
   type AgentCallUsage,
@@ -239,8 +239,8 @@ export interface CreateAnthropicExecutorsOptions {
   resolveModel?: (modelRef: string) => string;
 }
 
-export type AnthropicGenerateResult = { output: unknown; [key: string]: unknown };
-export type AnthropicStreamResult = { output: string; [key: string]: unknown };
+export type AnthropicGenerateResult = { result: unknown; [key: string]: unknown };
+export type AnthropicStreamResult = { result: string; [key: string]: unknown };
 
 export interface AnthropicExecutors extends AgentRequestExecutors<
   AnthropicGenerateResult,
@@ -277,15 +277,14 @@ export function createAnthropicExecutors(
     };
 
     if (getAgentOutputMode(request.outputSchema) === "structured") {
-      // THE structured-output envelope contract (see docs/hosts.md): the forced
-      // tool's input schema is the declared schema wrapped as `{ result,
-      // reasoning? }`. Unwrap `.result` before returning so the machine validates
-      // the bare schema it declared; `reasoning` (opt-in) is surfaced on the raw
-      // result only.
-      const envelope = buildEnvelopeSchema(request.outputSchema!, {
+      // The structured-output contract (see docs/hosts.md): the forced tool's
+      // input schema is the declared schema wrapped as `{ result, reasoning? }`.
+      // The parsed `result` is what the machine validates against the bare
+      // schema it declared; `reasoning` (opt-in) stays on the raw result only.
+      const outputSchema = providerOutputSchema(request.outputSchema!, {
         reasoning: request.includeReasoning,
       });
-      const jsonSchema = getJsonSchemaSync(envelope);
+      const jsonSchema = getJsonSchemaSync(outputSchema);
       if (jsonSchema) {
         const tool: Tool = {
           name: STRUCTURED_OUTPUT_TOOL_NAME,
@@ -301,10 +300,10 @@ export function createAnthropicExecutors(
           (block): block is Extract<typeof block, { type: "tool_use" }> =>
             block.type === "tool_use" && block.name === STRUCTURED_OUTPUT_TOOL_NAME,
         );
-        // Validated unwrap of the { result, reasoning? } envelope — no cast.
-        const parsed = parseStructuredEnvelope(request, toolUse?.input);
+        // Validated parse of the { result, reasoning? } provider output — no cast.
+        const parsed = parseProviderOutput(request, toolUse?.input);
         return {
-          output: parsed.result,
+          result: parsed.result,
           usage: toAgentCallUsage(response.usage),
           ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
         };
@@ -318,7 +317,7 @@ export function createAnthropicExecutors(
       { ...common, ...(tools.length > 0 ? { tools } : {}) },
       { signal: info?.signal },
     );
-    return { output: extractText(response), usage: toAgentCallUsage(response.usage) };
+    return { result: extractText(response), usage: toAgentCallUsage(response.usage) };
   };
 
   const streamText = async (
@@ -342,7 +341,7 @@ export function createAnthropicExecutors(
     stream.on("text", (delta) => info?.onChunk?.(delta));
     // `finalMessage()` (not `finalText()`) so the stream's usage reaches the run.
     const final = await stream.finalMessage();
-    return { output: extractText(final), usage: toAgentCallUsage(final.usage) };
+    return { result: extractText(final), usage: toAgentCallUsage(final.usage) };
   };
 
   const decide: AgentDecisionExecutor = async (request, info) => {

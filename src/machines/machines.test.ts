@@ -51,7 +51,7 @@ function mockGenerateText(reply: (request: AgentTextRequest) => unknown = () => 
   const requests: AgentTextRequest[] = [];
   const generateText: AgentRequestExecutors["generateText"] = async (request) => {
     requests.push(request);
-    return { output: reply(request) };
+    return { result: reply(request) };
   };
   return { generateText, requests };
 }

@@ -28,7 +28,7 @@ const mockSummarizer: AgentRequestExecutor = async (request) => {
   if (request.name !== "summarizeTurn") {
     throw new Error(`mock generateText: no route for request '${request.name}'.`);
   }
-  return { output: { summary: "The goblin staggers back, bleeding." } };
+  return { result: { summary: "The goblin staggers back, bleeding." } };
 };
 
 describe("combat machine", () => {
@@ -127,7 +127,7 @@ function createGameExecutors(opts: {
       throw new Error(`mock generateText: no route for request '${request.name}'.`);
     }
     calls.push("summarize");
-    return { output: opts.summary ?? { summary: "The hero strikes." } };
+    return { result: opts.summary ?? { summary: "The hero strikes." } };
   };
 
   return { executors: { generateText, decide }, calls };

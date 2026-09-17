@@ -207,7 +207,7 @@ export function runConsensusReviewExample(
   return runAgent(consensusReviewMachine, {
     executors: {
       generateText: async () => ({
-        output: { approve: true, reason: "Scripted review; substitute a real model in your host." },
+        result: { approve: true, reason: "Scripted review; substitute a real model in your host." },
       }),
     },
     ...runOptions,

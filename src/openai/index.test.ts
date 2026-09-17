@@ -246,7 +246,7 @@ describe("createOpenAiExecutors: generateText", () => {
     });
 
     const result = await generateText(textRequest());
-    expect(result.output).toBe("a joke");
+    expect(result.result).toBe("a joke");
     expect(result.finishReason).toBe("stop");
     expect(result.usage).toEqual({
       inputTokens: 11,
@@ -262,10 +262,10 @@ describe("createOpenAiExecutors: generateText", () => {
     });
 
     const result = await generateText(textRequest());
-    expect(result).toMatchObject({ output: "half a jo", finishReason: "length" });
+    expect(result).toMatchObject({ result: "half a jo", finishReason: "length" });
   });
 
-  test("structured output goes through the { result } envelope and is unwrapped", async () => {
+  test("structured output goes through the { result } provider schema and is unwrapped", async () => {
     const create = vi.fn(async (_params: any) => ({
       choices: [choice(JSON.stringify({ result: { answer: "42" } }))],
     }));
@@ -273,7 +273,7 @@ describe("createOpenAiExecutors: generateText", () => {
 
     const result = await generateText(textRequest({ outputSchema }));
     expect(create.mock.calls[0]![0].response_format).toMatchObject({ type: "json_schema" });
-    expect(result.output).toEqual({ answer: "42" });
+    expect(result.result).toEqual({ answer: "42" });
   });
 
   test("a truncated STRUCTURED request throws AgentTruncatedError with the partial text", async () => {
@@ -320,7 +320,7 @@ describe("createOpenAiExecutors: streamText", () => {
       stream_options: { include_usage: true },
     });
     expect(seen).toEqual(chunks);
-    expect(result.output).toBe(chunks.join(""));
+    expect(result.result).toBe(chunks.join(""));
     expect(result.finishReason).toBe("length");
     expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 9, totalTokens: 14 });
   });
@@ -512,7 +512,7 @@ describe("createOpenAiExecutors: tool loop", () => {
     const result = await generateText(textRequest({ tools, maxSteps: 4 } as never));
 
     expect(create).toHaveBeenCalledTimes(2);
-    expect(result.output).toBe("Cats have 9 lives.");
+    expect(result.result).toBe("Cats have 9 lives.");
     expect(result.finishReason).toBe("stop");
     // The second call carries the assistant tool_calls message and the result.
     expect(create.mock.calls[1]![0].messages.slice(-2)).toEqual([
@@ -592,7 +592,7 @@ describe("createOpenAiExecutors: tool loop", () => {
       role: "tool",
       content: "Error: boom",
     });
-    expect(result.output).toBe("Sorry, the lookup failed.");
+    expect(result.result).toBe("Sorry, the lookup failed.");
   });
 
   test("`toolChoice` is mapped onto OpenAI's `tool_choice`, on the first step only", async () => {

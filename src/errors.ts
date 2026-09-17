@@ -23,7 +23,7 @@ export class AgentError extends Error {
 /**
  * A model call ran out of output tokens before it produced anything usable.
  * Core never throws this: it is the adapter's signal that a `'length'` finish
- * reason left nothing to return — a structured request whose envelope never
+ * reason left nothing to return — a structured request whose JSON never
  * closed, say. A text request that WAS cut off still returns its text, with
  * `finishReason: 'length'`.
  *

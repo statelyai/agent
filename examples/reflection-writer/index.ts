@@ -44,7 +44,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   type AgentMessage,
   assistantMessage,
@@ -55,13 +55,13 @@ import {
   type AgentRequestExecutors,
 } from "@statelyai/agent";
 
-export const models = defineModels({
+const models = {
   // One generator model, re-invoked each round over the growing transcript —
   // the tutorial's single `generate` node.
   writer: openai("gpt-5.4-mini"),
   // The `reflect` node: a teacher persona grading the latest draft.
   critic: openai("gpt-5.4-mini"),
-});
+};
 
 // The critic returns PROSE feedback plus a boolean verdict. The prose is what
 // gets fed back to the writer (the tutorial's role-flipped reflection message);

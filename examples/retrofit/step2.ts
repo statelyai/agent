@@ -11,7 +11,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   runAgent,
@@ -20,7 +20,7 @@ import {
 } from "@statelyai/agent";
 
 const REFUND_LIMIT = 100;
-const models = defineModels({ agent: openai("gpt-5.4-mini") });
+const models = { agent: openai("gpt-5.4-mini") };
 
 const schemas = createAgentSchemas({
   context: z.object({

@@ -4,7 +4,7 @@ import { plainWriterMachine, runPlainXstateExample } from "./index.js";
 describe("plain-xstate", () => {
   test("drives the plain machine to completion when the model approves", async () => {
     const result = await runPlainXstateExample({
-      generateText: async () => ({ output: "A crisp, concrete launch blurb." }),
+      generateText: async () => ({ result: "A crisp, concrete launch blurb." }),
       decide: async () => ({ event: { type: "APPROVE" } }),
     });
 
@@ -24,7 +24,7 @@ describe("plain-xstate", () => {
       generateText: async () => {
         calls += 1;
         if (calls === 1) throw new Error("model unavailable");
-        return { output: "A crisp, concrete launch blurb." };
+        return { result: "A crisp, concrete launch blurb." };
       },
       decide: async () => ({ event: { type: "APPROVE" } }),
     });
@@ -58,7 +58,7 @@ describe("plain-xstate", () => {
   test("loops through REVISE and re-drafts, then approves", async () => {
     let judged = 0;
     const result = await runPlainXstateExample({
-      generateText: async () => ({ output: "draft" }),
+      generateText: async () => ({ result: "draft" }),
       // REVISE the first two rounds, then APPROVE.
       decide: async () => {
         judged += 1;

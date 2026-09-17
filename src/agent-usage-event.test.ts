@@ -79,7 +79,7 @@ const budgetMachine = agent.createMachine({
 });
 
 const textExecutors = {
-  generateText: async () => ({ output: "a fact", usage: { totalTokens: 400, inputTokens: 300 } }),
+  generateText: async () => ({ result: "a fact", usage: { totalTokens: 400, inputTokens: 300 } }),
 };
 
 describe("@agent.usage (reserved per-call usage event)", () => {

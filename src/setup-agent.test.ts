@@ -353,7 +353,7 @@ describe("setupAgent", () => {
           generateText: async (request) => {
             expect(request.name).toBe("draftEmail");
             expect(request.prompt).toBe("Draft it.");
-            return { output: { body: "Standalone body." } };
+            return { result: { body: "Standalone body." } };
           },
         },
       ),
@@ -418,7 +418,7 @@ describe("setupAgent", () => {
               tools: {},
             }),
           );
-          return { output: { body: "Generated body." } };
+          return { result: { body: "Generated body." } };
         },
       }),
     ).resolves.toMatchObject({ result: { body: "Generated body." } });
@@ -448,7 +448,7 @@ describe("setupAgent", () => {
         },
         streamText: async (request: AgentTextRequest & { tools: AgentTools }) => {
           expect(request.prompt).toBe("Draft body.");
-          return { output: Promise.resolve("Streamed final text.") };
+          return { result: Promise.resolve("Streamed final text.") };
         },
       }),
     ).resolves.toMatchObject({ result: "Streamed final text." });
@@ -541,7 +541,7 @@ describe("setupAgent", () => {
     const answer = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
         expect(request.tools).toEqual({});
-        return { output: { answer: `Answered ${request.prompt}` } };
+        return { result: { answer: `Answered ${request.prompt}` } };
       },
     });
     step = resolveAgentStep(machine, step, step.requests[0]!, {
@@ -566,7 +566,7 @@ describe("setupAgent", () => {
         throw new Error("generateText should not be used for stream requests");
       },
       streamText: async (request: AgentTextRequest & { tools: AgentTools }) => ({
-        output: `Streamed ${request.prompt}`,
+        result: `Streamed ${request.prompt}`,
       }),
     });
     step = resolveAgentStep(machine, step, step.requests[0]!, {
@@ -611,7 +611,7 @@ describe("setupAgent", () => {
 
     const step = initialAgentStep(machine, { prompt: "Why machines?" });
     const request = asTextRequest(step.requests[0]);
-    const rawResult = { output: { answer: "Because state." } };
+    const rawResult = { result: { answer: "Because state." } };
 
     const result = await executeAgentRequest(request, {
       generateText: async () => rawResult,
@@ -693,7 +693,7 @@ describe("setupAgent", () => {
 
     await expect(
       executeAgentRequest(asTextRequest(step.requests[0]), {
-        generateText: () => ({ output: { answer: 123 } }),
+        generateText: () => ({ result: { answer: 123 } }),
       }),
     ).rejects.toThrow("expected string");
   });
@@ -1223,7 +1223,7 @@ describe("setupAgent", () => {
           generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
             expect(request.prompt).toBe("Summarize:\nA long article.");
             expect(request.tools).toEqual({});
-            return { output: { summary: "Standalone summary." } };
+            return { result: { summary: "Standalone summary." } };
           },
         },
       ),
@@ -1273,7 +1273,7 @@ describe("setupAgent", () => {
         },
         streamText: async (request: AgentTextRequest & { tools: AgentTools }) => {
           expect(request.prompt).toBe("Stream:\nState machines.");
-          return { output: "streamed summary" };
+          return { result: "streamed summary" };
         },
       }),
     ).resolves.toMatchObject({ result: "streamed summary" });
@@ -1288,7 +1288,7 @@ describe("setupAgent", () => {
           streamText: async (request: AgentTextRequest & { tools: AgentTools }) => {
             expect(request.prompt).toBe("Stream:\nState machines.");
             expect(request.tools).toEqual({});
-            return { output: "standalone stream" };
+            return { result: "standalone stream" };
           },
         },
       ),
@@ -1308,7 +1308,7 @@ describe("setupAgent", () => {
       async ({ input, request, signal }) => {
         expect(signal).toBeInstanceOf(AbortSignal);
         return {
-          output: {
+          result: {
             answer: `${request.model}:${input.question}`,
           },
         };
@@ -1368,8 +1368,8 @@ describe("setupAgent", () => {
         prompt: ({ input }) => input.question,
       },
       async () =>
-        ({ output: { nope: true } }) as unknown as {
-          output: { answer: string };
+        ({ result: { nope: true } }) as unknown as {
+          result: { answer: string };
         },
     );
 
@@ -1507,7 +1507,7 @@ describe("setupAgent", () => {
               }>,
             );
             return {
-              output: {
+              result: {
                 subject: `Re: ${request.prompt}`,
                 body: "Typed raw XState machine body.",
               },
@@ -1627,7 +1627,7 @@ describe("setupAgent", () => {
 
     const { result, messages } = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
-        output: {
+        result: {
           answer: `Answered: ${request.prompt}`,
         },
       }),
@@ -1643,7 +1643,7 @@ describe("setupAgent", () => {
       input: { prompt: "why run agents?" },
       executors: {
         generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
-          output: {
+          result: {
             answer: `Ran: ${request.prompt}`,
           },
         }),
@@ -1815,7 +1815,7 @@ describe("setupAgent", () => {
     const result = await runAgent(machine, {
       input: { question: "Why statecharts?" },
       executors: {
-        generateText: async () => ({ output: { answer: "Because logic matters." } }),
+        generateText: async () => ({ result: { answer: "Because logic matters." } }),
       },
     });
 
@@ -1948,14 +1948,14 @@ describe("setupAgent", () => {
     await expect(
       executeAgentRequest(asTextRequest(step.requests[0]), {
         generateText: async () => ({
-          output: { answer: 42 },
+          result: { answer: 42 },
         }),
       }),
     ).rejects.toThrow();
 
     const { result, messages } = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async () => ({
-        output: { answer: "Because logic matters." },
+        result: { answer: "Because logic matters." },
       }),
     });
     step = resolveAgentStep(machine, step, step.requests[0]!, { result, messages });
@@ -2101,7 +2101,7 @@ describe("setupAgent", () => {
     const result = await runAgent(machine, {
       input: { question: "Why statecharts?" },
       executors: {
-        generateText: async () => ({ output: { answer: "Because logic matters." } }),
+        generateText: async () => ({ result: { answer: "Because logic matters." } }),
       },
     });
 
@@ -2167,7 +2167,7 @@ describe("setupAgent", () => {
     const result = await runAgent(machine, {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide: async (input) => {
           receivedInputs.push(input);
           return { event: { type: "GUESS", answer: "42" } };
@@ -2241,7 +2241,7 @@ describe("setupAgent", () => {
       { compileSchema: ajvCompiler() },
     );
 
-    const generateText = async () => ({ output: { draft: "Hello world." } });
+    const generateText = async () => ({ result: { draft: "Hello world." } });
 
     const first = await runAgent(machine, { input: {}, executors: { generateText } });
     expect(first.status).toBe("idle");
@@ -2945,7 +2945,7 @@ describe("decision live path (runAgent auto-delivery)", () => {
     const result = await runAgent(machine, {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide: async (): Promise<{ event: ChosenEvent }> => ({
           event: { type: "ATTACK", target: "goblin" },
         }),
@@ -3039,7 +3039,7 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
     const result = await runAgent(machine, {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide: async () => ({ event: { type: "ATTACK", target: "goblin" } }),
       },
     });

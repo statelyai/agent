@@ -63,10 +63,10 @@ Put `tools` on any [text request](text-requests.md), either inline in `setupAgen
 ```ts no-check
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import { } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
-const models = defineModels({ assistant: openai("gpt-5.4-mini") });
+const models = { assistant: openai("gpt-5.4-mini") };
 
 const agentSetup = setupAgent({
   models,

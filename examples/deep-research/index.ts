@@ -30,16 +30,16 @@ import {
   type AgentRequestExecutors,
   type DoneActorEventOf,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const queriesSchema = z.array(z.string()).min(2).max(4);
 
-export const models = defineModels({
+const models = {
   planner: openai("gpt-5.4-mini"),
   researcher: openai("gpt-5.4-mini"),
   reflector: openai("gpt-5.4-mini"),
   writer: openai("gpt-5.4-mini"),
-});
+};
 
 const BRANCH_PREFIX = "research-";
 

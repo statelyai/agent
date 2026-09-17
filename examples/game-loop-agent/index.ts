@@ -43,12 +43,12 @@ import {
   type AgentDecisionExecutor,
   type AgentRequestExecutor,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-export const models = defineModels({
+const models = {
   player: openai("gpt-5.4-mini"),
   referee: openai("gpt-5.4-mini"),
-});
+};
 
 const DEFAULT_TARGET = 50;
 const DEFAULT_MAX_ROUNDS = 3;

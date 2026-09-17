@@ -45,15 +45,15 @@
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-export const models = defineModels({
+const models = {
   supervisor: openai("gpt-5.4-mini"),
   searcher: openai("gpt-5.4-mini"),
   scraper: openai("gpt-5.4-mini"),
   outliner: openai("gpt-5.4-mini"),
   writer: openai("gpt-5.4-mini"),
-});
+};
 
 /** Collapses a worker result to one short line for the team tree. */
 function oneLine(text: string, max = 64): string {

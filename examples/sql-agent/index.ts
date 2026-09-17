@@ -34,7 +34,7 @@ import {
   setupAgent,
   type RunAgentOptions,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // ─── In-memory sample table (the whole "database") ───
 type Order = { id: number; category: string; amount: number };
@@ -67,10 +67,10 @@ export function executeQuery(plan: QueryPlan, table: Order[] = orders): number {
   return rows.length ? total / rows.length : 0;
 }
 
-export const models = defineModels({
+const models = {
   planner: openai("gpt-5.4-mini"),
   summarizer: openai("gpt-5.4-mini"),
-});
+};
 
 const contextSchema = z.object({
   question: z.string(),

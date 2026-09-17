@@ -44,11 +44,11 @@ import {
   type AgentRequestExecutor,
   type RunAgentOptions,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-export const models = defineModels({
+const models = {
   writer: openai("gpt-5.4-mini"),
-});
+};
 
 /** The data-part type carrying each machine state the run enters. */
 const AGENT_STATE_PART = "data-agent-state";

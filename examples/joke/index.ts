@@ -22,7 +22,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   createTextLogic,
@@ -86,10 +86,10 @@ export const jokeSchemas = createAgentSchemas({
   },
 });
 
-export const models = defineModels({
+const models = {
   jokeWriter: openai("gpt-5.4-mini"),
   critic: openai("gpt-5.4-mini"),
-});
+};
 
 export const tellJoke = createTextLogic({
   mode: "stream",

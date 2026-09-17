@@ -316,7 +316,7 @@ export function createWalkthroughExecutors(): Partial<AgentRequestExecutors> {
       // Stream word by word so a streaming machine shows its chunks arriving.
       for (const word of output.split(/(?<=\s)/)) info.onChunk(word);
     }
-    return { output };
+    return { result: output };
   };
 
   return {

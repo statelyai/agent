@@ -187,7 +187,7 @@ test("the exported POST handler serves the route", async () => {
 
 test("a failing executor ends in the machine's `failed` state", async () => {
   const response = await handleChatRequest(chatRequest("Why state machines?"), {
-    generateText: async () => ({ output: "" }),
+    generateText: async () => ({ result: "" }),
     streamText: async () => {
       throw new Error("model unavailable");
     },

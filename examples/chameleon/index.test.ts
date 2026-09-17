@@ -38,11 +38,11 @@ function createPlayers(script: Script, captured: CapturedRequest[] = []) {
       serialized: JSON.stringify(request),
     });
     if (request.name === "guessSecret") {
-      return { output: { guess: script.guess ?? "", reasoning: "the words all circled it" } };
+      return { result: { guess: script.guess ?? "", reasoning: "the words all circled it" } };
     }
     const word = script.words[turn] ?? "";
     turn += 1;
-    return { output: { word, reasoning: `seat ${turn}` } };
+    return { result: { word, reasoning: `seat ${turn}` } };
   };
   return { executor, captured };
 }

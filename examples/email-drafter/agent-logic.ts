@@ -18,7 +18,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import type { AiSdkModelMap } from "@statelyai/agent/ai-sdk";
 import {
   type AgentInteraction,
   type AgentMessage,
@@ -80,10 +80,10 @@ const outputSchema = z.object({
   failure: z.string().nullable(),
 });
 
-export const models = defineModels({
+export const models: AiSdkModelMap<"promptEvaluator" | "emailDrafter"> = {
   promptEvaluator: openai("gpt-5.4-mini"),
   emailDrafter: openai("gpt-5.4-mini"),
-});
+};
 
 export const evaluatePrompt = createTextLogic({
   schemas: {

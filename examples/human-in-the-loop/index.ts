@@ -30,7 +30,7 @@
 import { z } from "zod";
 import type { Snapshot } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   eventFromInteraction,
   getInteraction,
@@ -44,9 +44,9 @@ import {
 /** Rejections allowed before the review loop gives up. */
 export const MAX_REJECTIONS = 2;
 
-export const models = defineModels({
+const models = {
   writer: openai("gpt-5.4-mini"),
-});
+};
 
 const contextSchema = z.object({
   topic: z.string(),

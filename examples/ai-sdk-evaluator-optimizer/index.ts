@@ -14,7 +14,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { setupAgent, runAgent } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const translationEvaluationSchema = z.object({
   qualityScore: z.number().min(1).max(10),
@@ -35,11 +35,11 @@ function translationPasses(evaluation: z.infer<typeof translationEvaluationSchem
   );
 }
 
-export const models = defineModels({
+const models = {
   translator: openai("gpt-5.4-mini"),
   evaluator: openai("gpt-5.4-mini"),
   improver: openai("gpt-5.4-mini"),
-});
+};
 
 const contextSchema = z.object({
   text: z.string(),

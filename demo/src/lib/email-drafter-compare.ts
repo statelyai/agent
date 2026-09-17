@@ -422,13 +422,13 @@ export function renderEvidence(summary: MachineSummary): string {
 }
 
 async function main() {
-  const [{ createAiSdkExecutors, defineModels }, { openai }] = await Promise.all([
+  const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
   const model = process.env.OPENAI_MODEL || "gpt-5.4-mini";
   const executors = createAiSdkExecutors({
-    models: defineModels({ fast: openai(model), writer: openai(model) }),
+    models: { fast: openai(model), writer: openai(model) },
   });
   const summaries = await runComparison(executors);
   console.log(renderComparison(summaries));

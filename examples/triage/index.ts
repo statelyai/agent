@@ -26,7 +26,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import type { SnapshotFrom } from "xstate";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -107,9 +107,9 @@ const schemas = createAgentSchemas({
   },
 });
 
-export const models = defineModels({
+const models = {
   ticketTriage: openai("gpt-5.4-mini"),
-});
+};
 
 /** The narrowed context every post-classification state reads. */
 const classified = {

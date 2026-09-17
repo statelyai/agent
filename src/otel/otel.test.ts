@@ -68,7 +68,7 @@ const script = {
     "*": [{ event: { type: "WRITE" as const }, usage: { inputTokens: 11, outputTokens: 3 } }],
   },
   text: {
-    "*": [{ output: "a draft", usage: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } }],
+    "*": [{ result: "a draft", usage: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } }],
   },
 };
 

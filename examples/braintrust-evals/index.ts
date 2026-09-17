@@ -192,8 +192,8 @@ export function scriptedExecutorsFor(drafterCase: DrafterCase): Partial<AgentReq
   // still gets the answer written for the call it actually makes.
   return createScriptedExecutors({
     text: {
-      evaluatePrompt: assessments.map((assessment) => ({ output: assessment, usage })),
-      draftEmail: [{ output: draft, usage }],
+      evaluatePrompt: assessments.map((assessment) => ({ result: assessment, usage })),
+      draftEmail: [{ result: draft, usage }],
     },
   });
 }

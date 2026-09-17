@@ -34,18 +34,18 @@ import {
   type RunAgentOptions,
   type RunAgentResult,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const agentName = z.enum(["travel", "food"]);
 
 /** Replies the conversation may run before only END is legal. */
 export const MAX_TURNS = 4;
 
-export const models = defineModels({
+const models = {
   travel: openai("gpt-5.4-mini"),
   food: openai("gpt-5.4-mini"),
   router: openai("gpt-5.4-mini"),
-});
+};
 
 const agentSetup = setupAgent({
   models,

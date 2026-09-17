@@ -25,7 +25,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { createAsyncLogic, type Snapshot, type StateValue } from "xstate";
 import {
   getInteraction,
@@ -40,9 +40,9 @@ import {
 /** Rejected document rounds allowed before the case is escalated to a human. */
 export const MAX_DOCS_REJECTIONS = 2;
 
-export const models = defineModels({
+const models = {
   scheduler: openai("gpt-5.4-mini"),
-});
+};
 
 const employeeSchema = z.object({
   id: z.string(),

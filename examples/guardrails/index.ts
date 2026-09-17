@@ -32,12 +32,12 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { createAgentSchemas, getStatePath, runAgent, setupAgent } from "@statelyai/agent";
 
-const models = defineModels({
+const models = {
   quick: openai("gpt-5.4-mini"),
-});
+};
 
 /** Scope the input guardrail enforces. Hardcoded so input is just the question. */
 const DEFAULT_TOPIC = "geography";

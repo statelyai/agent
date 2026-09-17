@@ -24,7 +24,7 @@ test("research supervisor routes SEARCH → SCRAPE → FINISH, looping workers",
   const output = await runHierarchicalTeamsExample({
     generateText: async (request) => {
       workerCalls.push(request.name);
-      return { output: WORKER_RESPONSES[request.name] };
+      return { result: WORKER_RESPONSES[request.name] };
     },
     decide: async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
       if (isResearchDecision(request)) {
@@ -67,7 +67,7 @@ test("worker-step budget bounds the research loop", async () => {
   const output = await runHierarchicalTeamsExample({
     generateText: async (request) => {
       workerCalls.push(request.name);
-      return { output: WORKER_RESPONSES[request.name] ?? "note" };
+      return { result: WORKER_RESPONSES[request.name] ?? "note" };
     },
     // The research supervisor never stops on its own — it always asks to
     // SEARCH. The budget (2) must force FINISH once exhausted.
@@ -92,7 +92,7 @@ test("coordinator supervisor sends one bounded revision round back to research",
   const output = await runHierarchicalTeamsExample({
     generateText: async (request) => {
       workerCalls.push(request.name);
-      return { output: WORKER_RESPONSES[request.name] ?? "note" };
+      return { result: WORKER_RESPONSES[request.name] ?? "note" };
     },
     decide: async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
       if (isResearchDecision(request)) return { event: { type: "FINISH" } };

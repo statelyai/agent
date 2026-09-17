@@ -56,7 +56,7 @@ export async function runWithSteps(
 
 - `initialAgentStep(machine, input)` starts the machine.
 - `transitionAgentStep(machine, step, event)` applies an external event: a decision's chosen event, a human reply, a timer.
-- `resolveAgentStep(machine, step, request, output)` delivers a text request's result as that invoke's `xstate.done.actor` event. `output` is the `{ result, messages }` envelope the invoke's `onDone` reads: the validated result plus the executor's response messages (`[]` when there are none).
+- `resolveAgentStep(machine, step, request, output)` delivers a text request's result as that invoke's `xstate.done.actor` event. `output` is the `{ result, messages }` the invoke's `onDone` reads: the validated result plus the executor's response messages (`[]` when there are none).
 - `rejectAgentStep(machine, step, request, error)` delivers a failure as `xstate.error.actor`, so the machine takes the invoke's `onError`. With no `onError` in scope the snapshot ends in `status: 'error'`, exactly as a live run would.
 - `executeAgentRequest(request, executors)` runs one text request against the executor contract and returns `{ result, messages, raw }`: the validated result, the response messages, and the raw executor result. The first two are exactly what `resolveAgentStep` takes. Decisions go through `resolveDecision`.
 

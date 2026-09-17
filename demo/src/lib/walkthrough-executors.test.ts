@@ -150,11 +150,11 @@ describe("createWalkthroughExecutors", () => {
       {
         name: "improve",
         model: "any",
-        prompt: `Improve this joke: ${String((one as { output: string }).output)}`,
+        prompt: `Improve this joke: ${String(one.result)}`,
         tools: {},
       },
       undefined,
     );
-    expect(String((two as { output: string }).output)).not.toMatch(/Placeholder .* Placeholder/);
+    expect(String(two.result)).not.toMatch(/Placeholder .* Placeholder/);
   });
 });

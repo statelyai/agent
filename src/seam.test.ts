@@ -193,7 +193,7 @@ describe("runSeam", () => {
       seam: { request: "write", occurrence: 1 },
       candidate: async (request) => {
         seen.push(request.name ?? request.model);
-        return { output: { subject: "Deploy", body: "Unchanged." } };
+        return { result: { subject: "Deploy", body: "Unchanged." } };
       },
     });
 
@@ -218,7 +218,7 @@ describe("runSeam", () => {
       seam: { request: "write", occurrence: 1 },
       candidate: async (request) => {
         seen.push(request.model);
-        return { output: REVISED };
+        return { result: REVISED };
       },
     });
 
@@ -332,7 +332,7 @@ describe("runSeam", () => {
       ...clarifyRun(),
       seam: { request: "assess" },
       // A candidate that waves the vague prompt through: no clarification round.
-      candidate: async () => ({ output: COMPLETE }),
+      candidate: async () => ({ result: COMPLETE }),
     });
 
     expect(strict.after.statePath).not.toContain("asking");

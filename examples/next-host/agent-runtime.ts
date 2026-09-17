@@ -14,13 +14,13 @@ import { openai } from "@ai-sdk/openai";
 import { type AgentRequestExecutors } from "@statelyai/agent";
 import { createScriptedExecutors } from "@statelyai/agent/testing";
 import type { AgentTextRequest } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { type AiSdkModelMap, createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import type { Inspector } from "@statelyai/sdk/inspect";
 
 /** The machine's `writeDraft` request asks for model `"writer"`; map it here. */
-export const models = defineModels({
+export const models: AiSdkModelMap<"writer"> = {
   writer: openai("gpt-5.4-mini"),
-});
+};
 
 /** The scripted stand-in for the `writeDraft` request, as a function of it. */
 const writeDraft = (request: AgentTextRequest): string => {

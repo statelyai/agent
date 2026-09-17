@@ -23,7 +23,7 @@ export {
   type AgentOutputMode,
   type AgentInteraction,
   type AgentTextResult,
-  type StructuredOutputEnvelope,
+  type ProviderStructuredOutput,
 } from "@statelyai/agent";
 export { createAiSdkExecutors, parseModelRef } from "@statelyai/agent/ai-sdk";
 export { createToolLoopMachine, type CreateRouterMachineConfig } from "@statelyai/agent/machines";

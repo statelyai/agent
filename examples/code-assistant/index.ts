@@ -61,12 +61,12 @@ import vm from "node:vm";
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
-export const models = defineModels({
+const models = {
   coder: openai("gpt-5.4-mini"),
-});
+};
 
 /** One unit check: call the generated function with `args`, expect `expected`. */
 export interface CodeCheck {

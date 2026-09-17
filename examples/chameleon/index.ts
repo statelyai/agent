@@ -42,7 +42,7 @@
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -126,7 +126,7 @@ export const chameleonSchemas = createAgentSchemas({
   },
 });
 
-const models = defineModels({ player: openai("gpt-5.4-mini") });
+const models = { player: openai("gpt-5.4-mini") };
 
 // ─── Rules (pure functions — the machine's, not the prompt's) ───
 

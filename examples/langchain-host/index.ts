@@ -81,7 +81,7 @@ export async function runJokeDemo(model: BaseChatModel, onChunk?: (chunk: string
 export const jokeScript: ScriptedResponse[] = [
   // 1. `telling` streams the first joke.
   { text: "A state machine walks into a bar. It refuses the transition." },
-  // 2. `rating` asks for structured output — the `{ result }` envelope.
+  // 2. `rating` asks for structured output — the `{ result }` provider schema.
   { structured: { result: { rating: 6, explanation: "Setup is longer than the punchline." } } },
   // 3. `telling` again: the machine always takes one improvement pass, so the
   //    writer gets the first joke plus the critique and rewrites it.

@@ -135,10 +135,10 @@ export const scriptedExecutors: AgentRequestExecutors = {
   generateText: async (request) => {
     switch (request.name) {
       case "evaluatePrompt":
-        return { output: { satisfied: true, missing: [], questions: [] } };
+        return { result: { satisfied: true, missing: [], questions: [] } };
       case "draftEmail":
         return {
-          output: {
+          result: {
             to: "team@example.com",
             subject: "Deploy pipeline is faster",
             body: "Hi team,\n\nThe deploy pipeline is now roughly twice as fast.\n\nThanks!",

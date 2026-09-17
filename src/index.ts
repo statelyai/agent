@@ -13,6 +13,7 @@ export type {
 export { isAgentMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, getAgentSchemas, setupAgent } from "./setup-agent.js";
 export type {
+  AgentDefaultMeta,
   AgentSchemaPack,
   // Both appear in `setupAgent`'s inferred result type (its event schemas
   // always carry the reserved `'@agent.usage'` entry), so consumers' declaration
@@ -59,19 +60,19 @@ export type {
 } from "./events.js";
 export {
   bindRequestExecutor,
-  buildEnvelopeSchema,
+  providerOutputSchema,
   createTextLogic,
   getAgentOutputMode,
   getCallFinishReason,
   getCallUsage,
   parseOutput,
-  parseStructuredEnvelope,
+  parseProviderOutput,
 } from "./text-logic.js";
 export type {
   AgentFinishReason,
   AgentModelRef,
   AgentOutputMode,
-  StructuredOutputEnvelope,
+  ProviderStructuredOutput,
   AgentExecutorTextRequest,
   AgentTextRequest,
   AgentRequestExecutor,

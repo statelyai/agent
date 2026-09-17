@@ -33,6 +33,7 @@ import {
 } from "./text-logic.js";
 import { createDecideActor } from "./decision.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
+import type { AgentInteractionMeta } from "./interaction.js";
 import {
   getAgentExecutionOptions,
   machineIdlePredicates,
@@ -105,6 +106,16 @@ type AgentSetupActors<
 > = TActors & BuiltinAgentActors<TEvent, TModel>;
 
 /**
+ * The default `meta` type of an agent machine: the interaction descriptor
+ * `getInteraction` reads, keyed by the machine's own event types (the
+ * reserved `@agent.*` events excluded). A machine that declares `meta`
+ * replaces this default.
+ */
+export type AgentDefaultMeta<TEventSchemas extends AgentEventSchemaInputMap> = AgentInteractionMeta<
+  Exclude<keyof TEventSchemas & string, typeof AGENT_USAGE_EVENT_TYPE>
+>;
+
+/**
  * A machine's full schema set — context, event payloads, machine input/
  * output, and state/transition meta — as returned by {@link createAgentSchemas}
  * and retained on `setupAgent(...)`'s `result.schemas` for runtime
@@ -121,7 +132,7 @@ export interface AgentSchemaPack<
   TEventSchemas extends AgentEventSchemaInputMap = AgentEventSchemaInputMap,
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
-  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
+  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<AgentDefaultMeta<TEventSchemas>>,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = Record<string, StandardSchemaV1>,
 > {
   context: TContextSchema;
@@ -284,7 +295,7 @@ export function createAgentSchemas<
   TEventSchemas extends AgentEventSchemaInputMap = {},
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
-  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
+  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<AgentDefaultMeta<TEventSchemas>>,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 >(
   schemas: AgentSchemaConfig<
@@ -695,7 +706,7 @@ export function setupAgent<
   TRequestSchemas extends AgentRequestSchemaMap = {},
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
-  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
+  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<AgentDefaultMeta<TEventSchemas>>,
   TModels extends AgentModelMap = {},
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
   const TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,

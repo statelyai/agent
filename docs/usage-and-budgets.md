@@ -42,7 +42,7 @@ Four things affect how you read these numbers.
 - Token fields are partial sums. Each field sums only the calls that reported it, and is `undefined` only when no call reported it. A run that mixes a real SDK executor, which reports usage, with a scripted mock, which does not, yields a sum over the reporting subset only. Do not treat a token total as the whole run unless every executor reports usage.
 - `modelCalls` is always present, even when nothing reports tokens.
 - Usage is per run, not per conversation. A resumed run counts only its own calls, not the history behind `snapshot` or `events`. Add prior results' totals yourself for a conversation-wide figure.
-- Usage comes from your executor. `runAgent` reads `usage` from the raw executor result. That can be the `{ output, usage }` envelope, a Vercel AI SDK result, which uses the same flat field names, or any custom executor following that shape. Non-finite values are dropped.
+- Usage comes from your executor. `runAgent` reads `usage` from the raw executor result. That is the `usage` field alongside `result`, on the flat field names the AI SDK also uses, from an adapter or any custom executor following that shape. Non-finite values are dropped.
 
 ### Billing
 
@@ -74,7 +74,7 @@ function addUsage(a: AgentUsage, b: AgentUsage): AgentUsage {
 
 Two callbacks report usage per call. Both are live and read-only.
 
-- `onResult(request, { output, raw })`: `raw` is your executor's verbatim result, so `raw.usage` is that call's usage in whatever shape the executor produced.
+- `onResult(request, { result, raw })`: `raw` is your executor's verbatim result, so `raw.usage` is that call's usage in whatever shape the executor produced.
 - `onTrace` on a `request.end` event: `usage?: AgentCallUsage` is normalized, and present only when the executor reported usage. See [Observability](observability.md#trace-one-run).
 
 ```ts
@@ -184,7 +184,7 @@ The payload has this shape.
 
 Model-call results reach the machine with usage stripped out.
 
-- A text invoke's `onDone` receives `{ result, messages }` only: the validated result and the executor's response messages. The runner drops the rest of the executor envelope, including usage (`src/run-agent.ts`).
+- A text invoke's `onDone` receives `{ result, messages }` only: the validated result and the executor's response messages. The runner drops the rest of the executor result, including usage (`src/run-agent.ts`).
 - A decision delivers only the chosen event. `resolveDecision` returns the validated event and drops the executor's `usage` (`src/decision.ts`).
 
 `@agent.usage` carries the tokens instead. After every settled model call that reported usage, `runAgent` delivers the event to the machine, so `context` can fold it and guards can read it. You can then keep both counters in `context`: increment turns in `onDone`, and fold tokens in the `@agent.usage` handler.
@@ -324,7 +324,7 @@ const machine = agentSetup.createMachine({
 let call = 0;
 const executors = {
   generateText: async () => ({
-    output: `fact ${++call}`,
+    result: `fact ${++call}`,
     usage: { totalTokens: 520 },
   }),
 };

@@ -43,7 +43,7 @@
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -153,7 +153,7 @@ export const justOneSchemas = createAgentSchemas({
   },
 });
 
-const models = defineModels({ clueGiver: openai("gpt-5.4-mini") });
+const models = { clueGiver: openai("gpt-5.4-mini") };
 
 // ─── Rules (pure functions — the machine's, not the prompt's) ───
 

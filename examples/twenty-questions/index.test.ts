@@ -24,34 +24,34 @@ function createClassifier(seenModels: string[] = []): AgentRequestExecutor {
     switch (request.name) {
       case "classifyGuessFeedback":
         return {
-          output: {
+          result: {
             correct: /^(yes|correct|right)$/i.test(rawAnswer),
             reasoning: `classified guess feedback ${rawAnswer}`,
           },
         };
       case "classifyPlayAgain":
         return {
-          output: {
+          result: {
             playAgain: /^yes$/i.test(rawAnswer),
             reasoning: `classified play again ${rawAnswer}`,
           },
         };
       case "answerSideQuestion": {
         const question = request.prompt?.match(/Side question: (.*)/)?.[1] ?? "";
-        return { output: `Briefly: the answer to "${question}" is yes.` };
+        return { result: `Briefly: the answer to "${question}" is yes.` };
       }
       case "classifyAnswer":
         // A reply ending in '?' is a side question back at the agent.
         return rawAnswer.endsWith("?")
           ? {
-              output: {
+              result: {
                 kind: "sideQuestion",
                 question: rawAnswer,
                 reasoning: `classified side question ${rawAnswer}`,
               },
             }
           : {
-              output: {
+              result: {
                 kind: "answer",
                 answer: rawAnswer === "mhm" || rawAnswer === "for sure" ? "yes" : "no",
                 reasoning: `classified ${rawAnswer}`,

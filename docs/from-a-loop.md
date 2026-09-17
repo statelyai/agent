@@ -89,10 +89,10 @@ A tool the machine must gate is not a tool any more. It becomes an actor the mac
 import { createAsyncLogic } from "xstate";
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import { } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
-const models = defineModels({ quick: openai("gpt-5.4-mini") });
+const models = { quick: openai("gpt-5.4-mini") };
 
 const emailSchema = z.object({ to: z.string(), subject: z.string(), body: z.string() });
 
@@ -297,7 +297,7 @@ if (result.status === "idle") {
 See [Choosing a run mode](choosing-a-run-mode.md) for the full set. The executors hold your existing model code:
 
 - The `createAiSdkExecutors` adapter wraps the AI SDK.
-- Another SDK, or a raw `fetch`, is three plain functions that return `{ output }`. See [Hosts](hosts.md).
+- Another SDK, or a raw `fetch`, is three plain functions that return `{ result }`. See [Hosts](hosts.md).
 - The tools, retry logic, and provider calls you already wrote move across unchanged.
 
 Only the `while` loop is removed. See [Hosts](hosts.md).

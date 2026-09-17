@@ -84,7 +84,7 @@ Executors are plain functions, so a test can supply scripted executors and never
 const machine = emailDrafter.provide({
   actors: {
     draftEmail: draftEmail.withExecutor(async ({ request }) => {
-      return { output: { to: "sam@example.com", subject: "Hello", body: "Hi Sam!" } };
+      return { result: { to: "sam@example.com", subject: "Hello", body: "Hi Sam!" } };
     }),
   },
 });

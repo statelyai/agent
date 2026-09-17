@@ -140,21 +140,21 @@ export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
 
     case "email-drafter-v1":
     case "email-drafter-v2":
-      return { generateText: async (request) => ({ output: emailDrafterOutput(request) }) };
+      return { generateText: async (request) => ({ result: emailDrafterOutput(request) }) };
 
     case "approval":
       return {
-        generateText: async (request) => ({ output: approvalDraft(request.prompt ?? "") }),
+        generateText: async (request) => ({ result: approvalDraft(request.prompt ?? "") }),
       };
 
     case "research":
       return {
-        generateText: async (request) => ({ output: researchOutput(request) }),
+        generateText: async (request) => ({ result: researchOutput(request) }),
       };
 
     case "pipeline":
       return {
-        generateText: async (request) => ({ output: pipelineOutput(request) }),
+        generateText: async (request) => ({ result: pipelineOutput(request) }),
       };
 
     case "retry": {
@@ -176,7 +176,7 @@ export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
           if (request.model === "primary" && (hard || (soft && attempt === 0))) {
             throw new Error("primary model unavailable (scripted failure)");
           }
-          return { output: classifyTicket(ticket) };
+          return { result: classifyTicket(ticket) };
         },
       };
     }
@@ -209,7 +209,7 @@ export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
         generateText: async (request) => {
           const prompt = request.prompt ?? "";
           const question = prompt.match(/^Question:\s*([\s\S]*?)\n\nObservations:/)?.[1] ?? prompt;
-          return { output: composeAnswer(question, parseObservations(prompt)) };
+          return { result: composeAnswer(question, parseObservations(prompt)) };
         },
       };
 
@@ -220,13 +220,13 @@ export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
           if (request.name === "writeDraft") {
             const topic = prompt.match(/^Topic:\s*(.*)/m)?.[1] ?? prompt;
             const revising = /Revise to address/.test(prompt);
-            return { output: revising ? revisedDraft(topic) : flatDraft(topic) };
+            return { result: revising ? revisedDraft(topic) : flatDraft(topic) };
           }
           // evaluate: the flat first pass scores low (forcing one revision);
           // the revision, recognizable by its shape, clears the bar.
           const draft = prompt.replace(/^Score this draft:\s*/, "");
           return {
-            output: isRevisedDraft(draft)
+            result: isRevisedDraft(draft)
               ? {
                   score: 9,
                   feedback:

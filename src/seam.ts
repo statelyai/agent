@@ -121,7 +121,7 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
    * by model.
    *
    * Entries follow {@link ScriptedTextEntry} conventions (a value, an
-   * `{ output, usage? }` envelope, or a function of the request). A queue that
+   * `{ result, usage? }` object, or a function of the request). A queue that
    * runs dry throws; set {@link RunSeamOptions.repeatLast} to replay its last
    * entry instead.
    */
@@ -170,7 +170,7 @@ export interface RunSeamResult<TMachine extends AnyStateMachine> {
    * The seam call's own reported token usage — the cost of the one live call
    * when a `candidate` is a real model. `undefined` when the run never reached
    * the seam or its answer reported no usage (scripted entries report usage
-   * only via the `{ output, usage }` envelope).
+   * only via the `{ result, usage }` form).
    */
   seamUsage?: AgentCallUsage;
   /** Model calls made before the seam, or `-1` when the run never reached it. */
@@ -186,23 +186,16 @@ export interface RunSeamResult<TMachine extends AnyStateMachine> {
   after: SeamSlice;
 }
 
-/** Whatever a host executor may return — our envelope, or a raw AI SDK result. */
+/** Whatever a host executor returns: `{ result, ... }`. */
 type ExecutorReturn = Awaited<ReturnType<AgentRequestExecutor>>;
 
 /**
- * The seam's own answer, for scoring. Our `{ output }` envelope is read
- * directly; a raw AI SDK `generateText` result contributes its `text`. A raw
- * STREAM result is left alone — the machine consumes that stream, and reading
- * it here would steal the chunks — so `seamOutput` is `undefined` for a
- * streaming candidate that returns one. Score its trajectory instead.
+ * The seam's own answer, for scoring: the executor result's `result`.
  * @internal
  */
 async function seamOutputOf(result: ExecutorReturn, request: AgentTextRequest): Promise<unknown> {
   if (!isRecord(result)) {
     return undefined;
-  }
-  if ("output" in result) {
-    return await result["output"];
   }
   return await normalizeGeneratorResult(result, `seam '${request.name ?? request.model}'`);
 }
@@ -336,7 +329,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
     callsBeforeSeam = callIndex;
     seamStateAt = statePath.length;
     seamEventAt = liveEvents;
-    seamOutput = scripted.output;
+    seamOutput = scripted.result;
     seamUsage = scripted.usage;
     return scripted;
   };

@@ -44,7 +44,7 @@ const machine = agent.createMachine({
 });
 ```
 
-There is no separate event or helper. A machine that ignores `output.messages` keeps no transcript, and one that appends them owns exactly what it retained. The same envelope arrives through `simulateAgent` scripts (with `messages: []`) and the [step API](steps.md).
+There is no separate event or helper. A machine that ignores `output.messages` keeps no transcript, and one that appends them owns exactly what it retained. The same shape arrives through `simulateAgent` scripts (with `messages: []`) and the [step API](steps.md).
 
 ## Validating and reading messages
 

@@ -4,7 +4,7 @@ import { MAX_REJECTIONS, humanInTheLoopMachine, runHumanInTheLoopExample } from 
 
 /** Canned draft; the real model is only used on direct run. */
 const generateText = async ({ prompt }: { prompt?: string }) => ({
-  output: `Announcement: ${prompt ?? ""}`,
+  result: `Announcement: ${prompt ?? ""}`,
 });
 
 test("drafts, rejects once with feedback, and publishes across two JSON round-trips", async () => {

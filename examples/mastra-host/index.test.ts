@@ -103,9 +103,9 @@ describe("mastra-host", () => {
     const markerExecutors: AgentRequestExecutors = {
       generateText: async (request) =>
         request.name === "evaluatePrompt"
-          ? { output: { satisfied: true, missing: [], questions: [] } }
+          ? { result: { satisfied: true, missing: [], questions: [] } }
           : {
-              output: {
+              result: {
                 to: "marker@example.com",
                 subject: "MARKER SUBJECT",
                 body: "Written by the marker executor.",

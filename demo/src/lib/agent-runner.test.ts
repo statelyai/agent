@@ -233,8 +233,8 @@ describe("bounded exits", () => {
       {
         generateText: async (request) =>
           request.name === "writeDraft"
-            ? { output: `Draft about the shoreline (${request.prompt?.length ?? 0}).` }
-            : { output: { score: 5, feedback: "Still generic. Name one concrete image." } },
+            ? { result: `Draft about the shoreline (${request.prompt?.length ?? 0}).` }
+            : { result: { score: 5, feedback: "Still generic. Name one concrete image." } },
       },
     );
     expect(result.status).toBe("done");

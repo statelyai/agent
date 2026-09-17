@@ -27,15 +27,15 @@ function createJokeExecutors(options: { ratings: number[]; decision: ChosenEvent
         previousJoke: input.previousJoke,
         rating: input.rating,
       });
-      return { output: `A better joke about ${input.topic}.` };
+      return { result: `A better joke about ${input.topic}.` };
     }
-    return { output: `A joke about ${input.topic}.` };
+    return { result: `A joke about ${input.topic}.` };
   };
 
   const generateText: AgentRequestExecutor = async (request) => {
     if (request.name !== "rateJoke") throw new Error(`unexpected text request: ${request.name}`);
     return {
-      output: { rating: options.ratings[ratingIndex++] ?? 8, explanation: "because" },
+      result: { rating: options.ratings[ratingIndex++] ?? 8, explanation: "because" },
     };
   };
 
@@ -124,7 +124,7 @@ describe("joke-teller", () => {
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
       executors: {
-        streamText: async () => ({ output: "A joke about state machines." }),
+        streamText: async () => ({ result: "A joke about state machines." }),
         generateText: async () => {
           throw new Error("rater offline");
         },

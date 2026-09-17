@@ -23,11 +23,11 @@ function createModel() {
     // Requests carry their setupAgent({ requests }) key as `name`.
     if (request.name === "summarize") {
       // summarize request → structured { summary }
-      return { output: { summary: "SUMMARY: prior facts folded in." } };
+      return { result: { summary: "SUMMARY: prior facts folded in." } };
     }
     // respond request → plain text reply
     respondCalls.push(request.messages ?? []);
-    return { output: `reply ${respondCalls.length}` };
+    return { result: `reply ${respondCalls.length}` };
   };
   return { generateText, respondCalls };
 }

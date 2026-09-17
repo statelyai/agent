@@ -57,7 +57,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { tool } from "ai";
 import { createAsyncLogic } from "xstate";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getInteraction,
   getStatePath,
@@ -69,9 +69,9 @@ import {
   type AgentRequestExecutors,
 } from "@statelyai/agent";
 
-export const models = defineModels({
+const models = {
   assistant: openai("gpt-5.4-mini"),
-});
+};
 
 // The consequential tool call the model proposes and a human reviews.
 const refundCallSchema = z.object({

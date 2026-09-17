@@ -18,12 +18,12 @@ import type { BaseChatModel, ToolChoice } from "@langchain/core/language_models/
 import type { BaseMessage } from "@langchain/core/messages";
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import {
-  buildEnvelopeSchema,
+  providerOutputSchema,
   getAgentOutputMode,
   getJsonSchema,
   getJsonSchemaSync,
   isStandardSchema,
-  parseStructuredEnvelope,
+  parseProviderOutput,
   renderDecisionAttempts,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
@@ -191,8 +191,8 @@ function requireBindTools(model: BaseChatModel): NonNullable<BaseChatModel["bind
  *
  * Structured output goes through `withStructuredOutput`, LangChain's own
  * portable structured-output surface, applied to the `{ result, reasoning? }`
- * envelope this framework requires (see docs/hosts.md); the `.result` is
- * unwrapped and validated before it reaches the machine.
+ * provider output this framework requires (see docs/hosts.md); the `.result`
+ * is validated before it reaches the machine.
  *
  * Decisions bind one tool per candidate event and force a call — the same
  * recipe as the AI SDK adapter. Core's `resolveDecision` owns the retry loop,
@@ -217,17 +217,17 @@ export function createLangChainExecutors({
     const options = toCallOptions(request, info?.signal);
 
     if (getAgentOutputMode(request.outputSchema) === "structured") {
-      const envelope = buildEnvelopeSchema(request.outputSchema!, {
+      const outputSchema = providerOutputSchema(request.outputSchema!, {
         reasoning: request.includeReasoning,
       });
-      const jsonSchema = await getJsonSchema(envelope);
+      const jsonSchema = await getJsonSchema(outputSchema);
       if (jsonSchema) {
         const structured = chat.withStructuredOutput(jsonSchema, { name: "output" });
         const raw = await structured.invoke(messages, options);
-        // Validated unwrap of the { result, reasoning? } envelope — no cast.
-        const parsed = parseStructuredEnvelope(request, raw);
+        // Validated parse of the { result, reasoning? } provider output — no cast.
+        const parsed = parseProviderOutput(request, raw);
         return {
-          output: parsed.result,
+          result: parsed.result,
           ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
         };
       }
@@ -239,7 +239,7 @@ export function createLangChainExecutors({
     const runnable = tools.length > 0 && chat.bindTools ? chat.bindTools(tools) : chat;
     const response = await runnable.invoke(messages, options);
     const usage = toAgentUsage(response);
-    return { output: response.text, ...(usage ? { usage } : {}) };
+    return { result: response.text, ...(usage ? { usage } : {}) };
   };
 
   const streamText = async (
@@ -264,7 +264,7 @@ export function createLangChainExecutors({
       }
       usage = toAgentUsage(chunk) ?? usage;
     }
-    return { output: text, ...(usage ? { usage } : {}) };
+    return { result: text, ...(usage ? { usage } : {}) };
   };
 
   const decide: AgentDecisionExecutor = async (request, info) => {

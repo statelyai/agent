@@ -541,7 +541,7 @@ export function renderDecisionAttempts(
  * `runId`, `requestId`); `onChunk` is never set for a decision.
  * The optional `reason` is carried through to
  * `onResult`/event-sourcing but never affects validation. Like text
- * executors' `{ output, ...extras }` envelope, any extra keys (finish reason,
+ * executors' `{ result, ...extras }`, any extra keys (finish reason,
  * …) flow untouched to `onResult`'s `raw`; `usage` is the one core reads —
  * report this attempt's tokens there and `runAgent` folds them into the run's
  * aggregated {@link AgentUsage}.

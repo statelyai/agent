@@ -848,7 +848,7 @@ function resolveRegisteredDecisionLogic(
 }
 
 // A scripted text value is the bare `result`; the invoke resolves to the same
-// `{ result, messages }` envelope a live executor produces, with no messages.
+// `{ result, messages }` a live executor produces, with no messages.
 function asTextResult(value: unknown): AgentTextResult {
   return { result: value, messages: [] };
 }

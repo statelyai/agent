@@ -60,12 +60,12 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
-export const models = defineModels({
+const models = {
   crag: openai("gpt-5.4-mini"),
-});
+};
 
 /**
  * Sample data: the primary knowledge base `retrieve` searches. Stand-in for a

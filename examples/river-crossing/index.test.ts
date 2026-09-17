@@ -26,7 +26,7 @@ describe("river-crossing", () => {
   test("scripted optimal 7-move solution reaches solved with correct output", async () => {
     const result = await runAgent(riverCrossingMachine, {
       input: { maxMoves: 12 },
-      executors: { generateText: async () => ({ output: "" }), decide: scriptedDecide(OPTIMAL) },
+      executors: { generateText: async () => ({ result: "" }), decide: scriptedDecide(OPTIMAL) },
     });
 
     expect(result.status).toBe("done");
@@ -70,7 +70,7 @@ describe("river-crossing", () => {
 
     const result = await runAgent(riverCrossingMachine, {
       input: { maxMoves: 12 },
-      executors: { generateText: async () => ({ output: "" }), decide },
+      executors: { generateText: async () => ({ result: "" }), decide },
     });
 
     expect(result.status).toBe("done");
@@ -90,7 +90,7 @@ describe("river-crossing", () => {
     const shuttle = ["TAKE_GOAT", "TAKE_GOAT", "TAKE_GOAT", "TAKE_GOAT"];
     const result = await runAgent(riverCrossingMachine, {
       input: { maxMoves: 3 },
-      executors: { generateText: async () => ({ output: "" }), decide: scriptedDecide(shuttle) },
+      executors: { generateText: async () => ({ result: "" }), decide: scriptedDecide(shuttle) },
     });
 
     expect(result.status).toBe("done");
@@ -107,7 +107,7 @@ describe("river-crossing", () => {
     await runAgent(riverCrossingMachine, {
       input: { maxMoves: 12 },
       executors: {
-        generateText: async () => ({ output: "" }),
+        generateText: async () => ({ result: "" }),
         decide: async (request) => {
           requestsSeen.push(request);
           const type = OPTIMAL[requestsSeen.length - 1] ?? "CROSS_ALONE";

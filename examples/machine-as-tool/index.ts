@@ -47,14 +47,14 @@ import {
   type RunAgentResult,
   type SnapshotOf,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 /** Refunds at or under this amount need no human approval. */
 export const AUTO_APPROVAL_LIMIT = 500;
 
-export const models = defineModels({
+const models = {
   validator: openai("gpt-5.4-mini"),
-});
+};
 
 const agentSetup = setupAgent({
   models,

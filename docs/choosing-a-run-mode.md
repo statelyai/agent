@@ -7,7 +7,7 @@ The machine is the artifact. Runners only decide how one host executes its XStat
 | One request/response run    | `runAgent`                                                                          |
 | Several idle/resume turns   | `runAgent` in a `while` loop over `result.persist()`                                |
 | Async progress feed         | `runAgentStream`                                                                    |
-| A long-lived actor          | `provideExecutors` + XState `createActor`                                           |
+| A long-lived actor          | `provideExecutors` + XState `createActor`, see [Advanced](advanced.md)              |
 | A custom or durable runtime | The step API, or `createDurable` from `xstate/durable`                              |
 
 ## Managed run
@@ -39,12 +39,7 @@ The continuation is always the native persisted XState snapshot, so the loop can
 
 ## Long-lived actor
 
-```ts no-check
-const bound = provideExecutors(machine, executors);
-const actor = createActor(bound);
-actor.start();
-actor.send({ type: "USER_REPLIED", text: "Continue" });
-```
+When your application owns the actor, or the agent machine is a child in a larger XState system, bind the executors with `provideExecutors` and run a plain `createActor`. See [Advanced](advanced.md).
 
 ## The portable loop
 
@@ -60,8 +55,8 @@ while (!step.done) {
     const event = await resolveDecision(request, executors, { canTake: (e) => step.snapshot.can(e) });
     step = transitionAgentStep(machine, step, event);
   } else {
-    const { output } = await executeAgentRequest(request, executors);
-    step = resolveAgentStep(machine, step, request, output);
+    const { result, messages } = await executeAgentRequest(request, executors);
+    step = resolveAgentStep(machine, step, request, { result, messages });
   }
 }
 

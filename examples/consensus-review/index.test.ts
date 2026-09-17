@@ -10,7 +10,7 @@ test("two approvals reach quorum, regardless of completion order", async () => {
   const started: string[] = [];
   const releases = new Map<
     string,
-    (value: { output: { approve: boolean; reason: string } }) => void
+    (value: { result: { approve: boolean; reason: string } }) => void
   >();
   const pending = runConsensusReviewExample({
     executors: {
@@ -25,7 +25,7 @@ test("two approvals reach quorum, regardless of completion order", async () => {
   });
   await expect.poll(() => started.length).toBe(3);
   for (const id of ["maintainability", "security", "reliability"]) {
-    releases.get(id)?.({ output: { approve: id !== "security", reason: id } });
+    releases.get(id)?.({ result: { approve: id !== "security", reason: id } });
   }
   const result = await pending;
   expect(result.status).toBe("done");
@@ -39,7 +39,7 @@ test("review failures abstain; human rejection survives a JSON snapshot round tr
     executors: {
       generateText: async (_request, info) => {
         if (info?.requestId !== "security") throw new Error("Reviewer offline");
-        return { output: { approve: true, reason: "No issue found" } };
+        return { result: { approve: true, reason: "No issue found" } };
       },
     },
   });
@@ -60,7 +60,7 @@ test("review failures abstain; human rejection survives a JSON snapshot round tr
 
 test("same machine runs in a native XState host with identical output", async () => {
   const executors: AgentRequestExecutors = {
-    generateText: async () => ({ output: { approve: true, reason: "Accepted" } }),
+    generateText: async () => ({ result: { approve: true, reason: "Accepted" } }),
   };
   const managed = await runConsensusReviewExample({ executors });
   const actor = createActor(provideExecutors(consensusReviewMachine, executors), {
@@ -82,7 +82,7 @@ test("same machine runs in a native XState host with identical output", async ()
 
 test("invalid model output cannot count as an approval", async () => {
   const pending = await runConsensusReviewExample({
-    executors: { generateText: async () => ({ output: { approve: "yes", reason: "bad shape" } }) },
+    executors: { generateText: async () => ({ result: { approve: "yes", reason: "bad shape" } }) },
   });
   expect(pending.status).toBe("idle");
   expect(pending.snapshot.context.votes).toEqual([]);
@@ -108,7 +108,7 @@ test("an external patch cannot auto-accept, even on a unanimous model vote", asy
   const pending = await runConsensusReviewExample({
     patch: adversarial,
     executors: {
-      generateText: async () => ({ output: { approve: true, reason: "approved" } }),
+      generateText: async () => ({ result: { approve: true, reason: "approved" } }),
     },
   });
   expect(pending.status).toBe("idle");
@@ -135,7 +135,7 @@ test("a caller cannot promote a supplied patch to trusted, even with the built-i
   const pending = await runConsensusReviewExample({
     patch: "Validate input before writing to the database.",
     executors: {
-      generateText: async () => ({ output: { approve: true, reason: "approved" } }),
+      generateText: async () => ({ result: { approve: true, reason: "approved" } }),
     },
   });
   expect(pending.status).toBe("idle");
@@ -148,7 +148,7 @@ test("an untyped `input` passed to the runner cannot overwrite the derived sourc
     patch: "Validate input before writing to the database.",
     input: { patch: "anything", source: "trusted" },
     executors: {
-      generateText: async () => ({ output: { approve: true, reason: "approved" } }),
+      generateText: async () => ({ result: { approve: true, reason: "approved" } }),
     },
   } as never);
   expect(pending.status).toBe("idle");

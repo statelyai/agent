@@ -31,18 +31,18 @@ function mockGenerateText(script: MockScript) {
   let asked = 0;
   return async (request: { name?: string; tools?: Record<string, AgentTool | undefined> }) => {
     if (request.name === "classify") {
-      return { output: script.intent };
+      return { result: script.intent };
     }
     // The answer request now reports whether it actually answered.
     const ask = script.asks?.[asked];
     if (ask !== undefined) {
       asked += 1;
-      return { output: { status: "needsInfo", question: ask } };
+      return { result: { status: "needsInfo", question: ask } };
     }
     // answer request: run the requested read-only tool, then answer with it.
     const call = script.answerTool!;
     const result = await executeTool(request.tools?.[call.name], call.input);
-    return { output: { status: "answered", answer: `Answer: ${JSON.stringify(result)}` } };
+    return { result: { status: "answered", answer: `Answer: ${JSON.stringify(result)}` } };
   };
 }
 

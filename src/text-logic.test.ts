@@ -10,10 +10,10 @@ import {
   type AgentTextRequest,
   type AgentTools,
 } from "./index.js";
-import { bindRequestExecutor, parseStructuredEnvelope } from "./index.js";
+import { bindRequestExecutor, parseProviderOutput } from "./index.js";
 import { type AgentRequest } from "./index.js";
 import {
-  buildEnvelopeSchema,
+  providerOutputSchema,
   builtinTextActors,
   executeAgentTextRequest,
   type AgentRequestExecutorInfo,
@@ -81,7 +81,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
           for (const part of parts) {
             info?.onChunk?.(part);
           }
-          return { output: parts.join("") };
+          return { result: parts.join("") };
         },
       },
     });
@@ -129,7 +129,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
       runAgent(machine, {
         input: { topic: "x" },
         executors: {
-          generateText: async () => ({ output: "nope" }),
+          generateText: async () => ({ result: "nope" }),
         },
       }),
     ).rejects.toThrow(/streamText/);
@@ -141,7 +141,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
         "stream",
         "myStream",
         { model: "test-model", prompt: "go" },
-        { generateText: async () => ({ output: "nope" }) },
+        { generateText: async () => ({ result: "nope" }) },
       ),
     ).rejects.toThrow(/no executor.*stream.*'myStream'/i);
   });
@@ -151,7 +151,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
     let sawSignal = false;
     const controller = new AbortController();
 
-    const { output } = await executeAgentTextRequest(
+    const { result: output } = await executeAgentTextRequest(
       "stream",
       "myStream",
       { model: "test-model", prompt: "go" },
@@ -163,7 +163,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
           info?.onChunk?.("a");
           info?.onChunk?.("b");
           sawSignal = info?.signal === controller.signal;
-          return { output: "ab" };
+          return { result: "ab" };
         },
       },
       {},
@@ -200,7 +200,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
             throw new Error("generateText should not be used");
           },
           streamText: async () => ({
-            output: { setup: "Knock knock.", punchline: "XState." },
+            result: { setup: "Knock knock.", punchline: "XState." },
           }),
         },
       ),
@@ -214,8 +214,8 @@ describe('createTextLogic({ mode: "stream" })', () => {
       streamStructured.execute(
         { topic: "actors" },
         {
-          generateText: async () => ({ output: {} }),
-          streamText: async () => ({ output: { setup: "only setup" } }),
+          generateText: async () => ({ result: {} }),
+          streamText: async () => ({ result: { setup: "only setup" } }),
         },
       ),
     ).rejects.toThrow();
@@ -225,7 +225,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
     const bound = streamJoke.withExecutor(async ({ input, request }) => {
       expect(request.model).toBe("test-model");
       expect(request.prompt).toBe(`Joke about ${input.topic}.`);
-      return { output: `bound joke about ${input.topic}` };
+      return { result: `bound joke about ${input.topic}` };
     });
 
     // still a stream logic
@@ -316,7 +316,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
           const tag = request.prompt === "a" ? "A" : "B";
           info?.onChunk?.(tag);
           info?.onChunk?.(tag);
-          return { output: `${tag}${tag}` };
+          return { result: `${tag}${tag}` };
         },
       },
     });
@@ -342,7 +342,7 @@ describe("bindRequestExecutor", () => {
     const seen: { request: AgentTextRequest & { tools: AgentTools }; hasSignal: boolean }[] = [];
     const executor: AgentRequestExecutor = (request, info) => {
       seen.push({ request, hasSignal: info?.signal instanceof AbortSignal });
-      return { output: `summary of ${request.prompt}` };
+      return { result: `summary of ${request.prompt}` };
     };
 
     const bound = bindRequestExecutor(summarize, executor);
@@ -364,7 +364,7 @@ describe("bindRequestExecutor", () => {
     let capturedTools: AgentTools | undefined;
     const bound = bindRequestExecutor(withTools, (request) => {
       capturedTools = request.tools;
-      return { output: "ok" };
+      return { result: "ok" };
     });
 
     await toPromise(createActor(bound, { input: { topic: "x" } }).start());
@@ -372,10 +372,10 @@ describe("bindRequestExecutor", () => {
   });
 });
 
-describe("buildEnvelopeSchema", () => {
-  test("envelopes an object schema as { result } and validates/unwraps", () => {
+describe("providerOutputSchema", () => {
+  test("wraps an object schema as { result } and validates/unwraps", () => {
     const inner = z.object({ ok: z.boolean() });
-    const envelope = buildEnvelopeSchema(inner);
+    const envelope = providerOutputSchema(inner);
 
     const json = envelope["~standard"].jsonSchema!.input!() as Record<string, unknown>;
     expect(json).toMatchObject({
@@ -398,12 +398,12 @@ describe("buildEnvelopeSchema", () => {
     expect(badInner).toHaveProperty("issues");
   });
 
-  test("envelopes a bare union and an array uniformly (root object either way)", () => {
+  test("wraps a bare union and an array uniformly (root object either way)", () => {
     for (const inner of [
       z.union([z.object({ a: z.string() }), z.object({ b: z.number() })]),
       z.array(z.string()),
     ]) {
-      const json = buildEnvelopeSchema(inner)["~standard"].jsonSchema!.input!() as Record<
+      const json = providerOutputSchema(inner)["~standard"].jsonSchema!.input!() as Record<
         string,
         unknown
       >;
@@ -414,7 +414,7 @@ describe("buildEnvelopeSchema", () => {
 
   test("reasoning opt-in adds a reasoning property BEFORE result and captures a string reasoning", () => {
     const inner = z.object({ ok: z.boolean() });
-    const envelope = buildEnvelopeSchema(inner, { reasoning: true });
+    const envelope = providerOutputSchema(inner, { reasoning: true });
 
     const json = envelope["~standard"].jsonSchema!.input!() as {
       properties: Record<string, unknown>;
@@ -438,36 +438,36 @@ describe("buildEnvelopeSchema", () => {
   });
 });
 
-describe("parseStructuredEnvelope", () => {
+describe("parseProviderOutput", () => {
   const request = {
     outputSchema: z.object({ answer: z.string() }),
     reasoning: undefined,
   };
 
-  test("unwraps a valid { result } envelope", () => {
-    expect(parseStructuredEnvelope(request, { result: { answer: "ok" } })).toEqual({
+  test("unwraps a valid { result } object", () => {
+    expect(parseProviderOutput(request, { result: { answer: "ok" } })).toEqual({
       result: { answer: "ok" },
     });
   });
 
   test("surfaces reasoning when the request opted in", () => {
     expect(
-      parseStructuredEnvelope(
+      parseProviderOutput(
         { ...request, includeReasoning: true },
         { result: { answer: "ok" }, reasoning: "because" },
       ),
     ).toEqual({ result: { answer: "ok" }, reasoning: "because" });
   });
 
-  test("throws on a non-envelope value and on a missing outputSchema", () => {
-    expect(() => parseStructuredEnvelope(request, "not an envelope")).toThrow();
-    expect(() => parseStructuredEnvelope({ outputSchema: undefined }, { result: 1 })).toThrow(
+  test("throws on a non-object value and on a missing outputSchema", () => {
+    expect(() => parseProviderOutput(request, "not an object")).toThrow();
+    expect(() => parseProviderOutput({ outputSchema: undefined }, { result: 1 })).toThrow(
       /outputSchema/,
     );
   });
 });
 
-// A text request's invoke resolves with the `{ result, messages }` envelope:
+// A text request's invoke resolves with `{ result, messages }`:
 // the validated result plus whatever response messages the executor returned.
 describe("text request invoke output", () => {
   const config = {
@@ -478,7 +478,7 @@ describe("text request invoke output", () => {
 
   test("resolves with the result and the executor's response messages", async () => {
     const logic = createTextLogic(config, () => ({
-      output: "hi",
+      result: "hi",
       messages: [{ role: "assistant" as const, content: "hi" }],
     }));
 
@@ -488,7 +488,7 @@ describe("text request invoke output", () => {
   });
 
   test("resolves with empty messages when the executor returns only output", async () => {
-    const logic = createTextLogic(config, () => ({ output: "hi" }));
+    const logic = createTextLogic(config, () => ({ result: "hi" }));
 
     const output = await toPromise(createActor(logic, { input: { topic: "actors" } }).start());
 
@@ -506,7 +506,7 @@ describe("createTextLogic schema defaults", () => {
         model: "test-model",
         prompt: ({ input }) => `Joke about ${input.topic}.`,
       },
-      ({ request }) => ({ output: `joke: ${request.prompt}` }),
+      ({ request }) => ({ result: `joke: ${request.prompt}` }),
     );
 
     const output = await toPromise(createActor(tellJoke, { input: { topic: "actors" } }).start());
@@ -525,7 +525,7 @@ describe("createTextLogic schema defaults", () => {
         model: "test-model",
         prompt: () => "hi",
       },
-      () => ({ output: { not: "a string" } as unknown as string }),
+      () => ({ result: { not: "a string" } as unknown as string }),
     );
 
     await expect(
@@ -539,7 +539,7 @@ describe("createTextLogic schema defaults", () => {
         model: "test-model",
         prompt: "Give me a topic.",
       },
-      () => ({ output: "otters" }),
+      () => ({ result: "otters" }),
     );
 
     expect(randomTopic.request(undefined).prompt).toBe("Give me a topic.");
@@ -595,8 +595,8 @@ describe("createTextLogic schema defaults", () => {
       executors: {
         generateText: (request) =>
           request.name === "randomTopic"
-            ? { output: "otters" }
-            : { output: `joke: ${request.prompt}` },
+            ? { result: "otters" }
+            : { result: `joke: ${request.prompt}` },
       },
     });
 
@@ -739,7 +739,7 @@ describe("agent text request input sources", () => {
       error: /'neither' has neither a non-empty `prompt` nor `messages`/,
     },
   ])("direct execution rejects a request with $name source", async ({ name, input, error }) => {
-    const generateText = vi.fn(async () => ({ output: "unreachable" }));
+    const generateText = vi.fn(async () => ({ result: "unreachable" }));
 
     await expect(
       executeAgentTextRequest("generate", name, input, { generateText }),

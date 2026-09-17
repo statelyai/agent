@@ -117,13 +117,13 @@ async function resolveExecutors(
     return { mode: "script", executors: scriptedExecutorsFor(scenarioId) };
   }
   // Lazy import: keeps @ai-sdk/openai out of any bundle that only needs scripts.
-  const [{ createAiSdkExecutors, defineModels }, { openai }] = await Promise.all([
+  const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
   const primary = process.env.OPENAI_MODEL || "gpt-5.4-mini";
   const fallback = process.env.OPENAI_FALLBACK_MODEL || primary;
-  const models = defineModels({
+  const models = {
     fast: openai(primary),
     writer: openai(primary),
     router: openai(primary),
@@ -133,7 +133,7 @@ async function resolveExecutors(
     reasoner: openai(primary),
     primary: openai(primary),
     fallback: openai(fallback),
-  });
+  };
   const executors = createAiSdkExecutors({ models });
   // Deterministic outage demo for the retry scenario: a healthy primary never
   // fails live, so the advertised retry path would never show. Two markers, two
