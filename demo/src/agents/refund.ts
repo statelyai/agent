@@ -29,23 +29,6 @@ const agentSetup = setupAgent({
     outcome: z.enum(["refunded", "approved", "denied", "needs-details"]),
     amount: z.number().nullable(),
   }),
-  // `interaction` is the declarative UI-hint convention: `label` is the human
-  // prompt; `events` refines how each accepted event renders (button label,
-  // emphasis). The chat UI derives everything else from the event schemas.
-  meta: z.object({
-    interaction: z
-      .object({
-        label: z.string(),
-        textEvent: z.string().optional(),
-        events: z
-          .record(
-            z.string(),
-            z.object({ label: z.string().optional(), style: z.string().optional() }),
-          )
-          .optional(),
-      })
-      .optional(),
-  }),
   // The model's legal moves. AUTO_REFUND / REVIEW carry the amount the model
   // extracted from the request text; the machine validates and routes it.
   events: {
@@ -57,9 +40,6 @@ const agentSetup = setupAgent({
     /** The customer's reply to "how much?" — free text the model re-reads. */
     DETAILS: z.object({ text: z.string() }),
   },
-  // Human-wait states carry this tag — declare it as the suspend signal so
-  // runAgent settles idle deterministically instead of timing out.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-human"),
 });
 
 export const refundMachine = agentSetup.createMachine({
@@ -101,8 +81,10 @@ export const refundMachine = agentSetup.createMachine({
     },
     // Idle: the customer left out the amount. Free text comes back as DETAILS
     // and the model reads the request again with the reply appended.
+    // `meta.interaction` is the UI hint: `label` is the human prompt and
+    // `events` refines how each accepted event renders. It is typed against
+    // the machine's events, so a typo here is a compile error.
     askingAmount: {
-      tags: ["awaiting-human"],
       meta: {
         interaction: {
           label: "How much was the charge? Reply with the amount.",
@@ -126,7 +108,6 @@ export const refundMachine = agentSetup.createMachine({
     // Idle: waits for a human. `meta.interaction` labels the prompt; the legal
     // events (APPROVE / DENY) come from the snapshot via getAcceptedEvents.
     awaitingApproval: {
-      tags: ["awaiting-human"],
       meta: {
         interaction: {
           label: "Amount exceeds the $100 auto-refund limit. Approve or deny.",

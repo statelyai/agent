@@ -29,15 +29,17 @@ const calcSchema = z.object({
   b: z.number(),
 });
 
+const contextSchema = z.object({
+  question: z.string(),
+  steps: z.number(),
+  observations: z.array(z.string()),
+  pendingCalc: calcSchema.nullable(),
+  pendingKey: z.string().nullable(),
+  answer: z.string().nullable(),
+});
+
 const agentSetup = setupAgent({
-  context: z.object({
-    question: z.string(),
-    steps: z.number(),
-    observations: z.array(z.string()),
-    pendingCalc: calcSchema.nullable(),
-    pendingKey: z.string().nullable(),
-    answer: z.string().nullable(),
-  }),
+  context: contextSchema,
   input: z.object({ question: z.string() }),
   output: z.object({ answer: z.string(), steps: z.number() }),
   events: {
@@ -84,6 +86,12 @@ const agentSetup = setupAgent({
       prompt: ({ input }) =>
         `Question: ${input.question}\n\nObservations:\n${input.observations.join("\n") || "(none)"}`,
     },
+  },
+  // A tool state is entered only by the event that carries its arguments, so
+  // narrow the pending field there instead of defaulting it at the call site.
+  states: {
+    calculating: { schemas: { context: contextSchema.extend({ pendingCalc: calcSchema }) } },
+    lookingUp: { schemas: { context: contextSchema.extend({ pendingKey: z.string() }) } },
   },
 });
 
@@ -139,7 +147,7 @@ export const toolsMachine = agentSetup.createMachine({
     calculating: {
       invoke: {
         src: "calculate",
-        input: ({ context }) => context.pendingCalc ?? { operation: "add" as const, a: 0, b: 0 },
+        input: ({ context }) => context.pendingCalc,
         onDone: {
           target: "thinking",
           context: ({ context, output }) => ({
@@ -153,7 +161,7 @@ export const toolsMachine = agentSetup.createMachine({
     lookingUp: {
       invoke: {
         src: "lookup",
-        input: ({ context }) => ({ key: context.pendingKey ?? "" }),
+        input: ({ context }) => ({ key: context.pendingKey }),
         onDone: {
           target: "thinking",
           context: ({ context, output }) => ({
