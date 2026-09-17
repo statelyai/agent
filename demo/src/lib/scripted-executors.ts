@@ -77,7 +77,13 @@ function emailDrafterOutput(request: AgentTextRequest): unknown {
       questions: missing.map((field) => `What is the ${field}?`),
     };
   }
-  return { to: text.match(EMAIL)?.[0] ?? "", subject: "Re: your request", body: text };
+  const to = text.match(EMAIL)?.[0] ?? "";
+  const openQuestions = [
+    ...(to ? [] : ["Who should this go to?"]),
+    ...(/subject/i.test(text) ? [] : ["What subject line do you want?"]),
+  ];
+  // v1's drafter ignores `openQuestions`; v2's collects them.
+  return { to, subject: "Re: your request", body: text, openQuestions };
 }
 
 export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {

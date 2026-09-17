@@ -117,6 +117,8 @@ export interface RunMetrics {
   category: CaseCategory;
   /** Times the workflow paused to ask the user something before it could send. */
   clarificationTurns: number;
+  /** Every question the workflow raised, blocking (v1) or alongside the draft (v2). */
+  clarifications: string[];
   revisions: number;
   modelCalls: number;
   /** Sum over every model call, or `null` if any call did not report usage. */
@@ -139,6 +141,8 @@ export interface MachineSummary {
   totals: {
     runs: number;
     clarificationTurns: number;
+    /** Questions raised across runs, whether or not they blocked. */
+    clarificationsRaised: number;
     revisions: number;
     modelCalls: number;
     totalTokens: number | null;
@@ -197,6 +201,7 @@ export async function runCase(
     caseId: emailCase.id,
     category: emailCase.category,
     clarificationTurns: 0,
+    clarifications: [],
     revisions: 0,
     modelCalls: 0,
     totalTokens: null,
@@ -288,8 +293,13 @@ export async function runCase(
   metrics.totalTokens =
     metrics.modelCalls > 0 && callsWithUsage === metrics.modelCalls ? tokens : null;
   if (result.status === "done") {
-    const output = result.output as { sentEmails: unknown[]; failure: string | null };
+    const output = result.output as {
+      sentEmails: unknown[];
+      clarifications: string[];
+      failure: string | null;
+    };
     metrics.failure = output.failure;
+    metrics.clarifications = output.clarifications;
     metrics.sent = output.sentEmails.length > 0;
   } else if (result.status === "error") {
     metrics.failure = String(result.error);
@@ -323,6 +333,7 @@ function summarize(machine: string, runs: RunMetrics[]): MachineSummary {
   const totals: MachineSummary["totals"] = {
     runs: runs.length,
     clarificationTurns: 0,
+    clarificationsRaised: 0,
     revisions: 0,
     modelCalls: 0,
     totalTokens: null,
@@ -332,6 +343,7 @@ function summarize(machine: string, runs: RunMetrics[]): MachineSummary {
   };
   for (const run of runs) {
     totals.clarificationTurns += run.clarificationTurns;
+    totals.clarificationsRaised += run.clarifications.length;
     totals.revisions += run.revisions;
     totals.modelCalls += run.modelCalls;
     totals.accepted += run.acceptedDraft ? 1 : 0;
@@ -368,7 +380,8 @@ export function renderComparison(summaries: MachineSummary[]): string {
   const row = (label: string, pick: (s: MachineSummary) => string | number) =>
     lines.push(`| ${label} | ${summaries.map((s) => String(pick(s))).join(" | ")} |`);
   row("runs", (s) => s.totals.runs);
-  row("clarification turns", (s) => s.totals.clarificationTurns);
+  row("clarification turns (blocking)", (s) => s.totals.clarificationTurns);
+  row("clarifications raised", (s) => s.totals.clarificationsRaised);
   row("revisions", (s) => s.totals.revisions);
   row("model calls", (s) => s.totals.modelCalls);
   row("total tokens", (s) => s.totals.totalTokens ?? "n/a");

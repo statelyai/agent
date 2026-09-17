@@ -18,7 +18,10 @@ test("v1 asks before drafting when only optional details are missing; v2 drafts 
 
   expect(v1.clarificationTurns).toBeGreaterThan(0);
   expect(v1.path).toContain("needsMoreInfo");
+  expect(v1.clarifications).toContain("What is the subject?");
   expect(v2.clarificationTurns).toBe(0);
+  // v2 still surfaces the gap; it just does not block on it.
+  expect(v2.clarifications).toEqual(["What subject line do you want?"]);
   expect(v2.path).toEqual(["drafting", "reviewing", "sending", "sent"]);
   expect(v1.sent && v2.sent).toBe(true);
 });
@@ -38,6 +41,7 @@ test("v2 moves the recipient check to the send boundary and never sends without 
 
   const reviewing = await start("email-drafter-v2", recipientCase.prompt);
   expect(reviewing.status).toBe("idle");
+  expect(reviewing.response).toContain("**Open questions**\n- Who should this go to?");
   expect(reviewing.idle?.events.map((event) => event.type)).toEqual(["REQUEST_CHANGES", "SEND"]);
   expect(reviewing.idle?.textEvent).toEqual({ type: "REQUEST_CHANGES", field: "text" });
   expect(reviewing.response).toContain("(no recipient yet)");

@@ -11,6 +11,9 @@
  * - added: `needsRecipient`, reached only from a SEND with no valid address
  * - SEND branches on `hasRecipient(draft)` instead of always sending
  * - `draftEmail` is told to leave `to` empty rather than invent an address
+ * - `draftEmail` also returns `openQuestions`: what it drafted around. They
+ *   accumulate in `clarifications` (same output field as v1) and show with
+ *   the draft, so nothing v1 would have asked is lost; it just stops blocking.
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
@@ -24,11 +27,17 @@ const agentSetup = setupAgent({
   context: z.object({
     prompt: z.string(),
     draft: emailDraftSchema.nullable(),
+    /** Questions the drafter raised while drafting around gaps. Part of the output. */
+    clarifications: z.array(z.string()),
     revisions: z.number(),
     failure: z.string().nullable(),
   }),
   input: z.object({ prompt: z.string() }),
-  output: z.object({ sentEmails: z.array(emailDraftSchema), failure: z.string().nullable() }),
+  output: z.object({
+    sentEmails: z.array(emailDraftSchema),
+    clarifications: z.array(z.string()),
+    failure: z.string().nullable(),
+  }),
   meta: interactionMetaSchema,
   events: {
     REQUEST_CHANGES: z.object({ text: z.string() }),
@@ -38,11 +47,18 @@ const agentSetup = setupAgent({
   isIdle: (snapshot) => snapshot.hasTag("awaiting-user"),
   requests: {
     draftEmail: {
-      schemas: { input: z.object({ prompt: z.string() }), output: emailDraftSchema },
+      schemas: {
+        input: z.object({ prompt: z.string() }),
+        output: emailDraftSchema.extend({
+          /** Details the request left out that the draft had to assume. Empty when nothing was missing. */
+          openQuestions: z.array(z.string()),
+        }),
+      },
       model: "writer",
       system:
         "Draft a polished email from the request. Use the details given. Pick a sensible subject if none is given. " +
-        "`to` must be an email address from the request; if none is given, leave `to` empty. Never invent an address.",
+        "`to` must be an email address from the request; if none is given, leave `to` empty. Never invent an address. " +
+        "In `openQuestions`, list one short question per detail you had to assume or leave out (recipient, subject, time, place). Empty if nothing was missing.",
       prompt: ({ input }) => input.prompt,
     },
   },
@@ -58,7 +74,13 @@ const agentSetup = setupAgent({
 
 export const emailDrafterV2Machine = agentSetup.createMachine({
   id: "email-drafter-v2",
-  context: ({ input }) => ({ prompt: input.prompt, draft: null, revisions: 0, failure: null }),
+  context: ({ input }) => ({
+    prompt: input.prompt,
+    draft: null,
+    clarifications: [],
+    revisions: 0,
+    failure: null,
+  }),
   // v1 starts in `evaluating`. v2 drafts with what it has.
   initial: "drafting",
   states: {
@@ -66,9 +88,15 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
       invoke: {
         src: "draftEmail",
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ context, output }) => ({
+        onDone: ({ context, output: { openQuestions, ...draft } }) => ({
           target: context.revisions >= MAX_REVISIONS ? "finalReview" : "reviewing",
-          context: { draft: output },
+          context: {
+            draft,
+            clarifications: [
+              ...context.clarifications,
+              ...openQuestions.filter((question) => !context.clarifications.includes(question)),
+            ],
+          },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -157,12 +185,17 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         sentEmails: context.draft ? [context.draft] : [],
+        clarifications: context.clarifications,
         failure: null,
       }),
     },
     failed: {
       type: "final",
-      output: ({ context }) => ({ sentEmails: [], failure: context.failure ?? "unknown failure" }),
+      output: ({ context }) => ({
+        sentEmails: [],
+        clarifications: context.clarifications,
+        failure: context.failure ?? "unknown failure",
+      }),
     },
   },
 });
