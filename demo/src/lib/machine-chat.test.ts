@@ -19,6 +19,7 @@ import {
   schemaFields,
   schemaNeedsPayload,
   singleStringField,
+  type Json,
 } from "./machine-ui";
 import { scriptedExecutorsFor } from "./scripted-executors";
 
@@ -340,6 +341,26 @@ describe("expandable trace detail", () => {
     expect(String((entry.event.output as { answer: string }).answer)).toContain("…");
     expect(entry.detail?.event).toEqual({ type: "answer.done", output: { answer } });
     expect(entry.detail?.context).toEqual({ answer, sources: [1, 2, 3] });
+  });
+
+  test("caps a wide event at both levels", () => {
+    const wide = Object.fromEntries(
+      Array.from({ length: 80 }, (_, index) => [`field${index}`, index]),
+    );
+    const recorder = createTraceRecorder();
+    recorder.onTransition({ value: "s", context: {} } as never, {
+      type: "RESUME",
+      payload: wide,
+    });
+
+    const [entry] = recorder.trace;
+    const nested = entry.event["payload"] as Record<string, Json>;
+    // 64 fields kept plus the marker, at the top level and one level down.
+    expect(Object.keys(nested)).toHaveLength(65);
+    expect(nested["…"]).toBe("16 more fields");
+    expect((entry.detail?.event as Record<string, Json>)["payload"]).toMatchObject({
+      "…": "16 more fields",
+    });
   });
 
   test("keeps the detail bounded, and says so rather than showing a prefix", () => {

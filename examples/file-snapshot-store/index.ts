@@ -127,6 +127,12 @@ export async function runLongLivedActor(
   // signal up itself, but this half owns the actor, so stopping it is what a
   // cancelled request means. A stopped actor settles its `waitFor`s.
   const stop = () => actor.stop();
+  // A listener only catches what happens next: a signal that is already
+  // aborted (a turn cancelled before this half began) must not start the
+  // actor at all, or its draft request runs after the cancellation.
+  if (observers.signal?.aborted) {
+    throw new Error("The run was cancelled before the long-lived actor started.");
+  }
   observers.signal?.addEventListener("abort", stop, { once: true });
   actor.start();
 

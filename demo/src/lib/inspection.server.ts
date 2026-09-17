@@ -31,6 +31,7 @@ import { createInspector, type Inspector } from "@statelyai/sdk/inspect";
 import { createInspectionRoomUrls, getInspectionRoomId } from "@statelyai/sdk";
 import type { AnyStateMachine, InspectionEvent } from "xstate";
 import { toVizConfig } from "./scenarios";
+import { nextDeclaration } from "./declaration-ticket";
 
 const INSPECTION_PRODUCER_ID = "agent-demo-runner";
 
@@ -127,10 +128,9 @@ type InspectionGlobals = {
   /** Root machine published to the room ahead of any actor, so the viz can
    * render the selected example before a run exists. */
   declaredMachine?: unknown;
-  /** Ticket counter for declarations, and the newest ticket already applied.
+  /** The newest declaration ticket already applied (see `declaration-ticket`).
    * Declarations load their payload asynchronously, so an older one can finish
    * last; without this it would put the previous selection back on screen. */
-  declarationSeq?: number;
   declarationApplied?: number;
   /** The current inspector exists only to carry that declaration, so the next
    * declaration can swap its graph in place instead of rebuilding the room. */
@@ -274,17 +274,6 @@ function createRoomInspector({ pinSelection }: { pinSelection: boolean }): Inspe
   state.idCounts = new Map();
   state.registeredIds = new Set();
   return inspector;
-}
-
-/**
- * Takes the next declaration ticket. A handler claims one BEFORE it starts
- * loading a machine, and passes it to {@link declareInspectionMachine}, so
- * declarations land in the order they were requested rather than the order
- * their payloads happened to finish.
- */
-export function nextDeclaration(): number {
-  state.declarationSeq = (state.declarationSeq ?? 0) + 1;
-  return state.declarationSeq;
 }
 
 /**

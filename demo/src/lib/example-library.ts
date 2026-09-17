@@ -8,6 +8,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import type { Snapshot } from "xstate";
 
+import { nextDeclaration } from "./declaration-ticket";
 import type { ExampleDetail } from "./example-library.server";
 import type { MachineChatResult } from "./machine-chat.server";
 
@@ -48,13 +49,14 @@ const declareInput = z.object({
 export const declareExampleMachine = createServerFn({ method: "POST" })
   .validator((input: unknown) => declareInput.parse(input))
   .handler(async ({ data }): Promise<{ declared: boolean }> => {
+    // Claimed before the first await — the dynamic imports below included:
+    // two quick selections must land in the order they were asked for, not
+    // the order their modules happened to resolve in.
+    const declaration = nextDeclaration();
     const [
       { getExampleMachine, getExampleMachineSource },
-      { declareInspectionMachine, ensureInspectionRelay, nextDeclaration, rootMachinePayload },
+      { declareInspectionMachine, ensureInspectionRelay, rootMachinePayload },
     ] = await Promise.all([import("./example-library.server"), import("./inspection.server")]);
-    // Claimed before the machine loads: two quick selections must land in the
-    // order they were asked for, not the order their modules finished.
-    const declaration = nextDeclaration();
     await ensureInspectionRelay();
     const [machine, source] = await Promise.all([
       getExampleMachine(data.id, data.exportName),

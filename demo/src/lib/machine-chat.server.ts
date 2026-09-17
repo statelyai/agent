@@ -289,9 +289,15 @@ function smallEventValue(value: unknown, nested: boolean): Json | undefined {
   // usually a small object. Deeper than that is a record, not a chat row.
   if (!nested && value !== null && typeof value === "object") {
     const inner: Record<string, Json> = {};
-    for (const [key, field] of Object.entries(value as Record<string, unknown>)) {
+    const entries = Object.entries(value as Record<string, unknown>);
+    // Capped like the top level: a resumed event's payload is the client's,
+    // and one wide nested object should not become the whole response.
+    for (const [key, field] of entries.slice(0, DETAIL_OBJECT_FIELDS)) {
       const small = smallEventValue(field, true);
       if (small !== undefined) inner[key] = small;
+    }
+    if (entries.length > DETAIL_OBJECT_FIELDS) {
+      inner["…"] = `${entries.length - DETAIL_OBJECT_FIELDS} more fields`;
     }
     return Object.keys(inner).length > 0 ? inner : undefined;
   }

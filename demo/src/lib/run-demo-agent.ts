@@ -14,6 +14,7 @@ import {
   startScenario as startScenarioRun,
   type ResumeEvent,
 } from "./agent-runner";
+import { nextDeclaration } from "./declaration-ticket";
 import type { ScenarioId } from "./scenarios";
 
 export type { ScenarioResult, TraceEntry, IdlePayload, RunMode } from "./agent-runner";
@@ -52,14 +53,14 @@ const resumeInput = z.object({
 export const declareScenarioMachine = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({ scenarioId }).parse(input))
   .handler(async ({ data }): Promise<{ declared: boolean }> => {
+    // Claimed before the first await, so a slower earlier selection cannot
+    // land on top of a newer one.
+    const declaration = nextDeclaration();
     const [{ machineFor }, { scenarioSource }, inspection] = await Promise.all([
       import("./agent-runner"),
       import("./scenarios"),
       import("./inspection.server"),
     ]);
-    // Claimed before the machine is built, so a slower earlier selection
-    // cannot land on top of a newer one.
-    const declaration = inspection.nextDeclaration();
     await inspection.ensureInspectionRelay();
     const id = data.scenarioId as ScenarioId;
     return {
