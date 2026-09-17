@@ -1,0 +1,18 @@
+{
+  "model": "gpt-5.4",
+  "observation": "The main friction is repeated clarification loops before any draft exists. This shows up in `evaluating -> needsMoreInfo` 16 times, with `missing-optional` and `missing-recipient` runs each taking 3 clarification turns and 4 model calls, while revisions were never used (`revisions: 0`). In v1, every missing field is blocked by `evaluatePrompt` because its system prompt says to require recipient, subject, and body details, and `needsMoreInfo` asks the human to fill gaps one round at a time before drafting unless they manually choose `DRAFT_ANYWAY`.",
+  "proposal": "Make `evaluatePrompt` require only a valid recipient before it can return `satisfied: true`; treat missing subject/body details as optional drafting gaps that can be handled in the first draft. Concretely, change the `evaluatePrompt.system` instruction from requiring recipient, subject, and body details to requiring recipient only, while still reporting subject/body gaps in `missing/questions` when present. No state structure changes are needed: `evaluating` can then go straight to `drafting` for more requests, `reviewing` still guarantees human review before `SEND`, and the existing `SEND` transition in `reviewing`/`finalReview` still blocks sends without a valid recipient via `hasRecipient(context.draft)`.",
+  "changes": [
+    {
+      "where": "`requests.evaluatePrompt.system`",
+      "change": "Replace `Require recipient, subject, and body details.` with guidance that only recipient is mandatory for satisfaction; subject/body details should be noted as missing questions but should not prevent `satisfied: true` when a valid recipient is present."
+    }
+  ],
+  "keeps": [
+    "Keep `reviewing` and `finalReview` unchanged so every draft is still reviewed by the human before send.",
+    "Keep `SEND` as the only path to `sending`; no email is sent automatically.",
+    "Keep the valid-recipient gate in `reviewing.SEND` and `finalReview.SEND` via `hasRecipient(context.draft)`.",
+    "Keep `needsMoreInfo` and `DRAFT_ANYWAY` for cases where the recipient is missing or the human wants to proceed despite other gaps."
+  ],
+  "measure": "After the change, compare runs on the same categories and expect fewer `evaluating -> needsMoreInfo` traversals, especially for `missing-optional`; fewer clarificationTurns and modelCalls per accepted run; and unchanged `sendRuleViolations = 0` and `sent = accepted`."
+}

@@ -28,6 +28,8 @@ const scenarioId = z.enum([
   "retry",
   "tools",
   "reflection",
+  "email-drafter-v1",
+  "email-drafter-v2",
 ]);
 
 const startInput = z.object({

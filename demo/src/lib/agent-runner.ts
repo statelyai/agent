@@ -28,6 +28,8 @@ import { pipelineMachine } from "@/agents/pipeline";
 import { retryMachine } from "@/agents/retry";
 import { toolsMachine } from "@/agents/tools";
 import { reflectionMachine } from "@/agents/reflection";
+import { emailDrafterV1Machine } from "@/agents/email-drafter-v1";
+import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
 import { scriptedExecutorsFor, scriptedReviewVerdict } from "./scripted-executors";
 import { scenarioSource, type ScenarioId } from "./scenarios";
 
@@ -77,6 +79,8 @@ const machines: Record<ScenarioId, AnyStateMachine> = {
   retry: retryMachine,
   tools: toolsMachine,
   reflection: reflectionMachine,
+  "email-drafter-v1": emailDrafterV1Machine,
+  "email-drafter-v2": emailDrafterV2Machine,
 };
 
 export function machineFor(scenarioId: ScenarioId): AnyStateMachine {
@@ -100,6 +104,9 @@ function inputFor(scenarioId: ScenarioId, prompt: string): Record<string, string
       return { ticket: prompt };
     case "tools":
       return { question: prompt };
+    case "email-drafter-v1":
+    case "email-drafter-v2":
+      return { prompt };
   }
 }
 
@@ -192,15 +199,32 @@ function describeResult(scenarioId: ScenarioId, result: RunAgentResult<AnyStateM
         return `${output.answer} (in ${output.steps} tool step${output.steps === 1 ? "" : "s"})`;
       case "reflection":
         return `**First draft**\n\n${output.firstDraft}\n\n**Final draft**\n\n${output.draft}\n\n${output.verdict}`;
+      case "email-drafter-v1":
+      case "email-drafter-v2":
+        return describeEmailOutcome(output);
     }
   }
   if (result.status === "idle") {
     const context = result.snapshot.context as Record<string, unknown>;
     if (scenarioId === "approval") return String(context.draft ?? "Draft ready for review.");
     if (scenarioId === "refund") return "Amount exceeds the auto-refund limit. Awaiting approval.";
+    if (scenarioId === "email-drafter-v1" || scenarioId === "email-drafter-v2") {
+      const draft = context.draft as { to: string; subject: string; body: string } | null;
+      return draft ? formatDraft(draft) : "Waiting for input.";
+    }
     return "Waiting for input.";
   }
   return "The run ended with an error.";
+}
+
+function formatDraft(draft: { to: string; subject: string; body: string }): string {
+  return `**To:** ${draft.to || "(no recipient yet)"}\n**Subject:** ${draft.subject}\n\n${draft.body}`;
+}
+
+function describeEmailOutcome(output: Record<string, unknown>): string {
+  if (output.failure) return `Not sent: ${String(output.failure)}`;
+  const sent = (output.sentEmails as { to: string; subject: string; body: string }[] | undefined) ?? [];
+  return sent.length ? `Sent (simulated outbox).\n\n${formatDraft(sent[0]!)}` : "Nothing was sent.";
 }
 
 function toResult(
