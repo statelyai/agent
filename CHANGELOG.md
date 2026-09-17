@@ -1,5 +1,49 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.25
+
+### Minor Changes
+
+- [#134](https://github.com/statelyai/agent/pull/134) [`edb7597`](https://github.com/statelyai/agent/commit/edb75976d8b7432d1e8041985f25075e43d96437) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Tighten the executor contract around SDK hosts.
+
+  - **Removed `agent.userInput`**, the `userInput` run option, `pendingUserInputs`, `PendingUserInput`, `AgentUserInput`, `AgentUserInputExecutor`, the scripted `userInput` channel, and the `userInput` shorthand in `simulateAgent`/`explorePaths` scripts (use `invokes` keyed by src). A human's turn is an idle state with accepted events; see the human-in-the-loop docs.
+  - **Executors return `{ result }` only.** The raw Vercel AI SDK result shapes (`{ text }`, `{ textStream }`) are no longer sniffed, `AiSdkShapedTextResult`/`AiSdkShapedStreamResult` are gone, and `AgentExecutorTextRequest` keeps precise `tools`/`messages` types instead of widening them to `any`. Use `createAiSdkExecutors` or a plain function.
+  - **Removed `defineModels`.** Pass the plain `models` map to `setupAgent({ models })` and to `createAiSdkExecutors({ models })`; the machine's model refs are typed from its keys either way. No executors are attached implicitly; pass `executors` explicitly to `runAgent`. (A library that exports its map from a package with declaration emit annotates it as `AiSdkModelMap<'quick' | 'deep'>`, as with any exported AI SDK value.)
+  - **Removed the `eventToolName` resolver** (`AgentEventToolNameResolver`). Event tool names are always `send_event_<TYPE>`.
+  - **`parseModelRef` moved** to `@statelyai/agent/ai-sdk`.
+
+- [#134](https://github.com/statelyai/agent/pull/134) [`2a0e5ea`](https://github.com/statelyai/agent/commit/2a0e5ea83301138b3bc1065c2f66740a469e474e) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Simplify the public API surface.
+
+  - **New entry points.** Testing and eval tooling moved to `@statelyai/agent/testing` (`lintAgentMachine`, `assertAgentMachine`, `simulateAgent`, `explorePaths`, `canReach`, `createScriptedExecutors`, `matchesTrajectory`, `runSeam`). Event-log primitives moved to `@statelyai/agent/log` (`replay`, `forkEventLog`, `initEntry`, `createReplayEntry`, `getUsageFromEvents`, `createInMemoryEventLogStore`, `assertEventLogStoreConformance`, and friends). The root keeps `AgentLogEntry`, `AgentEventLogStore`, and the errors `runAgent` throws.
+  - **Step API exported.** `initialAgentStep`, `transitionAgentStep`, `resolveAgentStep`, `rejectAgentStep`, and the `AgentStep` type are now public from the root, alongside `executeAgentRequest`. This is the pure `(state, event) => (state, requests)` view of a machine that `simulateAgent` already ran on; any host can drive it.
+  - **Removed `runAgentLoop`.** Write the loop: `while (result.status === "idle") result = await runAgent(machine, { snapshot: result.persist(), event, executors })`.
+  - `executeAgentRequest` now takes an `AgentStepRequest` only; the undocumented effect-shaped argument is gone.
+  - `EventLogStoreConformanceHarness` no longer accepts an unused `expect` field.
+
+- [#134](https://github.com/statelyai/agent/pull/134) [`c130184`](https://github.com/statelyai/agent/commit/c130184af400dbe13af0d6cc44e78d7ce1cde941) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Text requests resolve to `{ result, messages }` on both sides of the executor contract, and the `agent.messages` event is removed.
+
+  - **`onDone` output is `{ result, messages }`.** Every text request (`requests`, `agent.generateText`, `agent.streamText`, `createTextLogic`) now resolves its invoke with `AgentTextResult<T>` (exported from `@statelyai/agent`): `output.result` is the validated result, typed from the request's output schema or `string`, and `output.messages` is the executor's framework-native response messages (`AgentMessage[]`, empty when the executor returned none). This is universal, not opt-in. Read `output.result` where you read `output` before, and append `output.messages` to `context.messages` in `onDone` to retain a transcript. Decisions and non-agent actors are unchanged.
+  - **JSON workflows.** Template expressions that read a request's output move from `{{ event.output.<field> }}` to `{{ event.output.result.<field> }}` (`{{ event.output.result }}` for a plain-text request). Non-request `actors` invokes still read `{{ event.output.<field> }}`.
+  - **Executors return the same shape.** `generateText`/`streamText` executors return `{ result, messages?, usage?, ... }` instead of `{ output, ... }`: `result` is the value, `messages` the provider's response messages. `AgentRequestExecutorResult`, `createScriptedExecutors` entries (`{ result, usage }` to report usage), `bindRequestExecutor`, `TextLogic.withExecutor`, and `onResult(request, { result, raw })` all follow. The `request.end` trace event is unchanged.
+  - **`executeAgentRequest` returns `{ result, messages, raw }`** (was `{ output, raw }`). Pass `{ result, messages }` straight to `resolveAgentStep`.
+  - **Provider schema helpers renamed.** `buildEnvelopeSchema` is `providerOutputSchema`, `parseStructuredEnvelope` is `parseProviderOutput`, and `StructuredOutputEnvelope` is `ProviderStructuredOutput`. They build and parse the `{ result, reasoning? }` object a provider is asked for; the parsed value is already an executor result.
+  - **Removed:** the reserved `agent.messages` event, `appendMessages`, the setup result's `appendMessages`, `AGENT_MESSAGES_EVENT_TYPE`, the `AgentMessagesEvent`/`AgentMessagesEventPayload` types, and the `unhandled-agent-messages` lint code. `messagesSchema`, `isAgentMessages`, and `getMessageText` remain.
+
+- [#134](https://github.com/statelyai/agent/pull/134) [`19b42ab`](https://github.com/statelyai/agent/commit/19b42ab94676697bda206d81149d80bbe7126c99) Thanks [@davidkpiano](https://github.com/davidkpiano)! - State `meta` is typed by default. `setupAgent` now types every state's `meta` as `AgentInteractionMeta` keyed by the machine's declared events (exported as `AgentDefaultMeta`), so a `meta.interaction` choice or `textEvent` naming an undeclared event is a compile error, with no `meta` schema to pass. A machine that declares its own `meta` schema replaces the default. `AgentInteractionDescriptor` and `AgentInteractionMeta` take the event-type union as a type parameter.
+
+- [#131](https://github.com/statelyai/agent/pull/131) [`1429090`](https://github.com/statelyai/agent/commit/1429090906ba9d8e6cee45525bbeaac8d54b2af6) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Require xstate `6.0.0-alpha.57`.**
+
+  The peer range moves to `>=6.0.0-alpha.57 <6.0.0`. Nothing in the library's own
+  API changes; the bump picks up alpha.57's structural setup state contracts
+  (`type` / `id` / `initial` / `history` / `target` / `route` in `setup({ states })`,
+  with strict transition targets) and the new `transitionMeta` schema.
+
+  alpha.57 also fixes declaration emit for machines built with `setup({ states })`
+  (statelyai/xstate#5722): the types those declarations reach for — `ActiveStateContext`,
+  `RootContextMarker`, the strict-target markers — are exported from the package
+  entry point now, so a package that exports such a machine can be built with
+  `declaration: true` again.
+
 ## 2.0.0-alpha.24
 
 ### Patch Changes
