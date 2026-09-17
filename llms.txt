@@ -20,10 +20,11 @@
 - [Hosts and executors](docs/hosts.md): Give an agent machine the executor functions that call a model, and choose between the shipped AI SDK adapter or your own.
 - [Use in any stack](docs/any-stack.md): One agent machine runs unchanged in a local script, an HTTP route, or an edge runtime. Only the executors are host-specific.
 - [The step API](docs/steps.md): The pure `(state, event) => (state, requests)` view of an agent machine, so any host (durable workflow, queue, test, replay) can run it without `runAgent`.
+- [Advanced: bare XState actors and hand-written executors](docs/advanced.md): Bind executors onto a machine with `provideExecutors` to run it as a plain XState actor, and write a `{ result, messages? }` executor without an adapter.
 - [Where state lives](docs/persistence.md): The two durable artifacts an agent run produces, what each one holds, and how to restore from them.
 - [The event log](docs/event-log.md): The event log is the source of truth. Append external inputs, replay deterministically, fork, and implement a store; primitives in `@statelyai/agent/log`.
 - [Human in the loop](docs/human-in-the-loop.md): Pause an agent for human input by settling idle, persist the snapshot anywhere, and resume in a different process.
-- [Models and providers](docs/models-and-providers.md): Reuse models and executors from other AI frameworks via AI SDK LanguageModel objects, raw ai functions, and OpenAI-compatible endpoints.
+- [Models and providers](docs/models-and-providers.md): Reuse models and executors from other AI frameworks via AI SDK LanguageModel objects and OpenAI-compatible endpoints.
 - [Observability](docs/observability.md): Watch an agent run locally in the Stately Inspector, ship its versioned trace stream to OpenTelemetry, and replay any run from the snapshot it traced.
 - [Usage and budgets](docs/usage-and-budgets.md): Read token usage off a run, cap runaway loops with maxModelCalls, and enforce turn and token budgets as ordinary machine guards.
 - [Debugging](docs/debugging.md): Find out why an agent did the wrong thing, using the inspector, the trace stream, scripted reproduction, and the static linter.

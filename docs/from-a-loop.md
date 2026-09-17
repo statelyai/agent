@@ -248,7 +248,7 @@ The loop's `return { pending: true }` becomes a waiting state with no invoke. `r
     // ...
 ```
 
-The `meta.interaction` block is what a host renders for the pause. Declare `meta: interactionMetaSchema` on `setupAgent` to have it typechecked. See [Human in the loop](human-in-the-loop.md).
+The `meta.interaction` block is what a host renders for the pause. `setupAgent` types it against the machine's events by default, so a choice naming an undeclared event does not compile. See [Human in the loop](human-in-the-loop.md).
 
 ## Step 4: the run with `runAgent`
 
