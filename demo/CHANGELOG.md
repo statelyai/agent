@@ -1,5 +1,18 @@
 # @statelyai/agent-demo
 
+## 0.0.1-alpha.13
+
+### Patch Changes
+
+- [#129](https://github.com/statelyai/agent/pull/129) [`92cebb6`](https://github.com/statelyai/agent/commit/92cebb6bc910d4798e97c1987ebbedd7d72fde91) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Demo: render the keyless hosted `/inspect` page instead of the API-key-gated embed, and keep one inspector per run session with stable actor identity (manual SDK actor API) so resumed turns arrive as snapshot updates instead of a fresh `system.init`.
+
+- [#133](https://github.com/statelyai/agent/pull/133) [`206c570`](https://github.com/statelyai/agent/commit/206c570fc65a963d82555a16278a7986a3182bea) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Email drafter comparison: a request that errors still counts as a model call; the summary token total stays `null` unless every run reported usage; `byCategory` is typed as partial for filtered runs; scripted mode reads an angle-bracketed address. Both drafters output a `clarifications` array: v1 collects the evaluator's questions, v2 collects the `openQuestions` its drafter raises while drafting around gaps, shown under the draft as open questions.
+
+- [#132](https://github.com/statelyai/agent/pull/132) [`9bd3d73`](https://github.com/statelyai/agent/commit/9bd3d734aee50eda34a7cb6e4b8e0b06773c82cb) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Two email drafter scenarios: v1 asks about every missing detail before drafting, v2 drafts first and checks for a recipient at SEND. `demo/src/lib/email-drafter-compare.ts` runs both on the same requests and records clarification turns, model calls, tokens, send-rule violations, and edge traversal counts; `email-drafter-propose.ts` asks an agent for one bounded change given v1 and that evidence.
+
+- Updated dependencies [[`edb7597`](https://github.com/statelyai/agent/commit/edb75976d8b7432d1e8041985f25075e43d96437), [`2a0e5ea`](https://github.com/statelyai/agent/commit/2a0e5ea83301138b3bc1065c2f66740a469e474e), [`c130184`](https://github.com/statelyai/agent/commit/c130184af400dbe13af0d6cc44e78d7ce1cde941), [`19b42ab`](https://github.com/statelyai/agent/commit/19b42ab94676697bda206d81149d80bbe7126c99), [`1429090`](https://github.com/statelyai/agent/commit/1429090906ba9d8e6cee45525bbeaac8d54b2af6)]:
+  - @statelyai/agent@2.0.0-alpha.25
+
 ## 0.0.1-alpha.12
 
 ### Patch Changes
