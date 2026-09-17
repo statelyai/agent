@@ -737,9 +737,6 @@ function toChatResult(
   };
 }
 
-/** Decision rotation shared across resumes, so a paused loop keeps cycling. */
-const walkthroughTurns = new Map<string, number>();
-
 type ResolvedExecutors = {
   mode: "live" | "walkthrough";
   model?: string;
@@ -754,7 +751,7 @@ type ResolvedExecutors = {
 async function resolveExecutors(): Promise<ResolvedExecutors> {
   if (!process.env.OPENAI_API_KEY) {
     const { createWalkthroughExecutors } = await import("./walkthrough-executors");
-    return { mode: "walkthrough", executors: createWalkthroughExecutors(walkthroughTurns) };
+    return { mode: "walkthrough", executors: createWalkthroughExecutors() };
   }
   const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),

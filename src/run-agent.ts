@@ -1806,11 +1806,9 @@ function rebindChildMachine(
  * console.log(r.output);
  * ```
  *
- * The `executors`' `generateText`/`streamText` accept the raw Vercel AI SDK
- * functions directly (`executors: { generateText, streamText }` with them
- * imported from `ai`) — their `{ text }`/`{ textStream }` results are unwrapped
- * natively. `decide` cannot be a raw AI SDK function: the tool-per-event mapping
- * lives in an adapter — use `createAiSdkExecutors` from '@statelyai/agent/ai-sdk'.
+ * Each executor is a plain function returning an `{ output }` envelope, or
+ * an adapter's set: `createAiSdkExecutors` from '@statelyai/agent/ai-sdk' or
+ * `createOpenAiExecutors` from '@statelyai/agent/openai' supply all three.
  */
 export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,

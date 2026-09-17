@@ -37,6 +37,9 @@ type JsonSchema = {
   exclusiveMinimum?: number;
   exclusiveMaximum?: number;
   format?: string;
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
   anyOf?: JsonSchema[];
   oneOf?: JsonSchema[];
   allOf?: JsonSchema[];
@@ -116,8 +119,51 @@ function amountIn(context: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+/**
+ * Fits `text` to the schema's length bounds and, when it declares a
+ * `pattern`, tries a few plain candidates against it. A pattern none of them
+ * match is left to the machine's own validation, which routes the request to
+ * its `onError` exactly as a bad model answer would.
+ */
+function fitString(text: string, schema: JsonSchema): string {
+  let out = text;
+  if (schema.maxLength !== undefined && out.length > schema.maxLength) {
+    out = out.slice(0, schema.maxLength).trimEnd() || out.slice(0, schema.maxLength);
+  }
+  if (schema.minLength !== undefined && out.length < schema.minLength) {
+    out = out.padEnd(schema.minLength, ".");
+  }
+  if (schema.pattern) {
+    let pattern: RegExp | undefined;
+    try {
+      pattern = new RegExp(schema.pattern, "u");
+    } catch {
+      return out;
+    }
+    if (pattern.test(out)) return out;
+    const candidates = [
+      "placeholder",
+      "Placeholder",
+      "PLACEHOLDER",
+      "placeholder-1",
+      "ABC-123",
+      "abc123",
+      "1",
+      "2026-01-01",
+      "a",
+    ];
+    const match = candidates.find((candidate) => pattern!.test(candidate));
+    if (match) return match;
+  }
+  return out;
+}
+
 /** A placeholder string that reads as what the field is for. */
 function placeholderString(name: string, schema: JsonSchema, context: string): string {
+  return fitString(rawPlaceholderString(name, schema, context), schema);
+}
+
+function rawPlaceholderString(name: string, schema: JsonSchema, context: string): string {
   if (schema.format === "email") return "someone@example.com";
   if (schema.format === "uri" || schema.format === "url") return "https://example.com/placeholder";
   if (schema.format === "date-time") return new Date(0).toISOString();
@@ -233,18 +279,34 @@ function toJsonSchema(schema: unknown): JsonSchema | undefined {
   }
 }
 
+/** FNV-1a over a string, for a stable, cheap pseudo-random pick. */
+function hashOf(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash;
+}
+
 /**
  * Placeholder executors that satisfy any request's schemas.
  *
- * `turns` is the rotation memory for decisions: each invoke site cycles
- * through its legal events, so a loop that keeps asking eventually hears the
- * event that ends it. A run that spans several HTTP resumes must share one
- * map across them (the server keeps a module-level one), or every resume
- * would start the cycle over and pick the same event forever.
+ * A decision's pick is a function of the decision's own prompt plus a
+ * per-run counter, so it carries no state across runs or visitors: a loop
+ * whose prompt grows each turn (a transcript, a game history) rotates
+ * through its legal events as the prompt changes, a loop that re-asks the
+ * same thing rotates through them within the run, and two visitors driving
+ * the same machine never advance each other's sequence.
  */
-export function createWalkthroughExecutors(
-  turns: Map<string, number> = new Map(),
-): Partial<AgentRequestExecutors> {
+export function createWalkthroughExecutors(): Partial<AgentRequestExecutors> {
+  // Per run (runAgent call), keyed by invoke site; bounded so a long-lived
+  // server does not accumulate one entry per run it ever served.
+  const turns = new Map<string, number>();
+  const remember = (key: string, value: number) => {
+    if (turns.size > 512) turns.delete(turns.keys().next().value!);
+    turns.set(key, value);
+  };
   const text = async (request: AgentTextRequest, info?: AgentRequestExecutorInfo) => {
     const schema = toJsonSchema(request.outputSchema);
     const output = schema
@@ -260,17 +322,17 @@ export function createWalkthroughExecutors(
   return {
     generateText: text,
     streamText: text,
-    decide: async (request: AgentDecisionRequest) => {
+    decide: async (request: AgentDecisionRequest, info?: AgentRequestExecutorInfo) => {
       const rejected = new Set(request.attempts.map((attempt) => attempt.event?.type));
       const candidates = request.events.filter((event) => !rejected.has(event.type));
       const pool = candidates.length ? candidates : request.events;
       if (!pool.length) {
         throw new Error("Walkthrough decision: the machine accepts no events in this state.");
       }
-      const key = request.name ?? request.id ?? "decision";
+      const key = `${info?.runId ?? "run"}:${request.name ?? request.id ?? "decision"}`;
       const turn = turns.get(key) ?? 0;
-      turns.set(key, turn + 1);
-      const chosen = pool[turn % pool.length];
+      remember(key, turn + 1);
+      const chosen = pool[(hashOf(request.prompt ?? "") + turn) % pool.length];
       const payload = synthesize(toJsonSchema(chosen.inputSchema), chosen.type, gist(request));
       return {
         event: {

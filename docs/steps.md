@@ -60,7 +60,18 @@ export async function runWithSteps(
 - `rejectAgentStep(machine, step, request, error)` delivers a failure as `xstate.error.actor`, so the machine takes the invoke's `onError`. With no `onError` in scope the snapshot ends in `status: 'error'`, exactly as a live run would.
 - `executeAgentRequest(request, executors)` runs one text request against the executor contract and returns `{ result, messages, raw }`: the validated result, the response messages, and the raw executor result. The first two are exactly what `resolveAgentStep` takes. Decisions go through `resolveDecision`.
 
-Every step's snapshot is a native XState snapshot. Persist it with `getPersistedSnapshot`, and restore it with `transitionAgentStep` on a later process. Requests in parallel regions arrive together in `step.requests`; the host chooses whether to run them concurrently.
+Every step's snapshot is a native XState snapshot. To continue in another process, persist it with `getPersistedSnapshot(step.snapshot)`, and on the other side rehydrate it with `machine.resolveState(persisted)` before handing it to `transitionAgentStep`: a persisted snapshot is plain JSON, and `resolveState` rebuilds the live snapshot (state nodes, children) that `transition` expects.
+
+```ts no-check
+// process A
+await store.put(id, getPersistedSnapshot(step.snapshot));
+
+// process B
+const snapshot = machine.resolveState(await store.get(id));
+step = transitionAgentStep(machine, snapshot, event);
+```
+
+Requests in parallel regions arrive together in `step.requests`; the host chooses whether to run them concurrently.
 
 ## Replaying a failed call
 

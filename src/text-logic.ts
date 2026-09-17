@@ -560,10 +560,11 @@ export interface TextLogic<
     readonly output: TOutputSchema;
   };
   request(input: InferOutput<TInputSchema>): AgentTextRequest<TMetadata>;
+  /** Runs this request once against `executors`; resolves the same `{ result, messages }` the invoke's `onDone` would receive. */
   execute(
     input: InferOutput<TInputSchema>,
     executors: AgentRequestExecutors,
-  ): Promise<InferOutput<TOutputSchema>>;
+  ): Promise<AgentTextResult<InferOutput<TOutputSchema>>>;
   withExecutor(
     execute: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>,
   ): TextLogic<TInputSchema, TOutputSchema, TMetadata>;

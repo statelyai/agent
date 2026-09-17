@@ -104,25 +104,40 @@ describe("createWalkthroughExecutors", () => {
     expect(result.output.answer).toMatch(/^Placeholder/);
   });
 
-  test("shares rotation memory across executor sets when given one map", async () => {
-    const request = {
+  test("picks by the decision's prompt, so a changing prompt rotates with no shared state", async () => {
+    const request = (prompt: string) => ({
       kind: "decision" as const,
       id: "0.(machine).deciding",
       name: "deciding",
       model: "any",
       input: {},
+      prompt,
       events: ["A", "B", "C"].map((type) => ({ type, toolName: `send_event_${type}` })),
       attempts: [],
-    };
-    const turns = new Map<string, number>();
-    const first = createWalkthroughExecutors(turns);
-    expect((await first.decide!(request)).event.type).toBe("A");
-    expect((await first.decide!(request)).event.type).toBe("B");
-    // A later executor set (a new HTTP resume) continues the cycle…
-    const second = createWalkthroughExecutors(turns);
-    expect((await second.decide!(request)).event.type).toBe("C");
-    // …where one without the shared map would start over.
-    expect((await createWalkthroughExecutors().decide!(request)).event.type).toBe("A");
+    });
+    // Two visitors with fresh executor sets and the same prompt agree, and
+    // neither advances the other: the pick is a function of the prompt.
+    const alice = createWalkthroughExecutors();
+    const bob = createWalkthroughExecutors();
+    const first = (await alice.decide!(request("turn one"))).event.type;
+    expect((await bob.decide!(request("turn one"))).event.type).toBe(first);
+    // Within one run the same prompt rotates, so a re-asking loop ends.
+    const second = (await alice.decide!(request("turn one"))).event.type;
+    expect(second).not.toBe(first);
+  });
+
+  test("fits strings to length bounds and tries plain candidates against a pattern", () => {
+    const value = synthesize({
+      type: "object",
+      properties: {
+        code: { type: "string", pattern: "^[A-Z]{3}-\\d+$" },
+        short: { type: "string", maxLength: 5 },
+        long: { type: "string", minLength: 40 },
+      },
+    }) as Record<string, string>;
+    expect(value.code).toBe("ABC-123");
+    expect(value.short.length).toBeLessThanOrEqual(5);
+    expect(value.long.length).toBeGreaterThanOrEqual(40);
   });
 
   test("does not nest placeholders when a placeholder is fed back into a prompt", async () => {
