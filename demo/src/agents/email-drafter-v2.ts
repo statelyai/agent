@@ -15,22 +15,10 @@
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
 import { interactionMetaSchema, setupAgent } from "@statelyai/agent";
+import { type EmailDraft, emailDraftSchema, hasRecipient } from "./email-draft";
 
 /** Same revision budget as v1, so the comparison changes one thing. */
 export const MAX_REVISIONS = 2;
-
-const emailDraftSchema = z.object({
-  /** An email address, or `""` when the request never named one. */
-  to: z.string(),
-  subject: z.string(),
-  body: z.string(),
-});
-export type EmailDraft = z.infer<typeof emailDraftSchema>;
-
-/** The one rule that must hold before sending: a real address to send to. */
-export function hasRecipient(draft: EmailDraft | null): draft is EmailDraft {
-  return draft !== null && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.to.trim());
-}
 
 const agentSetup = setupAgent({
   context: z.object({

@@ -66,6 +66,53 @@ test("v2 moves the recipient check to the send boundary and never sends without 
   expect(sent.response).toContain("alex@example.com");
 });
 
+test("v1 'draft anyway' cannot send without a recipient; SEND asks instead", async () => {
+  const resume = (snapshot: unknown, event: { type: string; [key: string]: unknown }) =>
+    resumeScenarioRun(
+      "email-drafter-v1",
+      snapshot as Snapshot<unknown>,
+      event,
+      "script",
+      undefined,
+      executors,
+    );
+  const asked = await startScenarioRun(
+    "email-drafter-v1",
+    recipientCase.prompt,
+    "script",
+    undefined,
+    executors,
+  );
+  const reviewing = await resume(asked.idle!.snapshot, { type: "DRAFT_ANYWAY" });
+  expect(reviewing.status).toBe("idle");
+  expect(reviewing.response).toContain("(no recipient yet)");
+
+  const askedAgain = await resume(reviewing.idle!.snapshot, { type: "SEND" });
+  expect(askedAgain.status).toBe("idle");
+  expect(askedAgain.idle?.prompt).toContain("Who should this go to?");
+  expect(askedAgain.idle?.events.map((event) => event.type)).toEqual(["MORE_INFO", "DRAFT_ANYWAY"]);
+
+  // MORE_INFO re-evaluates and re-drafts; the scripted drafter picks the address up.
+  const redrafted = await resume(askedAgain.idle!.snapshot, {
+    type: "MORE_INFO",
+    text: "Recipient: alex@example.com. Subject: Coffee on Thursday.",
+  });
+  expect(redrafted.status).toBe("idle");
+  const done = await resume(redrafted.idle!.snapshot, { type: "SEND" });
+  expect(done.status).toBe("done");
+  expect(done.response).toContain("alex@example.com");
+});
+
+test("hasRecipient rejects malformed and multi-address values", async () => {
+  const { hasRecipient } = await import("@/agents/email-draft");
+  const draft = (to: string) => ({ to, subject: "s", body: "b" });
+  expect(hasRecipient(draft("alex@example.com"))).toBe(true);
+  expect(hasRecipient(draft("alex@example.com,other"))).toBe(false);
+  expect(hasRecipient(draft("Alex"))).toBe(false);
+  expect(hasRecipient(draft(""))).toBe(false);
+  expect(hasRecipient(null)).toBe(false);
+});
+
 test("v1 idle label surfaces the evaluator's questions", async () => {
   const first = await startScenarioRun(
     "email-drafter-v1",

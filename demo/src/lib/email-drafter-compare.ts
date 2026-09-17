@@ -25,7 +25,8 @@ import {
   runAgent,
 } from "@statelyai/agent";
 import { emailDrafterV1Machine } from "@/agents/email-drafter-v1";
-import { emailDrafterV2Machine, hasRecipient } from "@/agents/email-drafter-v2";
+import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
+import { hasRecipient } from "@/agents/email-draft";
 
 export type CaseCategory = "complete" | "missing-optional" | "missing-recipient";
 
@@ -118,6 +119,7 @@ export interface RunMetrics {
   clarificationTurns: number;
   revisions: number;
   modelCalls: number;
+  /** Sum over every model call, or `null` if any call did not report usage. */
   totalTokens: number | null;
   /** The draft mentioned every required fact when the user sent it. */
   acceptedDraft: boolean;
@@ -204,11 +206,14 @@ export async function runCase(
   };
 
   let previous: string | null = null;
+  let tokens = 0;
+  let callsWithUsage = 0;
   const onTrace = (event: AgentTraceEvent) => {
     if (event.type === "request.end") {
       metrics.modelCalls += 1;
       if (event.usage?.totalTokens !== undefined) {
-        metrics.totalTokens = (metrics.totalTokens ?? 0) + event.usage.totalTokens;
+        tokens += event.usage.totalTokens;
+        callsWithUsage += 1;
       }
     }
     if (event.type === "machine.transition") {
@@ -275,6 +280,9 @@ export async function runCase(
     result = await runAgent(machine, { snapshot, event: event as never, executors, onTrace });
   }
 
+  // A partial sum would read as a total, so any call without usage voids it.
+  metrics.totalTokens =
+    metrics.modelCalls > 0 && callsWithUsage === metrics.modelCalls ? tokens : null;
   if (result.status === "done") {
     const output = result.output as { sentEmails: unknown[]; failure: string | null };
     metrics.failure = output.failure;

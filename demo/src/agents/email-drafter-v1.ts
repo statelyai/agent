@@ -6,7 +6,9 @@
  * What the MACHINE owns: the order. Nothing is drafted until the evaluator is
  * satisfied or the human says "draft anyway"; nothing is sent until the human
  * chooses SEND from a review state; after MAX_REVISIONS rounds the only legal
- * move is SEND. `sending` is a simulated outbox.
+ * move is SEND. A SEND with no valid recipient (possible after "draft anyway")
+ * goes back to `needsMoreInfo`, v1's only way to ask. `sending` is a simulated
+ * outbox.
  *
  * Every missing detail is treated the same way here: stop and ask. That is the
  * friction v2 (`./email-drafter-v2.ts`) removes, and `email-drafter-compare.ts`
@@ -15,12 +17,12 @@
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
 import { interactionMetaSchema, setupAgent } from "@statelyai/agent";
+import { type EmailDraft, emailDraftSchema, hasRecipient } from "./email-draft";
 
 /** Revision rounds `reviewing` allows before only SEND is legal. */
 export const MAX_REVISIONS = 2;
 
-const emailDraftSchema = z.object({ to: z.string(), subject: z.string(), body: z.string() });
-export type EmailDraft = z.infer<typeof emailDraftSchema>;
+const RECIPIENT_QUESTION = "Who should this go to? Type an email address.";
 
 const assessmentSchema = z.object({
   satisfied: z.boolean(),
@@ -160,7 +162,10 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
             prompt: `${context.prompt}\n\nRevision request: ${event.text}`,
           },
         }),
-        SEND: { target: "sending" },
+        SEND: ({ context }) =>
+          hasRecipient(context.draft)
+            ? { target: "sending" }
+            : { target: "needsMoreInfo", context: { questions: RECIPIENT_QUESTION } },
       },
     },
 
@@ -173,7 +178,10 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
         },
       },
       on: {
-        SEND: { target: "sending" },
+        SEND: ({ context }) =>
+          hasRecipient(context.draft)
+            ? { target: "sending" }
+            : { target: "needsMoreInfo", context: { questions: RECIPIENT_QUESTION } },
       },
     },
 
