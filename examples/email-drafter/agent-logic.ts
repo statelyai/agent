@@ -6,8 +6,8 @@
  * Every framework host in `examples/` (Mastra, Flue, LangChain, Cloudflare, the
  * inspector, the CLI in `./index.ts`) imports this module and nothing else from
  * the example. Each state that needs the human carries the library's own
- * `meta.interaction` descriptor — validated by the shipped
- * `interactionMetaSchema` and read back with `getInteraction` — so hosts render
+ * `meta.interaction` descriptor — typed against the machine's events by
+ * `setupAgent` and read back with `getInteraction` — so hosts render
  * the conversation generically and never hardcode state names.
  *
  * Flow: prompting → evaluating → (needsMoreInfo)? → drafting → reviewing →
@@ -26,7 +26,6 @@ import {
   assistantMessage,
   createAgentSchemas,
   createTextLogic,
-  interactionMetaSchema,
   setupAgent,
   userMessage,
 } from "@statelyai/agent";
@@ -118,7 +117,6 @@ export const emailDrafterSchemas = createAgentSchemas({
   output: outputSchema,
   // The library's own interaction protocol, not a per-machine restatement of
   // it: `label` / `events` / `textEvent`, read back with `getInteraction`.
-  meta: interactionMetaSchema,
 });
 
 export const emailDrafterActors = {

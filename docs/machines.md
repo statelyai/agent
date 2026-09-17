@@ -425,7 +425,7 @@ When the root declares no `output` and exactly one final state does, `createMach
 
 <!-- typed meta protocol from examples/email-drafter/agent-logic.ts -->
 
-The `meta` field attaches typed data to a state or transition. Declare `meta: interactionMetaSchema` on `setupAgent` and hosts read the shipped interaction protocol through `getInteraction(snapshot)` instead of `Record<string, unknown>`. A `label` names the wait, `events` maps choice events to labels, and `textEvent` names the free-text event whose payload is `{ text }`:
+The `meta` field attaches typed data to a state or transition. By default `setupAgent` types it as the shipped interaction protocol, keyed by the machine's declared events, and hosts read it through `getInteraction(snapshot)` instead of `Record<string, unknown>`. A `label` names the wait, `events` maps choice events to labels, and `textEvent` names the free-text event whose payload is `{ text }`:
 
 ```ts no-check
 // inside states: { ... }
@@ -442,7 +442,7 @@ prompting: {
 }
 ```
 
-A `meta` value that does not match the schema is a compile error. See [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts).
+A choice or `textEvent` naming an event the machine never declared is a compile error. A machine with other metadata declares its own `meta` schema on `setupAgent`, which replaces the default. See [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts).
 
 ## Delayed transitions
 
