@@ -70,6 +70,6 @@ The seam between tools and actors is fixed. Tools are chosen by the model within
 
 - [Hosts and executors](hosts.md): the executor contract the host implements.
 - [Use in any stack](any-stack.md): the same machine across local, server, and edge hosts.
-- [The XState transition loop](steps.md): the effect lifecycle custom and durable hosts own.
+- [The step API](steps.md): the pure step loop custom and durable hosts own.
 - [Multi-agent composition](multi-agent.md): composing machines without an orchestration layer.
 - [Post-alpha roadmap](roadmap.md): what is deliberately not shipped yet.

@@ -14,13 +14,13 @@
  */
 import { z } from "zod";
 import {
-  createInMemoryEventLogStore,
-  createScriptedExecutors,
   runAgent,
   setupAgent,
   type AgentEventLogStore,
   type RunAgentOptions,
 } from "@statelyai/agent";
+import { createInMemoryEventLogStore } from "@statelyai/agent/log";
+import { createScriptedExecutors } from "@statelyai/agent/testing";
 import type { AnyStateMachine } from "xstate";
 
 /**

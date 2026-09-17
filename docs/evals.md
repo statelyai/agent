@@ -12,7 +12,7 @@ executors: { generateText: async () => ({ output: "a draft" }) }
 
 ## Scripted executors
 
-`createScriptedExecutors` is the multi-request version: ordered answers by request name, where the last entry for a name repeats forever.
+`createScriptedExecutors` (from `@statelyai/agent/testing`) is the multi-request version: ordered answers by request name, where the last entry for a name repeats forever.
 
 ```ts no-check
 const scripted = createScriptedExecutors({

@@ -37,7 +37,6 @@ import {
   interactionMetaSchema,
   isAgentIdle,
   runAgent,
-  runAgentLoop,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -251,8 +250,9 @@ function roundTrip(snapshot: Snapshot<unknown>): Snapshot<unknown> {
   return JSON.parse(JSON.stringify(snapshot)) as Snapshot<unknown>;
 }
 
-// Direct run: runAgentLoop drives a real interactive review. Each idle pause
-// renders the machine's interaction metadata and returns a validated event.
+// Direct run: a plain while loop drives a real interactive review. Each idle
+// pause renders the machine's interaction metadata, and the next `runAgent`
+// resumes from the persisted snapshot with a validated event.
 /** Prompt once on stdin and resolve the trimmed reply. */
 async function promptLine(query: string): Promise<string> {
   const { createInterface } = await import("node:readline/promises");
@@ -271,25 +271,32 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const result = await runAgentLoop(humanInTheLoopMachine, {
+    const executors = createAiSdkExecutors({ models });
+    let result = await runAgent(humanInTheLoopMachine, {
       input: { topic: "the new deploy pipeline" },
-      executors: createAiSdkExecutors({ models }),
-      onIdle: async ({ snapshot }) => {
-        const interaction = getInteraction(snapshot);
-        console.log("\n--- Draft for review ---");
-        console.log(snapshot.context.draft ?? "");
-        console.log("\n" + (interaction?.label ?? ""));
-        console.log("Legal events:", interaction?.events.map(({ type }) => type).join(", "));
-
-        const answer = (await promptLine("approve / reject? ")).toLowerCase();
-        if (answer.startsWith("a")) {
-          // Typed off the snapshot: the machine's own event union, no cast.
-          return eventFromInteraction(snapshot, { type: "APPROVE" });
-        }
-        const text = await promptLine("What should change? ");
-        return eventFromInteraction(snapshot, { text });
-      },
+      executors,
     });
+
+    while (result.status === "idle") {
+      const { snapshot } = result;
+      const interaction = getInteraction(snapshot);
+      console.log("\n--- Draft for review ---");
+      console.log(snapshot.context.draft ?? "");
+      console.log("\n" + (interaction?.label ?? ""));
+      console.log("Legal events:", interaction?.events.map(({ type }) => type).join(", "));
+
+      const answer = (await promptLine("approve / reject? ")).toLowerCase();
+      // Typed off the snapshot: the machine's own event union, no cast.
+      const event = answer.startsWith("a")
+        ? eventFromInteraction(snapshot, { type: "APPROVE" })
+        : eventFromInteraction(snapshot, { text: await promptLine("What should change? ") });
+
+      result = await runAgent(humanInTheLoopMachine, {
+        snapshot: result.persist(),
+        event,
+        executors,
+      });
+    }
 
     if (result.status !== "done") {
       throw new Error(`Expected a final state, got '${result.status}'.`);

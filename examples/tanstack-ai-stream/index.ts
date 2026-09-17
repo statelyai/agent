@@ -33,7 +33,6 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import type { AnyStateMachine } from "xstate";
 import {
-  createScriptedExecutors,
   getStatePath,
   runAgent,
   setupAgent,
@@ -41,6 +40,7 @@ import {
   type AgentTextRequest,
   type RunAgentOptions,
 } from "@statelyai/agent";
+import { createScriptedExecutors } from "@statelyai/agent/testing";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import { maybeCreateRunInspection } from "./inspect.js";
 import {

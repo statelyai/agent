@@ -1,38 +1,83 @@
-# The XState transition loop
+# The step API
 
-Stately Agent requests are ordinary invoked actor logic. The underlying execution model is XState's transition/effect loop.
+`runAgent` is one host. Underneath it, an agent machine is a pure function: given a state and an event, it returns the next state and the model requests it is now waiting on. The step API exposes that function directly, so any host can run the same machine: a durable workflow, a queue consumer, a test, or a replay of a recorded log.
+
+A step is a snapshot plus the requests still to resolve:
 
 ```ts no-check
-let [state, effects] = initialTransition(machine, input);
-for (const effect of effects) await effect.exec();
-
-while (state.status === "active") {
-  const event = await nextEvent();
-  [state, effects] = transition(machine, state, event);
-  for (const effect of effects) await effect.exec();
+interface AgentStep {
+  snapshot: MachineSnapshot;
+  requests: AgentStepRequest[]; // kind: "text" | "decision"
+  actions: readonly ExecutableAction[];
+  done: boolean;
 }
-
-return state.output;
 ```
 
-Use `runAgent` when an in-process actor is enough. Use `provideExecutors` when your application owns the live actor. Use `createDurable` from `xstate/durable` when a durable framework owns the effect lifecycle.
+Nothing in a step has executed. The host decides how and when each request runs.
 
-`executeAgentRequest(request, executors)` remains useful for evaluating or testing one individual model request without running a machine. It does not create a second state-machine runtime.
+## The loop
+
+```ts
+import {
+  executeAgentRequest,
+  initialAgentStep,
+  resolveAgentStep,
+  resolveDecision,
+  transitionAgentStep,
+} from "@statelyai/agent";
+import type { AgentRequestExecutors } from "@statelyai/agent";
+import type { AnyStateMachine } from "xstate";
+
+export async function runWithSteps(
+  machine: AnyStateMachine,
+  input: unknown,
+  executors: AgentRequestExecutors,
+) {
+  let step = initialAgentStep(machine, input);
+
+  while (!step.done) {
+    const [request] = step.requests;
+    if (!request) break; // idle: resting on an external event
+
+    if (request.kind === "decision") {
+      const event = await resolveDecision(request, executors, {
+        canTake: (candidate) => step.snapshot.can(candidate),
+      });
+      step = transitionAgentStep(machine, step, event);
+    } else {
+      const { output } = await executeAgentRequest(request, executors);
+      step = resolveAgentStep(machine, step, request, output);
+    }
+  }
+
+  return step.snapshot;
+}
+```
+
+- `initialAgentStep(machine, input)` starts the machine.
+- `transitionAgentStep(machine, step, event)` applies an external event: a decision's chosen event, a human reply, a timer.
+- `resolveAgentStep(machine, step, request, output)` delivers a text request's result as that invoke's `xstate.done.actor` event.
+- `rejectAgentStep(machine, step, request, error)` delivers a failure as `xstate.error.actor`, so the machine takes the invoke's `onError`. With no `onError` in scope the snapshot ends in `status: 'error'`, exactly as a live run would.
+- `executeAgentRequest(request, executors)` runs one text request against the executor contract and validates its output. Decisions go through `resolveDecision`.
+
+Every step's snapshot is a native XState snapshot. Persist it with `getPersistedSnapshot`, and restore it with `transitionAgentStep` on a later process. Requests in parallel regions arrive together in `step.requests`; the host chooses whether to run them concurrently.
 
 ## Replaying a failed call
 
-A call that failed is replayed as the invoke's error, not its output. Where a successful replay sends `xstate.done.actor` with the recorded output, a failed one sends `xstate.error.actor` with the recorded error, and the machine takes that invoke's `onError`. With no `onError` in scope the machine ends in `status: 'error'`, exactly as a live failed invoke does.
+A call that failed is replayed as the invoke's error, not its output:
 
 ```ts no-check
-const event = call.error
-  ? { type: "xstate.error.actor", actorId: call.id, error: call.error }
-  : { type: "xstate.done.actor", actorId: call.id, output: call.output };
-
-[state, effects] = transition(machine, state, event);
+step = call.error
+  ? rejectAgentStep(machine, step, call.id, call.error)
+  : resolveAgentStep(machine, step, call.id, call.output);
 ```
 
-The error value is whatever the host recorded. An `Error` is the usual one, and a plain object such as `{ code: "truncated" }` arrives at the `onError` transition as `event.error` untouched, so a machine can branch on a failure code.
+The error value is whatever the host recorded. An `Error` is the usual one, and a plain object such as `{ code: "truncated" }` arrives at the `onError` transition as `event.error` untouched, so a machine can branch on a failure code. `simulateAgent` in `@statelyai/agent/testing` uses this to script failures with no model. See [scripted failures](verify.md#scripted-failures).
 
-Internally, `rejectAgentStep(machine, step, request, error)` is the step-envelope form of this, the failure counterpart of `resolveAgentStep`. `simulateAgent` uses it to script failures with no model. See [scripted failures](verify.md#scripted-failures).
+## Other hosts
 
-The host decides how effects execute. That includes retries, tool-loop interruption behavior, persistence, concurrency, and scheduling.
+- `runAgent` when an in-process actor is enough.
+- `provideExecutors` when your application owns a live XState actor.
+- `createDurable` from `xstate/durable` when a durable framework owns the effect lifecycle. The [`portable-xstate-loop`](../examples/portable-xstate-loop) example shows that shape.
+
+The host decides how requests execute. That includes retries, tool-loop interruption behavior, persistence, concurrency, and scheduling.

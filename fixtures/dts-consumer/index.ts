@@ -21,7 +21,6 @@ export {
   getJsonSchema,
   parseModelRef,
   resolveDecision,
-  runAgentLoop,
   runAgentStream,
   type AgentOutputMode,
   type AgentInteraction,

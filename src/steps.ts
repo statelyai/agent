@@ -1,11 +1,11 @@
 /**
- * The step envelope: an INTERNAL, per-model-call-checkpoint view of an agent
- * machine (`AgentStep` = snapshot + actions + discovered requests + done). It
- * once backed a public step API; the public step path is now the thin
- * effect/replay loop in `./effects.ts` (re-exported from `@statelyai/agent`).
- * These helpers survive as internals that `runAgent`, `verify.ts`, and the
- * effect path build on — the only symbol still on the public surface is
- * {@link executeAgentRequest} (the `text`-effect resolver).
+ * The step API: the pure `(state, event) => (nextState, requests)` view of an
+ * agent machine. An {@link AgentStep} is a snapshot plus the model requests
+ * the machine is now waiting on; nothing here executes anything. A host
+ * resolves each request however it likes ({@link executeAgentRequest},
+ * `resolveDecision`, a queue, a durable workflow, a replayed log) and feeds
+ * the result back with {@link resolveAgentStep} or {@link rejectAgentStep}.
+ * `runAgent` is the in-process host built for the common case.
  * @module
  */
 import {
@@ -311,13 +311,12 @@ export function transitionResult<TLogic extends AnyActorLogic>(
 }
 
 /**
- * One durable checkpoint on the step path: the machine's current snapshot,
- * the executable actions that produced it, the pending
+ * One checkpoint on the step path: the machine's current snapshot, the
+ * executable actions that produced it, the pending
  * {@link AgentStepRequest}s (text/decision work still to resolve), and
- * whether the machine has reached a final state. This is the
- * per-model-call-checkpoint path for durable hosts (Workflows, Temporal,
- * queues, …) — a peer of `runAgent`, not a lesser version of it. Produced by
- * {@link initialAgentStep}/{@link transitionAgentStep}/{@link resolveAgentStep}.
+ * whether the machine has reached a final state. Produced by
+ * {@link initialAgentStep}, {@link transitionAgentStep},
+ * {@link resolveAgentStep}, and {@link rejectAgentStep}.
  */
 export interface AgentStep<TSnapshot extends AnyMachineSnapshot = AnyMachineSnapshot> {
   snapshot: TSnapshot;
@@ -429,50 +428,25 @@ export function rejectAgentStep<TMachine extends AnyActorLogic>(
 }
 
 /**
- * Resolves one **text** request against a host's {@link AgentRequestExecutors}
- * — merges the request's tools, dispatches to `generateText`/`streamText` per
- * `mode`, and validates the result against the request's `outputSchema` if
- * present. Accepts either a `kind: 'text'` `AgentEffect` (the step-path shape
- * from a custom XState host) or an {@link AgentRequest} envelope.
- * **Text-only**: passing a `kind: 'decision'` request throws, directing the
- * caller to `resolveDecision(request, executors, ...)` instead. Always
- * returns both the normalized `output` and the `raw` executor result (tool
- * calls, usage, finish reason — needed for observability and event-sourced
- * replay).
+ * Resolves one **text** request ({@link AgentRequest}, from
+ * {@link AgentStep.requests}) against a host's {@link AgentRequestExecutors}
+ * — merges the request's tools, dispatches to `generateText`/`streamText`
+ * per `mode`, and validates the result against the request's
+ * `outputSchema` if present. **Text-only**: passing a `kind: 'decision'`
+ * request throws, directing the caller to `resolveDecision(request,
+ * executors, ...)` instead. Returns both the normalized `output` and the
+ * `raw` executor result (tool calls, usage, finish reason).
  */
-/** A `kind: 'text'` `AgentEffect` (structural, to avoid an import cycle with effects.ts). */
-interface TextEffectLike {
-  kind: "text";
-  requestId: string;
-  request: AgentTextRequest;
-  mode?: AgentRequestMode;
-}
-
 export async function executeAgentRequest(
-  requestOrEffect: AgentRequest | TextEffectLike,
+  request: AgentStepRequest,
   executors: Partial<AgentRequestExecutors>,
 ): Promise<{ output: unknown; raw: unknown }> {
-  if ((requestOrEffect as { kind: string }).kind === "decision") {
+  if (request.kind === "decision") {
     throw new Error(
       "executeAgentRequest(...) is text-only. Resolve a 'decision' request with " +
         "resolveDecision(request, executors, ...) instead.",
     );
   }
-
-  // A text AgentEffect carries the bare AgentTextRequest under `request`;
-  // normalize it to the envelope shape this function has always taken.
-  const request: AgentRequest =
-    "requestId" in requestOrEffect
-      ? {
-          kind: "text",
-          id: requestOrEffect.requestId,
-          src: "",
-          mode: requestOrEffect.mode,
-          input: requestOrEffect.request,
-          tools: requestOrEffect.request.tools ?? {},
-          events: [],
-        }
-      : requestOrEffect;
 
   assertTextExecutor(request, executors);
 

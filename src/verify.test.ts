@@ -1,17 +1,14 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
+import { createTextLogic, runAgent, setupAgent, type ChosenEvent } from "./index.js";
 import {
   AgentLintError,
   canReach,
-  createTextLogic,
   explorePaths,
   lintAgentMachine,
-  runAgent,
-  setupAgent,
   simulateAgent,
   type AgentLintDiagnostic,
-  type ChosenEvent,
-} from "./index.js";
+} from "./testing/index.js";
 import { createDecisionLogic } from "./decision.js";
 import { initialAgentStep, rejectAgentStep } from "./steps.js";
 import { humanInTheLoopMachine, jokeMachine, twentyQuestionsMachine } from "../examples/index.js";

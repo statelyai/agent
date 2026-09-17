@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { lintAgentMachine, runAgent } from "../index.js";
+import { runAgent } from "../index.js";
+import { lintAgentMachine } from "../testing/index.js";
 import type { AgentRequestExecutors, AgentTextRequest } from "../text-logic.js";
 import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
 import {

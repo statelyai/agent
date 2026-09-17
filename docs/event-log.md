@@ -2,6 +2,8 @@
 
 The event log is an append-only journal of the external inputs a machine consumed. It is the source of truth for a run: `replay` folds it back into a snapshot without executing anything.
 
+`runAgent({ store, threadId })` writes and reads the log for you. The primitives on this page (`replay`, `forkEventLog`, `initEntry`, `createReplayEntry`, the stores, and the conformance suite) are in `@statelyai/agent/log`.
+
 ## What is journaled
 
 Only external inputs, in the order the run accepted them:

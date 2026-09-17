@@ -35,7 +35,8 @@ generate → validate (validateAgentConfig) → lower (fromConfig) → lint → 
 Each gate runs on the config the model returned, in order:
 
 ```ts no-check
-import { lintAgentMachine, setupAgent, simulateAgent } from "@statelyai/agent";
+import { setupAgent } from "@statelyai/agent";
+import { lintAgentMachine, simulateAgent } from "@statelyai/agent/testing";
 import { validateAgentConfig } from "@statelyai/agent/validate";
 
 // 1. Validate the config shape against the JSON Schema.

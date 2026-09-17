@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
+import { runAgent } from "@statelyai/agent";
 import {
   canReach,
   explorePaths,
   lintAgentMachine,
   matchesTrajectory,
-  runAgent,
   simulateAgent,
-} from "@statelyai/agent";
+} from "@statelyai/agent/testing";
 import type { AgentDecisionRequest, ChosenEvent } from "@statelyai/agent";
 import { APPROVAL_THRESHOLD, refundMachine } from "./index.js";
 

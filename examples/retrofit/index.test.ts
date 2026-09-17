@@ -1,10 +1,6 @@
 import { expect, test } from "vitest";
-import {
-  lintAgentMachine,
-  simulateAgent,
-  type AgentRequestExecutors,
-  type ChosenEvent,
-} from "@statelyai/agent";
+import { type AgentRequestExecutors, type ChosenEvent } from "@statelyai/agent";
+import { lintAgentMachine, simulateAgent } from "@statelyai/agent/testing";
 import { MAX_LOOKUPS, runRetrofitExample, supportMachine } from "./index.js";
 
 const TRIAGE = { category: "refund", sentiment: "neutral", summary: "Damaged item refund" };

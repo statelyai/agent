@@ -10,18 +10,13 @@ import {
 } from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
-  AGENT_INIT_EVENT_TYPE,
   AGENT_TRACE_SCHEMA_VERSION,
   AGENT_USAGE_EVENT_TYPE,
   AgentError,
   AgentEventLogConflictError,
   AgentMachineVersionMismatchError,
   AgentSnapshotDivergedError,
-  getLogExecutionId,
-  getUsageFromEvents,
-  replay,
   createAgentSchemas,
-  createInMemoryEventLogStore,
   createTextLogic,
   AgentInvalidEventPayloadError,
   parseAgentEvent,
@@ -39,6 +34,13 @@ import {
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
+import {
+  AGENT_INIT_EVENT_TYPE,
+  getLogExecutionId,
+  getUsageFromEvents,
+  replay,
+  createInMemoryEventLogStore,
+} from "./log/index.js";
 import { getMachineStructuralHash } from "./index.js";
 
 /**

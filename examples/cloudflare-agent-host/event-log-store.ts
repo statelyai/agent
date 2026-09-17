@@ -26,11 +26,10 @@
  */
 import {
   AgentEventLogConflictError,
-  assertAgentLogEntry,
   type AgentEventLogStore,
   type AgentLogEntry,
 } from "@statelyai/agent";
-
+import { assertAgentLogEntry } from "@statelyai/agent/log";
 export interface DurableObjectEventLogStoreOptions {
   /** Table holding the log entries. Defaults to `agent_event_log`. */
   table?: string;

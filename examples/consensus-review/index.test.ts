@@ -1,11 +1,7 @@
 import { expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
-import {
-  getInteraction,
-  lintAgentMachine,
-  provideExecutors,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getInteraction, provideExecutors, type AgentRequestExecutors } from "@statelyai/agent";
+import { lintAgentMachine } from "@statelyai/agent/testing";
 import { consensusReviewMachine, runConsensusReviewExample } from "./index.js";
 
 test("two approvals reach quorum, regardless of completion order", async () => {

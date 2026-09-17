@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { createAsyncLogic } from "xstate";
-import { lintAgentMachine } from "@statelyai/agent";
+import { lintAgentMachine } from "@statelyai/agent/testing";
 import { bookingCompensationMachine, runBookingCompensationExample } from "./index.js";
 
 test("approval gates reservations and a confirmed unavailable hotel compensates the flight", async () => {

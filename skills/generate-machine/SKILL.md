@@ -191,8 +191,7 @@ Lowering is itself a gate: it throws on an unresolved named guard/action and on 
 ## 5. Lint
 
 ```ts
-import { lintAgentMachine } from "@statelyai/agent";
-
+import { lintAgentMachine } from "@statelyai/agent/testing";
 const diagnostics = lintAgentMachine(machine);
 lintAgentMachine(machine, { throw: true }); // throws AgentLintError on error-severity findings
 ```
@@ -206,8 +205,7 @@ The one that bites most often is `decide-without-events`: an `allowedEvents` lis
 Lint is structural. A dry run proves a path actually settles. No API key needed.
 
 ```ts
-import { simulateAgent } from "@statelyai/agent";
-
+import { simulateAgent } from "@statelyai/agent/testing";
 const dryRun = await simulateAgent(machine, {
   input: { ticket: "" },
   script: {

@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { getInteraction, lintAgentMachine } from "@statelyai/agent";
+import { getInteraction } from "@statelyai/agent";
+import { lintAgentMachine } from "@statelyai/agent/testing";
 import { deadlineEscalationMachine, runDeadlineEscalationExample } from "./index.js";
 
 test.each([

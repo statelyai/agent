@@ -29,12 +29,8 @@
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic, Snapshot, SnapshotFrom } from "xstate";
-import {
-  createScriptedExecutors,
-  getStatePath,
-  matchesTrajectory,
-  runAgent,
-} from "@statelyai/agent";
+import { getStatePath, runAgent } from "@statelyai/agent";
+import { createScriptedExecutors, matchesTrajectory } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { emailDrafter, models } from "../email-drafter/agent-logic.js";
 

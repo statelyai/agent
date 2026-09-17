@@ -78,15 +78,14 @@ When the answer arrives over the wire instead of from your own code, parse it at
 ## Drive several turns
 
 ```ts no-check
-const result = await runAgentLoop(machine, {
-  input,
-  executors,
-  persist: (snapshot) => storage.put(id, snapshot),
-  onIdle: async ({ snapshot }) => {
-    const interaction = getInteraction(snapshot);
-    return promptUser(interaction);
-  }
-});
+let result = await runAgent(machine, { input, executors });
+
+while (result.status === "idle") {
+  const snapshot = result.persist();
+  await storage.put(id, snapshot);
+  const event = await promptUser(getInteraction(result.snapshot));
+  result = await runAgent(machine, { snapshot, event, executors });
+}
 ```
 
 For HTTP or queue-based applications, persist `result.persist()` and resume in a later request with `runAgent({ snapshot, event })`. Storage remains framework-owned.

@@ -4,7 +4,6 @@ import {
   AgentDecisionExhaustedError,
   AgentError,
   AgentInvalidEventPayloadError,
-  AgentLintError,
   createAgentSchemas,
   createTextLogic,
   runAgent,
@@ -14,6 +13,7 @@ import {
   type JsonSerializableTraceEvent,
   type RunAgentErrorCause,
 } from "./index.js";
+import { AgentLintError } from "./testing/index.js";
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 // ─── Compile-time pin: the derived JsonSerializableTraceEvent must stay

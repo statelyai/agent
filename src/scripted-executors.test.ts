@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
 import { z } from "zod";
-import { createScriptedExecutors, provideExecutors, runAgent, setupAgent } from "./index.js";
-
+import { provideExecutors, runAgent, setupAgent } from "./index.js";
+import { createScriptedExecutors } from "./testing/index.js";
 const outcomeSchema = z.enum(["published", "flagged", "blocked"]);
 
 const moderationSetup = setupAgent({

@@ -11,7 +11,8 @@
  * module-level singleton would run dry on the second run.
  */
 import { openai } from "@ai-sdk/openai";
-import { createScriptedExecutors, type AgentRequestExecutors } from "@statelyai/agent";
+import { type AgentRequestExecutors } from "@statelyai/agent";
+import { createScriptedExecutors } from "@statelyai/agent/testing";
 import type { AgentTextRequest } from "@statelyai/agent";
 import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 import type { Inspector } from "@statelyai/sdk/inspect";

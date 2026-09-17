@@ -9,13 +9,8 @@ import {
 import { beforeEach, describe, expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
 import { z } from "zod";
-import {
-  createScriptedExecutors,
-  provideExecutors,
-  runAgent,
-  setupAgent,
-  traceTransitions,
-} from "../index.js";
+import { provideExecutors, runAgent, setupAgent, traceTransitions } from "../index.js";
+import { createScriptedExecutors } from "../testing/index.js";
 import { createOtelTraceHandler } from "./index.js";
 
 const setup = setupAgent({

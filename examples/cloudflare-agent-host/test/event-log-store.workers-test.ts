@@ -7,7 +7,7 @@
  * The suite asks for a FRESH, EMPTY store per case; a new table name per
  * `create()` gives that isolation on one Durable Object's SQL storage.
  */
-import { assertEventLogStoreConformance } from "@statelyai/agent";
+import { assertEventLogStoreConformance } from "@statelyai/agent/log";
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { createDurableObjectEventLogStore } from "../event-log-store.js";

@@ -25,6 +25,7 @@
     "paths": {
       "@statelyai/agent": ["./node_modules/@statelyai/agent"],
       "@statelyai/agent/ai-sdk": ["./node_modules/@statelyai/agent/dist/ai-sdk"],
+      "@statelyai/agent/testing": ["./node_modules/@statelyai/agent/dist/testing"],
       "@statelyai/agent/*": ["./node_modules/@statelyai/agent/*"]
     }
   },

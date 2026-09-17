@@ -15,13 +15,12 @@ import { AGENT_EVENT_SCHEMA_VERSION, type AgentLogEntry, type JsonValue } from "
 type CreateStore = () => Promise<AgentEventLogStore> | AgentEventLogStore;
 
 /**
- * A test runner's registration functions. `expect` is accepted and unused —
- * every case asserts by throwing, so the suite stays runner-agnostic.
+ * A test runner's registration functions. Every case asserts by throwing, so
+ * the suite stays runner-agnostic.
  */
 export interface EventLogStoreConformanceHarness {
   describe: (name: string, register: () => void) => void;
   it: (name: string, run: () => Promise<void>) => void;
-  expect?: unknown;
 }
 
 function fail(message: string): never {

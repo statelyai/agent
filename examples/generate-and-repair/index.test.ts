@@ -1,11 +1,11 @@
 import { expect, test } from "vitest";
+import { runAgent } from "@statelyai/agent";
 import {
   assertAgentMachine,
   canReach,
   createScriptedExecutors,
   matchesTrajectory,
-  runAgent,
-} from "@statelyai/agent";
+} from "@statelyai/agent/testing";
 import type { StateValue } from "xstate";
 import {
   CANDIDATE_COUNT,

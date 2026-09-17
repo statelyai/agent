@@ -45,7 +45,6 @@ import type { EventFrom } from "xstate";
 import { Agent, routeAgentRequest, type Connection } from "agents";
 import { createOpenAI } from "@ai-sdk/openai";
 import {
-  createScriptedExecutors,
   getAcceptedEvents,
   getInteraction,
   parseAgentEvent,
@@ -54,6 +53,7 @@ import {
   type AgentRequestExecutors,
   type RunAgentResult,
 } from "@statelyai/agent";
+import { createScriptedExecutors } from "@statelyai/agent/testing";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { emailDrafter, emailDrafterSchemas } from "../email-drafter/agent-logic.js";
 import { createDurableObjectEventLogStore } from "./event-log-store.js";

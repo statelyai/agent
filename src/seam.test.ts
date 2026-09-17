@@ -4,9 +4,9 @@
  */
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { matchesTrajectory, runSeam, setupAgent } from "./index.js";
-import type { SeamTurn } from "./index.js";
-
+import { setupAgent } from "./index.js";
+import { matchesTrajectory, runSeam } from "./testing/index.js";
+import type { SeamTurn } from "./testing/index.js";
 const assessmentSchema = z.object({ satisfied: z.boolean(), question: z.string() });
 const draftSchema = z.object({ subject: z.string(), body: z.string() });
 

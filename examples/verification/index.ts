@@ -36,18 +36,16 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
+import { createAgentSchemas, interactionMetaSchema, setupAgent } from "@statelyai/agent";
 import {
   canReach,
-  createAgentSchemas,
   explorePaths,
-  interactionMetaSchema,
   lintAgentMachine,
   matchesTrajectory,
-  setupAgent,
   simulateAgent,
   type AgentPathReport,
   type SimulateAgentResult,
-} from "@statelyai/agent";
+} from "@statelyai/agent/testing";
 import { defineModels } from "@statelyai/agent/ai-sdk";
 
 // Declared so the machine is playable against a real model; the report below

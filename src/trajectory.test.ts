@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { matchesTrajectory, runAgent, createScriptedExecutors, setupAgent } from "./index.js";
+import { runAgent, setupAgent } from "./index.js";
+import { matchesTrajectory, createScriptedExecutors } from "./testing/index.js";
 import { z } from "zod";
 
 const entry = (type: string, payload: Record<string, unknown> = {}) => ({

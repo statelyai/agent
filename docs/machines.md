@@ -457,7 +457,7 @@ waiting: {
 How `after` runs depends on the host:
 
 - Under [`runAgent`](hosts.md), the timer runs live. A pending `after` does not count as idle, so `runAgent` waits for it and continues.
-- Under a custom or durable XState host, timers follow that framework's runtime adapter. See [the XState transition loop](steps.md).
+- Under a custom or durable XState host, timers follow that framework's runtime adapter. See [the step API](steps.md).
 
 ## Related
 
