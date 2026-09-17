@@ -110,7 +110,7 @@ type RequestName = RequestNamesOf<typeof agentSetup>;
 
 Beyond schemas, `setupAgent` takes your models plus optional `requests`, `actors`, `actions`, `guards`, `states`, and `delays`. `states` narrows context per state. See [Per-state context narrowing](#per-state-context-narrowing). `delays` names the durations that [delayed transitions](#delayed-transitions) reference. It returns a **setup** whose `createMachine` method builds the machine. Like XState's `setup()`, the return value is a typed foundation, not a running agent. Name it accordingly, for example `agentSetup` or `gameSetup`.
 
-The builtins `agent.generateText`, `agent.streamText`, `agent.decide`, and `agent.userInput` are registered automatically. Invoke them by name.
+The builtins `agent.generateText`, `agent.streamText`, and `agent.decide` are registered automatically. Invoke them by name.
 
 ### Models
 
@@ -118,12 +118,12 @@ The `models` map pairs a short alias with a resolved model. Request and decision
 
 ```ts
 import { openai } from "@ai-sdk/openai";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import { } from "@statelyai/agent/ai-sdk";
 
-const models = defineModels({
+const models = {
   quick: openai("gpt-5.4-mini"),
   careful: openai("gpt-5.4"),
-});
+};
 
 const agentSetup = setupAgent({
   models,
@@ -208,10 +208,11 @@ const agentSetup = setupAgent({
 
 | `src`                | Invoke `input`                                                              | `onDone` output                                        | Reference                                 |
 | -------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
-| `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | text, or the value parsed from `outputSchema`          | [Text requests](text-requests.md)         |
+| `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | `{ result, messages }`: text or the value parsed from `outputSchema`, plus response messages | [Text requests](text-requests.md)         |
 | `agent.streamText`   | same as `agent.generateText`                                                | same, with chunks delivered to the host as they arrive | [Text requests](text-requests.md)         |
 | `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`                       | the one chosen event, applied to the machine           | [Decisions](decisions.md)                 |
-| `agent.userInput`    | `prompt`, optional `schema`                                                 | the human's value                                      | [Human in the loop](human-in-the-loop.md) |
+
+A human's turn is not a builtin: it is an idle state with accepted events. See [Human in the loop](human-in-the-loop.md).
 
 Named `requests` are the default form because they are typed, reusable, and testable. The builtins are the inline alternative. The host executes both, so neither form names a model SDK in the machine.
 
@@ -248,7 +249,7 @@ const machine = agentSetup.createMachine({
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
           target: "done",
-          context: { answer: output.answer },
+          context: { answer: output.result.answer },
         }),
       },
     },
@@ -312,7 +313,7 @@ on: {
 
 This affects [decisions](decisions.md). If the model chooses an event whose transition returns `undefined`, the choice is rejected before the transition is taken.
 
-A transition can also be a plain object. Its `context` is a static patch, or a mapper function that receives the same arguments. On `onDone`, those arguments include `output`:
+A transition can also be a plain object. Its `context` is a static patch, or a mapper function that receives the same arguments. On `onDone`, those arguments include `output` (for a text request, `{ result, messages }`):
 
 ```ts no-check
 // inside a state
@@ -324,7 +325,7 @@ on: {
 // on an invoke
 onDone: {
   target: 'revising',
-  context: ({ output }) => ({ feedback: output.feedback }),
+  context: ({ output }) => ({ feedback: output.result.feedback }),
 }
 ```
 
@@ -357,7 +358,7 @@ In a JSON [machine config](machines-as-data.md), `choice` is an array of branche
 
 ## Request and actor invokes
 
-A state invokes an actor by `src`. The `src` is a request key, a registered actor, or a builtin such as `agent.decide` or `agent.userInput`. The state passes typed `input` and handles `onDone` and `onError`.
+A state invokes an actor by `src`. The `src` is a request key, a registered actor, or a builtin such as `agent.decide`. The state passes typed `input` and handles `onDone` and `onError`.
 
 ```ts no-check
 // inside states: { ... }
@@ -365,13 +366,13 @@ drafting: {
   invoke: {
     src: 'draftEmail',
     input: ({ context }) => ({ prompt: context.prompt, messages: context.messages }),
-    onDone: ({ output }) => ({ target: 'reviewing', context: { draft: output } }),
+    onDone: ({ output }) => ({ target: 'reviewing', context: { draft: output.result } }),
     onError: { target: 'failed' },
   },
 }
 ```
 
-The `onDone` handler receives the actor's `output`, typed from its output schema. Both `onDone` and `onError` are transition functions.
+The `onDone` handler receives the actor's `output`. For a text request that is `{ result, messages }`: `result` is typed from the request's output schema, and `messages` is the executor's response messages (see [Messages](messages.md)). Any other actor's `output` is whatever its logic resolves. Both `onDone` and `onError` are transition functions.
 
 ### Inline text requests
 
@@ -394,13 +395,13 @@ generating: {
     }),
     onDone: ({ output }) => ({
       target: "done",
-      context: { result: parseOutput(resultSchema, output) },
+      context: { result: parseOutput(resultSchema, output.result) },
     }),
   },
 },
 
 // ...
-await runAgent(machine, { input, executors: { generateText, streamText } });
+await runAgent(machine, { input, executors: createAiSdkExecutors({ models }) });
 ```
 
 Give an invoke an explicit `id` when the host needs a stable occurrence identity. XState owns invoke identity and snapshot restoration.
@@ -457,7 +458,7 @@ waiting: {
 How `after` runs depends on the host:
 
 - Under [`runAgent`](hosts.md), the timer runs live. A pending `after` does not count as idle, so `runAgent` waits for it and continues.
-- Under a custom or durable XState host, timers follow that framework's runtime adapter. See [the XState transition loop](steps.md).
+- Under a custom or durable XState host, timers follow that framework's runtime adapter. See [the step API](steps.md).
 
 ## Related
 

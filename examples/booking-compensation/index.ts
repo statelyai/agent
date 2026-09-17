@@ -90,7 +90,7 @@ export const bookingCompensationMachine = agent.createMachine({
       invoke: {
         src: "plan",
         input: ({ context }) => ({ destination: context.destination }),
-        onDone: ({ output }) => ({ target: "approval", context: { itinerary: output } }),
+        onDone: ({ output }) => ({ target: "approval", context: { itinerary: output.result } }),
         onError: { target: "failed" },
       },
     },
@@ -222,7 +222,7 @@ export function runBookingCompensationExample(
   return runAgent(bookingCompensationMachine, {
     input: { bookingId: "trip-1", destination: "Lisbon" },
     executors: {
-      generateText: async () => ({ output: { flight: "Flight to Lisbon", hotel: "Lisbon hotel" } }),
+      generateText: async () => ({ result: { flight: "Flight to Lisbon", hotel: "Lisbon hotel" } }),
     },
     ...options,
   });

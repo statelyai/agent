@@ -10,18 +10,13 @@ import {
 } from "xstate";
 import { createDecisionLogic } from "./decision.js";
 import {
-  AGENT_INIT_EVENT_TYPE,
   AGENT_TRACE_SCHEMA_VERSION,
   AGENT_USAGE_EVENT_TYPE,
   AgentError,
   AgentEventLogConflictError,
   AgentMachineVersionMismatchError,
   AgentSnapshotDivergedError,
-  getLogExecutionId,
-  getUsageFromEvents,
-  replay,
   createAgentSchemas,
-  createInMemoryEventLogStore,
   createTextLogic,
   AgentInvalidEventPayloadError,
   parseAgentEvent,
@@ -39,6 +34,13 @@ import {
   type AgentTraceEvent,
   type ChosenEvent,
 } from "./index.js";
+import {
+  AGENT_INIT_EVENT_TYPE,
+  getLogExecutionId,
+  getUsageFromEvents,
+  replay,
+  createInMemoryEventLogStore,
+} from "./log/index.js";
 import { getMachineStructuralHash } from "./index.js";
 
 /**
@@ -82,7 +84,7 @@ describe("runAgent", () => {
             input: ({ context }) => ({ prompt: context.prompt }),
             onDone: ({ output }) => ({
               target: "done",
-              context: { answer: output.answer },
+              context: { answer: output.result.answer },
             }),
           },
         },
@@ -94,7 +96,7 @@ describe("runAgent", () => {
     });
 
     const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => ({
-      output: { answer: `Answered: ${request.prompt}` },
+      result: { answer: `Answered: ${request.prompt}` },
     });
 
     const observedEvents: string[] = [];
@@ -143,7 +145,7 @@ describe("runAgent", () => {
             input: ({ context }) => ({ prompt: context.prompt }),
             onDone: ({ output }) => ({
               target: "awaitingApproval",
-              context: { draft: output },
+              context: { draft: output.result },
             }),
           },
         },
@@ -158,7 +160,7 @@ describe("runAgent", () => {
     });
 
     const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => ({
-      output: `Draft: ${request.prompt}`,
+      result: `Draft: ${request.prompt}`,
     });
 
     const first = await runAgent(machine, {
@@ -285,7 +287,7 @@ describe("runAgent", () => {
             input: ({ context }) => ({ topic: context.topic }),
             onDone: ({ output }) => ({
               target: "awaitingApproval",
-              context: { draft: output },
+              context: { draft: output.result },
             }),
           },
         },
@@ -304,7 +306,7 @@ describe("runAgent", () => {
 
     const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => {
       modelCalls += 1;
-      return { output: `Draft about ${request.prompt}` };
+      return { result: `Draft about ${request.prompt}` };
     };
 
     const first = await runAgent(machine, {
@@ -405,7 +407,7 @@ describe("runAgent", () => {
     const result = await runAgent(machine, {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide,
       },
     });
@@ -444,7 +446,7 @@ describe("runAgent", () => {
             onDone: ({ output }) => ({
               target: "looping",
               reenter: true,
-              context: { count: output as number },
+              context: { count: output.result },
             }),
           },
         },
@@ -458,7 +460,7 @@ describe("runAgent", () => {
       executors: {
         generateText: async () => {
           calls += 1;
-          return { output: calls };
+          return { result: calls };
         },
       },
     });
@@ -518,7 +520,7 @@ describe("runAgent", () => {
       executors: {
         generateText: async () => {
           calls += 1;
-          return { output: calls };
+          return { result: calls };
         },
       },
     });
@@ -559,7 +561,7 @@ describe("runAgent", () => {
       input: {},
       signal: controller.signal,
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
       },
     });
 
@@ -597,7 +599,7 @@ describe("runAgent", () => {
       executors: {
         generateText: () =>
           new Promise((resolveExec) => {
-            setTimeout(() => resolveExec({ output: {} }), 50);
+            setTimeout(() => resolveExec({ result: {} }), 50);
           }),
       },
     });
@@ -658,7 +660,7 @@ describe("runAgent", () => {
           model: "test-model",
           prompt: ({ input }) => input.topic,
         },
-        async () => ({ output: "a summary" }),
+        async () => ({ result: "a summary" }),
       );
 
       const machine = setup({}).createMachine({
@@ -679,7 +681,7 @@ describe("runAgent", () => {
 
       const result = await runAgent(machine, {
         executors: {
-          generateText: async () => ({ output: {} }),
+          generateText: async () => ({ result: {} }),
         },
       });
       expect(result.status).toBe("done");
@@ -706,44 +708,8 @@ describe("runAgent", () => {
       });
 
       await expect(
-        runAgent(machine, { input: {}, executors: { generateText: async () => ({ output: {} }) } }),
+        runAgent(machine, { input: {}, executors: { generateText: async () => ({ result: {} }) } }),
       ).rejects.toThrow(/chooseMove/);
-    });
-
-    test("a machine invoking agent.userInput with no userInput option settles idle with pendingUserInputs (blessed placeholder, not a bind error)", async () => {
-      const schemas = createAgentSchemas({
-        context: z.object({ feedback: z.string().nullable() }),
-        input: z.object({}),
-        output: z.object({}),
-      });
-      const agent = setupAgent({ schemas });
-      const machine = agent.createMachine({
-        context: { feedback: null },
-        initial: "asking",
-        states: {
-          asking: {
-            invoke: {
-              id: "ask",
-              src: "agent.userInput",
-              input: { prompt: "How was it?" },
-              onDone: { target: "done" },
-            },
-          },
-          done: { type: "final" },
-        },
-      });
-
-      const result = await runAgent(machine, {
-        input: {},
-        executors: {
-          generateText: async () => ({ output: {} }),
-        },
-      });
-
-      expect(result.status).toBe("idle");
-      if (result.status !== "idle") throw new Error("expected idle");
-      expect(result.pendingUserInputs).toEqual([{ id: "ask", input: { prompt: "How was it?" } }]);
-      expect(result.persist()).toBeDefined();
     });
 
     test("a machine invoking an unregistered string src throws naming the source", async () => {
@@ -765,7 +731,7 @@ describe("runAgent", () => {
       await expect(
         runAgent(machine, {
           input: undefined,
-          executors: { generateText: async () => ({ output: {} }) },
+          executors: { generateText: async () => ({ result: {} }) },
         }),
       ).rejects.toThrow(/notRegistered/);
     });
@@ -798,7 +764,7 @@ describe("runAgent", () => {
       });
 
       await expect(
-        runAgent(machine, { input: {}, executors: { generateText: async () => ({ output: {} }) } }),
+        runAgent(machine, { input: {}, executors: { generateText: async () => ({ result: {} }) } }),
       ).rejects.toThrow(/streamSummary/);
     });
 
@@ -826,7 +792,7 @@ describe("runAgent", () => {
       });
 
       await expect(
-        runAgent(machine, { executors: { generateText: async () => ({ output: {} }) } }),
+        runAgent(machine, { executors: { generateText: async () => ({ result: {} }) } }),
       ).rejects.toThrow(/direct-object/);
     });
 
@@ -863,7 +829,7 @@ describe("runAgent", () => {
                 input: ({ context }) => ({ topic: context.topic }),
                 onDone: ({ output }) => ({
                   target: "done",
-                  context: { research: output },
+                  context: { research: output.result },
                 }),
               },
             },
@@ -877,7 +843,7 @@ describe("runAgent", () => {
           childMachine = childMachine.provide({
             actors: {
               researchTopic: researchTopic.withExecutor(async ({ input }) => ({
-                output: `Research: ${input.topic}`,
+                result: `Research: ${input.topic}`,
               })),
             },
           });
@@ -923,7 +889,7 @@ describe("runAgent", () => {
         const result = await runAgent(parentMachine, {
           input: { topic: "agents" },
           executors: {
-            generateText: async ({ prompt }) => ({ output: `parent-ran: ${prompt}` }),
+            generateText: async ({ prompt }) => ({ result: `parent-ran: ${prompt}` }),
           },
         });
 
@@ -942,7 +908,7 @@ describe("runAgent", () => {
           executors: {
             generateText: async () => {
               parentCalls += 1;
-              return { output: "unused" };
+              return { result: "unused" };
             },
           },
         });
@@ -998,7 +964,7 @@ describe("runAgent", () => {
         const result = await runAgent(parentMachine, {
           input: { topic: "agents" },
           executors: {
-            generateText: async ({ prompt }) => ({ output: `depth: ${prompt}` }),
+            generateText: async ({ prompt }) => ({ result: `depth: ${prompt}` }),
           },
         });
 
@@ -1046,7 +1012,7 @@ describe("runAgent", () => {
           input: { n: 0 },
           signal: AbortSignal.abort(),
           executors: {
-            generateText: async () => ({ output: "x" }),
+            generateText: async () => ({ result: "x" }),
           },
         });
         expect(["done", "idle", "error"]).toContain(result.status);
@@ -1062,7 +1028,7 @@ describe("runAgent", () => {
           input: { topic: "agents" },
           onTrace: (event) => trace.push(event),
           executors: {
-            generateText: async () => ({ output: "y" }),
+            generateText: async () => ({ result: "y" }),
           },
         });
         expect(ok.status).toBe("done");
@@ -1078,7 +1044,7 @@ describe("runAgent", () => {
           input: { topic: "agents" },
           maxModelCalls: 0,
           executors: {
-            generateText: async () => ({ output: "y" }),
+            generateText: async () => ({ result: "y" }),
           },
         });
         expect(capped.status).toBe("error");
@@ -1107,7 +1073,7 @@ describe("runAgent", () => {
               invoke: {
                 src: "streamResearch",
                 input: ({ context }) => ({ topic: context.topic }),
-                onDone: ({ output }) => ({ target: "done", context: { research: output } }),
+                onDone: ({ output }) => ({ target: "done", context: { research: output.result } }),
               },
             },
             done: {
@@ -1126,7 +1092,7 @@ describe("runAgent", () => {
           runAgent(parentMachine, {
             input: { topic: "agents" },
             executors: {
-              generateText: async () => ({ output: "x" }),
+              generateText: async () => ({ result: "x" }),
             },
           }),
         ).rejects.toThrow(/child machine.*streamText/s);
@@ -1149,7 +1115,7 @@ describe("runAgent", () => {
     const result = await runAgent(machine, {
       input: undefined,
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
       },
     });
 
@@ -1174,7 +1140,7 @@ describe("runAgent", () => {
         seenEventTypes.push(event.type);
       },
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
       },
     });
 
@@ -1183,52 +1149,6 @@ describe("runAgent", () => {
     // runAgent sends options.event right after start(), so GO is applied.
     expect(result.status === "done" || result.status === "idle").toBe(true);
     expect(seenEventTypes).toContain("GO");
-  });
-
-  test("userInput: the userInput option resolves agent.userInput and the machine consumes it", async () => {
-    const schemas = createAgentSchemas({
-      context: z.object({ feedback: z.string().nullable() }),
-      input: z.object({}),
-      output: z.object({ feedback: z.string() }),
-    });
-    const agent = setupAgent({ schemas });
-    const machine = agent.createMachine({
-      context: { feedback: null },
-      initial: "asking",
-      states: {
-        asking: {
-          invoke: {
-            id: "ask",
-            src: "agent.userInput",
-            input: { prompt: "How was it?" },
-            onDone: ({ output }) => ({
-              target: "done",
-              context: { feedback: output },
-            }),
-          },
-        },
-        done: {
-          type: "final",
-          output: ({ context }) => ({ feedback: context.feedback ?? "" }),
-        },
-      },
-    });
-
-    const result = await runAgent(machine, {
-      input: {},
-      userInput: async (input) => {
-        expect(input).toEqual(expect.objectContaining({ prompt: "How was it?" }));
-        return "great";
-      },
-      executors: {
-        generateText: async () => ({ output: {} }),
-      },
-    });
-
-    expect(result.status).toBe("done");
-    expect(result.status === "done" ? result.output : undefined).toEqual({
-      feedback: "great",
-    });
   });
 
   describe('omitted allowedEvents: "all currently-legal events"', () => {
@@ -1245,9 +1165,6 @@ describe("runAgent", () => {
       const agent = setupAgent({ schemas });
       const machine = agent.createMachine({
         context: { hp: 10, messages: [] },
-        on: {
-          "agent.messages": agent.appendMessages(),
-        },
         initial: "choosingMove",
         states: {
           choosingMove: {
@@ -1279,14 +1196,13 @@ describe("runAgent", () => {
       const result = await runAgent(machine, {
         input: {},
         executors: {
-          generateText: async () => ({ output: {} }),
+          generateText: async () => ({ result: {} }),
           decide,
         },
       });
 
       expect(result.status).toBe("done");
       expect(seenEvents.map((event) => event.type).sort()).toEqual(["ATTACK", "HEAL"]);
-      expect(seenEvents.map((event) => event.type)).not.toContain("agent.messages");
       expect(seenEvents.find((event) => event.type === "ATTACK")?.inputSchema).toBe(attackSchema);
       expect(seenEvents.find((event) => event.type === "HEAL")?.inputSchema).toBe(healSchema);
     });
@@ -1330,7 +1246,7 @@ describe("runAgent", () => {
       const result = await runAgent(machine, {
         input: {},
         executors: {
-          generateText: async () => ({ output: {} }),
+          generateText: async () => ({ result: {} }),
           decide,
         },
       });
@@ -1382,7 +1298,7 @@ describe("runAgent", () => {
       const result = await runAgent(machine, {
         input: {},
         executors: {
-          generateText: async () => ({ output: {} }),
+          generateText: async () => ({ result: {} }),
           decide,
         },
       });
@@ -1460,7 +1376,7 @@ describe("runAgent", () => {
         }
       },
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide: async () => ({ event: { type: "ATTACK" } }),
       },
     });
@@ -1513,7 +1429,7 @@ describe("runAgent", () => {
     const result = await runAgent(machine, {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "NOTE" } }),
       },
     });
@@ -1591,7 +1507,7 @@ describe("runAgent", () => {
     const result = await runAgent(parentMachine, {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "ATTACK" } }),
       },
     });
@@ -1601,143 +1517,6 @@ describe("runAgent", () => {
     // The child transitioned to its own `done` off the delivered ATTACK and
     // produced that output — proof the event reached the child, not the root.
     expect(result.output.childMove).toBe("ATTACK");
-  });
-});
-
-describe("agent.userInput as a pending placeholder (durable parallel HITL)", () => {
-  const schemas = createAgentSchemas({
-    context: z.object({
-      summary: z.string().nullable(),
-      feedback: z.string().nullable(),
-    }),
-    input: z.object({}),
-    output: z.object({ summary: z.string(), feedback: z.string() }),
-  });
-
-  const agent = setupAgent({
-    schemas,
-    requests: {
-      summarize: {
-        schemas: { input: z.object({}), output: z.string() },
-        model: "m",
-        prompt: () => "summarize",
-      },
-    },
-  });
-
-  const machine = agent.createMachine({
-    context: { summary: null, feedback: null },
-    type: "parallel",
-    output: ({ context }) => ({
-      summary: context.summary ?? "",
-      feedback: context.feedback ?? "",
-    }),
-    states: {
-      working: {
-        initial: "summarizing",
-        states: {
-          summarizing: {
-            invoke: {
-              id: "sum",
-              src: "summarize",
-              input: {},
-              onDone: ({ output }) => ({
-                target: "summarized",
-                context: { summary: output },
-              }),
-            },
-          },
-          summarized: { type: "final" },
-        },
-      },
-      reviewing: {
-        initial: "asking",
-        states: {
-          asking: {
-            invoke: {
-              id: "askHuman",
-              src: "agent.userInput",
-              input: { prompt: "Feedback?" },
-              onDone: ({ output }) => ({
-                target: "received",
-                context: { feedback: output },
-              }),
-            },
-          },
-          received: { type: "final" },
-        },
-      },
-    },
-  });
-
-  test("a sibling region finishes its model call, then the run settles idle with the pending user input", async () => {
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ output: "a summary" }),
-      },
-    });
-
-    expect(result.status).toBe("idle");
-    if (result.status !== "idle") throw new Error("expected idle");
-    // The sibling region's work ran to completion before settling.
-    expect((result.snapshot.context as { summary: string | null }).summary).toBe("a summary");
-    expect(result.pendingUserInputs).toEqual([{ id: "askHuman", input: { prompt: "Feedback?" } }]);
-    expect(result.persist()).toBeDefined();
-  });
-
-  test("the persisted snapshot JSON round-trips and resumes with a userInput handler to done", async () => {
-    const first = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ output: "a summary" }),
-      },
-    });
-    if (first.status !== "idle" || !first.persist()) {
-      throw new Error("expected idle with persistedSnapshot");
-    }
-
-    const stored = JSON.parse(JSON.stringify(first.persist()));
-
-    const second = await runAgent(machine, {
-      snapshot: stored,
-      userInput: async (input) => {
-        expect(input).toEqual({ prompt: "Feedback?" });
-        return "ship it";
-      },
-      executors: {
-        generateText: async () => {
-          throw new Error("no model call expected on resume");
-        },
-      },
-    });
-
-    expect(second.status).toBe("done");
-    if (second.status !== "done") throw new Error("expected done");
-    expect(second.output).toEqual({ summary: "a summary", feedback: "ship it" });
-  });
-
-  test("resuming without a handler settles idle again with the same pending input", async () => {
-    const first = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ output: "a summary" }),
-      },
-    });
-    if (first.status !== "idle" || !first.persist()) {
-      throw new Error("expected idle with persistedSnapshot");
-    }
-
-    const again = await runAgent(machine, {
-      snapshot: JSON.parse(JSON.stringify(first.persist())),
-      executors: {
-        generateText: async () => ({ output: "unused" }),
-      },
-    });
-
-    expect(again.status).toBe("idle");
-    if (again.status !== "idle") throw new Error("expected idle");
-    expect(again.pendingUserInputs).toEqual([{ id: "askHuman", input: { prompt: "Feedback?" } }]);
   });
 });
 
@@ -1771,8 +1550,8 @@ describe("emitted events (runAgent `on`)", () => {
           src: "draft",
           input: ({ context }) => ({ topic: context.topic }),
           onDone: ({ output }, enq) => {
-            enq.emit({ type: "DRAFTED", length: output.length });
-            return { target: "done", context: { draft: output } };
+            enq.emit({ type: "DRAFTED", length: output.result.length });
+            return { target: "done", context: { draft: output.result } };
           },
         },
       },
@@ -1791,7 +1570,7 @@ describe("emitted events (runAgent `on`)", () => {
         DRAFTED: (emitted) => drafted.push(emitted.length),
       },
       executors: {
-        generateText: async () => ({ output: "a draft" }),
+        generateText: async () => ({ result: "a draft" }),
       },
     });
 
@@ -1807,7 +1586,7 @@ describe("emitted events (runAgent `on`)", () => {
       input: { topic: "rivers" },
       on: { "*": (emitted) => seen.push(emitted.type) },
       executors: {
-        generateText: async () => ({ output: "a draft" }),
+        generateText: async () => ({ result: "a draft" }),
       },
     });
 
@@ -1821,7 +1600,7 @@ describe("emitted events (runAgent `on`)", () => {
       input: { topic: "rivers" },
       onTrace: (event) => trace.push(event),
       executors: {
-        generateText: async () => ({ output: "a draft", usage: { totalTokens: 3 } }),
+        generateText: async () => ({ result: "a draft", usage: { totalTokens: 3 } }),
       },
     });
 
@@ -1846,7 +1625,7 @@ describe("emitted events (runAgent `on`)", () => {
       expect.objectContaining({
         type: "request.end",
         output: "a draft",
-        raw: { output: "a draft", usage: { totalTokens: 3 } },
+        raw: { result: "a draft", usage: { totalTokens: 3 } },
       }),
     );
 
@@ -1876,7 +1655,7 @@ describe("emitted events (runAgent `on`)", () => {
     await runAgent(versioned, {
       onTrace: (event) => trace.push(event),
       executors: {
-        generateText: async () => ({ output: "a draft" }),
+        generateText: async () => ({ result: "a draft" }),
       },
     });
 
@@ -1910,7 +1689,7 @@ describe("onTrace stream chunks", () => {
           invoke: {
             src: "joke",
             input: () => ({}),
-            onDone: ({ output }) => ({ target: "done", context: { joke: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { joke: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ joke: context.joke ?? "" }) },
@@ -1921,11 +1700,11 @@ describe("onTrace stream chunks", () => {
     const result = await runAgent(machine, {
       onTrace: (event) => trace.push(event),
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         streamText: async (_request, info) => {
           info?.onChunk?.("a");
           info?.onChunk?.("b");
-          return { output: "ab" };
+          return { result: "ab" };
         },
       },
     });
@@ -1965,7 +1744,7 @@ describe("sugar callbacks are projections of onTrace", () => {
           invoke: {
             src: "joke",
             input: () => ({}),
-            onDone: ({ output }) => ({ target: "done", context: { joke: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { joke: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ joke: context.joke ?? "" }) },
@@ -1977,13 +1756,13 @@ describe("sugar callbacks are projections of onTrace", () => {
     const result = await runAgent(machine, {
       onTrace: (event) => log.push(`trace:${event.type}`),
       onChunk: (chunk, info) => log.push(`chunk:${chunk}:${info.request.src}`),
-      onResult: (_request, { output }) => log.push(`result:${String(output)}`),
+      onResult: (_request, { result }) => log.push(`result:${String(result)}`),
       onTransition: (_snapshot, event) => log.push(`transition:${event.type}`),
       executors: {
         streamText: async (_request, info) => {
           info?.onChunk?.("a");
           info?.onChunk?.("b");
-          return { output: "ab" };
+          return { result: "ab" };
         },
       },
     });
@@ -2037,7 +1816,7 @@ describe("onResult raw pass-through", () => {
           invoke: {
             src: "ask",
             input: () => ({}),
-            onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { answer: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ answer: context.answer ?? "" }) },
@@ -2049,7 +1828,7 @@ describe("onResult raw pass-through", () => {
       onResult: (_request, { raw }) => raws.push(raw),
       executors: {
         generateText: async () => ({
-          output: "42",
+          result: "42",
           usage: { inputTokens: 7, outputTokens: 3 },
           finishReason: "stop",
         }),
@@ -2058,7 +1837,7 @@ describe("onResult raw pass-through", () => {
 
     expect(result.status).toBe("done");
     expect(raws).toEqual([
-      { output: "42", usage: { inputTokens: 7, outputTokens: 3 }, finishReason: "stop" },
+      { result: "42", usage: { inputTokens: 7, outputTokens: 3 }, finishReason: "stop" },
     ]);
   });
 
@@ -2086,7 +1865,7 @@ describe("onResult raw pass-through", () => {
             input: () => ({}),
             onDone: ({ output }) => ({
               target: "done",
-              context: { answer: (output as { answer: string }).answer },
+              context: { answer: output.result.answer },
             }),
           },
         },
@@ -2102,7 +1881,7 @@ describe("onResult raw pass-through", () => {
       executors: {
         // Executor surfaces reasoning alongside the (already-unwrapped) output —
         // exactly what createAiSdkExecutors returns from the envelope.
-        generateText: async () => ({ output: { answer: "42" }, reasoning: "carefully" }),
+        generateText: async () => ({ result: { answer: "42" }, reasoning: "carefully" }),
       },
     });
 
@@ -2110,7 +1889,7 @@ describe("onResult raw pass-through", () => {
     // reasoning stays out of machine context/output.
     expect(result.status === "done" ? result.output : undefined).toEqual({ answer: "42" });
     // reasoning reaches onResult via raw.
-    expect(raws).toEqual([{ output: { answer: "42" }, reasoning: "carefully" }]);
+    expect(raws).toEqual([{ result: { answer: "42" }, reasoning: "carefully" }]);
     // reasoning is lifted onto the request.end trace event as a field.
     const end = trace.find(
       (event): event is Extract<AgentTraceEvent, { type: "request.end" }> =>
@@ -2174,7 +1953,7 @@ describe("inspect passthrough (system-wide visibility)", () => {
         });
       },
       executors: {
-        generateText: async () => ({ output: "" }),
+        generateText: async () => ({ result: "" }),
       },
     });
 
@@ -2215,7 +1994,7 @@ describe("inspect passthrough (system-wide visibility)", () => {
     const result = await runAgent(machine, {
       // The observer shape ({ next }), not a function.
       inspect: { next: (event) => seen.push(event.type) },
-      executors: { generateText: async () => ({ output: "" }) },
+      executors: { generateText: async () => ({ result: "" }) },
     });
 
     expect(result.status).toBe("done");
@@ -2244,31 +2023,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     expect(result.status).toBe("idle");
   });
 
-  test("an unreachable userInput placeholder does not override a custom idle predicate", async () => {
-    const controller = new AbortController();
-    const agent = setupAgent({
-      context: z.object({}),
-      isIdle: () => false,
-    });
-    const machine = agent.createMachine({
-      context: {},
-      initial: "waiting",
-      states: {
-        waiting: {},
-        unreachablePrompt: {
-          invoke: { src: "agent.userInput", input: { prompt: "Never reached" } },
-        },
-      },
-    });
-    setTimeout(() => controller.abort("test complete"), 5);
-
-    const result = await runAgent(machine, {
-      signal: controller.signal,
-      executors: {},
-    });
-    expect(result).toMatchObject({ status: "error", cause: "aborted" });
-  });
-
   test("a machine-carried isIdle predicate settles idle and resumes to done", async () => {
     const agent = setupAgent({
       context: z.object({}),
@@ -2293,7 +2047,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     const first = await runAgent(machine, {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
       },
     });
     expect(first.status).toBe("idle");
@@ -2304,7 +2058,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       snapshot: first.persist(),
       event: { type: "APPROVE" },
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
       },
     });
     expect(second.status).toBe("done");
@@ -2405,7 +2159,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       },
     });
 
-    const executors = { generateText: async () => ({ output: "tick" }) };
+    const executors = { generateText: async () => ({ result: "tick" }) };
 
     const first = await runAgent(machine, { input: {}, executors });
     expect(first.status).toBe("idle");
@@ -2520,7 +2274,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
 
     const result = await runAgent(machine, {
       input: {},
-      executors: { generateText: async () => ({ output: "tick" }) },
+      executors: { generateText: async () => ({ result: "tick" }) },
     });
     expect(result.status).toBe("idle");
     if (result.status !== "idle") throw new Error("expected idle");
@@ -2566,7 +2320,10 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
                 id: "sum",
                 src: "summarize",
                 input: {},
-                onDone: ({ output }) => ({ target: "summarized", context: { summary: output } }),
+                onDone: ({ output }) => ({
+                  target: "summarized",
+                  context: { summary: output.result },
+                }),
               },
             },
             summarized: { type: "final" },
@@ -2579,7 +2336,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       input: {},
       executors: {
         generateText: () =>
-          new Promise((res) => setTimeout(() => res({ output: "done-summary" }), 10)),
+          new Promise((res) => setTimeout(() => res({ result: "done-summary" }), 10)),
       },
     });
 
@@ -2607,7 +2364,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     const result = await runAgent(machine, {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
       },
     });
 
@@ -2646,7 +2403,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     const result = await runAgent(provided, {
       input: {},
       executors: {
-        generateText: async () => ({ output: "x" }),
+        generateText: async () => ({ result: "x" }),
       },
     });
 
@@ -2674,7 +2431,7 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     const result = await runAgent(machine, {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
       },
     });
     expect(result.status).toBe("idle");
@@ -2709,7 +2466,7 @@ describe("Feature B: an event the state does not handle is ignored", () => {
     },
   });
 
-  const generateText = async () => ({ output: {} });
+  const generateText = async () => ({ result: {} });
 
   test("an event the restored state does not handle is ignored, not an error", async () => {
     const first = await runAgent(machine, { input: {}, executors: { generateText } });
@@ -2820,7 +2577,7 @@ describe("runAgent error cause split", () => {
     const result = await runAgent(exhaustingDecisionMachine(false), {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide: alwaysUnknown,
       },
     });
@@ -2833,7 +2590,7 @@ describe("runAgent error cause split", () => {
     const result = await runAgent(exhaustingDecisionMachine(true), {
       input: {},
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
         decide: alwaysUnknown,
       },
     });
@@ -2904,7 +2661,7 @@ describe("runAgent dev-mode serialization guard", () => {
       const result = await runAgent(machine, {
         input: {},
         executors: {
-          generateText: async () => ({ output: {} }),
+          generateText: async () => ({ result: {} }),
         },
       });
       expect(result.status).toBe("idle");
@@ -2941,7 +2698,7 @@ describe("runAgent dev-mode serialization guard", () => {
     try {
       await runAgent(machine, {
         input: {},
-        executors: { generateText: async () => ({ output: {} }) },
+        executors: { generateText: async () => ({ result: {} }) },
       });
     } finally {
       console.warn = original;
@@ -2971,7 +2728,7 @@ describe("restore semantics: pending requests and events-only resume", () => {
             input: () => ({ model: "m", prompt: "one" }),
             onDone: ({ event }) => ({
               target: "waiting",
-              context: { a: String(event.output) },
+              context: { a: String(event.output.result) },
             }),
           },
         },
@@ -2982,7 +2739,7 @@ describe("restore semantics: pending requests and events-only resume", () => {
             input: () => ({ model: "m", prompt: "two" }),
             onDone: ({ event }) => ({
               target: "done",
-              context: { b: String(event.output) },
+              context: { b: String(event.output.result) },
             }),
           },
         },
@@ -3017,7 +2774,7 @@ describe("restore semantics: pending requests and events-only resume", () => {
     const resolving = {
       generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
         calls.push(`retry:${request.prompt}`);
-        return { output: `ok:${request.prompt}` };
+        return { result: `ok:${request.prompt}` };
       },
     };
     const restored = await runAgent(machine, {
@@ -3049,7 +2806,7 @@ describe("restore semantics: pending requests and events-only resume", () => {
       executors: {
         generateText: async (request, info) => {
           seen.push({ runId: info?.runId, requestId: info?.requestId });
-          return { output: `ok:${request.prompt}` };
+          return { result: `ok:${request.prompt}` };
         },
       },
     });
@@ -3160,7 +2917,7 @@ describe("inspectTransitions", () => {
         observed.push({ id: actorRef.id, value: snapshot.value });
       }),
       executors: {
-        generateText: async () => ({ output: {} }),
+        generateText: async () => ({ result: {} }),
       },
     });
 
@@ -3197,7 +2954,10 @@ describe("runAgent usage aggregation", () => {
           id: "first",
           src: "step",
           input: { label: "one" },
-          onDone: ({ output }) => ({ target: "second", context: { second: null, first: output } }),
+          onDone: ({ output }) => ({
+            target: "second",
+            context: { second: null, first: output.result },
+          }),
         },
       },
       second: {
@@ -3207,7 +2967,7 @@ describe("runAgent usage aggregation", () => {
           input: { label: "two" },
           onDone: ({ output, context }) => ({
             target: "done",
-            context: { first: context.first, second: output },
+            context: { first: context.first, second: output.result },
           }),
         },
       },
@@ -3223,7 +2983,7 @@ describe("runAgent usage aggregation", () => {
       input: {},
       executors: {
         generateText: async (request: AgentTextRequest & { tools: AgentTools }) => ({
-          output: `out:${request.prompt}`,
+          result: `out:${request.prompt}`,
           usage: {
             inputTokens: 10,
             outputTokens: 4,
@@ -3255,8 +3015,8 @@ describe("runAgent usage aggregation", () => {
           call += 1;
           // Only the FIRST call reports usage, and only two fields of it.
           return call === 1
-            ? { output: "a", usage: { inputTokens: 5, totalTokens: 6 } }
-            : { output: "b" };
+            ? { result: "a", usage: { inputTokens: 5, totalTokens: 6 } }
+            : { result: "b" };
         },
       },
     });
@@ -3271,7 +3031,7 @@ describe("runAgent usage aggregation", () => {
   test("counts model calls even when no executor reports usage", async () => {
     const result = await runAgent(twoCallMachine, {
       input: {},
-      executors: { generateText: async () => ({ output: "x" }) },
+      executors: { generateText: async () => ({ result: "x" }) },
     });
 
     expect(result.usage).toEqual({ modelCalls: 2 });
@@ -3289,7 +3049,7 @@ describe("runAgent usage aggregation", () => {
             input: { label: "one" },
             onDone: ({ output }) => ({
               target: "waiting",
-              context: { second: null, first: output },
+              context: { second: null, first: output.result },
             }),
           },
         },
@@ -3305,7 +3065,7 @@ describe("runAgent usage aggregation", () => {
       input: {},
       executors: {
         generateText: async () => ({
-          output: "drafted",
+          result: "drafted",
           usage: { inputTokens: 9, outputTokens: 3 },
         }),
       },
@@ -3318,7 +3078,7 @@ describe("runAgent usage aggregation", () => {
     const resumed = await runAgent(idleMachine, {
       snapshot: result.persist(),
       event: { type: "APPROVE" },
-      executors: { generateText: async () => ({ output: "unused" }) },
+      executors: { generateText: async () => ({ result: "unused" }) },
     });
     expect(resumed.status).toBe("done");
     expect(resumed.usage).toEqual({ modelCalls: 0 });
@@ -3329,7 +3089,7 @@ describe("runAgent usage aggregation", () => {
       input: {},
       maxModelCalls: 1,
       executors: {
-        generateText: async () => ({ output: "a", usage: { inputTokens: 11, totalTokens: 12 } }),
+        generateText: async () => ({ result: "a", usage: { inputTokens: 11, totalTokens: 12 } }),
       },
     });
 
@@ -3388,7 +3148,7 @@ describe("runAgent usage aggregation", () => {
       input: {},
       onTrace: (event) => trace.push(event),
       executors: {
-        generateText: async () => ({ output: "x", usage: { inputTokens: 2, outputTokens: 1 } }),
+        generateText: async () => ({ result: "x", usage: { inputTokens: 2, outputTokens: 1 } }),
       },
     });
 
@@ -3409,7 +3169,7 @@ describe("runAgent usage aggregation", () => {
         // is what an un-normalizing host would need), so it lands on `'other'`.
         generateText: async ({ prompt }) =>
           ({
-            output: "x",
+            result: "x",
             finishReason: prompt === "one" ? "length" : "error",
           }) as AgentRequestExecutorResult<string>,
       },
@@ -3559,9 +3319,9 @@ describe("runAgent event log", () => {
             id: "ask",
             src: "answer",
             input: () => ({}),
-            onDone: ({ output }: { output: string }) => ({
+            onDone: ({ output }: { output: { result: string } }) => ({
               target: "waiting",
-              context: { answer: output },
+              context: { answer: output.result },
             }),
           } as never,
         },
@@ -3576,7 +3336,7 @@ describe("runAgent event log", () => {
     } as never);
 
   const executors = () => ({
-    generateText: async () => ({ output: "42", usage: { totalTokens: 7 } }),
+    generateText: async () => ({ result: "42", usage: { totalTokens: 7 } }),
   });
 
   const types = (entries: readonly AgentLogEntry[]) => entries.map((entry) => entry.event.type);
@@ -3676,7 +3436,7 @@ describe("runAgent event log", () => {
         executors: {
           generateText: async (_request, info) => {
             firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
-            if (firstCalls.length === 1) return { output: "one" };
+            if (firstCalls.length === 1) return { result: "one" };
             // The second call is the one still in flight at the crash.
             inFlight.resolve();
             return await new Promise<never>(() => {});
@@ -3699,7 +3459,7 @@ describe("runAgent event log", () => {
       executors: {
         generateText: async (_request, info) => {
           secondCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
-          return { output: "two" };
+          return { result: "two" };
         },
       },
     });
@@ -3831,7 +3591,7 @@ describe("runAgent event log", () => {
     // host bug, not a resume.
     const otherRun = await runAgent(machine, {
       input: undefined,
-      executors: { generateText: async () => ({ output: "different" }) },
+      executors: { generateText: async () => ({ result: "different" }) },
     });
     await expect(
       runAgent(machine, {
@@ -3995,7 +3755,7 @@ describe("runAgent event log", () => {
     const result = await runAgent(machine, {
       input: undefined,
       executors: {
-        generateText: async () => ({ output: "42", usage: { totalTokens: 7, inputTokens: 3 } }),
+        generateText: async () => ({ result: "42", usage: { totalTokens: 7, inputTokens: 3 } }),
       },
     });
     const usageEntries = result.events.filter(
@@ -4031,7 +3791,7 @@ describe("runAgent event log", () => {
         generateText: async () => {
           inFlight.resolve();
           await release.promise;
-          return { output: "late", usage: { totalTokens: 11 } };
+          return { result: "late", usage: { totalTokens: 11 } };
         },
       },
     });
@@ -4093,7 +3853,7 @@ describe("runAgent event log", () => {
       executors: {
         generateText: async () => {
           called++;
-          return { output: "should not happen" };
+          return { result: "should not happen" };
         },
       },
     });
@@ -4120,7 +3880,7 @@ describe("runAgent write-ahead store", () => {
       },
     } as never);
 
-  const executors = () => ({ generateText: async () => ({ output: "42" }) });
+  const executors = () => ({ generateText: async () => ({ result: "42" }) });
 
   test("a fresh run writes every entry to the store, in index order", async () => {
     const store = createInMemoryEventLogStore();
@@ -4184,7 +3944,7 @@ describe("runAgent write-ahead store", () => {
       executors: {
         generateText: async () => {
           calls++;
-          return { output: "42" };
+          return { result: "42" };
         },
       },
     });
@@ -4230,7 +3990,7 @@ describe("runAgent write-ahead store", () => {
       executors: {
         generateText: async (_request, info) => {
           firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
-          if (firstCalls.length === 1) return { output: "one" };
+          if (firstCalls.length === 1) return { result: "one" };
           inFlight.resolve();
           return await new Promise<never>(() => {});
         },
@@ -4249,7 +4009,7 @@ describe("runAgent write-ahead store", () => {
       executors: {
         generateText: async (_request, info) => {
           secondCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
-          return { output: "two" };
+          return { result: "two" };
         },
       },
     });
@@ -4287,7 +4047,7 @@ describe("runAgent write-ahead store", () => {
       executors: {
         generateText: async () => {
           calls++;
-          return { output: "42" };
+          return { result: "42" };
         },
       },
     });
@@ -4415,7 +4175,7 @@ describe("runAgent write-ahead store", () => {
         generateText: async () => {
           inFlight.resolve();
           await release.promise;
-          return { output: "42", usage: { totalTokens: 5 } };
+          return { result: "42", usage: { totalTokens: 5 } };
         },
       },
     });
@@ -4464,7 +4224,7 @@ describe("wire events: parse at the boundary, ignore what the state does not han
       done: { type: "final", output: () => ({}) },
     },
   });
-  const executors = { generateText: async () => ({ output: {} }) };
+  const executors = { generateText: async () => ({ result: {} }) };
 
   const paused = async () => {
     const first = await runAgent(machine, { input: {}, executors });

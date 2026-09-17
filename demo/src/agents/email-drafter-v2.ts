@@ -17,34 +17,36 @@
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { interactionMetaSchema, setupAgent } from "@statelyai/agent";
+import { setupAgent } from "@statelyai/agent";
 import { type EmailDraft, emailDraftSchema, hasRecipient } from "./email-draft";
 
 /** Same revision budget as v1, so the comparison changes one thing. */
 export const MAX_REVISIONS = 2;
 
+const contextSchema = z.object({
+  prompt: z.string(),
+  draft: emailDraftSchema.nullable(),
+  /** Questions the drafter raised while drafting around gaps. Part of the output. */
+  clarifications: z.array(z.string()),
+  revisions: z.number(),
+  failure: z.string().nullable(),
+});
+
+const drafted = contextSchema.extend({ draft: emailDraftSchema });
+
 const agentSetup = setupAgent({
-  context: z.object({
-    prompt: z.string(),
-    draft: emailDraftSchema.nullable(),
-    /** Questions the drafter raised while drafting around gaps. Part of the output. */
-    clarifications: z.array(z.string()),
-    revisions: z.number(),
-    failure: z.string().nullable(),
-  }),
+  context: contextSchema,
   input: z.object({ prompt: z.string() }),
   output: z.object({
     sentEmails: z.array(emailDraftSchema),
     clarifications: z.array(z.string()),
     failure: z.string().nullable(),
   }),
-  meta: interactionMetaSchema,
   events: {
     REQUEST_CHANGES: z.object({ text: z.string() }),
     SEND: z.object({}),
     RECIPIENT_PROVIDED: z.object({ text: z.string() }),
   },
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-user"),
   requests: {
     draftEmail: {
       schemas: {
@@ -70,6 +72,13 @@ const agentSetup = setupAgent({
       },
     }),
   },
+  // Every state after `drafting` holds a draft, so narrow it there.
+  states: {
+    reviewing: { schemas: { context: drafted } },
+    finalReview: { schemas: { context: drafted } },
+    needsRecipient: { schemas: { context: drafted } },
+    sending: { schemas: { context: drafted } },
+  },
 });
 
 export const emailDrafterV2Machine = agentSetup.createMachine({
@@ -88,7 +97,12 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
       invoke: {
         src: "draftEmail",
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ context, output: { openQuestions, ...draft } }) => ({
+        onDone: ({
+          context,
+          output: {
+            result: { openQuestions, ...draft },
+          },
+        }) => ({
           target: context.revisions >= MAX_REVISIONS ? "finalReview" : "reviewing",
           context: {
             draft,
@@ -106,7 +120,6 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
     },
 
     reviewing: {
-      tags: ["awaiting-user"],
       meta: {
         interaction: {
           label: "Send the draft, or type the changes you want.",
@@ -133,7 +146,6 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
     },
 
     finalReview: {
-      tags: ["awaiting-user"],
       meta: {
         interaction: {
           label: "That is the last revision I can make. Send this draft?",
@@ -150,7 +162,6 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
     // The one question v2 still asks, and only once the human has decided to
     // send. Nothing invents an address on their behalf.
     needsRecipient: {
-      tags: ["awaiting-user"],
       meta: {
         interaction: {
           label: "Who should this go to? Type an email address.",
@@ -172,7 +183,7 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
     sending: {
       invoke: {
         src: "sendEmail",
-        input: ({ context }) => ({ draft: context.draft! }),
+        input: ({ context }) => ({ draft: context.draft }),
         onDone: { target: "sent" },
         onError: ({ event }) => ({
           target: "failed",

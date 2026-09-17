@@ -11,11 +11,7 @@
  * `*Run` functions directly and inject scripted executors — no API key, no
  * network.
  */
-import {
-  runAgent,
-  type AgentRequestExecutors,
-  type RunAgentResult,
-} from "@statelyai/agent";
+import { runAgent, type AgentRequestExecutors, type RunAgentResult } from "@statelyai/agent";
 import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
 import { maybeCreateRunInspection } from "./inspection.server";
 import { createTraceRecorder, describeIdle, type TraceEntry } from "./machine-chat.server";
@@ -121,13 +117,13 @@ async function resolveExecutors(
     return { mode: "script", executors: scriptedExecutorsFor(scenarioId) };
   }
   // Lazy import: keeps @ai-sdk/openai out of any bundle that only needs scripts.
-  const [{ createAiSdkExecutors, defineModels }, { openai }] = await Promise.all([
+  const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
   const primary = process.env.OPENAI_MODEL || "gpt-5.4-mini";
   const fallback = process.env.OPENAI_FALLBACK_MODEL || primary;
-  const models = defineModels({
+  const models = {
     fast: openai(primary),
     writer: openai(primary),
     router: openai(primary),
@@ -137,7 +133,7 @@ async function resolveExecutors(
     reasoner: openai(primary),
     primary: openai(primary),
     fallback: openai(fallback),
-  });
+  };
   const executors = createAiSdkExecutors({ models });
   // Deterministic outage demo for the retry scenario: a healthy primary never
   // fails live, so the advertised retry path would never show. Two markers, two
@@ -207,7 +203,11 @@ function describeResult(scenarioId: ScenarioId, result: RunAgentResult<AnyStateM
   if (result.status === "idle") {
     const context = result.snapshot.context as Record<string, unknown>;
     if (scenarioId === "approval") return String(context.draft ?? "Draft ready for review.");
-    if (scenarioId === "refund") return "Amount exceeds the auto-refund limit. Awaiting approval.";
+    if (scenarioId === "refund") {
+      return result.snapshot.value === "askingAmount"
+        ? "No amount in the request. Asking the customer how much was charged."
+        : "Amount exceeds the auto-refund limit. Awaiting approval.";
+    }
     if (scenarioId === "email-drafter-v1" || scenarioId === "email-drafter-v2") {
       const draft = context.draft as { to: string; subject: string; body: string } | null;
       return draft
@@ -230,7 +230,8 @@ function formatDraft(
 
 function describeEmailOutcome(output: Record<string, unknown>): string {
   if (output.failure) return `Not sent: ${String(output.failure)}`;
-  const sent = (output.sentEmails as { to: string; subject: string; body: string }[] | undefined) ?? [];
+  const sent =
+    (output.sentEmails as { to: string; subject: string; body: string }[] | undefined) ?? [];
   const clarifications = (output.clarifications as string[] | undefined) ?? [];
   return sent.length
     ? `Sent (simulated outbox).\n\n${formatDraft(sent[0]!, clarifications)}`

@@ -30,14 +30,13 @@
 import { z } from "zod";
 import type { Snapshot } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   eventFromInteraction,
   getInteraction,
   interactionMetaSchema,
   isAgentIdle,
   runAgent,
-  runAgentLoop,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -45,9 +44,9 @@ import {
 /** Rejections allowed before the review loop gives up. */
 export const MAX_REJECTIONS = 2;
 
-export const models = defineModels({
+const models = {
   writer: openai("gpt-5.4-mini"),
-});
+};
 
 const contextSchema = z.object({
   topic: z.string(),
@@ -120,7 +119,7 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
         input: ({ context }) => ({ topic: context.topic, feedback: context.feedback }),
         onDone: ({ output }) => ({
           target: "reviewing",
-          context: { draft: output },
+          context: { draft: output.result },
         }),
         onError: ({ event }) => ({
           target: "abandoned",
@@ -251,8 +250,9 @@ function roundTrip(snapshot: Snapshot<unknown>): Snapshot<unknown> {
   return JSON.parse(JSON.stringify(snapshot)) as Snapshot<unknown>;
 }
 
-// Direct run: runAgentLoop drives a real interactive review. Each idle pause
-// renders the machine's interaction metadata and returns a validated event.
+// Direct run: a plain while loop drives a real interactive review. Each idle
+// pause renders the machine's interaction metadata, and the next `runAgent`
+// resumes from the persisted snapshot with a validated event.
 /** Prompt once on stdin and resolve the trimmed reply. */
 async function promptLine(query: string): Promise<string> {
   const { createInterface } = await import("node:readline/promises");
@@ -271,25 +271,32 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const result = await runAgentLoop(humanInTheLoopMachine, {
+    const executors = createAiSdkExecutors({ models });
+    let result = await runAgent(humanInTheLoopMachine, {
       input: { topic: "the new deploy pipeline" },
-      executors: createAiSdkExecutors({ models }),
-      onIdle: async ({ snapshot }) => {
-        const interaction = getInteraction(snapshot);
-        console.log("\n--- Draft for review ---");
-        console.log(snapshot.context.draft ?? "");
-        console.log("\n" + (interaction?.label ?? ""));
-        console.log("Legal events:", interaction?.events.map(({ type }) => type).join(", "));
-
-        const answer = (await promptLine("approve / reject? ")).toLowerCase();
-        if (answer.startsWith("a")) {
-          // Typed off the snapshot: the machine's own event union, no cast.
-          return eventFromInteraction(snapshot, { type: "APPROVE" });
-        }
-        const text = await promptLine("What should change? ");
-        return eventFromInteraction(snapshot, { text });
-      },
+      executors,
     });
+
+    while (result.status === "idle") {
+      const { snapshot } = result;
+      const interaction = getInteraction(snapshot);
+      console.log("\n--- Draft for review ---");
+      console.log(snapshot.context.draft ?? "");
+      console.log("\n" + (interaction?.label ?? ""));
+      console.log("Legal events:", interaction?.events.map(({ type }) => type).join(", "));
+
+      const answer = (await promptLine("approve / reject? ")).toLowerCase();
+      // Typed off the snapshot: the machine's own event union, no cast.
+      const event = answer.startsWith("a")
+        ? eventFromInteraction(snapshot, { type: "APPROVE" })
+        : eventFromInteraction(snapshot, { text: await promptLine("What should change? ") });
+
+      result = await runAgent(humanInTheLoopMachine, {
+        snapshot: result.persist(),
+        event,
+        executors,
+      });
+    }
 
     if (result.status !== "done") {
       throw new Error(`Expected a final state, got '${result.status}'.`);

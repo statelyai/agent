@@ -164,13 +164,13 @@ The machine below makes the same four model calls and applies the same policy as
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createTextLogic, runAgent, setupAgent } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
 
 // Model IDs here are illustrative; substitute your provider's current models.
-const models = defineModels({
+const models = {
   triage: openai("gpt-5.4-mini"),
   reviewer: openai("gpt-5.4-mini"),
-});
+};
 
 const classifyTicket = createTextLogic({
   schemas: { input: z.object({ ticket: z.string() }), output: z.string() },
@@ -228,7 +228,7 @@ const triageMachine = agentSetup.createMachine({
       invoke: {
         src: "classifyTicket",
         input: ({ context }) => ({ ticket: context.ticket }),
-        onDone: ({ output }) => ({ target: "routing", context: { category: output } }),
+        onDone: ({ output }) => ({ target: "routing", context: { category: output.result } }),
       },
     },
     // `type: 'choice'` is a library pseudo-state, not native XState.
@@ -245,7 +245,7 @@ const triageMachine = agentSetup.createMachine({
           category: context.category ?? "unknown",
           note: context.note,
         }),
-        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output } }),
+        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output.result } }),
       },
     },
     reviewing: {

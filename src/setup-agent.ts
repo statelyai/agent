@@ -24,9 +24,7 @@ import type {
 import {
   builtinTextActors,
   createTextLogic,
-  userInputActor,
   DECIDE_ACTOR,
-  USER_INPUT_ACTOR,
   type AgentModelMap,
   type AgentModelRef,
   type BuiltinAgentActors,
@@ -35,13 +33,7 @@ import {
 } from "./text-logic.js";
 import { createDecideActor } from "./decision.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
-import {
-  AGENT_MESSAGES_EVENT_TYPE,
-  agentMessagesEventSchema,
-  appendMessages,
-  type AgentMessagesEventPayload,
-  type AppendMessagesTransition,
-} from "./messages.js";
+import type { AgentInteractionMeta } from "./interaction.js";
 import {
   getAgentExecutionOptions,
   machineIdlePredicates,
@@ -114,6 +106,16 @@ type AgentSetupActors<
 > = TActors & BuiltinAgentActors<TEvent, TModel>;
 
 /**
+ * The default `meta` type of an agent machine: the interaction descriptor
+ * `getInteraction` reads, keyed by the machine's own event types (the
+ * reserved `@agent.*` events excluded). A machine that declares `meta`
+ * replaces this default.
+ */
+export type AgentDefaultMeta<TEventSchemas extends AgentEventSchemaInputMap> = AgentInteractionMeta<
+  Exclude<keyof TEventSchemas & string, typeof AGENT_USAGE_EVENT_TYPE>
+>;
+
+/**
  * A machine's full schema set — context, event payloads, machine input/
  * output, and state/transition meta — as returned by {@link createAgentSchemas}
  * and retained on `setupAgent(...)`'s `result.schemas` for runtime
@@ -130,7 +132,7 @@ export interface AgentSchemaPack<
   TEventSchemas extends AgentEventSchemaInputMap = AgentEventSchemaInputMap,
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
-  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
+  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<AgentDefaultMeta<TEventSchemas>>,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = Record<string, StandardSchemaV1>,
 > {
   context: TContextSchema;
@@ -236,10 +238,9 @@ const agentUsageEventSchema: StandardSchemaV1<AgentUsageEventPayload> = {
  */
 export type WithAgentEvents<T extends AgentEventSchemaInputMap> = Omit<
   T,
-  typeof AGENT_USAGE_EVENT_TYPE | typeof AGENT_MESSAGES_EVENT_TYPE
+  typeof AGENT_USAGE_EVENT_TYPE
 > & {
   [AGENT_USAGE_EVENT_TYPE]: StandardSchemaV1<AgentUsageEventPayload>;
-  [AGENT_MESSAGES_EVENT_TYPE]: StandardSchemaV1<AgentMessagesEventPayload>;
 };
 
 /** @deprecated Use {@link WithAgentEvents}. */
@@ -264,18 +265,9 @@ function withAgentUsageEventSchema<T extends AgentEventSchemaInputMap>(
         `transition instead: on: { '${AGENT_USAGE_EVENT_TYPE}': … }.`,
     );
   }
-  const declaredMessages = events?.[AGENT_MESSAGES_EVENT_TYPE];
-  if (declaredMessages !== undefined && declaredMessages !== agentMessagesEventSchema) {
-    throw new Error(
-      `setupAgent: event type '${AGENT_MESSAGES_EVENT_TYPE}' is reserved and cannot be ` +
-        `declared in 'events' — setupAgent registers it for you. Add a transition ` +
-        `instead: on: { '${AGENT_MESSAGES_EVENT_TYPE}': appendMessages() }.`,
-    );
-  }
   return {
     ...events,
     [AGENT_USAGE_EVENT_TYPE]: agentUsageEventSchema,
-    [AGENT_MESSAGES_EVENT_TYPE]: agentMessagesEventSchema,
   } as WithAgentEvents<T>;
 }
 
@@ -303,7 +295,7 @@ export function createAgentSchemas<
   TEventSchemas extends AgentEventSchemaInputMap = {},
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
-  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
+  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<AgentDefaultMeta<TEventSchemas>>,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
 >(
   schemas: AgentSchemaConfig<
@@ -500,10 +492,7 @@ type AgentSetupXStateConfig<
       AgentAllActors<TActors, TRequestSchemas>,
       // Framework-reserved event types are never model-facing, so they stay
       // out of the `allowedEvents` candidate union the decide builtin types.
-      Exclude<
-        keyof TEventSchemas & string,
-        typeof AGENT_USAGE_EVENT_TYPE | typeof AGENT_MESSAGES_EVENT_TYPE
-      >,
+      Exclude<keyof TEventSchemas & string, typeof AGENT_USAGE_EVENT_TYPE>,
       AgentModelRef<TModels>
     >
   >;
@@ -571,7 +560,7 @@ type SetupAgentBaseConfig<
   isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 };
 
-// The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (schemas/models/requests/appendMessages, plus the wrapped createMachine) are added.
+// The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (schemas/models/requests, plus the wrapped createMachine) are added.
 type SetupAgentXStateResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends AgentEventSchemaInputMap,
@@ -601,20 +590,11 @@ type SetupAgentXStateResult<
 /**
  * The object returned by {@link setupAgent}: an xstate `setup(...)` result
  * (`createMachine`, `assign`, …) extended with `schemas` (the resolved
- * {@link AgentSchemaPack}), `models`, `requests` (the built request actors),
- * and {@link appendMessages}. Machines created here are registered so
+ * {@link AgentSchemaPack}), `models`, and `requests` (the built request
+ * actors). Machines created here are registered so
  * `runAgent` and the free step helpers can resolve their schemas/actors
  * without re-passing them each call.
  */
-type ArrayContextKey<TContext> = {
-  [TKey in keyof TContext & string]: TContext[TKey] extends readonly unknown[] ? TKey : never;
-}[keyof TContext & string];
-
-type AgentAppendMessages<TContext> = {
-  (): AppendMessagesTransition;
-  <TKey extends ArrayContextKey<TContext>>(options: { key: TKey }): AppendMessagesTransition;
-};
-
 type SetupAgentResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends AgentEventSchemaInputMap,
@@ -672,8 +652,6 @@ type SetupAgentResult<
   readonly models: TModels;
   /** The {@link TextLogic} actors built from `setupAgent({ requests })`, keyed the same way. */
   readonly requests: RequestActors<TRequestSchemas>;
-  /** {@link appendMessages}, for an explicit top-level `agent.messages` transition. */
-  appendMessages: AgentAppendMessages<InferOutput<TContextSchema>>;
 };
 
 /**
@@ -683,11 +661,11 @@ type SetupAgentResult<
  * executors. Context, events, machine input, machine output, and
  * state/transition meta are all standard schemas — no `{} as Type` casts —
  * and are retained on `result.schemas` for runtime validation. Also
- * registers the `agent.generateText`/`agent.streamText`/`agent.userInput`/
+ * registers the `agent.generateText`/`agent.streamText`/
  * `agent.decide` builtin actors and lowers `requests`/`actors` into the
  * machine's actor sources. The result is the xstate `setup(...)` object with
  * a wrapped `result.createMachine(...)` plus `result.schemas`/`models`/
- * `requests`/`appendMessages` attached. Also has a
+ * `requests` attached. Also has a
  * `setupAgent.fromConfig(...)` namespace member for building a machine from
  * a serializable {@link AgentWorkflowConfig} instead of this TS API.
  *
@@ -728,7 +706,7 @@ export function setupAgent<
   TRequestSchemas extends AgentRequestSchemaMap = {},
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
-  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<MetaObject>,
+  TMetaSchema extends StandardSchemaV1 = StandardSchemaV1<AgentDefaultMeta<TEventSchemas>>,
   TModels extends AgentModelMap = {},
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
   const TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
@@ -853,7 +831,6 @@ export function setupAgent<
     schemas,
     models,
     requests: requestActors,
-    appendMessages,
   }) as unknown as SetupAgentResult<
     TContextSchema,
     TEventSchemas,
@@ -1075,7 +1052,6 @@ function assertStateSchemaKeysExist(
 // `requests` entry cannot silently clobber a builtin via spread order.
 const RESERVED_AGENT_ACTOR_KEYS = [
   ...(Object.keys(builtinTextActors) as (keyof typeof builtinTextActors)[]),
-  USER_INPUT_ACTOR,
   DECIDE_ACTOR,
 ] satisfies readonly (keyof BuiltinAgentActors)[];
 
@@ -1159,7 +1135,6 @@ export function createAgentActors<
 
   return {
     ...builtinTextActors,
-    [USER_INPUT_ACTOR]: userInputActor,
     [DECIDE_ACTOR]: createDecideActor(),
     ...actors,
     ...requestActors,

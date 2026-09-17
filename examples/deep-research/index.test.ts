@@ -21,14 +21,14 @@ test("plans, researches in parallel, reflects, and writes", async () => {
     generateText: async (request) => {
       calls.push(request.name);
       if (request.name === "planResearch") {
-        return { output: { queries: ["snapshots", "event logs", "retries"] } };
+        return { result: { queries: ["snapshots", "event logs", "retries"] } };
       }
       if (request.name === "research") {
         researched += 1;
-        return { output: found(request.prompt ?? "", researched) };
+        return { result: found(request.prompt ?? "", researched) };
       }
-      if (request.name === "reflect") return { output: { sufficient: true, gaps: "" } };
-      return { output: "Durable workflows combine snapshots [1], events [2], and retries [3]." };
+      if (request.name === "reflect") return { result: { sufficient: true, gaps: "" } };
+      return { result: "Durable workflows combine snapshots [1], events [2], and retries [3]." };
     },
   });
 
@@ -51,10 +51,10 @@ test("the writer is handed the ledger and the findings' markers", async () => {
   await runDeepResearchExample({
     question: "durability",
     generateText: async (request) => {
-      if (request.name === "planResearch") return { output: { queries: ["one", "two"] } };
+      if (request.name === "planResearch") return { result: { queries: ["one", "two"] } };
       if (request.name === "research") {
         return {
-          output: {
+          result: {
             finding: "shared evidence",
             // Both branches cite the SAME page: the ledger dedupes it to [1].
             sources: [
@@ -63,9 +63,9 @@ test("the writer is handed the ledger and the findings' markers", async () => {
           },
         };
       }
-      if (request.name === "reflect") return { output: { sufficient: true, gaps: "" } };
+      if (request.name === "reflect") return { result: { sufficient: true, gaps: "" } };
       writerPrompt = request.prompt ?? "";
-      return { output: "Report [1]" };
+      return { result: "Report [1]" };
     },
   });
 
@@ -78,10 +78,10 @@ test("generic search URLs never reach the ledger", async () => {
   const output = await runDeepResearchExample({
     question: "durability",
     generateText: async (request) => {
-      if (request.name === "planResearch") return { output: { queries: ["one", "two"] } };
+      if (request.name === "planResearch") return { result: { queries: ["one", "two"] } };
       if (request.name === "research") {
         return {
-          output: {
+          result: {
             finding: "evidence",
             sources: [
               { title: "Search", url: "https://www.google.com/search?q=durability", quote: "q" },
@@ -91,8 +91,8 @@ test("generic search URLs never reach the ledger", async () => {
           },
         };
       }
-      if (request.name === "reflect") return { output: { sufficient: true, gaps: "" } };
-      return { output: "Report [1]" };
+      if (request.name === "reflect") return { result: { sufficient: true, gaps: "" } };
+      return { result: "Report [1]" };
     },
   });
 
@@ -105,11 +105,11 @@ test("runs one targeted follow-up round when reflection finds a gap", async () =
     question: "durability",
     generateText: async (request) => {
       if (request.name === "planResearch") {
-        return { output: { queries: ["one", "two", "three"] } };
+        return { result: { queries: ["one", "two", "three"] } };
       }
       if (request.name === "research") {
         return {
-          output: {
+          result: {
             finding: "evidence",
             sources: [{ title: "Page", url: "https://example.com/a/b", quote: "q" }],
           },
@@ -117,9 +117,9 @@ test("runs one targeted follow-up round when reflection finds a gap", async () =
       }
       if (request.name === "reflect") {
         reflections++;
-        return { output: { sufficient: reflections === 2, gaps: "failure recovery" } };
+        return { result: { sufficient: reflections === 2, gaps: "failure recovery" } };
       }
-      return { output: "Final report [1]" };
+      return { result: "Final report [1]" };
     },
   });
 
@@ -134,15 +134,15 @@ test("a researcher failure counts as a settlement, so collecting cannot hang", a
   const output = await runDeepResearchExample({
     question: "durability",
     generateText: async (request) => {
-      if (request.name === "planResearch") return { output: { queries: ["one", "two"] } };
+      if (request.name === "planResearch") return { result: { queries: ["one", "two"] } };
       if (request.name === "research") {
         researched += 1;
         // The first researcher dies; the second returns a finding.
         if (researched === 1) throw new Error("search backend down");
-        return { output: found("two", 1) };
+        return { result: found("two", 1) };
       }
-      if (request.name === "reflect") return { output: { sufficient: true, gaps: "" } };
-      return { output: "Report [1]" };
+      if (request.name === "reflect") return { result: { sufficient: true, gaps: "" } };
+      return { result: "Report [1]" };
     },
   });
 
@@ -162,7 +162,7 @@ test("a failed request ends the run in `failed`, naming the reason", async () =>
     onProgress: (state) => states.push(state),
     generateText: async (request) => {
       if (request.name === "planResearch") throw new Error("planner offline");
-      return { output: "" };
+      return { result: "" };
     },
   });
 

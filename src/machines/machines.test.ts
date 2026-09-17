@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { lintAgentMachine, runAgent } from "../index.js";
+import { runAgent } from "../index.js";
+import { lintAgentMachine } from "../testing/index.js";
 import type { AgentRequestExecutors, AgentTextRequest } from "../text-logic.js";
 import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
 import {
@@ -50,7 +51,7 @@ function mockGenerateText(reply: (request: AgentTextRequest) => unknown = () => 
   const requests: AgentTextRequest[] = [];
   const generateText: AgentRequestExecutors["generateText"] = async (request) => {
     requests.push(request);
-    return { output: reply(request) };
+    return { result: reply(request) };
   };
   return { generateText, requests };
 }

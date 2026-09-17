@@ -14,6 +14,7 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 - [Thinking in state machines](thinking-in-state-machines.md)
 - [Migrating from a loop](from-a-loop.md)
 - [Choosing a run mode](choosing-a-run-mode.md)
+- [Advanced: bare XState actors and hand-written executors](advanced.md)
 
 ## Core APIs
 
@@ -21,13 +22,23 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | ------------------------------------------- | ------------------------------------------------------------ |
 | `setupAgent`                                | Schema-first XState setup with Agent request actors          |
 | `runAgent`                                  | Run one in-process leg to done, idle, or error               |
-| `runAgentLoop`                              | Drive repeated idle/resume turns                             |
 | `runAgentStream`                            | Observe requests, chunks, transitions, emissions, and settle |
-| `provideExecutors`                          | Bind executors for an application-owned XState actor         |
-| `createScriptedExecutors`                   | Deterministic named request scripts                          |
+| `initialAgentStep` / `transitionAgentStep`  | The pure step API: `(state, event) => (state, requests)`     |
 | `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                       |
 | `isAgentIdle`                               | Default composable idle-state predicate                      |
-| `lintAgentMachine`                          | Agent-specific diagnostics                                   |
 | `ContextOf` / `EventOf` / other `*Of` types | Extract setup and machine types                              |
 
-The optional `@statelyai/agent/ai-sdk` entry provides `defineModels` and AI SDK executors. Core has no runtime dependency on the AI SDK.
+## Entry points
+
+| Entry                        | Purpose                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| `@statelyai/agent`           | Authoring, running, human interaction, and the executor contract               |
+| `@statelyai/agent/testing`   | `lintAgentMachine`, `simulateAgent`, `canReach`, `createScriptedExecutors`, trajectories, seams |
+| `@statelyai/agent/log`       | The event log: `replay`, `forkEventLog`, hand-built entries, stores            |
+| `@statelyai/agent/ai-sdk`    | `createAiSdkExecutors`, the Vercel AI SDK adapter                             |
+| `@statelyai/agent/openai`    | Executors over the raw `openai` package                                        |
+| `@statelyai/agent/machines`  | Preset machines: tool loop, sequential, parallel, router, supervisor, handoff  |
+| `@statelyai/agent/otel`      | OpenTelemetry trace handler                                                    |
+| `@statelyai/agent/validate`  | JSON workflow config validation                                                |
+
+Core has no runtime dependency on the AI SDK.

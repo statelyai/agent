@@ -1,5 +1,5 @@
 import type { AnyActorLogic, AnyStateMachine } from "xstate";
-import { isTextLogic, USER_INPUT_ACTOR, type AgentRequestExecutors } from "./text-logic.js";
+import { isTextLogic, type AgentRequestExecutors } from "./text-logic.js";
 import { isDecisionLogic } from "./decision.js";
 import {
   bindChildMachineForProvide,
@@ -16,7 +16,7 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
   /**
    * Extra actor-source overrides merged onto the machine BEFORE binding — the
    * same shape as `machine.provide({ actors })`. Use it to supply the
-   * `agent.userInput` handler, a custom non-agent actor, or to shadow an agent
+   * a custom non-agent actor, or to shadow an agent
    * source with your own executor-bound logic. Merged first, so an override
    * that already carries its own executor is left untouched by the binding pass.
    */
@@ -63,7 +63,7 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
  * `inspect` to also capture `machine.transition` events in the same stream.
  *
  * A source that already carries its own executor (`.withExecutor(...)`) is left
- * as-is. `agent.userInput` is left UNBOUND — an uncontrolled host handles idle
+ * as-is.
  * itself, so supply a handler via `options.actors` if the machine uses it.
  * Non-agent actors are untouched.
  *
@@ -100,12 +100,6 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
   const invokedSrcs = getConfiguredInvokeSrcs(provided);
 
   for (const [key, logic] of Object.entries(effectiveSources)) {
-    // Leave `agent.userInput` unbound: uncontrolled hosts drive human input
-    // themselves (pass a handler via options.actors if needed).
-    if (key === USER_INPUT_ACTOR) {
-      continue;
-    }
-
     // An invoked child machine: recursively bind ITS agent sources with the
     // same executors (same semantics as runAgent's rebindChildMachine).
     if (isStateMachineLogic(logic)) {
@@ -191,9 +185,6 @@ function assertChildBindable(
   const nextVisited = new Set([...visited, childMachine]);
   const sources = childMachine.sources.actors as Record<string, AnyActorLogic>;
   for (const src of getConfiguredInvokeSrcs(childMachine)) {
-    if (src === USER_INPUT_ACTOR) {
-      continue;
-    }
     const logic = sources[src];
     if (!logic) {
       continue;

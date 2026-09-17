@@ -1,6 +1,7 @@
 import { setupAgent } from "../setup-agent.js";
 import {
   entryInput,
+  entryOutput,
   entrySrc,
   isMachineEntry,
   jsonAny,
@@ -125,14 +126,17 @@ export function createLoopMachine(config: CreateLoopMachineConfig): LoopMachine 
               model,
               body.prompt ? body.prompt(loopState(context)) : context.prompt,
             ),
-          onDone: ({ context, output }: { context: LoopContext; output: unknown }) => ({
-            target: "checking",
-            context: {
-              iterations: context.iterations + 1,
-              results: [...context.results, output],
-              last: output,
-            },
-          }),
+          onDone: ({ context, output }: { context: LoopContext; output: unknown }) => {
+            const result = entryOutput(body, output);
+            return {
+              target: "checking",
+              context: {
+                iterations: context.iterations + 1,
+                results: [...context.results, result],
+                last: result,
+              },
+            };
+          },
         },
       },
       // The bound, as a visible guard: stop on `until`, or when the iteration

@@ -13,7 +13,7 @@ import { tool } from "ai";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools } from "../types.js";
-import { createAiSdkExecutors, defineModels } from "./index.js";
+import { createAiSdkExecutors, parseModelRef } from "./index.js";
 import {
   extractFirstJsonValue,
   isStructuredOutputRequest,
@@ -26,61 +26,7 @@ import {
 import { AgentTruncatedError, runAgent, setupAgent } from "../index.js";
 import type { AiSdkModelMap } from "./index.js";
 
-describe("defineModels", () => {
-  test("returns the map unchanged and pins a nameable, key-preserving type", () => {
-    const model = new MockLanguageModelV3({});
-    const models = defineModels({ quick: model, deep: model });
-
-    // Identity at runtime.
-    expect(models).toEqual({ quick: model, deep: model });
-
-    // Type-level: the return type is the nameable `AiSdkModelMap<'quick' | 'deep'>`
-    // — no TS2742 when the const is exported (examples/joke exercises that export
-    // case under the examples typecheck). Assign both ways to pin the exact type.
-    const asMap: AiSdkModelMap<"quick" | "deep"> = models;
-    const roundTrip: typeof models = asMap;
-    void roundTrip;
-
-    // Key set is preserved for model-ref inference at the call site.
-    createAiSdkExecutors({ models });
-
-    // @ts-expect-error — 'nope' is not one of the declared model keys.
-    void models.nope;
-  });
-});
-
 describe("createAiSdkExecutors with core runAgent", () => {
-  const response = {
-    content: [{ type: "text" as const, text: "hello" }],
-    finishReason: { unified: "stop" as const, raw: "stop" },
-    usage: {
-      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-      outputTokens: { total: 1, text: 1, reasoning: 0 },
-    },
-    warnings: [],
-  };
-
-  test("defineModels supplies the default AI SDK executors", async () => {
-    const models = defineModels({ quick: new MockLanguageModelV3({ doGenerate: response }) });
-    const agent = setupAgent({ context: z.object({}), input: z.object({}), models });
-    const machine = agent.createMachine({
-      context: ({ input }) => input,
-      initial: "writing",
-      states: {
-        writing: {
-          invoke: {
-            src: "agent.generateText",
-            input: { model: "quick", prompt: "hi" },
-            onDone: { target: "done" },
-          },
-        },
-        done: { type: "final" },
-      },
-    });
-
-    await expect(runAgent(machine, { input: {} })).resolves.toMatchObject({ status: "done" });
-  });
-
   test("the adapter's LanguageModelUsage lands in the run result's aggregated usage", async () => {
     const usageResponse = {
       content: [{ type: "text" as const, text: "hello" }],
@@ -91,7 +37,7 @@ describe("createAiSdkExecutors with core runAgent", () => {
       },
       warnings: [],
     };
-    const models = defineModels({ quick: new MockLanguageModelV3({ doGenerate: usageResponse }) });
+    const models = { quick: new MockLanguageModelV3({ doGenerate: usageResponse }) };
     const agent = setupAgent({ context: z.object({}), input: z.object({}), models });
     const machine = agent.createMachine({
       context: ({ input }) => input,
@@ -397,7 +343,7 @@ describe("onResult metadata enrichment", () => {
     const executors = createAiSdkExecutors({ models: { m: model } });
     const result = await executors.generateText({ model: "m", prompt: "hi", tools: {} });
 
-    expect(result.output).toBe("hello");
+    expect(result.result).toBe("hello");
     expect(result.usage).toMatchObject({ inputTokens: 7, outputTokens: 3 });
     expect(result.finishReason).toBe("stop");
     expect(result.toolCalls).toEqual([]);
@@ -535,7 +481,7 @@ describe("maxSteps (multi-step tool loops)", () => {
     });
 
     expect(calls).toBe(3);
-    expect(result.output).toBe("done");
+    expect(result.result).toBe("done");
   });
 
   test("streamText stays single-step when maxSteps is absent (regression: was ignored)", async () => {
@@ -635,7 +581,7 @@ describe("maxSteps (multi-step tool loops)", () => {
     expect(fedBack).toContain("714");
     // Final output resolution + loop actually ran twice.
     expect(calls).toBe(2);
-    expect(result.output).toBe("42 times 17 is 714.");
+    expect(result.result).toBe("42 times 17 is 714.");
   });
 
   const structuredUsage = {
@@ -665,7 +611,7 @@ describe("maxSteps (multi-step tool loops)", () => {
     const schema = z.object({ ok: z.boolean() });
     const result = await generateText({ model: "m", prompt: "x", outputSchema: schema, tools: {} });
 
-    expect(result.output).toEqual({ ok: true });
+    expect(result.result).toEqual({ ok: true });
     expect(result.reasoning).toBeUndefined();
     // The provider saw the enveloped schema (its json schema mentions `result`).
     expect(JSON.stringify(sentResponseFormat)).toContain("result");
@@ -689,7 +635,7 @@ describe("maxSteps (multi-step tool loops)", () => {
     const result = await generateText({ model: "m", prompt: "x", outputSchema: union, tools: {} });
 
     // Transparent unwrap: caller gets the inner union value, not { result }.
-    expect(result.output).toEqual({ kind: "a", a: 1 });
+    expect(result.result).toEqual({ kind: "a", a: 1 });
   });
 
   test("generateText: reasoning opt-in adds a reasoning property and surfaces it on the raw result", async () => {
@@ -722,7 +668,7 @@ describe("maxSteps (multi-step tool loops)", () => {
     });
 
     // Output is the declared schema value only; reasoning is a raw-result field.
-    expect(result.output).toEqual({ ok: true });
+    expect(result.result).toEqual({ ok: true });
     expect(result.reasoning).toBe("because true");
     // The enveloped schema advertised `reasoning` to the provider.
     expect(JSON.stringify(sentResponseFormat)).toContain("reasoning");
@@ -795,7 +741,7 @@ describe("maxSteps (multi-step tool loops)", () => {
     });
 
     expect(calls).toBe(3);
-    expect(result.output).toBe("done");
+    expect(result.result).toBe("done");
   });
 
   test("only the typed maxSteps controls the tool loop", async () => {
@@ -822,7 +768,7 @@ describe("maxSteps (multi-step tool loops)", () => {
     });
 
     expect(calls).toBe(3);
-    expect(result.output).toBe("done");
+    expect(result.result).toBe("done");
   });
 });
 
@@ -870,7 +816,7 @@ describe("structured-output resilience", () => {
       tools: {},
     });
 
-    expect(result.output).toEqual({ answer: "first" });
+    expect(result.result).toEqual({ answer: "first" });
   });
 
   test("generateText leaves unrepairable output retry policy to the AI SDK/host", async () => {
@@ -1039,11 +985,11 @@ describe("structured-output resilience", () => {
       });
 
     const { generateText } = createAiSdkExecutors({
-      models: defineModels({
+      models: {
         quick: makeModel(),
         // `deep` is a persona: this ref always thinks harder.
         deep: { model: makeModel(), settings: { reasoning: "xhigh", temperature: 0.5 } },
-      }),
+      },
     });
 
     await generateText({ model: "quick", prompt: "hi", tools: {} });
@@ -1076,7 +1022,7 @@ describe("structured-output resilience", () => {
     });
 
     const { generateText } = createAiSdkExecutors({
-      models: defineModels({ deep: { model, settings: { reasoning: "xhigh" } } }),
+      models: { deep: { model, settings: { reasoning: "xhigh" } } },
       settings: { reasoning: "low" },
     });
 
@@ -1105,7 +1051,7 @@ describe("structured-output resilience", () => {
     });
 
     const { decide } = createAiSdkExecutors({
-      models: defineModels({ m: { model, settings: { reasoning: "xhigh", topP: 0.3 } } }),
+      models: { m: { model, settings: { reasoning: "xhigh", topP: 0.3 } } },
       settings: { temperature: 0.9, maxOutputTokens: 256 },
     });
 
@@ -1175,7 +1121,25 @@ describe("createAiSdkExecutors — truncation", () => {
     const { generateText } = createAiSdkExecutors({ models: { m: model } });
     const result = await generateText({ model: "m", name: "draft", prompt: "hi", tools: {} });
 
-    expect(result.output).toBe("as far as it got");
+    expect(result.result).toBe("as far as it got");
     expect(result.finishReason).toBe("length");
+  });
+});
+
+describe("parseModelRef", () => {
+  test("splits provider/model-id refs on the first slash", () => {
+    expect(parseModelRef("openai/gpt-5.4-mini")).toEqual({
+      provider: "openai",
+      modelId: "gpt-5.4-mini",
+    });
+    // Only the FIRST slash splits — model ids may contain slashes.
+    expect(parseModelRef("openrouter/meta/llama-3")).toEqual({
+      provider: "openrouter",
+      modelId: "meta/llama-3",
+    });
+  });
+
+  test("a ref without a slash has no provider", () => {
+    expect(parseModelRef("quick")).toEqual({ provider: undefined, modelId: "quick" });
   });
 });

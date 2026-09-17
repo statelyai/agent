@@ -33,7 +33,6 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import type { AnyStateMachine } from "xstate";
 import {
-  createScriptedExecutors,
   getStatePath,
   runAgent,
   setupAgent,
@@ -41,7 +40,8 @@ import {
   type AgentTextRequest,
   type RunAgentOptions,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createScriptedExecutors } from "@statelyai/agent/testing";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { maybeCreateRunInspection } from "./inspect.js";
 import {
   chatParamsFromRequest,
@@ -58,9 +58,9 @@ import {
 // catches drift instead of a dated comment claiming it was verified once.
 // Unpublished hosts keep their boundaries explicit in ordinary TypeScript.
 
-export const models = defineModels({
+const models = {
   writer: openai("gpt-5.4-mini"),
-});
+};
 
 // ─── The machine: outline the answer, then write it ───
 
@@ -128,7 +128,7 @@ export const tanstackAiStreamMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question }),
         onDone: ({ output }) => ({
           target: "answering",
-          context: { outline: output },
+          context: { outline: output.result },
         }),
         onError: { target: "failed" },
       },
@@ -143,7 +143,7 @@ export const tanstackAiStreamMachine = agentSetup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "done",
-          context: { answer: output },
+          context: { answer: output.result },
         }),
         onError: { target: "failed" },
       },
@@ -330,7 +330,7 @@ export function createScriptedChatExecutors(): AgentRequestExecutors {
       // Drawing from `generateText` takes the entry off the shared queue without
       // the built-in whole-string chunk, leaving the deltas to this loop.
       const result = await scripted.generateText(request);
-      for (const delta of String(result.output).split(/(?<=\s)/)) {
+      for (const delta of String(result.result).split(/(?<=\s)/)) {
         await new Promise((resolve) => setTimeout(resolve, 15));
         info?.onChunk?.(delta);
       }

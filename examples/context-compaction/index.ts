@@ -38,7 +38,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import type { SnapshotFrom } from "xstate";
 import {
   type AgentMessage,
@@ -54,9 +54,9 @@ import {
 } from "@statelyai/agent";
 
 // Annotated so the exported const has a portable, nameable type (TS2742).
-export const models = defineModels({
+const models = {
   chat: openai("gpt-5.4-mini"),
-});
+};
 
 export const contextCompactionSchemas = createAgentSchemas({
   context: z.object({
@@ -210,7 +210,7 @@ export const contextCompactionMachine = agentSetup.createMachine({
           const messages = [
             ...context.messages,
             userMessage(context.pendingInput ?? ""),
-            assistantMessage(output),
+            assistantMessage(output.result),
           ];
           return {
             target: "checkingWindow",
@@ -242,7 +242,7 @@ export const contextCompactionMachine = agentSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "awaitingUser",
           context: {
-            summary: output.summary,
+            summary: output.result.summary,
             messages: context.messages.slice(-context.keepRecent),
           },
         }),

@@ -23,7 +23,7 @@ function scriptedGenerateText(script: unknown[]) {
     const output = script[i];
     if (output === undefined) throw new Error("the proposal script ran dry");
     i++;
-    return { output };
+    return { result: output };
   };
   return { generateText, prompts };
 }
@@ -200,7 +200,7 @@ async function toolLoop(request: AgentTextRequest) {
     },
     { role: "assistant", content: text },
   ];
-  return { output: text, messages: responseMessages };
+  return { result: text, messages: responseMessages };
 }
 
 test("the host tool loop runs the real tool and the machine appends its messages", async () => {

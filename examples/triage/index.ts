@@ -26,7 +26,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import type { SnapshotFrom } from "xstate";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -107,9 +107,9 @@ const schemas = createAgentSchemas({
   },
 });
 
-export const models = defineModels({
+const models = {
   ticketTriage: openai("gpt-5.4-mini"),
-});
+};
 
 /** The narrowed context every post-classification state reads. */
 const classified = {
@@ -190,7 +190,7 @@ export const triageMachine = triageAgentSetup.createMachine({
         input: ({ context }) => ({ ticket: context.ticket }),
         onDone: ({ output }) => ({
           target: "checkingConfidence",
-          context: { classification: output, slaNote: slaNoteFor(output) },
+          context: { classification: output.result, slaNote: slaNoteFor(output.result) },
         }),
         // No classification, so nothing downstream can run: end in a terminal
         // state that says so, with a holding reply.
@@ -283,7 +283,7 @@ export const triageMachine = triageAgentSetup.createMachine({
           sentiment: context.classification.sentiment,
           slaNote: context.slaNote,
         }),
-        onDone: ({ output }) => ({ target: "done", context: { reply: output.reply } }),
+        onDone: ({ output }) => ({ target: "done", context: { reply: output.result.reply } }),
         onError: { target: "replyFailed" },
       },
     },

@@ -211,7 +211,7 @@ export function isStructuredOutputRequest(
  * Extracts the first complete top-level JSON value from `text`, or returns
  * `undefined` when there is nothing to repair (no complete value, or the value
  * already spans the whole text). Models occasionally emit two structured-output
- * envelopes back to back (`{"result":{…}}{"result":{…}}`), which fails JSON
+ * objects back to back (`{"result":{…}}{"result":{…}}`), which fails JSON
  * parsing wholesale; the balanced scan below recovers the first value and
  * drops the rest.
  */

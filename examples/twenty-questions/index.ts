@@ -34,7 +34,7 @@
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   type AgentMessage,
   assistantMessage,
@@ -87,9 +87,9 @@ const guessFeedbackClassificationSchema = z.object({
   reasoning: z.string(),
 });
 
-const models = defineModels({
+const models = {
   quick: openai("gpt-5.4-mini"),
-});
+};
 
 export const twentyQuestionsSchemas = createAgentSchemas({
   meta: interactionMetaSchema,
@@ -441,7 +441,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
           messages: context.messages,
           transcript: context.transcript,
         }),
-        onDone: ({ context, output }) =>
+        onDone: ({ context, output: { result: output } }) =>
           output.kind === "sideQuestion"
             ? {
                 // Detour: answer the player's side question, then re-ask the
@@ -475,7 +475,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
           enq.emit({
             type: "SIDE_ANSWER",
             question: context.pendingSideQuestion ?? "",
-            answer: output,
+            answer: output.result,
           });
           return {
             target: "awaitingAnswer",
@@ -484,7 +484,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
               messages: [
                 ...context.messages,
                 userMessage(context.pendingSideQuestion ?? ""),
-                assistantMessage(output),
+                assistantMessage(output.result),
               ],
             },
           };
@@ -536,7 +536,11 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
         }),
         onDone: ({ context, output }) => ({
           target: "awaitingPlayAgain",
-          context: withGuessFeedback(context, output.correct, context.pendingRawAnswer ?? ""),
+          context: withGuessFeedback(
+            context,
+            output.result.correct,
+            context.pendingRawAnswer ?? "",
+          ),
         }),
         onError: {
           target: "awaitingPlayAgain",
@@ -586,7 +590,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
           messages: context.messages,
         }),
         onDone: ({ context, output }) =>
-          output.playAgain
+          output.result.playAgain
             ? { target: "deciding", context: freshRound(context) }
             : {
                 target: "gameOver",

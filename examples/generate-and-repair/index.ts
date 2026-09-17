@@ -30,8 +30,8 @@
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { runAgent, setupAgent } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { runAgent, setupAgent, type AgentTextResult } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 /** How many repair rounds one run may spend before giving up. */
 export const MAX_REPAIRS = 2;
@@ -116,10 +116,10 @@ export const parseConfigActor = createAsyncLogic<GeneratedMachineConfig, { text:
   run: async ({ input }) => parseGeneratedConfig(input.text),
 });
 
-export const models = defineModels({
+const models = {
   author: openai("gpt-5.4-mini"),
   repairer: openai("gpt-5.4-mini"),
-});
+};
 
 const SHAPE_RULES = [
   "Reply with one fenced ```json code block and nothing else.",
@@ -253,8 +253,8 @@ const agentMachine = generateAndRepairSetup.createMachine({
         id,
         src: "generateConfig" as const,
         input: ({ context }: SlotArgs) => ({ prompt: context.prompt }),
-        onDone: ({ context, output }: SlotArgs & { output: string }) => ({
-          context: { pending: [...context.pending, output], settled: context.settled + 1 },
+        onDone: ({ context, output }: SlotArgs & { output: AgentTextResult<string> }) => ({
+          context: { pending: [...context.pending, output.result], settled: context.settled + 1 },
         }),
         // One failed call costs ONE candidate, not the round: the slot settles
         // with nothing in it and the others carry on. `AgentTruncatedError`
@@ -340,7 +340,7 @@ const agentMachine = generateAndRepairSetup.createMachine({
           });
           return {
             target: "parsing",
-            context: { candidate: output, pending: [], repairs: context.repairs + 1 },
+            context: { candidate: output.result, pending: [], repairs: context.repairs + 1 },
           };
         },
         onError: {

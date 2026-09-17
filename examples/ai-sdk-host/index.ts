@@ -26,7 +26,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { type AiSdkModelMap, createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   createTextLogic,
@@ -80,10 +80,10 @@ export const gameSchemas = createAgentSchemas({
 
 type GameEventType = keyof typeof gameSchemas.events;
 
-export const models = defineModels({
+export const models: AiSdkModelMap<"moveChooser" | "turnSummarizer"> = {
   moveChooser: openai("gpt-5.4-mini"),
   turnSummarizer: openai("gpt-5.4-mini"),
-});
+};
 
 const defaultMoveEvents = ["ATTACK", "DEFEND", "FLEE"] satisfies GameEventType[];
 const lowHpMoveEvents = ["ATTACK", "DEFEND", "HEAL", "FLEE"] satisfies GameEventType[];
@@ -278,10 +278,10 @@ export const gameMachine = gameAgentSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "checkingOutcome",
           context: {
-            lastSummary: output.summary,
+            lastSummary: output.result.summary,
             log: [
               ...context.log,
-              output.summary,
+              output.result.summary,
               `End of turn: you ${context.playerHp} HP, goblin ${context.enemyHp} HP.`,
             ],
           },
@@ -359,7 +359,7 @@ export const gameMachine = gameAgentSetup.createMachine({
 // ─── The host: the only part of this file that knows about the AI SDK ───
 
 // Adapter-provided executors. The machine above names its models symbolically
-// (`defineModels` keys); this is where those refs become real AI SDK models.
+// (`models` keys); this is where those refs become real AI SDK models.
 const defaultExecutors = createAiSdkExecutors({ models });
 
 /**

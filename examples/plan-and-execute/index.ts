@@ -38,16 +38,16 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const stepSchema = z.object({ id: z.string(), question: z.string() });
 const planSchema = z.object({ steps: z.array(stepSchema) });
 
-export const models = defineModels({
+const models = {
   planner: openai("gpt-5.4-mini"),
   worker: openai("gpt-5.4-mini"),
   solver: openai("gpt-5.4-mini"),
-});
+};
 
 /** Hard cap on plan steps the loop will run, whatever the planner returns. */
 export const MAX_STEPS = 4;
@@ -183,7 +183,7 @@ export const planAndExecuteMachine = agentSetup.createMachine({
         id: "planTask",
         src: "planTask",
         input: ({ context }) => ({ goal: context.goal }),
-        onDone: ({ output }) => ({ target: "executing", context: { steps: output.steps } }),
+        onDone: ({ output }) => ({ target: "executing", context: { steps: output.result.steps } }),
         // A planner that errors ends the run in `failed` — an empty answer in
         // `done` would look like a successful run that had nothing to say.
         onError: ({ event }) => ({
@@ -236,7 +236,7 @@ export const planAndExecuteMachine = agentSetup.createMachine({
             target: "executing",
             context: {
               stepIndex: context.stepIndex + 1,
-              evidence: { ...context.evidence, [id]: output },
+              evidence: { ...context.evidence, [id]: output.result },
             },
           };
         },
@@ -259,7 +259,7 @@ export const planAndExecuteMachine = agentSetup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "done",
-          context: { answer: output },
+          context: { answer: output.result },
         }),
         onError: ({ event }) => ({
           target: "failed",

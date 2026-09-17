@@ -57,7 +57,7 @@ export const portableLoopMachine = portableLoopSetup.createMachine({
         input: ({ context }) => ({ topic: context.topic }),
         onDone: ({ output }) => ({
           target: "reviewing",
-          context: { draft: output },
+          context: { draft: output.result },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -179,7 +179,7 @@ function settle(state: LoopSnapshot): { draft: string; failure: string | null } 
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   const output = await runPortableXstateLoop("portable agent machines", {
-    generateText: async (request) => ({ output: `Release note: ${request.prompt}` }),
+    generateText: async (request) => ({ result: `Release note: ${request.prompt}` }),
   });
   console.log(output);
 }

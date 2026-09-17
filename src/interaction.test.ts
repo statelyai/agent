@@ -157,6 +157,65 @@ describe("interactionMetaSchema", () => {
   });
 });
 
+describe("default meta typing", () => {
+  test("setupAgent types meta.interaction by the machine's events without a meta schema", () => {
+    const agentSetup = setupAgent({
+      context: z.object({ subject: z.string() }),
+      events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
+    });
+    const machine = agentSetup.createMachine({
+      context: { subject: "Hello" },
+      initial: "review",
+      states: {
+        review: {
+          meta: {
+            interaction: {
+              label: "Approve {subject}?",
+              events: { APPROVE: "Approve" },
+              textEvent: "REJECT",
+            },
+          },
+          on: { APPROVE: { target: "review" }, REJECT: { target: "review" } },
+        },
+      },
+    });
+    expect(getInteraction(createActor(machine).getSnapshot())).toEqual({
+      label: "Approve Hello?",
+      events: [{ type: "APPROVE", label: "Approve" }],
+      textEvent: "REJECT",
+    });
+
+    agentSetup.createMachine({
+      context: { subject: "Hello" },
+      initial: "review",
+      states: {
+        review: {
+          meta: {
+            interaction: {
+              // @ts-expect-error DECLINE is not a declared event
+              events: { DECLINE: "Decline" },
+            },
+          },
+        },
+      },
+    });
+    agentSetup.createMachine({
+      context: { subject: "Hello" },
+      initial: "review",
+      states: {
+        review: {
+          meta: {
+            interaction: {
+              // @ts-expect-error the usage event is reserved, never a human choice
+              textEvent: "@agent.usage",
+            },
+          },
+        },
+      },
+    });
+  });
+});
+
 describe("getInteraction whitespace", () => {
   const agent = setupAgent({
     context: z.object({ diff: z.string() }),
@@ -217,9 +276,7 @@ describe("interaction event typing", () => {
 
   test("eventFromInteraction returns the machine's event union", () => {
     const event = eventFromInteraction(snapshot, { type: "APPROVE" });
-    expectTypeOf(event.type).toEqualTypeOf<
-      "APPROVE" | "REJECT" | "agent.messages" | "@agent.usage"
-    >();
+    expectTypeOf(event.type).toEqualTypeOf<"APPROVE" | "REJECT" | "@agent.usage">();
     // No cast needed to send it back into the machine.
     expect(snapshot.can(event)).toBe(true);
     expect(event).toEqual({ type: "APPROVE" });
@@ -229,7 +286,7 @@ describe("interaction event typing", () => {
     const interaction = getInteraction(snapshot)!;
     expectTypeOf(interaction.textEvent).toExtend<string | undefined>();
     expectTypeOf(interaction.events[0]!.type).toEqualTypeOf<
-      "APPROVE" | "REJECT" | "agent.messages" | "@agent.usage"
+      "APPROVE" | "REJECT" | "@agent.usage"
     >();
   });
 });

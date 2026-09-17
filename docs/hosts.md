@@ -12,7 +12,7 @@ const result = await runAgent(machine, {
         prompt: request.prompt,
         signal,
       });
-      return { output: response.text, messages: response.messages };
+      return { result: response.text, messages: response.messages };
     },
   },
 });
@@ -50,18 +50,18 @@ const executors = {
 
 See [The event log](event-log.md).
 
-## Optional AI SDK default
+## AI SDK adapter
 
 ```ts no-check
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
 
-const models = defineModels({ fast: openai("gpt-5.4-mini") });
+const models = { fast: openai("gpt-5.4-mini") };
 const agent = setupAgent({ models /* schemas and requests */ });
 
-await runAgent(machine, { input });
+await runAgent(machine, { input, executors: createAiSdkExecutors({ models }) });
 ```
 
-A registry created by `defineModels` carries an optional AI SDK executor factory. Explicit executors merge over those defaults. Core does not import or require the AI SDK at runtime.
+Passing the same `models` map to `setupAgent({ models })` types the machine's model refs, so a request naming a model the host does not have is a compile error. Executors are always passed explicitly. Core does not import or require the AI SDK at runtime.
 
 ## OpenAI SDK adapter
 
@@ -92,7 +92,7 @@ await runAgent(machine, { input, executors });
 
 `settings` carries the provider knobs that belong to the host rather than the machine, such as `reasoning_effort` or `service_tier`. Key it by model ref to give a ref a persona, or pass a function of the request to vary settings per call. Settings merge under what the request declared, so a request that set `maxOutputTokens` wins.
 
-Structured output goes through `response_format: { type: 'json_schema' }` around the `{ result, reasoning? }` envelope, and is unwrapped before the machine validates it. Decisions force a tool call with `tool_choice: 'required'`, one function tool per candidate event.
+Structured output goes through `response_format: { type: 'json_schema' }` with the declared schema wrapped as `{ result, reasoning? }`, and the parsed `result` is what the machine validates. Decisions force a tool call with `tool_choice: 'required'`, one function tool per candidate event.
 
 `generateText` runs the tool loop host-side. Each step that comes back with tool calls runs the request's tools, appends the assistant `tool_calls` message and one tool message per result, and asks again. The request's `maxSteps` bounds the number of OpenAI calls; the default is one, so a single-step request behaves as before. A tool that throws goes back to the model as an error result. The loop also ends early on a tool with no `execute` — a client-side tool, whose call is handed back with `finishReason: 'tool-calls'` and the raw response. Every step's `usage` is summed onto the one result the run aggregates.
 
@@ -193,11 +193,7 @@ See [Persistence](persistence.md#resume-with-an-event-off-the-wire).
 
 ## Uncontrolled XState actor
 
-```ts no-check
-const bound = provideExecutors(machine, executors);
-const actor = createActor(bound, { input });
-actor.start();
-```
+`provideExecutors(machine, executors)` binds the executors onto the machine so a plain `createActor` runs it, for an application that owns the actor or embeds the agent machine in a larger XState system. See [Advanced](advanced.md).
 
 ## One request
 

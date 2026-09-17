@@ -1,6 +1,6 @@
 ---
 title: Models and providers
-description: Reuse models and executors from other AI frameworks via AI SDK LanguageModel objects, raw ai functions, and OpenAI-compatible endpoints.
+description: Reuse models and executors from other AI frameworks via AI SDK LanguageModel objects and OpenAI-compatible endpoints.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
@@ -28,7 +28,7 @@ There are four integration paths. The first two both go through `createAiSdkExec
 - **Hand-written executors.** Write the three executors yourself against a provider's HTTP API, or against a client that is not an AI SDK `LanguageModel`, such as a LangChain `BaseChatModel`. Supports all three executors, but you map structured output and decision retries yourself. See [Hosts](hosts.md) and [LangChain models](#langchain-models).
 - **Raw `ai` functions.** Pass the `ai` package's `generateText` and `streamText` as your `executors` set. This path supports text only. `decide` requires the adapter, and structured output is best-effort.
 
-<!-- viz: executor sourcing paths: LanguageModel object -> createAiSdkExecutors -> { generateText, streamText, decide }, with the raw-`ai` path bypassing the adapter and losing decide/structured output -->
+<!-- viz: executor sourcing paths: LanguageModel object -> createAiSdkExecutors -> { generateText, streamText, decide } -->
 
 ## Host-owned model settings
 
@@ -141,33 +141,18 @@ To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and use 
 
 For OpenAI itself, `@statelyai/agent/openai` maps the three executors onto the raw `openai` package's Chat Completions API, with no `ai` dependency. See [Hosts](hosts.md#openai-sdk-adapter).
 
-To avoid depending on `ai` or `openai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. For structured output, `buildEnvelopeSchema` and `getJsonSchema` from `@statelyai/agent` build the `{ result, reasoning? }` envelope schema to send; on the way back, `parseStructuredEnvelope` validates the model's JSON against that envelope and unwraps it to `{ result, reasoning? }`. Use `parseOutput` when you validate an unwrapped value on its own, against the schema the request declared. Use `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
-
-## Raw AI SDK functions
-
-The `generateText` and `streamText` executors accept the raw Vercel AI SDK functions directly. No adapter is needed.
-
-```ts
-import { generateText, streamText } from "ai";
-
-await runAgent(machine, { input, executors: { generateText, streamText } });
-```
-
-An `AgentTextRequest` is spread-compatible with the AI SDK's call options. Result shapes unwrap natively: `{ text }` for `generateText`, and `{ textStream }` for `streamText`, whose final text is available via `await result.text`. This path has two limits.
-
-- Structured output is best-effort. A request with an `outputSchema` has its raw text parsed with `JSON.parse` and then validated. A parse failure throws. Use `createAiSdkExecutors` for reliable structured output.
-- `decide` requires the adapter. The tool-per-event mapping lives in the adapter, and there is no raw AI SDK function for it.
+To avoid depending on `ai` or `openai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. For structured output, `providerOutputSchema` and `getJsonSchema` from `@statelyai/agent` build the `{ result, reasoning? }` schema to send; on the way back, `parseProviderOutput` validates the model's JSON against it and returns `{ result, reasoning? }`, which is already the shape an executor returns. Use `parseOutput` when you validate a bare value on its own, against the schema the request declared. Use `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
 
 ## Testing with a mock model
 
-To exercise the adapter path itself without a provider, hand `defineModels` one of the AI SDK's own mock models from `ai/test`.
+To exercise the adapter path itself without a provider, put one of the AI SDK's own mock models from `ai/test` in the `models` map.
 
 ```ts
 import { MockLanguageModelV3 } from "ai/test";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
 
 const executors = createAiSdkExecutors({
-  models: defineModels({
+  models: {
     fast: new MockLanguageModelV3({
       doGenerate: async () => ({
         content: [{ type: "text", text: "Because transitions constrain behavior." }],
@@ -179,7 +164,7 @@ const executors = createAiSdkExecutors({
         warnings: [],
       }),
     }),
-  }),
+  },
 });
 ```
 
@@ -192,9 +177,8 @@ When the adapter is not what is under test, a plain function executor or `create
 | `createAiSdkExecutors`  | yes            | yes          | yes      | yes               |
 | `createOpenAiExecutors` | yes            | yes          | yes      | yes               |
 | Hand-written executors  | yes            | yes          | yes      | yes (you map it)  |
-| Raw `ai` functions      | yes            | yes          | no       | best-effort       |
 
-The `decide` executor maps each machine event to a forced tool call. That mapping lives in the adapter layer, so raw `ai` functions cannot back a decision. For reliable structured output, use `createAiSdkExecutors` or map the envelope yourself. See [Text requests](text-requests.md) and [Decisions](decisions.md).
+The `decide` executor maps each machine event to a forced tool call, and structured output is requested as `{ result, reasoning? }`. Both live in the adapter layer, so an executor is either an adapter's or a function of yours that returns `{ result }`. See [Text requests](text-requests.md) and [Decisions](decisions.md).
 
 ## Reference hosts by provider
 

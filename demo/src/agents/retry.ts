@@ -53,7 +53,7 @@ export const retryMachine = agentSetup.createMachine({
         onDone: {
           target: "complete",
           context: ({ context, output }) => ({
-            category: output,
+            category: output.result,
             outcome: `Attempt ${context.attempts + 1} of ${TOTAL_ATTEMPTS} succeeded on the ${
               context.attempts >= MAX_ATTEMPTS ? "fallback" : "primary"
             } model.`,

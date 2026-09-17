@@ -44,15 +44,15 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic, setup } from "xstate";
 import { getShortestPaths } from "xstate/graph";
 import { createAgentSchemas, runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { describeMachine } from "./describe-machine.js";
 
 // Re-exported so the barrel and tests can reach the prototype from this module.
 export { describeMachine } from "./describe-machine.js";
 
-const models = defineModels({
+const models = {
   planner: openai("gpt-5.4-mini"),
-});
+};
 
 // Bank as a zod enum: `"left"`/`"right"` literals are accepted as `Bank`
 // without casts, and `Bank` is the schema's inferred type.

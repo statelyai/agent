@@ -36,15 +36,15 @@ function createModel(opts: {
     calls.push(step);
     switch (step) {
       case "validate":
-        return { output: opts.validate };
+        return { result: opts.validate };
       case "answer":
-        return { output: { answer: "Paris." } };
+        return { result: { answer: "Paris." } };
       case "verify": {
         const seq = opts.verify ?? [{ supported: true, critique: "" }];
-        return { output: seq[Math.min(verifyIndex++, seq.length - 1)] };
+        return { result: seq[Math.min(verifyIndex++, seq.length - 1)] };
       }
       case "revise":
-        return { output: { answer: "Paris is the capital of France." } };
+        return { result: { answer: "Paris is the capital of France." } };
       default:
         throw new Error(`unexpected request: ${request.name}`);
     }

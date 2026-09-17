@@ -7,7 +7,7 @@ import {
 } from "./index.js";
 
 const generateText = async (request: AgentTextRequest) => ({
-  output: `Day one for ${request.prompt}`,
+  result: `Day one for ${request.prompt}`,
 });
 
 test("pauses twice and resumes from JSON snapshots", async () => {
@@ -106,7 +106,7 @@ test("a delivered laptop is never written up as still scheduled", async () => {
     requests.push(request);
     const status = /Hardware: (.*)/.exec(request.prompt ?? "")?.[1] ?? "";
     return {
-      output: status.startsWith("delivered")
+      result: status.startsWith("delivered")
         ? "9:00 Setup. The laptop was delivered and is waiting at the desk."
         : "9:00 Setup. The laptop delivery is scheduled.",
     };

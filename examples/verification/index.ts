@@ -36,25 +36,23 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
+import { createAgentSchemas, interactionMetaSchema, setupAgent } from "@statelyai/agent";
 import {
   canReach,
-  createAgentSchemas,
   explorePaths,
-  interactionMetaSchema,
   lintAgentMachine,
   matchesTrajectory,
-  setupAgent,
   simulateAgent,
   type AgentPathReport,
   type SimulateAgentResult,
-} from "@statelyai/agent";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+} from "@statelyai/agent/testing";
+import {} from "@statelyai/agent/ai-sdk";
 
 // Declared so the machine is playable against a real model; the report below
 // never calls it.
-const models = defineModels({
+const models = {
   reviewer: openai("gpt-5.4-mini"),
-});
+};
 
 /** The business rule, in one number. Refunds above this need a human. */
 export const APPROVAL_THRESHOLD = 100;

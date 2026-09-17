@@ -1,6 +1,7 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { createScriptedExecutors, getInteraction } from "@statelyai/agent";
+import { getInteraction } from "@statelyai/agent";
+import { createScriptedExecutors } from "@statelyai/agent/testing";
 import { runSwarmHandoffExample, swarmHandoffMachine, MAX_TURNS } from "./index.js";
 
 // Name-keyed script: `travelReply`/`foodReply` are request names, `route` is

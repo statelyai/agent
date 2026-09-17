@@ -16,7 +16,7 @@
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { interactionMetaSchema, setupAgent } from "@statelyai/agent";
+import { setupAgent } from "@statelyai/agent";
 import { type EmailDraft, emailDraftSchema, hasRecipient } from "./email-draft";
 
 /** Revision rounds `reviewing` allows before only SEND is legal. */
@@ -30,31 +30,33 @@ const assessmentSchema = z.object({
   questions: z.array(z.string()),
 });
 
+const contextSchema = z.object({
+  prompt: z.string(),
+  /** The evaluator's open questions, joined for the idle label. */
+  questions: z.string(),
+  /** Every question the workflow raised, in order. Part of the output. */
+  clarifications: z.array(z.string()),
+  draft: emailDraftSchema.nullable(),
+  revisions: z.number(),
+  failure: z.string().nullable(),
+});
+
+const drafted = contextSchema.extend({ draft: emailDraftSchema });
+
 const agentSetup = setupAgent({
-  context: z.object({
-    prompt: z.string(),
-    /** The evaluator's open questions, joined for the idle label. */
-    questions: z.string(),
-    /** Every question the workflow raised, in order. Part of the output. */
-    clarifications: z.array(z.string()),
-    draft: emailDraftSchema.nullable(),
-    revisions: z.number(),
-    failure: z.string().nullable(),
-  }),
+  context: contextSchema,
   input: z.object({ prompt: z.string() }),
   output: z.object({
     sentEmails: z.array(emailDraftSchema),
     clarifications: z.array(z.string()),
     failure: z.string().nullable(),
   }),
-  meta: interactionMetaSchema,
   events: {
     MORE_INFO: z.object({ text: z.string() }),
     DRAFT_ANYWAY: z.object({}),
     REQUEST_CHANGES: z.object({ text: z.string() }),
     SEND: z.object({}),
   },
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-user"),
   requests: {
     evaluatePrompt: {
       schemas: { input: z.object({ prompt: z.string() }), output: assessmentSchema },
@@ -79,6 +81,12 @@ const agentSetup = setupAgent({
       },
     }),
   },
+  // Every state after `drafting` holds a draft, so narrow it there.
+  states: {
+    reviewing: { schemas: { context: drafted } },
+    finalReview: { schemas: { context: drafted } },
+    sending: { schemas: { context: drafted } },
+  },
 });
 
 export const emailDrafterV1Machine = agentSetup.createMachine({
@@ -97,7 +105,7 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
       invoke: {
         src: "evaluatePrompt",
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ context, output }) => ({
+        onDone: ({ context, output: { result: output } }) => ({
           target: output.satisfied ? "drafting" : "needsMoreInfo",
           context: {
             questions: output.questions.join(" "),
@@ -113,7 +121,6 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
 
     // Idle human-wait. Free text is MORE_INFO; the button is DRAFT_ANYWAY.
     needsMoreInfo: {
-      tags: ["awaiting-user"],
       meta: {
         interaction: {
           label: "Some details are missing. {questions} Type them in, or draft anyway.",
@@ -140,7 +147,7 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
       invoke: {
         src: "draftEmail",
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ context, output }) => ({
+        onDone: ({ context, output: { result: output } }) => ({
           // A spent revision budget is a different state, not a hidden guard.
           target: context.revisions >= MAX_REVISIONS ? "finalReview" : "reviewing",
           context: { draft: output },
@@ -153,7 +160,6 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
     },
 
     reviewing: {
-      tags: ["awaiting-user"],
       meta: {
         interaction: {
           label: "Send the draft, or type the changes you want.",
@@ -186,7 +192,6 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
     },
 
     finalReview: {
-      tags: ["awaiting-user"],
       meta: {
         interaction: {
           label: "That is the last revision I can make. Send this draft?",
@@ -210,7 +215,7 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
     sending: {
       invoke: {
         src: "sendEmail",
-        input: ({ context }) => ({ draft: context.draft! }),
+        input: ({ context }) => ({ draft: context.draft }),
         onDone: { target: "sent" },
         onError: ({ event }) => ({
           target: "failed",

@@ -9,8 +9,8 @@
  *   2. SDK-owned (`toolCallingMachine`, second half of this file): the request
  *      carries a real AI SDK tool and `maxSteps`, so the SDK runs the whole
  *      multi-step loop itself. The machine never sees an individual tool call —
- *      only the completed request, whose native `ModelMessage[]` response it
- *      appends through an `agent.messages` transition.
+ *      only the completed request, whose native `ModelMessage[]` response
+ *      arrives as `output.messages` and is appended in `onDone`.
  *
  * Pick 1 when a call is consequential enough to gate; pick 2 when the loop is
  * routine and you only care about the transcript it leaves behind.
@@ -57,7 +57,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { tool } from "ai";
 import { createAsyncLogic } from "xstate";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getInteraction,
   getStatePath,
@@ -69,9 +69,9 @@ import {
   type AgentRequestExecutors,
 } from "@statelyai/agent";
 
-export const models = defineModels({
+const models = {
   assistant: openai("gpt-5.4-mini"),
-});
+};
 
 // The consequential tool call the model proposes and a human reviews.
 const refundCallSchema = z.object({
@@ -174,7 +174,7 @@ export const reviewToolCallsMachine = agentSetup.createMachine({
       invoke: {
         src: "proposeRefund",
         input: ({ context }) => ({ request: context.request, feedback: context.feedback }),
-        onDone: ({ output }) => ({ target: "reviewing", context: { proposal: output } }),
+        onDone: ({ output }) => ({ target: "reviewing", context: { proposal: output.result } }),
         // Without this the run would hang on a model error with a consequential
         // tool half-proposed. `failed` says so; it never executes anything.
         onError: ({ event }) => ({
@@ -383,9 +383,9 @@ export async function runReviewToolCallsExample(
 // Variant 2: SDK-owned tool loop
 //
 // The request below carries a real AI SDK tool and `maxSteps`, so the AI SDK
-// executor owns every intermediate tool call. Its `ModelMessage[]` response is
-// emitted as an ordinary `agent.messages` event and appended explicitly by the
-// machine — the machine sees the completed request, never an individual call,
+// executor owns every intermediate tool call. Its `ModelMessage[]` response
+// rides on the invoke output as `output.messages` and is appended explicitly
+// by the machine — it sees the completed request, never an individual call,
 // so there is nothing for a human to gate. Compare `reviewToolCallsMachine`
 // above when a call is consequential enough to review first.
 //
@@ -464,18 +464,21 @@ export const toolCallingMachine = toolCallingSetup.createMachine({
     turns: 0,
   }),
   initial: "answering",
-  // Transcript retention is visible machine behavior, not runner side state.
-  on: {
-    "agent.messages": toolCallingSetup.appendMessages(),
-  },
   states: {
     answering: {
       invoke: {
         src: "answer",
         input: ({ context }) => ({ messages: context.messages }),
+        // Transcript retention is visible machine behavior, not runner side
+        // state: the response messages ride on the invoke output and are
+        // appended here, next to the answer they produced.
         onDone: ({ context, output }) => ({
           target: "waiting",
-          context: { answer: output, turns: context.turns + 1 },
+          context: {
+            answer: output.result,
+            messages: [...context.messages, ...output.messages],
+            turns: context.turns + 1,
+          },
         }),
         onError: { target: "failed" },
       },

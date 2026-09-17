@@ -65,8 +65,10 @@ export type ExampleDetail = ExampleSummary & {
   machines: ExampleMachine[];
   /** Set when the example module could not be imported on the server. */
   importError: string | null;
-  /** False when the demo server has no API key, so runs are disabled. */
+  /** Always true now: without a key the server runs placeholders (`mode: "walkthrough"`). */
   runnable: boolean;
+  /** How this server will run the example: a real model, or schema-driven placeholders. */
+  mode: "live" | "walkthrough";
   /**
    * True for examples the demo cannot drive: `"manual": true` in metadata
    * (CLI-only scripts, host adapters) or a module that exports no machine.
@@ -358,7 +360,8 @@ async function loadDetail(id: string): Promise<ExampleDetail> {
     source,
     machines,
     importError,
-    runnable: hasLiveExecutors(),
+    runnable: true,
+    mode: hasLiveExecutors() ? "live" : "walkthrough",
     // No machine export means nothing to drive from chat, same as `manual`.
     manual: metadataById.get(id)?.manual === true || machines.length === 0,
   };

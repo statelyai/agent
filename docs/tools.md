@@ -63,10 +63,10 @@ Put `tools` on any [text request](text-requests.md), either inline in `setupAgen
 ```ts no-check
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import { } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
-const models = defineModels({ assistant: openai("gpt-5.4-mini") });
+const models = { assistant: openai("gpt-5.4-mini") };
 
 const agentSetup = setupAgent({
   models,
@@ -94,7 +94,7 @@ export const toolCallingMachine = agentSetup.createMachine({
       invoke: {
         src: "answer",
         input: ({ context }) => ({ query: context.query }),
-        onDone: ({ output }) => ({ target: "done", context: { finalAnswer: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { finalAnswer: output.result } }),
       },
     },
     done: { type: "final", output: ({ context }) => ({ finalAnswer: context.finalAnswer ?? "" }) },
@@ -123,7 +123,7 @@ For approval and progress around real tools, see [review-tool-calls](../examples
 1. The machine invokes the request. Core lowers it to an `AgentTextRequest` carrying `tools`, `toolChoice`, and `metadata`.
 2. The executor maps tools to its SDK. `createAiSdkExecutors` passes a native `tool({...})` through unchanged and wraps a plain descriptor or bare function in `tool()`. A tool with no `inputSchema` gets a permissive one.
 3. `maxSteps` becomes `stopWhen: stepCountIs(maxSteps)`. The loop runs entirely inside the executor.
-4. The final output is validated against the request's output schema and returned to `onDone`.
+4. The final output is validated against the request's output schema and returned to `onDone` as `output.result`, next to the executor's response messages in `output.messages`.
 
 The machine observes the request boundary, not each intermediate tool call. For
 example, `maxSteps: 5` permits up to five AI SDK-controlled steps before the
@@ -141,16 +141,22 @@ The raw executor result, including tool calls and results, reaches host code thr
 
 <!-- message model from src/types.ts and src/utils.ts -->
 
-Tool calls and results stay in the executor framework's native message objects. Store them explicitly as machine context:
+Tool calls and results stay in the executor framework's native message objects. A tool-carrying request resolves with them in `output.messages`, and the machine stores them explicitly as context in `onDone`:
 
 ```ts no-check
-import { appendMessages } from "@statelyai/agent";
-
-const machine = agent.createMachine({
-  context: { messages: [] },
-  on: { "agent.messages": appendMessages() },
-  // ...
-});
+answering: {
+  invoke: {
+    src: "answer",
+    input: ({ context }) => ({ query: context.query }),
+    onDone: ({ context, output }) => ({
+      target: "done",
+      context: {
+        finalAnswer: output.result,
+        messages: [...context.messages, ...output.messages],
+      },
+    }),
+  },
+},
 ```
 
 Build these parts by hand only when the machine owns the loop, such as in a ReAct-style machine or when replaying a transcript. With a host-run tool loop, the intermediate calls stay inside the executor. See [Messages](messages.md).

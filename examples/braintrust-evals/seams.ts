@@ -27,14 +27,14 @@
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic } from "xstate";
-import { matchesTrajectory, runSeam } from "@statelyai/agent";
+import { matchesTrajectory, runSeam } from "@statelyai/agent/testing";
+import type { AgentRequestExecutors } from "@statelyai/agent";
 import type {
-  AgentRequestExecutors,
   ScriptedTextEntry,
   SeamRef,
   SeamTurn,
   TrajectoryMatch,
-} from "@statelyai/agent";
+} from "@statelyai/agent/testing";
 import { emailDrafter, models } from "../email-drafter/agent-logic.js";
 
 type DrafterEvent = EventFromLogic<typeof emailDrafter>;

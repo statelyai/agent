@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { matchesTrajectory, runAgent, createScriptedExecutors, setupAgent } from "./index.js";
+import { runAgent, setupAgent } from "./index.js";
+import { matchesTrajectory, createScriptedExecutors } from "./testing/index.js";
 import { z } from "zod";
 
 const entry = (type: string, payload: Record<string, unknown> = {}) => ({
@@ -195,7 +196,7 @@ describe("matchesTrajectory: over a real run", () => {
         invoke: {
           src: "tellJoke",
           input: ({ context }) => ({ topic: context.topic }),
-          onDone: ({ output }) => ({ target: "told", context: { joke: output } }),
+          onDone: ({ output }) => ({ target: "told", context: { joke: output.result } }),
         },
       },
       told: { type: "final" },

@@ -34,18 +34,18 @@ import {
   type RunAgentOptions,
   type RunAgentResult,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const agentName = z.enum(["travel", "food"]);
 
 /** Replies the conversation may run before only END is legal. */
 export const MAX_TURNS = 4;
 
-export const models = defineModels({
+const models = {
   travel: openai("gpt-5.4-mini"),
   food: openai("gpt-5.4-mini"),
   router: openai("gpt-5.4-mini"),
-});
+};
 
 const agentSetup = setupAgent({
   models,
@@ -121,7 +121,7 @@ export const swarmHandoffMachine = agentSetup.createMachine({
         input: ({ context }) => ({ message: context.message }),
         onDone: ({ context, output }) => ({
           target: "checkingBudget",
-          context: { reply: output, turns: context.turns + 1 },
+          context: { reply: output.result, turns: context.turns + 1 },
         }),
         onError: { target: "failed" },
       },
@@ -132,7 +132,7 @@ export const swarmHandoffMachine = agentSetup.createMachine({
         input: ({ context }) => ({ message: context.message }),
         onDone: ({ context, output }) => ({
           target: "checkingBudget",
-          context: { reply: output, turns: context.turns + 1 },
+          context: { reply: output.result, turns: context.turns + 1 },
         }),
         onError: { target: "failed" },
       },
@@ -230,7 +230,7 @@ export function roundTrip<T>(snapshot: T): T {
 export async function runSwarmHandoffExample(
   options: RunAgentOptions<typeof swarmHandoffMachine> = {},
 ) {
-  // Spread-merge, so passing only `onTransition` keeps the default executors.
+  // Spread-merge, so a caller passing only `onTransition` keeps the live executors.
   const resolved: RunAgentOptions<typeof swarmHandoffMachine> = {
     executors: createAiSdkExecutors({ models }),
     ...options,

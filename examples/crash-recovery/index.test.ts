@@ -1,4 +1,4 @@
-import { createInMemoryEventLogStore } from "@statelyai/agent";
+import { createInMemoryEventLogStore } from "@statelyai/agent/log";
 import { describe, expect, test } from "vitest";
 import { recover, runUntilCrash } from "./index.js";
 

@@ -27,7 +27,7 @@ Rules the runtime enforces. Each one maps to a build error or a lint diagnostic:
 - A model call is either a named `requests` entry invoked with `src: "<requestName>"`, or an inline invoke with `src: "agent.decide"` plus an `allowedEvents` list.
 - A state invoking `agent.decide` MUST handle every allowed event in its `on`.
 - An `agent.decide` invoke has no `onDone` (a decision produces no output). Use `onError` for the retries-exhausted path.
-- A request invoke reads its result via `onDone.assign` from `"{{ event.output.<field> }}"`.
+- A request invoke resolves with `{ result, messages }`, so `onDone.assign` reads its result from `"{{ event.output.result.<field> }}"` (`"{{ event.output.result }}"` for a plain-text request). A non-request `actors` invoke reads `"{{ event.output.<field> }}"` directly.
 - Every path must reach a `"type": "final"` state, and each final state needs an `output` when `schemas.output` is declared.
 - Do not invent guard or action names. Only `"{{ }}"` guards, `assign`, and `emit` exist unless the host tells you which named guards/actions it implements.
 - Model refs are strings (`"openai/gpt-5.4-mini"`); the host resolves them.
@@ -113,7 +113,7 @@ Reference config — decision, text request, idle human step, one final state:
         "input": { "ticket": "{{ context.ticket }}" },
         "onDone": {
           "target": "awaitingApproval",
-          "assign": { "reply": "{{ event.output.reply }}" }
+          "assign": { "reply": "{{ event.output.result.reply }}" }
         }
       }
     },
@@ -191,8 +191,7 @@ Lowering is itself a gate: it throws on an unresolved named guard/action and on 
 ## 5. Lint
 
 ```ts
-import { lintAgentMachine } from "@statelyai/agent";
-
+import { lintAgentMachine } from "@statelyai/agent/testing";
 const diagnostics = lintAgentMachine(machine);
 lintAgentMachine(machine, { throw: true }); // throws AgentLintError on error-severity findings
 ```
@@ -206,8 +205,7 @@ The one that bites most often is `decide-without-events`: an `allowedEvents` lis
 Lint is structural. A dry run proves a path actually settles. No API key needed.
 
 ```ts
-import { simulateAgent } from "@statelyai/agent";
-
+import { simulateAgent } from "@statelyai/agent/testing";
 const dryRun = await simulateAgent(machine, {
   input: { ticket: "" },
   script: {

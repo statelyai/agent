@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { createScriptedExecutors, runAgent } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
+import { createScriptedExecutors } from "@statelyai/agent/testing";
 import type { AgentDecisionRequest, ChosenEvent } from "@statelyai/agent";
 import { idlePrompt, MAX_STEPS_PER_COMMAND, runTodoNlExample, todoMachine } from "./index.js";
 

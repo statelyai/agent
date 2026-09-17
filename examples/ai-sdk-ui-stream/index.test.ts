@@ -22,7 +22,7 @@ function mockStreamText(scripts: readonly string[]): AgentRequestExecutor {
       await new Promise((resolve) => setTimeout(resolve, 1));
       info?.onChunk?.(token);
     }
-    return { output: text };
+    return { result: text };
   };
 }
 
@@ -103,7 +103,7 @@ test("a stream that fails lands in `failed` with no pitch", async () => {
     executors: {
       streamText: async (request) => {
         if (request.name === "streamPitch") throw new Error("stream dropped");
-        return { output: TAGLINE };
+        return { result: TAGLINE };
       },
     },
   });

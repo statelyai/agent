@@ -42,7 +42,7 @@ const machine = agent.createMachine({
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
           target: "done",
-          context: { answer: output },
+          context: { answer: output.result },
         }),
       },
     },
@@ -56,7 +56,7 @@ const machine = agent.createMachine({
 const result = await runAgent(machine, {
   input: { prompt: "Why state machines?" },
   executors: {
-    generateText: async () => ({ output: "Because transitions constrain behavior." }),
+    generateText: async () => ({ result: "Because transitions constrain behavior." }),
   },
 });
 

@@ -37,7 +37,7 @@ function buildStreamMachine() {
         invoke: {
           src: "joke",
           input: () => ({}),
-          onDone: ({ output }) => ({ target: "done", context: { joke: output } }),
+          onDone: ({ output }) => ({ target: "done", context: { joke: output.result } }),
         },
       },
       done: { type: "final", output: ({ context }) => ({ joke: context.joke ?? "" }) },
@@ -50,11 +50,11 @@ describe("createAgentRun", () => {
     const machine = buildStreamMachine();
     const run = createAgentRun(machine, {
       executors: {
-        generateText: async () => ({ output: "" }),
+        generateText: async () => ({ result: "" }),
         streamText: async (_request, info) => {
           info?.onChunk?.("knock ");
           info?.onChunk?.("knock");
-          return { output: "knock knock" };
+          return { result: "knock knock" };
         },
       },
     });
@@ -88,11 +88,11 @@ describe("createAgentRun", () => {
     const machine = buildStreamMachine();
     const run = createAgentRun(machine, {
       executors: {
-        generateText: async () => ({ output: "" }),
+        generateText: async () => ({ result: "" }),
         streamText: async (_request, info) => {
           info?.onChunk?.("a");
           info?.onChunk?.("b");
-          return { output: "ab" };
+          return { result: "ab" };
         },
       },
     });
@@ -120,10 +120,10 @@ describe("createAgentRun", () => {
     const run = createAgentRun(machine, {
       onTrace: (event) => sink.push(event),
       executors: {
-        generateText: async () => ({ output: "" }),
+        generateText: async () => ({ result: "" }),
         streamText: async (_request, info) => {
           info?.onChunk?.("x");
-          return { output: "x" };
+          return { result: "x" };
         },
       },
     });
@@ -162,7 +162,10 @@ describe("createAgentRun", () => {
             id: "draft",
             src: "draftText",
             input: ({ context }) => ({ prompt: context.prompt }),
-            onDone: ({ output }) => ({ target: "awaitingApproval", context: { draft: output } }),
+            onDone: ({ output }) => ({
+              target: "awaitingApproval",
+              context: { draft: output.result },
+            }),
           },
         },
         awaitingApproval: {
@@ -176,7 +179,7 @@ describe("createAgentRun", () => {
     });
 
     const generateText = async (request: AgentTextRequest & { tools: AgentTools }) => ({
-      output: `Draft: ${request.prompt}`,
+      result: `Draft: ${request.prompt}`,
     });
 
     // Run to idle, persist the snapshot.
@@ -215,8 +218,8 @@ describe("createAgentRun", () => {
     const machine = buildStreamMachine();
     const run = createAgentRun(machine, {
       executors: {
-        generateText: async () => ({ output: "" }),
-        streamText: async () => ({ output: "done" }),
+        generateText: async () => ({ result: "" }),
+        streamText: async () => ({ result: "done" }),
       },
     });
 
@@ -290,7 +293,7 @@ describe("runAgentStream", () => {
       executors: {
         streamText: async (_request, info) => {
           info?.onChunk?.("hello");
-          return { output: "hello" };
+          return { result: "hello" };
         },
       },
     })) {

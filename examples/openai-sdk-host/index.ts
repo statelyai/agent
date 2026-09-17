@@ -20,7 +20,7 @@
  * `stream_options.include_usage`.
  *
  * The adapter's `streamText` is deliberately TEXT-ONLY: it sends no tools and
- * no `response_format`, because a chunk-by-chunk structured envelope has
+ * no `response_format`, because a chunk-by-chunk structured object has
  * nothing useful to hand `onChunk` mid-stream. A request that declares tools
  * or a structured output schema is rejected with a message pointing at
  * `generateText`, rather than silently returning unstructured text.
@@ -28,10 +28,11 @@
  * Run: OPENAI_API_KEY=... npx tsx examples/openai-sdk-host/index.ts
  */
 import type OpenAI from "openai";
+import type { SnapshotFrom } from "xstate";
 import { runAgent } from "@statelyai/agent";
 import { createOpenAiExecutors } from "@statelyai/agent/openai";
 import { triageMachine } from "../triage/index.js";
-import { twentyQuestionsMachine } from "../twenty-questions/index.js";
+import { idlePrompt, toPlayerEvent, twentyQuestionsMachine } from "../twenty-questions/index.js";
 
 async function promptAnswer(question: string): Promise<string> {
   const { createInterface } = await import("node:readline/promises");
@@ -77,22 +78,33 @@ export async function runStreamingDemo(client: OpenAI) {
 }
 
 // Drives twenty-questions' inline `agent.decide` + machine-owned human-input
-// states via the `userInput` executor — the same human-loop pattern
-// twenty-questions/index.ts's own main() uses (no host-side idle/event loop
-// or fabricated events; `runAgent` gathers input inline via `userInput`).
+// states: every player turn settles the run idle, and the host resumes it
+// from the persisted snapshot with the player's event — the same loop
+// twenty-questions/index.ts's own main() runs.
 export async function runTwentyQuestionsDemo(client: OpenAI) {
   const { generateText, decide } = createOpenAiExecutors({
     client,
     resolveModel: resolveDemoModel,
   });
 
-  const result = await runAgent(twentyQuestionsMachine, {
+  const executors = { generateText, decide };
+  const onTransition = (snapshot: SnapshotFrom<typeof twentyQuestionsMachine>) =>
+    console.log("[state]", JSON.stringify(snapshot.value));
+  let result = await runAgent(twentyQuestionsMachine, {
     input: { questionsRemaining: 20 },
-    executors: { generateText, decide },
-    userInput: async ({ prompt }) => promptAnswer(prompt ?? ">"),
-    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+    executors,
+    onTransition,
   });
-
+  // Every player turn settles the run idle; resume from the persisted snapshot.
+  while (result.status === "idle") {
+    const text = await promptAnswer(`${idlePrompt(result.snapshot)}\n> `);
+    result = await runAgent(twentyQuestionsMachine, {
+      snapshot: result.persist(),
+      event: toPlayerEvent(result.snapshot, text),
+      executors,
+      onTransition,
+    });
+  }
   if (result.status !== "done") {
     throw new Error(`Twenty questions demo did not complete: ${result.status}`);
   }

@@ -44,7 +44,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   type AgentMessage,
   assistantMessage,
@@ -55,13 +55,13 @@ import {
   type AgentRequestExecutors,
 } from "@statelyai/agent";
 
-export const models = defineModels({
+const models = {
   // One generator model, re-invoked each round over the growing transcript —
   // the tutorial's single `generate` node.
   writer: openai("gpt-5.4-mini"),
   // The `reflect` node: a teacher persona grading the latest draft.
   critic: openai("gpt-5.4-mini"),
-});
+};
 
 // The critic returns PROSE feedback plus a boolean verdict. The prose is what
 // gets fed back to the writer (the tutorial's role-flipped reflection message);
@@ -255,17 +255,17 @@ export const reflectionWriterMachine = agentSetup.createMachine({
           enq.emit({
             type: "DRAFTED",
             revision: context.critiques.length,
-            length: output.length,
+            length: output.result.length,
           });
           return {
             target: "critiquing",
             context: {
-              essay: output,
+              essay: output.result,
               // The original draft is kept once, so the result can show it next
               // to the final one.
-              firstDraft: context.critiques.length === 0 ? output : context.firstDraft,
+              firstDraft: context.critiques.length === 0 ? output.result : context.firstDraft,
               // Record the draft in the transcript (assistant turn).
-              messages: [...context.messages, assistantMessage(output)],
+              messages: [...context.messages, assistantMessage(output.result)],
             },
           };
         },
@@ -286,15 +286,15 @@ export const reflectionWriterMachine = agentSetup.createMachine({
           enq.emit({
             type: "CRITIQUED",
             revision: context.critiques.length + 1,
-            satisfied: output.satisfied,
+            satisfied: output.result.satisfied,
           });
           return {
             target: "checking",
             context: {
-              critiques: [...context.critiques, output],
+              critiques: [...context.critiques, output.result],
               // Feed the critique back as a role-flipped USER message, as the
               // tutorial does, so the next draft treats it as feedback to act on.
-              messages: [...context.messages, userMessage(`Critique:\n${output.critique}`)],
+              messages: [...context.messages, userMessage(`Critique:\n${output.result.critique}`)],
             },
           };
         },

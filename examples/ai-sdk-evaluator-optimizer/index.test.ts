@@ -1,6 +1,7 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { createScriptedExecutors, runAgent } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
+import { createScriptedExecutors } from "@statelyai/agent/testing";
 import { aiSdkEvaluatorOptimizerMachine } from "./index.js";
 
 test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {

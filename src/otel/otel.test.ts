@@ -9,13 +9,8 @@ import {
 import { beforeEach, describe, expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
 import { z } from "zod";
-import {
-  createScriptedExecutors,
-  provideExecutors,
-  runAgent,
-  setupAgent,
-  traceTransitions,
-} from "../index.js";
+import { provideExecutors, runAgent, setupAgent, traceTransitions } from "../index.js";
+import { createScriptedExecutors } from "../testing/index.js";
 import { createOtelTraceHandler } from "./index.js";
 
 const setup = setupAgent({
@@ -60,7 +55,7 @@ const machine = setup.createMachine({
         input: ({ context }) => ({ topic: context.topic }),
         onDone: {
           target: "done",
-          context: ({ event }) => ({ draft: event.output }),
+          context: ({ event }) => ({ draft: event.output.result }),
         },
       },
     },
@@ -73,7 +68,7 @@ const script = {
     "*": [{ event: { type: "WRITE" as const }, usage: { inputTokens: 11, outputTokens: 3 } }],
   },
   text: {
-    "*": [{ output: "a draft", usage: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } }],
+    "*": [{ result: "a draft", usage: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } }],
   },
 };
 

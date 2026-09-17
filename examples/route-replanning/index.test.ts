@@ -27,7 +27,7 @@ test("a closed road forces one replan and the delivery still completes", async (
       }),
       generateText: async (request: AgentTextRequest) => {
         assert.equal(request.name, "writeReport");
-        return { output: "Delivered via the riverside after the bridge road closed." };
+        return { result: "Delivered via the riverside after the bridge road closed." };
       },
     },
   });
@@ -60,7 +60,7 @@ test("abandoning at the closure ends the run undelivered", async () => {
       decide: async () => ({
         event: { type: "ABANDON", reasoning: "Not worth the detour." } as ChosenEvent,
       }),
-      generateText: async () => ({ output: "Returned to the depot; the bridge was shut." }),
+      generateText: async () => ({ result: "Returned to the depot; the bridge was shut." }),
     },
   });
 

@@ -2,6 +2,7 @@ import { setupAgent } from "../setup-agent.js";
 import {
   assertEntryNames,
   entryInput,
+  entryOutput,
   entrySrc,
   jsonAny,
   jsonString,
@@ -151,7 +152,7 @@ export function createHandoffMachine<const TAgents extends Record<string, Preset
           entryInput(name, entry, model, context.message),
         onDone: ({ output }: { output: unknown }) => ({
           target: "waiting",
-          context: { reply: output },
+          context: { reply: entryOutput(entry, output) },
         }),
       },
     };

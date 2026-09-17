@@ -43,7 +43,7 @@
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -153,7 +153,7 @@ export const justOneSchemas = createAgentSchemas({
   },
 });
 
-const models = defineModels({ clueGiver: openai("gpt-5.4-mini") });
+const models = { clueGiver: openai("gpt-5.4-mini") };
 
 // ─── Rules (pure functions — the machine's, not the prompt's) ───
 
@@ -342,7 +342,7 @@ export const justOneMachine = agentSetup.createMachine({
                   secretWord: context.secretWord,
                   persona: PERSONAS[0],
                 }),
-                onDone: ({ output }) => ({ target: "written", context: { clueA: output } }),
+                onDone: ({ output }) => ({ target: "written", context: { clueA: output.result } }),
                 // A failed request is a blank clue: the round goes on, and
                 // `judgeClues` strikes it like any other unusable clue.
                 onError: { target: "written", context: { clueA: null } },
@@ -361,7 +361,7 @@ export const justOneMachine = agentSetup.createMachine({
                   secretWord: context.secretWord,
                   persona: PERSONAS[1],
                 }),
-                onDone: ({ output }) => ({ target: "written", context: { clueB: output } }),
+                onDone: ({ output }) => ({ target: "written", context: { clueB: output.result } }),
                 onError: { target: "written", context: { clueB: null } },
               },
             },
@@ -378,7 +378,7 @@ export const justOneMachine = agentSetup.createMachine({
                   secretWord: context.secretWord,
                   persona: PERSONAS[2],
                 }),
-                onDone: ({ output }) => ({ target: "written", context: { clueC: output } }),
+                onDone: ({ output }) => ({ target: "written", context: { clueC: output.result } }),
                 onError: { target: "written", context: { clueC: null } },
               },
             },

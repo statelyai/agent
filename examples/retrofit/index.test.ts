@@ -1,10 +1,6 @@
 import { expect, test } from "vitest";
-import {
-  lintAgentMachine,
-  simulateAgent,
-  type AgentRequestExecutors,
-  type ChosenEvent,
-} from "@statelyai/agent";
+import { type AgentRequestExecutors, type ChosenEvent } from "@statelyai/agent";
+import { lintAgentMachine, simulateAgent } from "@statelyai/agent/testing";
 import { MAX_LOOKUPS, runRetrofitExample, supportMachine } from "./index.js";
 
 const TRIAGE = { category: "refund", sentiment: "neutral", summary: "Damaged item refund" };
@@ -66,7 +62,7 @@ function mockExecutors(
   const queue = [...events];
   return {
     generateText: async (request: { name?: string }) => {
-      if (request.name === "triageTicket") return { output: TRIAGE };
+      if (request.name === "triageTicket") return { result: TRIAGE };
       throw new Error(`unexpected generateText request: ${request.name}`);
     },
     decide: async () => ({ event: queue.shift()! }),

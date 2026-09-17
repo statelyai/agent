@@ -11,14 +11,14 @@ test("parallel streaming requests are disambiguated by request.id in onChunk", a
     for (const part of parts) {
       info?.onChunk?.(part);
     }
-    return { output: parts.join("") };
+    return { result: parts.join("") };
   };
 
   const { output, buffers, lastChunkAt } = await runParallelStreamsExample({
     input: { topic: "actors" },
     executors: {
       // generateText is required by the type but unused here (both requests stream).
-      generateText: async () => ({ output: "" }),
+      generateText: async () => ({ result: "" }),
       streamText,
     },
   });
@@ -53,10 +53,10 @@ test("a failing stream ends its region instead of hanging the parallel machine",
   const { output } = await runParallelStreamsExample({
     input: { topic: "actors" },
     executors: {
-      generateText: async () => ({ output: "" }),
+      generateText: async () => ({ result: "" }),
       streamText: async (request) => {
         if (request.name === "poet") throw new Error("poet is out of ink");
-        return { output: "analysis only" };
+        return { result: "analysis only" };
       },
     },
   });

@@ -29,12 +29,8 @@
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic, Snapshot, SnapshotFrom } from "xstate";
-import {
-  createScriptedExecutors,
-  getStatePath,
-  matchesTrajectory,
-  runAgent,
-} from "@statelyai/agent";
+import { getStatePath, runAgent } from "@statelyai/agent";
+import { createScriptedExecutors, matchesTrajectory } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { emailDrafter, models } from "../email-drafter/agent-logic.js";
 
@@ -196,8 +192,8 @@ export function scriptedExecutorsFor(drafterCase: DrafterCase): Partial<AgentReq
   // still gets the answer written for the call it actually makes.
   return createScriptedExecutors({
     text: {
-      evaluatePrompt: assessments.map((assessment) => ({ output: assessment, usage })),
-      draftEmail: [{ output: draft, usage }],
+      evaluatePrompt: assessments.map((assessment) => ({ result: assessment, usage })),
+      draftEmail: [{ result: draft, usage }],
     },
   });
 }

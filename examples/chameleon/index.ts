@@ -42,7 +42,7 @@
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -126,7 +126,7 @@ export const chameleonSchemas = createAgentSchemas({
   },
 });
 
-const models = defineModels({ player: openai("gpt-5.4-mini") });
+const models = { player: openai("gpt-5.4-mini") };
 
 // ─── Rules (pure functions — the machine's, not the prompt's) ───
 
@@ -349,8 +349,8 @@ export const chameleonMachine = agentSetup.createMachine({
                   ...context.words,
                   {
                     player: PLAYERS[context.turnIndex] ?? "",
-                    word: output.word.trim(),
-                    reasoning: output.reasoning,
+                    word: output.result.word.trim(),
+                    reasoning: output.result.reasoning,
                   },
                 ],
               },
@@ -441,7 +441,7 @@ export const chameleonMachine = agentSetup.createMachine({
         // The comparison is the machine's, not the model's: a normalized match
         // against the secret the request never received.
         onDone: ({ context, output }) => {
-          const guess = output.guess.trim();
+          const guess = output.result.guess.trim();
           const correct = isCorrectGuess(guess, context.secretWord);
           return {
             target: correct ? "chameleonSteals" : "detectivesWin",

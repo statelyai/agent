@@ -5,9 +5,9 @@ description: Statically lint, simulate, and explore agent machines without any A
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-This page covers the APIs that check an agent machine before it runs. None of them need an API key or a model call.
+This page covers the APIs that check an agent machine before it runs. None of them need an API key or a model call. They all live in `@statelyai/agent/testing`.
 
-- `lintAgentMachine` statically catches undeliverable decisions, unrebindable invoke sources, invokes with no error path, and dropped framework messages. Pass `{ throw: true }` for the throwing form.
+- `lintAgentMachine` statically catches undeliverable decisions, unrebindable invoke sources, and invokes with no error path. Pass `{ throw: true }` for the throwing form.
 - `assertAgentMachine` is the one-line throwing form for tests and generation loops.
 - `simulateAgent` drives a deterministic scripted playthrough to a known outcome.
 - `explorePaths` and `canReach` enumerate decision branches and check that a target state is reachable.
@@ -23,8 +23,7 @@ Use these APIs to check that an LLM-generated machine is legal before you run it
 `lintAgentMachine(machine, options?)` runs static structural checks over a built machine. It accepts machines authored in TypeScript with `setupAgent(...).createMachine(...)` and machines compiled with `setupAgent.fromConfig(...)`. It returns `AgentLintDiagnostic[]`, where each diagnostic is `{ code, severity, path, message }`. The array is empty when the machine is clean.
 
 ```ts
-import { lintAgentMachine } from "@statelyai/agent";
-
+import { lintAgentMachine } from "@statelyai/agent/testing";
 const errors = lintAgentMachine(machine).filter((d) => d.severity === "error");
 if (errors.length) {
   throw new Error(errors.map((e) => `${e.path}: ${e.message}`).join("\n"));
@@ -46,14 +45,13 @@ assertAgentMachine(machine, { warnings: true });
 | `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                       |
 | `invoke-without-on-error`  | warning  | An invoke declares no `onError`, and neither its state nor any ancestor handles an actor error, so a rejected request or actor lands the machine in an error state with no modeled recovery. Add `onError` targeting a `failed` final state or a bounded retry.     |
 | `direct-object-src`        | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                                |
-| `unhandled-agent-messages` | warning  | A text request may return framework messages, but no state handles `agent.messages`, so returned transcripts are dropped. Add `on: { 'agent.messages': appendMessages() }` when retention is intended, or disable the warning when messages are ignored on purpose. |
 
 ## Test assertions
 
 Every check is a plain function, so you can assert structural soundness, reachability, and scripted playthroughs directly in vitest or jest.
 
 ```ts no-check
-import { assertAgentMachine, canReach, simulateAgent } from "@statelyai/agent";
+import { assertAgentMachine, canReach, simulateAgent } from "@statelyai/agent/testing";
 import { supportMachine } from "./support-machine";
 
 test("machine is structurally sound", () => {
@@ -86,7 +84,7 @@ Executors are plain functions, so a test can supply scripted executors and never
 const machine = emailDrafter.provide({
   actors: {
     draftEmail: draftEmail.withExecutor(async ({ request }) => {
-      return { output: { to: "sam@example.com", subject: "Hello", body: "Hi Sam!" } };
+      return { result: { to: "sam@example.com", subject: "Hello", body: "Hi Sam!" } };
     }),
   },
 });
@@ -105,19 +103,17 @@ This script keys by invoke **src**, not by request name. It is not the `createSc
 - `decisions` holds the `ChosenEvent` to apply per decision, keyed by decision src, usually `agent.decide`.
 - `text` holds output values for text requests, keyed by request src.
 - `invokes` holds answers for scripted invokes, keyed by invoke src.
-- `userInput` is one flat queue of answers for `agent.userInput` invokes.
 - `errors` holds failure values that reject a request instead of resolving it, keyed by the same srcs the other channels use.
 
 Pending work is read off the snapshot's live invoked actors, not off the last transition. A state that invokes several actors at once keeps every one of them pending until it settles, including when an invoke's `onDone` targets nothing. `simulateAgent` settles one invoke per step, in invoke-id order, and keeps going until none are left, so an `always` join that waits on all of them fires.
 
 ```ts
-import { simulateAgent } from "@statelyai/agent";
-
+import { simulateAgent } from "@statelyai/agent/testing";
 const { status, snapshot, trail } = await simulateAgent(machine, {
   input: { questionsRemaining: 20 },
   script: {
     decisions: { "agent.decide": [{ type: "GUESS", guess: "a cat" }] },
-    userInput: ["yes", "no"],
+    events: [{ type: "GUESS_RIGHT" }, { type: "PLAY_AGAIN_NO" }],
     text: {
       classifyGuessFeedback: [{ correct: true, reasoning: "matched" }],
       classifyPlayAgain: [{ playAgain: false, reasoning: "stop" }],
@@ -172,12 +168,12 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 ## Branch exploration
 
-`explorePaths(machine, { input, maxDepth?, maxPaths?, text?, invokes?, userInput?, errors? })` enumerates decision and external-event branches without a model, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, text?, invokes?, errors? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - At an idle wait, it forks one branch per externally accepted event.
 - `text` is a map of canned outputs for text requests, keyed by src. One value per src is reused every time that src is reached.
-- `invokes` is the same map for scripted invokes, and `userInput` is the shorthand for `invokes['agent.userInput']`.
+- `invokes` is the same map for scripted invokes.
 - A src with no canned output halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
 - `errors` is a map of one canned failure per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates.
 - A rejection that reaches no `onError` errors the machine, and that path ends in an `error` terminal carrying the failure value on `error`.
@@ -186,8 +182,7 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 <!-- viz: branch exploration tree for the refund machine: deciding -> AUTO_APPROVE (pruned by guard) / NEEDS_REVIEW -> awaitingHuman -> refunded, denied -->
 
 ```ts
-import { explorePaths } from "@statelyai/agent";
-
+import { explorePaths } from "@statelyai/agent/testing";
 const report = await explorePaths(refundMachine, {
   input: { request: "Refund my duplicate charge", amount: 5000 },
 });
@@ -216,8 +211,7 @@ const report = await explorePaths(machine, {
 path or state-node ID is reachable, with a witness path when it is.
 
 ```ts
-import { canReach } from "@statelyai/agent";
-
+import { canReach } from "@statelyai/agent/testing";
 const { reachable, witness } = await canReach(refundMachine, "denied", {
   input: { request: "x", amount: 5000 },
 });
@@ -241,7 +235,7 @@ Everything on this page runs without an API key, so a small script is enough for
 
 ```ts no-check
 // check.ts (run with: npx tsx check.ts)
-import { assertAgentMachine } from "@statelyai/agent";
+import { assertAgentMachine } from "@statelyai/agent/testing";
 import { machine } from "./machine";
 
 assertAgentMachine(machine); // throws AgentLintError on error-severity findings

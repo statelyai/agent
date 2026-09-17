@@ -43,7 +43,7 @@ import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { createAsyncLogic } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -244,9 +244,9 @@ const resultSchema = z.object({
   explanation: z.string(),
 });
 
-const models = defineModels({
+const models = {
   quiz: openai("gpt-5.4-mini"),
-});
+};
 
 export const chatWithPdfSchemas = createAgentSchemas({
   // The library's own interaction protocol, not a per-machine restatement.
@@ -519,7 +519,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
         }),
         onDone: ({ context, output }, enq) => {
           const chunk = context.chunks[context.chunkCursor]!;
-          const prompt = renderQuestion(output, chunk.pageNumber);
+          const prompt = renderQuestion(output.result, chunk.pageNumber);
           enq.emit({ type: "QUESTION", prompt, pageNumber: chunk.pageNumber });
           return {
             target: "awaitingAnswer",
@@ -582,9 +582,9 @@ export const chatWithPdfMachine = agentSetup.createMachine({
         onDone: ({ context, output }, enq) => {
           enq.emit({
             type: "GRADED",
-            correct: output.correct,
-            expected: output.expected,
-            explanation: output.explanation,
+            correct: output.result.correct,
+            expected: output.result.expected,
+            explanation: output.result.explanation,
           });
           const results = [
             ...context.results,
@@ -592,8 +592,8 @@ export const chatWithPdfMachine = agentSetup.createMachine({
               pageNumber: context.pending.pageNumber,
               prompt: context.pending.prompt,
               answer: context.answer,
-              correct: output.correct,
-              explanation: output.explanation,
+              correct: output.result.correct,
+              explanation: output.result.explanation,
             },
           ];
           return {
@@ -603,7 +603,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
               pending: null,
               answer: "",
               lastGrade: {
-                ...output,
+                ...output.result,
                 pageNumber: context.pending.pageNumber,
                 sourceText: context.pending.sourceText,
               },

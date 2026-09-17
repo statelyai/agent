@@ -182,7 +182,7 @@ export interface AgentWorkflowRequestConfig {
   output: JsonSchemaObject;
   tools?: AgentTools;
   toolChoice?: AgentToolChoice | unknown;
-  /** Opt into the structured-output envelope's `reasoning` field (see `AgentTextRequest.includeReasoning`). */
+  /** Opt into the provider output's `reasoning` field (see `AgentTextRequest.includeReasoning`). */
   includeReasoning?: boolean;
 
   temperature?: unknown;

@@ -12,7 +12,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   runAgent,
@@ -21,7 +21,7 @@ import {
 } from "@statelyai/agent";
 
 const REFUND_LIMIT = 100;
-const models = defineModels({ agent: openai("gpt-5.4-mini") });
+const models = { agent: openai("gpt-5.4-mini") };
 
 // The tool-choice union — still a model output validated after the fact, exactly
 // like the loop's `toolCalls`. Step 2 turns this into typed events + a decision.
@@ -93,7 +93,7 @@ export const supportMachineStep1 = agentSetup.createMachine({
       invoke: {
         src: "decideAction",
         input: ({ context }) => ({ ticket: context.ticket }),
-        onDone: ({ output }) => ({ target: "routing", context: { action: output } }),
+        onDone: ({ output }) => ({ target: "routing", context: { action: output.result } }),
       },
     },
     // The nested tool-choice `if/else`, still here — just as a routing state.

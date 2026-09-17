@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
 import { z } from "zod";
-import { createScriptedExecutors, provideExecutors, runAgent, setupAgent } from "./index.js";
-
+import { provideExecutors, runAgent, setupAgent } from "./index.js";
+import { createScriptedExecutors } from "./testing/index.js";
 const outcomeSchema = z.enum(["published", "flagged", "blocked"]);
 
 const moderationSetup = setupAgent({
@@ -78,14 +78,14 @@ const writerMachine = writerSetup.createMachine({
       invoke: {
         src: "outline",
         input: ({ context: _c, event: _e }) => ({ topic: "state machines" }),
-        onDone: ({ output }) => ({ target: "drafting", context: { outline: output } }),
+        onDone: ({ output }) => ({ target: "drafting", context: { outline: output.result } }),
       },
     },
     drafting: {
       invoke: {
         src: "draft",
         input: ({ context }) => ({ outline: context.outline ?? "" }),
-        onDone: ({ output }) => ({ target: "done", context: { article: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { article: output.result } }),
       },
     },
     done: { type: "final" },
@@ -218,7 +218,7 @@ describe("createScriptedExecutors", () => {
       { onChunk: (chunk) => chunks.push(chunk) },
     );
 
-    expect(result.output).toBe("hello world");
+    expect(result.result).toBe("hello world");
     expect(chunks).toEqual(["hello ", "world"]);
     expect(scripted.calls[0]).toMatchObject({
       kind: "streamText",
@@ -264,17 +264,17 @@ describe("createScriptedExecutors", () => {
     expect(result.output.outcome).toBe("blocked");
   });
 
-  test("an entry may be the `{ output, usage }` envelope; usage reaches the run total", async () => {
+  test("an entry may be the `{ result, usage }` form; usage reaches the run total", async () => {
     const result = await runAgent(writerMachine, {
       input: { topic: "state machines" },
       executors: createScriptedExecutors({
         text: {
           outline: {
-            output: "an outline",
+            result: "an outline",
             usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
           },
           draft: {
-            output: "an article",
+            result: "an article",
             usage: { inputTokens: 20, outputTokens: 6, totalTokens: 26 },
           },
         },
@@ -349,7 +349,7 @@ describe("createScriptedExecutors", () => {
           invoke: {
             src: "moderatorNote",
             input: ({ context: _c }) => ({ comment: "spam" }),
-            onDone: ({ output }) => ({ target: "done", context: { note: output.note } }),
+            onDone: ({ output }) => ({ target: "done", context: { note: output.result.note } }),
           },
         },
         done: { type: "final" },
@@ -366,11 +366,11 @@ describe("createScriptedExecutors", () => {
     expect(result.output).toEqual({ note: "Repeat offender." });
   });
 
-  test("a structured output with its own `output` key keeps its sibling keys", async () => {
+  test("a structured output with its own `result` key keeps its sibling keys", async () => {
     const executors = createScriptedExecutors({
-      // Only `{ output, usage?, raw? }` is the envelope. This object owns a
+      // Only `{ result, messages?, usage?, raw? }` is the executor result. This object owns a
       // sibling key, so it is the output VALUE — `confidence` must survive.
-      text: { test: [{ output: "draft", confidence: 0.9 }] },
+      text: { test: [{ result: "draft", confidence: 0.9 }] },
     });
 
     const result = await executors.generateText({
@@ -380,13 +380,13 @@ describe("createScriptedExecutors", () => {
       tools: {},
     });
 
-    expect(result.output).toEqual({ output: "draft", confidence: 0.9 });
+    expect(result.result).toEqual({ result: "draft", confidence: 0.9 });
     expect(result.usage).toBeUndefined();
   });
 
-  test("an object owning only envelope keys is still read as the envelope", async () => {
+  test("an object owning only executor-result keys is still read as the executor result", async () => {
     const executors = createScriptedExecutors({
-      text: { test: [{ output: "draft", usage: { totalTokens: 5 } }] },
+      text: { test: [{ result: "draft", usage: { totalTokens: 5 } }] },
     });
 
     const result = await executors.generateText({
@@ -396,12 +396,12 @@ describe("createScriptedExecutors", () => {
       tools: {},
     });
 
-    expect(result.output).toBe("draft");
+    expect(result.result).toBe("draft");
     expect(result.usage).toEqual({ totalTokens: 5 });
   });
 
-  test("an inherited `output` property is not an envelope", async () => {
-    const inherited = Object.create({ output: "from the prototype" }) as { note: string };
+  test("an inherited `result` property is not an executor result", async () => {
+    const inherited = Object.create({ result: "from the prototype" }) as { note: string };
     inherited.note = "mine";
     const executors = createScriptedExecutors({ text: { test: [inherited] } });
 
@@ -412,7 +412,7 @@ describe("createScriptedExecutors", () => {
       tools: {},
     });
 
-    expect(result.output).toBe(inherited);
+    expect(result.result).toBe(inherited);
   });
 
   test("works with provideExecutors and a plain createActor", async () => {
@@ -439,7 +439,7 @@ describe("createScriptedExecutors", () => {
       { onChunk: (chunk) => chunks.push(chunk) },
     );
 
-    expect(result).toMatchObject({ output: "hello world" });
+    expect(result).toMatchObject({ result: "hello world" });
     expect(chunks).toEqual(["hello world"]);
   });
 
@@ -486,61 +486,6 @@ describe("createScriptedExecutors", () => {
   });
 });
 
-describe("createScriptedExecutors — userInput", () => {
-  const feedbackSetup = setupAgent({
-    context: z.object({ feedback: z.string().nullable() }),
-    input: z.object({}),
-    output: z.object({ feedback: z.string() }),
-    events: {},
-  });
-
-  const feedbackMachine = feedbackSetup.createMachine({
-    context: () => ({ feedback: null }),
-    output: ({ context }) => ({ feedback: context.feedback ?? "" }),
-    initial: "asking",
-    states: {
-      asking: {
-        invoke: {
-          id: "ask",
-          src: "agent.userInput",
-          input: { prompt: "How was it?" },
-          onDone: ({ output }) => ({ target: "done", context: { feedback: output } }),
-        },
-      },
-      done: { type: "final" },
-    },
-  });
-
-  test("plays the userInput queue back to runAgent's userInput handler", async () => {
-    const scripted = createScriptedExecutors({ userInput: ["great"] });
-    const result = await runAgent(feedbackMachine, {
-      input: {},
-      executors: scripted,
-      userInput: scripted.userInput,
-    });
-
-    expect(result.status).toBe("done");
-    if (result.status !== "done") return;
-    expect(result.output.feedback).toBe("great");
-  });
-
-  test("entries may be functions of the request", async () => {
-    const scripted = createScriptedExecutors({
-      userInput: [({ prompt }) => `answering: ${prompt}`],
-    });
-    await expect(scripted.userInput({ prompt: "How was it?" })).resolves.toBe(
-      "answering: How was it?",
-    );
-  });
-
-  test("an empty userInput script throws, naming the array to add to", async () => {
-    const scripted = createScriptedExecutors();
-    await expect(scripted.userInput({ prompt: "How was it?" })).rejects.toThrow(
-      /No scripted answer for request 'agent.userInput'[\s\S]*`userInput` array/,
-    );
-  });
-});
-
 describe("name-keyed scripts", () => {
   const request = {
     kind: "text" as const,
@@ -555,7 +500,7 @@ describe("name-keyed scripts", () => {
       text: { summarize: ["short"], expand: ["long"] },
     });
     await expect(scripted.generateText(request as never)).resolves.toMatchObject({
-      output: "short",
+      result: "short",
     });
   });
 
@@ -571,7 +516,7 @@ describe("name-keyed scripts", () => {
   test("a '*' fallback keeps unnamed requests working", async () => {
     const scripted = createScriptedExecutors({ text: { "*": ["anything"] } });
     await expect(scripted.generateText(request as never)).resolves.toMatchObject({
-      output: "anything",
+      result: "anything",
     });
   });
 
@@ -592,13 +537,13 @@ describe("name-keyed scripts", () => {
   test("entries are consumed in order and the last one repeats", async () => {
     const scripted = createScriptedExecutors({ text: { summarize: ["first", "second"] } });
     await expect(scripted.generateText(request as never)).resolves.toMatchObject({
-      output: "first",
+      result: "first",
     });
     await expect(scripted.generateText(request as never)).resolves.toMatchObject({
-      output: "second",
+      result: "second",
     });
     await expect(scripted.generateText(request as never)).resolves.toMatchObject({
-      output: "second",
+      result: "second",
     });
   });
 });

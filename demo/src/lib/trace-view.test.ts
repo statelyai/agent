@@ -23,6 +23,22 @@ describe("transition payload summaries", () => {
     ).toBe("score: 6, verdict: revise");
   });
 
+  it("reads a text request's result out of its { result, messages } envelope", () => {
+    expect(
+      summarizePayload({
+        type: "xstate.done.actor.0.evaluate",
+        actorId: "evaluate",
+        output: { result: { score: 6, feedback: "tighten the intro" }, messages: [] },
+      }),
+    ).toBe("score: 6, feedback: tighten the intro");
+    expect(
+      summarizePayload({
+        type: "xstate.done.actor.0.writeDraft",
+        output: { result: "A short draft.", messages: [{ role: "assistant", content: "x" }] },
+      }),
+    ).toBe("A short draft.");
+  });
+
   it("previews a long text output instead of printing it into the thread", () => {
     const summary = summarizePayload({
       type: "xstate.done.actor.0.writeEssay",

@@ -11,6 +11,7 @@ import {
   renderIdleWork,
   renderOutput,
   runSignal,
+  smallEvent,
   traceDetail,
 } from "./machine-chat.server";
 import {
@@ -300,7 +301,14 @@ describe("idle work rendering (changed context surfaces before approval)", () =>
 describe("refused decisions in the trace", () => {
   const start = (id: string, attempts: Array<{ type: string; failure: string }>) => ({
     type: "request.start",
-    request: { id, attempts: attempts.map((attempt) => ({ event: { type: attempt.type }, failure: attempt.failure, reason: "" })) },
+    request: {
+      id,
+      attempts: attempts.map((attempt) => ({
+        event: { type: attempt.type },
+        failure: attempt.failure,
+        reason: "",
+      })),
+    },
   });
 
   test("records each attempt once as a decision retries", () => {
@@ -360,6 +368,23 @@ describe("expandable trace detail", () => {
     expect(nested["…"]).toBe("16 more fields");
     expect((entry.detail?.event as Record<string, Json>)["payload"]).toMatchObject({
       "…": "16 more fields",
+    });
+  });
+
+  test("keeps a text request's result structured on the wire, and counts its messages", () => {
+    const event = smallEvent({
+      type: "xstate.done.actor.0.evaluate",
+      actorId: "evaluate",
+      output: {
+        result: { score: 6, feedback: "tighten the intro" },
+        messages: [{ role: "assistant", content: "..." }],
+      },
+    });
+
+    expect(event).toEqual({
+      type: "xstate.done.actor.0.evaluate",
+      actorId: "evaluate",
+      output: { result: { score: 6, feedback: "tighten the intro" }, messages: "1 item" },
     });
   });
 

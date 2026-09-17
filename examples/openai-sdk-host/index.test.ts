@@ -15,7 +15,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
         completions: {
           create: async (params: { response_format?: unknown }) => {
             expect(params.response_format).toMatchObject({ type: "json_schema" });
-            // The host sends the `{ result }` envelope schema; the model replies
+            // The host sends the `{ result }` provider schema; the model replies
             // in kind. The host unwraps `.result` before the machine validates.
             return {
               choices: [
@@ -162,7 +162,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
       executors: {
-        generateText: async () => ({ output: { rating: 9, explanation: "stub" } }),
+        generateText: async () => ({ result: { rating: 9, explanation: "stub" } }),
         streamText: async (request, info) => {
           const seen: string[] = [];
           passes.push(seen);

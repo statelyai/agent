@@ -10,15 +10,10 @@ export type {
   SnapshotOf,
   StateValueOf,
 } from "./type-helpers.js";
-export {
-  AGENT_MESSAGES_EVENT_TYPE,
-  appendMessages,
-  isAgentMessages,
-  messagesSchema,
-} from "./messages.js";
-export type { AgentMessagesEvent, AgentMessagesEventPayload } from "./messages.js";
+export { isAgentMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, getAgentSchemas, setupAgent } from "./setup-agent.js";
 export type {
+  AgentDefaultMeta,
   AgentSchemaPack,
   // Both appear in `setupAgent`'s inferred result type (its event schemas
   // always carry the reserved `'@agent.usage'` entry), so consumers' declaration
@@ -61,81 +56,54 @@ export type {
   // Named return type of `getAgentSchemas`, so declaration emit can name it.
   AgentSchemas,
   AgentEventDescriptor,
-  AgentEventToolNameResolver,
   AgentRequestSource,
 } from "./events.js";
 export {
   bindRequestExecutor,
-  buildEnvelopeSchema,
+  providerOutputSchema,
   createTextLogic,
   getAgentOutputMode,
   getCallFinishReason,
   getCallUsage,
-  parseModelRef,
   parseOutput,
-  parseStructuredEnvelope,
+  parseProviderOutput,
 } from "./text-logic.js";
 export type {
   AgentFinishReason,
   AgentModelRef,
   AgentOutputMode,
-  StructuredOutputEnvelope,
+  ProviderStructuredOutput,
   AgentExecutorTextRequest,
   AgentTextRequest,
-  AiSdkShapedStreamResult,
-  AiSdkShapedTextResult,
   AgentRequestExecutor,
   AgentRequestExecutorInfo,
   AgentRequestExecutorResult,
   AgentRequestExecutors,
+  AgentTextResult,
   AgentUsage,
   AgentCallUsage,
-  AgentUserInput,
   TextLogic,
   TextLogicConfig,
   TextLogicExecuteArgs,
   TextLogicExecutor,
 } from "./text-logic.js";
-export { executeAgentRequest } from "./steps.js";
-export type { AgentRequest, AgentStepRequest } from "./steps.js";
+export {
+  executeAgentRequest,
+  initialAgentStep,
+  rejectAgentStep,
+  resolveAgentStep,
+  transitionAgentStep,
+} from "./steps.js";
+export type { AgentRequest, AgentStep, AgentStepRequest } from "./steps.js";
 export { AGENT_USAGE_EVENT_TYPE } from "./usage.js";
 export type { AgentUsageEvent } from "./usage.js";
-export {
-  AGENT_EVENT_SCHEMA_VERSION,
-  AGENT_INIT_EVENT_TYPE,
-  AgentEventLogError,
-  AgentMachineVersionMismatchError,
-  AgentReplayDivergenceError,
-  NonSerializableAgentEventError,
-  agentCallOccurrence,
-  assertAgentLogEntry,
-  assertJsonSerializable,
-  createReplayEntry,
-  forkEventLog,
-  getLogExecutionId,
-  getSnapshotStateHash,
-  getUsageFromEvents,
-  initEntry,
-  rebindActorSession,
-  replay,
-  validateReplayEntries,
-} from "./event-log.js";
-export type {
-  AgentInitEvent,
-  AgentLogEntry,
-  AgentLogInit,
-  AgentLogVerification,
-  AgentPersistedSnapshot,
-  CreateReplayEntryOptions,
-  JsonValue,
-  ReplayOptions,
-  // Named return type of `replay`, so declaration emit can name it.
-  ReplayResult,
-} from "./event-log.js";
-export { AgentEventLogConflictError, createInMemoryEventLogStore } from "./event-log-store.js";
+// The event log itself (replay, forking, hand-built entries, stores) lives in
+// `@statelyai/agent/log`. The root keeps only what `runAgent` reads and
+// returns, and the errors it can throw.
+export { AgentMachineVersionMismatchError } from "./event-log.js";
+export type { AgentLogEntry } from "./event-log.js";
+export { AgentEventLogConflictError } from "./event-log-store.js";
 export type { AgentEventLogStore } from "./event-log-store.js";
-export { assertEventLogStoreConformance } from "./event-log-store-conformance.js";
-export type { EventLogStoreConformanceHarness } from "./event-log-store-conformance.js";
 export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentMaxModelCallsExceededError,
@@ -148,64 +116,21 @@ export {
 } from "./run-agent.js";
 export { runAgentStream } from "./agent-run.js";
 export type { AgentStreamEvent } from "./agent-run.js";
-export { runAgentLoop } from "./run-loop.js";
-export type { RunAgentLoopOptions } from "./run-loop.js";
 export type {
   AgentInputFrom,
   AgentRunMeta,
   AgentTransitionHandler,
   AgentTraceEvent,
-  AgentUserInputExecutor,
   InspectedActorRef,
   JsonSerializableTraceEvent,
-  PendingUserInput,
   RunAgentOptions,
   RunAgentResult,
   RunAgentErrorCause,
 } from "./run-agent.js";
 export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";
-export {
-  AgentLintError,
-  AgentUnknownStateError,
-  assertAgentMachine,
-  canReach,
-  explorePaths,
-  lintAgentMachine,
-  simulateAgent,
-} from "./verify.js";
-export type {
-  AgentLintDiagnostic,
-  AgentLintSeverity,
-  AgentPathReport,
-  AgentPathTerminal,
-  AssertAgentMachineOptions,
-  CanReachResult,
-  ExplorePathsOptions,
-  LintAgentMachineOptions,
-  SimulateAgentOptions,
-  SimulateAgentResult,
-  SimulationScript,
-  SimulationTrailEntry,
-} from "./verify.js";
-export { matchesTrajectory } from "./trajectory.js";
-export type {
-  MatchTrajectoryOptions,
-  TrajectoryEvent,
-  TrajectoryItem,
-  TrajectoryMatch,
-  TrajectoryMiss,
-} from "./trajectory.js";
-export { runSeam } from "./seam.js";
-export type {
-  RunSeamOptions,
-  RunSeamResult,
-  SeamCall,
-  SeamRef,
-  SeamSlice,
-  SeamTurn,
-} from "./seam.js";
-export { createScriptedExecutors } from "./scripted-executors.js";
+// Lint, simulation, scripted executors, trajectories, and seams live in
+// `@statelyai/agent/testing`.
 export type {
   ScriptedByName,
   ScriptedDecisionEntry,
@@ -213,7 +138,6 @@ export type {
   ScriptedExecutors,
   ScriptedExecutorsScript,
   ScriptedTextEntry,
-  ScriptedUserInputEntry,
 } from "./scripted-executors.js";
 export {
   assistantMessage,

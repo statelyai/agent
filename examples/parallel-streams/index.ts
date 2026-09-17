@@ -23,12 +23,12 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-export const models = defineModels({
+const models = {
   thinker: openai("gpt-5.4-mini"),
   poet: openai("gpt-5.4-mini"),
-});
+};
 
 /** Completion order, the part a final view usually drops. Rendered in `output`. */
 function renderLanes(lanes: string[]): string {
@@ -116,7 +116,7 @@ export const parallelStreamsMachine = agentSetup.createMachine({
             input: ({ context }) => ({ topic: context.topic }),
             onDone: ({ context, output }) => ({
               target: "done",
-              context: { analysis: output, lanes: [...context.lanes, "analysis"] },
+              context: { analysis: output.result, lanes: [...context.lanes, "analysis"] },
             }),
             // A region that fails still has to reach a final state, or the
             // parallel machine never completes.
@@ -140,7 +140,7 @@ export const parallelStreamsMachine = agentSetup.createMachine({
             input: ({ context }) => ({ topic: context.topic }),
             onDone: ({ context, output }) => ({
               target: "done",
-              context: { poem: output, lanes: [...context.lanes, "poem"] },
+              context: { poem: output.result, lanes: [...context.lanes, "poem"] },
             }),
             onError: ({ context, event }) => ({
               target: "failed",

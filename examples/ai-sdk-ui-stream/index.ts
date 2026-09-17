@@ -44,11 +44,11 @@ import {
   type AgentRequestExecutor,
   type RunAgentOptions,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-export const models = defineModels({
+const models = {
   writer: openai("gpt-5.4-mini"),
-});
+};
 
 /** The data-part type carrying each machine state the run enters. */
 const AGENT_STATE_PART = "data-agent-state";
@@ -104,7 +104,7 @@ export const aiSdkUiStreamMachine = agentSetup.createMachine({
         id: "tagline",
         src: "streamTagline",
         input: ({ context }) => ({ product: context.product }),
-        onDone: ({ output }) => ({ target: "pitch", context: { tagline: output } }),
+        onDone: ({ output }) => ({ target: "pitch", context: { tagline: output.result } }),
         onError: { target: "failed" },
       },
     },
@@ -113,7 +113,7 @@ export const aiSdkUiStreamMachine = agentSetup.createMachine({
         id: "pitch",
         src: "streamPitch",
         input: ({ context }) => ({ product: context.product, tagline: context.tagline ?? "" }),
-        onDone: ({ output }) => ({ target: "done", context: { pitch: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { pitch: output.result } }),
         onError: { target: "failed" },
       },
     },

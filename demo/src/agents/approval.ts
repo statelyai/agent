@@ -20,12 +20,10 @@ const agentSetup = setupAgent({
   context: approvalContextSchema,
   input: z.object({ topic: z.string() }),
   output: z.object({ published: z.boolean(), draft: z.string() }),
-  meta: z.object({ interaction: z.object({ label: z.string() }).optional() }),
   events: {
     APPROVE: z.object({}),
     REJECT: z.object({ reason: z.string() }),
   },
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
@@ -51,14 +49,13 @@ export const approvalMachine = agentSetup.createMachine({
         src: "writeDraft",
         input: ({ context }) => ({ topic: context.topic }),
         // Object-form transition: static target (draws the edge), dynamic context.
-        onDone: { target: "reviewing", context: ({ output }) => ({ draft: output }) },
+        onDone: { target: "reviewing", context: ({ output }) => ({ draft: output.result }) },
         onError: { target: "failed" },
       },
     },
     // Idle human-wait: no invoke. runAgent settles here; the host shows
     // `meta.interaction` and the events from getAcceptedEvents.
     reviewing: {
-      tags: ["awaiting-review"],
       meta: {
         interaction: { label: "Review the draft: approve to publish, or reject with a reason." },
       },

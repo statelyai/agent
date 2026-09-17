@@ -1,5 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createWebSocketTransport } from "@statelyai/sdk";
+import { StateOutline } from "@/components/state-outline";
+import { MachineEmbed, type EmbedStep } from "@/components/machine-embed";
 
 export type LiveWs = { relayUrl: string; roomId: string };
 
@@ -29,6 +31,20 @@ type VizPanelProps = {
   /** The inspection relay was reached for and never became available. */
   inspectionUnavailable?: boolean;
   /**
+   * Stable key for the selected machine, and its source text or plain-JSON
+   * config: what the SDK embed draws when live inspection is unavailable.
+   */
+  machineKey?: string;
+  machineConfig?: unknown;
+  /**
+   * Plain-JSON machine config for the static outline: the last resort when
+   * the embed cannot connect either. Null when the machine has no JSON view.
+   */
+  outlineConfig?: Record<string, unknown> | null;
+  /** The latest settled step of the run, for the active state. */
+  step?: EmbedStep | null;
+  theme?: "light" | "dark";
+  /**
    * Live inspection relay. The panel joins the room as a viewer purely to
    * mirror the stream to `onSystemMessage` — the /inspect page connects to the
    * relay itself for rendering.
@@ -50,19 +66,42 @@ export function VizPanel({
   title,
   hasMachine,
   inspectionUnavailable = false,
+  machineKey = "",
+  machineConfig = null,
+  outlineConfig = null,
+  step = null,
+  theme = "light",
   liveWs,
   liveUrl,
   onSystemMessage,
 }: VizPanelProps) {
+  // The server may reach the relay while this browser cannot (a corporate
+  // proxy, an offline demo). The viewer socket below is the canary: if it is
+  // not ready within a few seconds, or errors, the embed would be blank too,
+  // so the static outline takes the pane instead.
+  const [socketUnavailable, setSocketUnavailable] = useState(false);
+  // The embed's own handshake failed too; nothing hosted can draw it.
+  const [embedUnavailable, setEmbedUnavailable] = useState(false);
+  useEffect(() => setEmbedUnavailable(false), [machineKey]);
+
   // The hosted /inspect page renders the system; this socket exists only so
   // the chat's transition log can follow the same run.
   useEffect(() => {
     if (!liveWs) return;
+    setSocketUnavailable(false);
     const transport = createWebSocketTransport({
       url: liveWs.relayUrl,
       role: "viewer",
       metadata: { name: "Stately Agent Lab" },
     });
+    const deadline = window.setTimeout(() => {
+      if (!transport.ready) setSocketUnavailable(true);
+    }, 6000);
+    const unsubscribeReady = transport.onReady(() => {
+      window.clearTimeout(deadline);
+      setSocketUnavailable(false);
+    });
+    const unsubscribeError = transport.onError?.(() => setSocketUnavailable(true));
     const unsubscribeMessage = transport.onMessage((protocolMessage) => {
       const message = protocolMessage as SystemMessage;
       if (message.type === "@statelyai.system.init") {
@@ -72,10 +111,17 @@ export function VizPanel({
       }
     });
     return () => {
+      window.clearTimeout(deadline);
+      unsubscribeReady();
+      unsubscribeError?.();
       unsubscribeMessage();
       transport.destroy();
     };
   }, [liveWs?.relayUrl, onSystemMessage]);
+
+  const inspectionDown = inspectionUnavailable || socketUnavailable;
+  const showEmbed = inspectionDown && machineConfig != null && !embedUnavailable;
+  const showOutline = inspectionDown && !showEmbed && outlineConfig;
 
   return (
     <section className="viz-shell" aria-label={`Live statechart for ${title}`}>
@@ -87,6 +133,17 @@ export function VizPanel({
             <strong>No machine to inspect</strong>
             <p>This example does not export a state machine from its index.ts.</p>
           </div>
+        ) : showEmbed ? (
+          <MachineEmbed
+            title={title}
+            machineKey={machineKey}
+            machine={machineConfig}
+            theme={theme}
+            step={step}
+            onUnavailable={() => setEmbedUnavailable(true)}
+          />
+        ) : showOutline ? (
+          <StateOutline title={title} config={outlineConfig} value={step?.value ?? null} />
         ) : liveUrl ? (
           <iframe
             className="viz-embed"
@@ -98,9 +155,7 @@ export function VizPanel({
         ) : inspectionUnavailable ? (
           <div className="viz-state" role="status">
             <strong>Live inspection unavailable</strong>
-            <p>
-              The demo could not reach the inspection relay, so this machine is not visualized.
-            </p>
+            <p>The demo could not reach the inspection relay, so this machine is not visualized.</p>
           </div>
         ) : (
           <div className="viz-state" role="status">

@@ -7,7 +7,9 @@
  * on `refunded` directly — it routes through the `checkingLimit` choice state,
  * so the policy, not the model, decides whether an amount can be auto-approved.
  * Over-limit amounts settle idle in `awaitingApproval`, waiting for a human
- * `APPROVE` / `DENY` event.
+ * `APPROVE` / `DENY` event. A request with no amount settles idle in
+ * `askingAmount` and asks once; the machine, not the model, bounds how many
+ * times it asks (`clarifications`).
  *
  * Mirrors the README quickstart, with the amount extracted by the decision
  * (carried on the chosen event) instead of supplied as input.
@@ -19,27 +21,13 @@ const agentSetup = setupAgent({
   context: z.object({
     request: z.string(),
     amount: z.number().nullable(),
+    /** Times the machine has asked for missing details; capped at one. */
+    clarifications: z.number(),
   }),
   input: z.object({ request: z.string() }),
   output: z.object({
     outcome: z.enum(["refunded", "approved", "denied", "needs-details"]),
     amount: z.number().nullable(),
-  }),
-  // `interaction` is the declarative UI-hint convention: `label` is the human
-  // prompt; `events` refines how each accepted event renders (button label,
-  // emphasis). The chat UI derives everything else from the event schemas.
-  meta: z.object({
-    interaction: z
-      .object({
-        label: z.string(),
-        events: z
-          .record(
-            z.string(),
-            z.object({ label: z.string().optional(), style: z.string().optional() }),
-          )
-          .optional(),
-      })
-      .optional(),
   }),
   // The model's legal moves. AUTO_REFUND / REVIEW carry the amount the model
   // extracted from the request text; the machine validates and routes it.
@@ -49,15 +37,14 @@ const agentSetup = setupAgent({
     NEEDS_DETAILS: z.object({}),
     APPROVE: z.object({}),
     DENY: z.object({}),
+    /** The customer's reply to "how much?" — free text the model re-reads. */
+    DETAILS: z.object({ text: z.string() }),
   },
-  // `awaitingApproval` is an idle human-wait state — declare it as the suspend
-  // signal so runAgent settles idle deterministically instead of timing out.
-  isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
 });
 
 export const refundMachine = agentSetup.createMachine({
   id: "refund",
-  context: ({ input }) => ({ request: input.request, amount: null }),
+  context: ({ input }) => ({ request: input.request, amount: null, clarifications: 0 }),
   initial: "deciding",
   states: {
     deciding: {
@@ -84,7 +71,31 @@ export const refundMachine = agentSetup.createMachine({
           target: "awaitingApproval",
           context: ({ event }) => ({ amount: event.amount }),
         },
-        NEEDS_DETAILS: { target: "needsDetails" },
+        // Ask once. A second NEEDS_DETAILS ends the run: the bound is the
+        // machine's, so the model cannot keep the customer in a loop.
+        NEEDS_DETAILS: ({ context }) =>
+          context.clarifications < 1
+            ? { target: "askingAmount", context: { clarifications: context.clarifications + 1 } }
+            : { target: "needsDetails" },
+      },
+    },
+    // Idle: the customer left out the amount. Free text comes back as DETAILS
+    // and the model reads the request again with the reply appended.
+    // `meta.interaction` is the UI hint: `label` is the human prompt and
+    // `events` refines how each accepted event renders. It is typed against
+    // the machine's events, so a typo here is a compile error.
+    askingAmount: {
+      meta: {
+        interaction: {
+          label: "How much was the charge? Reply with the amount.",
+          textEvent: "DETAILS",
+        },
+      },
+      on: {
+        DETAILS: ({ context, event }) => ({
+          target: "deciding",
+          context: { request: `${context.request}\nCustomer added: ${event.text}` },
+        }),
       },
     },
     // The policy gate. A choice state is a pure machine decision: no model runs
@@ -97,7 +108,6 @@ export const refundMachine = agentSetup.createMachine({
     // Idle: waits for a human. `meta.interaction` labels the prompt; the legal
     // events (APPROVE / DENY) come from the snapshot via getAcceptedEvents.
     awaitingApproval: {
-      tags: ["awaiting-approval"],
       meta: {
         interaction: {
           label: "Amount exceeds the $100 auto-refund limit. Approve or deny.",

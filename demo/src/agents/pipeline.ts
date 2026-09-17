@@ -74,7 +74,7 @@ export const pipelineMachine = agentSetup.createMachine({
       invoke: {
         src: "planTask",
         input: ({ context }) => ({ task: context.task }),
-        onDone: { target: "executing", context: ({ output }) => ({ plan: output }) },
+        onDone: { target: "executing", context: ({ output }) => ({ plan: output.result }) },
         onError: { target: "failed", context: { failedAt: "planning" } },
       },
     },
@@ -82,7 +82,7 @@ export const pipelineMachine = agentSetup.createMachine({
       invoke: {
         src: "executeTask",
         input: ({ context }) => ({ task: context.task, plan: context.plan }),
-        onDone: { target: "verifying", context: ({ output }) => ({ draft: output }) },
+        onDone: { target: "verifying", context: ({ output }) => ({ draft: output.result }) },
         onError: { target: "failed", context: { failedAt: "executing" } },
       },
     },
@@ -90,7 +90,7 @@ export const pipelineMachine = agentSetup.createMachine({
       invoke: {
         src: "verifyTask",
         input: ({ context }) => ({ task: context.task, draft: context.draft }),
-        onDone: { target: "complete", context: ({ output }) => ({ verification: output }) },
+        onDone: { target: "complete", context: ({ output }) => ({ verification: output.result }) },
         onError: { target: "failed", context: { failedAt: "verifying" } },
       },
     },

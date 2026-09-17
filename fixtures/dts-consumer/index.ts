@@ -14,20 +14,18 @@ import { runAgent, setupAgent } from "@statelyai/agent";
 // Something from every entry — proves each entry's public types resolve
 // from the shipped package, not just source. The root block also asserts the
 export {
-  appendMessages,
   eventFromInteraction,
   executeAgentRequest,
   getInteraction,
   getJsonSchema,
-  parseModelRef,
   resolveDecision,
-  runAgentLoop,
   runAgentStream,
   type AgentOutputMode,
   type AgentInteraction,
-  type StructuredOutputEnvelope,
+  type AgentTextResult,
+  type ProviderStructuredOutput,
 } from "@statelyai/agent";
-export { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+export { createAiSdkExecutors, parseModelRef } from "@statelyai/agent/ai-sdk";
 export { createToolLoopMachine, type CreateRouterMachineConfig } from "@statelyai/agent/machines";
 export {
   createOtelTraceHandler,
@@ -78,7 +76,7 @@ export const machine = setup.createMachine({
         input: ({ context }) => ({ topic: context.topic }),
         onDone: {
           target: "done",
-          context: ({ event }) => ({ summary: event.output }),
+          context: ({ event }) => ({ summary: event.output.result }),
         },
       },
     },

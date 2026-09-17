@@ -34,7 +34,7 @@ import {
   setupAgent,
   type RunAgentOptions,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // ─── In-memory sample table (the whole "database") ───
 type Order = { id: number; category: string; amount: number };
@@ -67,10 +67,10 @@ export function executeQuery(plan: QueryPlan, table: Order[] = orders): number {
   return rows.length ? total / rows.length : 0;
 }
 
-export const models = defineModels({
+const models = {
   planner: openai("gpt-5.4-mini"),
   summarizer: openai("gpt-5.4-mini"),
-});
+};
 
 const contextSchema = z.object({
   question: z.string(),
@@ -169,7 +169,7 @@ export const sqlAgentMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question }),
         onDone: ({ output }) => ({
           target: "awaitingApproval",
-          context: { plan: output },
+          context: { plan: output.result },
         }),
         // No plan, no query: end in `failed`, not in a success-shaped output.
         onError: {
@@ -222,7 +222,7 @@ export const sqlAgentMachine = agentSetup.createMachine({
           plan: context.plan,
           result: context.result,
         }),
-        onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { answer: output.result } }),
         // The result is already computed — fall back to a plain rendering.
         onError: ({ context }) => ({
           target: "done",
@@ -267,7 +267,7 @@ export async function runSqlAgentExample(
   } = {},
 ) {
   const { approval = "APPROVE", ...runOptions } = options;
-  // Spread-merge, so passing only `onTransition` keeps the default executors.
+  // Spread-merge, so a caller passing only `onTransition` keeps the live executors.
   const resolved: RunAgentOptions<typeof sqlAgentMachine> = {
     executors: createAiSdkExecutors({ models }),
     ...runOptions,

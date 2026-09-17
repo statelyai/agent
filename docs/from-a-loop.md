@@ -16,7 +16,7 @@ const result = await generateText({ model, prompt, tools });
 you end with this:
 
 ```ts
-const result = await runAgentLoop(machine, { input, executors, onIdle });
+const result = await runAgent(machine, { input, executors });
 ```
 
 The `generateText` call still exists. It moves into the executors, and the loop around it becomes the machine. The result carries `result.output`, the live `result.snapshot`, native `result.persist()`, and aggregated `result.usage`.
@@ -89,10 +89,10 @@ A tool the machine must gate is not a tool any more. It becomes an actor the mac
 import { createAsyncLogic } from "xstate";
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import { } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
-const models = defineModels({ quick: openai("gpt-5.4-mini") });
+const models = { quick: openai("gpt-5.4-mini") };
 
 const emailSchema = z.object({ to: z.string(), subject: z.string(), body: z.string() });
 
@@ -179,7 +179,7 @@ const machine = agentSetup.createMachine({
       invoke: {
         src: "assist",
         input: ({ context }) => ({ request: context.request }),
-        onDone: ({ output }) => ({ target: "deciding", context: { reply: output } }),
+        onDone: ({ output }) => ({ target: "deciding", context: { reply: output.result } }),
       },
     },
     deciding: {
@@ -250,22 +250,26 @@ The loop's `return { pending: true }` becomes a waiting state with no invoke. `r
 
 The `meta.interaction` block is what a host renders for the pause. Declare `meta: interactionMetaSchema` on `setupAgent` to have it typechecked. See [Human in the loop](human-in-the-loop.md).
 
-## Step 4: the run with `runAgentLoop`
+## Step 4: the run with `runAgent`
 
-The loop ran N turns, so its replacement is `runAgentLoop`. It calls `runAgent`, hands each idle snapshot to `onIdle`, and resumes with the event you return. Returning nothing ends the run. Your existing approval callback becomes the body of `onIdle`.
+The loop ran N turns. Its replacement is `runAgent` inside a `while`: each call runs until the machine is done or pauses on a human, and the next call resumes from the persisted snapshot with the event you supply. Your existing approval callback becomes the body of the loop.
 
 ```ts
-import { runAgentLoop } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const executors = createAiSdkExecutors({ models });
 
-const result = await runAgentLoop(machine, {
+let result = await runAgent(machine, {
   input: { request: "Refund my duplicate charge" },
   executors,
-  onIdle: async ({ snapshot }) =>
-    (await approve(snapshot.context.draft)) ? { type: "APPROVE" } : { type: "REJECT" },
 });
+
+while (result.status === "idle") {
+  const event = (await approve(result.snapshot.context.draft))
+    ? { type: "APPROVE" as const }
+    : { type: "REJECT" as const };
+  result = await runAgent(machine, { snapshot: result.persist(), event, executors });
+}
 
 if (result.status === "done") console.log(result.output); // { sent: true, reply: '...' }
 ```
@@ -293,7 +297,7 @@ if (result.status === "idle") {
 See [Choosing a run mode](choosing-a-run-mode.md) for the full set. The executors hold your existing model code:
 
 - The `createAiSdkExecutors` adapter wraps the AI SDK.
-- The `generateText` and `streamText` slots also accept the raw AI SDK functions. Another SDK or a raw `fetch` works the same way.
+- Another SDK, or a raw `fetch`, is three plain functions that return `{ result }`. See [Hosts](hosts.md).
 - The tools, retry logic, and provider calls you already wrote move across unchanged.
 
 Only the `while` loop is removed. See [Hosts](hosts.md).
@@ -324,8 +328,7 @@ To handle the human pause over HTTP, persist the snapshot with `runAgent` and re
 Before you ship, pin the new machine's behavior with a deterministic playthrough that uses no model. `simulateAgent` scripts the decisions and traverses the same machine transitions as `runAgent`, with no API key and no network access.
 
 ```ts
-import { simulateAgent } from "@statelyai/agent";
-
+import { simulateAgent } from "@statelyai/agent/testing";
 // The agent must stop for approval instead of sending.
 const result = await simulateAgent(machine, {
   input: { request: "Refund my duplicate charge" },
@@ -359,7 +362,7 @@ drafting: {
     input: ({ context }) => ({ topic: context.topic }),
     onDone: ({ output }) => ({
       target: "reviewing",
-      context: { draft: output },
+      context: { draft: output.result },
     }),
   },
 }

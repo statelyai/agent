@@ -24,4 +24,4 @@ Common errors:
 
 An event the active state has no transition for is not an error: the run settles normally and the event comes back as `result.ignored`.
 
-`lintAgentMachine` reports only Agent-specific mistakes: decisions with no candidate events, direct object request sources that a host cannot bind, and returned messages with no `agent.messages` transition. General state-machine lint belongs in XState tooling.
+`lintAgentMachine` reports only Agent-specific mistakes: decisions with no candidate events, direct object request sources that a host cannot bind, and invokes with no error path. General state-machine lint belongs in XState tooling.

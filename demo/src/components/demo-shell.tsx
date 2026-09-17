@@ -19,7 +19,8 @@ import {
 } from "@/lib/example-library";
 import { humanizeEventType } from "@/lib/machine-ui";
 import { declareScenarioMachine, resumeScenario, startScenario } from "@/lib/run-demo-agent";
-import { getScenario, scenarios } from "@/lib/scenarios";
+import { getScenario, scenarios, scenarioVizConfig } from "@/lib/scenarios";
+import { WALKTHROUGH_NOTE } from "@/lib/walkthrough-executors";
 import type { Selection } from "@/lib/selection";
 import {
   createShellStore,
@@ -94,7 +95,6 @@ export function DemoShell() {
     ? (exampleDetail ?? examples.find((example) => example.id === selection.id) ?? null)
     : null;
   const activeMachine = exampleDetail?.machines[machineIndex] ?? exampleDetail?.machines[0] ?? null;
-
 
   // A resumed turn reuses the session's inspector, so no init/actorRegistered
   // arrives for the root — remember its session id across turns;
@@ -534,6 +534,7 @@ export function DemoShell() {
           ? "Send a message…"
           : `${activeMachine.promptField}…`,
       submitLabel: started ? "Send" : "Start run",
+      ...(exampleDetail.mode === "walkthrough" ? { note: WALKTHROUGH_NOTE } : {}),
     };
   })();
 
@@ -552,35 +553,35 @@ export function DemoShell() {
   const starters: StarterAction[] = isScenario
     ? scenario.starters.map((text) => ({ label: text, onStart: () => submit(text) }))
     : (exampleSummary?.starters ?? []).flatMap((starter) => {
-          // A runner needs no machine — it IS the whole story — and no API
-          // key: a multi-run example scripts its own executors, so these chips
-          // stay offered on a server that cannot run anything else.
-          if (starter.kind === "runner") {
-            return [
-              {
-                label: starter.label,
-                onStart: () => startExampleRunner(starter.label, starter.exportName),
-              },
-            ];
-          }
-          if (!exampleDetail?.runnable || !activeMachine) return [];
-          if (starter.kind === "text") {
-            const field = activeMachine.promptField;
-            return [
-              {
-                label: starter.label,
-                onStart: () =>
-                  field
-                    ? startExampleRun(starter.text, { [field]: starter.text })
-                    : // No prompt input: start with defaults, then say it.
-                      startExampleRun(`Start · ${activeMachine.exportName}`, {}, starter.text),
-              },
-            ];
-          }
+        // A runner needs no machine — it IS the whole story — and no API
+        // key: a multi-run example scripts its own executors, so these chips
+        // stay offered on a server that cannot run anything else.
+        if (starter.kind === "runner") {
           return [
-            { label: starter.label, onStart: () => startExampleRun(starter.label, starter.input) },
+            {
+              label: starter.label,
+              onStart: () => startExampleRunner(starter.label, starter.exportName),
+            },
           ];
-        });
+        }
+        if (!exampleDetail?.runnable || !activeMachine) return [];
+        if (starter.kind === "text") {
+          const field = activeMachine.promptField;
+          return [
+            {
+              label: starter.label,
+              onStart: () =>
+                field
+                  ? startExampleRun(starter.text, { [field]: starter.text })
+                  : // No prompt input: start with defaults, then say it.
+                    startExampleRun(`Start · ${activeMachine.exportName}`, {}, starter.text),
+            },
+          ];
+        }
+        return [
+          { label: starter.label, onStart: () => startExampleRun(starter.label, starter.input) },
+        ];
+      });
 
   const intro = isScenario ? (
     <ScenarioIntro scenario={scenario} />
@@ -620,11 +621,44 @@ export function DemoShell() {
       : null;
   const liveWs = inspection;
 
+  // Without live inspection the pane draws the machine itself: the SDK embed
+  // takes the machine's source (examples) or JSON config (scenarios), and the
+  // plain outline is the last resort. Both light the latest settled step.
+  const machineConfig: unknown = isScenario
+    ? scenarioVizConfig[scenario.id]
+    : (activeMachine?.vizConfig ?? null);
+  const outlineConfig = isScenario
+    ? scenarioVizConfig[scenario.id]
+    : activeMachine && typeof activeMachine.vizConfig === "object"
+      ? activeMachine.vizConfig
+      : null;
+  const latestStep = (() => {
+    for (let index = turns.length - 1; index >= 0; index--) {
+      const turn = turns[index];
+      if (turn.status !== "ready" || !turn.result) continue;
+      const last = turn.result.trace[turn.result.trace.length - 1];
+      if (!last) continue;
+      const status =
+        turn.result.status === "done"
+          ? "done"
+          : turn.result.status === "error"
+            ? "error"
+            : "active";
+      return { value: last.value, context: last.context, event: last.event, status } as const;
+    }
+    return null;
+  })();
+
   const vizPanel = (
     <VizPanel
       title={headerName}
       hasMachine={isScenario || !!activeMachine?.vizConfig}
       inspectionUnavailable={inspectionChecked && !inspection}
+      machineKey={inspectKey ?? ""}
+      machineConfig={machineConfig}
+      outlineConfig={outlineConfig}
+      step={latestStep}
+      theme={theme}
       liveWs={liveWs}
       liveUrl={liveUrl}
       onSystemMessage={handleSystemMessage}

@@ -70,7 +70,7 @@ export const researchMachine = agentSetup.createMachine({
               invoke: {
                 src: "researchRisks",
                 input: ({ context }) => ({ topic: context.topic }),
-                onDone: { target: "done", context: ({ output }) => ({ risks: output }) },
+                onDone: { target: "done", context: ({ output }) => ({ risks: output.result }) },
               },
             },
             done: { type: "final" },
@@ -83,7 +83,10 @@ export const researchMachine = agentSetup.createMachine({
               invoke: {
                 src: "researchOpportunities",
                 input: ({ context }) => ({ topic: context.topic }),
-                onDone: { target: "done", context: ({ output }) => ({ opportunities: output }) },
+                onDone: {
+                  target: "done",
+                  context: ({ output }) => ({ opportunities: output.result }),
+                },
               },
             },
             done: { type: "final" },
@@ -99,7 +102,7 @@ export const researchMachine = agentSetup.createMachine({
           risks: context.risks ?? "",
           opportunities: context.opportunities ?? "",
         }),
-        onDone: { target: "complete", context: ({ output }) => ({ synthesis: output }) },
+        onDone: { target: "complete", context: ({ output }) => ({ synthesis: output.result }) },
       },
     },
     complete: {

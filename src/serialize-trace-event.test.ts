@@ -4,7 +4,6 @@ import {
   AgentDecisionExhaustedError,
   AgentError,
   AgentInvalidEventPayloadError,
-  AgentLintError,
   createAgentSchemas,
   createTextLogic,
   runAgent,
@@ -14,6 +13,7 @@ import {
   type JsonSerializableTraceEvent,
   type RunAgentErrorCause,
 } from "./index.js";
+import { AgentLintError } from "./testing/index.js";
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 // ─── Compile-time pin: the derived JsonSerializableTraceEvent must stay
@@ -274,7 +274,7 @@ describe("serializeTraceEvent", () => {
         drafting: {
           invoke: {
             src: "draft",
-            onDone: ({ output }) => ({ target: "done", context: { draft: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { draft: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ draft: context.draft ?? "" }) },
@@ -284,7 +284,7 @@ describe("serializeTraceEvent", () => {
     const trace: AgentTraceEvent<typeof machine>[] = [];
     const result = await runAgent(machine, {
       onTrace: (event) => trace.push(event),
-      executors: { generateText: async () => ({ output: "a draft", raw: { provider: {} } }) },
+      executors: { generateText: async () => ({ result: "a draft", raw: { provider: {} } }) },
     });
 
     expect(result.status).toBe("done");

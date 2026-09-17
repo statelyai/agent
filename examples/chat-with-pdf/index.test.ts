@@ -57,7 +57,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
       gradePrompts.push(request.prompt ?? "");
       const answer = (request.prompt ?? "").match(/Learner's answer: (.*)/)?.[1] ?? "";
       return {
-        output: {
+        result: {
           correct: options.grade ? options.grade(answer) : true,
           expected: options.expected ?? "the expected answer",
           explanation: `graded "${answer}"`,
@@ -69,7 +69,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
     passages.push(passage);
     questionNumber += 1;
     return {
-      output: {
+      result: {
         type: "short-answer",
         question: `Q${questionNumber} about: ${passage.slice(0, 24)}`,
         choices: [],

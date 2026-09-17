@@ -4,6 +4,7 @@ import {
   DECIDE_SRC,
   emptyPayload,
   entryInput,
+  entryOutput,
   entrySrc,
   jsonNumber,
   jsonRecord,
@@ -181,7 +182,7 @@ export function createSupervisorMachine<const TWorkers extends Record<string, Pr
         onDone: ({ context, output }: { context: SupervisorContext; output: unknown }) => ({
           target: "supervising",
           context: {
-            results: { ...context.results, [name]: output },
+            results: { ...context.results, [name]: entryOutput(entry, output) },
             turns: context.turns + 1,
           },
         }),

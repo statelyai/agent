@@ -142,7 +142,7 @@
         "onDone": {
           "target": "awaitingApproval",
           "assign": {
-            "reply": "{{ event.output.reply }}"
+            "reply": "{{ event.output.result.reply }}"
           }
         },
         "onError": {

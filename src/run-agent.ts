@@ -39,7 +39,6 @@ import {
   isTextLogic,
   normalizeGeneratorResult,
   STREAM_TEXT_ACTOR,
-  USER_INPUT_ACTOR,
   type AgentCallUsage,
   type AgentFinishReason,
   type AgentUsage,
@@ -47,8 +46,8 @@ import {
   type AgentRequestExecutor,
   type AgentRequestExecutors,
   type AgentTextRequest,
-  type AgentUserInput,
   type TextLogic,
+  responseMessagesOf,
 } from "./text-logic.js";
 import {
   AgentDecisionExhaustedError,
@@ -61,14 +60,11 @@ import {
 import type { AgentRequest, AgentStepRequest } from "./steps.js";
 import {
   executorBoundLogics,
-  DEFAULT_AGENT_EXECUTORS,
   getMachineIdlePredicate,
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
-  type DefaultExecutorsRegistry,
 } from "./internal/registry.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
-import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
 import {
   AgentMachineVersionMismatchError,
   agentCallOccurrence,
@@ -157,11 +153,6 @@ function readAgentMeta(snapshot: unknown): Partial<AgentRunMeta> | undefined {
   return meta !== null && typeof meta === "object" ? (meta as Partial<AgentRunMeta>) : undefined;
 }
 
-/** Handler for `agent.userInput` invokes passed as {@link RunAgentOptions.userInput}. Resolves to what the human typed. */
-export interface AgentUserInputExecutor {
-  (input: AgentUserInput): PromiseLike<string>;
-}
-
 /** Typed root-machine transition observer accepted by {@link runAgent}. */
 export type AgentTransitionHandler<TMachine extends AnyStateMachine> = (
   snapshot: SnapshotFrom<TMachine>,
@@ -200,7 +191,7 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
       output: unknown;
       raw: unknown;
       /** The model's reasoning, lifted off the raw executor result when the
-       * request opted into the structured-output envelope's `reasoning` field.
+       * request opted into the provider output's `reasoning` field.
        * Present only when the executor surfaced a string `reasoning`. */
       reasoning?: string;
       /** This call's token usage, lifted off the raw executor result's `usage`.
@@ -240,7 +231,6 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
           type: "run.end";
           status: "idle";
           snapshot: SnapshotFrom<TMachine>;
-          pendingUserInputs?: PendingUserInput[];
         }
       | {
           type: "run.end";
@@ -522,17 +512,6 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   /** Actor source implementations, merged onto the machine before binding — sugar for `machine.provide({ actors })` ahead of the run. */
   actors?: Record<string, AnyActorLogic>;
 
-  /**
-   * Optional human-input handler for `agent.userInput` invokes (CLI prompt,
-   * web form, Slack, …). With a handler, input is gathered inline without
-   * settling. Without one, an `agent.userInput` invoke becomes a *pending
-   * placeholder*: it waits indefinitely, does not block idle detection, and
-   * the run settles `{ status: 'idle', pendingUserInputs }` once no other work
-   * is in flight — persist with `result.persist()` and resume that snapshot
-   * with a `userInput` handler that answers it.
-   */
-  userInput?: AgentUserInputExecutor;
-
   // observation — all void; no callback controls the run
   /**
    * Sugar over {@link onTrace}'s `stream.chunk` events: fires for each streamed
@@ -547,7 +526,7 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * result (tool calls, usage, …) — the seam for tracing/observability and
    * event-sourced replay logging.
    */
-  onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
+  onResult?: (request: AgentStepRequest, result: { result: unknown; raw: unknown }) => void;
   /** Fires a single ordered stream of run/request/chunk/transition/emit/end events. Intended for eval traces, JSONL logs, and adapter-owned telemetry/exporters. */
   onTrace?: (event: AgentTraceEvent<TMachine>) => void;
   /**
@@ -617,20 +596,9 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
  * underlying actor is stopped on every settle path — there is no live actor to
  * resume; resume is always by snapshot.
  */
-/** A pending unhandled `agent.userInput` invoke surfaced on an idle settle — `id` is the invoke's id, `input` its resolved invoke input (prompt, metadata). Answer it by resuming with a `userInput` handler. */
-export interface PendingUserInput {
-  id: string;
-  input: AgentUserInput | undefined;
-}
-
 type RunAgentOutcome<TMachine extends AnyStateMachine> =
   | { status: "done"; output: OutputFrom<TMachine>; snapshot: SnapshotFrom<TMachine> }
-  | {
-      status: "idle";
-      snapshot: SnapshotFrom<TMachine>;
-      /** Present when the machine is waiting on unhandled `agent.userInput` invokes: one entry per pending invoke. */
-      pendingUserInputs?: PendingUserInput[];
-    }
+  | { status: "idle"; snapshot: SnapshotFrom<TMachine> }
   | {
       status: "error";
       cause: RunAgentErrorCause;
@@ -912,15 +880,6 @@ function assertMachineBindable(
       continue;
     }
 
-    if (src === USER_INPUT_ACTOR) {
-      // Handled or not, `agent.userInput` is always bindable: without a
-      // `userInput` option or actor source it is bound as a pending
-      // placeholder that settles the run idle (see the binding step below).
-      // (Only meaningful for the top-level machine — a child machine's own
-      // userInput placeholder still binds harmlessly.)
-      continue;
-    }
-
     if (isDecisionLogic(logic)) {
       // A decision source with its own bound executor runs itself.
       if (executorBoundLogics.has(logic as object)) {
@@ -1136,7 +1095,7 @@ interface TraceSinks {
   /** Envelope-stamping trace sink (run-scoped on the runAgent path, per-root-actor on the provide path). */
   onTrace?: (payload: AgentTraceEventPayload, self?: BoundActorSelf) => void;
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
-  onResult?: (request: AgentStepRequest, result: { output: unknown; raw: unknown }) => void;
+  onResult?: (request: AgentStepRequest, result: { result: unknown; raw: unknown }) => void;
   onTransition?: (
     snapshot: SnapshotFrom<AnyStateMachine>,
     event: EventFromLogic<AnyStateMachine>,
@@ -1163,7 +1122,7 @@ function createTraceDispatch(sinks: TraceSinks): TraceDispatch {
         sinks.onChunk?.(payload.chunk, { request: payload.request });
         return;
       case "request.end":
-        sinks.onResult?.(payload.request, { output: payload.output, raw: payload.raw });
+        sinks.onResult?.(payload.request, { result: payload.output, raw: payload.raw });
         sinks.onTrace?.(payload, self);
         return;
       case "machine.transition":
@@ -1259,32 +1218,10 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
         ...(id !== "" ? { requestId: id } : {}),
         ...(callKey !== undefined ? { callKey } : {}),
       });
-      const output = await normalizeGeneratorResult(raw, id, {
-        request,
-        onChunk: (chunk: string) => {
-          runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
-        },
-      });
+      const output = await normalizeGeneratorResult(raw, id);
 
-      const responseMessages = (raw as { messages?: unknown } | null | undefined)?.messages;
-      if (Array.isArray(responseMessages) && responseMessages.length > 0) {
-        const parent = invokingActorOf(self, runCtx);
-        const event = {
-          type: AGENT_MESSAGES_EVENT_TYPE,
-          request: request.name!,
-          actorId: id,
-          messages: responseMessages,
-        };
-        // Transcript retention is explicit machine behavior. An executor may
-        // return messages even when this machine intentionally ignores them;
-        // only deliver when the current configuration accepts the event.
-        if ((parent?.getSnapshot() as AnyMachineSnapshot | undefined)?.can(event)) {
-          parent?.send(event);
-        }
-      }
-
-      // Lift `reasoning` off the raw executor result (structured-output
-      // envelope opt-in) onto the request.end trace — never into machine output.
+      // Lift `reasoning` off the raw executor result (the provider output's
+      // opt-in field) onto the request.end trace — never into machine output.
       const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
       const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
 
@@ -1319,7 +1256,7 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
         self,
       );
 
-      return { output };
+      return { result: output, messages: responseMessagesOf(raw) };
     } catch (error) {
       runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
       throw error;
@@ -1830,8 +1767,7 @@ function rebindChildMachine(
       }
       continue;
     }
-    // Non-agent actors, `agent.userInput`, and placeholders pass through
-    // untouched (child userInput is not given the top-level HITL placeholder).
+    // Non-agent actors and placeholders pass through untouched.
   }
 
   return Object.keys(wrapped).length > 0
@@ -1856,9 +1792,7 @@ function rebindChildMachine(
  * could reach is walked and checked against the effective actor sources
  * (`options.actors` merged onto the machine), so a missing
  * `streamText`/`decide` executor or any other unbound actor source throws
- * immediately — a bind-time error, not a mid-run failure. The one exception
- * is `agent.userInput`: unhandled, it binds as a pending placeholder that
- * settles the run idle (with `pendingUserInputs`) instead of erroring.
+ * immediately — a bind-time error, not a mid-run failure.
  *
  * @example
  * ```ts
@@ -1872,11 +1806,9 @@ function rebindChildMachine(
  * console.log(r.output);
  * ```
  *
- * The `executors`' `generateText`/`streamText` accept the raw Vercel AI SDK
- * functions directly (`executors: { generateText, streamText }` with them
- * imported from `ai`) — their `{ text }`/`{ textStream }` results are unwrapped
- * natively. `decide` cannot be a raw AI SDK function: the tool-per-event mapping
- * lives in an adapter — use `createAiSdkExecutors` from '@statelyai/agent/ai-sdk'.
+ * Each executor is a plain function returning `{ result }` (plus optional `messages`/`usage`), or
+ * an adapter's set: `createAiSdkExecutors` from '@statelyai/agent/ai-sdk' or
+ * `createOpenAiExecutors` from '@statelyai/agent/openai' supply all three.
  */
 export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
@@ -2270,13 +2202,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
   const effectiveSources = provided.sources.actors as Record<string, AnyActorLogic>;
 
-  const registeredModels = getRegisteredAgentExecutionOptions(machine).models as
-    | DefaultExecutorsRegistry
-    | undefined;
-  const executors = {
-    ...registeredModels?.[DEFAULT_AGENT_EXECUTORS]?.(),
-    ...options.executors,
-  };
+  const executors = { ...options.executors };
 
   assertBindable(provided, effectiveSources, executors);
 
@@ -2294,38 +2220,14 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
   };
 
+  const wrappedSources: Record<string, AnyActorLogic> = {};
+
   // §3.2 step 2: wrap every effective TextLogic/DecisionLogic (and the
   // agent.* builtins) with a host-backed executor. Invoked child machines are
   // recursively rebound so their requests inherit the same executors at any
   // depth (see rebindChildMachine). Every other source (plain actors,
   // non-agent logic) passes through untouched.
-  // True when unhandled `agent.userInput` invokes are bound as pending
-  // placeholders: they wait indefinitely and must not block idle detection.
-  let userInputIsPlaceholder = false;
-
-  const wrappedSources: Record<string, AnyActorLogic> = {};
   for (const [key, logic] of Object.entries(effectiveSources)) {
-    if (key === USER_INPUT_ACTOR) {
-      if (options.userInput) {
-        const userInput = options.userInput;
-        wrappedSources[key] = createAsyncLogic<string, AgentUserInput>({
-          run: async ({ input }) => await userInput(input),
-        });
-      } else if (isUnboundPlaceholder(logic)) {
-        // The blessed HITL placeholder: with no handler, an `agent.userInput`
-        // invoke waits forever. Idle detection ignores it, so the run settles
-        // `{ status: 'idle', pendingUserInputs }` once no
-        // OTHER work is in flight (a sibling parallel region keeps running).
-        // Resume with the persisted snapshot plus a `userInput` handler; the
-        // restored invoke re-runs against the handler and completes.
-        userInputIsPlaceholder = true;
-        wrappedSources[key] = createAsyncLogic<string, AgentUserInput>({
-          run: () => new Promise<never>(() => {}),
-        });
-      }
-      continue;
-    }
-
     if (isDecisionLogic(logic)) {
       wrappedSources[key] = bindDecisionLogic(logic, runCtx);
       continue;
@@ -2363,8 +2265,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // otherwise a resting configuration with event handlers (or interaction
   // metadata) is an intentional external wait.
   const isIdle = getMachineIdlePredicate(machine) ?? isAgentIdle;
-  const isIntentionalIdle = (snapshot: AnyMachineSnapshot) =>
-    isIdle(snapshot) || collectPendingUserInputs(snapshot).length > 0;
+  const isIntentionalIdle = (snapshot: AnyMachineSnapshot) => isIdle(snapshot);
 
   // ─── Resume precedence: the log is truth, the snapshot is a cache ───
   //
@@ -2701,12 +2602,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     // any value that would silently corrupt (Date, Map, Set, function,
     // undefined, class instance, circular). Never throws.
     warnNonSerializableContext(current);
-    const pendingUserInputs = userInputIsPlaceholder ? collectPendingUserInputs(current) : [];
-    settle({
-      status: "idle",
-      snapshot: current as SnapshotFrom<TMachine>,
-      ...(pendingUserInputs.length > 0 ? { pendingUserInputs } : {}),
-    });
+    settle({ status: "idle", snapshot: current as SnapshotFrom<TMachine> });
   };
 
   // The run-level error cause ladder.
@@ -2731,10 +2627,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
         return;
       }
       const current = actor.getSnapshot() as AnyMachineSnapshot;
-      if (
-        isIntentionalIdle(current) &&
-        isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })
-      ) {
+      if (isIntentionalIdle(current) && isIdleSnapshot(current)) {
         settleIdle(current);
       }
     }, 0);
@@ -2789,7 +2682,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       // transition is external when its event came from outside the root actor
       // (a host `send`, the resume event, a child's
       // `xstate.done.actor`/`xstate.error.actor`, the reserved `@agent.usage`
-      // and `agent.messages` events this library sends). `xstate.timer` is the
+      // event this library sends). `xstate.timer` is the
       // one self-sent input that must be retained — a fired `after` delay is
       // real time passing, not machine logic. Raised/internal events and
       // `@xstate.init` are re-derived by `initialTransition`/`transition`.
@@ -2849,11 +2742,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       // resume's restore transition so the pending event is delivered first.
       // Everything else (untagged machines, or a idle snapshot with
       // sibling work still running) falls through to the timing heuristic.
-      if (
-        !deliveringResumeEvent &&
-        isIntentionalIdle(snapshot) &&
-        isIdleSnapshot(snapshot, { ignoreUserInputChildren: userInputIsPlaceholder })
-      ) {
+      if (!deliveringResumeEvent && isIntentionalIdle(snapshot) && isIdleSnapshot(snapshot)) {
         // Not settled synchronously: the event that reached this idle
         // state may have come from an invoked child mid-flush (child →
         // parent, whose handler sendTo's the child back). A sync settle
@@ -2865,10 +2754,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
             return;
           }
           const current = actor.getSnapshot() as AnyMachineSnapshot;
-          if (
-            isIntentionalIdle(current) &&
-            isIdleSnapshot(current, { ignoreUserInputChildren: userInputIsPlaceholder })
-          ) {
+          if (isIntentionalIdle(current) && isIdleSnapshot(current)) {
             settleIdle(current);
           } else {
             // A drained child event started new work (or left the idle state)
@@ -3059,22 +2945,13 @@ export function traceTransitions<TMachine extends AnyStateMachine = AnyStateMach
   };
 }
 
-// True when a snapshot is active but has no in-flight children and no pending eventless/after work — see §3.3 in .scratch/p0-design.md for the approximation this makes. `ignoreUserInputChildren` exempts pending `agent.userInput` placeholder children (they wait for a human indefinitely and must not block an idle settle).
-function isIdleSnapshot(
-  snapshot: AnyMachineSnapshot,
-  { ignoreUserInputChildren }: { ignoreUserInputChildren: boolean },
-): boolean {
+// True when a snapshot is active but has no in-flight children and no pending eventless/after work — see §3.3 in .scratch/p0-design.md for the approximation this makes.
+function isIdleSnapshot(snapshot: AnyMachineSnapshot): boolean {
   if (snapshot.status !== "active") {
     return false;
   }
   const childrenBusy = Object.values(snapshot.children ?? {}).some((child) => {
     const ref = child as AnyActorRef | undefined;
-    if (
-      ignoreUserInputChildren &&
-      (ref as { src?: unknown } | undefined)?.src === USER_INPUT_ACTOR
-    ) {
-      return false;
-    }
     const childSnapshot = ref?.getSnapshot?.();
     if (childSnapshot?.status !== "active") {
       return false;
@@ -3085,7 +2962,7 @@ function isIdleSnapshot(
     // idle settle. Non-machine children (promises, decide invokes) that are
     // active are always in-flight work.
     if (isMachineSnapshot(childSnapshot)) {
-      return !isIdleSnapshot(childSnapshot, { ignoreUserInputChildren });
+      return !isIdleSnapshot(childSnapshot);
     }
     return true;
   });
@@ -3119,21 +2996,4 @@ export function isAgentIdle(snapshot: AnyMachineSnapshot): boolean {
     return typeof meta === "object" && meta !== null && "interaction" in meta;
   });
   return hasInteraction || getAcceptedEvents(snapshot).length > 0;
-}
-
-// Gathers the still-active `agent.userInput` placeholder children off an idle snapshot: one {@link PendingUserInput} per pending invoke, with the invoke's resolved input (prompt, metadata) read off the child's own snapshot.
-function collectPendingUserInputs(snapshot: AnyMachineSnapshot): PendingUserInput[] {
-  const pending: PendingUserInput[] = [];
-  for (const [id, child] of Object.entries(snapshot.children ?? {})) {
-    const ref = child as (AnyActorRef & { src?: unknown }) | undefined;
-    if (ref?.src !== USER_INPUT_ACTOR) {
-      continue;
-    }
-    const childSnapshot = ref.getSnapshot?.() as { status?: unknown; input?: unknown } | undefined;
-    if (childSnapshot?.status !== "active") {
-      continue;
-    }
-    pending.push({ id, input: childSnapshot.input as AgentUserInput | undefined });
-  }
-  return pending;
 }

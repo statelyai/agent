@@ -1,5 +1,6 @@
 import { setupAgent } from "../setup-agent.js";
 import type { AgentTools, StandardSchemaV1 } from "../types.js";
+import type { AgentTextResult } from "../text-logic.js";
 import {
   assertEntryNames,
   GENERATE_TEXT_SRC,
@@ -131,11 +132,11 @@ export function createSequentialMachine(config: CreateSequentialMachineConfig): 
                 ? context.prompt
                 : String(context.previous),
           ),
-        onDone: ({ context, output }: { context: SequentialContext; output: unknown }) => ({
+        onDone: ({ context, output }: { context: SequentialContext; output: AgentTextResult }) => ({
           target: next,
           context: {
-            results: { ...context.results, [step.name]: output },
-            previous: output,
+            results: { ...context.results, [step.name]: output.result },
+            previous: output.result,
           },
         }),
       },

@@ -13,7 +13,7 @@ test("workflow.json is real JSON data, not code", () => {
 });
 
 test("REPLY path: the draft settles idle, and APPROVE reaches the replied final state", async () => {
-  const generateText = async () => ({ output: { reply: "Sorry about that — refund issued." } });
+  const generateText = async () => ({ result: { reply: "Sorry about that — refund issued." } });
   const decide = async () => ({ event: { type: "REPLY" as const } });
 
   const first = await runAgent(jsonAgentMachine, {
@@ -43,7 +43,7 @@ test("REPLY path: the draft settles idle, and APPROVE reaches the replied final 
 });
 
 test("REJECT path: rejecting the draft escalates and keeps the drafted reply", async () => {
-  const generateText = async () => ({ output: { reply: "Here is a workaround." } });
+  const generateText = async () => ({ result: { reply: "Here is a workaround." } });
   const decide = async () => ({ event: { type: "REPLY" as const } });
 
   const first = await runAgent(jsonAgentMachine, {

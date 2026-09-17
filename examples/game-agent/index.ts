@@ -19,7 +19,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
   getInteraction,
@@ -91,9 +91,9 @@ export const rpsSchemas = createAgentSchemas({
   },
 });
 
-export const rpsModels = defineModels({
+const rpsModels = {
   movePicker: openai("gpt-5.4-mini"),
-});
+};
 
 const BEATS: Record<Move, Move> = {
   rock: "scissors",

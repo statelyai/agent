@@ -11,9 +11,9 @@ import { MAX_REVISIONS, emailDrafter } from "./agent-logic.js";
 const executors = {
   generateText: async ({ name }) =>
     name === "evaluatePrompt"
-      ? { output: { satisfied: true, missing: [], questions: [] } }
+      ? { result: { satisfied: true, missing: [], questions: [] } }
       : {
-          output: {
+          result: {
             to: "team@example.com",
             subject: "Deploy pipeline is faster",
             body: "Hi team, deploys are twice as fast now.",

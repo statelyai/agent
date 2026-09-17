@@ -11,7 +11,6 @@ import { getAgentExecutionOptions } from "./internal/registry.js";
 import type { StandardSchemaV1 } from "./types.js";
 import { isRecord } from "./internal/is-record.js";
 import { validateSchemaSync } from "./utils.js";
-import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
 
 /**
  * Thrown by {@link parseAgentEvent} (and {@link eventFromInteraction}) when a
@@ -36,14 +35,8 @@ export class AgentInvalidEventPayloadError extends AgentError {
 // `& {}` keeps literal-union autocomplete alive while still allowing any string — a bare `string` in a union would swallow the literals.
 export type AgentRequestSource = string & {};
 
-/** Default prefix for the synthetic tool name generated per candidate event (e.g. `send_event_ASK`). Override per-request with {@link AgentEventToolNameResolver}. @internal */
+/** Prefix for the synthetic tool name generated per candidate event (e.g. `send_event_ASK`). @internal */
 const EVENT_TOOL_PREFIX = "send_event_" as const;
-
-/** Customizes the tool name generated for a candidate event; see {@link AgentRequestOptions.eventToolName}. */
-export type AgentEventToolNameResolver = (args: {
-  eventType: string;
-  defaultToolName: string;
-}) => string;
 
 // Short deterministic hash, used to keep generated tool names within length limits while staying unique.
 function hashString(value: string): string {
@@ -103,8 +96,8 @@ function matchesEventPattern(eventType: string, pattern: string): boolean {
 }
 
 /**
- * Event types reserved for delivery by the library (`@agent.*` and
- * `agent.messages`). A machine may declare transitions on them,
+ * Event types reserved for delivery by the library (`@agent.*`). A machine
+ * may declare transitions on them,
  * but they are never model-facing: {@link getAcceptedEvents} drops them before
  * any `allowedEvents` matching, so they cannot be offered as a decision
  * candidate (not even under a `'*'` wildcard) and {@link parseAgentEvent}
@@ -114,9 +107,7 @@ function matchesEventPattern(eventType: string, pattern: string): boolean {
 const RESERVED_AGENT_EVENT_PREFIX = "@agent.";
 
 function isReservedAgentEvent(eventType: string): boolean {
-  return (
-    eventType.startsWith(RESERVED_AGENT_EVENT_PREFIX) || eventType === AGENT_MESSAGES_EVENT_TYPE
-  );
+  return eventType.startsWith(RESERVED_AGENT_EVENT_PREFIX);
 }
 
 /** True when an `allowedEvents` entry is a wildcard pattern rather than a concrete event type. @internal */
@@ -144,8 +135,6 @@ export interface AgentRequestOptions {
   events?: Record<string, StandardSchemaV1>;
   schemas?: AgentSchemas;
   actors?: Record<string, unknown>;
-  /** Customize machine-event tool names. Defaults to send_event_<TYPE>. */
-  eventToolName?: AgentEventToolNameResolver;
 }
 
 /** Recovers a machine's event union from its snapshot type, so {@link parseAgentEvent} returns the machine-typed event without a downstream cast. @internal */
@@ -243,7 +232,7 @@ export function parseAgentEvent<TSource extends AnyStateMachine | AnyMachineSnap
  */
 export function getAcceptedEvents(
   snapshot: AnyMachineSnapshot,
-  options: Pick<AgentRequestOptions, "events" | "schemas" | "eventToolName"> & {
+  options: Pick<AgentRequestOptions, "events" | "schemas"> & {
     eventTypes?: readonly string[];
   } = {},
 ): AgentEventDescriptor[] {
@@ -267,9 +256,7 @@ export function getAcceptedEvents(
 
     seen.add(eventType);
     const defaultToolName = sanitizeEventToolName(eventType);
-    const toolName = options.eventToolName
-      ? options.eventToolName({ eventType, defaultToolName })
-      : disambiguateEventToolName(defaultToolName, eventType, usedToolNames);
+    const toolName = disambiguateEventToolName(defaultToolName, eventType, usedToolNames);
 
     const inputSchema = (options.events ?? options.schemas?.events)?.[eventType];
 

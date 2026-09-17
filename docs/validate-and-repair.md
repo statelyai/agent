@@ -33,7 +33,7 @@ states: {
       input: ({ context }) => ({ prompt: context.prompt }),
       // Targetless: the slot records its draft and the other two keep running.
       onDone: ({ context, output }) => ({
-        context: { pending: [...context.pending, output], settled: context.settled + 1 },
+        context: { pending: [...context.pending, output.result], settled: context.settled + 1 },
       }),
       onError: ({ context, event }) => ({
         context: { settled: context.settled + 1, failureReason: reasonFor(event.error) },
@@ -84,7 +84,7 @@ states: {
       }),
       onDone: ({ context, output }) => ({
         target: "parsing",
-        context: { candidate: output, pending: [], repairs: context.repairs + 1 },
+        context: { candidate: output.result, pending: [], repairs: context.repairs + 1 },
       }),
       onError: { target: "failed" },
     },

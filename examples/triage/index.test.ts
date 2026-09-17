@@ -17,10 +17,10 @@ function scriptedExecutor(
     prompts.push(request.prompt);
     switch (request.name) {
       case "classifyTicket":
-        return { output: classification };
+        return { result: classification };
       case "draftReply":
         if (reply instanceof Error) throw reply;
-        return { output: { reply } };
+        return { result: { reply } };
       default:
         throw new Error(`Unexpected request '${request.name}'.`);
     }
@@ -148,7 +148,7 @@ describe("ticket-triage", () => {
     const generateText: AgentRequestExecutor = async (request) => {
       calls += 1;
       if (request.name === "classifyTicket") {
-        return { output: { sentiment: "negative", category: "billing", confidence: 0.9 } };
+        return { result: { sentiment: "negative", category: "billing", confidence: 0.9 } };
       }
       throw new Error("model unavailable");
     };
@@ -169,7 +169,7 @@ describe("ticket-triage", () => {
   test("an out-of-enum category fails validation and ends in `unclassified`", async () => {
     const generateText: AgentRequestExecutor = async () => ({
       // `category` is not one of billing|technical|other.
-      output: { sentiment: "neutral", category: "not-a-category", confidence: 0.9 },
+      result: { sentiment: "neutral", category: "not-a-category", confidence: 0.9 },
     });
 
     const result = await runAgent(triageMachine, {

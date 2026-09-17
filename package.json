@@ -48,6 +48,16 @@
         "default": "./dist/ai-sdk.cjs"
       }
     },
+    "./log": {
+      "import": {
+        "types": "./dist/log.d.mts",
+        "default": "./dist/log.mjs"
+      },
+      "require": {
+        "types": "./dist/log.d.cts",
+        "default": "./dist/log.cjs"
+      }
+    },
     "./machines": {
       "import": {
         "types": "./dist/machines.d.mts",
@@ -76,6 +86,16 @@
       "require": {
         "types": "./dist/otel.d.cts",
         "default": "./dist/otel.cjs"
+      }
+    },
+    "./testing": {
+      "import": {
+        "types": "./dist/testing.d.mts",
+        "default": "./dist/testing.mjs"
+      },
+      "require": {
+        "types": "./dist/testing.d.cts",
+        "default": "./dist/testing.cjs"
       }
     },
     "./validate": {

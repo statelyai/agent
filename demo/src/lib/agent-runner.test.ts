@@ -41,10 +41,28 @@ describe("scenario outcomes (scripted)", () => {
     expect((second.output as { outcome: string }).outcome).toBe("approved");
   });
 
-  test("refund with no amount asks for details", async () => {
-    const result = await start("refund", "I want my money back.");
-    expect(result.status).toBe("done");
-    expect((result.output as { outcome: string }).outcome).toBe("needs-details");
+  test("refund with no amount asks once, then decides on the reply", async () => {
+    const first = await start("refund", "I want my money back.");
+    expect(first.status).toBe("idle");
+    expect(first.idle?.textEvent).toEqual({ type: "DETAILS", field: "text" });
+    expect(first.idle?.prompt).toContain("How much");
+    const second = await resume("refund", first.idle!.snapshot, {
+      type: "DETAILS",
+      text: "It was $60.",
+    });
+    expect(second.status).toBe("done");
+    expect((second.output as { outcome: string; amount: number }).outcome).toBe("refunded");
+    expect((second.output as { amount: number }).amount).toBe(60);
+  });
+
+  test("refund gives up after one unanswered clarification", async () => {
+    const first = await start("refund", "I want my money back.");
+    const second = await resume("refund", first.idle!.snapshot, {
+      type: "DETAILS",
+      text: "I don't remember.",
+    });
+    expect(second.status).toBe("done");
+    expect((second.output as { outcome: string }).outcome).toBe("needs-details");
   });
 
   test("an event the snapshot does not accept is ignored, leaving the state put", async () => {
@@ -112,8 +130,32 @@ describe("scenario outcomes (scripted)", () => {
     expect(output.verification).not.toBe("");
   });
 
+  test("retry answers on the first attempt when the primary is healthy", async () => {
+    const result = await start(
+      "retry",
+      "Classify this ticket: the billing page shows last month's total.",
+    );
+    expect(result.status).toBe("done");
+    const output = result.output as { attempts: number; usedFallback: boolean; outcome: string };
+    expect(output.attempts).toBe(0);
+    expect(output.usedFallback).toBe(false);
+    expect(output.outcome).toBe("Attempt 1 of 3 succeeded on the primary model.");
+  });
+
+  test("retry recovers on the primary after one failure", async () => {
+    const result = await start("retry", "Classify this ticket: exports time out. [primary-outage]");
+    expect(result.status).toBe("done");
+    const output = result.output as { attempts: number; usedFallback: boolean; outcome: string };
+    expect(output.attempts).toBe(1);
+    expect(output.usedFallback).toBe(false);
+    expect(output.outcome).toBe("Attempt 2 of 3 succeeded on the primary model.");
+  });
+
   test("retry reaches fallback success after primary failures", async () => {
-    const result = await start("retry", "I was charged twice and cannot open my invoice.");
+    const result = await start(
+      "retry",
+      "I was charged twice and cannot open my invoice. [primary-outage-hard]",
+    );
     expect(result.status).toBe("done");
     const output = result.output as {
       category: string;
@@ -123,18 +165,20 @@ describe("scenario outcomes (scripted)", () => {
     };
     expect(output.usedFallback).toBe(true);
     expect(output.attempts).toBe(2);
-    expect(output.category).not.toBe("");
+    expect(output.category).toBe("Category: billing · Priority: high · Route to billing support.");
     // The visible outcome names the winning attempt and the model that served it.
     expect(output.outcome).toBe("Attempt 3 of 3 succeeded on the fallback model.");
     expect(result.response).toContain(output.outcome);
   });
 
   test("tools calls a tool then finishes within the cap", async () => {
-    const result = await start("tools", "What is 42 times 17?");
+    const result = await start("tools", "What is 42 times 17, and what is the speed of light?");
     expect(result.status).toBe("done");
     const output = result.output as { answer: string; steps: number };
-    expect(output.steps).toBeGreaterThanOrEqual(1);
-    expect(output.answer).not.toBe("");
+    expect(output.steps).toBe(2);
+    expect(output.answer).toBe(
+      "42 × 17 = 714. The speed of light is 299,792,458 meters per second.",
+    );
   });
 
   test("reflection revises once then accepts", async () => {
@@ -189,8 +233,8 @@ describe("bounded exits", () => {
       {
         generateText: async (request) =>
           request.name === "writeDraft"
-            ? { output: `Draft about the shoreline (${request.prompt?.length ?? 0}).` }
-            : { output: { score: 5, feedback: "Still generic. Name one concrete image." } },
+            ? { result: `Draft about the shoreline (${request.prompt?.length ?? 0}).` }
+            : { result: { score: 5, feedback: "Still generic. Name one concrete image." } },
       },
     );
     expect(result.status).toBe("done");

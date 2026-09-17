@@ -18,14 +18,14 @@ Pass a `requests` map to `setupAgent`. Each entry becomes an invokable actor und
 ```ts
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import { } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
 // Model IDs here are illustrative; substitute your provider's current models.
-const models = defineModels({
+const models = {
   quick: openai("gpt-5.4-mini"),
   careful: openai("gpt-5.4"),
-});
+};
 const answerSchema = z.object({ answer: z.string() });
 
 const agentSetup = setupAgent({
@@ -68,12 +68,12 @@ answering: {
     id: "answer",
     src: "answerQuestion",
     input: ({ context }) => ({ prompt: context.prompt }),
-    onDone: ({ output }) => ({ target: "done", context: { answer: output.answer } }),
+    onDone: ({ output }) => ({ target: "done", context: { answer: output.result.answer } }),
   },
 },
 ```
 
-In `onDone`, `output` is already validated against the request's output schema and typed from it. In this example the type is `{ answer: string }`, so you read `output.answer` directly. The machine needs no parsing step.
+In `onDone`, `output` is `{ result, messages }`. `output.result` is already validated against the request's output schema and typed from it. In this example the type is `{ answer: string }`, so you read `output.result.answer` directly. The machine needs no parsing step. `output.messages` holds the response messages the executor returned, ready to append to context; see [Messages](messages.md).
 
 > **Note:** Route on `request.name`. Every lowered request carries its `setupAgent({ requests })` key as `name`. A mock executor, or a router that picks providers per request, tells requests apart with `request.name === 'answerQuestion'`. Do not inspect the `system` or `prompt` text. See [examples/context-compaction/index.test.ts](../examples/context-compaction/index.test.ts).
 
@@ -93,7 +93,7 @@ const answer = parseOutput(answerSchema, rawOutput); // typed as { answer: strin
 
 Output is structured when the schema describes an object, an array, or a top-level union of them built with `z.union` or `z.discriminatedUnion`. Otherwise the output is plain text. An `output: z.object({ ... })` schema returns a validated object. An `output: z.string()` schema returns the model's text.
 
-> **Note for host implementers:** Every structured request is sent in a root object `{ result: <your schema> }`. The host must unwrap it before validation. This envelope keeps a bare union or array root portable, because providers that reject one at the root still accept it nested under `result`. Machine authors declare and receive the bare schema.
+> **Note for host implementers:** Every structured request is sent to the provider as a root object `{ result: <your schema> }`, built by `providerOutputSchema`. The parsed `result` is what the executor returns and what the machine validates. The wrapper keeps a bare union or array root portable, because providers that reject one at the root still accept it nested under `result`. Machine authors declare and receive the bare schema.
 
 ```ts
 export const triageTicket = createTextLogic({
@@ -117,7 +117,7 @@ The mode is derived from the schema automatically. You never set it. See [exampl
 
 <!-- reasoning opt-in from src/text-logic.ts (AgentTextRequest.includeReasoning) -->
 
-Set `includeReasoning: true` on a structured request to add an optional string `reasoning` field to the envelope. The field is listed before `result`, so the property order prompts the model to reason before answering:
+Set `includeReasoning: true` on a structured request to add an optional string `reasoning` field to the provider's output schema. The field is listed before `result`, so the property order prompts the model to reason before answering:
 
 ```ts
 export const triageTicket = createTextLogic({
@@ -150,7 +150,7 @@ export const tellJoke = createTextLogic({
 
 const result = await runAgent(machine, {
   input: { topic: "state machines" },
-  executors: { generateText, streamText },
+  executors: createAiSdkExecutors({ models }),
   onChunk: (chunk) => process.stdout.write(chunk),
 });
 ```
@@ -172,7 +172,7 @@ The reason reaches observability the way per-call usage does: `runAgent` lifts i
 `'length'` means the output token limit cut the call off. What that costs depends on the request:
 
 - A text request returns the text it did produce, with `finishReason: 'length'`. Nothing throws. The machine decides whether a half-finished draft is worth keeping.
-- A structured request has nothing usable: an envelope that never closed does not parse, and one that stopped mid-thought is not an answer. `createAiSdkExecutors` throws an `AgentTruncatedError`.
+- A structured request has nothing usable: a JSON object that never closed does not parse, and one that stopped mid-thought is not an answer. `createAiSdkExecutors` throws an `AgentTruncatedError`.
 
 `AgentTruncatedError` extends `AgentError` with the code `'truncated'`, so an invoke's `onError` branches on the code without an `instanceof` check across bundles:
 
@@ -182,7 +182,7 @@ answering: {
     id: "answer",
     src: "answerQuestion",
     input: ({ context }) => ({ prompt: context.prompt }),
-    onDone: ({ output }) => ({ target: "done", context: { answer: output.answer } }),
+    onDone: ({ output }) => ({ target: "done", context: { answer: output.result.answer } }),
     onError: [
       { guard: ({ event }) => event.error.code === "truncated", target: "askingForLess" },
       { target: "failed" },

@@ -32,17 +32,30 @@ awaitingApproval: {
 
 ## Type the metadata
 
-`interactionMetaSchema` is the schema for that `meta` shape, so a machine declares it once instead of restating the interaction fields:
+`setupAgent` types every state's `meta` as `AgentInteractionMeta` by default, keyed by the machine's declared events. A choice or `textEvent` that names an event the machine never declared is a compile error:
 
 ```ts no-check
-const schemas = createAgentSchemas({
-  meta: interactionMetaSchema,
+const agentSetup = setupAgent({
   context: contextSchema,
-  events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) }
+  events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
+});
+
+agentSetup.createMachine({
+  // ...
+  states: {
+    review: {
+      meta: {
+        interaction: {
+          label: "Approve {subject}?",
+          events: { APPROVE: "Approve", DECLINE: "Decline" }, // error: DECLINE is not an event
+        },
+      },
+    },
+  },
 });
 ```
 
-It accepts an optional `interaction` with a `label` (a string with `{context.path}` interpolation, or a function of the context), an `events` map of choices, and a `textEvent`. `AgentInteractionMeta` is the matching TypeScript type.
+The descriptor is an optional `interaction` with a `label` (a string with `{context.path}` interpolation, or a function of the context), an `events` map of choices, and a `textEvent`. A machine that declares its own `meta` schema replaces the default; `interactionMetaSchema` is the runtime schema for the interaction shape when you build a schema pack by hand with `createAgentSchemas`.
 
 ## Render and validate
 
@@ -78,15 +91,14 @@ When the answer arrives over the wire instead of from your own code, parse it at
 ## Drive several turns
 
 ```ts no-check
-const result = await runAgentLoop(machine, {
-  input,
-  executors,
-  persist: (snapshot) => storage.put(id, snapshot),
-  onIdle: async ({ snapshot }) => {
-    const interaction = getInteraction(snapshot);
-    return promptUser(interaction);
-  }
-});
+let result = await runAgent(machine, { input, executors });
+
+while (result.status === "idle") {
+  const snapshot = result.persist();
+  await storage.put(id, snapshot);
+  const event = await promptUser(getInteraction(result.snapshot));
+  result = await runAgent(machine, { snapshot, event, executors });
+}
 ```
 
 For HTTP or queue-based applications, persist `result.persist()` and resume in a later request with `runAgent({ snapshot, event })`. Storage remains framework-owned.

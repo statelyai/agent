@@ -12,7 +12,7 @@ function scriptedGenerateText(codes: string[]) {
     prompts.push(request.prompt ?? "");
     const code = codes[i] ?? codes[codes.length - 1]!;
     i++;
-    return { output: { code, explanation: "" } };
+    return { result: { code, explanation: "" } };
   };
   return { generateText, prompts };
 }

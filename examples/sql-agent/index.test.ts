@@ -7,10 +7,10 @@ import { executeQuery, runSqlAgentExample } from "./index.js";
 const generateText = async (request: AgentTextRequest) => {
   switch (request.name) {
     case "planQuery":
-      return { output: { operation: "sum", column: "amount", category: "electronics" } };
+      return { result: { operation: "sum", column: "amount", category: "electronics" } };
     case "summarize":
       // The prompt carries the real computed result.
-      return { output: `Answer: ${request.prompt}` };
+      return { result: `Answer: ${request.prompt}` };
     default:
       throw new Error(`Unexpected request '${request.name}'.`);
   }

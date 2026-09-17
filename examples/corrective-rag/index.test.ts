@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import { createScriptedExecutors } from "@statelyai/agent";
+import { createScriptedExecutors } from "@statelyai/agent/testing";
 import { correctiveRagMachine, runCorrectiveRagExample } from "./index.js";
 
 /**

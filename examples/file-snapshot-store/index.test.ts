@@ -9,7 +9,7 @@ test("writes a native XState snapshot to a JSON file and resumes the run from it
   const output = await runFileSnapshotStoreExample(directory, {
     generateText: async (request) => {
       if (request.name !== "draft") throw new Error(`unexpected request: ${request.name}`);
-      return { output: "Framework-owned persistence." };
+      return { result: "Framework-owned persistence." };
     },
   });
 
@@ -27,7 +27,7 @@ test("one actor stays alive from the model draft through the APPROVE event to do
   const result = await runLongLivedActor("actors", {
     generateText: async (request) => {
       if (request.name !== "draft") throw new Error(`unexpected request: ${request.name}`);
-      return { output: "Keep the actor alive." };
+      return { result: "Keep the actor alive." };
     },
   });
 
@@ -44,7 +44,7 @@ test("refuses to start the long-lived actor when the run is already cancelled", 
       {
         generateText: async () => {
           called = true;
-          return { output: "should never run" };
+          return { result: "should never run" };
         },
       },
       { signal: AbortSignal.abort() },

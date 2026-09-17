@@ -18,7 +18,7 @@ const runOptions: RefundRunOptions = {
         throw new Error(`Unexpected request '${request.name}'.`);
       }
       const { amount } = request.input as { amount: number };
-      return { output: { valid: amount <= AUTO_APPROVAL_LIMIT } };
+      return { result: { valid: amount <= AUTO_APPROVAL_LIMIT } };
     },
   },
   actors: {

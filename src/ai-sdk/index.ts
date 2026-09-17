@@ -13,16 +13,15 @@ import {
   type TypedToolResult,
 } from "ai";
 import {
-  buildEnvelopeSchema,
+  providerOutputSchema,
   type AgentFinishReason,
   type AgentRequestExecutorInfo,
   type AgentTextRequest,
-  type StructuredOutputEnvelope,
+  type ProviderStructuredOutput,
 } from "../text-logic.js";
 import { AgentTruncatedError } from "../errors.js";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
-import { DEFAULT_AGENT_EXECUTORS } from "../internal/registry.js";
 import {
   defined,
   extractFirstJsonValue,
@@ -56,37 +55,29 @@ export type AiSdkModelEntry =
   | LanguageModel
   | { model: LanguageModel; settings?: AiSdkCallSettings };
 
-/** AI SDK model registry: maps model refs (as used in `setupAgent({ models })`/`AgentTextRequest.model`) to AI SDK `LanguageModel` values, or to `{ model, settings }` pairs. The optional `TKey` parameter pins the ref keys (see {@link defineModels}); it defaults to `string`, so bare `AiSdkModelMap` stays `Record<string, AiSdkModelEntry>`. */
-export type AiSdkModelMap<TKey extends string = string> = Record<TKey, AiSdkModelEntry>;
-
 /**
- * Identity helper for a `models` map whose value is exported. Returns the map
- * unchanged, but types it as {@link AiSdkModelMap}`<keyof T & string>` — a
- * portable, nameable type — so an exported `const models = defineModels({...})`
- * needs no `Record<'a' | 'b', LanguageModel>` annotation and never triggers
- * TS2742 ("inferred type cannot be named without a reference to …"). The exact
- * ref keys survive, so `createAiSdkExecutors({ models })` and
- * `setupAgent({ models })` still infer/autocomplete them.
+ * Splits a portable `"provider/model-id"` model ref (the convention JSON
+ * workflows and registry-less hosts use, e.g. `"openai/gpt-5.4-mini"`) into
+ * its parts. A ref with no `/` has no provider — `modelId` is the whole ref.
+ * The standard building block for a host's `resolveModel`:
  *
  * @example
  * ```ts
- * export const models = defineModels({
- *   quick: openai('gpt-5.4-mini'),
- *   deep: openai('gpt-5.4'),
- * });
- * // typeof models === AiSdkModelMap<'quick' | 'deep'>
+ * const resolveModel = (ref: string) => openai(parseModelRef(ref).modelId);
  * ```
  */
-export function defineModels<T extends Record<string, AiSdkModelEntry>>(
-  models: T,
-): AiSdkModelMap<keyof T & string> {
-  const registry = { ...models } as AiSdkModelMap<keyof T & string>;
-  Object.defineProperty(registry, DEFAULT_AGENT_EXECUTORS, {
-    enumerable: false,
-    value: () => createAiSdkExecutors({ models: registry }),
-  });
-  return registry;
+export function parseModelRef(modelRef: string): {
+  provider: string | undefined;
+  modelId: string;
+} {
+  const slash = modelRef.indexOf("/");
+  return slash === -1
+    ? { provider: undefined, modelId: modelRef }
+    : { provider: modelRef.slice(0, slash), modelId: modelRef.slice(slash + 1) };
 }
+
+/** AI SDK model registry: maps model refs (as used in `setupAgent({ models })`/`AgentTextRequest.model`) to AI SDK `LanguageModel` values, or to `{ model, settings }` pairs. The optional `TKey` parameter pins the ref keys; it defaults to `string`, so bare `AiSdkModelMap` stays `Record<string, AiSdkModelEntry>`. */
+export type AiSdkModelMap<TKey extends string = string> = Record<TKey, AiSdkModelEntry>;
 
 /**
  * Per-call AI SDK settings a host can apply on top of what the machine asked
@@ -170,7 +161,7 @@ function resolveAiSdkModel<TModels extends AiSdkModelMap>(
 }
 
 /**
- * The `LanguageModel` inside a map entry, whichever form it takes. `defineModels`
+ * The `LanguageModel` inside a map entry, whichever form it takes. `AiSdkModelMap`
  * widens its return to {@link AiSdkModelMap}, so reading an entry out of the map
  * to hand to a raw AI SDK call needs this to get past the union.
  */
@@ -211,19 +202,19 @@ function withJsonRepair<TOutput extends ReturnType<typeof Output.object<unknown>
 }
 
 /**
- * Raw result shape from {@link AiSdkExecutors.generateText} — the `{ output }`
- * envelope (the validated structured object for structured-output requests,
- * or the accumulated text string otherwise; unwrapped by
- * `normalizeGeneratorResult`) plus the AI SDK call metadata. Core only reads
- * `output`; everything else flows verbatim to `runAgent`'s
- * `onResult(request, { raw })`, so `raw as AiSdkGenerateResult` is the
- * supported cast for token accounting and tracing.
+ * Raw result shape from {@link AiSdkExecutors.generateText} — `result` (the
+ * validated structured object for structured-output requests, or the
+ * accumulated text string otherwise) and `messages`, plus the AI SDK call
+ * metadata. Core reads `result`, `messages` and `usage`; everything else flows
+ * verbatim to `runAgent`'s `onResult(request, { raw })`, so
+ * `raw as AiSdkGenerateResult` is the supported cast for token accounting and
+ * tracing.
  */
 export type AiSdkGenerateResult = {
-  output: unknown;
+  result: unknown;
   /** The model's reasoning, present only when the request opted in via
-   * `reasoning: true` and the model produced it (see the structured-output
-   * envelope in {@link buildEnvelopeSchema}). Never enters machine context/output. */
+   * `reasoning: true` and the model produced it (see
+   * {@link providerOutputSchema}). Never enters machine context/output. */
   reasoning?: string;
   /** The call's token usage. Its flat `inputTokens`/`outputTokens`/`totalTokens`/
    * `reasoningTokens`/`cachedInputTokens` fields are what `runAgent` folds into
@@ -239,9 +230,9 @@ export type AiSdkGenerateResult = {
   /** The untouched AI SDK result. */
   raw: unknown;
 };
-/** Raw result shape from {@link AiSdkExecutors.streamText} — the `{ output }` envelope carrying the fully-accumulated text once the stream finishes (chunks are delivered separately via `onChunk`), plus the stream's final usage/finish metadata for `onResult`. */
+/** Raw result shape from {@link AiSdkExecutors.streamText} — `result` is the fully-accumulated text once the stream finishes (chunks are delivered separately via `onChunk`), plus the response messages and the stream's final usage/finish metadata for `onResult`. */
 export type AiSdkStreamResult = {
-  output: string;
+  result: string;
   /** The stream's final (awaited) usage; aggregated into the run result's `AgentUsage`. */
   usage: AiSdkCallUsage;
   /** Why the stream stopped, normalized to the portable {@link AgentFinishReason}. The SDK's own value stays on `raw`. */
@@ -330,20 +321,20 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     };
 
     if (isStructuredOutputRequest(request)) {
-      // Every structured request is sent as the uniform `{ result, reasoning? }`
-      // envelope — a root object is universally accepted, unlike a bare union/
-      // array root. Unwrap `.result` before the machine validates the declared
-      // schema; surface `reasoning` on the raw result only.
-      const envelope = buildEnvelopeSchema(request.outputSchema!, {
+      // Every structured request is sent as `{ result, reasoning? }` — a root
+      // object is universally accepted, unlike a bare union/array root. The
+      // parsed `result` is what the machine validates against the declared
+      // schema; `reasoning` rides along on the raw result only.
+      const outputSchema = providerOutputSchema(request.outputSchema!, {
         reasoning: request.includeReasoning,
       });
       const structuredOutput = withJsonRepair(
         Output.object({
-          schema: envelope as FlexibleSchema<unknown>,
+          schema: outputSchema as FlexibleSchema<unknown>,
         }),
       );
       // A structured request that ran out of tokens has no usable output: the
-      // envelope never closed. The SDK reports that either by rejecting the
+      // JSON object never closed. The SDK reports that either by rejecting the
       // call or by throwing when the parsed output is read, and both become an
       // AgentTruncatedError a machine can branch on.
       const result = await aiGenerateText({ ...common, output: structuredOutput }).catch(
@@ -353,24 +344,23 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
             : error;
         },
       );
-      const parsed = ((): StructuredOutputEnvelope => {
+      const parsed = ((): ProviderStructuredOutput => {
         try {
-          return result.output as StructuredOutputEnvelope;
+          return result.output as ProviderStructuredOutput;
         } catch (error) {
           throw result.finishReason === "length"
             ? truncated(request, info, result.text, error)
             : error;
         }
       })();
-      const { result: output, reasoning } = parsed;
       // A structured output the model DID close, but only because it stopped
       // mid-thought, is not something to hand a machine as a final answer.
       if (result.finishReason === "length") {
-        throw truncated(request, info, output);
+        throw truncated(request, info, parsed.result);
       }
       return {
-        output,
-        ...(reasoning !== undefined ? { reasoning } : {}),
+        result: parsed.result,
+        ...(parsed.reasoning !== undefined ? { reasoning: parsed.reasoning } : {}),
         usage: toAgentCallUsage(result.usage),
         finishReason: toAgentFinishReason(result.finishReason),
         toolCalls: result.toolCalls,
@@ -384,7 +374,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     // with `finishReason: 'length'` — the machine decides what that is worth.
     const result = await aiGenerateText(common);
     return {
-      output: result.text,
+      result: result.text,
       usage: toAgentCallUsage(result.usage),
       finishReason: toAgentFinishReason(result.finishReason),
       toolCalls: result.toolCalls,
@@ -413,7 +403,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     }
 
     return {
-      output: await result.text,
+      result: await result.text,
       usage: toAgentCallUsage(await result.usage),
       finishReason: toAgentFinishReason(await result.finishReason),
       messages: await result.responseMessages,

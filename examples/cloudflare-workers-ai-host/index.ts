@@ -40,7 +40,7 @@ export interface Env {
 }
 
 /**
- * The game machine names its models symbolically (`defineModels` keys), which
+ * The game machine names its models symbolically (`models` keys), which
  * is the point: the machine stays provider-free and the HOST decides what each
  * ref means. Here every ref maps to a Workers AI model id; an unknown ref is
  * passed through, so a machine can also name a `@cf/...` id directly.
@@ -169,13 +169,13 @@ async function runWorkersAiTextRequest(env: Env, request: AgentTextRequest) {
     });
 
   const first = await ask(basePrompt);
-  if (!structured) return { output: first.text, usage: first.usage };
+  if (!structured) return { result: first.text, usage: first.usage };
 
   // Mirror the decision path's recover-with-feedback: on a malformed JSON
   // response, retry once telling the model what went wrong, then surface the
   // raw text if it still fails to parse.
   try {
-    return { output: parseJsonFromText(first.text), usage: first.usage };
+    return { result: parseJsonFromText(first.text), usage: first.usage };
   } catch (firstError) {
     const retry = await ask(
       [
@@ -187,7 +187,7 @@ async function runWorkersAiTextRequest(env: Env, request: AgentTextRequest) {
     );
     const usage = addUsage(first.usage, retry.usage);
     try {
-      return { output: parseJsonFromText(retry.text), usage };
+      return { result: parseJsonFromText(retry.text), usage };
     } catch (retryError) {
       throw new Error(
         `Workers AI structured response was not valid JSON: ${String(retryError)}\nRaw text: ${retry.text}`,

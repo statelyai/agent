@@ -1,13 +1,12 @@
 import { expect, test } from "vitest";
 import { z } from "zod";
-import { appendMessages, getMessageText, isAgentMessages, runAgent, setupAgent } from "./index.js";
+import { getMessageText, isAgentMessages, runAgent, setupAgent } from "./index.js";
 
-test("request actors expose framework-native messages through an explicit machine transition", async () => {
-  const nativeMessage = z.object({ kind: z.literal("native"), body: z.string() });
+test("request actors resolve with the executor's framework-native messages on output.messages", async () => {
   const agent = setupAgent({
-    context: z.object({ messages: z.array(nativeMessage) }),
+    context: z.object({ messages: z.array(z.unknown()) }),
     input: z.object({}),
-    output: z.object({ messages: z.array(nativeMessage) }),
+    output: z.object({ messages: z.array(z.unknown()) }),
     requests: {
       answer: {
         schemas: { output: z.string() },
@@ -20,14 +19,14 @@ test("request actors expose framework-native messages through an explicit machin
     context: { messages: [] },
     output: ({ context }) => ({ messages: context.messages }),
     initial: "answering",
-    on: {
-      "agent.messages": appendMessages(),
-    },
     states: {
       answering: {
         invoke: {
           src: "answer",
-          onDone: { target: "done" },
+          onDone: ({ context, output }) => ({
+            target: "done",
+            context: { messages: [...context.messages, ...output.messages] },
+          }),
         },
       },
       done: { type: "final" },
@@ -38,7 +37,7 @@ test("request actors expose framework-native messages through an explicit machin
     input: {},
     executors: {
       generateText: async () => ({
-        output: "ok",
+        result: "ok",
         messages: [{ kind: "native", body: "framework response" }],
       }),
     },
@@ -47,22 +46,6 @@ test("request actors expose framework-native messages through an explicit machin
   expect(result.status).toBe("done");
   if (result.status !== "done") return;
   expect(result.output.messages).toEqual([{ kind: "native", body: "framework response" }]);
-  expect((result.snapshot as { messages?: unknown }).messages).toBeUndefined();
-});
-
-test("appendMessages can target an explicit context key", () => {
-  const transition = appendMessages({ key: "researchMessages" });
-  const result = transition({
-    context: { researchMessages: [{ id: 1 }] },
-    event: {
-      type: "agent.messages",
-      request: "research",
-      actorId: "research-1",
-      messages: [{ id: 2 }],
-    },
-  });
-
-  expect(result.context.researchMessages).toEqual([{ id: 1 }, { id: 2 }]);
 });
 
 test("getMessageText reads string and text-part content", () => {

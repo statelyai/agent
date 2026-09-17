@@ -40,7 +40,7 @@ function createClueGivers(script: Record<string, string[]>, captured: CapturedRe
     const round = counts.get(persona.name) ?? 0;
     counts.set(persona.name, round + 1);
     const clue = script[persona.name]?.[round] ?? "";
-    return { output: { clue, reasoning: `${persona.name} round ${round + 1}` } };
+    return { result: { clue, reasoning: `${persona.name} round ${round + 1}` } };
   };
   return { executor, captured };
 }

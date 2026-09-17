@@ -37,10 +37,10 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic, setup } from "xstate";
 import { getShortestPaths } from "xstate/graph";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
 
-const models = defineModels({ dispatcher: openai("gpt-5.4-mini") });
+const models = { dispatcher: openai("gpt-5.4-mini") };
 
 // ─── The road network ───
 
@@ -340,7 +340,7 @@ export const routeReplanningMachine = agentSetup.createMachine({
           travelled: context.travelled,
           delivered: context.at === "market",
         }),
-        onDone: ({ output }) => ({ target: "done", context: { report: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { report: output.result } }),
         onError: ({ event }) => ({
           target: "done",
           context: { report: `No report: ${String(event.error)}` },

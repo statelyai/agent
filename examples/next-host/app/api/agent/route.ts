@@ -72,7 +72,7 @@ export const announceMachine = agentSetup.createMachine({
       invoke: {
         src: "writeDraft",
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output } }),
+        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output.result } }),
         onError: ({ event }) => ({
           target: "failed",
           context: { reason: `writeDraft failed: ${String(event.error)}` },

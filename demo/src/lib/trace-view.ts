@@ -81,6 +81,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   );
 }
 
+/**
+ * A text request resolves to `{ result, messages }`. The row is about the
+ * work, so it reads the validated `result`; the response messages stay in the
+ * expandable detail.
+ */
+function unwrapTextResult(output: unknown): unknown {
+  return isPlainObject(output) && "result" in output && Array.isArray(output["messages"])
+    ? output["result"]
+    : output;
+}
+
 /** One value as a glanceable string, or null when there is nothing to show. */
 function previewValue(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
@@ -114,7 +125,12 @@ function previewFields(source: Record<string, unknown>): string {
  * `output: {…}`. Returns "" when the event carries nothing to show.
  */
 export function summarizePayload(event: Record<string, unknown>): string {
-  const outcome = "output" in event ? event["output"] : "error" in event ? event["error"] : undefined;
+  const outcome =
+    "output" in event
+      ? unwrapTextResult(event["output"])
+      : "error" in event
+        ? event["error"]
+        : undefined;
   const hoisted = isPlainObject(outcome) ? previewFields(outcome) : previewValue(outcome);
   const rest = previewFields(
     Object.fromEntries(
@@ -130,14 +146,7 @@ export function summarizePayload(event: Record<string, unknown>): string {
  * progress, a rejection is a choice the machine refused before retrying.
  * Neither moves the machine, so neither renders an arrow or a target state.
  */
-export type TraceStepKind =
-  | "model"
-  | "done"
-  | "error"
-  | "system"
-  | "emit"
-  | "rejected"
-  | "leg";
+export type TraceStepKind = "model" | "done" | "error" | "system" | "emit" | "rejected" | "leg";
 
 /** How a refused decision reads in the log. */
 const FAILURE_LABELS: Record<string, string> = {

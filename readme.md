@@ -139,9 +139,9 @@ const liveResult = await runAgent(refundMachine, {
 });
 ```
 
-For a machine with several requests, `createScriptedExecutors` holds ordered answers keyed by request name. See [Evals](docs/evals.md#scripted-executors).
+For a machine with several requests, `createScriptedExecutors` from `@statelyai/agent/testing` holds ordered answers keyed by request name. See [Evals](docs/evals.md#scripted-executors).
 
-Passing a `defineModels` registry to `setupAgent({ models })` types the machine's model refs and supplies the AI SDK executor by default; explicit `executors` override it. Core does not import the AI SDK. See [Hosts and executors](docs/hosts.md).
+Passing the same `models` map to `setupAgent({ models })` types the machine's model refs. Executors are always explicit, and core does not import the AI SDK. See [Hosts and executors](docs/hosts.md).
 
 ## Architecture
 

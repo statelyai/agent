@@ -5,10 +5,10 @@ The machine is the artifact. Runners only decide how one host executes its XStat
 | Need                        | Use                                                                                 |
 | --------------------------- | ----------------------------------------------------------------------------------- |
 | One request/response run    | `runAgent`                                                                          |
-| Several idle/resume turns   | `runAgentLoop`                                                                      |
+| Several idle/resume turns   | `runAgent` in a `while` loop over `result.persist()`                                |
 | Async progress feed         | `runAgentStream`                                                                    |
-| A long-lived actor          | `provideExecutors` + XState `createActor`                                           |
-| A custom or durable runtime | XState `initialTransition` / `transition`, or `createDurable` from `xstate/durable` |
+| A long-lived actor          | `provideExecutors` + XState `createActor`, see [Advanced](advanced.md)              |
+| A custom or durable runtime | The step API, or `createDurable` from `xstate/durable`                              |
 
 ## Managed run
 
@@ -25,41 +25,45 @@ if (result.status === "idle") {
 ## Idle/resume loop
 
 ```ts no-check
-const result = await runAgentLoop(machine, {
-  input,
-  executors,
-  persist: (snapshot) => storage.save(snapshot),
-  onIdle: async (idle) => nextExternalEvent(idle.snapshot),
-});
+let result = await runAgent(machine, { input, executors });
+
+while (result.status === "idle") {
+  const snapshot = result.persist();
+  await storage.save(snapshot);
+  const event = await nextExternalEvent(result.snapshot);
+  result = await runAgent(machine, { snapshot, event, executors });
+}
 ```
 
-The continuation is always the native persisted XState snapshot.
+The continuation is always the native persisted XState snapshot, so the loop can span processes: persist after one call, resume in another.
 
 ## Long-lived actor
 
-```ts no-check
-const bound = provideExecutors(machine, executors);
-const actor = createActor(bound);
-actor.start();
-actor.send({ type: "USER_REPLIED", text: "Continue" });
-```
+When your application owns the actor, or the agent machine is a child in a larger XState system, bind the executors with `provideExecutors` and run a plain `createActor`. See [Advanced](advanced.md).
 
 ## The portable loop
 
-Any host can run the same artifact with XState's pure transition API:
+Any host can run the same artifact with the pure step API. A step is the snapshot plus the model requests the machine is waiting on. Nothing executes until the host decides how:
 
 ```ts no-check
-let [state, effects] = initialTransition(machine, input);
-for (const effect of effects) await effect.exec();
+let step = initialAgentStep(machine, input);
 
-while (state.status === "active") {
-  const event = await nextEvent();
-  [state, effects] = transition(machine, state, event);
-  for (const effect of effects) await effect.exec();
+while (!step.done) {
+  const [request] = step.requests;
+  if (!request) break; // idle: waiting on an external event
+  if (request.kind === "decision") {
+    const event = await resolveDecision(request, executors, { canTake: (e) => step.snapshot.can(e) });
+    step = transitionAgentStep(machine, step, event);
+  } else {
+    const { result, messages } = await executeAgentRequest(request, executors);
+    step = resolveAgentStep(machine, step, request, { result, messages });
+  }
 }
 
-return state.output;
+return step.snapshot.output;
 ```
+
+See [The step API](steps.md).
 
 [`portable-xstate-loop`](../examples/portable-xstate-loop) expands this sketch
 into a runnable `createDurable` host. Its extra mailbox and wake-up plumbing is

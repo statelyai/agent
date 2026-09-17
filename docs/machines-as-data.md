@@ -59,7 +59,7 @@ Run `validateAgentConfig` first. `fromConfig(...)` does not validate the config 
 
 ### Reserved key prefix
 
-The `agent.` prefix belongs to the library. `setupAgent` throws when a `requests` or `actors` key starts with `agent.`, including the builtin names `agent.generateText`, `agent.streamText`, `agent.decide`, and `agent.userInput`. Rename the key without the prefix. To override a builtin deliberately, do it on the created machine with `machine.provide({ actors })`.
+The `agent.` prefix belongs to the library. `setupAgent` throws when a `requests` or `actors` key starts with `agent.`, including the builtin names `agent.generateText`, `agent.streamText`, and `agent.decide`. Rename the key without the prefix. To override a builtin deliberately, do it on the created machine with `machine.provide({ actors })`.
 
 ## Expressions
 
@@ -151,7 +151,7 @@ states:
       input: { ticket: "{{ context.ticket }}" }
       onDone:
         target: awaitingApproval
-        assign: { reply: "{{ event.output.reply }}" }
+        assign: { reply: "{{ event.output.result.reply }}" }
   awaitingApproval:
     on:
       APPROVE: { target: resolved, assign: { resolution: replied } }
@@ -215,7 +215,7 @@ A `requests` entry can also declare these fields.
 | --- | --- | --- |
 | `tools` | Map of tool name to `{ description?, inputSchema?, outputSchema? }`, where the schemas are JSON Schemas | Passes the tools to the model alongside the request. |
 | `toolChoice` | `"auto"`, `"none"`, `"required"`, or `{ type: "tool", name }` | Controls whether the model must call a tool. |
-| `includeReasoning` | `true` | Opts into the `reasoning` field of the structured-output envelope. |
+| `includeReasoning` | `true` | Opts into the `reasoning` field of the provider's structured output. |
 
 ```yaml
 requests:
@@ -313,7 +313,7 @@ Executors return these shapes.
 | Executor | Returns | Notes |
 | --- | --- | --- |
 | `decide` | `{ event: { type, ...payload } }` | The chosen machine event. A bare `{ type }` throws a descriptive error. |
-| `generateText`, `streamText` | `{ output }` | The structured result matching the request's `output` schema. |
+| `generateText`, `streamText` | `{ result, messages? }` | `result` matches the request's `output` schema; `messages` are the provider's response messages. |
 
 A run settles in one of two ways.
 

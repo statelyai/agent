@@ -47,14 +47,14 @@ import {
   type RunAgentResult,
   type SnapshotOf,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 /** Refunds at or under this amount need no human approval. */
 export const AUTO_APPROVAL_LIMIT = 500;
 
-export const models = defineModels({
+const models = {
   validator: openai("gpt-5.4-mini"),
-});
+};
 
 const agentSetup = setupAgent({
   models,
@@ -122,7 +122,7 @@ export const refundMachine = agentSetup.createMachine({
         input: ({ context }) => ({ amount: context.amount, orderId: context.orderId }),
         onDone: ({ output }) => ({
           target: "checked",
-          context: { check: { valid: output.valid } },
+          context: { check: { valid: output.result.valid } },
         }),
         onError: ({ event }) => ({
           target: "failed",

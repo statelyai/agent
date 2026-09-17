@@ -111,9 +111,9 @@ export const mockRunOptions: RunAgentOptions<typeof emailDrafter> = {
   executors: {
     generateText: async (request: AgentTextRequest) =>
       request.name === "evaluatePrompt"
-        ? { output: { satisfied: true, missing: [], questions: [] } }
+        ? { result: { satisfied: true, missing: [], questions: [] } }
         : {
-            output: {
+            result: {
               to: "team@example.com",
               subject: "Deploy pipeline is faster",
               body: "Hi team,\n\nThe deploy pipeline is now roughly twice as fast.\n\nThanks!",

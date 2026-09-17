@@ -16,7 +16,7 @@ function testEntry(index: number, type: string): AgentLogEntry {
 }
 
 // The harness form: each conformance case becomes its own test.
-void assertEventLogStoreConformance(createInMemoryEventLogStore, { describe, it, expect });
+void assertEventLogStoreConformance(createInMemoryEventLogStore, { describe, it });
 
 describe("createInMemoryEventLogStore", () => {
   test("passes the conformance suite in its runner-agnostic form", async () => {

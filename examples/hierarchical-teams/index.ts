@@ -45,15 +45,15 @@
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
-import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-export const models = defineModels({
+const models = {
   supervisor: openai("gpt-5.4-mini"),
   searcher: openai("gpt-5.4-mini"),
   scraper: openai("gpt-5.4-mini"),
   outliner: openai("gpt-5.4-mini"),
   writer: openai("gpt-5.4-mini"),
-});
+};
 
 /** Collapses a worker result to one short line for the team tree. */
 function oneLine(text: string, max = 64): string {
@@ -193,8 +193,11 @@ export const researchTeamMachine = researchSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "supervising",
           context: {
-            notes: [...context.notes, output],
-            log: [...context.log, { worker: "search", status: "done" as const, result: output }],
+            notes: [...context.notes, output.result],
+            log: [
+              ...context.log,
+              { worker: "search", status: "done" as const, result: output.result },
+            ],
             budget: context.budget - 1,
           },
         }),
@@ -214,8 +217,11 @@ export const researchTeamMachine = researchSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "supervising",
           context: {
-            notes: [...context.notes, output],
-            log: [...context.log, { worker: "scrape", status: "done" as const, result: output }],
+            notes: [...context.notes, output.result],
+            log: [
+              ...context.log,
+              { worker: "scrape", status: "done" as const, result: output.result },
+            ],
             budget: context.budget - 1,
           },
         }),
@@ -274,8 +280,11 @@ export const writingTeamMachine = writingSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "writing",
           context: {
-            outline: output,
-            log: [...context.log, { worker: "outline", status: "done" as const, result: output }],
+            outline: output.result,
+            log: [
+              ...context.log,
+              { worker: "outline", status: "done" as const, result: output.result },
+            ],
           },
         }),
         onError: ({ context }) => ({
@@ -293,8 +302,11 @@ export const writingTeamMachine = writingSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "done",
           context: {
-            report: output,
-            log: [...context.log, { worker: "write", status: "done" as const, result: output }],
+            report: output.result,
+            log: [
+              ...context.log,
+              { worker: "write", status: "done" as const, result: output.result },
+            ],
           },
         }),
         onError: ({ context }) => ({

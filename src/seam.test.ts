@@ -4,9 +4,9 @@
  */
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { matchesTrajectory, runSeam, setupAgent } from "./index.js";
-import type { SeamTurn } from "./index.js";
-
+import { setupAgent } from "./index.js";
+import { matchesTrajectory, runSeam } from "./testing/index.js";
+import type { SeamTurn } from "./testing/index.js";
 const assessmentSchema = z.object({ satisfied: z.boolean(), question: z.string() });
 const draftSchema = z.object({ subject: z.string(), body: z.string() });
 
@@ -62,8 +62,8 @@ const machine = setup.createMachine({
         src: "assess",
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
-          target: output.satisfied ? "writing" : "asking",
-          context: { satisfied: output.satisfied },
+          target: output.result.satisfied ? "writing" : "asking",
+          context: { satisfied: output.result.satisfied },
         }),
       },
     },
@@ -80,7 +80,7 @@ const machine = setup.createMachine({
       invoke: {
         src: "write",
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output } }),
+        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output.result } }),
       },
     },
     reviewing: {
@@ -193,7 +193,7 @@ describe("runSeam", () => {
       seam: { request: "write", occurrence: 1 },
       candidate: async (request) => {
         seen.push(request.name ?? request.model);
-        return { output: { subject: "Deploy", body: "Unchanged." } };
+        return { result: { subject: "Deploy", body: "Unchanged." } };
       },
     });
 
@@ -218,7 +218,7 @@ describe("runSeam", () => {
       seam: { request: "write", occurrence: 1 },
       candidate: async (request) => {
         seen.push(request.model);
-        return { output: REVISED };
+        return { result: REVISED };
       },
     });
 
@@ -332,7 +332,7 @@ describe("runSeam", () => {
       ...clarifyRun(),
       seam: { request: "assess" },
       // A candidate that waves the vague prompt through: no clarification round.
-      candidate: async () => ({ output: COMPLETE }),
+      candidate: async () => ({ result: COMPLETE }),
     });
 
     expect(strict.after.statePath).not.toContain("asking");
