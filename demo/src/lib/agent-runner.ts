@@ -210,21 +210,31 @@ function describeResult(scenarioId: ScenarioId, result: RunAgentResult<AnyStateM
     if (scenarioId === "refund") return "Amount exceeds the auto-refund limit. Awaiting approval.";
     if (scenarioId === "email-drafter-v1" || scenarioId === "email-drafter-v2") {
       const draft = context.draft as { to: string; subject: string; body: string } | null;
-      return draft ? formatDraft(draft) : "Waiting for input.";
+      return draft
+        ? formatDraft(draft, context.clarifications as string[] | undefined)
+        : "Waiting for input.";
     }
     return "Waiting for input.";
   }
   return "The run ended with an error.";
 }
 
-function formatDraft(draft: { to: string; subject: string; body: string }): string {
-  return `**To:** ${draft.to || "(no recipient yet)"}\n**Subject:** ${draft.subject}\n\n${draft.body}`;
+function formatDraft(
+  draft: { to: string; subject: string; body: string },
+  clarifications: string[] = [],
+): string {
+  const text = `**To:** ${draft.to || "(no recipient yet)"}\n**Subject:** ${draft.subject}\n\n${draft.body}`;
+  if (!clarifications.length) return text;
+  return `${text}\n\n**Open questions**\n${clarifications.map((question) => `- ${question}`).join("\n")}`;
 }
 
 function describeEmailOutcome(output: Record<string, unknown>): string {
   if (output.failure) return `Not sent: ${String(output.failure)}`;
   const sent = (output.sentEmails as { to: string; subject: string; body: string }[] | undefined) ?? [];
-  return sent.length ? `Sent (simulated outbox).\n\n${formatDraft(sent[0]!)}` : "Nothing was sent.";
+  const clarifications = (output.clarifications as string[] | undefined) ?? [];
+  return sent.length
+    ? `Sent (simulated outbox).\n\n${formatDraft(sent[0]!, clarifications)}`
+    : "Nothing was sent.";
 }
 
 function toResult(

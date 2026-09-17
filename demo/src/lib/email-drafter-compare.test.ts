@@ -18,7 +18,10 @@ test("v1 asks before drafting when only optional details are missing; v2 drafts 
 
   expect(v1.clarificationTurns).toBeGreaterThan(0);
   expect(v1.path).toContain("needsMoreInfo");
+  expect(v1.clarifications).toContain("What is the subject?");
   expect(v2.clarificationTurns).toBe(0);
+  // v2 still surfaces the gap; it just does not block on it.
+  expect(v2.clarifications).toEqual(["What subject line do you want?"]);
   expect(v2.path).toEqual(["drafting", "reviewing", "sending", "sent"]);
   expect(v1.sent && v2.sent).toBe(true);
 });
@@ -38,6 +41,7 @@ test("v2 moves the recipient check to the send boundary and never sends without 
 
   const reviewing = await start("email-drafter-v2", recipientCase.prompt);
   expect(reviewing.status).toBe("idle");
+  expect(reviewing.response).toContain("**Open questions**\n- Who should this go to?");
   expect(reviewing.idle?.events.map((event) => event.type)).toEqual(["REQUEST_CHANGES", "SEND"]);
   expect(reviewing.idle?.textEvent).toEqual({ type: "REQUEST_CHANGES", field: "text" });
   expect(reviewing.response).toContain("(no recipient yet)");
@@ -103,6 +107,39 @@ test("v1 'draft anyway' cannot send without a recipient; SEND asks instead", asy
   expect(done.response).toContain("alex@example.com");
 });
 
+test("scripted mode reads an angle-bracketed address, so v2 sends without asking", async () => {
+  const reviewing = await startScenarioRun(
+    "email-drafter-v2",
+    "Email <priya@example.com>, subject 'Hi', saying the deck is ready.",
+    "script",
+    undefined,
+    executors,
+  );
+  expect(reviewing.status).toBe("idle");
+  expect(reviewing.response).toContain("**To:** priya@example.com");
+  const sent = await resumeScenarioRun(
+    "email-drafter-v2",
+    reviewing.idle!.snapshot as unknown as Snapshot<unknown>,
+    { type: "SEND" },
+    "script",
+    undefined,
+    executors,
+  );
+  expect(sent.status).toBe("done");
+});
+
+test("a request that errors still counts as a model call, with no token total", async () => {
+  const run = await runCase(emailDrafterV2Machine, optionalCase, {
+    generateText: async () => {
+      throw new Error("model offline");
+    },
+  });
+  expect(run.modelCalls).toBe(1);
+  expect(run.totalTokens).toBeNull();
+  expect(run.failure).toMatch(/draftEmail failed/);
+  expect(run.sent).toBe(false);
+});
+
 test("hasRecipient rejects malformed and multi-address values", async () => {
   const { hasRecipient } = await import("@/agents/email-draft");
   const draft = (to: string) => ({ to, subject: "s", body: "b" });
@@ -132,6 +169,8 @@ test("the comparison holds the send rule for both versions and v2 asks less", as
   expect(v2?.machine).toBe("v2");
 
   for (const summary of [v1!, v2!]) {
+    // Scripted executors report no usage, so no total is claimed.
+    expect(summary.totals.totalTokens).toBeNull();
     expect(summary.totals.sendRuleViolations).toBe(0);
     expect(summary.totals.sent).toBe(cases.length);
     expect(summary.runs.every((run) => run.failure === null)).toBe(true);

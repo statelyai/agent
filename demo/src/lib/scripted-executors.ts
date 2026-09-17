@@ -54,9 +54,9 @@ export function scriptedReviewVerdict(text: string): "APPROVE" | "REJECT" | "UNC
   return "UNCLEAR";
 }
 
-// Stops before trailing punctuation ("priya@example.com," or "...com.") so the
-// scripted draft carries an address `hasRecipient` accepts.
-const EMAIL = /[^\s@,]+@[^\s@,]+\.[A-Za-z]+/;
+// Starts at a local-part character and stops before trailing punctuation, so
+// "<priya@example.com>," yields an address `hasRecipient` accepts.
+const EMAIL = /[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/;
 
 /**
  * Email drafter stand-ins, routed on request name. The evaluator flags a
@@ -77,7 +77,13 @@ function emailDrafterOutput(request: AgentTextRequest): unknown {
       questions: missing.map((field) => `What is the ${field}?`),
     };
   }
-  return { to: text.match(EMAIL)?.[0] ?? "", subject: "Re: your request", body: text };
+  const to = text.match(EMAIL)?.[0] ?? "";
+  const openQuestions = [
+    ...(to ? [] : ["Who should this go to?"]),
+    ...(/subject/i.test(text) ? [] : ["What subject line do you want?"]),
+  ];
+  // v1's drafter ignores `openQuestions`; v2's collects them.
+  return { to, subject: "Re: your request", body: text, openQuestions };
 }
 
 export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {

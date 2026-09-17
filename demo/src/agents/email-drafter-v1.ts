@@ -35,12 +35,18 @@ const agentSetup = setupAgent({
     prompt: z.string(),
     /** The evaluator's open questions, joined for the idle label. */
     questions: z.string(),
+    /** Every question the workflow raised, in order. Part of the output. */
+    clarifications: z.array(z.string()),
     draft: emailDraftSchema.nullable(),
     revisions: z.number(),
     failure: z.string().nullable(),
   }),
   input: z.object({ prompt: z.string() }),
-  output: z.object({ sentEmails: z.array(emailDraftSchema), failure: z.string().nullable() }),
+  output: z.object({
+    sentEmails: z.array(emailDraftSchema),
+    clarifications: z.array(z.string()),
+    failure: z.string().nullable(),
+  }),
   meta: interactionMetaSchema,
   events: {
     MORE_INFO: z.object({ text: z.string() }),
@@ -80,6 +86,7 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
   context: ({ input }) => ({
     prompt: input.prompt,
     questions: "",
+    clarifications: [],
     draft: null,
     revisions: 0,
     failure: null,
@@ -90,9 +97,12 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
       invoke: {
         src: "evaluatePrompt",
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ output }) => ({
+        onDone: ({ context, output }) => ({
           target: output.satisfied ? "drafting" : "needsMoreInfo",
-          context: { questions: output.questions.join(" ") },
+          context: {
+            questions: output.questions.join(" "),
+            clarifications: [...context.clarifications, ...output.questions],
+          },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -165,7 +175,13 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
         SEND: ({ context }) =>
           hasRecipient(context.draft)
             ? { target: "sending" }
-            : { target: "needsMoreInfo", context: { questions: RECIPIENT_QUESTION } },
+            : {
+                target: "needsMoreInfo",
+                context: {
+                  questions: RECIPIENT_QUESTION,
+                  clarifications: [...context.clarifications, RECIPIENT_QUESTION],
+                },
+              },
       },
     },
 
@@ -181,7 +197,13 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
         SEND: ({ context }) =>
           hasRecipient(context.draft)
             ? { target: "sending" }
-            : { target: "needsMoreInfo", context: { questions: RECIPIENT_QUESTION } },
+            : {
+                target: "needsMoreInfo",
+                context: {
+                  questions: RECIPIENT_QUESTION,
+                  clarifications: [...context.clarifications, RECIPIENT_QUESTION],
+                },
+              },
       },
     },
 
@@ -201,12 +223,17 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         sentEmails: context.draft ? [context.draft] : [],
+        clarifications: context.clarifications,
         failure: null,
       }),
     },
     failed: {
       type: "final",
-      output: ({ context }) => ({ sentEmails: [], failure: context.failure ?? "unknown failure" }),
+      output: ({ context }) => ({
+        sentEmails: [],
+        clarifications: context.clarifications,
+        failure: context.failure ?? "unknown failure",
+      }),
     },
   },
 });
