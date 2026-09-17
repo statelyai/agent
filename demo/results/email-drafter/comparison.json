@@ -1,0 +1,580 @@
+{
+  "generatedAt": "2026-09-17T15:27:26.747Z",
+  "model": "gpt-5.4-mini",
+  "summaries": [
+    {
+      "machine": "v1",
+      "runs": [
+        {
+          "caseId": "complete-1",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "clarifications": [],
+          "revisions": 0,
+          "modelCalls": 2,
+          "totalTokens": 340,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "complete-2",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "clarifications": [],
+          "revisions": 0,
+          "modelCalls": 2,
+          "totalTokens": 336,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "complete-3",
+          "category": "complete",
+          "clarificationTurns": 1,
+          "clarifications": [
+            "What exact body text would you like included in the email?"
+          ],
+          "revisions": 0,
+          "modelCalls": 3,
+          "totalTokens": 546,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 1,
+            "needsMoreInfo --MORE_INFO--> evaluating": 1,
+            "evaluating --xstate.done.actor--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-1",
+          "category": "missing-optional",
+          "clarificationTurns": 1,
+          "clarifications": [
+            "What subject line would you like for the email?",
+            "What should the email body say beyond inviting Alex for coffee after your talk on Thursday?"
+          ],
+          "revisions": 0,
+          "modelCalls": 3,
+          "totalTokens": 562,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 1,
+            "needsMoreInfo --MORE_INFO--> evaluating": 1,
+            "evaluating --xstate.done.actor--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-2",
+          "category": "missing-optional",
+          "clarificationTurns": 3,
+          "clarifications": [
+            "What subject line should I use?",
+            "What body text should I send?",
+            "What subject would you like for the email?",
+            "What subject would you like for the email?",
+            "What should the email body say?"
+          ],
+          "revisions": 0,
+          "modelCalls": 4,
+          "totalTokens": 790,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 3,
+            "needsMoreInfo --MORE_INFO--> evaluating": 2,
+            "needsMoreInfo --DRAFT_ANYWAY--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-3",
+          "category": "missing-optional",
+          "clarificationTurns": 3,
+          "clarifications": [
+            "What subject should I use for the email?",
+            "What exact body text would you like sent to ops@example.com?",
+            "What subject line should I use?",
+            "What body details should I include beyond 'the deploy is postponed to tomorrow morning'?",
+            "What subject would you like for the email?",
+            "What body text should I use for the email?"
+          ],
+          "revisions": 0,
+          "modelCalls": 4,
+          "totalTokens": 804,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 3,
+            "needsMoreInfo --MORE_INFO--> evaluating": 2,
+            "needsMoreInfo --DRAFT_ANYWAY--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "recipient-1",
+          "category": "missing-recipient",
+          "clarificationTurns": 3,
+          "clarifications": [
+            "What should the subject line be?",
+            "What details should the email body include, such as the coffee time, location, and any preferred tone?",
+            "What subject would you like me to use for the email?",
+            "What exact wording or additional details should be included in the email body beyond inviting Alex for coffee after your talk on Thursday?",
+            "What subject would you like me to use for the email?",
+            "What exact details should I include in the body beyond inviting Alex for coffee after your talk on Thursday?"
+          ],
+          "revisions": 0,
+          "modelCalls": 4,
+          "totalTokens": 866,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 3,
+            "needsMoreInfo --MORE_INFO--> evaluating": 2,
+            "needsMoreInfo --DRAFT_ANYWAY--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "recipient-2",
+          "category": "missing-recipient",
+          "clarificationTurns": 2,
+          "clarifications": [
+            "Who should I address the email to exactly within the finance team?",
+            "What subject line would you like me to use?",
+            "What additional body details should I include beyond that the Q3 numbers are in the shared folder as of this morning?",
+            "What subject line would you like to use, or should I suggest one?"
+          ],
+          "revisions": 0,
+          "modelCalls": 4,
+          "totalTokens": 818,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 2,
+            "needsMoreInfo --MORE_INFO--> evaluating": 2,
+            "evaluating --xstate.done.actor--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        }
+      ],
+      "totals": {
+        "runs": 8,
+        "clarificationTurns": 13,
+        "clarificationsRaised": 24,
+        "revisions": 0,
+        "modelCalls": 26,
+        "totalTokens": 5062,
+        "accepted": 8,
+        "sent": 8,
+        "sendRuleViolations": 0
+      },
+      "byCategory": {
+        "complete": {
+          "runs": 3,
+          "clarificationTurns": 1,
+          "revisions": 0,
+          "modelCalls": 7,
+          "accepted": 3
+        },
+        "missing-optional": {
+          "runs": 3,
+          "clarificationTurns": 7,
+          "revisions": 0,
+          "modelCalls": 11,
+          "accepted": 3
+        },
+        "missing-recipient": {
+          "runs": 2,
+          "clarificationTurns": 5,
+          "revisions": 0,
+          "modelCalls": 8,
+          "accepted": 2
+        }
+      },
+      "edges": {
+        "evaluating --xstate.done.actor--> drafting": 5,
+        "drafting --xstate.done.actor--> reviewing": 8,
+        "reviewing --SEND--> sending": 8,
+        "sending --xstate.done.actor--> sent": 8,
+        "evaluating --xstate.done.actor--> needsMoreInfo": 13,
+        "needsMoreInfo --MORE_INFO--> evaluating": 10,
+        "needsMoreInfo --DRAFT_ANYWAY--> drafting": 3
+      }
+    },
+    {
+      "machine": "v2",
+      "runs": [
+        {
+          "caseId": "complete-1",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "clarifications": [],
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 260,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "complete-2",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "clarifications": [],
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 251,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "complete-3",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "clarifications": [],
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 254,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-1",
+          "category": "missing-optional",
+          "clarificationTurns": 0,
+          "clarifications": [],
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 271,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-2",
+          "category": "missing-optional",
+          "clarificationTurns": 0,
+          "clarifications": [],
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 251,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-3",
+          "category": "missing-optional",
+          "clarificationTurns": 0,
+          "clarifications": [
+            "time",
+            "place"
+          ],
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 251,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "recipient-1",
+          "category": "missing-recipient",
+          "clarificationTurns": 1,
+          "clarifications": [
+            "What is Alex’s email address?",
+            "What time on Thursday is the talk?",
+            "Where should we meet for coffee?"
+          ],
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 289,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> needsRecipient": 1,
+            "needsRecipient --RECIPIENT_PROVIDED--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "needsRecipient",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "recipient-2",
+          "category": "missing-recipient",
+          "clarificationTurns": 1,
+          "clarifications": [
+            "What email address should I send this to?",
+            "What time did this happen?",
+            "Which shared folder should I refer to?"
+          ],
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 275,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> needsRecipient": 1,
+            "needsRecipient --RECIPIENT_PROVIDED--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "needsRecipient",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        }
+      ],
+      "totals": {
+        "runs": 8,
+        "clarificationTurns": 2,
+        "clarificationsRaised": 8,
+        "revisions": 0,
+        "modelCalls": 8,
+        "totalTokens": 2102,
+        "accepted": 8,
+        "sent": 8,
+        "sendRuleViolations": 0
+      },
+      "byCategory": {
+        "complete": {
+          "runs": 3,
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 3,
+          "accepted": 3
+        },
+        "missing-optional": {
+          "runs": 3,
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 3,
+          "accepted": 3
+        },
+        "missing-recipient": {
+          "runs": 2,
+          "clarificationTurns": 2,
+          "revisions": 0,
+          "modelCalls": 2,
+          "accepted": 2
+        }
+      },
+      "edges": {
+        "drafting --xstate.done.actor--> reviewing": 8,
+        "reviewing --SEND--> sending": 6,
+        "sending --xstate.done.actor--> sent": 8,
+        "reviewing --SEND--> needsRecipient": 2,
+        "needsRecipient --RECIPIENT_PROVIDED--> sending": 2
+      }
+    }
+  ]
+}

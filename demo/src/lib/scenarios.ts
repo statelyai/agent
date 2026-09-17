@@ -12,6 +12,8 @@ import { pipelineMachine } from "@/agents/pipeline";
 import { retryMachine } from "@/agents/retry";
 import { toolsMachine } from "@/agents/tools";
 import { reflectionMachine } from "@/agents/reflection";
+import { emailDrafterV1Machine } from "@/agents/email-drafter-v1";
+import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
 import refundSource from "@/agents/refund.ts?raw";
 import approvalSource from "@/agents/approval.ts?raw";
 import routingSource from "@/agents/routing.ts?raw";
@@ -20,6 +22,8 @@ import pipelineSource from "@/agents/pipeline.ts?raw";
 import retrySource from "@/agents/retry.ts?raw";
 import toolsSource from "@/agents/tools.ts?raw";
 import reflectionSource from "@/agents/reflection.ts?raw";
+import emailDrafterV1Source from "@/agents/email-drafter-v1.ts?raw";
+import emailDrafterV2Source from "@/agents/email-drafter-v2.ts?raw";
 
 export type ScenarioId =
   | "refund"
@@ -29,7 +33,9 @@ export type ScenarioId =
   | "pipeline"
   | "retry"
   | "tools"
-  | "reflection";
+  | "reflection"
+  | "email-drafter-v1"
+  | "email-drafter-v2";
 
 export type Scenario = {
   id: ScenarioId;
@@ -151,6 +157,34 @@ export const scenarios: Scenario[] = [
       "Write one paragraph about a hospital waiting room at 3am.",
     ],
   },
+  {
+    id: "email-drafter-v1",
+    name: "Email drafter v1",
+    eyebrow: "Ask first, draft second",
+    description:
+      "The evaluator stops to ask about every missing detail before drafting. Sending is a human action from review.",
+    placeholder: "Email alex@example.com to invite them for coffee after my talk on Thursday.",
+    startLabel: "Draft email",
+    starters: [
+      "Email alex@example.com to invite them for coffee after my talk on Thursday.",
+      "Email Alex to invite them for coffee after my talk on Thursday.",
+      "Email priya@example.com, subject 'Design review moved', telling her Thursday's design review is now Friday at 10am.",
+    ],
+  },
+  {
+    id: "email-drafter-v2",
+    name: "Email drafter v2",
+    eyebrow: "Draft first, check at the boundary",
+    description:
+      "Drafts with what it has. The only mandatory check, a valid recipient, moves to SEND. Review stays human.",
+    placeholder: "Email alex@example.com to invite them for coffee after my talk on Thursday.",
+    startLabel: "Draft email",
+    starters: [
+      "Email alex@example.com to invite them for coffee after my talk on Thursday.",
+      "Email Alex to invite them for coffee after my talk on Thursday.",
+      "Email priya@example.com, subject 'Design review moved', telling her Thursday's design review is now Friday at 10am.",
+    ],
+  },
 ];
 
 const machines: Record<ScenarioId, AnyStateMachine> = {
@@ -162,6 +196,8 @@ const machines: Record<ScenarioId, AnyStateMachine> = {
   retry: retryMachine,
   tools: toolsMachine,
   reflection: reflectionMachine,
+  "email-drafter-v1": emailDrafterV1Machine,
+  "email-drafter-v2": emailDrafterV2Machine,
 };
 
 export const scenarioSource: Record<ScenarioId, string> = {
@@ -173,6 +209,8 @@ export const scenarioSource: Record<ScenarioId, string> = {
   retry: retrySource,
   tools: toolsSource,
   reflection: reflectionSource,
+  "email-drafter-v1": emailDrafterV1Source,
+  "email-drafter-v2": emailDrafterV2Source,
 };
 
 export function getScenario(id: ScenarioId): Scenario {

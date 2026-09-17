@@ -76,6 +76,38 @@ export function scriptedReviewVerdict(text: string): "APPROVE" | "REJECT" | "UNC
   return "UNCLEAR";
 }
 
+// Starts at a local-part character and stops before trailing punctuation, so
+// "<priya@example.com>," yields an address `hasRecipient` accepts.
+const EMAIL = /[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/;
+
+/**
+ * Email drafter stand-ins, routed on request name. The evaluator flags a
+ * recipient as missing when no address appears and a subject as missing when
+ * the word "subject" does not; the drafter copies the request into the body,
+ * so every fact the user typed is "mentioned".
+ */
+function emailDrafterOutput(request: AgentTextRequest): unknown {
+  const text = request.prompt ?? "";
+  if (request.name === "evaluatePrompt") {
+    const missing = [
+      ...(EMAIL.test(text) ? [] : ["recipient"]),
+      ...(/subject/i.test(text) ? [] : ["subject"]),
+    ];
+    return {
+      satisfied: missing.length === 0,
+      missing,
+      questions: missing.map((field) => `What is the ${field}?`),
+    };
+  }
+  const to = text.match(EMAIL)?.[0] ?? "";
+  const openQuestions = [
+    ...(to ? [] : ["Who should this go to?"]),
+    ...(/subject/i.test(text) ? [] : ["What subject line do you want?"]),
+  ];
+  // v1's drafter ignores `openQuestions`; v2's collects them.
+  return { to, subject: "Re: your request", body: text, openQuestions };
+}
+
 export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
   switch (scenarioId) {
     case "refund":
@@ -105,6 +137,10 @@ export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
           return { event: { ...pick(request, type), reason: ROUTING_REASONS[type] } };
         },
       };
+
+    case "email-drafter-v1":
+    case "email-drafter-v2":
+      return { generateText: async (request) => ({ output: emailDrafterOutput(request) }) };
 
     case "approval":
       return {
