@@ -146,15 +146,18 @@ export interface MachineSummary {
     sent: number;
     sendRuleViolations: number;
   };
-  byCategory: Record<
-    CaseCategory,
-    {
-      runs: number;
-      clarificationTurns: number;
-      revisions: number;
-      modelCalls: number;
-      accepted: number;
-    }
+  /** Only the categories `selectedCases` covered; a filtered run omits the rest. */
+  byCategory: Partial<
+    Record<
+      CaseCategory,
+      {
+        runs: number;
+        clarificationTurns: number;
+        revisions: number;
+        modelCalls: number;
+        accepted: number;
+      }
+    >
   >;
   /** Traversal counts summed over every run: the weighted graph. */
   edges: Record<string, number>;
@@ -209,8 +212,9 @@ export async function runCase(
   let tokens = 0;
   let callsWithUsage = 0;
   const onTrace = (event: AgentTraceEvent) => {
+    // A call that errors still hit the model, so count starts, not ends.
+    if (event.type === "request.start") metrics.modelCalls += 1;
     if (event.type === "request.end") {
-      metrics.modelCalls += 1;
       if (event.usage?.totalTokens !== undefined) {
         tokens += event.usage.totalTokens;
         callsWithUsage += 1;
@@ -330,7 +334,6 @@ function summarize(machine: string, runs: RunMetrics[]): MachineSummary {
     totals.clarificationTurns += run.clarificationTurns;
     totals.revisions += run.revisions;
     totals.modelCalls += run.modelCalls;
-    if (run.totalTokens !== null) totals.totalTokens = (totals.totalTokens ?? 0) + run.totalTokens;
     totals.accepted += run.acceptedDraft ? 1 : 0;
     totals.sent += run.sent ? 1 : 0;
     totals.sendRuleViolations += run.sendRuleViolations;
@@ -348,6 +351,11 @@ function summarize(machine: string, runs: RunMetrics[]): MachineSummary {
     bucket.modelCalls += run.modelCalls;
     bucket.accepted += run.acceptedDraft ? 1 : 0;
   }
+  // Same rule as per run: a partial sum must not read as a total.
+  totals.totalTokens =
+    runs.length > 0 && runs.every((run) => run.totalTokens !== null)
+      ? runs.reduce((sum, run) => sum + (run.totalTokens ?? 0), 0)
+      : null;
   return { machine, runs, totals, byCategory, edges };
 }
 

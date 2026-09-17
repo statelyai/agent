@@ -54,9 +54,9 @@ export function scriptedReviewVerdict(text: string): "APPROVE" | "REJECT" | "UNC
   return "UNCLEAR";
 }
 
-// Stops before trailing punctuation ("priya@example.com," or "...com.") so the
-// scripted draft carries an address `hasRecipient` accepts.
-const EMAIL = /[^\s@,]+@[^\s@,]+\.[A-Za-z]+/;
+// Starts at a local-part character and stops before trailing punctuation, so
+// "<priya@example.com>," yields an address `hasRecipient` accepts.
+const EMAIL = /[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/;
 
 /**
  * Email drafter stand-ins, routed on request name. The evaluator flags a
