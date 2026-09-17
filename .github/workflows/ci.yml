@@ -30,8 +30,6 @@ jobs:
         run: npm i pnpm@latest -g
       - name: install dependencies
         run: pnpm install --frozen-lockfile
-      - name: typecheck
-        run: pnpm typecheck
       - name: lint
         run: pnpm lint
       - name: format check
@@ -42,3 +40,8 @@ jobs:
         run: pnpm test:ci
       - name: build
         run: pnpm build
+      # Last on purpose: a single failing step ends the job, and typechecking
+      # is the step most likely to break on an xstate alpha we don't control.
+      # Everything above reports on its own merits before that can happen.
+      - name: typecheck
+        run: pnpm typecheck
