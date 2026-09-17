@@ -112,8 +112,32 @@ describe("scenario outcomes (scripted)", () => {
     expect(output.verification).not.toBe("");
   });
 
+  test("retry answers on the first attempt when the primary is healthy", async () => {
+    const result = await start(
+      "retry",
+      "Classify this ticket: the billing page shows last month's total.",
+    );
+    expect(result.status).toBe("done");
+    const output = result.output as { attempts: number; usedFallback: boolean; outcome: string };
+    expect(output.attempts).toBe(0);
+    expect(output.usedFallback).toBe(false);
+    expect(output.outcome).toBe("Attempt 1 of 3 succeeded on the primary model.");
+  });
+
+  test("retry recovers on the primary after one failure", async () => {
+    const result = await start("retry", "Classify this ticket: exports time out. [primary-outage]");
+    expect(result.status).toBe("done");
+    const output = result.output as { attempts: number; usedFallback: boolean; outcome: string };
+    expect(output.attempts).toBe(1);
+    expect(output.usedFallback).toBe(false);
+    expect(output.outcome).toBe("Attempt 2 of 3 succeeded on the primary model.");
+  });
+
   test("retry reaches fallback success after primary failures", async () => {
-    const result = await start("retry", "I was charged twice and cannot open my invoice.");
+    const result = await start(
+      "retry",
+      "I was charged twice and cannot open my invoice. [primary-outage-hard]",
+    );
     expect(result.status).toBe("done");
     const output = result.output as {
       category: string;
@@ -123,18 +147,20 @@ describe("scenario outcomes (scripted)", () => {
     };
     expect(output.usedFallback).toBe(true);
     expect(output.attempts).toBe(2);
-    expect(output.category).not.toBe("");
+    expect(output.category).toBe("Category: billing · Priority: high · Route to billing support.");
     // The visible outcome names the winning attempt and the model that served it.
     expect(output.outcome).toBe("Attempt 3 of 3 succeeded on the fallback model.");
     expect(result.response).toContain(output.outcome);
   });
 
   test("tools calls a tool then finishes within the cap", async () => {
-    const result = await start("tools", "What is 42 times 17?");
+    const result = await start("tools", "What is 42 times 17, and what is the speed of light?");
     expect(result.status).toBe("done");
     const output = result.output as { answer: string; steps: number };
-    expect(output.steps).toBeGreaterThanOrEqual(1);
-    expect(output.answer).not.toBe("");
+    expect(output.steps).toBe(2);
+    expect(output.answer).toBe(
+      "42 × 17 = 714. The speed of light is 299,792,458 meters per second.",
+    );
   });
 
   test("reflection revises once then accepts", async () => {
