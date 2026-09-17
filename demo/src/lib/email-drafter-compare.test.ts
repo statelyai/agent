@@ -1,0 +1,102 @@
+import { expect, test } from "vitest";
+import type { Snapshot } from "xstate";
+import { resumeScenarioRun, startScenarioRun } from "./agent-runner";
+import { cases, runCase, runComparison } from "./email-drafter-compare";
+import { scriptedExecutorsFor } from "./scripted-executors";
+import { emailDrafterV1Machine } from "@/agents/email-drafter-v1";
+import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
+
+// The scripted executors the UI runs without a key; same for both versions.
+const executors = scriptedExecutorsFor("email-drafter-v1");
+
+const optionalCase = cases.find((entry) => entry.id === "optional-1")!;
+const recipientCase = cases.find((entry) => entry.id === "recipient-1")!;
+
+test("v1 asks before drafting when only optional details are missing; v2 drafts first", async () => {
+  const v1 = await runCase(emailDrafterV1Machine, optionalCase, executors);
+  const v2 = await runCase(emailDrafterV2Machine, optionalCase, executors);
+
+  expect(v1.clarificationTurns).toBeGreaterThan(0);
+  expect(v1.path).toContain("needsMoreInfo");
+  expect(v2.clarificationTurns).toBe(0);
+  expect(v2.path).toEqual(["drafting", "reviewing", "sending", "sent"]);
+  expect(v1.sent && v2.sent).toBe(true);
+});
+
+test("v2 moves the recipient check to the send boundary and never sends without one", async () => {
+  const start = (id: "email-drafter-v2", prompt: string) =>
+    startScenarioRun(id, prompt, "script", undefined, executors);
+  const resume = (snapshot: unknown, event: { type: string; [key: string]: unknown }) =>
+    resumeScenarioRun(
+      "email-drafter-v2",
+      snapshot as Snapshot<unknown>,
+      event,
+      "script",
+      undefined,
+      executors,
+    );
+
+  const reviewing = await start("email-drafter-v2", recipientCase.prompt);
+  expect(reviewing.status).toBe("idle");
+  expect(reviewing.idle?.events.map((event) => event.type)).toEqual(["REQUEST_CHANGES", "SEND"]);
+  expect(reviewing.idle?.textEvent).toEqual({ type: "REQUEST_CHANGES", field: "text" });
+  expect(reviewing.response).toContain("(no recipient yet)");
+
+  // SEND with no recipient: the workflow asks instead of sending.
+  const asked = await resume(reviewing.idle!.snapshot, { type: "SEND" });
+  expect(asked.status).toBe("idle");
+  expect(asked.idle?.prompt).toContain("Who should this go to?");
+  expect(asked.idle?.textEvent).toEqual({ type: "RECIPIENT_PROVIDED", field: "text" });
+
+  // An invalid address keeps asking.
+  const stillAsking = await resume(asked.idle!.snapshot, {
+    type: "RECIPIENT_PROVIDED",
+    text: "Alex",
+  });
+  expect(stillAsking.status).toBe("idle");
+  expect(stillAsking.idle?.prompt).toContain("Who should this go to?");
+
+  // A valid one sends, because the human already chose SEND.
+  const sent = await resume(stillAsking.idle!.snapshot, {
+    type: "RECIPIENT_PROVIDED",
+    text: "alex@example.com",
+  });
+  expect(sent.status).toBe("done");
+  expect(sent.response).toContain("Sent (simulated outbox)");
+  expect(sent.response).toContain("alex@example.com");
+});
+
+test("v1 idle label surfaces the evaluator's questions", async () => {
+  const first = await startScenarioRun(
+    "email-drafter-v1",
+    recipientCase.prompt,
+    "script",
+    undefined,
+    executors,
+  );
+  expect(first.status).toBe("idle");
+  expect(first.idle?.prompt).toContain("What is the recipient?");
+  expect(first.idle?.events.map((event) => event.type)).toEqual(["MORE_INFO", "DRAFT_ANYWAY"]);
+});
+
+test("the comparison holds the send rule for both versions and v2 asks less", async () => {
+  const [v1, v2] = await runComparison(executors);
+  expect(v1?.machine).toBe("v1");
+  expect(v2?.machine).toBe("v2");
+
+  for (const summary of [v1!, v2!]) {
+    expect(summary.totals.sendRuleViolations).toBe(0);
+    expect(summary.totals.sent).toBe(cases.length);
+    expect(summary.runs.every((run) => run.failure === null)).toBe(true);
+  }
+  expect(v2!.totals.clarificationTurns).toBeLessThan(v1!.totals.clarificationTurns);
+  expect(v2!.totals.modelCalls).toBeLessThan(v1!.totals.modelCalls);
+
+  // The weighted graph: v1's clarification loop shows up as traversed edges;
+  // v2 has no such edges to traverse.
+  expect(Object.keys(v1!.edges).some((edge) => edge.includes("--> needsMoreInfo"))).toBe(true);
+  expect(Object.keys(v2!.edges).some((edge) => edge.includes("needsMoreInfo"))).toBe(false);
+  // Missing-recipient cases still get asked in v2, at the boundary.
+  expect(v2!.byCategory["missing-recipient"]?.clarificationTurns).toBe(2);
+  expect(v2!.byCategory["missing-optional"]?.clarificationTurns).toBe(0);
+});

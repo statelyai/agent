@@ -1,0 +1,518 @@
+{
+  "generatedAt": "2026-09-16T14:55:26.442Z",
+  "model": "gpt-5.4-mini",
+  "summaries": [
+    {
+      "machine": "v1",
+      "runs": [
+        {
+          "caseId": "complete-1",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 2,
+          "totalTokens": 340,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "complete-2",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 2,
+          "totalTokens": 336,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "complete-3",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 2,
+          "totalTokens": 336,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-1",
+          "category": "missing-optional",
+          "clarificationTurns": 3,
+          "revisions": 0,
+          "modelCalls": 4,
+          "totalTokens": 889,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 3,
+            "needsMoreInfo --MORE_INFO--> evaluating": 2,
+            "needsMoreInfo --DRAFT_ANYWAY--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-2",
+          "category": "missing-optional",
+          "clarificationTurns": 3,
+          "revisions": 0,
+          "modelCalls": 4,
+          "totalTokens": 783,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 3,
+            "needsMoreInfo --MORE_INFO--> evaluating": 2,
+            "needsMoreInfo --DRAFT_ANYWAY--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-3",
+          "category": "missing-optional",
+          "clarificationTurns": 3,
+          "revisions": 0,
+          "modelCalls": 4,
+          "totalTokens": 769,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 3,
+            "needsMoreInfo --MORE_INFO--> evaluating": 2,
+            "needsMoreInfo --DRAFT_ANYWAY--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "recipient-1",
+          "category": "missing-recipient",
+          "clarificationTurns": 3,
+          "revisions": 0,
+          "modelCalls": 4,
+          "totalTokens": 829,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 3,
+            "needsMoreInfo --MORE_INFO--> evaluating": 2,
+            "needsMoreInfo --DRAFT_ANYWAY--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "needsMoreInfo",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "recipient-2",
+          "category": "missing-recipient",
+          "clarificationTurns": 1,
+          "revisions": 0,
+          "modelCalls": 3,
+          "totalTokens": 579,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "evaluating --xstate.done.actor--> needsMoreInfo": 1,
+            "needsMoreInfo --MORE_INFO--> evaluating": 1,
+            "evaluating --xstate.done.actor--> drafting": 1,
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "evaluating",
+            "needsMoreInfo",
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        }
+      ],
+      "totals": {
+        "runs": 8,
+        "clarificationTurns": 13,
+        "revisions": 0,
+        "modelCalls": 25,
+        "totalTokens": 4861,
+        "accepted": 8,
+        "sent": 8,
+        "sendRuleViolations": 0
+      },
+      "byCategory": {
+        "complete": {
+          "runs": 3,
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 6,
+          "accepted": 3
+        },
+        "missing-optional": {
+          "runs": 3,
+          "clarificationTurns": 9,
+          "revisions": 0,
+          "modelCalls": 12,
+          "accepted": 3
+        },
+        "missing-recipient": {
+          "runs": 2,
+          "clarificationTurns": 4,
+          "revisions": 0,
+          "modelCalls": 7,
+          "accepted": 2
+        }
+      },
+      "edges": {
+        "evaluating --xstate.done.actor--> drafting": 4,
+        "drafting --xstate.done.actor--> reviewing": 8,
+        "reviewing --SEND--> sending": 8,
+        "sending --xstate.done.actor--> sent": 8,
+        "evaluating --xstate.done.actor--> needsMoreInfo": 13,
+        "needsMoreInfo --MORE_INFO--> evaluating": 9,
+        "needsMoreInfo --DRAFT_ANYWAY--> drafting": 4
+      }
+    },
+    {
+      "machine": "v2",
+      "runs": [
+        {
+          "caseId": "complete-1",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 199,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "complete-2",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 203,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "complete-3",
+          "category": "complete",
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 203,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-1",
+          "category": "missing-optional",
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 228,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-2",
+          "category": "missing-optional",
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 192,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "optional-3",
+          "category": "missing-optional",
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 188,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "recipient-1",
+          "category": "missing-recipient",
+          "clarificationTurns": 1,
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 213,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> needsRecipient": 1,
+            "needsRecipient --RECIPIENT_PROVIDED--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "needsRecipient",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        },
+        {
+          "caseId": "recipient-2",
+          "category": "missing-recipient",
+          "clarificationTurns": 1,
+          "revisions": 0,
+          "modelCalls": 1,
+          "totalTokens": 197,
+          "acceptedDraft": true,
+          "sent": true,
+          "sendRuleViolations": 0,
+          "edges": {
+            "drafting --xstate.done.actor--> reviewing": 1,
+            "reviewing --SEND--> needsRecipient": 1,
+            "needsRecipient --RECIPIENT_PROVIDED--> sending": 1,
+            "sending --xstate.done.actor--> sent": 1
+          },
+          "path": [
+            "drafting",
+            "reviewing",
+            "needsRecipient",
+            "sending",
+            "sent"
+          ],
+          "failure": null
+        }
+      ],
+      "totals": {
+        "runs": 8,
+        "clarificationTurns": 2,
+        "revisions": 0,
+        "modelCalls": 8,
+        "totalTokens": 1623,
+        "accepted": 8,
+        "sent": 8,
+        "sendRuleViolations": 0
+      },
+      "byCategory": {
+        "complete": {
+          "runs": 3,
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 3,
+          "accepted": 3
+        },
+        "missing-optional": {
+          "runs": 3,
+          "clarificationTurns": 0,
+          "revisions": 0,
+          "modelCalls": 3,
+          "accepted": 3
+        },
+        "missing-recipient": {
+          "runs": 2,
+          "clarificationTurns": 2,
+          "revisions": 0,
+          "modelCalls": 2,
+          "accepted": 2
+        }
+      },
+      "edges": {
+        "drafting --xstate.done.actor--> reviewing": 8,
+        "reviewing --SEND--> sending": 6,
+        "sending --xstate.done.actor--> sent": 8,
+        "reviewing --SEND--> needsRecipient": 2,
+        "needsRecipient --RECIPIENT_PROVIDED--> sending": 2
+      }
+    }
+  ]
+}

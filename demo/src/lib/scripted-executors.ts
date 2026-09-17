@@ -54,6 +54,30 @@ export function scriptedReviewVerdict(text: string): "APPROVE" | "REJECT" | "UNC
   return "UNCLEAR";
 }
 
+const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+
+/**
+ * Email drafter stand-ins, routed on request name. The evaluator flags a
+ * recipient as missing when no address appears and a subject as missing when
+ * the word "subject" does not; the drafter copies the request into the body,
+ * so every fact the user typed is "mentioned".
+ */
+function emailDrafterOutput(request: AgentTextRequest): unknown {
+  const text = request.prompt ?? "";
+  if (request.name === "evaluatePrompt") {
+    const missing = [
+      ...(EMAIL.test(text) ? [] : ["recipient"]),
+      ...(/subject/i.test(text) ? [] : ["subject"]),
+    ];
+    return {
+      satisfied: missing.length === 0,
+      missing,
+      questions: missing.map((field) => `What is the ${field}?`),
+    };
+  }
+  return { to: text.match(EMAIL)?.[0] ?? "", subject: "Re: your request", body: text };
+}
+
 export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
   switch (scenarioId) {
     case "refund":
@@ -81,6 +105,10 @@ export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {
           return { event: { ...pick(request, type), reason: ROUTING_REASONS[type] } };
         },
       };
+
+    case "email-drafter-v1":
+    case "email-drafter-v2":
+      return { generateText: async (request) => ({ output: emailDrafterOutput(request) }) };
 
     case "approval":
       return {

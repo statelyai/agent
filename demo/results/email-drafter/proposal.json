@@ -1,0 +1,18 @@
+{
+  "model": "gpt-5.4",
+  "observation": "The main friction is repeated clarification loops before any draft exists. This is concentrated in `needsMoreInfo`: 13 traversals into `needsMoreInfo`, 9 `MORE_INFO` returns to `evaluating`, and all 3 `missing-optional` runs took 3 clarification turns each before drafting. Revisions are 0, so review is not the bottleneck. The current evaluator policy also treats every gap the same: `evaluatePrompt.system` says `Require recipient, subject, and body details`, which forces optional-detail cases through the same stop-and-ask path as harder cases.",
+  "proposal": "Make one bounded change to the evaluator policy so it only blocks on a valid recipient before drafting, and treats missing subject/body detail as non-blocking draftable gaps. Concretely, change the `evaluatePrompt.system` request from requiring `recipient, subject, and body details` to requiring only a valid recipient for satisfaction, while still returning questions for missing optional content that the drafter can handle. This preserves all non-negotiables: sending still only happens from `reviewing`/`finalReview` on `SEND`; every draft is still reviewed before send; and a valid recipient is still required before the machine can reach `drafting` and thus `sending`.",
+  "changes": [
+    {
+      "where": "`requests.evaluatePrompt.system`",
+      "change": "Replace `Require recipient, subject, and body details. Return missing fields and one question per gap.` with guidance that only a valid recipient is mandatory to proceed, while subject/body gaps should be noted but need not make `satisfied` false. Example intent: `Evaluate an email drafting request. A valid recipient is required before drafting. If recipient is missing or invalid, return satisfied=false and ask for it. Missing subject/body detail may be returned as questions, but should not block drafting when a recipient is present.`"
+    }
+  ],
+  "keeps": [
+    "Keep `needsMoreInfo` and `DRAFT_ANYWAY`; recipient-missing cases can still stop there.",
+    "Keep human review in `reviewing`/`finalReview` before `sending`.",
+    "Keep `SEND` as the only path to `sending`.",
+    "Keep the valid-recipient requirement before sending by enforcing it in evaluation."
+  ],
+  "measure": "Success metric: reduce clarification turns and model calls in `missing-optional` runs. Specifically, expect the `complete` path shape (`evaluating > drafting > reviewing > sending > sent`) to absorb most `missing-optional` cases, cutting their clarificationTurns from 3 toward 0 and modelCalls from 4 toward 2, while leaving sendRuleViolations at 0."
+}
