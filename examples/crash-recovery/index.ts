@@ -73,7 +73,7 @@ export const crashRecoveryMachine = crashRecoverySetup.createMachine({
       invoke: {
         src: "outline",
         input: ({ context }) => ({ topic: context.topic }),
-        onDone: ({ output }) => ({ target: "drafting", context: { outline: output } }),
+        onDone: ({ output }) => ({ target: "drafting", context: { outline: output.result } }),
         onError: { target: "failed" },
       },
     },
@@ -81,7 +81,7 @@ export const crashRecoveryMachine = crashRecoverySetup.createMachine({
       invoke: {
         src: "draft",
         input: ({ context }) => ({ topic: context.topic, outline: context.outline ?? "" }),
-        onDone: ({ output }) => ({ target: "done", context: { article: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { article: output.result } }),
         onError: { target: "failed" },
       },
     },

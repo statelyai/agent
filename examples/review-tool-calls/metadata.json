@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Vercel AI SDK tools", "framework-native chat history"],
-    "purpose": "Two variants on one axis. Machine-owned: LangGraph's interrupt() over a proposed call becomes a first-class idle `reviewing` state, resumed by typed APPROVE / EDIT / REJECT events before the consequential tool runs. SDK-owned: the AI SDK runs the whole multi-step loop under `maxSteps` and the machine only appends its native response messages through an agent.messages transition."
+    "purpose": "Two variants on one axis. Machine-owned: LangGraph's interrupt() over a proposed call becomes a first-class idle `reviewing` state, resumed by typed APPROVE / EDIT / REJECT events before the consequential tool runs. SDK-owned: the AI SDK runs the whole multi-step loop under `maxSteps` and the machine only appends the native response messages that arrive on the invoke output."
   },
   "starters": [
     "Refund me $60 for the late delivery on order #8891.",

@@ -139,7 +139,7 @@ export const supportMachine = agentSetup.createMachine({
       invoke: {
         src: "triageTicket",
         input: ({ context }) => ({ ticket: context.ticket }),
-        onDone: ({ output }) => ({ target: "deciding", context: { triage: output } }),
+        onDone: ({ output }) => ({ target: "deciding", context: { triage: output.result } }),
         onError: ({ event }) => ({
           target: "escalated",
           context: { resolution: `Triage failed, escalated: ${String(event.error)}` },

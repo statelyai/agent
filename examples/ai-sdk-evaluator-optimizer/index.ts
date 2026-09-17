@@ -167,10 +167,10 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
           targetLanguage: context.targetLanguage,
         }),
         onDone: ({ output }, enq) => {
-          enq.emit({ type: "TRANSLATED", translation: output });
+          enq.emit({ type: "TRANSLATED", translation: output.result });
           return {
             target: "evaluating",
-            context: { translation: output, firstDraft: output },
+            context: { translation: output.result, firstDraft: output.result },
           };
         },
         // Nothing was translated, so there is no best-effort answer to give:
@@ -189,12 +189,12 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
         onDone: ({ context, output }, enq) => {
           enq.emit({
             type: "EVALUATED",
-            qualityScore: output.qualityScore,
+            qualityScore: output.result.qualityScore,
             iteration: context.iterations + 1,
           });
           return {
             target: "checking",
-            context: { evaluation: output, iterations: context.iterations + 1 },
+            context: { evaluation: output.result, iterations: context.iterations + 1 },
           };
         },
         // A translation exists; only the review is missing. `done` reports it
@@ -219,10 +219,13 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
           evaluation: context.evaluation,
         }),
         onDone: ({ context, output }, enq) => {
-          enq.emit({ type: "IMPROVED", translation: output });
+          enq.emit({ type: "IMPROVED", translation: output.result });
           return {
             target: "evaluating",
-            context: { translation: output, revisedIssues: context.evaluation.specificIssues },
+            context: {
+              translation: output.result,
+              revisedIssues: context.evaluation.specificIssues,
+            },
           };
         },
         // The previous translation stands; `done` reports it unrevised.

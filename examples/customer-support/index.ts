@@ -309,7 +309,7 @@ export const customerSupportMachine = agentSetup.createMachine({
       invoke: {
         src: "classify",
         input: ({ context }) => ({ query: context.query }),
-        onDone: ({ output }) => ({
+        onDone: ({ output: { result: output } }) => ({
           target: "routing",
           context: {
             pendingAction:
@@ -349,7 +349,7 @@ export const customerSupportMachine = agentSetup.createMachine({
         // request's own `needsInfo` flag, it becomes a state the customer can
         // reply into — instead of a final state that reports `answered`
         // having answered nothing.
-        onDone: ({ context, output }) => {
+        onDone: ({ context, output: { result: output } }) => {
           if (output.status === "answered") {
             return { target: "answered", context: { message: output.answer } };
           }

@@ -28,6 +28,7 @@
  * Run: OPENAI_API_KEY=... npx tsx examples/openai-sdk-host/index.ts
  */
 import type OpenAI from "openai";
+import type { SnapshotFrom } from "xstate";
 import { runAgent } from "@statelyai/agent";
 import { createOpenAiExecutors } from "@statelyai/agent/openai";
 import { triageMachine } from "../triage/index.js";

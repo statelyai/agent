@@ -179,7 +179,7 @@ const machine = agentSetup.createMachine({
       invoke: {
         src: "assist",
         input: ({ context }) => ({ request: context.request }),
-        onDone: ({ output }) => ({ target: "deciding", context: { reply: output } }),
+        onDone: ({ output }) => ({ target: "deciding", context: { reply: output.result } }),
       },
     },
     deciding: {
@@ -362,7 +362,7 @@ drafting: {
     input: ({ context }) => ({ topic: context.topic }),
     onDone: ({ output }) => ({
       target: "reviewing",
-      context: { draft: output },
+      context: { draft: output.result },
     }),
   },
 }

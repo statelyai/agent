@@ -103,9 +103,9 @@ export const reflectionMachine = agentSetup.createMachine({
         onDone: {
           target: "evaluating",
           context: ({ context, output }) => ({
-            draft: output,
+            draft: output.result,
             // Only the first pass is preserved; later drafts overwrite `draft` alone.
-            firstDraft: context.firstDraft || output,
+            firstDraft: context.firstDraft || output.result,
           }),
         },
         onError: { target: "done" },
@@ -117,7 +117,10 @@ export const reflectionMachine = agentSetup.createMachine({
         input: ({ context }) => ({ draft: context.draft }),
         onDone: {
           target: "checking",
-          context: ({ output }) => ({ score: output.score, feedback: output.feedback }),
+          context: ({ output }) => ({
+            score: output.result.score,
+            feedback: output.result.feedback,
+          }),
         },
         onError: { target: "done" },
       },

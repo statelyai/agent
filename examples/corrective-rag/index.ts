@@ -361,7 +361,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
         // none survived → correct via rewrite + fallback index.
         onDone: ({ context, output }) => {
           const relevant = context.documents.filter(
-            (_doc, i) => output.grades[i]?.relevant === true,
+            (_doc, i) => output.result.grades[i]?.relevant === true,
           );
           return {
             target: relevant.length > 0 ? "generating" : "transformingQuery",
@@ -379,7 +379,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question }),
         onDone: ({ output }) => ({
           target: "webSearching",
-          context: { rewrittenQuestion: output },
+          context: { rewrittenQuestion: output.result },
         }),
         onError: { target: "generating" },
       },
@@ -412,7 +412,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
           question: context.rewrittenQuestion ?? context.question,
           documents: context.documents,
         }),
-        onDone: ({ output }) => ({ target: "done", context: { generation: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { generation: output.result } }),
         onError: { target: "failed" },
       },
     },

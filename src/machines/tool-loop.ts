@@ -98,7 +98,7 @@ export function createToolLoopMachine(config: CreateToolLoopMachineConfig): Tool
             ...(resultSchema ? { outputSchema: resultSchema } : {}),
             ...(maxSteps !== undefined ? { maxSteps } : {}),
           }),
-          onDone: ({ output }) => ({ target: "done", context: { result: output } }),
+          onDone: ({ output }) => ({ target: "done", context: { result: output.result } }),
         },
       },
       done: {

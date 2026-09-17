@@ -78,14 +78,14 @@ const writerMachine = writerSetup.createMachine({
       invoke: {
         src: "outline",
         input: ({ context: _c, event: _e }) => ({ topic: "state machines" }),
-        onDone: ({ output }) => ({ target: "drafting", context: { outline: output } }),
+        onDone: ({ output }) => ({ target: "drafting", context: { outline: output.result } }),
       },
     },
     drafting: {
       invoke: {
         src: "draft",
         input: ({ context }) => ({ outline: context.outline ?? "" }),
-        onDone: ({ output }) => ({ target: "done", context: { article: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { article: output.result } }),
       },
     },
     done: { type: "final" },
@@ -349,7 +349,7 @@ describe("createScriptedExecutors", () => {
           invoke: {
             src: "moderatorNote",
             input: ({ context: _c }) => ({ comment: "spam" }),
-            onDone: ({ output }) => ({ target: "done", context: { note: output.note } }),
+            onDone: ({ output }) => ({ target: "done", context: { note: output.result.note } }),
           },
         },
         done: { type: "final" },

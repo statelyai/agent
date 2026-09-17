@@ -128,7 +128,7 @@ export const tanstackAiStreamMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question }),
         onDone: ({ output }) => ({
           target: "answering",
-          context: { outline: output },
+          context: { outline: output.result },
         }),
         onError: { target: "failed" },
       },
@@ -143,7 +143,7 @@ export const tanstackAiStreamMachine = agentSetup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "done",
-          context: { answer: output },
+          context: { answer: output.result },
         }),
         onError: { target: "failed" },
       },

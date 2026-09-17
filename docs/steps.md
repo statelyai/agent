@@ -45,8 +45,8 @@ export async function runWithSteps(
       });
       step = transitionAgentStep(machine, step, event);
     } else {
-      const { output } = await executeAgentRequest(request, executors);
-      step = resolveAgentStep(machine, step, request, output);
+      const { result, messages } = await executeAgentRequest(request, executors);
+      step = resolveAgentStep(machine, step, request, { result, messages });
     }
   }
 
@@ -56,9 +56,9 @@ export async function runWithSteps(
 
 - `initialAgentStep(machine, input)` starts the machine.
 - `transitionAgentStep(machine, step, event)` applies an external event: a decision's chosen event, a human reply, a timer.
-- `resolveAgentStep(machine, step, request, output)` delivers a text request's result as that invoke's `xstate.done.actor` event.
+- `resolveAgentStep(machine, step, request, output)` delivers a text request's result as that invoke's `xstate.done.actor` event. `output` is the `{ result, messages }` envelope the invoke's `onDone` reads: the validated result plus the executor's response messages (`[]` when there are none).
 - `rejectAgentStep(machine, step, request, error)` delivers a failure as `xstate.error.actor`, so the machine takes the invoke's `onError`. With no `onError` in scope the snapshot ends in `status: 'error'`, exactly as a live run would.
-- `executeAgentRequest(request, executors)` runs one text request against the executor contract and validates its output. Decisions go through `resolveDecision`.
+- `executeAgentRequest(request, executors)` runs one text request against the executor contract and returns `{ result, messages, raw }`: the validated result, the response messages, and the raw executor result. The first two are exactly what `resolveAgentStep` takes. Decisions go through `resolveDecision`.
 
 Every step's snapshot is a native XState snapshot. Persist it with `getPersistedSnapshot`, and restore it with `transitionAgentStep` on a later process. Requests in parallel regions arrive together in `step.requests`; the host chooses whether to run them concurrently.
 

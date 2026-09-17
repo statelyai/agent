@@ -84,7 +84,7 @@ describe("runAgent", () => {
             input: ({ context }) => ({ prompt: context.prompt }),
             onDone: ({ output }) => ({
               target: "done",
-              context: { answer: output.answer },
+              context: { answer: output.result.answer },
             }),
           },
         },
@@ -145,7 +145,7 @@ describe("runAgent", () => {
             input: ({ context }) => ({ prompt: context.prompt }),
             onDone: ({ output }) => ({
               target: "awaitingApproval",
-              context: { draft: output },
+              context: { draft: output.result },
             }),
           },
         },
@@ -287,7 +287,7 @@ describe("runAgent", () => {
             input: ({ context }) => ({ topic: context.topic }),
             onDone: ({ output }) => ({
               target: "awaitingApproval",
-              context: { draft: output },
+              context: { draft: output.result },
             }),
           },
         },
@@ -446,7 +446,7 @@ describe("runAgent", () => {
             onDone: ({ output }) => ({
               target: "looping",
               reenter: true,
-              context: { count: output as number },
+              context: { count: output.result },
             }),
           },
         },
@@ -829,7 +829,7 @@ describe("runAgent", () => {
                 input: ({ context }) => ({ topic: context.topic }),
                 onDone: ({ output }) => ({
                   target: "done",
-                  context: { research: output },
+                  context: { research: output.result },
                 }),
               },
             },
@@ -1073,7 +1073,7 @@ describe("runAgent", () => {
               invoke: {
                 src: "streamResearch",
                 input: ({ context }) => ({ topic: context.topic }),
-                onDone: ({ output }) => ({ target: "done", context: { research: output } }),
+                onDone: ({ output }) => ({ target: "done", context: { research: output.result } }),
               },
             },
             done: {
@@ -1165,9 +1165,6 @@ describe("runAgent", () => {
       const agent = setupAgent({ schemas });
       const machine = agent.createMachine({
         context: { hp: 10, messages: [] },
-        on: {
-          "agent.messages": agent.appendMessages(),
-        },
         initial: "choosingMove",
         states: {
           choosingMove: {
@@ -1206,7 +1203,6 @@ describe("runAgent", () => {
 
       expect(result.status).toBe("done");
       expect(seenEvents.map((event) => event.type).sort()).toEqual(["ATTACK", "HEAL"]);
-      expect(seenEvents.map((event) => event.type)).not.toContain("agent.messages");
       expect(seenEvents.find((event) => event.type === "ATTACK")?.inputSchema).toBe(attackSchema);
       expect(seenEvents.find((event) => event.type === "HEAL")?.inputSchema).toBe(healSchema);
     });
@@ -1554,8 +1550,8 @@ describe("emitted events (runAgent `on`)", () => {
           src: "draft",
           input: ({ context }) => ({ topic: context.topic }),
           onDone: ({ output }, enq) => {
-            enq.emit({ type: "DRAFTED", length: output.length });
-            return { target: "done", context: { draft: output } };
+            enq.emit({ type: "DRAFTED", length: output.result.length });
+            return { target: "done", context: { draft: output.result } };
           },
         },
       },
@@ -1693,7 +1689,7 @@ describe("onTrace stream chunks", () => {
           invoke: {
             src: "joke",
             input: () => ({}),
-            onDone: ({ output }) => ({ target: "done", context: { joke: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { joke: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ joke: context.joke ?? "" }) },
@@ -1748,7 +1744,7 @@ describe("sugar callbacks are projections of onTrace", () => {
           invoke: {
             src: "joke",
             input: () => ({}),
-            onDone: ({ output }) => ({ target: "done", context: { joke: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { joke: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ joke: context.joke ?? "" }) },
@@ -1820,7 +1816,7 @@ describe("onResult raw pass-through", () => {
           invoke: {
             src: "ask",
             input: () => ({}),
-            onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { answer: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ answer: context.answer ?? "" }) },
@@ -1869,7 +1865,7 @@ describe("onResult raw pass-through", () => {
             input: () => ({}),
             onDone: ({ output }) => ({
               target: "done",
-              context: { answer: (output as { answer: string }).answer },
+              context: { answer: output.result.answer },
             }),
           },
         },
@@ -2324,7 +2320,10 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
                 id: "sum",
                 src: "summarize",
                 input: {},
-                onDone: ({ output }) => ({ target: "summarized", context: { summary: output } }),
+                onDone: ({ output }) => ({
+                  target: "summarized",
+                  context: { summary: output.result },
+                }),
               },
             },
             summarized: { type: "final" },
@@ -2729,7 +2728,7 @@ describe("restore semantics: pending requests and events-only resume", () => {
             input: () => ({ model: "m", prompt: "one" }),
             onDone: ({ event }) => ({
               target: "waiting",
-              context: { a: String(event.output) },
+              context: { a: String(event.output.result) },
             }),
           },
         },
@@ -2740,7 +2739,7 @@ describe("restore semantics: pending requests and events-only resume", () => {
             input: () => ({ model: "m", prompt: "two" }),
             onDone: ({ event }) => ({
               target: "done",
-              context: { b: String(event.output) },
+              context: { b: String(event.output.result) },
             }),
           },
         },
@@ -2955,7 +2954,10 @@ describe("runAgent usage aggregation", () => {
           id: "first",
           src: "step",
           input: { label: "one" },
-          onDone: ({ output }) => ({ target: "second", context: { second: null, first: output } }),
+          onDone: ({ output }) => ({
+            target: "second",
+            context: { second: null, first: output.result },
+          }),
         },
       },
       second: {
@@ -2965,7 +2967,7 @@ describe("runAgent usage aggregation", () => {
           input: { label: "two" },
           onDone: ({ output, context }) => ({
             target: "done",
-            context: { first: context.first, second: output },
+            context: { first: context.first, second: output.result },
           }),
         },
       },
@@ -3047,7 +3049,7 @@ describe("runAgent usage aggregation", () => {
             input: { label: "one" },
             onDone: ({ output }) => ({
               target: "waiting",
-              context: { second: null, first: output },
+              context: { second: null, first: output.result },
             }),
           },
         },
@@ -3317,9 +3319,9 @@ describe("runAgent event log", () => {
             id: "ask",
             src: "answer",
             input: () => ({}),
-            onDone: ({ output }: { output: string }) => ({
+            onDone: ({ output }: { output: { result: string } }) => ({
               target: "waiting",
-              context: { answer: output },
+              context: { answer: output.result },
             }),
           } as never,
         },

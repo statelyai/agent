@@ -340,7 +340,7 @@ export const routeReplanningMachine = agentSetup.createMachine({
           travelled: context.travelled,
           delivered: context.at === "market",
         }),
-        onDone: ({ output }) => ({ target: "done", context: { report: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { report: output.result } }),
         onError: ({ event }) => ({
           target: "done",
           context: { report: `No report: ${String(event.error)}` },

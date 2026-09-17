@@ -278,10 +278,10 @@ export const gameMachine = gameAgentSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "checkingOutcome",
           context: {
-            lastSummary: output.summary,
+            lastSummary: output.result.summary,
             log: [
               ...context.log,
-              output.summary,
+              output.result.summary,
               `End of turn: you ${context.playerHp} HP, goblin ${context.enemyHp} HP.`,
             ],
           },

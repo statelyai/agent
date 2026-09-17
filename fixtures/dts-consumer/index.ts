@@ -14,7 +14,6 @@ import { runAgent, setupAgent } from "@statelyai/agent";
 // Something from every entry — proves each entry's public types resolve
 // from the shipped package, not just source. The root block also asserts the
 export {
-  appendMessages,
   eventFromInteraction,
   executeAgentRequest,
   getInteraction,
@@ -23,6 +22,7 @@ export {
   runAgentStream,
   type AgentOutputMode,
   type AgentInteraction,
+  type AgentTextResult,
   type StructuredOutputEnvelope,
 } from "@statelyai/agent";
 export { createAiSdkExecutors, parseModelRef } from "@statelyai/agent/ai-sdk";
@@ -76,7 +76,7 @@ export const machine = setup.createMachine({
         input: ({ context }) => ({ topic: context.topic }),
         onDone: {
           target: "done",
-          context: ({ event }) => ({ summary: event.output }),
+          context: ({ event }) => ({ summary: event.output.result }),
         },
       },
     },

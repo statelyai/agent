@@ -34,13 +34,6 @@ import {
 import { createDecideActor } from "./decision.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import {
-  AGENT_MESSAGES_EVENT_TYPE,
-  agentMessagesEventSchema,
-  appendMessages,
-  type AgentMessagesEventPayload,
-  type AppendMessagesTransition,
-} from "./messages.js";
-import {
   getAgentExecutionOptions,
   machineIdlePredicates,
   setAgentExecutionOptions,
@@ -234,10 +227,9 @@ const agentUsageEventSchema: StandardSchemaV1<AgentUsageEventPayload> = {
  */
 export type WithAgentEvents<T extends AgentEventSchemaInputMap> = Omit<
   T,
-  typeof AGENT_USAGE_EVENT_TYPE | typeof AGENT_MESSAGES_EVENT_TYPE
+  typeof AGENT_USAGE_EVENT_TYPE
 > & {
   [AGENT_USAGE_EVENT_TYPE]: StandardSchemaV1<AgentUsageEventPayload>;
-  [AGENT_MESSAGES_EVENT_TYPE]: StandardSchemaV1<AgentMessagesEventPayload>;
 };
 
 /** @deprecated Use {@link WithAgentEvents}. */
@@ -262,18 +254,9 @@ function withAgentUsageEventSchema<T extends AgentEventSchemaInputMap>(
         `transition instead: on: { '${AGENT_USAGE_EVENT_TYPE}': … }.`,
     );
   }
-  const declaredMessages = events?.[AGENT_MESSAGES_EVENT_TYPE];
-  if (declaredMessages !== undefined && declaredMessages !== agentMessagesEventSchema) {
-    throw new Error(
-      `setupAgent: event type '${AGENT_MESSAGES_EVENT_TYPE}' is reserved and cannot be ` +
-        `declared in 'events' — setupAgent registers it for you. Add a transition ` +
-        `instead: on: { '${AGENT_MESSAGES_EVENT_TYPE}': appendMessages() }.`,
-    );
-  }
   return {
     ...events,
     [AGENT_USAGE_EVENT_TYPE]: agentUsageEventSchema,
-    [AGENT_MESSAGES_EVENT_TYPE]: agentMessagesEventSchema,
   } as WithAgentEvents<T>;
 }
 
@@ -498,10 +481,7 @@ type AgentSetupXStateConfig<
       AgentAllActors<TActors, TRequestSchemas>,
       // Framework-reserved event types are never model-facing, so they stay
       // out of the `allowedEvents` candidate union the decide builtin types.
-      Exclude<
-        keyof TEventSchemas & string,
-        typeof AGENT_USAGE_EVENT_TYPE | typeof AGENT_MESSAGES_EVENT_TYPE
-      >,
+      Exclude<keyof TEventSchemas & string, typeof AGENT_USAGE_EVENT_TYPE>,
       AgentModelRef<TModels>
     >
   >;
@@ -569,7 +549,7 @@ type SetupAgentBaseConfig<
   isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 };
 
-// The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (schemas/models/requests/appendMessages, plus the wrapped createMachine) are added.
+// The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (schemas/models/requests, plus the wrapped createMachine) are added.
 type SetupAgentXStateResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends AgentEventSchemaInputMap,
@@ -599,20 +579,11 @@ type SetupAgentXStateResult<
 /**
  * The object returned by {@link setupAgent}: an xstate `setup(...)` result
  * (`createMachine`, `assign`, …) extended with `schemas` (the resolved
- * {@link AgentSchemaPack}), `models`, `requests` (the built request actors),
- * and {@link appendMessages}. Machines created here are registered so
+ * {@link AgentSchemaPack}), `models`, and `requests` (the built request
+ * actors). Machines created here are registered so
  * `runAgent` and the free step helpers can resolve their schemas/actors
  * without re-passing them each call.
  */
-type ArrayContextKey<TContext> = {
-  [TKey in keyof TContext & string]: TContext[TKey] extends readonly unknown[] ? TKey : never;
-}[keyof TContext & string];
-
-type AgentAppendMessages<TContext> = {
-  (): AppendMessagesTransition;
-  <TKey extends ArrayContextKey<TContext>>(options: { key: TKey }): AppendMessagesTransition;
-};
-
 type SetupAgentResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends AgentEventSchemaInputMap,
@@ -670,8 +641,6 @@ type SetupAgentResult<
   readonly models: TModels;
   /** The {@link TextLogic} actors built from `setupAgent({ requests })`, keyed the same way. */
   readonly requests: RequestActors<TRequestSchemas>;
-  /** {@link appendMessages}, for an explicit top-level `agent.messages` transition. */
-  appendMessages: AgentAppendMessages<InferOutput<TContextSchema>>;
 };
 
 /**
@@ -685,7 +654,7 @@ type SetupAgentResult<
  * `agent.decide` builtin actors and lowers `requests`/`actors` into the
  * machine's actor sources. The result is the xstate `setup(...)` object with
  * a wrapped `result.createMachine(...)` plus `result.schemas`/`models`/
- * `requests`/`appendMessages` attached. Also has a
+ * `requests` attached. Also has a
  * `setupAgent.fromConfig(...)` namespace member for building a machine from
  * a serializable {@link AgentWorkflowConfig} instead of this TS API.
  *
@@ -851,7 +820,6 @@ export function setupAgent<
     schemas,
     models,
     requests: requestActors,
-    appendMessages,
   }) as unknown as SetupAgentResult<
     TContextSchema,
     TEventSchemas,

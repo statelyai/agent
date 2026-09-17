@@ -50,7 +50,7 @@ deciding: {
 // ...
 ```
 
-The `allowedEvents` list is typed against the machine's user-authored event schema, so a typo is a compile error. Framework events such as `agent.messages` and `@agent.usage` can be handled by the machine but are never model-facing candidates. Listing events explicitly also makes the candidate set visible in the machine.
+The `allowedEvents` list is typed against the machine's user-authored event schema, so a typo is a compile error. Framework events such as `@agent.usage` can be handled by the machine but are never model-facing candidates. Listing events explicitly also makes the candidate set visible in the machine.
 
 > **Note:** `agent.decide` needs a snapshot-aware host such as `runAgent` to know which events are currently legal. With a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), list `allowedEvents` explicitly. Wildcards and the omitted default cannot expand there.
 

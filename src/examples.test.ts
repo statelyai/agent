@@ -159,7 +159,8 @@ describe("curated XState setup examples", () => {
     expect(summarize.events).toEqual([]);
 
     const finalStep = resolveAgentStep(gameMachine, attackStep, summarize, {
-      summary: "You strike the goblin.",
+      result: { summary: "You strike the goblin." },
+      messages: [],
     });
 
     expect(finalStep.done).toBe(true);

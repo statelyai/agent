@@ -274,7 +274,7 @@ describe("serializeTraceEvent", () => {
         drafting: {
           invoke: {
             src: "draft",
-            onDone: ({ output }) => ({ target: "done", context: { draft: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { draft: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ draft: context.draft ?? "" }) },

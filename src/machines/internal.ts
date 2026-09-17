@@ -9,6 +9,7 @@ import type {
   StateValue,
 } from "xstate";
 import type { AgentTools, StandardSchemaV1 } from "../types.js";
+import type { AgentTextResult } from "../text-logic.js";
 
 /**
  * The machine type a preset factory returns: its context, event union, input
@@ -170,6 +171,15 @@ export function machineActors(
 /** The `src` an entry invokes: its own actor key (child machine) or the inline text builtin. @internal */
 export function entrySrc(name: string, entry: PresetEntry): string {
   return isMachineEntry(entry) ? name : GENERATE_TEXT_SRC;
+}
+
+/**
+ * The value an entry's invoke produced: a child machine's output as-is, or the
+ * validated `result` off the `{ result, messages }` envelope a text request
+ * resolves with. @internal
+ */
+export function entryOutput(entry: PresetEntry, output: unknown): unknown {
+  return isMachineEntry(entry) ? output : (output as AgentTextResult).result;
 }
 
 /** Builds an entry's invoke `input` from the current prompt. @internal */

@@ -116,7 +116,7 @@ export const parallelStreamsMachine = agentSetup.createMachine({
             input: ({ context }) => ({ topic: context.topic }),
             onDone: ({ context, output }) => ({
               target: "done",
-              context: { analysis: output, lanes: [...context.lanes, "analysis"] },
+              context: { analysis: output.result, lanes: [...context.lanes, "analysis"] },
             }),
             // A region that fails still has to reach a final state, or the
             // parallel machine never completes.
@@ -140,7 +140,7 @@ export const parallelStreamsMachine = agentSetup.createMachine({
             input: ({ context }) => ({ topic: context.topic }),
             onDone: ({ context, output }) => ({
               target: "done",
-              context: { poem: output, lanes: [...context.lanes, "poem"] },
+              context: { poem: output.result, lanes: [...context.lanes, "poem"] },
             }),
             onError: ({ context, event }) => ({
               target: "failed",

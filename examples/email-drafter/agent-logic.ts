@@ -180,8 +180,8 @@ export const emailDrafter = agentSetup.createMachine({
         src: "evaluatePrompt",
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
-          target: output.satisfied ? "drafting" : "needsMoreInfo",
-          context: { assessment: output },
+          target: output.result.satisfied ? "drafting" : "needsMoreInfo",
+          context: { assessment: output.result },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -230,7 +230,7 @@ export const emailDrafter = agentSetup.createMachine({
           prompt: context.prompt,
           messages: context.messages,
         }),
-        onDone: ({ context, output: draft }) => ({
+        onDone: ({ context, output: { result: draft } }) => ({
           // A spent revision budget is a different state, not a hidden guard:
           // `finalReview` simply does not accept REQUEST_CHANGES, so every
           // host — and `getInteraction` — stops offering it.

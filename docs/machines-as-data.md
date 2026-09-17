@@ -151,7 +151,7 @@ states:
       input: { ticket: "{{ context.ticket }}" }
       onDone:
         target: awaitingApproval
-        assign: { reply: "{{ event.output.reply }}" }
+        assign: { reply: "{{ event.output.result.reply }}" }
   awaitingApproval:
     on:
       APPROVE: { target: resolved, assign: { resolution: replied } }

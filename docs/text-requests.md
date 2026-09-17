@@ -68,12 +68,12 @@ answering: {
     id: "answer",
     src: "answerQuestion",
     input: ({ context }) => ({ prompt: context.prompt }),
-    onDone: ({ output }) => ({ target: "done", context: { answer: output.answer } }),
+    onDone: ({ output }) => ({ target: "done", context: { answer: output.result.answer } }),
   },
 },
 ```
 
-In `onDone`, `output` is already validated against the request's output schema and typed from it. In this example the type is `{ answer: string }`, so you read `output.answer` directly. The machine needs no parsing step.
+In `onDone`, `output` is `{ result, messages }`. `output.result` is already validated against the request's output schema and typed from it. In this example the type is `{ answer: string }`, so you read `output.result.answer` directly. The machine needs no parsing step. `output.messages` holds the response messages the executor returned, ready to append to context; see [Messages](messages.md).
 
 > **Note:** Route on `request.name`. Every lowered request carries its `setupAgent({ requests })` key as `name`. A mock executor, or a router that picks providers per request, tells requests apart with `request.name === 'answerQuestion'`. Do not inspect the `system` or `prompt` text. See [examples/context-compaction/index.test.ts](../examples/context-compaction/index.test.ts).
 
@@ -182,7 +182,7 @@ answering: {
     id: "answer",
     src: "answerQuestion",
     input: ({ context }) => ({ prompt: context.prompt }),
-    onDone: ({ output }) => ({ target: "done", context: { answer: output.answer } }),
+    onDone: ({ output }) => ({ target: "done", context: { answer: output.result.answer } }),
     onError: [
       { guard: ({ event }) => event.error.code === "truncated", target: "askingForLess" },
       { target: "failed" },

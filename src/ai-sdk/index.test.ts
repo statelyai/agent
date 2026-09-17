@@ -50,16 +50,6 @@ describe("defineModels", () => {
 });
 
 describe("createAiSdkExecutors with core runAgent", () => {
-  const response = {
-    content: [{ type: "text" as const, text: "hello" }],
-    finishReason: { unified: "stop" as const, raw: "stop" },
-    usage: {
-      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-      outputTokens: { total: 1, text: 1, reasoning: 0 },
-    },
-    warnings: [],
-  };
-
   test("the adapter's LanguageModelUsage lands in the run result's aggregated usage", async () => {
     const usageResponse = {
       content: [{ type: "text" as const, text: "hello" }],

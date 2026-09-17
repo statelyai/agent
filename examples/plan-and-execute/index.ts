@@ -183,7 +183,7 @@ export const planAndExecuteMachine = agentSetup.createMachine({
         id: "planTask",
         src: "planTask",
         input: ({ context }) => ({ goal: context.goal }),
-        onDone: ({ output }) => ({ target: "executing", context: { steps: output.steps } }),
+        onDone: ({ output }) => ({ target: "executing", context: { steps: output.result.steps } }),
         // A planner that errors ends the run in `failed` — an empty answer in
         // `done` would look like a successful run that had nothing to say.
         onError: ({ event }) => ({
@@ -236,7 +236,7 @@ export const planAndExecuteMachine = agentSetup.createMachine({
             target: "executing",
             context: {
               stepIndex: context.stepIndex + 1,
-              evidence: { ...context.evidence, [id]: output },
+              evidence: { ...context.evidence, [id]: output.result },
             },
           };
         },
@@ -259,7 +259,7 @@ export const planAndExecuteMachine = agentSetup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "done",
-          context: { answer: output },
+          context: { answer: output.result },
         }),
         onError: ({ event }) => ({
           target: "failed",

@@ -23,6 +23,8 @@ import { validateSchemaSync } from "./utils.js";
 import {
   executeAgentTextRequest,
   isTextLogic,
+  responseMessagesOf,
+  type AgentTextResult,
   type AgentRequestExecutors,
   type AgentRequestMode,
   type AgentTextRequest,
@@ -433,13 +435,14 @@ export function rejectAgentStep<TMachine extends AnyActorLogic>(
  * per `mode`, and validates the result against the request's
  * `outputSchema` if present. **Text-only**: passing a `kind: 'decision'`
  * request throws, directing the caller to `resolveDecision(request,
- * executors, ...)` instead. Returns both the normalized `output` and the
- * `raw` executor result (tool calls, usage, finish reason).
+ * executors, ...)` instead. Returns the invoke's output — `{ result,
+ * messages }`, ready for {@link resolveAgentStep} — plus the `raw` executor
+ * result (tool calls, usage, finish reason).
  */
 export async function executeAgentRequest(
   request: AgentStepRequest,
   executors: Partial<AgentRequestExecutors>,
-): Promise<{ output: unknown; raw: unknown }> {
+): Promise<AgentTextResult & { raw: unknown }> {
   if (request.kind === "decision") {
     throw new Error(
       "executeAgentRequest(...) is text-only. Resolve a 'decision' request with " +
@@ -458,9 +461,10 @@ export async function executeAgentRequest(
   );
 
   return {
-    output: request.input.outputSchema
+    result: request.input.outputSchema
       ? validateSchemaSync(request.input.outputSchema, output)
       : output,
+    messages: responseMessagesOf(raw),
     raw,
   };
 }

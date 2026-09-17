@@ -172,7 +172,8 @@ export type ToolMessage = {
 /**
  * Optional framework-neutral message helpers. Requests also accept native
  * framework message values directly; core never converts between formats.
- * Store messages as plain context state — see {@link appendMessages}.
+ * Store messages as plain context state: a text request's `onDone` output
+ * carries the executor's response messages as `output.messages`.
  */
 export type AgentMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage;
 

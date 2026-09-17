@@ -190,7 +190,7 @@ export const jokeMachine = jokeAgentSetup.createMachine({
         }),
         onDone: ({ context, output }) => ({
           target: "rating",
-          context: { jokes: [...context.jokes, output] },
+          context: { jokes: [...context.jokes, output.result] },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -205,8 +205,8 @@ export const jokeMachine = jokeAgentSetup.createMachine({
         onDone: ({ output }) => ({
           target: "checkingRating",
           context: {
-            lastRating: output.rating,
-            lastExplanation: output.explanation,
+            lastRating: output.result.rating,
+            lastExplanation: output.result.explanation,
           },
         }),
         onError: ({ event }) => ({

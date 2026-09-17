@@ -62,8 +62,8 @@ const machine = setup.createMachine({
         src: "assess",
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
-          target: output.satisfied ? "writing" : "asking",
-          context: { satisfied: output.satisfied },
+          target: output.result.satisfied ? "writing" : "asking",
+          context: { satisfied: output.result.satisfied },
         }),
       },
     },
@@ -80,7 +80,7 @@ const machine = setup.createMachine({
       invoke: {
         src: "write",
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output } }),
+        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output.result } }),
       },
     },
     reviewing: {

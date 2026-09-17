@@ -47,6 +47,7 @@ import {
   type AgentRequestExecutors,
   type AgentTextRequest,
   type TextLogic,
+  responseMessagesOf,
 } from "./text-logic.js";
 import {
   AgentDecisionExhaustedError,
@@ -64,7 +65,6 @@ import {
   isUnboundPlaceholder,
 } from "./internal/registry.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
-import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
 import {
   AgentMachineVersionMismatchError,
   agentCallOccurrence,
@@ -1220,23 +1220,6 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
       });
       const output = await normalizeGeneratorResult(raw, id);
 
-      const responseMessages = (raw as { messages?: unknown } | null | undefined)?.messages;
-      if (Array.isArray(responseMessages) && responseMessages.length > 0) {
-        const parent = invokingActorOf(self, runCtx);
-        const event = {
-          type: AGENT_MESSAGES_EVENT_TYPE,
-          request: request.name!,
-          actorId: id,
-          messages: responseMessages,
-        };
-        // Transcript retention is explicit machine behavior. An executor may
-        // return messages even when this machine intentionally ignores them;
-        // only deliver when the current configuration accepts the event.
-        if ((parent?.getSnapshot() as AnyMachineSnapshot | undefined)?.can(event)) {
-          parent?.send(event);
-        }
-      }
-
       // Lift `reasoning` off the raw executor result (structured-output
       // envelope opt-in) onto the request.end trace — never into machine output.
       const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
@@ -1273,7 +1256,7 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
         self,
       );
 
-      return { output };
+      return { output, messages: responseMessagesOf(raw) };
     } catch (error) {
       runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
       throw error;
@@ -2701,7 +2684,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       // transition is external when its event came from outside the root actor
       // (a host `send`, the resume event, a child's
       // `xstate.done.actor`/`xstate.error.actor`, the reserved `@agent.usage`
-      // and `agent.messages` events this library sends). `xstate.timer` is the
+      // event this library sends). `xstate.timer` is the
       // one self-sent input that must be retained — a fired `after` delay is
       // real time passing, not machine logic. Raised/internal events and
       // `@xstate.init` are re-derived by `initialTransition`/`transition`.

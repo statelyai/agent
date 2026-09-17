@@ -90,7 +90,7 @@ export const bookingCompensationMachine = agent.createMachine({
       invoke: {
         src: "plan",
         input: ({ context }) => ({ destination: context.destination }),
-        onDone: ({ output }) => ({ target: "approval", context: { itinerary: output } }),
+        onDone: ({ output }) => ({ target: "approval", context: { itinerary: output.result } }),
         onError: { target: "failed" },
       },
     },

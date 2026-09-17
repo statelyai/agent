@@ -55,7 +55,7 @@ const machine = setup.createMachine({
         input: ({ context }) => ({ topic: context.topic }),
         onDone: {
           target: "done",
-          context: ({ event }) => ({ draft: event.output }),
+          context: ({ event }) => ({ draft: event.output.result }),
         },
       },
     },

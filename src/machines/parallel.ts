@@ -2,6 +2,7 @@ import { setupAgent } from "../setup-agent.js";
 import {
   assertEntryNames,
   entryInput,
+  entryOutput,
   entrySrc,
   jsonRecord,
   jsonString,
@@ -87,7 +88,7 @@ export function createParallelMachine(config: CreateParallelMachineConfig): Para
               entryInput(name, entry, model, context.prompt),
             onDone: ({ context, output }: { context: ParallelContext; output: unknown }) => ({
               target: "done",
-              context: { results: { ...context.results, [name]: output } },
+              context: { results: { ...context.results, [name]: entryOutput(entry, output) } },
             }),
           },
         },

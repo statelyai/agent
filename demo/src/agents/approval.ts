@@ -51,7 +51,7 @@ export const approvalMachine = agentSetup.createMachine({
         src: "writeDraft",
         input: ({ context }) => ({ topic: context.topic }),
         // Object-form transition: static target (draws the edge), dynamic context.
-        onDone: { target: "reviewing", context: ({ output }) => ({ draft: output }) },
+        onDone: { target: "reviewing", context: ({ output }) => ({ draft: output.result }) },
         onError: { target: "failed" },
       },
     },

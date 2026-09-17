@@ -443,7 +443,7 @@ export const gameMachine = gameSetup.createMachine({
             // Wins are already tallied by `roundOver`; this branch only
             // decides whether another round starts.
             onDone: ({ context, output }) => {
-              if (!output.playAgain) {
+              if (!output.result.playAgain) {
                 return { target: "#pig-game.stopped" };
               }
               const next = freshRound(context);

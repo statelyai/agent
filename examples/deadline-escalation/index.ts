@@ -44,7 +44,10 @@ export const deadlineEscalationMachine = agent.createMachine({
       invoke: {
         src: "propose",
         input: ({ context }) => ({ task: context.task }),
-        onDone: ({ output }) => ({ target: "awaitingApproval", context: { proposal: output } }),
+        onDone: ({ output }) => ({
+          target: "awaitingApproval",
+          context: { proposal: output.result },
+        }),
         onError: { target: "failed" },
       },
     },

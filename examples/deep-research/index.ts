@@ -243,9 +243,9 @@ export const deepResearchMachine = setup.createMachine({
         onDone: ({ output, context }) => ({
           target: "researching",
           context: {
-            queries: output.queries,
+            queries: output.result.queries,
             findings: {},
-            expected: output.queries.length,
+            expected: output.result.queries.length,
             settled: 0,
             round: context.round + 1,
           },
@@ -278,20 +278,21 @@ export const deepResearchMachine = setup.createMachine({
       on: {
         "xstate.done.actor": ({ context, event }) => {
           const { actorId, output } = event as DoneActorEventOf<typeof research>;
+          const finding = output.result;
           if (!actorId.startsWith(BRANCH_PREFIX)) {
             return undefined;
           }
           // The branch's sources join the run-wide ledger, and its finding
           // carries the `[n]` markers back, so the citation survives the
           // reduce instead of being re-guessed by the writer.
-          const { sources, markers } = mergeSources(context.sources, output.sources);
+          const { sources, markers } = mergeSources(context.sources, finding.sources);
           const settled = context.settled + 1;
           const next = {
             settled,
             sources,
             findings: {
               ...context.findings,
-              [actorId]: markers ? `${output.finding} ${markers}` : output.finding,
+              [actorId]: markers ? `${finding.finding} ${markers}` : finding.finding,
             },
           };
           return settled >= context.expected
@@ -323,7 +324,7 @@ export const deepResearchMachine = setup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "reflected",
-          context: { assessment: output, feedback: output.gaps },
+          context: { assessment: output.result, feedback: output.result.gaps },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -350,7 +351,7 @@ export const deepResearchMachine = setup.createMachine({
           findings: Object.values(context.findings),
           ledger: renderLedger(context.sources),
         }),
-        onDone: ({ output }) => ({ target: "done", context: { report: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { report: output.result } }),
         onError: ({ event }) => ({
           target: "failed",
           context: { failure: `writeReport failed: ${String(event.error)}` },

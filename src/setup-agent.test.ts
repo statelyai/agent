@@ -311,7 +311,7 @@ describe("setupAgent", () => {
             input: ({ context }) => ({ prompt: context.prompt }),
             onDone: ({ output }) => ({
               target: "done",
-              context: { draft: output },
+              context: { draft: output.result },
             }),
           },
         },
@@ -357,7 +357,7 @@ describe("setupAgent", () => {
           },
         },
       ),
-    ).resolves.toEqual({ body: "Standalone body." });
+    ).resolves.toEqual({ result: { body: "Standalone body." }, messages: [] });
   });
 
   test("agent machines execute generated and streamed requests with host callbacks", async () => {
@@ -421,7 +421,7 @@ describe("setupAgent", () => {
           return { output: { body: "Generated body." } };
         },
       }),
-    ).resolves.toMatchObject({ output: { body: "Generated body." } });
+    ).resolves.toMatchObject({ result: { body: "Generated body." } });
 
     const streamMachine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, body: null }),
@@ -451,7 +451,7 @@ describe("setupAgent", () => {
           return { output: Promise.resolve("Streamed final text.") };
         },
       }),
-    ).resolves.toMatchObject({ output: "Streamed final text." });
+    ).resolves.toMatchObject({ result: "Streamed final text." });
   });
 
   test("setupAgent auto-provides built-in generateText and streamText sources", async () => {
@@ -489,7 +489,7 @@ describe("setupAgent", () => {
             }),
             onDone: ({ output }) => ({
               target: "streaming",
-              context: { answer: parseOutput(answerSchema, output).answer },
+              context: { answer: parseOutput(answerSchema, output.result).answer },
             }),
           },
         },
@@ -503,7 +503,7 @@ describe("setupAgent", () => {
             }),
             onDone: ({ output }) => ({
               target: "done",
-              context: { streamed: output as string },
+              context: { streamed: output.result as string },
             }),
           },
         },
@@ -538,13 +538,16 @@ describe("setupAgent", () => {
       }),
     ]);
 
-    const { output: answer } = await executeAgentRequest(asTextRequest(step.requests[0]), {
+    const answer = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
         expect(request.tools).toEqual({});
         return { output: { answer: `Answered ${request.prompt}` } };
       },
     });
-    step = resolveAgentStep(machine, step, step.requests[0]!, answer);
+    step = resolveAgentStep(machine, step, step.requests[0]!, {
+      result: answer.result,
+      messages: answer.messages,
+    });
 
     expect(step.requests).toEqual([
       expect.objectContaining({
@@ -558,7 +561,7 @@ describe("setupAgent", () => {
       }),
     ]);
 
-    const { output: streamed } = await executeAgentRequest(asTextRequest(step.requests[0]), {
+    const streamed = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async () => {
         throw new Error("generateText should not be used for stream requests");
       },
@@ -566,7 +569,10 @@ describe("setupAgent", () => {
         output: `Streamed ${request.prompt}`,
       }),
     });
-    step = resolveAgentStep(machine, step, step.requests[0]!, streamed);
+    step = resolveAgentStep(machine, step, step.requests[0]!, {
+      result: streamed.result,
+      messages: streamed.messages,
+    });
 
     expect(step.done).toBe(true);
     expect(step.snapshot.output).toEqual({
@@ -611,7 +617,8 @@ describe("setupAgent", () => {
       generateText: async () => rawResult,
     });
     expect(result).toEqual({
-      output: { answer: "Because state." },
+      result: { answer: "Because state." },
+      messages: [],
       raw: rawResult,
     });
   });
@@ -717,12 +724,12 @@ describe("setupAgent", () => {
             src: "answer",
             input: ({ context }) => ({ prompt: context.prompt }),
             onDone: ({ output }) => {
-              // `output` is typed as the request's output schema type
+              // `output.result` is typed as the request's output.result schema type
               // (`{ answer: string }`) — already validated, no parseOutput.
-              const answer: string = output.answer;
-              // @ts-expect-error `output` has no `missing` property (proves it
+              const answer: string = output.result.answer;
+              // @ts-expect-error `output.result` has no `missing` property (proves it
               // is the typed object, not `unknown`/`any`).
-              void output.missing;
+              void output.result.missing;
               return { target: "done", context: { answer } };
             },
           },
@@ -851,55 +858,6 @@ describe("setupAgent", () => {
         },
       },
     });
-  });
-
-  test("appendMessages creates an explicit agent.messages transition", async () => {
-    const schemas = createAgentSchemas({
-      context: z.object({
-        messages: messagesSchema,
-      }),
-      input: z.object({}),
-      events: {},
-    });
-    const agent = setupAgent({ schemas });
-    const machine = agent.createMachine({
-      context: { messages: [] },
-      initial: "waiting",
-      states: {
-        waiting: {
-          on: {
-            "agent.messages": agent.appendMessages(),
-          },
-        },
-      },
-    });
-
-    const actor = createActor(machine);
-    actor.start();
-    actor.send({
-      type: "agent.messages",
-      request: "reply",
-      actorId: "reply",
-      messages: [{ role: "user", content: "hello" }],
-    } as never);
-
-    expect(actor.getSnapshot().context.messages).toEqual([{ role: "user", content: "hello" }]);
-  });
-
-  test("appendMessages only targets declared array context keys", () => {
-    const agent = setupAgent({
-      context: z.object({
-        history: z.array(z.unknown()),
-        count: z.number(),
-      }),
-    });
-
-    agent.appendMessages({ key: "history" });
-    agent.appendMessages();
-    // @ts-expect-error message targets must be array-valued context keys
-    agent.appendMessages({ key: "count" });
-    // @ts-expect-error the context key must be declared
-    agent.appendMessages({ key: "missing" });
   });
 
   test("toolMessage builds a tool-role message from tool-result parts", () => {
@@ -1214,7 +1172,7 @@ describe("setupAgent", () => {
               target: "done",
               context: {
                 summary: (() => {
-                  const summary: string = output.summary;
+                  const summary: string = output.result.summary;
                   return summary;
                 })(),
               },
@@ -1251,7 +1209,8 @@ describe("setupAgent", () => {
     });
 
     [snapshot] = transitionResult(machine, snapshot, request!, {
-      summary: "Agents become inspectable.",
+      result: { summary: "Agents become inspectable." },
+      messages: [],
     });
 
     expect(snapshot.status).toBe("done");
@@ -1268,7 +1227,7 @@ describe("setupAgent", () => {
           },
         },
       ),
-    ).resolves.toEqual({ summary: "Standalone summary." });
+    ).resolves.toEqual({ result: { summary: "Standalone summary." }, messages: [] });
   });
 
   test("reusable stream text actors execute with streamText", async () => {
@@ -1317,7 +1276,7 @@ describe("setupAgent", () => {
           return { output: "streamed summary" };
         },
       }),
-    ).resolves.toMatchObject({ output: "streamed summary" });
+    ).resolves.toMatchObject({ result: "streamed summary" });
 
     await expect(
       streamSummary.execute(
@@ -1333,7 +1292,7 @@ describe("setupAgent", () => {
           },
         },
       ),
-    ).resolves.toBe("standalone stream");
+    ).resolves.toEqual({ result: "standalone stream", messages: [] });
   });
 
   test("named text logic can optionally execute as a promise actor", async () => {
@@ -1376,7 +1335,7 @@ describe("setupAgent", () => {
             input: ({ context }) => ({ question: context.question }),
             onDone: ({ output }) => ({
               target: "done",
-              context: { answer: output.answer },
+              context: { answer: output.result.answer },
             }),
           },
         },
@@ -1513,7 +1472,7 @@ describe("setupAgent", () => {
               target: "review",
               context: {
                 draft: (() => {
-                  const draft = output;
+                  const draft = output.result;
                   const subject: string = draft.subject;
                   return { ...draft, subject };
                 })(),
@@ -1612,7 +1571,7 @@ describe("setupAgent", () => {
             input: ({ context }) => ({ prompt: context.prompt }),
             onDone: ({ output }) => ({
               target: "done",
-              context: { answer: output.answer },
+              context: { answer: output.result.answer },
             }),
           },
         },
@@ -1644,7 +1603,8 @@ describe("setupAgent", () => {
     });
 
     [snapshot, actions] = transitionResult(machine, snapshot, request!, {
-      answer: "Because the workflow matters.",
+      result: { answer: "Because the workflow matters." },
+      messages: [],
     });
 
     expect(getAgentRequests(actions)).toEqual([]);
@@ -1665,14 +1625,14 @@ describe("setupAgent", () => {
       }),
     );
 
-    const { output } = await executeAgentRequest(asTextRequest(step.requests[0]), {
+    const { result, messages } = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
         output: {
           answer: `Answered: ${request.prompt}`,
         },
       }),
     });
-    step = resolveAgentStep(machine, step, step.requests[0]!, output);
+    step = resolveAgentStep(machine, step, step.requests[0]!, { result, messages });
 
     expect(step.done).toBe(true);
     expect(step.snapshot.output).toEqual({
@@ -1843,7 +1803,7 @@ describe("setupAgent", () => {
               id: "answer",
               src: "answerQuestion",
               input: { question: "{{ context.question }}" },
-              onDone: { target: "done", assign: { answer: "{{ event.output.answer }}" } },
+              onDone: { target: "done", assign: { answer: "{{ event.output.result.answer }}" } },
             },
           },
           done: { type: "final", output: { answer: "{{ context.answer }}" } },
@@ -1953,7 +1913,7 @@ describe("setupAgent", () => {
               onDone: {
                 target: "done",
                 assign: {
-                  answer: "{{ event.output.answer }}",
+                  answer: "{{ event.output.result.answer }}",
                 },
               },
             },
@@ -1993,12 +1953,12 @@ describe("setupAgent", () => {
       }),
     ).rejects.toThrow();
 
-    const { output } = await executeAgentRequest(asTextRequest(step.requests[0]), {
+    const { result, messages } = await executeAgentRequest(asTextRequest(step.requests[0]), {
       generateText: async () => ({
         output: { answer: "Because logic matters." },
       }),
     });
-    step = resolveAgentStep(machine, step, step.requests[0]!, output);
+    step = resolveAgentStep(machine, step, step.requests[0]!, { result, messages });
 
     expect(step.done).toBe(true);
     expect(step.snapshot.output).toEqual({ answer: "Because logic matters." });
@@ -2125,7 +2085,7 @@ describe("setupAgent", () => {
               input: { question: "{{ context.question }}" },
               onDone: {
                 target: "done",
-                assign: { answer: "{{ event.output.answer }}" },
+                assign: { answer: "{{ event.output.result.answer }}" },
               },
             },
           },
@@ -2263,7 +2223,7 @@ describe("setupAgent", () => {
               input: {},
               onDone: {
                 target: "reviewing",
-                assign: { draft: "{{ event.output.draft }}" },
+                assign: { draft: "{{ event.output.result.draft }}" },
               },
             },
           },
@@ -3172,26 +3132,6 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
           on: { ATTACK: { target: "attacked" } },
         },
         attacked: {},
-      },
-    });
-
-    // Illegal: framework events can be handled by the machine but are never
-    // model-facing decision candidates.
-    agent.createMachine({
-      context: {},
-      initial: "choosingMove",
-      states: {
-        choosingMove: {
-          // @ts-expect-error 'agent.messages' is reserved from allowedEvents
-          invoke: {
-            id: "choosingMove",
-            src: "agent.decide",
-            input: {
-              model: "test-model",
-              allowedEvents: ["agent.messages"],
-            },
-          },
-        },
       },
     });
   });

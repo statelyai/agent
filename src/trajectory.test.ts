@@ -196,7 +196,7 @@ describe("matchesTrajectory: over a real run", () => {
         invoke: {
           src: "tellJoke",
           input: ({ context }) => ({ topic: context.topic }),
-          onDone: ({ output }) => ({ target: "told", context: { joke: output } }),
+          onDone: ({ output }) => ({ target: "told", context: { joke: output.result } }),
         },
       },
       told: { type: "final" },

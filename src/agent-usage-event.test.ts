@@ -59,7 +59,7 @@ const budgetMachine = agent.createMachine({
         input: ({ context }) => ({ turn: context.notes.length + 1 }),
         onDone: ({ context, output }) => ({
           target: "checkingBudget",
-          context: { notes: [...context.notes, output] },
+          context: { notes: [...context.notes, output.result] },
         }),
       },
     },
@@ -188,7 +188,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
             id: "research",
             src: "researchStep",
             input: { turn: 1 },
-            onDone: ({ output }) => ({ target: "done", context: { note: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { note: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ note: context.note }) },
@@ -262,7 +262,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
             id: "research",
             src: "researchStep",
             input: { turn: 1 },
-            onDone: ({ output }) => ({ target: "done", context: { note: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { note: output.result } }),
           },
         },
         done: {
@@ -346,11 +346,7 @@ describe("@agent.usage registration (declared by setupAgent, not by the machine)
   });
 
   test("setupAgent's retained schemas expose it alongside the machine's own events", () => {
-    expect(Object.keys(agent.schemas.events).sort()).toEqual([
-      AGENT_USAGE_EVENT_TYPE,
-      "APPROVE",
-      "agent.messages",
-    ]);
+    expect(Object.keys(agent.schemas.events).sort()).toEqual([AGENT_USAGE_EVENT_TYPE, "APPROVE"]);
   });
 
   test("the machine's event union includes it — the handler is typed without declaring it", () => {
@@ -393,7 +389,6 @@ describe("@agent.usage registration (declared by setupAgent, not by the machine)
     expect(Object.keys(fromConfigSchemas.events).sort()).toEqual([
       AGENT_USAGE_EVENT_TYPE,
       "APPROVE",
-      "agent.messages",
     ]);
 
     expect(() =>

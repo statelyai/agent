@@ -121,7 +121,7 @@ export const swarmHandoffMachine = agentSetup.createMachine({
         input: ({ context }) => ({ message: context.message }),
         onDone: ({ context, output }) => ({
           target: "checkingBudget",
-          context: { reply: output, turns: context.turns + 1 },
+          context: { reply: output.result, turns: context.turns + 1 },
         }),
         onError: { target: "failed" },
       },
@@ -132,7 +132,7 @@ export const swarmHandoffMachine = agentSetup.createMachine({
         input: ({ context }) => ({ message: context.message }),
         onDone: ({ context, output }) => ({
           target: "checkingBudget",
-          context: { reply: output, turns: context.turns + 1 },
+          context: { reply: output.result, turns: context.turns + 1 },
         }),
         onError: { target: "failed" },
       },

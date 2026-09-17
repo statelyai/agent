@@ -217,9 +217,7 @@ describe("interaction event typing", () => {
 
   test("eventFromInteraction returns the machine's event union", () => {
     const event = eventFromInteraction(snapshot, { type: "APPROVE" });
-    expectTypeOf(event.type).toEqualTypeOf<
-      "APPROVE" | "REJECT" | "agent.messages" | "@agent.usage"
-    >();
+    expectTypeOf(event.type).toEqualTypeOf<"APPROVE" | "REJECT" | "@agent.usage">();
     // No cast needed to send it back into the machine.
     expect(snapshot.can(event)).toBe(true);
     expect(event).toEqual({ type: "APPROVE" });
@@ -229,7 +227,7 @@ describe("interaction event typing", () => {
     const interaction = getInteraction(snapshot)!;
     expectTypeOf(interaction.textEvent).toExtend<string | undefined>();
     expectTypeOf(interaction.events[0]!.type).toEqualTypeOf<
-      "APPROVE" | "REJECT" | "agent.messages" | "@agent.usage"
+      "APPROVE" | "REJECT" | "@agent.usage"
     >();
   });
 });

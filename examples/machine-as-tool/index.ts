@@ -122,7 +122,7 @@ export const refundMachine = agentSetup.createMachine({
         input: ({ context }) => ({ amount: context.amount, orderId: context.orderId }),
         onDone: ({ output }) => ({
           target: "checked",
-          context: { check: { valid: output.valid } },
+          context: { check: { valid: output.result.valid } },
         }),
         onError: ({ event }) => ({
           target: "failed",

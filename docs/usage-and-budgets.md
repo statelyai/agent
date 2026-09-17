@@ -184,7 +184,7 @@ The payload has this shape.
 
 Model-call results reach the machine with usage stripped out.
 
-- A text invoke's `onDone` receives the normalized output only. The runner returns `{ output }` and drops the rest of the executor envelope (`src/run-agent.ts`).
+- A text invoke's `onDone` receives `{ result, messages }` only: the validated result and the executor's response messages. The runner drops the rest of the executor envelope, including usage (`src/run-agent.ts`).
 - A decision delivers only the chosen event. `resolveDecision` returns the validated event and drops the executor's `usage` (`src/decision.ts`).
 
 `@agent.usage` carries the tokens instead. After every settled model call that reported usage, `runAgent` delivers the event to the machine, so `context` can fold it and guards can read it. You can then keep both counters in `context`: increment turns in `onDone`, and fold tokens in the `@agent.usage` handler.
@@ -296,7 +296,7 @@ const machine = agentSetup.createMachine({
         // Tokens arrive through `@agent.usage`, so only turns are folded here.
         onDone: ({ context, output }) => ({
           target: "checkingBudget",
-          context: { notes: [...context.notes, output], turns: context.turns + 1 },
+          context: { notes: [...context.notes, output.result], turns: context.turns + 1 },
         }),
         // No onError, so a maxModelCalls overrun surfaces as the run's error
         // result instead of being handled here.

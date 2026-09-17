@@ -284,11 +284,11 @@ export const codeAssistantMachine = agentSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "executing",
           context: {
-            code: output.code,
-            explanation: output.explanation,
+            code: output.result.code,
+            explanation: output.result.explanation,
             // Repairs are the interesting case: say what the rewrite was for.
             repairSummary: context.attempts
-              ? `Repair after attempt ${context.attempts}: ${output.explanation}`
+              ? `Repair after attempt ${context.attempts}: ${output.result.explanation}`
               : "",
           },
         }),

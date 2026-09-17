@@ -176,7 +176,7 @@ export const guardrailsMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question, topic: context.topic }),
         onDone: ({ output }) => ({
           target: "checkingQuestion",
-          context: { validated: output },
+          context: { validated: output.result },
         }),
         onError: {
           target: "refused",
@@ -202,7 +202,7 @@ export const guardrailsMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question }),
         onDone: ({ output }) => ({
           target: "verifyingAnswer",
-          context: { answer: output.answer },
+          context: { answer: output.result.answer },
         }),
         onError: {
           target: "refused",
@@ -220,7 +220,7 @@ export const guardrailsMachine = agentSetup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "checkingAnswer",
-          context: { verified: output, critique: output.critique },
+          context: { verified: output.result, critique: output.result.critique },
         }),
         onError: {
           target: "unverified",
@@ -262,7 +262,7 @@ export const guardrailsMachine = agentSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "verifyingAnswer",
           context: {
-            answer: output.answer,
+            answer: output.result.answer,
             revisions: context.revisions + 1,
           },
         }),

@@ -48,7 +48,7 @@ describe("provideExecutors", () => {
           invoke: {
             src: "draftText",
             input: ({ context }) => ({ topic: context.topic }),
-            onDone: ({ output }) => ({ target: "done", context: { draft: output } }),
+            onDone: ({ output }) => ({ target: "done", context: { draft: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ draft: context.draft ?? "" }) },
@@ -92,7 +92,7 @@ describe("provideExecutors", () => {
           invoke: {
             src: "streamDraft",
             input: ({ context }) => ({ topic: context.topic }),
-            onDone: ({ output }) => ({ target: "done", context: { streamed: output as string } }),
+            onDone: ({ output }) => ({ target: "done", context: { streamed: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ streamed: context.streamed ?? "" }) },
@@ -203,7 +203,7 @@ describe("provideExecutors", () => {
           invoke: {
             src: "draftText",
             input: {},
-            onDone: ({ output }) => ({ target: "done", context: { draft: output as string } }),
+            onDone: ({ output }) => ({ target: "done", context: { draft: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ draft: context.draft ?? "" }) },
@@ -253,7 +253,7 @@ describe("provideExecutors onTrace / traceTransitions", () => {
             id: "draft",
             src: "streamDraft",
             input: ({ context }) => ({ topic: context.topic }),
-            onDone: ({ output }) => ({ target: "done", context: { streamed: output as string } }),
+            onDone: ({ output }) => ({ target: "done", context: { streamed: output.result } }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ streamed: context.streamed ?? "" }) },
@@ -447,7 +447,7 @@ describe("provideExecutors + '@agent.usage'", () => {
             input: ({ context }) => ({ turn: context.notes.length + 1 }),
             onDone: ({ context, output }) => ({
               target: "checkingBudget",
-              context: { notes: [...context.notes, output] },
+              context: { notes: [...context.notes, output.result] },
             }),
           },
         },
@@ -592,7 +592,7 @@ describe("provideExecutors recursive child binding", () => {
             },
             onDone: ({ output }: { output: unknown }) => ({
               target: "done",
-              context: { line: output as string },
+              context: { line: (output as { result: string }).result },
             }),
           },
         },
@@ -725,7 +725,7 @@ describe("provideExecutors recursive child binding", () => {
             input: { topic: "t" },
             onDone: ({ output }: { output: unknown }) => ({
               target: "done",
-              context: { line: output as string },
+              context: { line: (output as { result: string }).result },
             }),
           },
         },

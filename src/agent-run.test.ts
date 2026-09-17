@@ -37,7 +37,7 @@ function buildStreamMachine() {
         invoke: {
           src: "joke",
           input: () => ({}),
-          onDone: ({ output }) => ({ target: "done", context: { joke: output } }),
+          onDone: ({ output }) => ({ target: "done", context: { joke: output.result } }),
         },
       },
       done: { type: "final", output: ({ context }) => ({ joke: context.joke ?? "" }) },
@@ -162,7 +162,10 @@ describe("createAgentRun", () => {
             id: "draft",
             src: "draftText",
             input: ({ context }) => ({ prompt: context.prompt }),
-            onDone: ({ output }) => ({ target: "awaitingApproval", context: { draft: output } }),
+            onDone: ({ output }) => ({
+              target: "awaitingApproval",
+              context: { draft: output.result },
+            }),
           },
         },
         awaitingApproval: {

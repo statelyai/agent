@@ -71,7 +71,9 @@ export const consensusReviewMachine = agent.createMachine({
                 input: ({ context }) => ({ patch: context.patch, reviewer: "security" }),
                 onDone: ({ context, output }) => ({
                   target: "done",
-                  context: { votes: [...context.votes, { ...output, reviewer: "security" }] },
+                  context: {
+                    votes: [...context.votes, { ...output.result, reviewer: "security" }],
+                  },
                 }),
                 onError: ({ context }) => ({
                   target: "done",
@@ -92,7 +94,9 @@ export const consensusReviewMachine = agent.createMachine({
                 input: ({ context }) => ({ patch: context.patch, reviewer: "reliability" }),
                 onDone: ({ context, output }) => ({
                   target: "done",
-                  context: { votes: [...context.votes, { ...output, reviewer: "reliability" }] },
+                  context: {
+                    votes: [...context.votes, { ...output.result, reviewer: "reliability" }],
+                  },
                 }),
                 onError: ({ context }) => ({
                   target: "done",
@@ -114,7 +118,7 @@ export const consensusReviewMachine = agent.createMachine({
                 onDone: ({ context, output }) => ({
                   target: "done",
                   context: {
-                    votes: [...context.votes, { ...output, reviewer: "maintainability" }],
+                    votes: [...context.votes, { ...output.result, reviewer: "maintainability" }],
                   },
                 }),
                 onError: ({ context }) => ({

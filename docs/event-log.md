@@ -12,7 +12,7 @@ Only external inputs, in the order the run accepted them:
 - Host-sent events.
 - Child completions: `xstate.done.actor` and `xstate.error.actor`, with output inline.
 - Timer firings.
-- `@agent.usage` spend records and `agent.messages` events.
+- `@agent.usage` spend records.
 
 Raised and internal events are never journaled. Replay re-derives them from the machine's own logic, so journaling them would apply them twice.
 

@@ -190,7 +190,7 @@ export const triageMachine = triageAgentSetup.createMachine({
         input: ({ context }) => ({ ticket: context.ticket }),
         onDone: ({ output }) => ({
           target: "checkingConfidence",
-          context: { classification: output, slaNote: slaNoteFor(output) },
+          context: { classification: output.result, slaNote: slaNoteFor(output.result) },
         }),
         // No classification, so nothing downstream can run: end in a terminal
         // state that says so, with a holding reply.
@@ -283,7 +283,7 @@ export const triageMachine = triageAgentSetup.createMachine({
           sentiment: context.classification.sentiment,
           slaNote: context.slaNote,
         }),
-        onDone: ({ output }) => ({ target: "done", context: { reply: output.reply } }),
+        onDone: ({ output }) => ({ target: "done", context: { reply: output.result.reply } }),
         onError: { target: "replyFailed" },
       },
     },

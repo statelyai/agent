@@ -15,13 +15,11 @@
  * @module
  */
 import type { AnyActorLogic, AnyMachineSnapshot, AnyStateMachine } from "xstate";
-import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
+import type { ChosenEvent } from "./types.js";
 import { AgentError } from "./errors.js";
-import { getJsonSchemaSync } from "./utils.js";
 import { getAcceptedEvents } from "./events.js";
 import { AgentDecisionExhaustedError, isDecisionLogic, resolveDecision } from "./decision.js";
-import { isTextLogic } from "./text-logic.js";
-import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
+import { isTextLogic, type AgentTextResult } from "./text-logic.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import {
   getPendingInvokes,
@@ -48,11 +46,7 @@ export type AgentLintSeverity = "error" | "warning";
  * or config location, and `message` explains the problem and its remedy.
  */
 export interface AgentLintDiagnostic {
-  code:
-    | "decide-without-events"
-    | "direct-object-src"
-    | "invoke-without-on-error"
-    | "unhandled-agent-messages";
+  code: "decide-without-events" | "direct-object-src" | "invoke-without-on-error";
   severity: AgentLintSeverity;
   /** State path (`parent.child`) or config pointer (e.g. `(root)`, `context`) the finding is about. */
   path: string;
@@ -279,58 +273,10 @@ function checkInvokeWithoutOnError(ctx: LintContext): AgentLintDiagnostic[] {
   return out;
 }
 
-function checkUnhandledAgentMessages(ctx: LintContext): AgentLintDiagnostic[] {
-  const handlesMessages = (config: AnyConfig) =>
-    config.on?.[AGENT_MESSAGES_EVENT_TYPE] !== undefined || config.on?.["*"] !== undefined;
-  if (
-    handlesMessages(ctx.config) ||
-    [...ctx.index.values()].some((node) => handlesMessages(node.config))
-  ) {
-    return [];
-  }
-
-  let contextJsonSchema: { properties?: Record<string, unknown> } | undefined;
-  try {
-    contextJsonSchema = getJsonSchemaSync(
-      ctx.schemas?.context as StandardSchemaV1 | undefined,
-    ) as typeof contextJsonSchema;
-  } catch {
-    // Some Standard Schemas deliberately cannot lower custom fields to JSON
-    // Schema. This advisory check must stay best-effort.
-  }
-  if (!contextJsonSchema?.properties?.messages) return [];
-
-  const hasTextRequest = [...ctx.index.values()].some((node) =>
-    node.invokes.some((invoke) => {
-      if (typeof invoke.src !== "string") return false;
-      return (
-        invoke.src === "agent.generateText" ||
-        invoke.src === "agent.streamText" ||
-        isTextLogic(ctx.actors[invoke.src])
-      );
-    }),
-  );
-  return hasTextRequest
-    ? [
-        {
-          code: "unhandled-agent-messages",
-          severity: "warning",
-          path: "(root)",
-          message:
-            "Text requests may return framework messages, but the machine does not " +
-            `handle '${AGENT_MESSAGES_EVENT_TYPE}'. Add on: { ` +
-            `'${AGENT_MESSAGES_EVENT_TYPE}': appendMessages() } when transcript retention ` +
-            "is intended, or disable this warning when messages are intentionally ignored.",
-        },
-      ]
-    : [];
-}
-
 const LINT_CHECKS: Array<(ctx: LintContext) => AgentLintDiagnostic[]> = [
   checkDecideWithoutEvents,
   checkDirectObjectSrc,
   checkInvokeWithoutOnError,
-  checkUnhandledAgentMessages,
 ];
 
 /**
@@ -677,7 +623,7 @@ export async function simulateAgent(
       if (!taken.found) {
         throw scriptDryError("text", request.src, request.id);
       }
-      step = resolveAgentStep(machine, step, request, taken.value);
+      step = resolveAgentStep(machine, step, request, asTextResult(taken.value));
       trail.push({
         state: step.snapshot.value,
         resolvedRequest: {
@@ -901,6 +847,12 @@ function resolveRegisteredDecisionLogic(
   return isDecisionLogic(candidate) ? candidate : undefined;
 }
 
+// A scripted text value is the bare `result`; the invoke resolves to the same
+// `{ result, messages }` envelope a live executor produces, with no messages.
+function asTextResult(value: unknown): AgentTextResult {
+  return { result: value, messages: [] };
+}
+
 function mapValues<T, U>(obj: Record<string, T>, fn: (value: T) => U): Record<string, U> {
   return Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, fn(value)]));
 }
@@ -1035,7 +987,7 @@ async function explore(
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 200;
   const textScript = options.text ?? {};
-  const invokeOutputs: Record<string, unknown> = { ...(options.invokes ?? {}) };
+  const invokeOutputs: Record<string, unknown> = { ...options.invokes };
   const errorScript = options.errors ?? {};
 
   const reachedStates = new Set<string>();
@@ -1087,7 +1039,12 @@ async function explore(
         if (!(request.src in textScript)) {
           return { step: current, blockedSrc: request.src };
         }
-        current = resolveAgentStep(machine, current, request, textScript[request.src]);
+        current = resolveAgentStep(
+          machine,
+          current,
+          request,
+          asTextResult(textScript[request.src]),
+        );
         recordState(current.snapshot);
         continue;
       }

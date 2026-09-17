@@ -169,7 +169,7 @@ export const sqlAgentMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question }),
         onDone: ({ output }) => ({
           target: "awaitingApproval",
-          context: { plan: output },
+          context: { plan: output.result },
         }),
         // No plan, no query: end in `failed`, not in a success-shaped output.
         onError: {
@@ -222,7 +222,7 @@ export const sqlAgentMachine = agentSetup.createMachine({
           plan: context.plan,
           result: context.result,
         }),
-        onDone: ({ output }) => ({ target: "done", context: { answer: output } }),
+        onDone: ({ output }) => ({ target: "done", context: { answer: output.result } }),
         // The result is already computed — fall back to a plain rendering.
         onError: ({ context }) => ({
           target: "done",

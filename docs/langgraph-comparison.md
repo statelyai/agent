@@ -19,7 +19,7 @@ Both libraries represent agent control flow explicitly. Stately Agent uses XStat
 | Conditional edge, a pure function of state | A [`type: 'choice'` state](machines.md#choice-states)                                                   |
 | Conditional edge, a response to an event | A guarded [transition](machines.md#transitions); when the model picks the branch, `agent.decide` with `allowedEvents` |
 | `Annotation` reducer                  | No reducers. A transition returns a partial `context` patch, so the merge is written where the change happens |
-| `withStructuredOutput(schema)`        | `schemas: { output }` on the request; the parsed value arrives as the invoke's `onDone` output                |
+| `withStructuredOutput(schema)`        | `schemas: { output }` on the request; the parsed value arrives as `output.result` in the invoke's `onDone`     |
 | Interrupt                             | A resting state that settles `runAgent` as idle. See [Human in the loop](human-in-the-loop.md)               |
 | `new Command({ resume })`             | A typed machine event: `runAgent(machine, { snapshot, event })`, or `{ events, event }` from the log         |
 | Checkpointer                          | A persisted XState snapshot the host stores. See [Persistence](persistence.md)                               |
@@ -101,7 +101,7 @@ const machine = agentSetup.createMachine({
       invoke: {
         src: "gradeDocs",
         input: ({ context }) => ({ question: context.question, docs: context.docs }),
-        onDone: ({ output }) => ({ target: "routing", context: { grade: output.grade } }),
+        onDone: ({ output }) => ({ target: "routing", context: { grade: output.result.grade } }),
       },
     },
     // addConditionalEdges: a routing branch with no event and no side effect.
@@ -119,7 +119,7 @@ const machine = agentSetup.createMachine({
         // The `attempts` reducer, written on the transition that increments it.
         onDone: ({ context, output }) => ({
           target: "retrieving",
-          context: { question: output, attempts: context.attempts + 1 },
+          context: { question: output.result, attempts: context.attempts + 1 },
         }),
       },
     },

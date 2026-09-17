@@ -93,7 +93,7 @@ export const supportMachineStep1 = agentSetup.createMachine({
       invoke: {
         src: "decideAction",
         input: ({ context }) => ({ ticket: context.ticket }),
-        onDone: ({ output }) => ({ target: "routing", context: { action: output } }),
+        onDone: ({ output }) => ({ target: "routing", context: { action: output.result } }),
       },
     },
     // The nested tool-choice `if/else`, still here — just as a routing state.

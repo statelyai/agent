@@ -172,7 +172,7 @@ export const toolsMachine = agentSetup.createMachine({
           question: context.question,
           observations: context.observations,
         }),
-        onDone: { target: "done", context: ({ output }) => ({ answer: output }) },
+        onDone: { target: "done", context: ({ output }) => ({ answer: output.result }) },
         onError: { target: "done" },
       },
     },

@@ -318,10 +318,29 @@ export function smallEvent(event: unknown): { type: string } & Record<string, Js
   // generous next to that, and keeps a wide client event off the wire.
   for (const [key, value] of Object.entries(source).slice(0, DETAIL_OBJECT_FIELDS)) {
     if (key === "type") continue;
-    const small = smallEventValue(value, false);
+    const small =
+      key === "output" && isTextResultEnvelope(value)
+        ? // A text request's `{ result, messages }`: the result is the work,
+          // so it keeps its one level of structure; the messages are a count.
+          {
+            result: smallEventValue(value.result, false) ?? null,
+            messages: smallEventValue(value.messages, true) ?? null,
+          }
+        : smallEventValue(value, false);
     if (small !== undefined) out[key] = small;
   }
   return out;
+}
+
+/** The `{ result, messages }` envelope every text request resolves to. */
+function isTextResultEnvelope(value: unknown): value is { result: unknown; messages: unknown[] } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "result" in value &&
+    Array.isArray((value as { messages?: unknown }).messages)
+  );
 }
 
 // ─── schema access ───

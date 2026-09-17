@@ -7,7 +7,7 @@ description: Statically lint, simulate, and explore agent machines without any A
 
 This page covers the APIs that check an agent machine before it runs. None of them need an API key or a model call. They all live in `@statelyai/agent/testing`.
 
-- `lintAgentMachine` statically catches undeliverable decisions, unrebindable invoke sources, invokes with no error path, and dropped framework messages. Pass `{ throw: true }` for the throwing form.
+- `lintAgentMachine` statically catches undeliverable decisions, unrebindable invoke sources, and invokes with no error path. Pass `{ throw: true }` for the throwing form.
 - `assertAgentMachine` is the one-line throwing form for tests and generation loops.
 - `simulateAgent` drives a deterministic scripted playthrough to a known outcome.
 - `explorePaths` and `canReach` enumerate decision branches and check that a target state is reachable.
@@ -45,7 +45,6 @@ assertAgentMachine(machine, { warnings: true });
 | `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                       |
 | `invoke-without-on-error`  | warning  | An invoke declares no `onError`, and neither its state nor any ancestor handles an actor error, so a rejected request or actor lands the machine in an error state with no modeled recovery. Add `onError` targeting a `failed` final state or a bounded retry.     |
 | `direct-object-src`        | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                                |
-| `unhandled-agent-messages` | warning  | A text request may return framework messages, but no state handles `agent.messages`, so returned transcripts are dropped. Add `on: { 'agent.messages': appendMessages() }` when retention is intended, or disable the warning when messages are ignored on purpose. |
 
 ## Test assertions
 

@@ -10,13 +10,7 @@ export type {
   SnapshotOf,
   StateValueOf,
 } from "./type-helpers.js";
-export {
-  AGENT_MESSAGES_EVENT_TYPE,
-  appendMessages,
-  isAgentMessages,
-  messagesSchema,
-} from "./messages.js";
-export type { AgentMessagesEvent, AgentMessagesEventPayload } from "./messages.js";
+export { isAgentMessages, messagesSchema } from "./messages.js";
 export { createAgentSchemas, getAgentSchemas, setupAgent } from "./setup-agent.js";
 export type {
   AgentSchemaPack,
@@ -84,6 +78,7 @@ export type {
   AgentRequestExecutorInfo,
   AgentRequestExecutorResult,
   AgentRequestExecutors,
+  AgentTextResult,
   AgentUsage,
   AgentCallUsage,
   TextLogic,

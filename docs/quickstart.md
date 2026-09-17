@@ -42,7 +42,7 @@ const machine = agent.createMachine({
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
           target: "done",
-          context: { answer: output },
+          context: { answer: output.result },
         }),
       },
     },

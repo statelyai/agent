@@ -210,7 +210,7 @@ export const contextCompactionMachine = agentSetup.createMachine({
           const messages = [
             ...context.messages,
             userMessage(context.pendingInput ?? ""),
-            assistantMessage(output),
+            assistantMessage(output.result),
           ];
           return {
             target: "checkingWindow",
@@ -242,7 +242,7 @@ export const contextCompactionMachine = agentSetup.createMachine({
         onDone: ({ context, output }) => ({
           target: "awaitingUser",
           context: {
-            summary: output.summary,
+            summary: output.result.summary,
             messages: context.messages.slice(-context.keepRecent),
           },
         }),

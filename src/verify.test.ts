@@ -115,62 +115,6 @@ describe("lintAgentMachine — the lint corpus stays quiet", () => {
 });
 
 describe("lintAgentMachine — each check fires on a crafted bad machine", () => {
-  test("unhandled-agent-messages: text requests without a root transcript transition warn", () => {
-    const agent = setupAgent({
-      context: z.object({ messages: z.array(z.unknown()) }),
-      requests: {
-        answer: { schemas: {}, model: "test", prompt: "answer" },
-      },
-    });
-    const machine = agent.createMachine({
-      context: { messages: [] },
-      initial: "answering",
-      states: {
-        answering: { invoke: { src: "answer", onDone: { target: "done" } } },
-        done: { type: "final" },
-      },
-    });
-
-    expect(lintAgentMachine(machine)).toContainEqual(
-      expect.objectContaining({
-        code: "unhandled-agent-messages",
-        severity: "warning",
-        path: "(root)",
-      }),
-    );
-    expect(
-      lintAgentMachine(machine, { disable: ["unhandled-agent-messages"] }).some(
-        (diagnostic) => diagnostic.code === "unhandled-agent-messages",
-      ),
-    ).toBe(false);
-  });
-
-  test("unhandled-agent-messages: a state-scoped transcript transition is recognized", () => {
-    const agent = setupAgent({
-      context: z.object({ messages: z.array(z.unknown()) }),
-      requests: {
-        answer: { schemas: {}, model: "test", prompt: "answer" },
-      },
-    });
-    const machine = agent.createMachine({
-      context: { messages: [] },
-      initial: "answering",
-      states: {
-        answering: {
-          on: { "agent.messages": agent.appendMessages() },
-          invoke: { src: "answer", onDone: { target: "done" } },
-        },
-        done: { type: "final" },
-      },
-    });
-
-    expect(
-      lintAgentMachine(machine).some(
-        (diagnostic) => diagnostic.code === "unhandled-agent-messages",
-      ),
-    ).toBe(false);
-  });
-
   test("decide-without-events: an agent.decide state with no on/ancestor handlers", () => {
     const agent = setupAgent({
       context: z.object({}),
@@ -1234,8 +1178,14 @@ function createFanOutMachine() {
         invoke: DRAFT_SLOTS.map((id) => ({
           id,
           src: "draft" as const,
-          onDone: ({ context, output }: { context: FanOutContext; output: string }) => ({
-            context: { drafts: [...context.drafts, output], settled: context.settled + 1 },
+          onDone: ({
+            context,
+            output,
+          }: {
+            context: FanOutContext;
+            output: { result: string };
+          }) => ({
+            context: { drafts: [...context.drafts, output.result], settled: context.settled + 1 },
           }),
           onError: ({ context }: { context: FanOutContext }) => ({
             context: { settled: context.settled + 1 },

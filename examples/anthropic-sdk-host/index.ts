@@ -39,6 +39,7 @@
  * Run: ANTHROPIC_API_KEY=... npx tsx examples/anthropic-sdk-host/index.ts
  */
 import type Anthropic from "@anthropic-ai/sdk";
+import type { SnapshotFrom } from "xstate";
 import type {
   ContentBlockParam,
   Message,

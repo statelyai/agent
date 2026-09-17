@@ -57,7 +57,7 @@ export const portableLoopMachine = portableLoopSetup.createMachine({
         input: ({ context }) => ({ topic: context.topic }),
         onDone: ({ output }) => ({
           target: "reviewing",
-          context: { draft: output },
+          context: { draft: output.result },
         }),
         onError: ({ event }) => ({
           target: "failed",

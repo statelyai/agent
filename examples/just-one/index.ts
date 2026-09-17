@@ -342,7 +342,7 @@ export const justOneMachine = agentSetup.createMachine({
                   secretWord: context.secretWord,
                   persona: PERSONAS[0],
                 }),
-                onDone: ({ output }) => ({ target: "written", context: { clueA: output } }),
+                onDone: ({ output }) => ({ target: "written", context: { clueA: output.result } }),
                 // A failed request is a blank clue: the round goes on, and
                 // `judgeClues` strikes it like any other unusable clue.
                 onError: { target: "written", context: { clueA: null } },
@@ -361,7 +361,7 @@ export const justOneMachine = agentSetup.createMachine({
                   secretWord: context.secretWord,
                   persona: PERSONAS[1],
                 }),
-                onDone: ({ output }) => ({ target: "written", context: { clueB: output } }),
+                onDone: ({ output }) => ({ target: "written", context: { clueB: output.result } }),
                 onError: { target: "written", context: { clueB: null } },
               },
             },
@@ -378,7 +378,7 @@ export const justOneMachine = agentSetup.createMachine({
                   secretWord: context.secretWord,
                   persona: PERSONAS[2],
                 }),
-                onDone: ({ output }) => ({ target: "written", context: { clueC: output } }),
+                onDone: ({ output }) => ({ target: "written", context: { clueC: output.result } }),
                 onError: { target: "written", context: { clueC: null } },
               },
             },

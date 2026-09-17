@@ -11,7 +11,6 @@ import { getAgentExecutionOptions } from "./internal/registry.js";
 import type { StandardSchemaV1 } from "./types.js";
 import { isRecord } from "./internal/is-record.js";
 import { validateSchemaSync } from "./utils.js";
-import { AGENT_MESSAGES_EVENT_TYPE } from "./messages.js";
 
 /**
  * Thrown by {@link parseAgentEvent} (and {@link eventFromInteraction}) when a
@@ -97,8 +96,8 @@ function matchesEventPattern(eventType: string, pattern: string): boolean {
 }
 
 /**
- * Event types reserved for delivery by the library (`@agent.*` and
- * `agent.messages`). A machine may declare transitions on them,
+ * Event types reserved for delivery by the library (`@agent.*`). A machine
+ * may declare transitions on them,
  * but they are never model-facing: {@link getAcceptedEvents} drops them before
  * any `allowedEvents` matching, so they cannot be offered as a decision
  * candidate (not even under a `'*'` wildcard) and {@link parseAgentEvent}
@@ -108,9 +107,7 @@ function matchesEventPattern(eventType: string, pattern: string): boolean {
 const RESERVED_AGENT_EVENT_PREFIX = "@agent.";
 
 function isReservedAgentEvent(eventType: string): boolean {
-  return (
-    eventType.startsWith(RESERVED_AGENT_EVENT_PREFIX) || eventType === AGENT_MESSAGES_EVENT_TYPE
-  );
+  return eventType.startsWith(RESERVED_AGENT_EVENT_PREFIX);
 }
 
 /** True when an `allowedEvents` entry is a wildcard pattern rather than a concrete event type. @internal */

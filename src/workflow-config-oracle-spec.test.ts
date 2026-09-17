@@ -251,7 +251,7 @@ describe("Oracle Agent Spec-style static workflows", () => {
                 onDone: {
                   target: "node3",
                   assign: {
-                    firstText: "{{ event.output.generated_text }}",
+                    firstText: "{{ event.output.result.generated_text }}",
                   },
                 },
               },
@@ -266,7 +266,7 @@ describe("Oracle Agent Spec-style static workflows", () => {
                 onDone: {
                   target: "toolNode",
                   assign: {
-                    secondText: "{{ event.output.generated_text }}",
+                    secondText: "{{ event.output.result.generated_text }}",
                   },
                 },
               },
@@ -298,15 +298,18 @@ describe("Oracle Agent Spec-style static workflows", () => {
       )
       .machine.provide({
         actors: {
+          // Request stand-ins resolve the same `{ result, messages }` envelope
+          // a live text request does; `toolNode` is a plain actor and does not.
           node12: createAsyncLogic({
             run: async () => ({
-              generated_text: "first generated text",
+              result: { generated_text: "first generated text" },
+              messages: [],
             }),
           }),
           node3: createAsyncLogic({
             run: async ({ input }) => {
               expect(input).toEqual({ previous: "first generated text" });
-              return { generated_text: "second generated text" };
+              return { result: { generated_text: "second generated text" }, messages: [] };
             },
           }),
           toolNode: createAsyncLogic({

@@ -52,7 +52,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
             input: ({ context }) => ({ topic: context.topic }),
             onDone: ({ output }) => ({
               target: "done",
-              context: { joke: output as string },
+              context: { joke: output.result },
             }),
           },
         },
@@ -204,7 +204,10 @@ describe('createTextLogic({ mode: "stream" })', () => {
           }),
         },
       ),
-    ).resolves.toEqual({ setup: "Knock knock.", punchline: "XState." });
+    ).resolves.toEqual({
+      result: { setup: "Knock knock.", punchline: "XState." },
+      messages: [],
+    });
 
     // output failing the schema surfaces as a validation error
     await expect(
@@ -230,7 +233,10 @@ describe('createTextLogic({ mode: "stream" })', () => {
 
     const actor = createActor(bound, { input: { topic: "reducers" } });
     actor.start();
-    await expect(toPromise(actor)).resolves.toBe("bound joke about reducers");
+    await expect(toPromise(actor)).resolves.toEqual({
+      result: "bound joke about reducers",
+      messages: [],
+    });
   });
 
   test("parallel stream requests interleave: onChunk disambiguates by request id", async () => {
@@ -269,7 +275,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
                 id: "streamA",
                 src: "streamA",
                 input: {},
-                onDone: ({ output }) => ({ target: "done", context: { a: output as string } }),
+                onDone: ({ output }) => ({ target: "done", context: { a: output.result } }),
               },
             },
             done: { type: "final" },
@@ -283,7 +289,7 @@ describe('createTextLogic({ mode: "stream" })', () => {
                 id: "streamB",
                 src: "streamB",
                 input: {},
-                onDone: ({ output }) => ({ target: "done", context: { b: output as string } }),
+                onDone: ({ output }) => ({ target: "done", context: { b: output.result } }),
               },
             },
             done: { type: "final" },
@@ -343,7 +349,7 @@ describe("bindRequestExecutor", () => {
     const actor = createActor(bound, { input: { topic: "actors" } }).start();
     const output = await toPromise(actor);
 
-    expect(output).toBe("summary of Summarize actors.");
+    expect(output).toEqual({ result: "summary of Summarize actors.", messages: [] });
     expect(seen[0]?.request.tools).toEqual({});
     expect(seen[0]?.hasSignal).toBe(true);
   });
@@ -461,6 +467,35 @@ describe("parseStructuredEnvelope", () => {
   });
 });
 
+// A text request's invoke resolves with the `{ result, messages }` envelope:
+// the validated result plus whatever response messages the executor returned.
+describe("text request invoke output", () => {
+  const config = {
+    schemas: { input: z.object({ topic: z.string() }) },
+    model: "test-model",
+    prompt: ({ input }: { input: { topic: string } }) => `Say hi about ${input.topic}.`,
+  };
+
+  test("resolves with the result and the executor's response messages", async () => {
+    const logic = createTextLogic(config, () => ({
+      output: "hi",
+      messages: [{ role: "assistant" as const, content: "hi" }],
+    }));
+
+    const output = await toPromise(createActor(logic, { input: { topic: "actors" } }).start());
+
+    expect(output).toEqual({ result: "hi", messages: [{ role: "assistant", content: "hi" }] });
+  });
+
+  test("resolves with empty messages when the executor returns only output", async () => {
+    const logic = createTextLogic(config, () => ({ output: "hi" }));
+
+    const output = await toPromise(createActor(logic, { input: { topic: "actors" } }).start());
+
+    expect(output).toEqual({ result: "hi", messages: [] });
+  });
+});
+
 // `schemas.output` defaults to a string schema and `schemas.input` to "no
 // input", so a plain text request needs neither.
 describe("createTextLogic schema defaults", () => {
@@ -476,7 +511,8 @@ describe("createTextLogic schema defaults", () => {
 
     const output = await toPromise(createActor(tellJoke, { input: { topic: "actors" } }).start());
     // typed as `string` — assigning to a string binding is the compile check
-    const text: string = output;
+    const text: string = output.result;
+    expect(output.messages).toEqual([]);
 
     expect(text).toBe("joke: Joke about actors.");
     expect(tellJoke.request({ topic: "actors" }).outputSchema).toBe(tellJoke.schemas.output);
@@ -507,7 +543,10 @@ describe("createTextLogic schema defaults", () => {
     );
 
     expect(randomTopic.request(undefined).prompt).toBe("Give me a topic.");
-    expect(await toPromise(createActor(randomTopic).start())).toBe("otters");
+    expect(await toPromise(createActor(randomTopic).start())).toEqual({
+      result: "otters",
+      messages: [],
+    });
   });
 
   test("setupAgent({ requests }) runs a request with an omitted output schema end to end", async () => {
@@ -538,14 +577,14 @@ describe("createTextLogic schema defaults", () => {
         topic: {
           invoke: {
             src: "randomTopic",
-            onDone: ({ output }) => ({ context: { topic: output }, target: "joking" }),
+            onDone: ({ output }) => ({ context: { topic: output.result }, target: "joking" }),
           },
         },
         joking: {
           invoke: {
             src: "tellJoke",
             input: ({ context }) => ({ topic: context.topic }),
-            onDone: ({ output }) => ({ context: { joke: output }, target: "done" }),
+            onDone: ({ output }) => ({ context: { joke: output.result }, target: "done" }),
           },
         },
         done: { type: "final", output: ({ context }) => ({ joke: context.joke! }) },
@@ -612,7 +651,7 @@ describe("createTextLogic schema default typing", () => {
             src: "rateJoke",
             input: ({ context }) => ({ joke: context.topic }),
             // a declared output schema still infers its own type
-            onDone: ({ output }) => ({ context: { score: output.score } }),
+            onDone: ({ output }) => ({ context: { score: output.result.score } }),
           },
         },
       },

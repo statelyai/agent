@@ -98,7 +98,7 @@ agentSetup.createMachine({
         // so `output.body` is a string — a wrong field would fail to compile.
         onDone: ({ context, output }) => ({
           context: {
-            messages: [...context.messages, assistantMessage(output.body)],
+            messages: [...context.messages, assistantMessage(output.result.body)],
           },
         }),
       },

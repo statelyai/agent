@@ -4,6 +4,7 @@ import {
   DECIDE_SRC,
   emptyPayload,
   entryInput,
+  entryOutput,
   entrySrc,
   jsonAny,
   jsonString,
@@ -144,7 +145,7 @@ export function createRouterMachine<const TRoutes extends Record<string, PresetE
           entryInput(name, entry, model, context.prompt),
         onDone: ({ output }: { output: unknown }) => ({
           target: "done",
-          context: { result: output },
+          context: { result: entryOutput(entry, output) },
         }),
       },
     };

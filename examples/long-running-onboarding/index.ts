@@ -319,7 +319,7 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "onboarded",
-          context: { schedule: output },
+          context: { schedule: output.result },
         }),
         onError: ({ event }) => ({
           target: "escalated",

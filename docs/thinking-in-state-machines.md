@@ -228,7 +228,7 @@ const triageMachine = agentSetup.createMachine({
       invoke: {
         src: "classifyTicket",
         input: ({ context }) => ({ ticket: context.ticket }),
-        onDone: ({ output }) => ({ target: "routing", context: { category: output } }),
+        onDone: ({ output }) => ({ target: "routing", context: { category: output.result } }),
       },
     },
     // `type: 'choice'` is a library pseudo-state, not native XState.
@@ -245,7 +245,7 @@ const triageMachine = agentSetup.createMachine({
           category: context.category ?? "unknown",
           note: context.note,
         }),
-        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output } }),
+        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output.result } }),
       },
     },
     reviewing: {

@@ -1,9 +1,15 @@
 import { createAsyncLogic, type AsyncActorLogic, type EventObject } from "xstate";
-import type { AgentToolChoice, AgentTools, InferOutput, StandardSchemaV1 } from "./types.js";
+import type {
+  AgentMessage,
+  AgentToolChoice,
+  AgentTools,
+  InferOutput,
+  StandardSchemaV1,
+} from "./types.js";
 import { getJsonSchemaSync, validateSchemaSync } from "./utils.js";
 import type { AgentDecisionExecutor, AgentDecisionInput } from "./decision.js";
 import type { ChosenEvent } from "./types.js";
-import { executorBoundLogics, unboundPlaceholderLogics } from "./internal/registry.js";
+import { executorBoundLogics } from "./internal/registry.js";
 
 // Well-known invoke `src` for the builtin human-input actor.
 // Well-known invoke `src` for the builtin one-shot text-generation actor.
@@ -213,10 +219,57 @@ export function getCallUsage(raw: unknown): AgentCallUsage | undefined {
   return out;
 }
 
-/** The four `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
+/**
+ * What a text request's invoke resolves to: the validated `result` (the
+ * request's `outputSchema` type, or a string) and the response `messages`
+ * the executor returned (empty when it returned none). Read it in `onDone`:
+ *
+ * ```ts
+ * onDone: ({ context, output }) => ({
+ *   context: {
+ *     draft: output.result,
+ *     messages: [...context.messages, ...output.messages],
+ *   },
+ * }),
+ * ```
+ */
+export interface AgentTextResult<TOutput = unknown, TMessage = AgentMessage> {
+  result: TOutput;
+  /** Framework-native response messages, exactly as the executor returned them. */
+  messages: TMessage[];
+}
+
+/**
+ * The response messages off an executor result envelope, or none. Fields
+ * holding `undefined` are dropped on the way in: SDK message objects often
+ * carry optional slots as explicit `undefined` (the AI SDK's
+ * `providerOptions`, for one), and the messages now travel inside the
+ * invoke's done event, which the event log requires to be strict JSON.
+ * @internal
+ */
+export function responseMessagesOf(raw: unknown): AgentMessage[] {
+  const messages = (raw as { messages?: unknown } | null | undefined)?.messages;
+  return Array.isArray(messages) ? (dropUndefined(messages) as AgentMessage[]) : [];
+}
+
+// Deep-copies plain objects and arrays without `undefined`-valued fields;
+// every other value (strings, typed arrays, URLs, class instances) is kept as-is.
+function dropUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(dropUndefined);
+  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry !== undefined) out[key] = dropUndefined(entry);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** The three `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
 export type BuiltinAgentActors<TEvent extends string = string, TModel extends string = string> = {
-  [GENERATE_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
-  [STREAM_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
+  [GENERATE_TEXT_ACTOR]: AsyncActorLogic<AgentTextResult, AgentTextRequest>;
+  [STREAM_TEXT_ACTOR]: AsyncActorLogic<AgentTextResult, AgentTextRequest>;
   [DECIDE_ACTOR]: AsyncActorLogic<
     ChosenEvent,
     AgentDecisionInput<TEvent, Record<string, unknown>, TModel>
@@ -314,7 +367,7 @@ function createBuiltinTextActor(
   mode: AgentRequestMode,
   outputSchema: StandardSchemaV1,
 ): TextLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1> {
-  const logic = createAsyncLogic<unknown, AgentTextRequest>({
+  const logic = createAsyncLogic<AgentTextResult, AgentTextRequest>({
     run: async () => {
       throw new Error(
         `'${src}' has no host execution. Provide an implementation with ` +
@@ -335,14 +388,17 @@ function createBuiltinTextActor(
       return validateSchemaSync(agentTextInputSchema, input);
     },
     async execute(input: AgentTextRequest, executors: AgentRequestExecutors) {
-      const { output } = await executeAgentTextRequest(
+      const { output, raw } = await executeAgentTextRequest(
         mode,
         src,
         validateSchemaSync(agentTextInputSchema, input),
         executors,
       );
 
-      return validateSchemaSync(outputSchema, output);
+      return {
+        result: validateSchemaSync(outputSchema, output),
+        messages: responseMessagesOf(raw),
+      };
     },
     withExecutor(
       execute: TextLogicExecutor<
@@ -496,7 +552,7 @@ export interface TextLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1,
   TMetadata = Record<string, unknown>,
-> extends AsyncActorLogic<InferOutput<TOutputSchema>, InferOutput<TInputSchema>> {
+> extends AsyncActorLogic<AgentTextResult<InferOutput<TOutputSchema>>, InferOutput<TInputSchema>> {
   readonly kind: "statelyai.textLogic";
   readonly mode: AgentRequestMode;
   readonly schemas: {
@@ -584,7 +640,7 @@ export function createTextLogic<
       metadata: resolveTextLogicValue(config.metadata, args),
     };
   };
-  const logic = createAsyncLogic<TOutput, TInput>({
+  const logic = createAsyncLogic<AgentTextResult<TOutput>, TInput>({
     run: async ({ input, signal, system, self }, enq) => {
       const resolvedRequest = request(input);
 
@@ -611,7 +667,10 @@ export function createTextLogic<
         typeof selfId === "string" ? selfId : "text logic",
       );
 
-      return validateSchemaSync<TOutput>(schemas.output, output);
+      return {
+        result: validateSchemaSync<TOutput>(schemas.output, output),
+        messages: responseMessagesOf(result),
+      };
     },
   });
 
@@ -621,14 +680,17 @@ export function createTextLogic<
     schemas,
     request,
     async execute(input: TInput, executors: AgentRequestExecutors) {
-      const { output } = await executeAgentTextRequest(
+      const { output, raw } = await executeAgentTextRequest(
         config.mode ?? "generate",
         "textLogic",
         request(input),
         executors,
       );
 
-      return validateSchemaSync<TOutput>(schemas.output, output);
+      return {
+        result: validateSchemaSync<TOutput>(schemas.output, output),
+        messages: responseMessagesOf(raw),
+      };
     },
     withExecutor(nextExecute: TextLogicExecutor<TInputSchema, TOutputSchema, TMetadata>) {
       return createTextLogic(config, nextExecute);

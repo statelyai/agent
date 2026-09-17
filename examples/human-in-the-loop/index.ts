@@ -119,7 +119,7 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
         input: ({ context }) => ({ topic: context.topic, feedback: context.feedback }),
         onDone: ({ output }) => ({
           target: "reviewing",
-          context: { draft: output },
+          context: { draft: output.result },
         }),
         onError: ({ event }) => ({
           target: "abandoned",

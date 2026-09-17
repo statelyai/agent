@@ -208,7 +208,7 @@ const agentSetup = setupAgent({
 
 | `src`                | Invoke `input`                                                              | `onDone` output                                        | Reference                                 |
 | -------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
-| `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | text, or the value parsed from `outputSchema`          | [Text requests](text-requests.md)         |
+| `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | `{ result, messages }`: text or the value parsed from `outputSchema`, plus response messages | [Text requests](text-requests.md)         |
 | `agent.streamText`   | same as `agent.generateText`                                                | same, with chunks delivered to the host as they arrive | [Text requests](text-requests.md)         |
 | `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`                       | the one chosen event, applied to the machine           | [Decisions](decisions.md)                 |
 
@@ -249,7 +249,7 @@ const machine = agentSetup.createMachine({
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output }) => ({
           target: "done",
-          context: { answer: output.answer },
+          context: { answer: output.result.answer },
         }),
       },
     },
@@ -313,7 +313,7 @@ on: {
 
 This affects [decisions](decisions.md). If the model chooses an event whose transition returns `undefined`, the choice is rejected before the transition is taken.
 
-A transition can also be a plain object. Its `context` is a static patch, or a mapper function that receives the same arguments. On `onDone`, those arguments include `output`:
+A transition can also be a plain object. Its `context` is a static patch, or a mapper function that receives the same arguments. On `onDone`, those arguments include `output` (for a text request, `{ result, messages }`):
 
 ```ts no-check
 // inside a state
@@ -325,7 +325,7 @@ on: {
 // on an invoke
 onDone: {
   target: 'revising',
-  context: ({ output }) => ({ feedback: output.feedback }),
+  context: ({ output }) => ({ feedback: output.result.feedback }),
 }
 ```
 
@@ -366,13 +366,13 @@ drafting: {
   invoke: {
     src: 'draftEmail',
     input: ({ context }) => ({ prompt: context.prompt, messages: context.messages }),
-    onDone: ({ output }) => ({ target: 'reviewing', context: { draft: output } }),
+    onDone: ({ output }) => ({ target: 'reviewing', context: { draft: output.result } }),
     onError: { target: 'failed' },
   },
 }
 ```
 
-The `onDone` handler receives the actor's `output`, typed from its output schema. Both `onDone` and `onError` are transition functions.
+The `onDone` handler receives the actor's `output`. For a text request that is `{ result, messages }`: `result` is typed from the request's output schema, and `messages` is the executor's response messages (see [Messages](messages.md)). Any other actor's `output` is whatever its logic resolves. Both `onDone` and `onError` are transition functions.
 
 ### Inline text requests
 
@@ -395,7 +395,7 @@ generating: {
     }),
     onDone: ({ output }) => ({
       target: "done",
-      context: { result: parseOutput(resultSchema, output) },
+      context: { result: parseOutput(resultSchema, output.result) },
     }),
   },
 },
