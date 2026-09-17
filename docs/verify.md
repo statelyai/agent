@@ -104,7 +104,6 @@ This script keys by invoke **src**, not by request name. It is not the `createSc
 - `decisions` holds the `ChosenEvent` to apply per decision, keyed by decision src, usually `agent.decide`.
 - `text` holds output values for text requests, keyed by request src.
 - `invokes` holds answers for scripted invokes, keyed by invoke src.
-- `userInput` is one flat queue of answers for `agent.userInput` invokes.
 - `errors` holds failure values that reject a request instead of resolving it, keyed by the same srcs the other channels use.
 
 Pending work is read off the snapshot's live invoked actors, not off the last transition. A state that invokes several actors at once keeps every one of them pending until it settles, including when an invoke's `onDone` targets nothing. `simulateAgent` settles one invoke per step, in invoke-id order, and keeps going until none are left, so an `always` join that waits on all of them fires.
@@ -115,7 +114,7 @@ const { status, snapshot, trail } = await simulateAgent(machine, {
   input: { questionsRemaining: 20 },
   script: {
     decisions: { "agent.decide": [{ type: "GUESS", guess: "a cat" }] },
-    userInput: ["yes", "no"],
+    events: [{ type: "GUESS_RIGHT" }, { type: "PLAY_AGAIN_NO" }],
     text: {
       classifyGuessFeedback: [{ correct: true, reasoning: "matched" }],
       classifyPlayAgain: [{ playAgain: false, reasoning: "stop" }],
@@ -170,12 +169,12 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 ## Branch exploration
 
-`explorePaths(machine, { input, maxDepth?, maxPaths?, text?, invokes?, userInput?, errors? })` enumerates decision and external-event branches without a model, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, text?, invokes?, errors? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - At an idle wait, it forks one branch per externally accepted event.
 - `text` is a map of canned outputs for text requests, keyed by src. One value per src is reused every time that src is reached.
-- `invokes` is the same map for scripted invokes, and `userInput` is the shorthand for `invokes['agent.userInput']`.
+- `invokes` is the same map for scripted invokes.
 - A src with no canned output halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
 - `errors` is a map of one canned failure per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates.
 - A rejection that reaches no `onError` errors the machine, and that path ends in an `error` terminal carrying the failure value on `error`.

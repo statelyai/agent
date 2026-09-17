@@ -297,7 +297,7 @@ if (result.status === "idle") {
 See [Choosing a run mode](choosing-a-run-mode.md) for the full set. The executors hold your existing model code:
 
 - The `createAiSdkExecutors` adapter wraps the AI SDK.
-- The `generateText` and `streamText` slots also accept the raw AI SDK functions. Another SDK or a raw `fetch` works the same way.
+- Another SDK, or a raw `fetch`, is three plain functions that return `{ output }`. See [Hosts](hosts.md).
 - The tools, retry logic, and provider calls you already wrote move across unchanged.
 
 Only the `while` loop is removed. See [Hosts](hosts.md).

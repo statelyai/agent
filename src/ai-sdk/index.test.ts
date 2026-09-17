@@ -13,7 +13,7 @@ import { tool } from "ai";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools } from "../types.js";
-import { createAiSdkExecutors, defineModels } from "./index.js";
+import { createAiSdkExecutors, defineModels, parseModelRef } from "./index.js";
 import {
   extractFirstJsonValue,
   isStructuredOutputRequest,
@@ -59,27 +59,6 @@ describe("createAiSdkExecutors with core runAgent", () => {
     },
     warnings: [],
   };
-
-  test("defineModels supplies the default AI SDK executors", async () => {
-    const models = defineModels({ quick: new MockLanguageModelV3({ doGenerate: response }) });
-    const agent = setupAgent({ context: z.object({}), input: z.object({}), models });
-    const machine = agent.createMachine({
-      context: ({ input }) => input,
-      initial: "writing",
-      states: {
-        writing: {
-          invoke: {
-            src: "agent.generateText",
-            input: { model: "quick", prompt: "hi" },
-            onDone: { target: "done" },
-          },
-        },
-        done: { type: "final" },
-      },
-    });
-
-    await expect(runAgent(machine, { input: {} })).resolves.toMatchObject({ status: "done" });
-  });
 
   test("the adapter's LanguageModelUsage lands in the run result's aggregated usage", async () => {
     const usageResponse = {
@@ -1177,5 +1156,23 @@ describe("createAiSdkExecutors — truncation", () => {
 
     expect(result.output).toBe("as far as it got");
     expect(result.finishReason).toBe("length");
+  });
+});
+
+describe("parseModelRef", () => {
+  test("splits provider/model-id refs on the first slash", () => {
+    expect(parseModelRef("openai/gpt-5.4-mini")).toEqual({
+      provider: "openai",
+      modelId: "gpt-5.4-mini",
+    });
+    // Only the FIRST slash splits — model ids may contain slashes.
+    expect(parseModelRef("openrouter/meta/llama-3")).toEqual({
+      provider: "openrouter",
+      modelId: "meta/llama-3",
+    });
+  });
+
+  test("a ref without a slash has no provider", () => {
+    expect(parseModelRef("quick")).toEqual({ provider: undefined, modelId: "quick" });
   });
 });

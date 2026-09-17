@@ -6,7 +6,6 @@ import type { ChosenEvent } from "./types.js";
 import { executorBoundLogics, unboundPlaceholderLogics } from "./internal/registry.js";
 
 // Well-known invoke `src` for the builtin human-input actor.
-export const USER_INPUT_ACTOR = "agent.userInput" as const;
 // Well-known invoke `src` for the builtin one-shot text-generation actor.
 export const GENERATE_TEXT_ACTOR = "agent.generateText" as const;
 // Well-known invoke `src` for the builtin streaming text-generation actor.
@@ -26,27 +25,6 @@ export type AgentModelMap = Record<string, unknown>;
 export type AgentModelRef<TModels extends AgentModelMap = {}> = [keyof TModels] extends [never]
   ? string
   : keyof TModels & string;
-
-/**
- * Splits a portable `"provider/model-id"` model ref (the convention JSON
- * workflows and registry-less hosts use, e.g. `"openai/gpt-5.4-mini"`) into
- * its parts. A ref with no `/` has no provider — `modelId` is the whole ref.
- * The standard building block for a host's `resolveModel`:
- *
- * @example
- * ```ts
- * const resolveModel = (ref: string) => openai(parseModelRef(ref).modelId);
- * ```
- */
-export function parseModelRef(modelRef: string): {
-  provider: string | undefined;
-  modelId: string;
-} {
-  const slash = modelRef.indexOf("/");
-  return slash === -1
-    ? { provider: undefined, modelId: modelRef }
-    : { provider: modelRef.slice(0, slash), modelId: modelRef.slice(slash + 1) };
-}
 
 /**
  * Portable, provider-agnostic input a text request passes to a host
@@ -235,23 +213,10 @@ export function getCallUsage(raw: unknown): AgentCallUsage | undefined {
   return out;
 }
 
-/**
- * Inline input for the `agent.userInput` builtin actor — a human-input request
- * (CLI prompt, chat reply, …) that resolves to the `string` the human typed.
- * See {@link RunAgentOptions.userInput}. For structured input, parse/classify
- * the string in a follow-up state, or register a custom actor source; host
- * rendering hints (a form spec, say) belong in `metadata`.
- */
-export interface AgentUserInput<TMetadata = Record<string, unknown>> {
-  prompt?: string;
-  metadata?: TMetadata;
-}
-
 /** The four `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
 export type BuiltinAgentActors<TEvent extends string = string, TModel extends string = string> = {
   [GENERATE_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
   [STREAM_TEXT_ACTOR]: AsyncActorLogic<unknown, AgentTextRequest>;
-  [USER_INPUT_ACTOR]: AsyncActorLogic<string, AgentUserInput>;
   [DECIDE_ACTOR]: AsyncActorLogic<
     ChosenEvent,
     AgentDecisionInput<TEvent, Record<string, unknown>, TModel>
@@ -425,17 +390,6 @@ export const builtinTextActors = {
   ),
   [STREAM_TEXT_ACTOR]: createBuiltinTextActor(STREAM_TEXT_ACTOR, "stream", stringOutputSchema),
 } satisfies Pick<BuiltinAgentActors, typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR>;
-
-/** The unbound `agent.userInput` builtin registered by setupAgent (an unbound-placeholder logic — see internal/registry.ts). Output is `string` — what the human typed. @internal */
-export const userInputActor = createAsyncLogic<string, AgentUserInput>({
-  run: async () => {
-    throw new Error(
-      `'${USER_INPUT_ACTOR}' has no host execution. Provide an implementation ` +
-        `with machine.provide({ actors: { '${USER_INPUT_ACTOR}': ... } }).`,
-    );
-  },
-});
-unboundPlaceholderLogics.add(userInputActor);
 
 /**
  * Validates a raw model/executor output against `schema`, returning the
@@ -655,7 +609,6 @@ export function createTextLogic<
       const output = await normalizeGeneratorResult(
         result,
         typeof selfId === "string" ? selfId : "text logic",
-        { request: resolvedRequest },
       );
 
       return validateSchemaSync<TOutput>(schemas.output, output);
@@ -800,99 +753,32 @@ export interface AgentRequestExecutorInfo {
 }
 
 /**
- * A raw Vercel AI SDK `generateText` result shape: resolves `{ text }` (a
- * string or a promise of one) instead of the `{ output }`
- * {@link AgentRequestExecutorResult} envelope. Admitted directly as an executor
- * return type so `ai`'s `generateText` passes to `runAgent`/executors without a
- * cast — {@link normalizeGeneratorResult} unwraps `text` at runtime (text-only;
- * structured output is best-effort JSON parsing against the request's
- * `outputSchema`). Extra fields (`content`, `usage`, …) are ignored.
- */
-export type AiSdkShapedTextResult = {
-  text: string | PromiseLike<string>;
-  // Optional passthrough fields (NOT an index signature — `ai`'s result
-  // interfaces have no index signature, so one would break their
-  // assignability) so callers of a widened executor can still read the
-  // envelope/raw fields without narrowing first.
-  output?: unknown;
-  usage?: unknown;
-  reasoning?: unknown;
-  finishReason?: unknown;
-  toolCalls?: unknown;
-  toolResults?: unknown;
-};
-
-/**
- * A raw Vercel AI SDK `streamText` result shape: exposes a `textStream` async
- * iterable of string chunks (and, optionally, a `text` promise for the final
- * text) instead of the `{ output }` {@link AgentRequestExecutorResult} envelope.
- * Admitted directly as an executor return type so `ai`'s `streamText` passes to
- * `runAgent`/executors without a cast — {@link normalizeGeneratorResult}
- * iterates `textStream`, forwarding chunks, then resolves the final text
- * (text-only; structured output is best-effort). Extra fields are ignored.
- */
-export type AiSdkShapedStreamResult = {
-  textStream: AsyncIterable<string>;
-  text?: PromiseLike<string>;
-  // Same optional passthrough fields as {@link AiSdkShapedTextResult}.
-  output?: unknown;
-  usage?: unknown;
-  reasoning?: unknown;
-  finishReason?: unknown;
-  toolCalls?: unknown;
-  toolResults?: unknown;
-};
-
-/**
- * The lowered request as an {@link AgentRequestExecutor} receives it. At
- * runtime this is exactly the {@link AgentTextRequest} core built (plus the
- * merged `tools` map); the TYPE is deliberately shaped so the Vercel AI SDK's
- * own `generateText`/`streamText` are directly assignable as executors
- * (function parameters are contravariant, so this type must be assignable to
- * `ai`'s options type):
- *
- * - `prompt`/`messages` are mutually exclusive, matching `ai`'s `Prompt`
- *   union (core always sets exactly one).
- * - `tools`, `toolChoice`, and `messages` are widened to `any` — their
- *   framework-native shapes may be branded and would otherwise fail the
- *   contravariant check.
- *
- * Hand-written executors that want the precise shapes can annotate their
- * parameter as `AgentTextRequest & { tools: AgentTools }` — that wider
- * parameter type keeps the executor assignable.
+ * The lowered request as an {@link AgentRequestExecutor} receives it: the
+ * {@link AgentTextRequest} core built, with `name` resolved and the request's
+ * `tools` merged in. Exactly one of `prompt`/`messages` is set.
  */
 export type AgentExecutorTextRequest<TMetadata = Record<string, unknown>> = Omit<
   AgentTextRequest<TMetadata>,
-  "name" | "prompt" | "messages" | "tools" | "toolChoice"
+  "name" | "tools"
 > & {
   /** Semantic request identity; always resolved before an executor is called. */
   name: string;
-  tools: any;
-  toolChoice?: any;
-} & ({ prompt: string; messages?: undefined } | { prompt?: undefined; messages: any[] });
+  tools: AgentTools;
+};
 
 /**
- * Host implementation of one text call (`generateText` or `streamText`) —
+ * Host implementation of one text call (`generateText` or `streamText`):
  * resolves a lowered {@link AgentExecutorTextRequest} to an `{ output }`
- * envelope (see {@link AgentRequestExecutorResult}), unwrapped by
- * {@link normalizeGeneratorResult}. Both sides are shaped so `ai`'s own
- * `generateText`/`streamText` pass through without a cast: the request
- * parameter is assignable to `ai`'s options (see
- * {@link AgentExecutorTextRequest}), and the return type is widened to also
- * admit the raw Vercel AI SDK shapes ({@link AiSdkShapedTextResult} /
- * {@link AiSdkShapedStreamResult}) — `normalizeGeneratorResult` checks for
- * `{ output }` first, then falls back to those shapes at runtime.
+ * envelope (see {@link AgentRequestExecutorResult}). Adapters such as
+ * `createAiSdkExecutors` and `createOpenAiExecutors` produce this shape; a
+ * hand-written executor is a plain async function returning it.
  */
 export type AgentRequestExecutor<
   TResult extends AgentRequestExecutorResult = AgentRequestExecutorResult,
 > = (
   request: AgentExecutorTextRequest,
   info?: AgentRequestExecutorInfo,
-) =>
-  | PromiseLike<TResult | AiSdkShapedTextResult | AiSdkShapedStreamResult>
-  | TResult
-  | AiSdkShapedTextResult
-  | AiSdkShapedStreamResult;
+) => TResult | PromiseLike<TResult>;
 
 /**
  * The full set of host executors a machine's agent actors are resolved
@@ -1082,84 +968,15 @@ export async function executeAgentTextRequest(
     );
   }
 
-  // The runtime object is a plain lowered request; the cast bridges to the
-  // executor-facing type (see AgentExecutorTextRequest — prompt/messages are
-  // typed as mutually exclusive there, which core enforces at runtime through
-  // agentTextInputSchema, createTextLogic's lowering, and this direct boundary.
+  // The runtime object is a plain lowered request with `tools` merged in.
   const raw = await executor(request as AgentExecutorTextRequest, info);
-  return {
-    output: await normalizeGeneratorResult(raw, id, {
-      request,
-      onChunk: info?.onChunk,
-    }),
-    raw,
-  };
-}
-
-/** Optional extras threaded into {@link normalizeGeneratorResult} so it can also unwrap raw AI SDK `generateText`/`streamText` results (which resolve `{ text }`/`{ textStream }` instead of `{ output }`). @internal */
-export interface NormalizeGeneratorResultInfo {
-  /** The lowered request — its `outputSchema` drives best-effort structured parsing of raw AI SDK text. */
-  request?: AgentTextRequest<any>;
-  /** Chunk sink for a raw `streamText` result's `textStream` (mirrors the `{ output }` path's `info.onChunk`). */
-  onChunk?: (chunk: string) => void;
-}
-
-// True for a value that looks like an AI SDK StreamTextResult: has a `textStream` async iterable.
-function hasTextStream(
-  value: object,
-): value is { textStream: AsyncIterable<string>; text?: unknown } {
-  return (
-    "textStream" in value &&
-    typeof (value as { textStream?: unknown }).textStream === "object" &&
-    !!(value as { textStream?: { [Symbol.asyncIterator]?: unknown } }).textStream?.[
-      Symbol.asyncIterator
-    ]
-  );
-}
-
-// Runs a raw AI SDK final text string through the request's outputSchema (best-effort), throwing a helpful error on parse failure.
-function parseRawAiSdkText(
-  text: string,
-  request: AgentTextRequest<any> | undefined,
-  id: string,
-): unknown {
-  if (!request?.outputSchema) {
-    return text;
-  }
-  let parsed: unknown = text;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    // Leave as the raw string; parseOutput will surface a schema error below.
-  }
-  try {
-    return parseOutput(request.outputSchema, parsed);
-  } catch (error) {
-    throw new Error(
-      `Executor for '${id}' returned a raw AI SDK result whose text could not be ` +
-        `parsed against the request's outputSchema. Structured-output requests through ` +
-        `raw AI SDK generateText/streamText functions are best-effort — for reliable ` +
-        `structured output, use createAiSdkExecutors from '@statelyai/agent/ai-sdk'. ` +
-        `Cause: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  return { output: await normalizeGeneratorResult(raw, id), raw };
 }
 
 /**
- * Unwraps an executor result into the request's final output. Accepts three
- * shapes:
- * - `{ output }` (the {@link AgentRequestExecutorResult} envelope) — awaits and
- *   returns `output` (the fast path; unchanged).
- * - a raw AI SDK `streamText` result (`{ textStream }` async iterable) — iterates
- *   `textStream`, forwarding each string chunk to `info.onChunk`, then resolves
- *   the final text from `await result.text` if present else the accumulated chunks.
- * - a raw AI SDK `generateText` result (`{ text }` string or promise) — awaits `text`.
- *
- * For the two raw AI SDK shapes, if `info.request?.outputSchema` is set the final
- * text is parsed through {@link parseOutput} (best-effort); a parse failure throws
- * an error recommending `createAiSdkExecutors` from '@statelyai/agent/ai-sdk'.
- *
- * A value matching none of these is a runtime error naming `id`. This is
+ * Unwraps an executor result into the request's final output: awaits and
+ * returns `output` from the `{ output }` {@link AgentRequestExecutorResult}
+ * envelope. Anything else is a runtime error naming `id`. This is
  * generator-result unwrapping only — decision results are extracted separately
  * by `resolveDecision`.
  *
@@ -1168,39 +985,12 @@ function parseRawAiSdkText(
 export async function normalizeGeneratorResult(
   result: unknown,
   id = "text request",
-  info?: NormalizeGeneratorResultInfo,
 ): Promise<unknown> {
   const resolved = await result;
-  if (!resolved || typeof resolved !== "object") {
+  if (!resolved || typeof resolved !== "object" || !("output" in resolved)) {
     throw invalidGeneratorResult(id);
   }
-
-  // Fast path: our `{ output }` envelope.
-  if ("output" in resolved) {
-    return await (resolved as { output: unknown }).output;
-  }
-
-  // Raw AI SDK streamText result: iterate textStream, forward chunks.
-  if (hasTextStream(resolved)) {
-    let accumulated = "";
-    for await (const chunk of resolved.textStream) {
-      accumulated += chunk;
-      info?.onChunk?.(chunk);
-    }
-    const finalText =
-      "text" in resolved && resolved.text !== undefined
-        ? await (resolved as { text: unknown }).text
-        : accumulated;
-    return parseRawAiSdkText(String(finalText), info?.request, id);
-  }
-
-  // Raw AI SDK generateText result: `text` string or promise.
-  if ("text" in resolved) {
-    const finalText = await (resolved as { text: unknown }).text;
-    return parseRawAiSdkText(String(finalText), info?.request, id);
-  }
-
-  throw invalidGeneratorResult(id);
+  return await (resolved as { output: unknown }).output;
 }
 
 function invalidGeneratorResult(id: string): Error {

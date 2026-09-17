@@ -150,7 +150,7 @@ export const tellJoke = createTextLogic({
 
 const result = await runAgent(machine, {
   input: { topic: "state machines" },
-  executors: { generateText, streamText },
+  executors: createAiSdkExecutors({ models }),
   onChunk: (chunk) => process.stdout.write(chunk),
 });
 ```

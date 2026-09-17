@@ -66,7 +66,7 @@ import {
   type AgentTools,
 } from "@statelyai/agent";
 import { triageMachine } from "../triage/index.js";
-import { twentyQuestionsMachine } from "../twenty-questions/index.js";
+import { idlePrompt, toPlayerEvent, twentyQuestionsMachine } from "../twenty-questions/index.js";
 
 // ─── Request → Anthropic param mapping (pure, unit-testable) ───
 
@@ -431,12 +431,24 @@ export async function runTwentyQuestionsDemo(client: Anthropic) {
     client,
     resolveModel: resolveDemoModel,
   });
-  const result = await runAgent(twentyQuestionsMachine, {
+  const executors = { generateText, decide };
+  const onTransition = (snapshot: SnapshotFrom<typeof twentyQuestionsMachine>) =>
+    console.log("[state]", JSON.stringify(snapshot.value));
+  let result = await runAgent(twentyQuestionsMachine, {
     input: { questionsRemaining: 20 },
-    executors: { generateText, decide },
-    userInput: async ({ prompt }) => promptAnswer(prompt ?? ">"),
-    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+    executors,
+    onTransition,
   });
+  // Every player turn settles the run idle; resume from the persisted snapshot.
+  while (result.status === "idle") {
+    const text = await promptAnswer(`${idlePrompt(result.snapshot)}\n> `);
+    result = await runAgent(twentyQuestionsMachine, {
+      snapshot: result.persist(),
+      event: toPlayerEvent(result.snapshot, text),
+      executors,
+      onTransition,
+    });
+  }
   if (result.status !== "done") {
     throw new Error(`Twenty questions demo did not complete: ${result.status}`);
   }

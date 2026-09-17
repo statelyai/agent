@@ -19,14 +19,13 @@ export {
   executeAgentRequest,
   getInteraction,
   getJsonSchema,
-  parseModelRef,
   resolveDecision,
   runAgentStream,
   type AgentOutputMode,
   type AgentInteraction,
   type StructuredOutputEnvelope,
 } from "@statelyai/agent";
-export { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+export { createAiSdkExecutors, parseModelRef } from "@statelyai/agent/ai-sdk";
 export { createToolLoopMachine, type CreateRouterMachineConfig } from "@statelyai/agent/machines";
 export {
   createOtelTraceHandler,

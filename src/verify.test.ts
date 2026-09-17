@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
+import { createAsyncLogic } from "xstate";
 import { createTextLogic, runAgent, setupAgent, type ChosenEvent } from "./index.js";
 import {
   AgentLintError,
@@ -733,14 +734,19 @@ describe("lintAgentMachine({ throw: true })", () => {
   });
 });
 
-// A machine whose only pending work is an `agent.userInput` invoke, for the
-// scripted `userInput` channel.
+// A machine whose only pending work is a plain (non-agent) invoke, for the
+// scripted `invokes` channel.
 function createFeedbackMachine() {
   const agent = setupAgent({
     context: z.object({ feedback: z.string().nullable() }),
     input: z.object({}),
     output: z.object({ feedback: z.string() }),
     events: {},
+    actors: {
+      askHuman: createAsyncLogic<string, { prompt: string }>({
+        run: async () => "unscripted",
+      }),
+    },
   });
   return agent.createMachine({
     id: "feedback",
@@ -750,7 +756,7 @@ function createFeedbackMachine() {
       asking: {
         invoke: {
           id: "ask",
-          src: "agent.userInput",
+          src: "askHuman",
           input: { prompt: "How was it?" },
           onDone: ({ output }) => ({ target: "done", context: { feedback: output } }),
         },
@@ -763,47 +769,13 @@ function createFeedbackMachine() {
   });
 }
 
-describe("scripted key taxonomy — userInput", () => {
-  test("simulateAgent resolves agent.userInput from the `userInput` queue", async () => {
+describe("scripted key taxonomy — invokes", () => {
+  test("simulateAgent resolves a plain invoke from the by-src `invokes` queue", async () => {
     const result = await simulateAgent(createFeedbackMachine(), {
       input: {},
-      script: { userInput: ["great"] },
-    });
-
-    expect(result.status).toBe("done");
-    expect(result.snapshot.context.feedback).toBe("great");
-    expect(result.trail).toContainEqual(
-      expect.objectContaining({
-        resolvedRequest: expect.objectContaining({ kind: "userInput", src: "agent.userInput" }),
-      }),
-    );
-  });
-
-  test("simulateAgent still accepts the by-src `invokes` form", async () => {
-    const result = await simulateAgent(createFeedbackMachine(), {
-      input: {},
-      script: { invokes: { "agent.userInput": ["fine"] } },
+      script: { invokes: { askHuman: ["fine"] } },
     });
     expect(result.snapshot.context.feedback).toBe("fine");
-  });
-
-  test("a dry userInput queue throws, naming the queue to add to", async () => {
-    await expect(simulateAgent(createFeedbackMachine(), { input: {}, script: {} })).rejects.toThrow(
-      /script ran dry on a pending userInput request.*`userInput` queue/s,
-    );
-  });
-
-  test("explorePaths resolves agent.userInput from `userInput`, and reports a missing one", async () => {
-    const explored = await explorePaths(createFeedbackMachine(), {
-      input: {},
-      userInput: "great",
-    });
-    expect(explored.terminals.map((terminal) => terminal.status)).toEqual(["done"]);
-
-    const blocked = await explorePaths(createFeedbackMachine(), { input: {} });
-    expect(blocked.terminals[0]).toEqual(
-      expect.objectContaining({ status: "needs-output", missingSrc: "agent.userInput" }),
-    );
   });
 
   test("explorePaths reads text requests from `text`", async () => {

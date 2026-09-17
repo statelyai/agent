@@ -41,14 +41,13 @@ import { openai } from "@ai-sdk/openai";
 import Ajv from "ajv";
 import {
   getStatePath,
-  parseModelRef,
   runAgent,
   setupAgent,
   type AgentWorkflowConfig,
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "@statelyai/agent";
-import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors, parseModelRef } from "@statelyai/agent/ai-sdk";
 
 // The Ajv-to-StandardSchema recipe: compile the JSON Schema with Ajv, then
 // wrap the compiled validator as a `StandardSchemaV1`, mapping Ajv's

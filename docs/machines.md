@@ -110,7 +110,7 @@ type RequestName = RequestNamesOf<typeof agentSetup>;
 
 Beyond schemas, `setupAgent` takes your models plus optional `requests`, `actors`, `actions`, `guards`, `states`, and `delays`. `states` narrows context per state. See [Per-state context narrowing](#per-state-context-narrowing). `delays` names the durations that [delayed transitions](#delayed-transitions) reference. It returns a **setup** whose `createMachine` method builds the machine. Like XState's `setup()`, the return value is a typed foundation, not a running agent. Name it accordingly, for example `agentSetup` or `gameSetup`.
 
-The builtins `agent.generateText`, `agent.streamText`, `agent.decide`, and `agent.userInput` are registered automatically. Invoke them by name.
+The builtins `agent.generateText`, `agent.streamText`, and `agent.decide` are registered automatically. Invoke them by name.
 
 ### Models
 
@@ -211,7 +211,8 @@ const agentSetup = setupAgent({
 | `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | text, or the value parsed from `outputSchema`          | [Text requests](text-requests.md)         |
 | `agent.streamText`   | same as `agent.generateText`                                                | same, with chunks delivered to the host as they arrive | [Text requests](text-requests.md)         |
 | `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`                       | the one chosen event, applied to the machine           | [Decisions](decisions.md)                 |
-| `agent.userInput`    | `prompt`, optional `schema`                                                 | the human's value                                      | [Human in the loop](human-in-the-loop.md) |
+
+A human's turn is not a builtin: it is an idle state with accepted events. See [Human in the loop](human-in-the-loop.md).
 
 Named `requests` are the default form because they are typed, reusable, and testable. The builtins are the inline alternative. The host executes both, so neither form names a model SDK in the machine.
 
@@ -357,7 +358,7 @@ In a JSON [machine config](machines-as-data.md), `choice` is an array of branche
 
 ## Request and actor invokes
 
-A state invokes an actor by `src`. The `src` is a request key, a registered actor, or a builtin such as `agent.decide` or `agent.userInput`. The state passes typed `input` and handles `onDone` and `onError`.
+A state invokes an actor by `src`. The `src` is a request key, a registered actor, or a builtin such as `agent.decide`. The state passes typed `input` and handles `onDone` and `onError`.
 
 ```ts no-check
 // inside states: { ... }
@@ -400,7 +401,7 @@ generating: {
 },
 
 // ...
-await runAgent(machine, { input, executors: { generateText, streamText } });
+await runAgent(machine, { input, executors: createAiSdkExecutors({ models }) });
 ```
 
 Give an invoke an explicit `id` when the host needs a stable occurrence identity. XState owns invoke identity and snapshot restoration.

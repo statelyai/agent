@@ -205,7 +205,6 @@ export function getAgentRequests(
             events: options.events,
             schemas: options.schemas,
             eventTypes: allowedEventTypes,
-            eventToolName: options.eventToolName,
           })
         : [];
 

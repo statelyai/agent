@@ -712,42 +712,6 @@ describe("runAgent", () => {
       ).rejects.toThrow(/chooseMove/);
     });
 
-    test("a machine invoking agent.userInput with no userInput option settles idle with pendingUserInputs (blessed placeholder, not a bind error)", async () => {
-      const schemas = createAgentSchemas({
-        context: z.object({ feedback: z.string().nullable() }),
-        input: z.object({}),
-        output: z.object({}),
-      });
-      const agent = setupAgent({ schemas });
-      const machine = agent.createMachine({
-        context: { feedback: null },
-        initial: "asking",
-        states: {
-          asking: {
-            invoke: {
-              id: "ask",
-              src: "agent.userInput",
-              input: { prompt: "How was it?" },
-              onDone: { target: "done" },
-            },
-          },
-          done: { type: "final" },
-        },
-      });
-
-      const result = await runAgent(machine, {
-        input: {},
-        executors: {
-          generateText: async () => ({ output: {} }),
-        },
-      });
-
-      expect(result.status).toBe("idle");
-      if (result.status !== "idle") throw new Error("expected idle");
-      expect(result.pendingUserInputs).toEqual([{ id: "ask", input: { prompt: "How was it?" } }]);
-      expect(result.persist()).toBeDefined();
-    });
-
     test("a machine invoking an unregistered string src throws naming the source", async () => {
       const machine = setup({}).createMachine({
         id: "unregistered",
@@ -1187,52 +1151,6 @@ describe("runAgent", () => {
     expect(seenEventTypes).toContain("GO");
   });
 
-  test("userInput: the userInput option resolves agent.userInput and the machine consumes it", async () => {
-    const schemas = createAgentSchemas({
-      context: z.object({ feedback: z.string().nullable() }),
-      input: z.object({}),
-      output: z.object({ feedback: z.string() }),
-    });
-    const agent = setupAgent({ schemas });
-    const machine = agent.createMachine({
-      context: { feedback: null },
-      initial: "asking",
-      states: {
-        asking: {
-          invoke: {
-            id: "ask",
-            src: "agent.userInput",
-            input: { prompt: "How was it?" },
-            onDone: ({ output }) => ({
-              target: "done",
-              context: { feedback: output },
-            }),
-          },
-        },
-        done: {
-          type: "final",
-          output: ({ context }) => ({ feedback: context.feedback ?? "" }),
-        },
-      },
-    });
-
-    const result = await runAgent(machine, {
-      input: {},
-      userInput: async (input) => {
-        expect(input).toEqual(expect.objectContaining({ prompt: "How was it?" }));
-        return "great";
-      },
-      executors: {
-        generateText: async () => ({ output: {} }),
-      },
-    });
-
-    expect(result.status).toBe("done");
-    expect(result.status === "done" ? result.output : undefined).toEqual({
-      feedback: "great",
-    });
-  });
-
   describe('omitted allowedEvents: "all currently-legal events"', () => {
     const attackSchema = z.object({ target: z.string() });
     const healSchema = z.object({});
@@ -1603,143 +1521,6 @@ describe("runAgent", () => {
     // The child transitioned to its own `done` off the delivered ATTACK and
     // produced that output — proof the event reached the child, not the root.
     expect(result.output.childMove).toBe("ATTACK");
-  });
-});
-
-describe("agent.userInput as a pending placeholder (durable parallel HITL)", () => {
-  const schemas = createAgentSchemas({
-    context: z.object({
-      summary: z.string().nullable(),
-      feedback: z.string().nullable(),
-    }),
-    input: z.object({}),
-    output: z.object({ summary: z.string(), feedback: z.string() }),
-  });
-
-  const agent = setupAgent({
-    schemas,
-    requests: {
-      summarize: {
-        schemas: { input: z.object({}), output: z.string() },
-        model: "m",
-        prompt: () => "summarize",
-      },
-    },
-  });
-
-  const machine = agent.createMachine({
-    context: { summary: null, feedback: null },
-    type: "parallel",
-    output: ({ context }) => ({
-      summary: context.summary ?? "",
-      feedback: context.feedback ?? "",
-    }),
-    states: {
-      working: {
-        initial: "summarizing",
-        states: {
-          summarizing: {
-            invoke: {
-              id: "sum",
-              src: "summarize",
-              input: {},
-              onDone: ({ output }) => ({
-                target: "summarized",
-                context: { summary: output },
-              }),
-            },
-          },
-          summarized: { type: "final" },
-        },
-      },
-      reviewing: {
-        initial: "asking",
-        states: {
-          asking: {
-            invoke: {
-              id: "askHuman",
-              src: "agent.userInput",
-              input: { prompt: "Feedback?" },
-              onDone: ({ output }) => ({
-                target: "received",
-                context: { feedback: output },
-              }),
-            },
-          },
-          received: { type: "final" },
-        },
-      },
-    },
-  });
-
-  test("a sibling region finishes its model call, then the run settles idle with the pending user input", async () => {
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ output: "a summary" }),
-      },
-    });
-
-    expect(result.status).toBe("idle");
-    if (result.status !== "idle") throw new Error("expected idle");
-    // The sibling region's work ran to completion before settling.
-    expect((result.snapshot.context as { summary: string | null }).summary).toBe("a summary");
-    expect(result.pendingUserInputs).toEqual([{ id: "askHuman", input: { prompt: "Feedback?" } }]);
-    expect(result.persist()).toBeDefined();
-  });
-
-  test("the persisted snapshot JSON round-trips and resumes with a userInput handler to done", async () => {
-    const first = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ output: "a summary" }),
-      },
-    });
-    if (first.status !== "idle" || !first.persist()) {
-      throw new Error("expected idle with persistedSnapshot");
-    }
-
-    const stored = JSON.parse(JSON.stringify(first.persist()));
-
-    const second = await runAgent(machine, {
-      snapshot: stored,
-      userInput: async (input) => {
-        expect(input).toEqual({ prompt: "Feedback?" });
-        return "ship it";
-      },
-      executors: {
-        generateText: async () => {
-          throw new Error("no model call expected on resume");
-        },
-      },
-    });
-
-    expect(second.status).toBe("done");
-    if (second.status !== "done") throw new Error("expected done");
-    expect(second.output).toEqual({ summary: "a summary", feedback: "ship it" });
-  });
-
-  test("resuming without a handler settles idle again with the same pending input", async () => {
-    const first = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ output: "a summary" }),
-      },
-    });
-    if (first.status !== "idle" || !first.persist()) {
-      throw new Error("expected idle with persistedSnapshot");
-    }
-
-    const again = await runAgent(machine, {
-      snapshot: JSON.parse(JSON.stringify(first.persist())),
-      executors: {
-        generateText: async () => ({ output: "unused" }),
-      },
-    });
-
-    expect(again.status).toBe("idle");
-    if (again.status !== "idle") throw new Error("expected idle");
-    expect(again.pendingUserInputs).toEqual([{ id: "askHuman", input: { prompt: "Feedback?" } }]);
   });
 });
 
@@ -2244,31 +2025,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
 
     const result = await runAgent(machine, { executors: {} });
     expect(result.status).toBe("idle");
-  });
-
-  test("an unreachable userInput placeholder does not override a custom idle predicate", async () => {
-    const controller = new AbortController();
-    const agent = setupAgent({
-      context: z.object({}),
-      isIdle: () => false,
-    });
-    const machine = agent.createMachine({
-      context: {},
-      initial: "waiting",
-      states: {
-        waiting: {},
-        unreachablePrompt: {
-          invoke: { src: "agent.userInput", input: { prompt: "Never reached" } },
-        },
-      },
-    });
-    setTimeout(() => controller.abort("test complete"), 5);
-
-    const result = await runAgent(machine, {
-      signal: controller.signal,
-      executors: {},
-    });
-    expect(result).toMatchObject({ status: "error", cause: "aborted" });
   });
 
   test("a machine-carried isIdle predicate settles idle and resumes to done", async () => {

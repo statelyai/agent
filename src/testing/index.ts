@@ -55,5 +55,4 @@ export type {
   ScriptedExecutors,
   ScriptedExecutorsScript,
   ScriptedTextEntry,
-  ScriptedUserInputEntry,
 } from "../scripted-executors.js";

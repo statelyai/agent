@@ -24,9 +24,7 @@ import type {
 import {
   builtinTextActors,
   createTextLogic,
-  userInputActor,
   DECIDE_ACTOR,
-  USER_INPUT_ACTOR,
   type AgentModelMap,
   type AgentModelRef,
   type BuiltinAgentActors,
@@ -683,7 +681,7 @@ type SetupAgentResult<
  * executors. Context, events, machine input, machine output, and
  * state/transition meta are all standard schemas — no `{} as Type` casts —
  * and are retained on `result.schemas` for runtime validation. Also
- * registers the `agent.generateText`/`agent.streamText`/`agent.userInput`/
+ * registers the `agent.generateText`/`agent.streamText`/
  * `agent.decide` builtin actors and lowers `requests`/`actors` into the
  * machine's actor sources. The result is the xstate `setup(...)` object with
  * a wrapped `result.createMachine(...)` plus `result.schemas`/`models`/
@@ -1075,7 +1073,6 @@ function assertStateSchemaKeysExist(
 // `requests` entry cannot silently clobber a builtin via spread order.
 const RESERVED_AGENT_ACTOR_KEYS = [
   ...(Object.keys(builtinTextActors) as (keyof typeof builtinTextActors)[]),
-  USER_INPUT_ACTOR,
   DECIDE_ACTOR,
 ] satisfies readonly (keyof BuiltinAgentActors)[];
 
@@ -1159,7 +1156,6 @@ export function createAgentActors<
 
   return {
     ...builtinTextActors,
-    [USER_INPUT_ACTOR]: userInputActor,
     [DECIDE_ACTOR]: createDecideActor(),
     ...actors,
     ...requestActors,

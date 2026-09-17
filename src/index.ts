@@ -61,7 +61,6 @@ export type {
   // Named return type of `getAgentSchemas`, so declaration emit can name it.
   AgentSchemas,
   AgentEventDescriptor,
-  AgentEventToolNameResolver,
   AgentRequestSource,
 } from "./events.js";
 export {
@@ -71,7 +70,6 @@ export {
   getAgentOutputMode,
   getCallFinishReason,
   getCallUsage,
-  parseModelRef,
   parseOutput,
   parseStructuredEnvelope,
 } from "./text-logic.js";
@@ -82,15 +80,12 @@ export type {
   StructuredOutputEnvelope,
   AgentExecutorTextRequest,
   AgentTextRequest,
-  AiSdkShapedStreamResult,
-  AiSdkShapedTextResult,
   AgentRequestExecutor,
   AgentRequestExecutorInfo,
   AgentRequestExecutorResult,
   AgentRequestExecutors,
   AgentUsage,
   AgentCallUsage,
-  AgentUserInput,
   TextLogic,
   TextLogicConfig,
   TextLogicExecuteArgs,
@@ -130,10 +125,8 @@ export type {
   AgentRunMeta,
   AgentTransitionHandler,
   AgentTraceEvent,
-  AgentUserInputExecutor,
   InspectedActorRef,
   JsonSerializableTraceEvent,
-  PendingUserInput,
   RunAgentOptions,
   RunAgentResult,
   RunAgentErrorCause,
@@ -149,7 +142,6 @@ export type {
   ScriptedExecutors,
   ScriptedExecutorsScript,
   ScriptedTextEntry,
-  ScriptedUserInputEntry,
 } from "./scripted-executors.js";
 export {
   assistantMessage,

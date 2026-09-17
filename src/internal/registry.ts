@@ -6,15 +6,6 @@ import {
   type AsyncActorLogic,
 } from "xstate";
 import type { AgentRequestOptions } from "../events.js";
-import type { AgentRequestExecutors } from "../text-logic.js";
-
-/** Non-enumerable hook an optional adapter can attach to a model registry. */
-export const DEFAULT_AGENT_EXECUTORS = Symbol.for("@statelyai/agent.defaultExecutors");
-
-export type DefaultExecutorsRegistry = {
-  [DEFAULT_AGENT_EXECUTORS]?: () => AgentRequestExecutors;
-};
-
 export type AgentExecutionOptions = Pick<AgentRequestOptions, "schemas" | "actors"> & {
   models?: object;
 };
@@ -79,8 +70,7 @@ export function getMachineIdlePredicate(
 }
 
 // Actor logic objects that are unbound placeholders (no host execution) and
-// carry no `kind` marker of their own — `agent.userInput` and workflow-config
-// actor stubs. runAgent's bind-time walk (§3.2) checks membership here to
+// carry no `kind` marker of their own — workflow-config actor stubs. runAgent's bind-time walk (§3.2) checks membership here to
 // fail fast on invokes that reach one of these unimplemented.
 export const unboundPlaceholderLogics = new WeakSet<object>();
 /** Text/decision logics created WITH their own executor (withExecutor or the

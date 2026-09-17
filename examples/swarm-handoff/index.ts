@@ -230,7 +230,7 @@ export function roundTrip<T>(snapshot: T): T {
 export async function runSwarmHandoffExample(
   options: RunAgentOptions<typeof swarmHandoffMachine> = {},
 ) {
-  // Spread-merge, so passing only `onTransition` keeps the default executors.
+  // Spread-merge, so a caller passing only `onTransition` keeps the live executors.
   const resolved: RunAgentOptions<typeof swarmHandoffMachine> = {
     executors: createAiSdkExecutors({ models }),
     ...options,

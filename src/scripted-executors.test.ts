@@ -486,61 +486,6 @@ describe("createScriptedExecutors", () => {
   });
 });
 
-describe("createScriptedExecutors — userInput", () => {
-  const feedbackSetup = setupAgent({
-    context: z.object({ feedback: z.string().nullable() }),
-    input: z.object({}),
-    output: z.object({ feedback: z.string() }),
-    events: {},
-  });
-
-  const feedbackMachine = feedbackSetup.createMachine({
-    context: () => ({ feedback: null }),
-    output: ({ context }) => ({ feedback: context.feedback ?? "" }),
-    initial: "asking",
-    states: {
-      asking: {
-        invoke: {
-          id: "ask",
-          src: "agent.userInput",
-          input: { prompt: "How was it?" },
-          onDone: ({ output }) => ({ target: "done", context: { feedback: output } }),
-        },
-      },
-      done: { type: "final" },
-    },
-  });
-
-  test("plays the userInput queue back to runAgent's userInput handler", async () => {
-    const scripted = createScriptedExecutors({ userInput: ["great"] });
-    const result = await runAgent(feedbackMachine, {
-      input: {},
-      executors: scripted,
-      userInput: scripted.userInput,
-    });
-
-    expect(result.status).toBe("done");
-    if (result.status !== "done") return;
-    expect(result.output.feedback).toBe("great");
-  });
-
-  test("entries may be functions of the request", async () => {
-    const scripted = createScriptedExecutors({
-      userInput: [({ prompt }) => `answering: ${prompt}`],
-    });
-    await expect(scripted.userInput({ prompt: "How was it?" })).resolves.toBe(
-      "answering: How was it?",
-    );
-  });
-
-  test("an empty userInput script throws, naming the array to add to", async () => {
-    const scripted = createScriptedExecutors();
-    await expect(scripted.userInput({ prompt: "How was it?" })).rejects.toThrow(
-      /No scripted answer for request 'agent.userInput'[\s\S]*`userInput` array/,
-    );
-  });
-});
-
 describe("name-keyed scripts", () => {
   const request = {
     kind: "text" as const,

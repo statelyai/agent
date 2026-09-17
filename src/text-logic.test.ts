@@ -10,7 +10,7 @@ import {
   type AgentTextRequest,
   type AgentTools,
 } from "./index.js";
-import { bindRequestExecutor, parseModelRef, parseStructuredEnvelope } from "./index.js";
+import { bindRequestExecutor, parseStructuredEnvelope } from "./index.js";
 import { type AgentRequest } from "./index.js";
 import {
   buildEnvelopeSchema,
@@ -429,24 +429,6 @@ describe("buildEnvelopeSchema", () => {
     // A non-string reasoning is dropped, not surfaced.
     const noReasoning = envelope["~standard"].validate({ reasoning: 42, result: { ok: true } });
     expect(noReasoning).toEqual({ value: { result: { ok: true } } });
-  });
-});
-
-describe("parseModelRef", () => {
-  test("splits provider/model-id refs on the first slash", () => {
-    expect(parseModelRef("openai/gpt-5.4-mini")).toEqual({
-      provider: "openai",
-      modelId: "gpt-5.4-mini",
-    });
-    // Only the FIRST slash splits — model ids may contain slashes.
-    expect(parseModelRef("openrouter/meta/llama-3")).toEqual({
-      provider: "openrouter",
-      modelId: "meta/llama-3",
-    });
-  });
-
-  test("a ref without a slash has no provider", () => {
-    expect(parseModelRef("quick")).toEqual({ provider: undefined, modelId: "quick" });
   });
 });
 

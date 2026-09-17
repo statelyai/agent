@@ -128,6 +128,10 @@ describe("joke-teller", () => {
         generateText: async () => {
           throw new Error("rater offline");
         },
+        // Bound because the machine declares a decision state; never reached here.
+        decide: async () => {
+          throw new Error("unreachable");
+        },
       },
     });
 

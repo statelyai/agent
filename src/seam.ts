@@ -204,14 +204,7 @@ async function seamOutputOf(result: ExecutorReturn, request: AgentTextRequest): 
   if ("output" in result) {
     return await result["output"];
   }
-  if ("textStream" in result) {
-    return undefined;
-  }
-  // Raw AI SDK generate result: the same unwrap (and structured-output parse)
-  // the machine itself will perform.
-  return await normalizeGeneratorResult(result, `seam '${request.name ?? request.model}'`, {
-    request,
-  });
+  return await normalizeGeneratorResult(result, `seam '${request.name ?? request.model}'`);
 }
 
 /**

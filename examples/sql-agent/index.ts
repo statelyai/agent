@@ -267,7 +267,7 @@ export async function runSqlAgentExample(
   } = {},
 ) {
   const { approval = "APPROVE", ...runOptions } = options;
-  // Spread-merge, so passing only `onTransition` keeps the default executors.
+  // Spread-merge, so a caller passing only `onTransition` keeps the live executors.
   const resolved: RunAgentOptions<typeof sqlAgentMachine> = {
     executors: createAiSdkExecutors({ models }),
     ...runOptions,

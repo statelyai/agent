@@ -1771,37 +1771,15 @@ describe("setupAgent", () => {
       expect.objectContaining({ type: "DEFEND", toolName: "send_event_DEFEND" }),
     ]);
 
-    expect(
-      getAcceptedEvents(snapshot, {
-        schemas: agent.schemas,
-        eventTypes: ["ATTACK"],
-        eventToolName: ({ eventType }) => `machine_${eventType.toLowerCase()}`,
-      }),
-    ).toEqual([expect.objectContaining({ type: "ATTACK", toolName: "machine_attack" })]);
-
     const request = getAgentRequests(actions, { machine, snapshot })[0];
     if (request?.kind !== "decision") {
       throw new Error("Expected a decision request.");
     }
-    const customNamedRequest = getAgentRequests(actions, {
-      machine,
-      snapshot,
-      eventToolName: ({ eventType }: { eventType: string }) => `machine_${eventType.toLowerCase()}`,
-    })[0];
-    if (customNamedRequest?.kind !== "decision") {
-      throw new Error("Expected a decision request.");
-    }
-
     expect(request.events.map((event) => event.type)).toEqual(["ATTACK", "DEFEND"]);
     expect(request.events.map((event) => event.toolName)).toEqual([
       "send_event_ATTACK",
       "send_event_DEFEND",
     ]);
-    expect(customNamedRequest.events.map((event) => event.toolName)).toEqual([
-      "machine_attack",
-      "machine_defend",
-    ]);
-
     const chosenEvent = await resolveDecision(request, {
       decide: async () => ({ event: { type: "ATTACK", target: "orc" } }),
     });
@@ -2401,129 +2379,6 @@ describe("setupAgent", () => {
         { compileSchema: ajvCompiler() },
       ),
     ).toThrow(/state 'choosing'.*onDone.*agent\.decide/s);
-  });
-
-  test("agent.userInput is a blessed host-provided actor for static workflows", async () => {
-    const machine = setupAgent
-      .fromConfig(
-        {
-          id: "static-user-input",
-          schemas: {
-            input: {
-              type: "object",
-              properties: {},
-            },
-            context: {
-              type: "object",
-              properties: {
-                recipient: { type: "string" },
-                draft: { type: "string" },
-              },
-            },
-            output: {
-              type: "object",
-              properties: {
-                draft: { type: "string" },
-              },
-              required: ["draft"],
-            },
-          },
-          context: {},
-          requests: {
-            draftEmail: {
-              model: "writer",
-              prompt: "Draft email to {{ input.recipient }}",
-              input: {
-                type: "object",
-                properties: {
-                  recipient: { type: "string" },
-                },
-                required: ["recipient"],
-              },
-              output: {
-                type: "object",
-                properties: {
-                  draft: { type: "string" },
-                },
-                required: ["draft"],
-              },
-            },
-          },
-          initial: "askRecipient",
-          states: {
-            askRecipient: {
-              invoke: {
-                id: "recipient",
-                src: "agent.userInput",
-                input: {
-                  prompt: "Who should receive this email?",
-                  schema: {
-                    type: "object",
-                    properties: {
-                      recipient: { type: "string" },
-                    },
-                    required: ["recipient"],
-                  },
-                },
-                onDone: {
-                  target: "draftEmail",
-                  assign: {
-                    recipient: "{{ event.output.recipient }}",
-                  },
-                },
-              },
-            },
-            draftEmail: {
-              invoke: {
-                id: "draft",
-                src: "draftEmail",
-                input: {
-                  recipient: "{{ context.recipient }}",
-                },
-                onDone: {
-                  target: "done",
-                  assign: {
-                    draft: "{{ event.output.draft }}",
-                  },
-                },
-              },
-            },
-            done: {
-              type: "final",
-              output: {
-                draft: "{{ context.draft }}",
-              },
-            },
-          },
-        },
-        { compileSchema: ajvCompiler() },
-      )
-      .machine.provide({
-        actors: {
-          "agent.userInput": createAsyncLogic({
-            run: async ({ input }) => {
-              expect(input).toEqual(
-                expect.objectContaining({
-                  prompt: "Who should receive this email?",
-                  schema: expect.objectContaining({ type: "object" }),
-                }),
-              );
-              return { recipient: "Ada" };
-            },
-          }),
-          draftEmail: createAsyncLogic({
-            run: async ({ input }) => {
-              expect(input).toEqual({ recipient: "Ada" });
-              return { draft: "Hello Ada." };
-            },
-          }),
-        },
-      });
-
-    const actor = createActor(machine, { input: {} }).start();
-    await waitFor(actor, (snapshot) => snapshot.status === "done");
-
-    expect(actor.getSnapshot().output).toEqual({ draft: "Hello Ada." });
   });
 
   test("fromConfig lowers transition-level `actions` (emit fires; entry emit still works)", async () => {

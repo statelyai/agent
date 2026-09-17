@@ -22,7 +22,6 @@ import {
 import { AgentTruncatedError } from "../errors.js";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
-import { DEFAULT_AGENT_EXECUTORS } from "../internal/registry.js";
 import {
   defined,
   extractFirstJsonValue,
@@ -56,6 +55,27 @@ export type AiSdkModelEntry =
   | LanguageModel
   | { model: LanguageModel; settings?: AiSdkCallSettings };
 
+/**
+ * Splits a portable `"provider/model-id"` model ref (the convention JSON
+ * workflows and registry-less hosts use, e.g. `"openai/gpt-5.4-mini"`) into
+ * its parts. A ref with no `/` has no provider — `modelId` is the whole ref.
+ * The standard building block for a host's `resolveModel`:
+ *
+ * @example
+ * ```ts
+ * const resolveModel = (ref: string) => openai(parseModelRef(ref).modelId);
+ * ```
+ */
+export function parseModelRef(modelRef: string): {
+  provider: string | undefined;
+  modelId: string;
+} {
+  const slash = modelRef.indexOf("/");
+  return slash === -1
+    ? { provider: undefined, modelId: modelRef }
+    : { provider: modelRef.slice(0, slash), modelId: modelRef.slice(slash + 1) };
+}
+
 /** AI SDK model registry: maps model refs (as used in `setupAgent({ models })`/`AgentTextRequest.model`) to AI SDK `LanguageModel` values, or to `{ model, settings }` pairs. The optional `TKey` parameter pins the ref keys (see {@link defineModels}); it defaults to `string`, so bare `AiSdkModelMap` stays `Record<string, AiSdkModelEntry>`. */
 export type AiSdkModelMap<TKey extends string = string> = Record<TKey, AiSdkModelEntry>;
 
@@ -66,7 +86,8 @@ export type AiSdkModelMap<TKey extends string = string> = Record<TKey, AiSdkMode
  * needs no `Record<'a' | 'b', LanguageModel>` annotation and never triggers
  * TS2742 ("inferred type cannot be named without a reference to …"). The exact
  * ref keys survive, so `createAiSdkExecutors({ models })` and
- * `setupAgent({ models })` still infer/autocomplete them.
+ * `setupAgent({ models })` still infer/autocomplete them. It is only a typing
+ * helper: executors are always passed explicitly.
  *
  * @example
  * ```ts
@@ -80,12 +101,7 @@ export type AiSdkModelMap<TKey extends string = string> = Record<TKey, AiSdkMode
 export function defineModels<T extends Record<string, AiSdkModelEntry>>(
   models: T,
 ): AiSdkModelMap<keyof T & string> {
-  const registry = { ...models } as AiSdkModelMap<keyof T & string>;
-  Object.defineProperty(registry, DEFAULT_AGENT_EXECUTORS, {
-    enumerable: false,
-    value: () => createAiSdkExecutors({ models: registry }),
-  });
-  return registry;
+  return models as AiSdkModelMap<keyof T & string>;
 }
 
 /**

@@ -2,7 +2,7 @@
  * Scripted executors — a deterministic stand-in for a model host.
  *
  * `createScriptedExecutors` builds a full `{ generateText, streamText, decide }`
- * set (plus a `userInput` handler) that plays back canned answers keyed by
+ * set that plays back canned answers keyed by
  * request name, so `runAgent` (or `provideExecutors`, or a bare
  * `TextLogic.execute`) runs with no API key and no network.
  *
@@ -18,7 +18,6 @@ import type {
   AgentRequestExecutorInfo,
   AgentRequestExecutors,
   AgentTextRequest,
-  AgentUserInput,
 } from "./text-logic.js";
 import type { ChosenEvent } from "./types.js";
 
@@ -84,20 +83,11 @@ export type ScriptedStreamEntry =
 
 /** A call observed by {@link createScriptedExecutors}. */
 export interface ScriptedExecutorCall {
-  kind: "generateText" | "streamText" | "decide" | "userInput";
+  kind: "generateText" | "streamText" | "decide";
   name: string;
   input: unknown;
-  request: AgentTextRequest | AgentDecisionRequest | AgentUserInput;
+  request: AgentTextRequest | AgentDecisionRequest;
 }
-
-/**
- * One scripted human answer: the string the simulated human typed, or a
- * function of the {@link AgentUserInput} request (its `prompt`/`metadata`)
- * returning one.
- */
-export type ScriptedUserInputEntry =
-  | string
-  | ((input: AgentUserInput) => string | PromiseLike<string>);
 
 /**
  * The script {@link createScriptedExecutors} plays back. Every channel is
@@ -111,19 +101,12 @@ export interface ScriptedExecutorsScript {
   text?: ScriptedByName<ScriptedTextEntry>;
   /** Stream chunks keyed by request name. */
   stream?: Record<string, ScriptedStreamEntry>;
-  /** Answers for `agent.userInput` requests, consumed in order. */
-  userInput?: ScriptedUserInputEntry[];
   /** Default usage attached when an entry does not provide its own. */
   usage?: AgentCallUsage;
 }
 
-/**
- * What {@link createScriptedExecutors} returns: the full executor set, plus a
- * `userInput` handler for `runAgent`'s own `userInput` option (the builtin
- * `agent.userInput` actor is not an executor slot).
- */
+/** What {@link createScriptedExecutors} returns: the full executor set plus the calls it observed. */
 export type ScriptedExecutors = Required<AgentRequestExecutors> & {
-  userInput: (input: AgentUserInput) => Promise<string>;
   calls: ScriptedExecutorCall[];
 };
 
@@ -248,18 +231,10 @@ export function emitScriptedChunk(result: unknown, info?: AgentRequestExecutorIn
  *   decisions: { route: (request) => ({ type: request.events[0]!.type }) },
  * });
  * ```
- *
- * @example Scripted human input
- * ```ts
- * const scripted = createScriptedExecutors({ userInput: ['ship it'] });
- * await runAgent(machine, { executors: scripted, userInput: scripted.userInput });
- * ```
  */
 export function createScriptedExecutors(script: ScriptedExecutorsScript = {}): ScriptedExecutors {
   const decisions = toQueues(script.decisions);
   const text = toQueues(script.text);
-  const userInput = [...(script.userInput ?? [])];
-  let userInputIndex = 0;
   const calls: ScriptedExecutorCall[] = [];
 
   const withDefaultUsage = <T extends object>(result: T): T & { usage?: AgentCallUsage } =>
@@ -283,17 +258,6 @@ export function createScriptedExecutors(script: ScriptedExecutorsScript = {}): S
 
   return {
     calls,
-    userInput: async (input) => {
-      calls.push({ kind: "userInput", name: "agent.userInput", input, request: input });
-      if (userInput.length === 0) {
-        throw new Error(
-          "No scripted answer for request 'agent.userInput'. " +
-            "Add an entry to the script's `userInput` array.",
-        );
-      }
-      const entry = userInput[Math.min(userInputIndex++, userInput.length - 1)]!;
-      return typeof entry === "function" ? await entry(input) : entry;
-    },
     generateText: (request, info) => nextText("generateText", request, info),
     streamText: async (request, info) => {
       const name = request.name ?? "*";

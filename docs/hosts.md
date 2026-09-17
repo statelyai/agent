@@ -50,18 +50,18 @@ const executors = {
 
 See [The event log](event-log.md).
 
-## Optional AI SDK default
+## AI SDK adapter
 
 ```ts no-check
-import { defineModels } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors, defineModels } from "@statelyai/agent/ai-sdk";
 
 const models = defineModels({ fast: openai("gpt-5.4-mini") });
 const agent = setupAgent({ models /* schemas and requests */ });
 
-await runAgent(machine, { input });
+await runAgent(machine, { input, executors: createAiSdkExecutors({ models }) });
 ```
 
-A registry created by `defineModels` carries an optional AI SDK executor factory. Explicit executors merge over those defaults. Core does not import or require the AI SDK at runtime.
+`defineModels` only types the registry, so `setupAgent({ models })` autocompletes model refs. Executors are always passed explicitly. Core does not import or require the AI SDK at runtime.
 
 ## OpenAI SDK adapter
 

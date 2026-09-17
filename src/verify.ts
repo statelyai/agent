@@ -36,7 +36,6 @@ import {
 // Well-known builtin invoke srcs (kept local to avoid widening the public
 // surface of text-logic/decision internals).
 const DECIDE_SRC = "agent.decide";
-const USER_INPUT_SRC = "agent.userInput";
 
 // ─── Diagnostics ───
 
@@ -461,9 +460,6 @@ export function assertAgentMachine(
  *   keyed by the invoke's `id` instead.
  * - `invokes` — output values for scripted invokes (any actor whose output must
  *   be canned), keyed by src.
- * - `userInput` — a flat FIFO queue of answers for `agent.userInput`, the
- *   shorthand for `invokes: { 'agent.userInput': [...] }`. Entries here are
- *   consumed before that src's `invokes` queue.
  * - `errors` — failure values to reject a request or invoke with instead of
  *   resolving it, keyed by the same srcs the other channels use. An entry here
  *   is consumed BEFORE that src's output queue, so a script can fail the first
@@ -482,7 +478,6 @@ export interface SimulationScript {
   text?: Record<string, unknown[]>;
   decisions?: Record<string, ChosenEvent[]>;
   invokes?: Record<string, unknown[]>;
-  userInput?: unknown[];
   errors?: Record<string, unknown[]>;
   events?: ChosenEvent[];
 }
@@ -516,7 +511,7 @@ export interface SimulationTrailEntry {
    * in which case `error` carries the scripted failure value.
    */
   resolvedRequest?: {
-    kind: "text" | "userInput" | "decision";
+    kind: "text" | "invoke" | "decision";
     src: string;
     id: string;
     outcome: "output" | "error";
@@ -540,8 +535,8 @@ export interface SimulateAgentResult {
   trail: SimulationTrailEntry[];
 }
 
-// A pending non-decision invoke read off the snapshot's live children (used
-// for `agent.userInput` and any other actor whose output must be scripted).
+// A pending non-decision invoke read off the snapshot's live children (any
+// actor whose output must be scripted).
 // Ordered by invoke id, like `step.requests`.
 interface PendingInvoke {
   id: string;
@@ -620,15 +615,6 @@ export async function simulateAgent(
     errors: mapValues(options.script.errors ?? {}, (arr) => [...arr]),
     events: [...(options.script.events ?? [])],
   };
-  if (options.script.userInput?.length) {
-    // `userInput` is the shorthand queue for the `agent.userInput` src, and is
-    // consumed before that src's own `invokes` entries.
-    script.invokes![USER_INPUT_SRC] = [
-      ...options.script.userInput,
-      ...(script.invokes![USER_INPUT_SRC] ?? []),
-    ];
-  }
-
   let step = initialAgentStep(machine, options.input);
   // The trail starts with the initial state, so it is a complete state path.
   const trail: SimulationTrailEntry[] = [{ state: step.snapshot.value }];
@@ -705,13 +691,13 @@ export async function simulateAgent(
     }
 
     // No text/decision request — check for a pending scripted invoke
-    // (agent.userInput and friends surface as spawn actions, not requests).
+    // (non-agent actors surface as spawn actions, not requests).
     const [invoke] = pendingInvokes(step);
     if (invoke) {
       const failure = takeFromQueue(script.errors, invoke.src);
       if (failure.found) {
         step = rejectScriptedRequest(machine, step, invoke.id, failure.value, {
-          kind: "userInput",
+          kind: "invoke",
           src: invoke.src,
           trail,
         });
@@ -719,13 +705,13 @@ export async function simulateAgent(
       }
       const taken = takeFromQueue(script.invokes, invoke.src);
       if (!taken.found) {
-        throw scriptDryError("userInput", invoke.src, invoke.id);
+        throw scriptDryError("invoke", invoke.src, invoke.id);
       }
       step = resolveAgentStep(machine, step, invoke.id, taken.value);
       trail.push({
         state: step.snapshot.value,
         resolvedRequest: {
-          kind: "userInput",
+          kind: "invoke",
           src: invoke.src,
           id: invoke.id,
           outcome: "output",
@@ -773,7 +759,7 @@ function rejectScriptedRequest(
   step: AgentStep,
   request: { id: string } | string,
   error: unknown,
-  entry: { kind: "text" | "userInput" | "decision"; src: string; trail: SimulationTrailEntry[] },
+  entry: { kind: "text" | "invoke" | "decision"; src: string; trail: SimulationTrailEntry[] },
 ): AgentStep {
   const id = typeof request === "string" ? request : request.id;
   const next = rejectAgentStep(machine, step, request, error);
@@ -791,7 +777,7 @@ function rejectScriptedRequest(
 // on the very value it scripted; any other value is wrapped, carried on `cause`.
 function unhandledScriptedError(
   error: unknown,
-  kind: "text" | "userInput" | "decision",
+  kind: "text" | "invoke" | "decision",
   src: string,
   id: string,
 ): unknown {
@@ -920,7 +906,7 @@ function mapValues<T, U>(obj: Record<string, T>, fn: (value: T) => U): Record<st
 }
 
 function scriptDryError(
-  kind: "text" | "decision" | "userInput",
+  kind: "text" | "decision" | "invoke",
   src: string,
   id: string,
   request?: AgentStepRequest,
@@ -934,9 +920,7 @@ function scriptDryError(
       ? `text['${src}']`
       : kind === "decision"
         ? `decisions['${src}']`
-        : src === USER_INPUT_SRC
-          ? "userInput"
-          : `invokes['${src}']`;
+        : `invokes['${src}']`;
   return new Error(
     `simulateAgent: script ran dry on a pending ${kind} request for src '${src}' (id '${id}'). ` +
       `Add an entry to the script's \`${key}\` queue.${events}`,
@@ -961,8 +945,6 @@ export interface ExplorePathsOptions {
   text?: Record<string, unknown>;
   /** Canned output for scripted invokes, keyed by src. Same one-value-per-src rule as `text`. */
   invokes?: Record<string, unknown>;
-  /** Canned output for `agent.userInput`, the shorthand for `invokes['agent.userInput']`. */
-  userInput?: unknown;
   /**
    * A canned failure per src, keyed like `text`/`invokes`. A src listed here
    * forks an extra branch at that invoke, where the invoke is rejected and the
@@ -1017,7 +999,7 @@ export interface AgentPathReport {
 }
 
 // Safety bound on the deterministic advance between two branch points: each
-// iteration resolves one text/userInput invoke, so this only trips on a machine
+// iteration resolves one text or scripted invoke, so this only trips on a machine
 // that loops through invokes without ever branching or settling.
 const MAX_ADVANCE_STEPS = 1000;
 
@@ -1054,9 +1036,6 @@ async function explore(
   const maxPaths = options.maxPaths ?? 200;
   const textScript = options.text ?? {};
   const invokeOutputs: Record<string, unknown> = { ...(options.invokes ?? {}) };
-  if ("userInput" in options) {
-    invokeOutputs[USER_INPUT_SRC] = options.userInput;
-  }
   const errorScript = options.errors ?? {};
 
   const reachedStates = new Set<string>();
@@ -1082,7 +1061,7 @@ async function explore(
     witness = [];
   }
 
-  // Advance a step deterministically through any non-branching text/userInput
+  // Advance a step deterministically through any non-branching text or scripted
   // invokes until it is done, idle-with-external-events, at a decision, or
   // blocked on a missing canned output. Returns the settled step plus a note.
   // `stopWhen` is checked on EVERY snapshot along the way — including the
@@ -1092,7 +1071,7 @@ async function explore(
     step: AgentStep,
   ): { step: AgentStep; blockedSrc?: string; hit?: boolean; fork?: InvokeFork } => {
     let current = step;
-    // Bounded loop: each iteration resolves one text/userInput invoke.
+    // Bounded loop: each iteration resolves one text or scripted invoke.
     for (let i = 0; i < MAX_ADVANCE_STEPS; i++) {
       if (stopWhen?.(current.snapshot)) {
         return { step: current, hit: true };
@@ -1130,7 +1109,7 @@ async function explore(
             }
           : { step: current };
       }
-      // No request: maybe a pending scripted invoke (userInput), else a wait.
+      // No request: maybe a pending scripted invoke, else a wait.
       const [invoke] = pendingInvokes(current);
       if (invoke) {
         if (invoke.src in errorScript) {
@@ -1285,8 +1264,7 @@ async function explore(
  * terminates. At each decision request it forks one branch per candidate event
  * (guard-rejected candidates are counted in `prunedByGuard`, not explored); at
  * an idle wait it forks per externally-accepted event. Text requests resolve
- * from `text`, other invokes from `invokes` (or `userInput` for
- * `agent.userInput`) — all by-src canned-output maps, and a missing src halts
+ * from `text`, other invokes from `invokes` — all by-src canned-output maps, and a missing src halts
  * that branch with a `needs-output` terminal rather than throwing. A src in
  * `errors` forks an extra branch where that invoke is rejected, so states
  * behind an `onError` are explored too.
