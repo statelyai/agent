@@ -18,3 +18,8 @@ export type EmailDraft = z.infer<typeof emailDraftSchema>;
 export function hasRecipient(draft: EmailDraft | null): draft is EmailDraft {
   return draft !== null && z.email().safeParse(draft.to.trim()).success;
 }
+
+/** A subject line the human actually wrote or approved. */
+export function hasSubject(draft: EmailDraft | null): draft is EmailDraft {
+  return draft !== null && draft.subject.trim().length > 0;
+}

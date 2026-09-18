@@ -163,11 +163,11 @@ export const scenarios: Scenario[] = [
     eyebrow: "Ask first, draft second",
     description:
       "The evaluator stops to ask about every missing detail before drafting. Sending is a human action from review.",
-    placeholder: "Email alex@example.com to invite them for coffee after my talk on Thursday.",
+    placeholder: "Email jenny@example.com to invite them for coffee after my talk on Thursday.",
     startLabel: "Draft email",
     starters: [
-      "Email alex@example.com to invite them for coffee after my talk on Thursday.",
-      "Email Alex to invite them for coffee after my talk on Thursday.",
+      "Email jenny@example.com to invite them for coffee after my talk on Thursday.",
+      "Email Jenny to invite them for coffee after my talk on Thursday.",
       "Email priya@example.com, subject 'Design review moved', telling her Thursday's design review is now Friday at 10am.",
     ],
   },
@@ -177,12 +177,13 @@ export const scenarios: Scenario[] = [
     eyebrow: "Draft first, check at the boundary",
     description:
       "Drafts with what it has. The only mandatory check, a valid recipient, moves to SEND. Review stays human.",
-    placeholder: "Email alex@example.com to invite them for coffee after my talk on Thursday.",
+    placeholder: "Email jenny@example.com to invite them for coffee after my talk on Thursday.",
     startLabel: "Draft email",
     starters: [
-      "Email alex@example.com to invite them for coffee after my talk on Thursday.",
-      "Email Alex to invite them for coffee after my talk on Thursday.",
+      "Email jenny@example.com to invite them for coffee after my talk on Thursday.",
+      "Email Jenny to invite them for coffee after my talk on Thursday.",
       "Email priya@example.com, subject 'Design review moved', telling her Thursday's design review is now Friday at 10am.",
+      "Email jenny@example.com about coffee after my talk on Thursday, no subject line.",
     ],
   },
 ];

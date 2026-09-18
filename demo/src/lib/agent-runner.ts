@@ -223,7 +223,7 @@ function formatDraft(
   draft: { to: string; subject: string; body: string },
   clarifications: string[] = [],
 ): string {
-  const text = `**To:** ${draft.to || "(no recipient yet)"}\n**Subject:** ${draft.subject}\n\n${draft.body}`;
+  const text = `**To:** ${draft.to || "(no recipient yet)"}\n**Subject:** ${draft.subject || "(no subject yet)"}\n\n${draft.body}`;
   if (!clarifications.length) return text;
   return `${text}\n\n**Open questions**\n${clarifications.map((question) => `- ${question}`).join("\n")}`;
 }
@@ -232,10 +232,9 @@ function describeEmailOutcome(output: Record<string, unknown>): string {
   if (output.failure) return `Not sent: ${String(output.failure)}`;
   const sent =
     (output.sentEmails as { to: string; subject: string; body: string }[] | undefined) ?? [];
-  const clarifications = (output.clarifications as string[] | undefined) ?? [];
-  return sent.length
-    ? `Sent (simulated outbox).\n\n${formatDraft(sent[0]!, clarifications)}`
-    : "Nothing was sent.";
+  // Open questions belong with a draft the human can still act on. Once the
+  // email is out, listing what it drafted around only reads as regret.
+  return sent.length ? `Sent (simulated outbox).\n\n${formatDraft(sent[0]!)}` : "Nothing was sent.";
 }
 
 function toResult(

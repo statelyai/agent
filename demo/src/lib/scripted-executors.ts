@@ -80,6 +80,10 @@ export function scriptedReviewVerdict(text: string): "APPROVE" | "REJECT" | "UNC
 // "<priya@example.com>," yields an address `hasRecipient` accepts.
 const EMAIL = /[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/;
 
+/** The request explicitly asked for a subject-less draft. */
+const NO_SUBJECT =
+  /\b(?:no subject|without a subject|blank subject|subject blank|leave the subject (?:blank|empty|out))\b/i;
+
 /**
  * Email drafter stand-ins, routed on request name. The evaluator flags a
  * recipient as missing when no address appears and a subject as missing when
@@ -100,12 +104,16 @@ function emailDrafterOutput(request: AgentTextRequest): unknown {
     };
   }
   const to = text.match(EMAIL)?.[0] ?? "";
+  // A request that asks for no subject gets none, the way a model told the
+  // same thing would leave it blank — that is how v2's `needsSubject` path is
+  // reachable without a key.
+  const subject = NO_SUBJECT.test(text) ? "" : "Re: your request";
   const openQuestions = [
     ...(to ? [] : ["Who should this go to?"]),
-    ...(/subject/i.test(text) ? [] : ["What subject line do you want?"]),
+    ...(subject && /subject/i.test(text) ? [] : ["What subject line do you want?"]),
   ];
   // v1's drafter ignores `openQuestions`; v2's collects them.
-  return { to, subject: "Re: your request", body: text, openQuestions };
+  return { to, subject, body: text, openQuestions };
 }
 
 export function scriptedExecutorsFor(scenarioId: ScenarioId): Executors {

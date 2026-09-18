@@ -262,10 +262,18 @@ export async function runCase(
         metrics.clarificationTurns += 1;
         event = { type: "RECIPIENT_PROVIDED", text: emailCase.details.to };
         break;
+      case "needsSubject":
+        metrics.clarificationTurns += 1;
+        event = {
+          type: "SUBJECT_PROVIDED",
+          text: emailCase.details.subject ?? "Following up",
+        };
+        break;
       case "reviewing": {
         if (draftMeetsCase(draft, emailCase)) {
           metrics.acceptedDraft = true;
-          event = { type: "SEND" };
+          // A subject-less draft offers ADD_SUBJECT in SEND's place.
+          event = accepted.has("SEND") ? { type: "SEND" } : { type: "ADD_SUBJECT" };
         } else {
           metrics.revisions += 1;
           const missing = emailCase.mustInclude.filter(
@@ -277,7 +285,7 @@ export async function runCase(
       }
       case "finalReview":
         metrics.acceptedDraft = draftMeetsCase(draft, emailCase);
-        event = { type: "SEND" };
+        event = accepted.has("SEND") ? { type: "SEND" } : { type: "ADD_SUBJECT" };
         break;
       default:
         throw new Error(`Simulated user has no policy for state "${state}"`);

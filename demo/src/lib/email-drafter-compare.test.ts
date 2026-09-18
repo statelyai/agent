@@ -52,13 +52,16 @@ test("v2 moves the recipient check to the send boundary and never sends without 
   expect(asked.idle?.prompt).toContain("Who should this go to?");
   expect(asked.idle?.textEvent).toEqual({ type: "RECIPIENT_PROVIDED", field: "text" });
 
-  // An invalid address keeps asking.
+  // An invalid address keeps asking, and says what was wrong with it.
   const stillAsking = await resume(asked.idle!.snapshot, {
     type: "RECIPIENT_PROVIDED",
     text: "Alex",
   });
   expect(stillAsking.status).toBe("idle");
+  expect(stillAsking.idle?.prompt).toContain('"Alex" is not an email address');
   expect(stillAsking.idle?.prompt).toContain("Who should this go to?");
+  // The draft keeps its empty recipient; the bad address is only quoted back.
+  expect(stillAsking.response).toContain("(no recipient yet)");
 
   // A valid one sends, because the human already chose SEND.
   const sent = await resume(stillAsking.idle!.snapshot, {
@@ -185,4 +188,101 @@ test("the comparison holds the send rule for both versions and v2 asks less", as
   // Missing-recipient cases still get asked in v2, at the boundary.
   expect(v2!.byCategory["missing-recipient"]?.clarificationTurns).toBe(2);
   expect(v2!.byCategory["missing-optional"]?.clarificationTurns).toBe(0);
+});
+
+test("v2 offers 'Add subject' in SEND's place, and sending stays a separate decision", async () => {
+  const resume = (snapshot: unknown, event: { type: string; [key: string]: unknown }) =>
+    resumeScenarioRun(
+      "email-drafter-v2",
+      snapshot as Snapshot<unknown>,
+      event,
+      "script",
+      undefined,
+      executors,
+    );
+
+  const reviewing = await startScenarioRun(
+    "email-drafter-v2",
+    "Email jenny@example.com about coffee after my talk on Thursday, no subject line.",
+    "script",
+    undefined,
+    executors,
+  );
+  expect(reviewing.status).toBe("idle");
+  expect(reviewing.response).toContain("(no subject yet)");
+  // SEND would not send, so it is not offered.
+  expect(reviewing.idle?.events.map((event) => event.type)).toEqual([
+    "REQUEST_CHANGES",
+    "ADD_SUBJECT",
+  ]);
+  expect(reviewing.idle?.prompt).toContain("no subject line yet");
+
+  const asking = await resume(reviewing.idle!.snapshot, { type: "ADD_SUBJECT" });
+  expect(asking.idle?.prompt).toContain("What should the subject line be?");
+  expect(asking.idle?.textEvent).toEqual({ type: "SUBJECT_PROVIDED", field: "text" });
+
+  // Blank text keeps asking; asking costs no model call and no revision.
+  const stillAsking = await resume(asking.idle!.snapshot, { type: "SUBJECT_PROVIDED", text: "  " });
+  expect(stillAsking.idle?.prompt).toContain("What should the subject line be?");
+
+  // A subject returns to the same review, where SEND is back on offer.
+  const back = await resume(stillAsking.idle!.snapshot, {
+    type: "SUBJECT_PROVIDED",
+    text: "Coffee Thursday?",
+  });
+  expect(back.response).toContain("**Subject:** Coffee Thursday?");
+  expect(back.idle?.events.map((event) => event.type)).toEqual(["REQUEST_CHANGES", "SEND"]);
+
+  const sent = await resume(back.idle!.snapshot, { type: "SEND" });
+  expect(sent.status).toBe("done");
+  expect(sent.response).toContain("Coffee Thursday?");
+});
+
+test("a sent email drops the open questions; a draft still shows them", async () => {
+  const reviewing = await startScenarioRun(
+    "email-drafter-v2",
+    optionalCase.prompt,
+    "script",
+    undefined,
+    executors,
+  );
+  expect(reviewing.response).toContain("**Open questions**");
+
+  const sent = await resumeScenarioRun(
+    "email-drafter-v2",
+    reviewing.idle!.snapshot as unknown as Snapshot<unknown>,
+    { type: "SEND" },
+    "script",
+    undefined,
+    executors,
+  );
+  expect(sent.status).toBe("done");
+  // The questions are still in the output; they just do not trail the email.
+  expect((sent.output as { clarifications: string[] }).clarifications.length).toBeGreaterThan(0);
+  expect(sent.response).not.toContain("Open questions");
+});
+
+test("v1 SEND with no subject asks, the same way it asks for a recipient", async () => {
+  const resume = (snapshot: unknown, event: { type: string; [key: string]: unknown }) =>
+    resumeScenarioRun(
+      "email-drafter-v1",
+      snapshot as Snapshot<unknown>,
+      event,
+      "script",
+      undefined,
+      executors,
+    );
+  const reviewing = await startScenarioRun(
+    "email-drafter-v1",
+    "Email jenny@example.com about coffee after my talk on Thursday, no subject line.",
+    "script",
+    undefined,
+    executors,
+  );
+  expect(reviewing.status).toBe("idle");
+  expect(reviewing.response).toContain("(no subject yet)");
+
+  const asked = await resume(reviewing.idle!.snapshot, { type: "SEND" });
+  expect(asked.idle?.prompt).toContain("What should the subject line be?");
+  expect(asked.idle?.events.map((event) => event.type)).toEqual(["MORE_INFO", "DRAFT_ANYWAY"]);
 });
