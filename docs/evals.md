@@ -65,8 +65,6 @@ createScriptedExecutors({
 });
 ```
 
-Use `"*"` as a fallback route for anything unmatched.
-
 > **Note:** `simulateAgent` and `explorePaths` are a different API with a different script: they key by invoke **src**, not by request name. See [Verification](verify.md#scripted-playthroughs).
 
 ### Entry shapes

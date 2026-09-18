@@ -7,11 +7,13 @@ description: Have a model author the agent workflow itself, then validate, lint,
 
 This page covers having a model author an agent machine config, then validating, linting, and simulating that config before it runs.
 
-An agent machine is [data](machines-as-data.md), so a model can write one. A generated machine can be checked before it runs, for three reasons.
+An agent machine is [data](machines-as-data.md), so a model can write one. A generated machine can be checked before it runs, at several gates.
+
+<!-- static lint diagnostics and schema-dependent checks from src/verify.ts -->
 
 - The config's shape is fixed by a JSON Schema that ships with the package. Expressions are dot paths, not code, so a generated config cannot do anything a hand-authored machine could not do.
 - `validateAgentConfig` checks the config against that schema and returns diagnostics. It is exported from `@statelyai/agent/validate`, which uses `ajv` as an optional peer dependency, so install `ajv` to use it.
-- `lintAgentMachine` statically catches dead decisions, unreachable states, and output-contract gaps. Every check applies to machines built from a config.
+- `lintAgentMachine` checks Agent-specific request wiring, decisions with no candidate events, and missing invoke error paths. Context serializability and final-state output checks require the validator to expose its JSON Schema; see [schema metadata](machines-as-data.md). Use [`canReach` and `explorePaths`](verify.md) to check reachability.
 - `simulateAgent` plays the machine through with canned responses and no API key, before it calls a model.
 
 ## The loop
