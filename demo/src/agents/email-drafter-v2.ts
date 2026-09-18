@@ -14,11 +14,14 @@
  * - `draftEmail` also returns `openQuestions`: what it drafted around. They
  *   accumulate in `clarifications` (same output field as v1) and show with
  *   the draft, so nothing v1 would have asked is lost; it just stops blocking.
+ * - added: `needsSubject`. A subject-less draft cannot be sent, so SEND is not
+ *   offered at all in that case — `ADD_SUBJECT` takes its place, rather than a
+ *   Send button that would quietly bounce.
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
 import { setupAgent } from "@statelyai/agent";
-import { type EmailDraft, emailDraftSchema, hasRecipient } from "./email-draft";
+import { type EmailDraft, emailDraftSchema, hasRecipient, hasSubject } from "./email-draft";
 
 /** Same revision budget as v1, so the comparison changes one thing. */
 export const MAX_REVISIONS = 2;
@@ -28,6 +31,8 @@ const contextSchema = z.object({
   draft: emailDraftSchema.nullable(),
   /** Questions the drafter raised while drafting around gaps. Part of the output. */
   clarifications: z.array(z.string()),
+  /** The last address typed that did not parse, so the re-ask can say why. */
+  rejectedRecipient: z.string().nullable(),
   revisions: z.number(),
   failure: z.string().nullable(),
 });
@@ -45,6 +50,8 @@ const agentSetup = setupAgent({
   events: {
     REQUEST_CHANGES: z.object({ text: z.string() }),
     SEND: z.object({}),
+    ADD_SUBJECT: z.object({}),
+    SUBJECT_PROVIDED: z.object({ text: z.string() }),
     RECIPIENT_PROVIDED: z.object({ text: z.string() }),
   },
   requests: {
@@ -58,7 +65,8 @@ const agentSetup = setupAgent({
       },
       model: "writer",
       system:
-        "Draft a polished email from the request. Use the details given. Pick a sensible subject if none is given. " +
+        "Draft a polished email from the request. Use the details given. Pick a sensible subject if none is given, " +
+        "unless the request explicitly says to leave the subject blank, in which case return an empty `subject`. " +
         "`to` must be an email address from the request; if none is given, leave `to` empty. Never invent an address. " +
         "In `openQuestions`, list one short question per detail you had to assume or leave out (recipient, subject, time, place). Empty if nothing was missing.",
       prompt: ({ input }) => input.prompt,
@@ -76,6 +84,7 @@ const agentSetup = setupAgent({
   states: {
     reviewing: { schemas: { context: drafted } },
     finalReview: { schemas: { context: drafted } },
+    needsSubject: { schemas: { context: drafted } },
     needsRecipient: { schemas: { context: drafted } },
     sending: { schemas: { context: drafted } },
   },
@@ -87,6 +96,7 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
     prompt: input.prompt,
     draft: null,
     clarifications: [],
+    rejectedRecipient: null,
     revisions: 0,
     failure: null,
   }),
@@ -122,9 +132,13 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
     reviewing: {
       meta: {
         interaction: {
-          label: "Send the draft, or type the changes you want.",
+          label: ({ context }) =>
+            hasSubject(context.draft)
+              ? "Send the draft, or type the changes you want."
+              : "This draft has no subject line yet. Add one, or type the changes you want.",
           events: {
             SEND: { label: "Send email", style: "primary" },
+            ADD_SUBJECT: { label: "Add subject", style: "primary" },
             REQUEST_CHANGES: { label: "Request changes" },
           },
           textEvent: "REQUEST_CHANGES",
@@ -138,24 +152,61 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
             prompt: `${context.prompt}\n\nRevision request: ${event.text}`,
           },
         }),
-        // The mandatory check lives at the sending boundary, not before drafting.
-        SEND: ({ context }) => ({
-          target: hasRecipient(context.draft) ? "sending" : "needsRecipient",
-        }),
+        // A subject-less draft is not sendable, so SEND is not offered: the
+        // transition returns nothing and the interaction drops the choice.
+        SEND: ({ context }) =>
+          hasSubject(context.draft)
+            ? { target: hasRecipient(context.draft) ? "sending" : "needsRecipient" }
+            : undefined,
+        ADD_SUBJECT: ({ context }) =>
+          hasSubject(context.draft) ? undefined : { target: "needsSubject" },
       },
     },
 
     finalReview: {
       meta: {
         interaction: {
-          label: "That is the last revision I can make. Send this draft?",
-          events: { SEND: { label: "Send email", style: "primary" } },
+          label: ({ context }) =>
+            hasSubject(context.draft)
+              ? "That is the last revision I can make. Send this draft?"
+              : "That is the last revision I can make. Add a subject line and it is ready to send.",
+          events: {
+            SEND: { label: "Send email", style: "primary" },
+            ADD_SUBJECT: { label: "Add subject", style: "primary" },
+          },
         },
       },
       on: {
-        SEND: ({ context }) => ({
-          target: hasRecipient(context.draft) ? "sending" : "needsRecipient",
-        }),
+        SEND: ({ context }) =>
+          hasSubject(context.draft)
+            ? { target: hasRecipient(context.draft) ? "sending" : "needsRecipient" }
+            : undefined,
+        ADD_SUBJECT: ({ context }) =>
+          hasSubject(context.draft) ? undefined : { target: "needsSubject" },
+      },
+    },
+
+    // The draft is written; only the subject is missing. Asking here costs no
+    // model call and no revision, unlike routing it through REQUEST_CHANGES.
+    needsSubject: {
+      meta: {
+        interaction: {
+          label: "What should the subject line be?",
+          events: { SUBJECT_PROVIDED: { label: "Use this subject", style: "primary" } },
+          textEvent: "SUBJECT_PROVIDED",
+        },
+      },
+      on: {
+        SUBJECT_PROVIDED: ({ context, event }) => {
+          const subject = event.text.trim();
+          // Back to the same review the human left; SEND stays their decision.
+          return subject
+            ? {
+                target: context.revisions >= MAX_REVISIONS ? "finalReview" : "reviewing",
+                context: { draft: { ...context.draft, subject } },
+              }
+            : { target: "needsSubject" };
+        },
       },
     },
 
@@ -164,18 +215,25 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
     needsRecipient: {
       meta: {
         interaction: {
-          label: "Who should this go to? Type an email address.",
+          // Re-asking the identical question reads as if the answer never
+          // arrived, so a rejected address says what was wrong with it.
+          label: ({ context }) =>
+            context.rejectedRecipient
+              ? `"${context.rejectedRecipient}" is not an email address. Who should this go to?`
+              : "Who should this go to? Type an email address.",
           events: { RECIPIENT_PROVIDED: { label: "Use this address", style: "primary" } },
           textEvent: "RECIPIENT_PROVIDED",
         },
       },
       on: {
         RECIPIENT_PROVIDED: ({ context, event }) => {
-          const draft = context.draft ? { ...context.draft, to: event.text.trim() } : null;
+          const to = event.text.trim();
+          const draft = context.draft ? { ...context.draft, to } : null;
           // An invalid address keeps asking; the send rule is not negotiable.
+          // The bad address is never written into the draft, only quoted back.
           return hasRecipient(draft)
-            ? { target: "sending", context: { draft } }
-            : { target: "needsRecipient" };
+            ? { target: "sending", context: { draft, rejectedRecipient: null } }
+            : { target: "needsRecipient", context: { rejectedRecipient: to.slice(0, 40) } };
         },
       },
     },

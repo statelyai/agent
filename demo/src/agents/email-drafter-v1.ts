@@ -7,8 +7,8 @@
  * satisfied or the human says "draft anyway"; nothing is sent until the human
  * chooses SEND from a review state; after MAX_REVISIONS rounds the only legal
  * move is SEND. A SEND with no valid recipient (possible after "draft anyway")
- * goes back to `needsMoreInfo`, v1's only way to ask. `sending` is a simulated
- * outbox.
+ * goes back to `needsMoreInfo`, v1's only way to ask, and so does a SEND with
+ * no subject line. `sending` is a simulated outbox.
  *
  * Every missing detail is treated the same way here: stop and ask. That is the
  * friction v2 (`./email-drafter-v2.ts`) removes, and `email-drafter-compare.ts`
@@ -17,12 +17,36 @@
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
 import { setupAgent } from "@statelyai/agent";
-import { type EmailDraft, emailDraftSchema, hasRecipient } from "./email-draft";
+import { type EmailDraft, emailDraftSchema, hasRecipient, hasSubject } from "./email-draft";
 
 /** Revision rounds `reviewing` allows before only SEND is legal. */
 export const MAX_REVISIONS = 2;
 
 const RECIPIENT_QUESTION = "Who should this go to? Type an email address.";
+const SUBJECT_QUESTION = "What should the subject line be?";
+
+/**
+ * v1's send rule, in v1's idiom: anything still missing sends the human back to
+ * `needsMoreInfo`, the one state that asks. v2 splits these into their own
+ * states so the choice on offer names the gap.
+ */
+function sendOrAsk(context: { draft: EmailDraft | null; clarifications: string[] }) {
+  const question = !hasRecipient(context.draft)
+    ? RECIPIENT_QUESTION
+    : !hasSubject(context.draft)
+      ? SUBJECT_QUESTION
+      : null;
+  if (question === null) return { target: "sending" } as const;
+  return {
+    target: "needsMoreInfo",
+    context: {
+      questions: question,
+      clarifications: context.clarifications.includes(question)
+        ? context.clarifications
+        : [...context.clarifications, question],
+    },
+  } as const;
+}
 
 const assessmentSchema = z.object({
   satisfied: z.boolean(),
@@ -109,7 +133,12 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
           target: output.satisfied ? "drafting" : "needsMoreInfo",
           context: {
             questions: output.questions.join(" "),
-            clarifications: [...context.clarifications, ...output.questions],
+            // The evaluator re-asks about a gap the user did not fill; the
+            // output lists each distinct question once.
+            clarifications: [
+              ...context.clarifications,
+              ...output.questions.filter((question) => !context.clarifications.includes(question)),
+            ],
           },
         }),
         onError: ({ event }) => ({
@@ -178,16 +207,7 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
             prompt: `${context.prompt}\n\nRevision request: ${event.text}`,
           },
         }),
-        SEND: ({ context }) =>
-          hasRecipient(context.draft)
-            ? { target: "sending" }
-            : {
-                target: "needsMoreInfo",
-                context: {
-                  questions: RECIPIENT_QUESTION,
-                  clarifications: [...context.clarifications, RECIPIENT_QUESTION],
-                },
-              },
+        SEND: ({ context }) => sendOrAsk(context),
       },
     },
 
@@ -199,16 +219,7 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
         },
       },
       on: {
-        SEND: ({ context }) =>
-          hasRecipient(context.draft)
-            ? { target: "sending" }
-            : {
-                target: "needsMoreInfo",
-                context: {
-                  questions: RECIPIENT_QUESTION,
-                  clarifications: [...context.clarifications, RECIPIENT_QUESTION],
-                },
-              },
+        SEND: ({ context }) => sendOrAsk(context),
       },
     },
 

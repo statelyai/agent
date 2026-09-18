@@ -455,19 +455,26 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
 
   const events: AcceptedEvent[] = getAcceptedEvents(snapshot, {
     events: schemas.events as never,
-  }).map((descriptor) => {
-    const jsonSchema = jsonSchemaOf(descriptor.inputSchema);
-    const hint = hints.events?.[descriptor.type] ?? {};
-    return {
-      type: descriptor.type,
-      label: hint.label
-        ? resolveLabel(hint.label, snapshot.context)
-        : humanizeEventType(descriptor.type),
-      style: hint.style === "primary" || hint.style === "danger" ? hint.style : "default",
-      jsonSchema,
-      needsPayload: schemaNeedsPayload(jsonSchema),
-    };
-  });
+  })
+    .map((descriptor) => {
+      const jsonSchema = jsonSchemaOf(descriptor.inputSchema);
+      const hint = hints.events?.[descriptor.type] ?? {};
+      return {
+        type: descriptor.type,
+        label: hint.label
+          ? resolveLabel(hint.label, snapshot.context)
+          : humanizeEventType(descriptor.type),
+        style: hint.style === "primary" || hint.style === "danger" ? hint.style : "default",
+        jsonSchema,
+        needsPayload: schemaNeedsPayload(jsonSchema),
+      } satisfies AcceptedEvent;
+    })
+    // `getAcceptedEvents` lists the transitions a state declares; it does not
+    // run their guards. A payload-free event the machine would refuse right
+    // now (a guard, or a function transition returning nothing) gets no
+    // button — a button that does nothing is worse than a missing one. An
+    // event that needs a payload cannot be judged yet, so it stays.
+    .filter((event) => event.needsPayload || snapshot.can({ type: event.type } as never));
 
   // Free text maps to the declared textEvent, or — when unambiguous — the one
   // accepted event whose payload is exactly one string field.
