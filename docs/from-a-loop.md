@@ -184,7 +184,7 @@ const machine = agentSetup.createMachine({
     },
     deciding: {
       invoke: {
-        // Name the decision. Scripts and traces key on this id.
+        // Name the invoke. Simulation can use this id when no src queue exists.
         id: "chooseAction",
         src: "agent.decide",
         input: ({ context }) => ({
@@ -344,7 +344,9 @@ expect(result.status).toBe("idle");
 
 Script one entry per decision attempt, including attempts a transition rejects. A rejected decision consumes its entry, and the retry consumes the next one. If a queue runs dry while a request is pending, `simulateAgent` throws an error naming the request's kind, src, and id.
 
-Script keys are request names. A named request is keyed by its `setupAgent` key (`assist`). An inline `agent.decide` has no name, so it is keyed by its invoke `id` (`chooseAction`); without an explicit `id`, that key is a generated state path. `simulateAgent` also accepts the `src` (`agent.decide`) for an inline decision. The `invokes` channel cans the output of any non-model actor.
+<!-- simulation queue routing from src/verify.ts -->
+
+`simulateAgent` scripts key by invoke `src`: `assist` for the registered request above and `agent.decide` for an inline decision. Decisions also accept the invoke `id` (`chooseAction`) when no src-keyed queue exists. The `invokes` channel supplies output for non-model actors. Request-name routing belongs to [`createScriptedExecutors`](evals.md#script-keys).
 
 `explorePaths` enumerates every branch, and `canReach` returns `{ reachable, witness }` for one target state. See [Testing and verification](verify.md).
 
