@@ -25,29 +25,6 @@ export const MAX_REVISIONS = 2;
 const RECIPIENT_QUESTION = "Who should this go to? Type an email address.";
 const SUBJECT_QUESTION = "What should the subject line be?";
 
-/**
- * v1's send rule, in v1's idiom: anything still missing sends the human back to
- * `needsMoreInfo`, the one state that asks. v2 splits these into their own
- * states so the choice on offer names the gap.
- */
-function sendOrAsk(context: { draft: EmailDraft | null; clarifications: string[] }) {
-  const question = !hasRecipient(context.draft)
-    ? RECIPIENT_QUESTION
-    : !hasSubject(context.draft)
-      ? SUBJECT_QUESTION
-      : null;
-  if (question === null) return { target: "sending" } as const;
-  return {
-    target: "needsMoreInfo",
-    context: {
-      questions: question,
-      clarifications: context.clarifications.includes(question)
-        ? context.clarifications
-        : [...context.clarifications, question],
-    },
-  } as const;
-}
-
 const assessmentSchema = z.object({
   satisfied: z.boolean(),
   missing: z.array(z.string()),
@@ -207,7 +184,30 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
             prompt: `${context.prompt}\n\nRevision request: ${event.text}`,
           },
         }),
-        SEND: ({ context }) => sendOrAsk(context),
+        // Keep every possible target visible in this expression. Hiding the
+        // branch in a helper makes the transition opaque to graph tooling.
+        SEND: ({ context }) =>
+          !hasRecipient(context.draft)
+            ? {
+                target: "needsMoreInfo",
+                context: {
+                  questions: RECIPIENT_QUESTION,
+                  clarifications: context.clarifications.includes(RECIPIENT_QUESTION)
+                    ? context.clarifications
+                    : [...context.clarifications, RECIPIENT_QUESTION],
+                },
+              }
+            : !hasSubject(context.draft)
+              ? {
+                  target: "needsMoreInfo",
+                  context: {
+                    questions: SUBJECT_QUESTION,
+                    clarifications: context.clarifications.includes(SUBJECT_QUESTION)
+                      ? context.clarifications
+                      : [...context.clarifications, SUBJECT_QUESTION],
+                  },
+                }
+              : { target: "sending" },
       },
     },
 
@@ -219,7 +219,28 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
         },
       },
       on: {
-        SEND: ({ context }) => sendOrAsk(context),
+        SEND: ({ context }) =>
+          !hasRecipient(context.draft)
+            ? {
+                target: "needsMoreInfo",
+                context: {
+                  questions: RECIPIENT_QUESTION,
+                  clarifications: context.clarifications.includes(RECIPIENT_QUESTION)
+                    ? context.clarifications
+                    : [...context.clarifications, RECIPIENT_QUESTION],
+                },
+              }
+            : !hasSubject(context.draft)
+              ? {
+                  target: "needsMoreInfo",
+                  context: {
+                    questions: SUBJECT_QUESTION,
+                    clarifications: context.clarifications.includes(SUBJECT_QUESTION)
+                      ? context.clarifications
+                      : [...context.clarifications, SUBJECT_QUESTION],
+                  },
+                }
+              : { target: "sending" },
       },
     },
 
