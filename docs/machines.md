@@ -331,6 +331,11 @@ onDone: {
 
 Use the function form when the `target` is conditional or when you need `enq` to enqueue effects. Use the object form otherwise.
 
+Keep conditional targets visible in the transition expression, as in the
+`ASK` example above. Do not hide target selection in a helper call or an
+arbitrary block body: the machine may run, but static graph tools cannot
+reliably discover those targets.
+
 ## Choice states
 
 <!-- choice state node type from xstate v6 (StateMachine formatChoiceTransitions) and src/machines/loop.ts -->

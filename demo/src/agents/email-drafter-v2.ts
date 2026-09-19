@@ -197,16 +197,17 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
         },
       },
       on: {
-        SUBJECT_PROVIDED: ({ context, event }) => {
-          const subject = event.text.trim();
-          // Back to the same review the human left; SEND stays their decision.
-          return subject
+        // Keep the branches inline so graph tooling sees every target.
+        SUBJECT_PROVIDED: ({ context, event }) =>
+          event.text.trim()
             ? {
+                // Back to the same review the human left; SEND stays their decision.
                 target: context.revisions >= MAX_REVISIONS ? "finalReview" : "reviewing",
-                context: { draft: { ...context.draft, subject } },
+                context: {
+                  draft: { ...context.draft, subject: event.text.trim() },
+                },
               }
-            : { target: "needsSubject" };
-        },
+            : { target: "needsSubject" },
       },
     },
 
@@ -226,15 +227,21 @@ export const emailDrafterV2Machine = agentSetup.createMachine({
         },
       },
       on: {
-        RECIPIENT_PROVIDED: ({ context, event }) => {
-          const to = event.text.trim();
-          const draft = context.draft ? { ...context.draft, to } : null;
-          // An invalid address keeps asking; the send rule is not negotiable.
-          // The bad address is never written into the draft, only quoted back.
-          return hasRecipient(draft)
-            ? { target: "sending", context: { draft, rejectedRecipient: null } }
-            : { target: "needsRecipient", context: { rejectedRecipient: to.slice(0, 40) } };
-        },
+        // An invalid address keeps asking; the send rule is not negotiable.
+        // The bad address is never written into the draft, only quoted back.
+        RECIPIENT_PROVIDED: ({ context, event }) =>
+          hasRecipient({ ...context.draft, to: event.text.trim() })
+            ? {
+                target: "sending",
+                context: {
+                  draft: { ...context.draft, to: event.text.trim() },
+                  rejectedRecipient: null,
+                },
+              }
+            : {
+                target: "needsRecipient",
+                context: { rejectedRecipient: event.text.trim().slice(0, 40) },
+              },
       },
     },
 
