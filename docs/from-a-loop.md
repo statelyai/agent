@@ -184,7 +184,7 @@ const machine = agentSetup.createMachine({
     },
     deciding: {
       invoke: {
-        // Name the decision. Scripts and traces key on this id.
+        // Name the invoke. Simulation can use this id when no src queue exists.
         id: "chooseAction",
         src: "agent.decide",
         input: ({ context }) => ({
