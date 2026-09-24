@@ -1,0 +1,19 @@
+{
+  "name": "self-discover",
+  "title": "Compose a reasoning plan for the task, then follow it",
+  "kind": "pattern",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph Self-Discover tutorial (Zhou et al. 2024)",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/self-discover/self-discover/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "The model selects generic reasoning modules that suit the task, adapts them, turns them into a step-by-step JSON plan, and follows that plan to an answer. LangGraph passes the selection on unchecked. Here a choice state requires between 1 and MAX_SELECTED_MODULES modules, retries selection once with feedback, and ends the run in a failed state if the second selection is still out of range."
+  },
+  "starters": [
+    "This SVG path element <path d=\"M 55.57,80.69 L 57.38,65.80 M 57.38,65.80 L 48.90,57.46 M 48.90,57.46 L 45.58,47.78 M 45.58,47.78 L 53.25,36.07 L 66.29,48.90 L 78.69,61.09 L 55.57,80.69\"/> draws a: (A) circle (B) heptagon (C) hexagon (D) kite (E) line (F) octagon (G) pentagon (H) rectangle (I) sector (J) triangle",
+    "Alice, Bob, and Carol each own one pet: a cat, a dog, or a fish. Alice is allergic to fur. Bob's pet cannot live in water. Carol does not own the dog. Who owns which pet?",
+    "Plan a one-day offsite for 8 people starting at 9am: a 2-hour workshop, lunch, a 90-minute hike that must end before 4pm, and dinner at 7pm."
+  ]
+}

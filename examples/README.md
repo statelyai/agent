@@ -35,6 +35,17 @@ convention in a prompt.
 - [game-agent](game-agent): rock-paper-scissors where the event log saved in context is the agent's only memory
 - [game-loop-agent](game-loop-agent): an invoked agent that receives pushed events and can act only on its own turn
 - [generate-and-repair](generate-and-repair): three candidates fanned out as concurrent invokes, judged by the host's own parser, with a repair round the machine caps explicitly
+- [adaptive-rag](adaptive-rag): a router picks the index, then choice states check `MAX_REWRITES` and `MAX_REGENERATIONS` on both the rewrite loop and the regenerate loop, where LangGraph relies on `recursion_limit`
+- [agentic-rag](agentic-rag): the model picks `RETRIEVE` or `ANSWER` through `agent.decide`, and a guard rejects `RETRIEVE` once `MAX_RETRIEVALS` is spent, so an answer forced by the budget lands in `failed`
+- [reflexion](reflexion): the critique drives real searches and each revision must cite what came back; citations to passages the run never retrieved are dropped, and a revision budget caps the loop
+- [tree-of-thoughts](tree-of-thoughts): a hand-written scorer rechecks every proposed Game of 24 step and rejects any that uses a number not on the table; a beam capped at `BEAM_SIZE` and `MAX_DEPTH` ends in `failed` when no line reaches 24
+- [self-discover](self-discover): a choice state requires 1 to `MAX_SELECTED_MODULES` reasoning modules and retries selection once with feedback before failing, a check the LangGraph chain leaves to trust
+- [prompt-chaining](prompt-chaining): the punchline gate is a choice state over a pure check, and a failed check regenerates at most twice before landing in `failed` instead of ending silently
+- [data-enrichment](data-enrichment): a choice state, not the model, decides the record is complete; gap searches and reviewer rejections share one `MAX_LOOPS` budget that ends in `failed` with the partial record
+- [tnt-llm](tnt-llm): one summary child spawned per document, then a batch index in context drives generate, update per batch, and review through choice states, with a category cap
+- [tool-retrieval](tool-retrieval): a guard lets `agent.decide` call only the tools the selector surfaced, with tool-call and reselection budgets forcing an answer
+- [model-fallback](model-fallback): a validator actor plus a choice state send a rejected cheap-model tool call to a stronger model exactly once (`MAX_FALLBACKS`), then `failed`
+- [project-planner](project-planner): the model only proposes tasks; the machine checks the dependency graph (with a repair budget) and computes the critical-path schedule, and a choice state replans against the deadline until `MAX_REPLANS`
 
 ## Human in the loop
 
@@ -47,6 +58,9 @@ it survives a snapshot round-trip instead of living in a closure.
 - [sql-agent](sql-agent): the model plans the query, a human approves, and only then does the engine run it
 - [long-running-onboarding](long-running-onboarding): pauses measured in days, with a bounded resend loop and an escalation path off every wait
 - [machine-as-tool](machine-as-tool): the whole machine behind one tool call, where the handle _is_ the persisted snapshot
+- [info-gathering](info-gathering): a choice state checks the four requirement slots itself (the model only extracts), forces one confirmation turn, and ends in `failed` after `MAX_TURNS` answers
+- [long-term-memory](long-term-memory): the memory store is machine input and output, recall and a capped save are their own states, and a second run started from the first run's output remembers
+- [feynman-tutor](feynman-tutor): an idle explain-back state per checkpoint; a choice state re-teaches below `PASS_SCORE` while a per-checkpoint `MAX_RETEACHES` budget lasts, then records the checkpoint failed and moves on
 
 ## Parallel and multi-agent
 
@@ -56,6 +70,11 @@ it survives a snapshot round-trip instead of living in a closure.
 - [parallel-streams](parallel-streams): two regions streaming at once, each chunk tagged with the request it came from
 - [just-one](just-one): isolated parallel regions whose inputs are fixed before any sibling settles; the duplicate-cancelling rule is a pure function, not an instruction
 - [chameleon](chameleon): hidden information enforced by request input shaping — the chameleon's request provably never carries the secret word
+- [agent-supervisor](agent-supervisor): a flat supervisor routes through `agent.decide` under guards: each worker is capped at two reports, `FINISH` is illegal until one lands, and a turn budget ends in `failed`
+- [map-reduce](map-reduce): LangGraph's `Send` fan-out as one spawned `writeJoke` child per subject, reduced as they land, with a capped width and a choice state that rejects an out-of-range judge index
+- [llm-compiler](llm-compiler): each task's dependencies are the `$N` references in its args; a choice state rejects references to later or missing tasks before anything runs, each wave of ready tasks is spawned together, and a task's inputs are filled in only after the tasks it references finish
+- [storm-writer](storm-writer): one interview child machine spawned per editor with a turn cap, transcripts reduced as they land; editor, turn and section overflow is dropped and counted against exported constants
+- [multi-agent-debate](multi-agent-debate): turn order and round count are machine edges, with a `MAX_ROUNDS` ceiling in the input schema; no speaker can end the debate or speak out of turn
 
 ## Persistence and recovery
 
@@ -85,14 +104,16 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 - [verification](verification): `canReach` proves a violation state unreachable across every branch, without one model call
 - [braintrust-evals](braintrust-evals): evals over typed output, transition trajectories, named request calls, and usage
 - [ai-sdk-evaluator-optimizer](ai-sdk-evaluator-optimizer): the evaluator-optimizer loop as explicit states, with a strict critic gating the exit
+- [chatbot-simulation-eval](chatbot-simulation-eval): a simulated customer and the bot under test alternate under a `MAX_EXCHANGES` choice guard, the bot's request input provably omits the persona, and the judge runs inside the machine
+- [essay-grader](essay-grader): three choice states over exported score thresholds stop grading at the first weak pass, and the result names the stage it stopped after
 
 ## Statechart policies
 
 - [consensus-review](consensus-review): two-of-three reviewer approval, abstentions, and human escalation
 - [booking-compensation](booking-compensation): approval before effects, compensation, and uncertain-outcome reconciliation
-- [deadline-escalation](deadline-escalation): scheduler-driven approval deadlines and stale-event rejection; `manual: true` because it needs a two-phase CLI and a trusted host clock, not a provider key
+- [deadline-escalation](deadline-escalation): scheduler-driven approval deadlines and stale-event rejection; `manual: true` because it needs a two-phase CLI and a trusted host clock on top of the provider key
 
-All three run offline with `pnpm tsx examples/<name>/index.ts`. See [Statechart policy examples](../docs/statechart-policy-examples.md) for sources, tests, and host contracts.
+All three run against a real model with `OPENAI_API_KEY=... pnpm tsx examples/<name>/index.ts`; their tests script the model by request name through the AI SDK's mock model. See [Statechart policy examples](../docs/statechart-policy-examples.md) for sources, tests, and host contracts.
 
 ## Conventions
 
@@ -110,10 +131,13 @@ Every example follows these. A new example that breaks one is probably wrong.
   with an empty or partial output is a bug, not graceful handling.
 - **Every `invoke` has an `onError`.** The `invoke-without-on-error` lint code
   must stay clean.
-- **Mock executors route on `request.name`** (the `setupAgent({ requests })`
-  key), or use name-keyed `createScriptedExecutors`. Never on a prompt
-  substring, a call index, a positional array, or `request.model` — those pass
-  while silently exercising the wrong request.
+- **Tests mock the model with `examples/mock-model.ts`**: the AI SDK's
+  `MockLanguageModelV3` behind the real `createAiSdkExecutors` adapter, with
+  answers keyed by request name (the `setupAgent({ requests })` key). The
+  helper is repo-internal and not published. A hand-written mock executor
+  routes on `request.name` too. Never on a prompt substring, a call index, a
+  positional array, or `request.model` — those pass while silently exercising
+  the wrong request.
 - **Context is replay-stable**: no `Date.now()`, `Math.random()`, or
   `randomUUID()` in context, and no module-level mutable state. Pass stores and
   executors in, or use a factory function.
@@ -123,5 +147,5 @@ Every example follows these. A new example that breaks one is probably wrong.
 - **Event names are facts or commands** from the human or host. Choices the
   model makes go through `agent.decide` and are filtered by guards.
 - **Sibling imports are allowed** — an example may import another example's
-  machine — but there is no shared test harness. Each example's test stands on
-  its own.
+  machine — but there is no shared test harness beyond the
+  `examples/mock-model.ts` model double. Each example's test stands on its own.

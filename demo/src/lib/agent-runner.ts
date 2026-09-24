@@ -6,16 +6,14 @@
  * settled result. The host stays stateless — an idle run returns a persisted
  * snapshot the client sends back to resume.
  *
- * The same code path runs with real models (`createAiSdkExecutors`, when
- * `OPENAI_API_KEY` is set) or with scripted executors. Tests import the
- * `*Run` functions directly and inject scripted executors — no API key, no
- * network.
+ * Runs need a real model: `createAiSdkExecutors` with `OPENAI_API_KEY`. Tests
+ * import the `*Run` functions directly and inject their own executors.
  */
 import { runAgent, type AgentRequestExecutors, type RunAgentResult } from "@statelyai/agent";
 import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
 import { maybeCreateRunInspection } from "./inspection.server";
 import { createTraceRecorder, describeIdle, type TraceEntry } from "./machine-chat.server";
-import type { ChatIdle } from "./machine-ui";
+import { MISSING_KEY_MESSAGE, type ChatIdle } from "./machine-ui";
 import { refundMachine } from "@/agents/refund";
 import { approvalMachine } from "@/agents/approval";
 import { routingMachine } from "@/agents/routing";
@@ -26,10 +24,7 @@ import { toolsMachine } from "@/agents/tools";
 import { reflectionMachine } from "@/agents/reflection";
 import { emailDrafterV1Machine } from "@/agents/email-drafter-v1";
 import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
-import { scriptedExecutorsFor, scriptedReviewVerdict } from "./scripted-executors";
 import { scenarioSource, type ScenarioId } from "./scenarios";
-
-export type RunMode = "live" | "script";
 
 /** JSON-safe value — server fns must return serializable data (TanStack validates it). */
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -42,7 +37,6 @@ export type IdlePayload = ChatIdle & {
 };
 
 export type ScenarioResult = {
-  mode: RunMode;
   model?: string;
   status: "done" | "idle" | "error";
   trace: TraceEntry[];
@@ -108,15 +102,12 @@ function inputFor(scenarioId: ScenarioId, prompt: string): Record<string, string
 
 // ─── executor resolution ───
 
-/** Resolves live (AI SDK) or scripted executors for a scenario, plus a label. */
+/** Resolves AI SDK executors for a scenario, plus the model label. Throws without a key. */
 async function resolveExecutors(
   scenarioId: ScenarioId,
-): Promise<{ mode: RunMode; model?: string; executors: Partial<AgentRequestExecutors> }> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return { mode: "script", executors: scriptedExecutorsFor(scenarioId) };
-  }
-  // Lazy import: keeps @ai-sdk/openai out of any bundle that only needs scripts.
+): Promise<{ model: string; executors: Partial<AgentRequestExecutors> }> {
+  if (!process.env.OPENAI_API_KEY) throw new Error(MISSING_KEY_MESSAGE);
+  // Lazy import: keeps @ai-sdk/openai out of the client bundle.
   const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
@@ -161,7 +152,7 @@ async function resolveExecutors(
       };
     }
   }
-  return { mode: "live", model: primary, executors };
+  return { model: primary, executors };
 }
 
 // ─── result shaping ───
@@ -239,13 +230,11 @@ function describeEmailOutcome(output: Record<string, unknown>): string {
 
 function toResult(
   scenarioId: ScenarioId,
-  mode: RunMode,
   model: string | undefined,
   result: RunAgentResult<AnyStateMachine>,
   trace: TraceEntry[],
 ): ScenarioResult {
   const base: ScenarioResult = {
-    mode,
     model,
     status: result.status === "done" ? "done" : result.status === "idle" ? "idle" : "error",
     trace,
@@ -268,7 +257,6 @@ function toResult(
 export async function startScenarioRun(
   scenarioId: ScenarioId,
   prompt: string,
-  mode: RunMode,
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
@@ -284,7 +272,7 @@ export async function startScenarioRun(
     onTrace,
     inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "start"),
   });
-  return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
+  return toResult(scenarioId, model, result as RunAgentResult<AnyStateMachine>, trace);
 }
 
 /** Resumes a persisted idle snapshot with a typed event. Pure — used by tests. */
@@ -292,7 +280,6 @@ export async function resumeScenarioRun(
   scenarioId: ScenarioId,
   snapshot: Snapshot<unknown>,
   event: { type: string; [key: string]: unknown },
-  mode: RunMode,
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
@@ -311,7 +298,7 @@ export async function resumeScenarioRun(
     onTrace,
     inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "resume"),
   });
-  return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
+  return toResult(scenarioId, model, result as RunAgentResult<AnyStateMachine>, trace);
 }
 
 // ─── env-resolving wrappers (used by the server functions) ───
@@ -321,8 +308,8 @@ export async function startScenario(
   prompt: string,
   signal?: AbortSignal,
 ): Promise<ScenarioResult> {
-  const { mode, model, executors } = await resolveExecutors(scenarioId);
-  return startScenarioRun(scenarioId, prompt, mode, model, executors, signal);
+  const { model, executors } = await resolveExecutors(scenarioId);
+  return startScenarioRun(scenarioId, prompt, model, executors, signal);
 }
 
 export async function resumeScenario(
@@ -331,29 +318,25 @@ export async function resumeScenario(
   event: ResumeEvent,
   signal?: AbortSignal,
 ): Promise<ScenarioResult> {
-  const { mode, model, executors } = await resolveExecutors(scenarioId);
+  const { model, executors } = await resolveExecutors(scenarioId);
 
   // Free-text review ("looks good") → map to a typed event before delivering.
   if (isInterpretEvent(event)) {
-    const verdict = await interpretReview(event.text, mode);
+    const verdict = await interpretReview(event.text);
     if (verdict === "UNCLEAR") {
       // Re-settle idle without delivering an event: still awaiting a clear verdict.
-      return startResumeIdleEcho(scenarioId, snapshot, mode, model);
+      return startResumeIdleEcho(scenarioId, snapshot, model);
     }
     const typed =
       verdict === "REJECT" ? { type: "REJECT", reason: event.text } : { type: "APPROVE" };
-    return resumeScenarioRun(scenarioId, snapshot, typed, mode, model, executors, signal);
+    return resumeScenarioRun(scenarioId, snapshot, typed, model, executors, signal);
   }
 
-  return resumeScenarioRun(scenarioId, snapshot, event, mode, model, executors, signal);
+  return resumeScenarioRun(scenarioId, snapshot, event, model, executors, signal);
 }
 
-/** Interprets a free-text review as a typed verdict (scripted or live). */
-async function interpretReview(
-  text: string,
-  mode: RunMode,
-): Promise<"APPROVE" | "REJECT" | "UNCLEAR"> {
-  if (mode === "script") return scriptedReviewVerdict(text);
+/** Interprets a free-text review as a typed verdict; a failed call reads as UNCLEAR. */
+async function interpretReview(text: string): Promise<"APPROVE" | "REJECT" | "UNCLEAR"> {
   try {
     const [{ generateText }, { openai }] = await Promise.all([
       import("ai"),
@@ -372,7 +355,7 @@ async function interpretReview(
         ? "REJECT"
         : "UNCLEAR";
   } catch {
-    return scriptedReviewVerdict(text);
+    return "UNCLEAR";
   }
 }
 
@@ -380,7 +363,6 @@ async function interpretReview(
 function startResumeIdleEcho(
   scenarioId: ScenarioId,
   snapshot: Snapshot<unknown>,
-  mode: RunMode,
   model: string | undefined,
 ): ScenarioResult {
   const machine = machineFor(scenarioId);
@@ -390,7 +372,6 @@ function startResumeIdleEcho(
     snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
   );
   return {
-    mode,
     model,
     status: "idle",
     trace: [],

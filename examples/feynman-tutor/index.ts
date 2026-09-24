@@ -1,0 +1,502 @@
+/**
+ * Feynman tutor — the "Chiron" Feynman-technique learning agent (a community
+ * LangGraph tutorial) as a checkpoint loop with an explicit reteach budget.
+ *
+ * The idea: to learn a topic, split it into a few checkpoints. For each one,
+ * the tutor sets the scene, the learner explains the idea back in their own
+ * words, and a grader scores the explanation. A weak explanation gets a
+ * simpler, Feynman-style re-teach and the learner tries again; a good one
+ * moves on to the next checkpoint.
+ *
+ * LangGraph shape (NirDiamant/GenAI_Agents, chiron_learning_agent_langgraph):
+ *
+ *   START → generate_checkpoints → context_builder → user_answer (interrupt)
+ *         → verify_answer ─┬─ (understood) → next_checkpoint ─┬─ context_builder …
+ *                          │                                  └─ END
+ *                          └─ (not yet) → teach_concept → user_answer …
+ *
+ * Here every node is a state, the conditional edges are `choice` states, and
+ * the interrupt is an ordinary resting state the run settles idle on:
+ *
+ *   planningCheckpoints → checkingPlan ─┬─ failed (no checkpoints)
+ *                                       └─ presenting → awaitingExplanation
+ *   awaitingExplanation ─EXPLAIN→ verifying → grading ─┬─ (pass) advancing
+ *                      │                              ├─ (budget left) teaching → awaitingExplanation
+ *                      │                              └─ (budget spent) advancing   [checkpoint failed]
+ *                      └─SKIP→ advancing              [checkpoint skipped]
+ *   advancing ─┬─ presenting (next checkpoint)
+ *              └─ done
+ *
+ * What maps to what:
+ *   - generate_checkpoints → `planningCheckpoints` (request `planCheckpoints`),
+ *                            capped at MAX_CHECKPOINTS by `checkingPlan`
+ *   - context_builder      → `presenting` (request `introduceCheckpoint`)
+ *   - user_answer interrupt→ `awaitingExplanation` (`meta.interaction`,
+ *                            `textEvent: "EXPLAIN"`, plus a SKIP button)
+ *   - verify_answer        → `verifying` (request `verifyExplanation`: score + feedback)
+ *   - understanding check  → `grading` (a `choice` state on PASS_SCORE and MAX_RETEACHES)
+ *   - teach_concept        → `teaching` (request `explainSimply`)
+ *   - next_checkpoint      → `advancing` (a `choice` state on `checkpointIndex`)
+ *   - checkpointer         → `result.persist()` between `runAgent` calls
+ *
+ * Differences from LangGraph worth calling out:
+ *   - The reteach loop is bounded. Chiron loops teach → answer → verify until
+ *     the learner gets it; here each checkpoint allows MAX_RETEACHES re-teaches,
+ *     then the checkpoint is recorded as failed and the session moves on.
+ *   - The pass/fail decision is a threshold the machine checks (PASS_SCORE),
+ *     not a model's "understood: yes/no".
+ *   - The learner can SKIP a checkpoint — a real event, recorded in the output.
+ *   - The number of checkpoints is capped (MAX_CHECKPOINTS) whatever the model
+ *     returns, so a session has a known worst-case length.
+ *   - Chiron's web search for checkpoint context is replaced by the model's
+ *     own introduction; there is no retrieval step.
+ *
+ * Stand-ins: none. Every node is a model call; there is no tool or search.
+ *
+ * Dual-mode: `runFeynmanTutorExample(options?)` takes an injectable
+ * `generateText` and scripted human events (tests pass both, so CI needs no
+ * API key); the direct run uses real models and stdin.
+ *
+ * Run: OPENAI_API_KEY=... npx tsx examples/feynman-tutor/index.ts
+ */
+import { z } from "zod";
+import type { SnapshotFrom } from "xstate";
+import { openai } from "@ai-sdk/openai";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import {
+  getInteraction,
+  getStatePath,
+  interactionMetaSchema,
+  runAgent,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
+
+const models = {
+  tutor: openai("gpt-5.4-mini"),
+};
+
+/** Most checkpoints a session covers, whatever the planner returns. */
+export const MAX_CHECKPOINTS = 3;
+/** Score (0-100) an explanation needs to pass a checkpoint. */
+export const PASS_SCORE = 70;
+/** Re-teaches allowed per checkpoint before it is recorded as failed. */
+export const MAX_RETEACHES = 2;
+
+const checkpointSchema = z.object({ title: z.string(), keyIdea: z.string() });
+
+const resultSchema = z.object({
+  title: z.string(),
+  status: z.enum(["passed", "failed", "skipped"]),
+  /** Last score for the checkpoint; null when it was skipped before scoring. */
+  score: z.number().nullable(),
+  reteaches: z.number(),
+});
+
+type CheckpointResult = z.infer<typeof resultSchema>;
+
+const feynmanContextSchema = z.object({
+  topic: z.string(),
+  checkpoints: z.array(checkpointSchema),
+  checkpointIndex: z.number(),
+  /** Re-teaches spent on the current checkpoint. */
+  reteaches: z.number(),
+  explanation: z.string(),
+  lastScore: z.number().nullable(),
+  lastFeedback: z.string(),
+  results: z.array(resultSchema),
+  /** What the idle state shows: the checkpoint intro, or the re-teach. */
+  notice: z.string(),
+  failure: z.string().nullable(),
+});
+
+type FeynmanContext = z.infer<typeof feynmanContextSchema>;
+
+function currentCheckpoint(context: FeynmanContext) {
+  return context.checkpoints[context.checkpointIndex] ?? { title: "", keyIdea: "" };
+}
+
+/** Records the current checkpoint's outcome and moves the index on. */
+function recordAndAdvance(context: FeynmanContext, status: CheckpointResult["status"]) {
+  return {
+    results: [
+      ...context.results,
+      {
+        title: currentCheckpoint(context).title,
+        status,
+        score: status === "skipped" ? null : context.lastScore,
+        reteaches: context.reteaches,
+      },
+    ],
+    checkpointIndex: context.checkpointIndex + 1,
+    reteaches: 0,
+    lastScore: null,
+    lastFeedback: "",
+  };
+}
+
+function renderSummary(context: FeynmanContext): string {
+  const lines = context.results.map((result, index) => {
+    const score = result.score === null ? "" : ` (score ${result.score}/100)`;
+    const reteach = result.reteaches > 0 ? `, ${result.reteaches} re-teach(es)` : "";
+    return `${index + 1}. ${result.title}: ${result.status}${score}${reteach}`;
+  });
+  const passed = context.results.filter((result) => result.status === "passed").length;
+  return [
+    `Feynman session on "${context.topic}": ${passed} of ${context.results.length} checkpoint(s) passed.`,
+    ...lines,
+  ].join("\n");
+}
+
+const outputSchema = z.object({
+  summary: z.string(),
+  passed: z.number(),
+  failed: z.number(),
+  skipped: z.number(),
+  checkpoints: z.array(resultSchema),
+});
+
+function sessionOutput(context: FeynmanContext) {
+  const count = (status: CheckpointResult["status"]) =>
+    context.results.filter((result) => result.status === status).length;
+  return {
+    summary: context.failure
+      ? `${context.failure}\n\n${renderSummary(context)}`
+      : renderSummary(context),
+    passed: count("passed"),
+    failed: count("failed"),
+    skipped: count("skipped"),
+    checkpoints: context.results,
+  };
+}
+
+const agentSetup = setupAgent({
+  models,
+  meta: interactionMetaSchema,
+  context: feynmanContextSchema,
+  input: z.object({ topic: z.string() }),
+  output: outputSchema,
+  events: {
+    EXPLAIN: z.object({ text: z.string() }),
+    SKIP: z.object({}),
+  },
+  requests: {
+    // generate_checkpoints: an ordered list of small learning goals.
+    planCheckpoints: {
+      schemas: {
+        input: z.object({ topic: z.string(), max: z.number() }),
+        output: z.object({ checkpoints: z.array(checkpointSchema) }),
+      },
+      model: "tutor",
+      system:
+        "You design Feynman-technique study sessions. Split the topic into a short, " +
+        "ordered list of checkpoints, simplest first. Each has a title and the one key " +
+        "idea a learner must be able to explain in plain words.",
+      prompt: ({ input }) => `Topic: ${input.topic}\nAt most ${input.max} checkpoints.`,
+    },
+    // context_builder: set the scene for one checkpoint.
+    introduceCheckpoint: {
+      schemas: {
+        input: z.object({ topic: z.string(), title: z.string(), keyIdea: z.string() }),
+        output: z.object({ context: z.string() }),
+      },
+      model: "tutor",
+      system:
+        "Introduce one checkpoint of a study session in 3-5 sentences: why it matters " +
+        "and what the learner should understand. Do not quiz; the learner will explain it back.",
+      prompt: ({ input }) =>
+        `Topic: ${input.topic}\nCheckpoint: ${input.title}\nKey idea: ${input.keyIdea}`,
+    },
+    // verify_answer: score the learner's explanation against the key idea.
+    verifyExplanation: {
+      schemas: {
+        input: z.object({ title: z.string(), keyIdea: z.string(), explanation: z.string() }),
+        output: z.object({ score: z.number().min(0).max(100), feedback: z.string() }),
+      },
+      model: "tutor",
+      system:
+        "Grade a learner's own-words explanation against the key idea. Score 0-100 for " +
+        "accuracy and completeness; ignore style. Feedback: one or two sentences naming " +
+        "what is missing or wrong.",
+      prompt: ({ input }) =>
+        [
+          `Checkpoint: ${input.title}`,
+          `Key idea: ${input.keyIdea}`,
+          `Learner's explanation: ${input.explanation}`,
+        ].join("\n"),
+    },
+    // teach_concept: a simpler, analogy-first re-explanation.
+    explainSimply: {
+      schemas: {
+        input: z.object({
+          title: z.string(),
+          keyIdea: z.string(),
+          explanation: z.string(),
+          feedback: z.string(),
+        }),
+        output: z.object({ explanation: z.string() }),
+      },
+      model: "tutor",
+      system:
+        "Re-teach a concept the Feynman way: plain words, one everyday analogy, no jargon. " +
+        "Address the specific gap in the learner's attempt. Keep it under 120 words.",
+      prompt: ({ input }) =>
+        [
+          `Checkpoint: ${input.title}`,
+          `Key idea: ${input.keyIdea}`,
+          `Learner's attempt: ${input.explanation}`,
+          `Grader feedback: ${input.feedback}`,
+        ].join("\n"),
+    },
+  },
+});
+
+export const feynmanTutorSchemas = agentSetup.schemas;
+
+export const feynmanTutorMachine = agentSetup.createMachine({
+  id: "feynman-tutor",
+  context: ({ input }) => ({
+    topic: input.topic,
+    checkpoints: [],
+    checkpointIndex: 0,
+    reteaches: 0,
+    explanation: "",
+    lastScore: null,
+    lastFeedback: "",
+    results: [],
+    notice: "",
+    failure: null,
+  }),
+  initial: "planningCheckpoints",
+  states: {
+    planningCheckpoints: {
+      invoke: {
+        src: "planCheckpoints",
+        input: ({ context }) => ({ topic: context.topic, max: MAX_CHECKPOINTS }),
+        onDone: ({ output }) => ({
+          target: "checkingPlan",
+          context: { checkpoints: output.result.checkpoints.slice(0, MAX_CHECKPOINTS) },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `planCheckpoints failed: ${String(event.error)}` },
+        }),
+      },
+    },
+    checkingPlan: {
+      type: "choice",
+      choice: ({ context }) =>
+        context.checkpoints.length === 0
+          ? { target: "failed", context: { failure: "The planner returned no checkpoints." } }
+          : { target: "presenting" },
+    },
+    // context_builder: the intro becomes the idle state's notice.
+    presenting: {
+      invoke: {
+        src: "introduceCheckpoint",
+        input: ({ context }) => ({ topic: context.topic, ...currentCheckpoint(context) }),
+        onDone: ({ context, output }) => ({
+          target: "awaitingExplanation",
+          context: {
+            notice:
+              `Checkpoint ${context.checkpointIndex + 1}/${context.checkpoints.length}: ` +
+              `${currentCheckpoint(context).title}\n\n${output.result.context}`,
+          },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `introduceCheckpoint failed: ${String(event.error)}` },
+        }),
+      },
+    },
+    // The interrupt: the run settles idle here until the learner explains or skips.
+    awaitingExplanation: {
+      tags: ["waiting"],
+      meta: {
+        interaction: {
+          label: "{notice}\n\nExplain this back in your own words.",
+          textEvent: "EXPLAIN",
+          events: {
+            EXPLAIN: { label: "Submit explanation", style: "primary" },
+            SKIP: { label: "Skip this checkpoint" },
+          },
+        },
+      },
+      on: {
+        EXPLAIN: ({ event }) => ({ target: "verifying", context: { explanation: event.text } }),
+        SKIP: ({ context }) => ({
+          target: "advancing",
+          context: recordAndAdvance(context, "skipped"),
+        }),
+      },
+    },
+    verifying: {
+      invoke: {
+        src: "verifyExplanation",
+        input: ({ context }) => ({
+          ...currentCheckpoint(context),
+          explanation: context.explanation,
+        }),
+        onDone: ({ output }) => ({
+          target: "grading",
+          context: { lastScore: output.result.score, lastFeedback: output.result.feedback },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `verifyExplanation failed: ${String(event.error)}` },
+        }),
+      },
+    },
+    // The understanding check: pass, re-teach while budget remains, else fail
+    // this checkpoint and move on.
+    grading: {
+      type: "choice",
+      choice: ({ context }) => {
+        if ((context.lastScore ?? 0) >= PASS_SCORE) {
+          return { target: "advancing", context: recordAndAdvance(context, "passed") };
+        }
+        if (context.reteaches < MAX_RETEACHES) return { target: "teaching" };
+        return { target: "advancing", context: recordAndAdvance(context, "failed") };
+      },
+    },
+    teaching: {
+      invoke: {
+        src: "explainSimply",
+        input: ({ context }) => ({
+          ...currentCheckpoint(context),
+          explanation: context.explanation,
+          feedback: context.lastFeedback,
+        }),
+        onDone: ({ context, output }) => ({
+          target: "awaitingExplanation",
+          context: {
+            reteaches: context.reteaches + 1,
+            notice:
+              `Not yet (score ${context.lastScore ?? 0}/100, need ${PASS_SCORE}): ` +
+              `${context.lastFeedback}\n\n${output.result.explanation}`,
+          },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `explainSimply failed: ${String(event.error)}` },
+        }),
+      },
+    },
+    // next_checkpoint: more to cover, or the session is over.
+    advancing: {
+      type: "choice",
+      choice: ({ context }) =>
+        context.checkpointIndex < context.checkpoints.length
+          ? { target: "presenting" }
+          : { target: "done" },
+    },
+    done: {
+      type: "final",
+      output: ({ context }) => sessionOutput(context),
+    },
+    // Planning produced nothing, or a model call failed: the checkpoints
+    // finished so far are the best-effort output.
+    failed: {
+      type: "final",
+      output: ({ context }) => sessionOutput(context),
+    },
+  },
+});
+
+type FeynmanSnapshot = SnapshotFrom<typeof feynmanTutorMachine>;
+
+/** What a host (or the test) sends to unblock the idle state. */
+export type FeynmanHumanEvent = { type: "EXPLAIN"; text: string } | { type: "SKIP" };
+
+export interface RunFeynmanTutorOptions {
+  topic?: string;
+  /** Injected for tests; the direct run supplies a real model executor. */
+  generateText?: AgentRequestExecutors["generateText"];
+  /** Scripted learner events, consumed in order on each idle settle; then stdin. */
+  humanEvents?: FeynmanHumanEvent[];
+  /** Observes each machine transition. */
+  onProgress?: (state: string) => void;
+  /** Observes the prompt shown on each idle settle. */
+  onPrompt?: (label: string) => void;
+}
+
+export type FeynmanTutorResult = z.infer<typeof outputSchema> & {
+  /** The final state reached: `done` or `failed`. */
+  outcome: string;
+  progress: string[];
+};
+
+/** Runs the session, resuming from `persist()` on every idle settle. */
+export async function runFeynmanTutorExample(
+  options: RunFeynmanTutorOptions = {},
+): Promise<FeynmanTutorResult> {
+  const {
+    topic = "How public-key cryptography works",
+    generateText,
+    onProgress,
+    onPrompt,
+  } = options;
+  const queued = [...(options.humanEvents ?? [])];
+  const progress: string[] = [];
+  const shared = {
+    executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+    onTransition: (snapshot: FeynmanSnapshot) => {
+      const state = getStatePath(snapshot);
+      // A resume re-reports the restored state; record each state once per visit.
+      if (progress.at(-1) === state) return;
+      progress.push(state);
+      onProgress?.(state);
+    },
+  };
+
+  let result = await runAgent(feynmanTutorMachine, { input: { topic }, ...shared });
+  while (result.status === "idle") {
+    const label =
+      getInteraction(result.snapshot, { preserveWhitespace: true })?.label ??
+      result.snapshot.context.notice;
+    onPrompt?.(label);
+    const event = queued.shift() ?? toHumanEvent(await promptLine(`${label}\n(or "skip")\n> `));
+    result = await runAgent(feynmanTutorMachine, {
+      snapshot: result.persist(),
+      event,
+      ...shared,
+    });
+  }
+
+  if (result.status !== "done") {
+    throw new Error(`Feynman tutor example did not complete: ${result.status}`);
+  }
+  return { ...result.output, outcome: getStatePath(result.snapshot), progress };
+}
+
+/** Typed "skip" skips the checkpoint; anything else is an explanation. */
+export function toHumanEvent(text: string): FeynmanHumanEvent {
+  return /^skip$/i.test(text.trim()) ? { type: "SKIP" } : { type: "EXPLAIN", text };
+}
+
+/** Prompt once on stdin and resolve the trimmed reply. */
+async function promptLine(query: string): Promise<string> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question(query)).trim();
+  } finally {
+    rl.close();
+  }
+}
+
+// Run directly (`tsx index.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
+  void (async () => {
+    const result = await runFeynmanTutorExample();
+    console.log(`\n[${result.outcome}]\n`);
+    console.log(result.summary);
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

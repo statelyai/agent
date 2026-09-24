@@ -1,13 +1,34 @@
 import { expect, test } from "vitest";
+import type { AgentRequestExecutors } from "@statelyai/agent";
 import type { Snapshot } from "xstate";
 import { resumeScenarioRun, startScenarioRun } from "./agent-runner";
 import { cases, runCase, runComparison } from "./email-drafter-compare";
-import { scriptedExecutorsFor } from "./scripted-executors";
 import { emailDrafterV1Machine } from "@/agents/email-drafter-v1";
 import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
 
-// The scripted executors the UI runs without a key; same for both versions.
-const executors = scriptedExecutorsFor("email-drafter-v1");
+const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
+
+// A rule-based stand-in model, the same for both versions: the evaluator flags
+// a missing address or the word "subject"; the drafter copies the request into
+// the body and leaves the subject blank when asked for none.
+const executors: Partial<AgentRequestExecutors> = {
+  generateText: async (request) => {
+    const text = request.prompt ?? "";
+    const to = text.match(EMAIL)?.[0] ?? "";
+    const namesSubject = /subject/i.test(text);
+    if (request.name === "evaluatePrompt") {
+      const missing = [...(to ? [] : ["recipient"]), ...(namesSubject ? [] : ["subject"])];
+      const questions = missing.map((field) => `What is the ${field}?`);
+      return { result: { satisfied: missing.length === 0, missing, questions } };
+    }
+    const subject = /\bno subject\b/i.test(text) ? "" : "Re: your request";
+    const openQuestions = [
+      ...(to ? [] : ["Who should this go to?"]),
+      ...(subject && namesSubject ? [] : ["What subject line do you want?"]),
+    ];
+    return { result: { to, subject, body: text, openQuestions } };
+  },
+};
 
 const optionalCase = cases.find((entry) => entry.id === "optional-1")!;
 const recipientCase = cases.find((entry) => entry.id === "recipient-1")!;
@@ -28,13 +49,12 @@ test("v1 asks before drafting when only optional details are missing; v2 drafts 
 
 test("v2 moves the recipient check to the send boundary and never sends without one", async () => {
   const start = (id: "email-drafter-v2", prompt: string) =>
-    startScenarioRun(id, prompt, "script", undefined, executors);
+    startScenarioRun(id, prompt, undefined, executors);
   const resume = (snapshot: unknown, event: { type: string; [key: string]: unknown }) =>
     resumeScenarioRun(
       "email-drafter-v2",
       snapshot as Snapshot<unknown>,
       event,
-      "script",
       undefined,
       executors,
     );
@@ -79,14 +99,12 @@ test("v1 'draft anyway' cannot send without a recipient; SEND asks instead", asy
       "email-drafter-v1",
       snapshot as Snapshot<unknown>,
       event,
-      "script",
       undefined,
       executors,
     );
   const asked = await startScenarioRun(
     "email-drafter-v1",
     recipientCase.prompt,
-    "script",
     undefined,
     executors,
   );
@@ -99,7 +117,7 @@ test("v1 'draft anyway' cannot send without a recipient; SEND asks instead", asy
   expect(askedAgain.idle?.prompt).toContain("Who should this go to?");
   expect(askedAgain.idle?.events.map((event) => event.type)).toEqual(["MORE_INFO", "DRAFT_ANYWAY"]);
 
-  // MORE_INFO re-evaluates and re-drafts; the scripted drafter picks the address up.
+  // MORE_INFO re-evaluates and re-drafts; the stub drafter picks the address up.
   const redrafted = await resume(askedAgain.idle!.snapshot, {
     type: "MORE_INFO",
     text: "Recipient: alex@example.com. Subject: Coffee on Thursday.",
@@ -108,27 +126,6 @@ test("v1 'draft anyway' cannot send without a recipient; SEND asks instead", asy
   const done = await resume(redrafted.idle!.snapshot, { type: "SEND" });
   expect(done.status).toBe("done");
   expect(done.response).toContain("alex@example.com");
-});
-
-test("scripted mode reads an angle-bracketed address, so v2 sends without asking", async () => {
-  const reviewing = await startScenarioRun(
-    "email-drafter-v2",
-    "Email <priya@example.com>, subject 'Hi', saying the deck is ready.",
-    "script",
-    undefined,
-    executors,
-  );
-  expect(reviewing.status).toBe("idle");
-  expect(reviewing.response).toContain("**To:** priya@example.com");
-  const sent = await resumeScenarioRun(
-    "email-drafter-v2",
-    reviewing.idle!.snapshot as unknown as Snapshot<unknown>,
-    { type: "SEND" },
-    "script",
-    undefined,
-    executors,
-  );
-  expect(sent.status).toBe("done");
 });
 
 test("a request that errors still counts as a model call, with no token total", async () => {
@@ -157,7 +154,6 @@ test("v1 idle label surfaces the evaluator's questions", async () => {
   const first = await startScenarioRun(
     "email-drafter-v1",
     recipientCase.prompt,
-    "script",
     undefined,
     executors,
   );
@@ -172,7 +168,7 @@ test("the comparison holds the send rule for both versions and v2 asks less", as
   expect(v2?.machine).toBe("v2");
 
   for (const summary of [v1!, v2!]) {
-    // Scripted executors report no usage, so no total is claimed.
+    // The stub reports no usage, so no total is claimed.
     expect(summary.totals.totalTokens).toBeNull();
     expect(summary.totals.sendRuleViolations).toBe(0);
     expect(summary.totals.sent).toBe(cases.length);
@@ -196,7 +192,6 @@ test("v2 offers 'Add subject' in SEND's place, and sending stays a separate deci
       "email-drafter-v2",
       snapshot as Snapshot<unknown>,
       event,
-      "script",
       undefined,
       executors,
     );
@@ -204,7 +199,6 @@ test("v2 offers 'Add subject' in SEND's place, and sending stays a separate deci
   const reviewing = await startScenarioRun(
     "email-drafter-v2",
     "Email jenny@example.com about coffee after my talk on Thursday, no subject line.",
-    "script",
     undefined,
     executors,
   );
@@ -242,7 +236,6 @@ test("a sent email drops the open questions; a draft still shows them", async ()
   const reviewing = await startScenarioRun(
     "email-drafter-v2",
     optionalCase.prompt,
-    "script",
     undefined,
     executors,
   );
@@ -252,7 +245,6 @@ test("a sent email drops the open questions; a draft still shows them", async ()
     "email-drafter-v2",
     reviewing.idle!.snapshot as unknown as Snapshot<unknown>,
     { type: "SEND" },
-    "script",
     undefined,
     executors,
   );
@@ -268,14 +260,12 @@ test("v1 SEND with no subject asks, the same way it asks for a recipient", async
       "email-drafter-v1",
       snapshot as Snapshot<unknown>,
       event,
-      "script",
       undefined,
       executors,
     );
   const reviewing = await startScenarioRun(
     "email-drafter-v1",
     "Email jenny@example.com about coffee after my talk on Thursday, no subject line.",
-    "script",
     undefined,
     executors,
   );

@@ -1,0 +1,19 @@
+{
+  "name": "info-gathering",
+  "title": "Gather prompt requirements, then write the prompt",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph prompt generation from user requirements (information gathering chatbot) tutorial",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/chatbots/information-gather-prompting/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Asks the user for a prompt's objective, variables, constraints and requirements one question at a time, then writes the prompt template. The model only extracts what it heard; a choice state checks that all four slots are filled, forces one confirmation turn, and ends in failed after MAX_TURNS answers instead of trusting the model to decide when it has enough."
+  },
+  "starters": [
+    "I need a prompt that extracts invoice fields from emails",
+    "Help me write a prompt that summarizes support tickets for an on-call engineer",
+    "I want a prompt that turns meeting notes into action items"
+  ]
+}

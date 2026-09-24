@@ -12,10 +12,9 @@
  * `start()` from `@flue/runtime/node` and drive an agent through
  * `init()` / `dispatch()` / `read()`.
  *
- * Run: npx tsx examples/flue-host/index.ts
- *   No API key -> pi's faux provider plays the model, so both demos run
- *     offline against the real runtime.
- *   OPENAI_API_KEY + ANTHROPIC_API_KEY -> real models drive the same agents.
+ * Run: OPENAI_API_KEY=... ANTHROPIC_API_KEY=... npx tsx examples/flue-host/index.ts
+ *   Real models drive both agents; the flue-owned agent reviews with an
+ *   Anthropic model, so both keys are required.
  *
  * Flue holds one runtime per process, so the demos run in sequence, each
  * starting and stopping its own.
@@ -24,34 +23,29 @@ export {
   MachineOwnedAgent,
   completed,
   main,
-  mockRunOptions,
   resumeDraft,
   resumeWorkflow,
   startDraft,
   startWorkflow,
-  useLiveExecutors,
+  useToolExecutors,
   type ToolResult,
 } from "./machine-owned.js";
-export {
-  FlueOwnedAgent,
-  main as flueOwnedMain,
-  outbox,
-  scriptedModel as flueOwnedScriptedModel,
-  steps,
-} from "./flue-owned.js";
+export { FlueOwnedAgent, main as flueOwnedMain, outbox, steps } from "./flue-owned.js";
 
 import { main as machineOwnedMain } from "./machine-owned.js";
 import { main as flueOwnedMain } from "./flue-owned.js";
 
 if (import.meta.url === new URL(process.argv[1] ?? "", "file:").href) {
-  // The flue-owned agent reviews with an Anthropic model, so live mode needs
-  // both keys; with either missing, both demos run on the faux provider.
-  const live = Boolean(process.env.OPENAI_API_KEY && process.env.ANTHROPIC_API_KEY);
   (async () => {
-    console.log(`=== Way 1: machine-owned (${live ? "live" : "scripted"}) ===`);
-    await machineOwnedMain({ live });
-    console.log(`\n=== Way 2: flue-owned (${live ? "live" : "scripted"}) ===`);
-    await flueOwnedMain({ live });
+    // The flue-owned agent reviews with an Anthropic model, so both keys are
+    // checked before either demo starts.
+    for (const key of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) {
+      if (!process.env[key]) throw new Error(`Set ${key} to run this example.`);
+    }
+    console.log("=== Way 1: machine-owned ===");
+    await machineOwnedMain();
+    console.log("\n=== Way 2: flue-owned ===");
+    await flueOwnedMain();
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

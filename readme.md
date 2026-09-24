@@ -139,7 +139,7 @@ const liveResult = await runAgent(refundMachine, {
 });
 ```
 
-For a machine with several requests, `createScriptedExecutors` from `@statelyai/agent/testing` holds ordered answers keyed by request name. See [Evals](docs/evals.md#scripted-executors).
+For a machine with several requests, the executor routes on `request.name`, or `MockLanguageModelV3` from `ai/test` stands in for the provider behind `createAiSdkExecutors`. See [Evals](docs/evals.md#testing-without-a-provider).
 
 Passing the same `models` map to `setupAgent({ models })` types the machine's model refs. Executors are always explicit, and core does not import the AI SDK. See [Hosts and executors](docs/hosts.md).
 
@@ -155,7 +155,7 @@ flowchart LR
   R -->|event or output| M
 ```
 
-The machine never talks to a model directly, so swapping `createAiSdkExecutors` for `createScriptedExecutors` (or your own functions) changes nothing about the agent.
+The machine never talks to a model directly, so swapping `createAiSdkExecutors` for your own functions changes nothing about the agent.
 
 The example above has one model decision and two final outcomes. Real machines add approval states, retries, parallel work, child agents, and long-running waits without changing how control flow is represented.
 

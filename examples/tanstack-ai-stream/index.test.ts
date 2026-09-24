@@ -1,22 +1,27 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { EventType, StreamProcessor, type StreamChunk } from "@tanstack/ai";
-import {
-  agentRunToAgUiStream,
-  createScriptedChatExecutors,
-  handleChatRequest,
-  POST,
-  tanstackAiStreamMachine,
-} from "./index.js";
+import { createMockModelExecutors } from "../mock-model.js";
+import { agentRunToAgUiStream, handleChatRequest, POST, tanstackAiStreamMachine } from "./index.js";
 
-// The route resolves real model executors when `OPENAI_API_KEY` is set. These
-// tests assert the scripted playback, so the key is neutralized here rather
-// than depending on whether the machine running them has one.
+// The route resolves real model executors from `OPENAI_API_KEY`. These tests
+// pass a mock model instead, and neutralize the key so the one test of the
+// default path does not depend on whether the machine running them has one.
 beforeEach(() => {
   vi.stubEnv("OPENAI_API_KEY", "");
 });
 afterEach(() => {
   vi.unstubAllEnvs();
 });
+
+/** A mock model answering both streamed requests; the adapter streams it word by word. */
+function mockExecutors() {
+  return createMockModelExecutors({
+    text: {
+      streamOutline: "- what they are\n- why they help",
+      streamAnswer: "State machines make an agent's control flow explicit and replayable.",
+    },
+  });
+}
 
 /** Parses a raw SSE body into the ordered AG-UI events it carried. */
 function parseChunks(body: string): StreamChunk[] {
@@ -56,7 +61,10 @@ function chatRequest(question: string): Request {
 const types = (chunks: StreamChunk[]): string[] => chunks.map((chunk) => String(chunk.type));
 
 test("the route streams the run as AG-UI events over SSE", async () => {
-  const response = await handleChatRequest(chatRequest("Why state machines for agents?"));
+  const response = await handleChatRequest(
+    chatRequest("Why state machines for agents?"),
+    mockExecutors(),
+  );
 
   expect(response.headers.get("Content-Type")).toBe("text/event-stream");
   expect(response.headers.get("Cache-Control")).toBe("no-cache");
@@ -124,7 +132,10 @@ test("the route streams the run as AG-UI events over SSE", async () => {
 });
 
 test("TanStack AI's own StreamProcessor reconstructs the messages from those events", async () => {
-  const response = await handleChatRequest(chatRequest("Why state machines for agents?"));
+  const response = await handleChatRequest(
+    chatRequest("Why state machines for agents?"),
+    mockExecutors(),
+  );
   const chunks = parseChunks(await response.text());
 
   // `StreamProcessor` is the exact fold `useChat` applies internally, so this
@@ -156,7 +167,7 @@ test("TanStack AI's own StreamProcessor reconstructs the messages from those eve
 });
 
 test("the question comes off the request body", async () => {
-  const response = await handleChatRequest(chatRequest("What is an actor?"));
+  const response = await handleChatRequest(chatRequest("What is an actor?"), mockExecutors());
   const chunks = parseChunks(await response.text());
   const finished = chunks[chunks.length - 1] as StreamChunk & { type: string };
 
@@ -174,15 +185,17 @@ test("a body that is not valid AG-UI is rejected with a 400", async () => {
   });
 
   // `chatParamsFromRequest` throws a `Response`, which a Start route returns.
-  const thrown = await handleChatRequest(bad).catch((error: unknown) => error);
+  const thrown = await handleChatRequest(bad, mockExecutors()).catch((error: unknown) => error);
   expect(thrown).toBeInstanceOf(Response);
   expect((thrown as Response).status).toBe(400);
 });
 
-test("the exported POST handler serves the route", async () => {
-  const response = await POST({ request: chatRequest("Why state machines?") });
-  expect(response.headers.get("Content-Type")).toBe("text/event-stream");
-  expect(types(parseChunks(await response.text()))).toContain("RUN_FINISHED");
+test("the exported POST handler needs a real model key and says so", async () => {
+  // No key and no fallback: the route fails naming the missing variable rather
+  // than answering with something that is not a model.
+  await expect(POST({ request: chatRequest("Why state machines?") })).rejects.toThrow(
+    "OPENAI_API_KEY",
+  );
 });
 
 test("a failing executor ends in the machine's `failed` state", async () => {
@@ -213,7 +226,7 @@ test("an aborted run closes the stream with RUN_ERROR", async () => {
   const chunks: StreamChunk[] = [];
   for await (const chunk of agentRunToAgUiStream(tanstackAiStreamMachine, {
     input: { question: "Why state machines?" },
-    executors: createScriptedChatExecutors(),
+    executors: mockExecutors(),
     signal: AbortSignal.abort(),
   })) {
     chunks.push(chunk);

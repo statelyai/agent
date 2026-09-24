@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import { createScriptedExecutors } from "@statelyai/agent/testing";
+import { createMockModelExecutors } from "../mock-model.js";
 import { correctiveRagMachine, runCorrectiveRagExample } from "./index.js";
 
 /**
@@ -14,7 +14,7 @@ function scriptedGenerateText(text: {
   rewriteQuery?: unknown[];
   generateAnswer?: unknown[];
 }) {
-  return createScriptedExecutors({ text }).generateText;
+  return createMockModelExecutors({ text }).generateText;
 }
 
 const allRelevant = { grades: [{ relevant: true }, { relevant: true }, { relevant: true }] };

@@ -1,5 +1,9 @@
 # @statelyai/agent-demo
 
+## Unreleased
+
+- Removed: keyless walkthrough and scripted-executor modes; the demo now requires OPENAI_API_KEY.
+
 ## 0.0.1-alpha.13
 
 ### Patch Changes

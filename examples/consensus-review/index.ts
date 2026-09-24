@@ -2,10 +2,13 @@
  * Independent model reviewers vote in parallel; machine policy counts votes.
  * Inspired by https://www.anthropic.com/engineering/building-effective-agents
  * A failed reviewer abstains. Fewer than two approvals requires human review.
- * Run without credentials: pnpm tsx examples/consensus-review/index.ts
- * Replace the scripted executor with any SDK executor; the machine stays intact.
+ * Run: OPENAI_API_KEY=... pnpm tsx examples/consensus-review/index.ts
+ * The runner defaults to real AI SDK executors; pass `executors` to swap the
+ * model layer (tests script it by request name). The machine stays intact.
  */
 import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   interactionMetaSchema,
   runAgent,
@@ -15,7 +18,11 @@ import {
 
 const vote = z.object({ approve: z.boolean(), reason: z.string() });
 const reviewer = z.enum(["security", "reliability", "maintainability"]);
+const models = {
+  reviewer: openai("gpt-5.4-mini"),
+};
 const agent = setupAgent({
+  models,
   // `source` is decided by host code, never by whoever supplied the patch: the
   // patch text reaches every reviewer prompt, so a patch the host did not
   // author is untrusted input and model votes cannot auto-accept it. There is
@@ -186,13 +193,21 @@ export const consensusReviewMachine = agent.createMachine({
 
 const BUILT_IN_PATCH = "Validate input before writing to the database.";
 
+/** The host's real executors: one OpenAI model behind the `reviewer` ref. */
+function liveExecutors() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY to run the consensus-review example.");
+  }
+  return createAiSdkExecutors({ models });
+}
+
 /**
  * Runs the example. `source` is derived here, in host code, and cannot be
  * supplied by the caller: the built-in patch is the only trusted one, and any
  * patch passed in is `"external"`, so a caller cannot promote their own patch
  * to auto-acceptance by claiming it is trusted.
  */
-export function runConsensusReviewExample(
+export async function runConsensusReviewExample(
   options?: Omit<RunAgentOptions<typeof consensusReviewMachine>, "input"> & { patch?: string },
 ) {
   // `input` is stripped at runtime too, not only by the type: a caller passing
@@ -200,17 +215,14 @@ export function runConsensusReviewExample(
   const {
     patch,
     input: _ignored,
+    executors = liveExecutors(),
     ...runOptions
   } = (options ?? {}) as typeof options & {
     input?: unknown;
   };
   return runAgent(consensusReviewMachine, {
-    executors: {
-      generateText: async () => ({
-        result: { approve: true, reason: "Scripted review; substitute a real model in your host." },
-      }),
-    },
     ...runOptions,
+    executors,
     // Last on purpose: the host-derived input wins over anything spread above.
     input:
       patch === undefined
@@ -220,6 +232,10 @@ export function runConsensusReviewExample(
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
   runConsensusReviewExample()
     .then((result) => console.log(result.status === "done" ? result.output : result.status))
     .catch((error) => {

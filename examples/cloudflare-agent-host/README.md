@@ -40,8 +40,7 @@ An event the current state does not accept is a 400 with the current view. A mal
 ## Run
 
 ```sh
-pnpm --filter @statelyai/example-cloudflare-agent-host dev        # scripted, no API key
-pnpm --filter @statelyai/example-cloudflare-agent-host dev:live   # real models
+pnpm --filter @statelyai/example-cloudflare-agent-host dev:live   # writes .dev.vars from the repo .env, then dev
 
 curl -X POST localhost:3009/agents/email-drafter/demo \
   -d '{"type":"PROMPT_SUBMITTED","text":"Email ana@x.com about Friday'\''s launch"}'
@@ -49,7 +48,7 @@ curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"SEND"}'
 curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"END"}'
 ```
 
-Without `OPENAI_API_KEY` the host falls back to scripted executors, so the example boots and completes with no credentials.
+`OPENAI_API_KEY` is required: without the binding a turn fails with a 500 naming it. There is no fallback model.
 
 ## Test
 

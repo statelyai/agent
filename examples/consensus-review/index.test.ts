@@ -1,8 +1,19 @@
+/**
+ * The runner defaults to real OpenAI executors. These tests script the model
+ * at the provider with the repo's AI SDK mock, answering by request name
+ * (`review`), or pass hand-written executors where a test is about invocation
+ * identity rather than model output.
+ */
 import { expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
-import { getInteraction, provideExecutors, type AgentRequestExecutors } from "@statelyai/agent";
+import { getInteraction, provideExecutors } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
+import { createMockModelExecutors } from "../mock-model.js";
 import { consensusReviewMachine, runConsensusReviewExample } from "./index.js";
+
+/** Every reviewer approves. */
+const approving = (reason = "approved") =>
+  createMockModelExecutors({ text: { review: { approve: true, reason } } });
 
 test("two approvals reach quorum, regardless of completion order", async () => {
   // All three calls share the semantic request name "review". Invocation IDs
@@ -51,6 +62,7 @@ test("review failures abstain; human rejection survives a JSON snapshot round tr
   const result = await runConsensusReviewExample({
     snapshot: JSON.parse(JSON.stringify(pending.persist())),
     event: { type: "REJECT" },
+    executors: approving(),
   });
   expect(result.status).toBe("done");
   if (result.status !== "done") return;
@@ -59,9 +71,7 @@ test("review failures abstain; human rejection survives a JSON snapshot round tr
 });
 
 test("same machine runs in a native XState host with identical output", async () => {
-  const executors: AgentRequestExecutors = {
-    generateText: async () => ({ result: { approve: true, reason: "Accepted" } }),
-  };
+  const executors = approving("Accepted");
   const managed = await runConsensusReviewExample({ executors });
   const actor = createActor(provideExecutors(consensusReviewMachine, executors), {
     // A native host parses no input schema, so it supplies `source` itself.
@@ -81,15 +91,17 @@ test("same machine runs in a native XState host with identical output", async ()
 });
 
 test("invalid model output cannot count as an approval", async () => {
-  const pending = await runConsensusReviewExample({
-    executors: { generateText: async () => ({ result: { approve: "yes", reason: "bad shape" } }) },
+  const executors = createMockModelExecutors({
+    text: { review: { approve: "yes", reason: "bad shape" } },
   });
+  const pending = await runConsensusReviewExample({ executors });
   expect(pending.status).toBe("idle");
   expect(pending.snapshot.context.votes).toEqual([]);
   expect(pending.snapshot.context.abstentions).toHaveLength(3);
   const result = await runConsensusReviewExample({
     snapshot: pending.persist(),
     event: { type: "APPROVE" },
+    executors,
   });
   expect(result.status).toBe("done");
   if (result.status === "done")
@@ -107,9 +119,7 @@ test("an external patch cannot auto-accept, even on a unanimous model vote", asy
   // pass `source` through the runner.
   const pending = await runConsensusReviewExample({
     patch: adversarial,
-    executors: {
-      generateText: async () => ({ result: { approve: true, reason: "approved" } }),
-    },
+    executors: approving(),
   });
   expect(pending.status).toBe("idle");
   expect(pending.snapshot.value).toBe("humanReview");
@@ -118,6 +128,7 @@ test("an external patch cannot auto-accept, even on a unanimous model vote", asy
   const result = await runConsensusReviewExample({
     snapshot: JSON.parse(JSON.stringify(pending.persist())),
     event: { type: "APPROVE" },
+    executors: approving(),
   });
   expect(result.status).toBe("done");
   if (result.status === "done")
@@ -125,7 +136,7 @@ test("an external patch cannot auto-accept, even on a unanimous model vote", asy
 });
 
 test("the trusted default still auto-accepts a unanimous vote", async () => {
-  const result = await runConsensusReviewExample();
+  const result = await runConsensusReviewExample({ executors: approving() });
   expect(result.status).toBe("done");
   if (result.status === "done")
     expect(result.output).toMatchObject({ approved: true, humanReviewed: false });
@@ -134,9 +145,7 @@ test("the trusted default still auto-accepts a unanimous vote", async () => {
 test("a caller cannot promote a supplied patch to trusted, even with the built-in text", async () => {
   const pending = await runConsensusReviewExample({
     patch: "Validate input before writing to the database.",
-    executors: {
-      generateText: async () => ({ result: { approve: true, reason: "approved" } }),
-    },
+    executors: approving(),
   });
   expect(pending.status).toBe("idle");
   expect(pending.snapshot.value).toBe("humanReview");
@@ -147,11 +156,19 @@ test("an untyped `input` passed to the runner cannot overwrite the derived sourc
   const pending = await runConsensusReviewExample({
     patch: "Validate input before writing to the database.",
     input: { patch: "anything", source: "trusted" },
-    executors: {
-      generateText: async () => ({ result: { approve: true, reason: "approved" } }),
-    },
+    executors: approving(),
   } as never);
   expect(pending.status).toBe("idle");
   expect(pending.snapshot.value).toBe("humanReview");
   expect(pending.snapshot.context.source).toBe("external");
+});
+
+test("without injected executors or a key, the runner rejects naming the env var", async () => {
+  const key = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    await expect(runConsensusReviewExample()).rejects.toThrow("OPENAI_API_KEY");
+  } finally {
+    if (key !== undefined) process.env.OPENAI_API_KEY = key;
+  }
 });

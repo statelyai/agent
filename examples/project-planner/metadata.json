@@ -1,0 +1,24 @@
+{
+  "name": "project-planner",
+  "title": "Plan a project where the machine, not the model, computes the schedule",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "langgraph",
+    "source": "Project manager assistant (GenAI_Agents community LangGraph tutorial)",
+    "url": "https://github.com/NirDiamant/GenAI_Agents/blob/main/all_agents_tutorials/project_manager_assistant_agent.ipynb"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "The model proposes tasks with durations and dependencies; the machine checks the dependency graph (unique ids, known references, no cycles), computes the critical-path schedule itself, and re-plans only when the computed length misses the deadline, with bounded repair and replan budgets that end in failed."
+  },
+  "starters": [
+    {
+      "label": "Tight 10-day deadline — triggers a replan",
+      "input": { "goal": "Ship a mobile app MVP for iOS and Android", "deadlineDays": 10 }
+    },
+    {
+      "label": "Generous 90-day deadline — fits on the first plan",
+      "input": { "goal": "Launch a company blog with ten launch posts", "deadlineDays": 90 }
+    }
+  ]
+}

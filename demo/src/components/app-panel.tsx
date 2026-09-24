@@ -16,7 +16,6 @@ import type { ChatIdle, JsonObject } from "@/lib/machine-ui";
 import { stateValueLabel, traceSteps, type TraceStep } from "@/lib/trace-view";
 
 export type ChatTurnResult = {
-  mode: string;
   model?: string;
   status: "done" | "idle" | "error";
   trace: TraceEntry[];
@@ -63,7 +62,7 @@ function resultState(result: ChatTurnResult): string {
     (entry) => entry.event.type !== "xstate.init" && entry.event.type !== "@xstate.init",
   );
   const last = committed[committed.length - 1];
-  return last ? stateValueLabel(last.value) : result.mode;
+  return last ? stateValueLabel(last.value) : result.status;
 }
 
 /** TraceSteps → fake tool-call parts the TransitionChip renderer understands. */

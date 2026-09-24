@@ -170,25 +170,27 @@ With three author calls and `maxRepairs: 2`, a worst-case run makes five calls, 
 
 ## Testing the loop without a key
 
-The loop is worth testing precisely because the interesting paths are the ones a live run rarely takes. [`createScriptedExecutors`](evals.md#deterministic-whole-run-evals) supplies canned model output while the real validator runs, so every branch is a plain unit test.
+The loop is worth testing precisely because the interesting paths are the ones a live run rarely takes. A [plain-function executor](evals.md#plain-function-executors) supplies canned model output while the real validator runs, so every branch is a plain unit test.
 
 ```ts no-check
-const scripted = createScriptedExecutors({
-  text: {
-    generateConfig: [BAD_JSON, NO_BLOCK, BAD_TARGET],
-    repairConfig: [VALID],
+const answers: Record<string, string[]> = {
+  generateConfig: [BAD_JSON, NO_BLOCK, BAD_TARGET],
+  repairConfig: [VALID],
+};
+const calls: string[] = [];
+
+const result = await runAgent(machine, {
+  input: { prompt: "a turnstile" },
+  executors: {
+    generateText: async (request) => {
+      calls.push(request.name);
+      return { result: answers[request.name].shift() };
+    },
   },
 });
 
-const result = await runAgent(machine, { input: { prompt: "a turnstile" }, executors: scripted });
-
 expect(result.output.repairs).toBe(1);
-expect(scripted.calls.map((call) => call.name)).toEqual([
-  "generateConfig",
-  "generateConfig",
-  "generateConfig",
-  "repairConfig",
-]);
+expect(calls).toEqual(["generateConfig", "generateConfig", "generateConfig", "repairConfig"]);
 ```
 
 One queued answer per invoke: the fan-out makes three `generateConfig` calls, so the queue holds three drafts. Three cases cover the loop:

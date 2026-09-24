@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
 import { z } from "zod";
 import { provideExecutors, runAgent, setupAgent, traceTransitions } from "../index.js";
-import { createScriptedExecutors } from "../testing/index.js";
+import type { AgentRequestExecutors } from "../index.js";
 import { createOtelTraceHandler } from "./index.js";
 
 const setup = setupAgent({
@@ -63,14 +63,17 @@ const machine = setup.createMachine({
   },
 });
 
-const script = {
-  decisions: {
-    "*": [{ event: { type: "WRITE" as const }, usage: { inputTokens: 11, outputTokens: 3 } }],
-  },
-  text: {
-    "*": [{ result: "a draft", usage: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } }],
-  },
-};
+/** Plain executors: every decision picks WRITE, every draft is fixed, both report usage. */
+const executors = {
+  decide: async () => ({
+    event: { type: "WRITE" as const },
+    usage: { inputTokens: 11, outputTokens: 3 },
+  }),
+  generateText: async () => ({
+    result: "a draft",
+    usage: { inputTokens: 20, outputTokens: 40, totalTokens: 60 },
+  }),
+} satisfies Partial<AgentRequestExecutors>;
 
 // What a real Node SDK registers; without it `context.active()` is always ROOT
 // and nothing the bridge does can nest under a caller's span.
@@ -96,7 +99,7 @@ describe("createOtelTraceHandler", () => {
 
     const result = await runAgent(machine, {
       input: { topic: "state machines" },
-      executors: createScriptedExecutors(script),
+      executors,
       onTrace,
     });
     onTrace.dispose();
@@ -166,7 +169,7 @@ describe("createOtelTraceHandler", () => {
     const onTrace = createOtelTraceHandler({ tracer });
     await runAgent(machine, {
       input: { topic: "privacy" },
-      executors: createScriptedExecutors(script),
+      executors,
       onTrace,
     });
     onTrace.dispose();
@@ -183,7 +186,7 @@ describe("createOtelTraceHandler", () => {
     const capturing = createOtelTraceHandler({ tracer, captureContent: true });
     await runAgent(machine, {
       input: { topic: "privacy" },
-      executors: createScriptedExecutors(script),
+      executors,
       onTrace: capturing,
     });
     capturing.dispose();
@@ -199,13 +202,12 @@ describe("createOtelTraceHandler", () => {
 
     const result = await runAgent(machine, {
       input: { topic: "failure" },
-      executors: createScriptedExecutors({
-        decisions: {
-          "*": () => {
-            throw boom;
-          },
+      executors: {
+        ...executors,
+        decide: async () => {
+          throw boom;
         },
-      }),
+      },
       onTrace,
     });
     onTrace.dispose();
@@ -229,7 +231,7 @@ describe("createOtelTraceHandler", () => {
     await tracer.startActiveSpan("http.request", async (active) => {
       await runAgent(machine, {
         input: { topic: "nesting" },
-        executors: createScriptedExecutors(script),
+        executors,
         onTrace,
       });
       active.end();
@@ -244,7 +246,7 @@ describe("createOtelTraceHandler", () => {
 
   test("degrades gracefully with no run boundary (uncontrolled path)", async () => {
     const onTrace = createOtelTraceHandler({ tracer });
-    const bound = provideExecutors(machine, createScriptedExecutors(script), { onTrace });
+    const bound = provideExecutors(machine, executors, { onTrace });
     const actor = createActor(bound, {
       input: { topic: "uncontrolled" },
       inspect: traceTransitions(onTrace),

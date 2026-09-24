@@ -84,8 +84,8 @@ prompt/messages, and tools. The machine owns control flow; the executor owns
 the provider call.
 
 An executor is just a function, so the machine runs anywhere a function does.
-When several requests each need their own canned answer, `createScriptedExecutors`
-keys them by request `name` — see [Evals](evals.md#scripted-executors).
+When several requests each need their own canned answer, the executor routes on
+`request.name`. See [Evals](evals.md#testing-without-a-provider).
 
 ## Use a real model
 

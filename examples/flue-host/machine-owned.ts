@@ -25,11 +25,10 @@
  * examples/next-host); swap it for Redis/Postgres and the tools are
  * unchanged.
  *
- * Run: npx tsx examples/flue-host/index.ts
- *   No API key -> pi's faux provider plays the model and mock executors
- *     drive the machine end to end.
- *   OPENAI_API_KEY=... -> a real model calls the same two tools, and the
- *     machine runs against real generations.
+ * Run: OPENAI_API_KEY=... ANTHROPIC_API_KEY=... npx tsx examples/flue-host/index.ts
+ *   A real model calls the two tools, and the machine runs against real
+ *   generations. (This way needs only OPENAI_API_KEY; ./flue-owned.ts also
+ *   reviews with an Anthropic model.)
  */
 import assert from "node:assert/strict";
 import type { z } from "zod";
@@ -39,7 +38,7 @@ import {
   getInteraction,
   parseAgentEvent,
   runAgent,
-  type AgentTextRequest,
+  type AgentRequestExecutors,
   type RunAgentOptions,
   type RunAgentResult,
 } from "@statelyai/agent";
@@ -53,14 +52,6 @@ import {
 import * as v from "valibot";
 import { defineTool, init, useModel, useTool } from "@flue/runtime";
 import { start } from "@flue/runtime/node";
-import {
-  fauxAssistantMessage,
-  fauxProvider,
-  fauxToolCall,
-  type Context,
-  type FauxResponseFactory,
-  type Message,
-} from "@earendil-works/pi-ai";
 
 // ─── Shared shapes ───
 
@@ -100,37 +91,19 @@ const runs = new Map<string, StoredRun>();
  */
 export const completed: EmailDraft[][] = [];
 
-// ─── Scripted executors ───
+// ─── Executors ───
 
 /**
- * Mock executors so the example (and its test) run with no API key or network.
- * Routes on `request.name` (the name each request declared in
- * ../email-drafter) instead of sniffing prompt text.
+ * What the tools run with: real generations through the email-drafter's
+ * declared models. `useToolExecutors()` swaps in other executors (a test's
+ * mock model, or a host's own provider setup).
  */
-export const mockRunOptions: RunAgentOptions<typeof emailDrafter> = {
-  executors: {
-    generateText: async (request: AgentTextRequest) =>
-      request.name === "evaluatePrompt"
-        ? { result: { satisfied: true, missing: [], questions: [] } }
-        : {
-            result: {
-              to: "team@example.com",
-              subject: "Deploy pipeline is faster",
-              body: "Hi team,\n\nThe deploy pipeline is now roughly twice as fast.\n\nThanks!",
-            },
-          },
-  },
+let toolRunOptions: RunAgentOptions<typeof emailDrafter> = {
+  executors: createAiSdkExecutors({ models }),
 };
 
-/**
- * What the tools actually run with. Defaults to the scripted mock so importing
- * this module never touches the network; `useLiveExecutors()` swaps in real
- * generations through the email-drafter's declared models.
- */
-let toolRunOptions: RunAgentOptions<typeof emailDrafter> = mockRunOptions;
-
-export function useLiveExecutors() {
-  toolRunOptions = { executors: createAiSdkExecutors({ models }) };
+export function useToolExecutors(executors: AgentRequestExecutors) {
+  toolRunOptions = { executors };
 }
 
 // ─── Bridge: runAgent <-> JSON-safe tool results ───
@@ -190,7 +163,7 @@ function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: strin
  */
 export async function startDraft(
   prompt: string,
-  // Defaults evaluate per call, so `useLiveExecutors()` takes effect for
+  // Defaults evaluate per call, so `useToolExecutors()` takes effect for
   // direct callers too (mirrors langchain-host/bridge.ts and mastra-host).
   runOptions: RunAgentOptions<typeof emailDrafter> = toolRunOptions,
 ): Promise<ToolResult> {
@@ -349,16 +322,6 @@ export function MachineOwnedAgent() {
   );
 }
 
-// ─── Scripted model: pi's faux provider, reacting to the machine's pauses ───
-//
-// The demo runs on the real Flue runtime either way; only the model changes.
-// Without a key, a faux response factory plays it — and because the factory
-// receives the very `Context` the runtime built for the turn, it can read the
-// last bridge-tool result and react to the choices the machine published
-// instead of replaying a fixed script. A real evaluator may route through the
-// needs-details pause, and a hardcoded SEND → END sequence would be refused
-// there (and rightly so).
-
 /** Pull the eventType back out of a projected choice line ("SEND (Send)"). */
 function eventTypeOf(choiceLine: string): string {
   return choiceLine.split(" ")[0]!;
@@ -384,46 +347,7 @@ function chooseEventType(accepted: string[]): string {
 /** Safety cap so a misbehaving model can never spin this demo forever. */
 const MAX_STEPS = 8;
 
-const BRIDGE_TOOLS = new Set(["start_workflow", "resume_workflow"]);
-
-/** The latest bridge-tool result in the turn's context, as the model sees it. */
-function lastBridgeResult(messages: readonly Message[]): ReturnType<typeof toModelResult> | null {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index]!;
-    if (message.role !== "toolResult" || !BRIDGE_TOOLS.has(message.toolName)) continue;
-    const text = message.content.find((part) => part.type === "text")?.text;
-    return text ? JSON.parse(text) : null;
-  }
-  return null;
-}
-
 const DEMO_PROMPT = "Tell the team the deploy pipeline is twice as fast now.";
-
-/** A faux provider that answers each pause the way the demo's stand-in human would. */
-export function scriptedModel() {
-  const respond: FauxResponseFactory = (context: Context) => {
-    const result = lastBridgeResult(context.messages);
-
-    if (!result) {
-      return fauxAssistantMessage([fauxToolCall("start_workflow", { prompt: DEMO_PROMPT })], {
-        stopReason: "toolUse",
-      });
-    }
-    if (result.status !== "pending") {
-      return fauxAssistantMessage(`Done — ${result.sentCount} email(s) sent.`);
-    }
-
-    const eventType = chooseEventType(result.choices.map(eventTypeOf));
-    return fauxAssistantMessage(
-      [fauxToolCall("resume_workflow", { handle: result.handle, eventType, text: null })],
-      { stopReason: "toolUse" },
-    );
-  };
-
-  const faux = fauxProvider({ provider: "openai", models: [{ id: "gpt-5.4-mini" }] });
-  faux.setResponses(Array.from({ length: MAX_STEPS + 2 }, () => respond));
-  return faux.provider;
-}
 
 // ─── Demo ───
 //
@@ -441,14 +365,13 @@ function humanReply(): string {
   return `I pick ${eventType}. Resume the workflow with that.`;
 }
 
-export async function main({ live = false } = {}) {
-  if (live) useLiveExecutors();
+export async function main() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY to run this example.");
+  }
   completed.length = 0;
 
-  const flue = await start({
-    agents: [MachineOwnedAgent],
-    providers: live ? undefined : [scriptedModel()],
-  });
+  const flue = await start({ agents: [MachineOwnedAgent] });
   try {
     const agent = init(MachineOwnedAgent, { id: `machine-owned-${Date.now()}` });
     // `read` follows the conversation from the stream origin, so each call

@@ -1,7 +1,7 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { runAgent } from "@statelyai/agent";
-import { createScriptedExecutors } from "@statelyai/agent/testing";
+import { createMockModelExecutors } from "../mock-model.js";
 import { aiSdkEvaluatorOptimizerMachine } from "./index.js";
 
 test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {
@@ -9,7 +9,7 @@ test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {
   const improved: string[] = [];
   // Routed by request name, so the two evaluate passes stay in order without
   // any of them depending on prompt wording.
-  const executors = createScriptedExecutors({
+  const executors = createMockModelExecutors({
     text: {
       translateText: ["Spanish:Hello friend"],
       evaluateTranslation: [
@@ -72,7 +72,7 @@ test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {
 });
 
 test("a failed first translation lands in `failed`, not in `done` with an empty draft", async () => {
-  const executors = createScriptedExecutors({
+  const executors = createMockModelExecutors({
     text: {
       translateText: [
         () => {

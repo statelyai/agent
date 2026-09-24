@@ -1,14 +1,28 @@
 import { describe, expect, test } from "vitest";
 import { noopObserve } from "@mastra/core/tools";
-import type { AgentRequestExecutors } from "@statelyai/agent";
-import { createHost, scriptedExecutors, main, unwrapToolResult } from "./index.js";
+import { createMockModelExecutors } from "../mock-model.js";
+import { createHost, main, unwrapToolResult } from "./index.js";
 
 const ctx = { observe: noopObserve };
+
+/** The two model calls the machine makes, answered by request name. */
+function mockExecutors() {
+  return createMockModelExecutors({
+    text: {
+      evaluatePrompt: { satisfied: true, missing: [], questions: [] },
+      draftEmail: {
+        to: "team@example.com",
+        subject: "Deploy pipeline is faster",
+        body: "Hi team,\n\nThe deploy pipeline is now roughly twice as fast.\n\nThanks!",
+      },
+    },
+  });
+}
 
 /** A fresh host per test: no run, handle, or executor is shared between them. */
 function host() {
   const { startWorkflow, resumeWorkflow, startDraft, resumeDraft, agent } = createHost({
-    executors: scriptedExecutors,
+    executors: mockExecutors(),
   });
   return {
     agent,
@@ -100,18 +114,16 @@ describe("mastra-host", () => {
   });
 
   test("the injected executors are the ones the tools run with", async () => {
-    const markerExecutors: AgentRequestExecutors = {
-      generateText: async (request) =>
-        request.name === "evaluatePrompt"
-          ? { result: { satisfied: true, missing: [], questions: [] } }
-          : {
-              result: {
-                to: "marker@example.com",
-                subject: "MARKER SUBJECT",
-                body: "Written by the marker executor.",
-              },
-            },
-    };
+    const markerExecutors = createMockModelExecutors({
+      text: {
+        evaluatePrompt: { satisfied: true, missing: [], questions: [] },
+        draftEmail: {
+          to: "marker@example.com",
+          subject: "MARKER SUBJECT",
+          body: "Written by the marker executor.",
+        },
+      },
+    });
     const { startDraft } = createHost({ executors: markerExecutors });
 
     const started = await startDraft("Announce the faster deploys.");
@@ -125,7 +137,13 @@ describe("mastra-host", () => {
     expect(Object.keys(tools).sort()).toEqual(["resume_workflow", "start_workflow"]);
   });
 
-  test("the demo runs end to end with no API key", async () => {
-    await expect(main()).resolves.toBeUndefined();
+  test("the demo requires OPENAI_API_KEY", async () => {
+    const key = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      await expect(main()).rejects.toThrow("OPENAI_API_KEY");
+    } finally {
+      if (key !== undefined) process.env.OPENAI_API_KEY = key;
+    }
   });
 });

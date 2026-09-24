@@ -1,11 +1,7 @@
 import { expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
-import {
-  assertAgentMachine,
-  canReach,
-  createScriptedExecutors,
-  matchesTrajectory,
-} from "@statelyai/agent/testing";
+import { assertAgentMachine, canReach, matchesTrajectory } from "@statelyai/agent/testing";
+import { createMockModelExecutors } from "../mock-model.js";
 import type { StateValue } from "xstate";
 import {
   CANDIDATE_COUNT,
@@ -56,7 +52,7 @@ function collectStates() {
 test("the first valid candidate wins, with no repair", async () => {
   // One entry per fanned-out invoke: `generating` makes three calls now, so
   // the queue holds three answers rather than one answer holding three.
-  const scripted = createScriptedExecutors({
+  const scripted = createMockModelExecutors({
     text: { generateConfig: [VALID, BAD_JSON, NO_BLOCK] },
   });
 
@@ -76,7 +72,7 @@ test("the first valid candidate wins, with no repair", async () => {
 });
 
 test("every candidate rejected, then one repair fixes it", async () => {
-  const scripted = createScriptedExecutors({
+  const scripted = createMockModelExecutors({
     text: {
       generateConfig: [BAD_JSON, NO_BLOCK, BAD_TARGET],
       repairConfig: [VALID],
@@ -125,7 +121,7 @@ test("every candidate rejected, then one repair fixes it", async () => {
 });
 
 test("repairs that never parse fail after the cap, having made 1 + maxRepairs calls", async () => {
-  const scripted = createScriptedExecutors({
+  const scripted = createMockModelExecutors({
     text: {
       generateConfig: [BAD_JSON, BAD_JSON, BAD_JSON],
       repairConfig: [BAD_TARGET, BAD_JSON],

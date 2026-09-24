@@ -17,7 +17,7 @@ import {
 import { nextDeclaration } from "./declaration-ticket";
 import type { ScenarioId } from "./scenarios";
 
-export type { ScenarioResult, TraceEntry, IdlePayload, RunMode } from "./agent-runner";
+export type { ScenarioResult, TraceEntry, IdlePayload } from "./agent-runner";
 
 const scenarioId = z.enum([
   "refund",
@@ -72,6 +72,12 @@ export const declareScenarioMachine = createServerFn({ method: "POST" })
       ),
     };
   });
+
+/** Whether the server has a model key; without one the shell runs nothing. */
+export const getApiKeyStatus = createServerFn({ method: "GET" }).handler(async () => {
+  const { hasApiKey } = await import("./machine-chat.server");
+  return { hasApiKey: hasApiKey() };
+});
 
 /** Request abort (Cancel / closed tab) OR the default time budget. */
 async function requestRunSignal(): Promise<AbortSignal> {

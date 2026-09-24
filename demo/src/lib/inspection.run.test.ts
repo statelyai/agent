@@ -13,7 +13,11 @@ vi.mock("@statelyai/sdk/inspect", () => ({ createInspector: vi.fn(() => inspecto
 import { resumeScenarioRun, startScenarioRun } from "./agent-runner";
 import { ensureInspectionRelay } from "./inspection.server";
 import { scenarioSource } from "./scenarios";
-import { scriptedExecutorsFor } from "./scripted-executors";
+
+// The model's one move in this run: an over-limit refund that waits for approval.
+const executors = {
+  decide: async () => ({ event: { type: "AUTO_REFUND", amount: 184 } }),
+};
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -32,9 +36,8 @@ describe("run inspection over a real scenario", () => {
     const first = await startScenarioRun(
       "refund",
       "I need a $184 refund for a damaged delivery.",
-      "script",
       undefined,
-      scriptedExecutorsFor("refund"),
+      executors,
     );
     expect(first.status).toBe("idle");
 
@@ -63,9 +66,8 @@ describe("run inspection over a real scenario", () => {
       "refund",
       first.idle!.snapshot as unknown as Snapshot<unknown>,
       { type: "APPROVE" },
-      "script",
       undefined,
-      scriptedExecutorsFor("refund"),
+      executors,
     );
     expect(second.status).toBe("done");
 

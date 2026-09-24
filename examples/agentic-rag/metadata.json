@@ -1,0 +1,34 @@
+{
+  "name": "agentic-rag",
+  "title": "Let the model decide when to search, within a retrieval budget",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph Agentic RAG tutorial",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/rag/langgraph_agentic_rag/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "The model chooses between searching sample summaries of Lilian Weng's posts and answering directly. Retrieved passages are graded, and a search that finds nothing relevant leads to a rewritten question and another turn for the model. In LangGraph, only recursion_limit stops a model that keeps calling the retriever. Here a guard rejects RETRIEVE once MAX_RETRIEVALS is spent, so the model has to answer, and that forced answer ends in a failed state marked as unverified."
+  },
+  "starters": [
+    {
+      "label": "On-corpus — retrieves, grades relevant, answers from the posts",
+      "input": {
+        "question": "What does Lilian Weng say about the types of agent memory?"
+      }
+    },
+    {
+      "label": "Off-corpus — search finds nothing, so the question is rewritten",
+      "input": {
+        "question": "What does Lilian Weng's blog say about diffusion models for video generation?"
+      }
+    },
+    {
+      "label": "Trivial — a good model answers directly, no retrieval",
+      "input": {
+        "question": "What is 2+2?"
+      }
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "name": "adaptive-rag",
+  "title": "Route a question, then grade the retrieval and the answer",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph Adaptive RAG tutorial (subsumes the Self-RAG tutorial)",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/rag/langgraph_adaptive_rag/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Routes each question to a sample vector store or a sample web index, grades the retrieved documents, and checks the answer for hallucination and usefulness before returning it. It also covers LangGraph's Self-RAG tutorial, which is the same graph without the router. LangGraph bounds the rewrite and regenerate cycles only with recursion_limit, which raises an error. Here MAX_REWRITES and MAX_REGENERATIONS are checked in choice states, and running out ends the run in a failed state that returns the last draft marked as unverified."
+  },
+  "starters": [
+    {
+      "label": "Corpus hit — graded, grounded, answered",
+      "input": {
+        "question": "How do LLM agents use long-term memory?"
+      }
+    },
+    {
+      "label": "Current-events question — routed to the sample web index",
+      "input": {
+        "question": "What is the latest guidance on defending agents against prompt injection?"
+      }
+    },
+    {
+      "label": "Not in the corpus — rewrites run out, ends in failed",
+      "input": {
+        "question": "What is chain-of-thought prompting?"
+      }
+    }
+  ]
+}

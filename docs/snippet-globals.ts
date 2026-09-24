@@ -17,6 +17,8 @@ import { tool } from "ai";
 
 import type { LanguageModel } from "ai";
 
+import { MockLanguageModelV3 } from "ai/test";
+
 import { openai } from "@ai-sdk/openai";
 
 import { createActor } from "xstate";
@@ -285,8 +287,6 @@ declare function createMyStore(): any;
 declare function appendToStore(entry: any): Promise<void>;
 
 declare function createSubAgentExecute(config: any): any;
-
-declare function scriptedExecutorsFor(config: any): any;
 
 declare function runSeamCase(input: any): Promise<any>;
 

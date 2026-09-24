@@ -1,10 +1,11 @@
 /**
  * Runs the Worker in real workerd (via @cloudflare/vitest-plugin), so the
  * Durable Object, its SQLite event log, and the folded XState machine are the
- * real thing — not a Node stand-in. No API key: `vitest.config.ts` forces the
+ * real thing — not a Node stand-in. Only the model is stubbed: the suite
+ * overrides `EmailDrafter.prototype.createExecutors` with a plain-function
+ * executor keyed by request name. `vitest.config.ts` also forces the
  * `OPENAI_API_KEY` binding empty (it would otherwise be picked up from a
- * `.dev.vars` left behind by `dev:live`), so the host falls back to scripted
- * executors and this suite never bills a provider.
+ * `.dev.vars` left behind by `dev:live`), so this suite never bills a provider.
  *
  * What these specs are really testing is the host's durability claim: the
  * append-only log in the Durable Object is the ONLY persisted state, and a
@@ -13,9 +14,9 @@
  */
 import { getAgentByName } from "agents";
 import { env, runInDurableObject, SELF } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
-import type { AgentLogEntry } from "@statelyai/agent";
-import { EmailDrafter, scriptedModelCalls } from "../index.js";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { AgentLogEntry, AgentRequestExecutors } from "@statelyai/agent";
+import { EmailDrafter } from "../index.js";
 import { createDurableObjectEventLogStore } from "../event-log-store.js";
 
 interface View {
@@ -26,6 +27,41 @@ interface View {
   output?: { sentEmails: unknown[] };
   error?: string;
 }
+
+/**
+ * The model stand-in, keyed by the request NAME the machine declares
+ * (`evaluatePrompt` / `draftEmail` in `../../email-drafter/agent-logic.ts`), so
+ * each answer lands on the request it was written for however many rounds the
+ * conversation takes. The counter makes the durability claim observable: a
+ * resume REPLAYS journaled calls instead of re-running them.
+ */
+const modelCalls = { count: 0 };
+const answers: Record<string, unknown> = {
+  evaluatePrompt: { satisfied: true, missing: [], questions: [] },
+  draftEmail: {
+    to: "ana@example.com",
+    subject: "Friday's launch",
+    body: "Hi Ana — we ship Friday at 9am. Shout if anything is still open on your side.",
+  },
+};
+const stubExecutors = (): AgentRequestExecutors => ({
+  generateText: async (request) => {
+    if (!(request.name in answers)) throw new Error(`no stub answer for "${request.name}"`);
+    modelCalls.count += 1;
+    return { result: answers[request.name] };
+  },
+});
+
+// The Durable Object runs in this isolate, so patching the class the Worker
+// exports reaches every instance the requests below create.
+const realCreateExecutors = EmailDrafter.prototype.createExecutors;
+const createExecutors = vi.spyOn(EmailDrafter.prototype, "createExecutors");
+beforeAll(() => {
+  createExecutors.mockImplementation(stubExecutors);
+});
+afterAll(() => {
+  createExecutors.mockRestore();
+});
 
 const url = (name: string) => `https://example.com/agents/email-drafter/${name}`;
 
@@ -115,7 +151,7 @@ describe("cloudflare agent host", () => {
     expect(drafted.state).toBe("reviewing");
     expect(drafted.draft?.subject).toBe("Friday's launch");
 
-    const callsAfterDrafting = scriptedModelCalls.count;
+    const callsAfterDrafting = modelCalls.count;
     const journaledAfterDrafting = (await journal(name)).length;
 
     // Eviction #1: the instance that drafted is gone.
@@ -125,19 +161,19 @@ describe("cloudflare agent host", () => {
     expect(resumed.view.state).toBe("reviewing");
     expect(resumed.view.draft?.subject).toBe("Friday's launch");
     // Folding the log re-executed nothing and appended nothing.
-    expect(scriptedModelCalls.count).toBe(callsAfterDrafting);
+    expect(modelCalls.count).toBe(callsAfterDrafting);
     expect(await journal(name)).toHaveLength(journaledAfterDrafting);
 
     const sent = await send(name, { type: "SEND" });
     expect(sent.state).toBe("sent");
-    expect(scriptedModelCalls.count).toBe(callsAfterDrafting);
+    expect(modelCalls.count).toBe(callsAfterDrafting);
 
     // Eviction #2: the conversation still finishes on a third instance.
     await evict(name);
     const done = await send(name, { type: "END" });
     expect(done.status).toBe("done");
     expect(done.output?.sentEmails).toHaveLength(1);
-    expect(scriptedModelCalls.count).toBe(callsAfterDrafting);
+    expect(modelCalls.count).toBe(callsAfterDrafting);
 
     const entries = await journal(name);
     expect(entries.map((entry) => entry.index)).toEqual(entries.map((_entry, i) => i));
@@ -258,6 +294,16 @@ describe("cloudflare agent host", () => {
     const { view } = await get(name);
     expect(view.state).toBe("prompting");
     expect(view.draft).toBeNull();
+  });
+
+  it("without a key binding, a turn fails naming it instead of faking a model", async () => {
+    // The real provider path, against the empty binding `vitest.config.ts` forces.
+    createExecutors.mockImplementationOnce(function (this: EmailDrafter) {
+      return realCreateExecutors.call(this);
+    });
+    const { status, view } = await get("no-key");
+    expect(status).toBe(500);
+    expect(view.error).toContain("OPENAI_API_KEY");
   });
 
   it("keeps each :name in its own Durable Object", async () => {

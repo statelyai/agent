@@ -23,18 +23,14 @@
  * Each is its own `Eval()`/experiment, so a vendor tracks per-seam scores over
  * time instead of one blended number.
  *
- * Run: npx tsx examples/braintrust-evals/seams.ts
+ * Run: OPENAI_API_KEY=... npx tsx examples/braintrust-evals/seams.ts
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic } from "xstate";
 import { matchesTrajectory, runSeam } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
-import type {
-  ScriptedTextEntry,
-  SeamRef,
-  SeamTurn,
-  TrajectoryMatch,
-} from "@statelyai/agent/testing";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import type { SeamRef, SeamScriptEntry, SeamTurn, TrajectoryMatch } from "@statelyai/agent/testing";
 import { emailDrafter, models } from "../email-drafter/agent-logic.js";
 
 type DrafterEvent = EventFromLogic<typeof emailDrafter>;
@@ -61,7 +57,7 @@ export interface SeamCaseInput {
   /** Revision request at `reviewing`, used once; `null` sends immediately. */
   changes: string | null;
   /** The call plan: canned answers per REQUEST NAME, in call order. */
-  scripts: Record<string, ScriptedTextEntry[]>;
+  scripts: Record<string, SeamScriptEntry[]>;
   seam: SeamRef;
 }
 
@@ -372,19 +368,16 @@ export const seams = [
 
 // ─── Braintrust wiring: one experiment per seam ───
 
-async function liveGenerateText(): Promise<AgentRequestExecutors["generateText"]> {
-  const { createAiSdkExecutors } = await import("@statelyai/agent/ai-sdk");
-  return createAiSdkExecutors({ models }).generateText;
-}
-
 export async function main() {
-  const live = Boolean(process.env.OPENAI_API_KEY);
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY to run the seam evals: the seam call hits the real model.");
+  }
   const upload = Boolean(process.env.BRAINTRUST_API_KEY);
-  const candidate = live ? await liveGenerateText() : null;
+  // The seam under test hits the real model; every other call replays its script.
+  const candidate = createAiSdkExecutors({ models }).generateText;
 
   console.log(
-    `[seam-evals] seam model: ${live ? "real (OPENAI_API_KEY set)" : "scripted (no API key)"} | ` +
-      `braintrust: ${upload ? "uploading experiments" : "local summaries (noSendLogs)"}`,
+    `[seam-evals] braintrust: ${upload ? "uploading experiments" : "local summaries (noSendLogs)"}`,
   );
 
   for (const seam of seams) {

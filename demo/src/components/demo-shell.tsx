@@ -17,10 +17,14 @@ import {
   type ExampleSummary,
   type InspectionInfo,
 } from "@/lib/example-library";
-import { humanizeEventType } from "@/lib/machine-ui";
-import { declareScenarioMachine, resumeScenario, startScenario } from "@/lib/run-demo-agent";
+import { humanizeEventType, MISSING_KEY_MESSAGE } from "@/lib/machine-ui";
+import {
+  declareScenarioMachine,
+  getApiKeyStatus,
+  resumeScenario,
+  startScenario,
+} from "@/lib/run-demo-agent";
 import { getScenario, scenarios, scenarioVizConfig } from "@/lib/scenarios";
-import { WALKTHROUGH_NOTE } from "@/lib/walkthrough-executors";
 import type { Selection } from "@/lib/selection";
 import {
   createShellStore,
@@ -144,6 +148,23 @@ export function DemoShell() {
       cancelled = true;
     };
   }, []);
+
+  // Every run needs a model key on the server. Unknown until this resolves;
+  // only a confirmed `false` blocks runs.
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void getApiKeyStatus().then(
+      (status) => {
+        if (!cancelled) setHasApiKey(status.hasApiKey);
+      },
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const missingKey = hasApiKey === false;
 
   // Auto-discovered examples: whatever folders exist under `examples/*`.
   useEffect(() => {
@@ -494,6 +515,9 @@ export function DemoShell() {
   // ─── composer policy ───
 
   const textPolicy: TextPolicy = (() => {
+    if (missingKey) {
+      return { visible: false, placeholder: "", submitLabel: "", note: MISSING_KEY_MESSAGE };
+    }
     if (isScenario) {
       return {
         visible: true,
@@ -506,14 +530,6 @@ export function DemoShell() {
       };
     }
     if (!exampleDetail) return { visible: false, placeholder: "", submitLabel: "" };
-    if (!exampleDetail.runnable) {
-      return {
-        visible: false,
-        placeholder: "",
-        submitLabel: "",
-        note: "Set OPENAI_API_KEY on the demo server to run library examples live.",
-      };
-    }
     if (!activeMachine) {
       return {
         visible: false,
@@ -534,12 +550,11 @@ export function DemoShell() {
           ? "Send a message…"
           : `${activeMachine.promptField}…`,
       submitLabel: started ? "Send" : "Start run",
-      ...(exampleDetail.mode === "walkthrough" ? { note: WALKTHROUGH_NOTE } : {}),
     };
   })();
 
   const startForm =
-    !isScenario && exampleDetail?.runnable && activeMachine && !activeMachine.promptField
+    !isScenario && !missingKey && activeMachine && !activeMachine.promptField
       ? {
           schema: activeMachine.inputJsonSchema ?? { type: "object" as const },
           onStart: (values: Record<string, unknown>) =>
@@ -550,12 +565,10 @@ export function DemoShell() {
   // Pre-baked starter inputs → one-click chips in the intro. A string starter
   // needs a chat-startable machine (single string input); an object starter is
   // the machine input verbatim.
-  const starters: StarterAction[] = isScenario
+  const offeredStarters: StarterAction[] = isScenario
     ? scenario.starters.map((text) => ({ label: text, onStart: () => submit(text) }))
     : (exampleSummary?.starters ?? []).flatMap((starter) => {
-        // A runner needs no machine — it IS the whole story — and no API
-        // key: a multi-run example scripts its own executors, so these chips
-        // stay offered on a server that cannot run anything else.
+        // A runner needs no machine — it IS the whole story.
         if (starter.kind === "runner") {
           return [
             {
@@ -564,7 +577,7 @@ export function DemoShell() {
             },
           ];
         }
-        if (!exampleDetail?.runnable || !activeMachine) return [];
+        if (!activeMachine) return [];
         if (starter.kind === "text") {
           const field = activeMachine.promptField;
           return [
@@ -582,6 +595,7 @@ export function DemoShell() {
           { label: starter.label, onStart: () => startExampleRun(starter.label, starter.input) },
         ];
       });
+  const starters = missingKey ? [] : offeredStarters;
 
   const intro = isScenario ? (
     <ScenarioIntro scenario={scenario} />

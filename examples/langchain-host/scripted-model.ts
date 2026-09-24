@@ -1,15 +1,13 @@
 /**
- * A real LangChain `BaseChatModel` that replays a scripted queue instead of
- * calling a provider. Reads no env vars and opens no sockets, so both
- * directions of this example run end to end — and are tested — with no API key.
+ * Test-only: a real LangChain `BaseChatModel` that replays a scripted queue
+ * instead of calling a provider. Reads no env vars and opens no sockets, so
+ * `./index.test.ts` runs both directions of this example end to end with no
+ * API key. The example itself runs against `ChatOpenAI`.
  *
  * It is a genuine LangChain model, not a stub around the executors: the same
  * `createLangChainExecutors` code path runs against it, and LangChain's own
- * `createAgent` loop drives it in `./bridge.ts`.
- *
- * Compare `createScriptedExecutors` (a root export of `@statelyai/agent`),
- * which scripts the *executor* layer; this scripts the *model* layer, one
- * level below, so the LangChain mapping code stays under test.
+ * `createAgent` loop drives it in `./bridge.ts`. It scripts the *model* layer,
+ * one level below the executors, so the LangChain mapping code stays under test.
  */
 import { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";

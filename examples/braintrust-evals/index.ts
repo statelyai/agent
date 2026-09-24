@@ -11,11 +11,9 @@
  *   XState transitions through `onTransition`.
  * - `token_budget` — `result.usage`, summed across the run's resume legs.
  *
- * Two modes, one code path:
- * - scripted (default) — `createScriptedExecutors` plays canned model answers.
- *   Deterministic, free, no network. This is what the test asserts.
- * - live — set `OPENAI_API_KEY` to score the real model instead. Same dataset,
- *   same scorers; only the executors change.
+ The model is real: set `OPENAI_API_KEY`. `runDrafterCase` takes its executors
+ * as an argument, so the test drives the same dataset and scorers over a mock
+ * model instead — only the executors change.
  *
  * Braintrust: `Eval()` runs locally with `noSendLogs: true` and prints a local
  * summary, so the eval runs with no Braintrust account. Set `BRAINTRUST_API_KEY`
@@ -25,13 +23,14 @@
  * This file scores whole runs. `./seams.ts` scores ONE transition at a time:
  * same machine, routed executors, one `Eval()` per seam.
  *
- * Run: npx tsx examples/braintrust-evals/index.ts
+ * Run: OPENAI_API_KEY=... npx tsx examples/braintrust-evals/index.ts
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic, Snapshot, SnapshotFrom } from "xstate";
 import { getStatePath, runAgent } from "@statelyai/agent";
-import { createScriptedExecutors, matchesTrajectory } from "@statelyai/agent/testing";
+import { matchesTrajectory } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { emailDrafter, models } from "../email-drafter/agent-logic.js";
 
 type DrafterEvent = EventFromLogic<typeof emailDrafter>;
@@ -46,15 +45,6 @@ export interface DrafterCase {
    * user declines and picks "draft anyway" instead.
    */
   details: string | null;
-  /** Canned model answers for the scripted run, in call order. */
-  script: {
-    /** One assessment per `evaluatePrompt` call. */
-    assessments: { satisfied: boolean; missing: string[]; questions: string[] }[];
-    /** The draft the model returns. */
-    draft: { to: string; subject: string; body: string };
-    /** Tokens each scripted call reports, so the budget scorer has real numbers. */
-    tokensPerCall: number;
-  };
 }
 
 /** What a dataset row expects. */
@@ -180,24 +170,6 @@ export async function runDrafterCase(
   };
 }
 
-/** Scripted executors for one row: the canned answers, each reporting tokens. */
-export function scriptedExecutorsFor(drafterCase: DrafterCase): Partial<AgentRequestExecutors> {
-  const { assessments, draft, tokensPerCall } = drafterCase.script;
-  const usage = {
-    inputTokens: tokensPerCall,
-    outputTokens: 0,
-    totalTokens: tokensPerCall,
-  };
-  // Keyed by request name, not by position: a run that takes a different branch
-  // still gets the answer written for the call it actually makes.
-  return createScriptedExecutors({
-    text: {
-      evaluatePrompt: assessments.map((assessment) => ({ result: assessment, usage })),
-      draftEmail: [{ result: draft, usage }],
-    },
-  });
-}
-
 // ─── Scorers ───
 
 /** `result.output`: did the machine finish, and is the sent email well-formed and addressed correctly? */
@@ -288,12 +260,6 @@ export const scorers = [
 
 // ─── Dataset ───
 
-const DRAFT = {
-  to: "team@example.com",
-  subject: "Deploy pipeline is twice as fast",
-  body: "Hi team, the deploy pipeline now runs in half the time. Details in the thread.",
-};
-
 /** Three rows, three branches through the machine. */
 export const dataset: {
   input: DrafterCase;
@@ -305,14 +271,6 @@ export const dataset: {
     input: {
       prompt: "Tell them the deploy pipeline is twice as fast now.",
       details: "Send it to team@example.com.",
-      script: {
-        assessments: [
-          { satisfied: false, missing: ["recipient"], questions: ["Who should receive it?"] },
-          { satisfied: true, missing: [], questions: [] },
-        ],
-        draft: DRAFT,
-        tokensPerCall: 150,
-      },
     },
     expected: {
       statePath: [
@@ -339,11 +297,6 @@ export const dataset: {
         "Email team@example.com with subject 'Deploy pipeline is twice as fast' telling them " +
         "the deploy pipeline now runs in half the time, and that details are in the thread.",
       details: null,
-      script: {
-        assessments: [{ satisfied: true, missing: [], questions: [] }],
-        draft: DRAFT,
-        tokensPerCall: 150,
-      },
     },
     expected: {
       // No `needsMoreInfo`: a complete request must go straight to drafting.
@@ -359,13 +312,6 @@ export const dataset: {
     input: {
       prompt: "Let the team know about the deploy.",
       details: null,
-      script: {
-        assessments: [
-          { satisfied: false, missing: ["recipient"], questions: ["Who should receive it?"] },
-        ],
-        draft: DRAFT,
-        tokensPerCall: 150,
-      },
     },
     expected: {
       statePath: [
@@ -390,30 +336,22 @@ export const dataset: {
 
 // ─── Braintrust wiring ───
 
-/**
- * Live executors, built only when `OPENAI_API_KEY` is set. Imported lazily so
- * the scripted path never loads a provider.
- */
-async function liveExecutors(): Promise<Partial<AgentRequestExecutors>> {
-  const { createAiSdkExecutors } = await import("@statelyai/agent/ai-sdk");
-  return createAiSdkExecutors({ models });
-}
-
 export async function main() {
-  const live = Boolean(process.env.OPENAI_API_KEY);
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY to run the braintrust-evals example.");
+  }
   const upload = Boolean(process.env.BRAINTRUST_API_KEY);
-  const executors = live ? await liveExecutors() : null;
+  const executors = createAiSdkExecutors({ models });
 
   console.log(
-    `[braintrust-evals] model: ${live ? "real (OPENAI_API_KEY set)" : "scripted (no API key)"} | ` +
-      `braintrust: ${upload ? "uploading experiment" : "local summary (noSendLogs)"}`,
+    `[braintrust-evals] braintrust: ${upload ? "uploading experiment" : "local summary (noSendLogs)"}`,
   );
 
   const result = await Eval<DrafterCase, DrafterOutcome, DrafterExpectation, { case: string }>(
     "statelyai-agent email-drafter",
     {
       data: dataset,
-      task: (input) => runDrafterCase(input, executors ?? scriptedExecutorsFor(input)),
+      task: (input) => runDrafterCase(input, executors),
       scores: scorers.map(
         (scorer) =>
           ({ output, expected }: { output: DrafterOutcome; expected: DrafterExpectation }) =>

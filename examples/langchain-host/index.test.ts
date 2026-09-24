@@ -1,14 +1,15 @@
 import { describe, expect, test } from "vitest";
-import { HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import {
-  ScriptedChatModel,
-  agentScript,
+  HumanMessage,
+  SystemMessage,
+  ToolMessage,
+  type BaseMessage,
+} from "@langchain/core/messages";
+import {
   createEmailHostAgent,
   createLangChainExecutors,
-  jokeScript,
-  machineScript,
-  main,
   resumeDraft,
+  runAgentLoopDemo,
   runBridgeDemo,
   runJokeDemo,
   startDraft,
@@ -18,6 +19,68 @@ import {
   useModel,
   type ToolResult,
 } from "./index.js";
+import { ScriptedChatModel, type ScriptedEntry, type ScriptedResponse } from "./scripted-model.js";
+
+/**
+ * A scripted LangChain model for a full run of the joke machine. The queue is
+ * consumed in the order the *machine* asks, not in prompt order — the machine
+ * owns the sequence, including the improvement pass it always takes before any
+ * decision is requested.
+ */
+const jokeScript: ScriptedResponse[] = [
+  // 1. `telling` streams the first joke.
+  { text: "A state machine walks into a bar. It refuses the transition." },
+  // 2. `rating` asks for structured output — the `{ result }` provider schema.
+  { structured: { result: { rating: 6, explanation: "Setup is longer than the punchline." } } },
+  // 3. `telling` again: the machine always takes one improvement pass, so the
+  //    writer gets the first joke plus the critique and rewrites it.
+  { text: "A state machine walks into a bar. Illegal transition." },
+  // 4. `rating` scores the rewrite.
+  { structured: { result: { rating: 9, explanation: "Tight setup, legal punchline." } } },
+  // 5. `deciding` forces one event tool. Event tools are named
+  //    `send_event_<EVENT_TYPE>`, so ending the loop is `send_event_END`.
+  { toolCall: { name: "send_event_END" } },
+];
+
+/** The handle from the most recent tool result — what a live model would read. */
+function lastHandle(messages: BaseMessage[]): string {
+  const toolMessage = [...messages].reverse().find((message) => message.getType() === "tool");
+  return (JSON.parse(toolMessage?.text ?? "{}") as { handle?: string }).handle ?? "";
+}
+
+/** A scripted LangChain model for the *agent loop* (tool calls, then a summary). */
+const agentScript: ScriptedEntry[] = [
+  { toolCall: { name: "start_workflow", args: { prompt: "Tell the team deploys are faster." } } },
+  (messages) => ({
+    toolCall: {
+      name: "resume_workflow",
+      args: { handle: lastHandle(messages), eventType: "SEND", text: null },
+    },
+  }),
+  (messages) => ({
+    toolCall: {
+      name: "resume_workflow",
+      args: { handle: lastHandle(messages), eventType: "END", text: null },
+    },
+  }),
+  { text: "Sent one email to team@example.com about the faster deploy pipeline." },
+];
+
+/** A scripted LangChain model for the machine *inside* the tools. */
+const machineScript: ScriptedResponse[] = [
+  // `evaluating` — the prompt evaluator's structured verdict.
+  { structured: { result: { satisfied: true, missing: [], questions: [] } } },
+  // `drafting` — the draft itself.
+  {
+    structured: {
+      result: {
+        to: "team@example.com",
+        subject: "Deploy pipeline is faster",
+        body: "Hi team,\n\nThe deploy pipeline is now roughly twice as fast.\n\nThanks!",
+      },
+    },
+  },
+];
 
 const machineModel = () => new ScriptedChatModel({ responses: machineScript });
 
@@ -201,8 +264,16 @@ describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
   });
 });
 
-describe("langchain-host: demo", () => {
-  test("the demo runs both directions end to end with no API key", async () => {
-    await expect(main()).resolves.toBeUndefined();
+describe("langchain-host: playthrough", () => {
+  test("both directions run end to end against scripted LangChain models", async () => {
+    const jokeOutput = await runJokeDemo(new ScriptedChatModel({ responses: jokeScript }));
+    expect(jokeOutput.lastRating).toBe(9);
+
+    const reply = await runAgentLoopDemo(
+      new ScriptedChatModel({ responses: agentScript }),
+      machineModel(),
+      "Tell the team deploys are faster, send it, then we're done.",
+    );
+    expect(reply).toContain("team@example.com");
   });
 });

@@ -27,18 +27,16 @@
  * shows up as a trace. Use `@statelyai/agent/otel` when the host should trace
  * the machine's own spans instead.
  *
- * Run: npx tsx examples/langchain-host/index.ts
- *   No API key -> both directions run against a scripted LangChain model.
- *   OPENAI_API_KEY=... -> both directions run live against ChatOpenAI.
+ * Run: OPENAI_API_KEY=... npx tsx examples/langchain-host/index.ts
+ *   Both directions run live against ChatOpenAI.
  */
 import assert from "node:assert/strict";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { HumanMessage, type BaseMessage } from "@langchain/core/messages";
+import { HumanMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { runAgent } from "@statelyai/agent";
 import { jokeMachine } from "../joke/index.js";
 import { createLangChainExecutors } from "./executors.js";
-import { ScriptedChatModel, type ScriptedEntry, type ScriptedResponse } from "./scripted-model.js";
 import {
   createEmailHostAgent,
   resumeWorkflowTool,
@@ -48,7 +46,6 @@ import {
 } from "./bridge.js";
 
 export * from "./executors.js";
-export * from "./scripted-model.js";
 export * from "./bridge.js";
 
 const LIVE_MODEL = "gpt-5.4-mini";
@@ -72,68 +69,7 @@ export async function runJokeDemo(model: BaseChatModel, onChunk?: (chunk: string
   return result.output;
 }
 
-/**
- * A scripted LangChain model for a full run of the joke machine. The queue is
- * consumed in the order the *machine* asks, not in prompt order — the machine
- * owns the sequence, including the improvement pass it always takes before any
- * decision is requested.
- */
-export const jokeScript: ScriptedResponse[] = [
-  // 1. `telling` streams the first joke.
-  { text: "A state machine walks into a bar. It refuses the transition." },
-  // 2. `rating` asks for structured output — the `{ result }` provider schema.
-  { structured: { result: { rating: 6, explanation: "Setup is longer than the punchline." } } },
-  // 3. `telling` again: the machine always takes one improvement pass, so the
-  //    writer gets the first joke plus the critique and rewrites it.
-  { text: "A state machine walks into a bar. Illegal transition." },
-  // 4. `rating` scores the rewrite.
-  { structured: { result: { rating: 9, explanation: "Tight setup, legal punchline." } } },
-  // 5. `deciding` forces one event tool. Event tools are named
-  //    `send_event_<EVENT_TYPE>`, so ending the loop is `send_event_END`.
-  { toolCall: { name: "send_event_END" } },
-];
-
 // ─── Direction B: the machine as LangChain tools ───
-
-/** The handle from the most recent tool result — what a live model would read. */
-function lastHandle(messages: BaseMessage[]): string {
-  const toolMessage = [...messages].reverse().find((message) => message.getType() === "tool");
-  return (JSON.parse(toolMessage?.text ?? "{}") as { handle?: string }).handle ?? "";
-}
-
-/** A scripted LangChain model for the *agent loop* (tool calls, then a summary). */
-export const agentScript: ScriptedEntry[] = [
-  { toolCall: { name: "start_workflow", args: { prompt: "Tell the team deploys are faster." } } },
-  (messages) => ({
-    toolCall: {
-      name: "resume_workflow",
-      args: { handle: lastHandle(messages), eventType: "SEND", text: null },
-    },
-  }),
-  (messages) => ({
-    toolCall: {
-      name: "resume_workflow",
-      args: { handle: lastHandle(messages), eventType: "END", text: null },
-    },
-  }),
-  { text: "Sent one email to team@example.com about the faster deploy pipeline." },
-];
-
-/** A scripted LangChain model for the machine *inside* the tools. */
-export const machineScript: ScriptedResponse[] = [
-  // `evaluating` — the prompt evaluator's structured verdict.
-  { structured: { result: { satisfied: true, missing: [], questions: [] } } },
-  // `drafting` — the draft itself.
-  {
-    structured: {
-      result: {
-        to: "team@example.com",
-        subject: "Deploy pipeline is faster",
-        body: "Hi team,\n\nThe deploy pipeline is now roughly twice as fast.\n\nThanks!",
-      },
-    },
-  },
-];
 
 /**
  * Drive the two bridge tools directly, the way LangChain's tool node does, and
@@ -176,33 +112,18 @@ export async function runAgentLoopDemo(
 
 // ─── Demos ───
 
-/** No API key: both directions against scripted LangChain models. No env reads. */
+/** Both directions against a real ChatOpenAI. */
 export async function main() {
-  console.log("— Direction A: LangChain model as executor (stream + structured + decide) —");
-  const jokeOutput = await runJokeDemo(new ScriptedChatModel({ responses: jokeScript }), (chunk) =>
-    process.stdout.write(chunk),
-  );
-  console.log(`\nRating: ${jokeOutput.lastRating}\n`);
-
-  console.log("— Direction B: machine as a LangChain tool, driven by createAgent —");
-  const reply = await runAgentLoopDemo(
-    new ScriptedChatModel({ responses: agentScript }),
-    new ScriptedChatModel({ responses: machineScript }),
-    "Tell the team deploys are faster, send it, then we're done.",
-  );
-  console.log(reply);
-  assert.ok(reply.length > 0, "agent produced no final message");
-}
-
-/** Live: the same two directions against a real ChatOpenAI. */
-export async function mainLive() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY to run the langchain-host example.");
+  }
   const model = new ChatOpenAI({ model: LIVE_MODEL });
 
-  console.log("— Direction A (live): LangChain model as executor —");
+  console.log("— Direction A: LangChain model as executor —");
   const jokeOutput = await runJokeDemo(model, (chunk) => process.stdout.write(chunk));
   console.log(`\nRating: ${jokeOutput.lastRating}, jokes told: ${jokeOutput.jokes.length}\n`);
 
-  console.log("— Direction B (live): createAgent over the machine's two tools —");
+  console.log("— Direction B: createAgent over the machine's two tools —");
   const agent = createEmailHostAgent(model);
   const result = await agent.invoke({
     messages: [
@@ -218,8 +139,7 @@ export async function mainLive() {
 }
 
 if (import.meta.url === new URL(process.argv[1] ?? "", "file:").href) {
-  const run = process.env.OPENAI_API_KEY ? mainLive : main;
-  run().catch((error) => {
+  main().catch((error) => {
     console.error(error);
     process.exitCode = 1;
   });

@@ -34,6 +34,9 @@
  *    ```
  */
 
+/** Every run needs a real model; the server throws this and the shell shows it without a key. */
+export const MISSING_KEY_MESSAGE = "Set OPENAI_API_KEY on the demo server to run examples.";
+
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 export type JsonObject = { [key: string]: Json };

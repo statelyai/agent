@@ -22,16 +22,14 @@ import {
   singleStringField,
   type Json,
 } from "./machine-ui";
-import { scriptedExecutorsFor } from "./scripted-executors";
 
 describe("accepted-event descriptors (unified chat)", () => {
   test("refund idle carries interaction hints and no-payload buttons", async () => {
     const result = await startScenarioRun(
       "refund",
       "I need a $500 refund for a cancelled order.",
-      "script",
       undefined,
-      scriptedExecutorsFor("refund"),
+      { decide: async () => ({ event: { type: "AUTO_REFUND", amount: 500 } }) },
     );
     expect(result.status).toBe("idle");
     const approve = result.idle!.events.find((event) => event.type === "APPROVE");
@@ -49,13 +47,9 @@ describe("accepted-event descriptors (unified chat)", () => {
   });
 
   test("approval idle: REJECT needs a payload dialog and is the inferred text event", async () => {
-    const result = await startScenarioRun(
-      "approval",
-      "Announce the migration.",
-      "script",
-      undefined,
-      scriptedExecutorsFor("approval"),
-    );
+    const result = await startScenarioRun("approval", "Announce the migration.", undefined, {
+      generateText: async () => ({ result: "Heads up: the migration moved." }),
+    });
     expect(result.status).toBe("idle");
     const reject = result.idle!.events.find((event) => event.type === "REJECT");
     expect(reject?.needsPayload).toBe(true);
@@ -430,9 +424,8 @@ describe("run limits (cancel + time budget)", () => {
     const result = await startScenarioRun(
       "refund",
       "I need a $500 refund.",
-      "script",
       undefined,
-      scriptedExecutorsFor("refund"),
+      { decide: async () => ({ event: { type: "AUTO_REFUND", amount: 500 } }) },
       controller.signal,
     );
     expect(result.status).toBe("error");

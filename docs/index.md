@@ -33,7 +33,7 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | Entry                        | Purpose                                                                        |
 | ---------------------------- | ------------------------------------------------------------------------------ |
 | `@statelyai/agent`           | Authoring, running, human interaction, and the executor contract               |
-| `@statelyai/agent/testing`   | `lintAgentMachine`, `simulateAgent`, `canReach`, `createScriptedExecutors`, trajectories, seams |
+| `@statelyai/agent/testing`   | `lintAgentMachine`, `simulateAgent`, `canReach`, trajectories, seams           |
 | `@statelyai/agent/log`       | The event log: `replay`, `forkEventLog`, hand-built entries, stores            |
 | `@statelyai/agent/ai-sdk`    | `createAiSdkExecutors`, the Vercel AI SDK adapter                             |
 | `@statelyai/agent/openai`    | Executors over the raw `openai` package                                        |

@@ -97,7 +97,7 @@ export function langChainRunOptions(model: BaseChatModel): RunAgentOptions<typeo
  */
 let toolRunOptions: RunAgentOptions<typeof emailDrafter> | null = null;
 
-/** Point the bridge tools at a LangChain model (scripted or live). */
+/** Point the bridge tools at a LangChain model. */
 export function useModel(model: BaseChatModel) {
   toolRunOptions = langChainRunOptions(model);
 }
@@ -259,7 +259,7 @@ export const SYSTEM_PROMPT =
  */
 export function createEmailHostAgent(model: BaseChatModel, machineModel: BaseChatModel = model) {
   // The conversing model and the model *inside* the machine are separable, and
-  // separate scripts keep the scripted demo readable; live, they are one model.
+  // separate models keep the test's scripts readable; live, they are one model.
   useModel(machineModel);
   return createAgent({
     model,

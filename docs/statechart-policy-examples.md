@@ -1,6 +1,6 @@
 # Statechart policy examples
 
-Three offline examples put consequential decisions in visible machine states. Each exports its machine and a runner accepting `RunAgentOptions`. The consensus-review runner takes `patch` instead of `input`, because the host, not the caller, decides whether a patch is trusted. Replace the scripted `generateText` executor with an SDK implementation; override booking actors through native XState `actors` bindings.
+Three examples put consequential decisions in visible machine states. Each exports its machine and a runner accepting `RunAgentOptions`. The consensus-review runner takes `patch` instead of `input`, because the host, not the caller, decides whether a patch is trusted. Each runner defaults to real AI SDK executors (`openai("gpt-5.4-mini")`), which need `OPENAI_API_KEY`; pass `executors` to swap the model layer. Override booking actors through native XState `actors` bindings.
 
 <!-- policy example catalog derived from examples/consensus-review, examples/booking-compensation, and examples/deadline-escalation -->
 
@@ -10,15 +10,15 @@ Three offline examples put consequential decisions in visible machine states. Ea
 | [booking-compensation](../examples/booking-compensation/index.ts) | Human approval before reservations; confirmed hotel unavailability compensates the flight; uncertain outcomes require reconciliation | No reservation before approval, compensation order, compensation failure, uncertain outcome, success/cancel paths                     |
 | [deadline-escalation](../examples/deadline-escalation/index.ts)   | Matching request identity and host timestamp determine whether approval or expiry is accepted                                        | Deadline equality, stale identities, early expiry, late approval, JSON restoration                                                    |
 
-Run without provider credentials:
+Run against a real model:
 
 ```sh
-pnpm tsx examples/consensus-review/index.ts
-pnpm tsx examples/booking-compensation/index.ts
-pnpm tsx examples/deadline-escalation/index.ts
+OPENAI_API_KEY=... pnpm tsx examples/consensus-review/index.ts
+OPENAI_API_KEY=... pnpm tsx examples/booking-compensation/index.ts
+OPENAI_API_KEY=... pnpm tsx examples/deadline-escalation/index.ts
 ```
 
-The first CLI accepts three scripted votes. The second restores an approval checkpoint and demonstrates compensation using simulated bookings. The third restores a checkpoint and delivers a simulated scheduler expiry. Tests also run the alternate outcomes.
+The first CLI collects three model votes. The second restores an approval checkpoint and demonstrates compensation using simulated bookings. The third restores a checkpoint and delivers a simulated scheduler expiry. Tests need no key: they script the model by request name (`review`, `plan`, `propose`) through the AI SDK's mock model, and also run the alternate outcomes.
 
 ## Reviewer quorum
 
@@ -62,7 +62,7 @@ Persist the `awaitingApproval` checkpoint before scheduling expiry. Store an abs
 
 Serialize deliveries per request, or use storage compare-and-swap with conflict handling. Two independent resumes of one snapshot can otherwise produce conflicting outcomes. Retry scheduler deliveries that arrive before the waiting checkpoint exists. Scheduling, authentication, durable storage, and delivery retries belong to the host.
 
-This example is marked manual in the demo catalog because generic chat cannot supply that clock/scheduler contract. Its CLI is fully offline. It exports an ordinary XState machine that a dedicated host can visualize and execute.
+This example is marked manual in the demo catalog because generic chat cannot supply that clock/scheduler contract. Its CLI drafts the proposal with a real model and simulates the scheduler delivery. It exports an ordinary XState machine that a dedicated host can visualize and execute.
 
 ## Visualization and validation
 

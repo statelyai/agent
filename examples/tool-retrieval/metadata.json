@@ -1,0 +1,19 @@
+{
+  "name": "tool-retrieval",
+  "title": "Pick a few tools from a large registry, then answer with only those",
+  "kind": "pattern",
+  "origin": {
+    "type": "langgraph",
+    "source": "langgraph-bigtool and the LangGraph \"many tools\" how-to",
+    "url": "https://github.com/langchain-ai/langgraph-bigtool"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Searches a twelve-tool sample registry for the three tools that best match the question, then lets the model call one of them, ask for a new search, or answer. LangGraph enforces the selection by binding only the selected tools and bounds the loop with recursion_limit; here a guard rejects any tool outside the selected set, and MAX_TOOL_CALLS and MAX_RESELECTIONS are checked in guards so the model must answer or the run ends in failed."
+  },
+  "starters": [
+    "How many miles is a 42.195 km marathon?",
+    "How many days are there between 2026-01-15 and 2026-03-01?",
+    "What is the capital of Australia?"
+  ]
+}

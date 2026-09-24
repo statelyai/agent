@@ -20,10 +20,9 @@
  *
  * Executors are resolved per Durable Object, not at import: Workers have no
  * ambient `process.env`, so the provider is constructed from the `env` binding.
- * With `OPENAI_API_KEY` set (via `.dev.vars` locally, `wrangler secret` in
- * production) the run is live; without it the host falls back to scripted
- * `createScriptedExecutors`, so the example boots and completes with no
- * credentials at all.
+ * Set `OPENAI_API_KEY` (via `.dev.vars` locally — `dev:live` writes it from the
+ * repo `.env` — or `wrangler secret` in production). Without it a turn fails
+ * with a 500 naming the missing binding; there is no fallback model.
  *
  * HTTP protocol (one Agent instance per `:name`, i.e. one conversation):
  *   GET  /agents/email-drafter/:name        -> current view (state, interaction,
@@ -33,8 +32,7 @@
  *                                              validated, then run as one turn
  *
  * Run:
- *   pnpm --filter @statelyai/example-cloudflare-agent-host dev        # scripted, no API key
- *   pnpm --filter @statelyai/example-cloudflare-agent-host dev:live   # real model
+ *   pnpm --filter @statelyai/example-cloudflare-agent-host dev:live   # writes .dev.vars, then dev
  *
  *   curl -X POST localhost:3009/agents/email-drafter/demo \
  *     -d '{"type":"PROMPT_SUBMITTED","text":"Email ana@x.com about Friday'\''s launch"}'
@@ -53,14 +51,13 @@ import {
   type AgentRequestExecutors,
   type RunAgentResult,
 } from "@statelyai/agent";
-import { createScriptedExecutors } from "@statelyai/agent/testing";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { emailDrafter, emailDrafterSchemas } from "../email-drafter/agent-logic.js";
 import { createDurableObjectEventLogStore } from "./event-log-store.js";
 
 interface Env {
   EmailDrafter: DurableObjectNamespace<EmailDrafter>;
-  /** Optional: set it and the run is live, leave it unset and the run is scripted. */
+  /** Required for any turn: the model provider's key. */
   OPENAI_API_KEY?: string;
 }
 
@@ -80,55 +77,6 @@ class IgnoredEventError extends Error {}
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : String(error ?? "Unknown error");
 
-/**
- * How many scripted model calls this Worker has made. The durability claim of
- * this host is that a resume REPLAYS journaled calls instead of re-running
- * them, and this counter is what makes that observable — see
- * `test/agent.workers-test.ts`.
- */
-export const scriptedModelCalls = { count: 0 };
-
-/**
- * Scripted answers, keyed by the request NAME the machine declares
- * (`evaluatePrompt` / `draftEmail` in `../email-drafter/agent-logic.ts`), so
- * each entry answers the request it was written for however many rounds the
- * conversation takes: the last entry for a name repeats.
- */
-const countCall =
-  <T>(answer: T) =>
-  (): T => {
-    scriptedModelCalls.count += 1;
-    return answer;
-  };
-
-const scriptedText = {
-  evaluatePrompt: [countCall({ satisfied: true, missing: [], questions: [] })],
-  draftEmail: [
-    countCall({
-      to: "ana@example.com",
-      subject: "Friday's launch",
-      body: "Hi Ana — we ship Friday at 9am. Shout if anything is still open on your side.",
-    }),
-  ],
-};
-
-/** Live executors when the DO has a key, scripted otherwise. */
-function resolveExecutors(env: Env): AgentRequestExecutors {
-  if (!env.OPENAI_API_KEY) {
-    return createScriptedExecutors({ text: scriptedText });
-  }
-
-  // Bind the provider to the Worker's env: `openai(...)` from the module scope
-  // would look for a `process.env` key that does not exist in workerd.
-  const openai = createOpenAI({ apiKey: env.OPENAI_API_KEY });
-  return createAiSdkExecutors({
-    models: {
-      promptEvaluator: openai("gpt-5.4-mini"),
-      emailDrafter: openai("gpt-5.4-mini"),
-    },
-  });
-}
-
 export class EmailDrafter extends Agent<Env> {
   #store: AgentEventLogStore | undefined;
   #executors: AgentRequestExecutors | undefined;
@@ -140,6 +88,25 @@ export class EmailDrafter extends Agent<Env> {
   #last: Turn | undefined;
   /** Turns are serialized: one `runAgent` leg at a time per conversation. */
   #turns: Promise<unknown> = Promise.resolve();
+
+  /**
+   * The executors this conversation's turns run with, built once per Durable
+   * Object from its `env`: Workers have no ambient `process.env`, so the
+   * provider is bound to the binding rather than constructed at module scope.
+   * A host swapping providers (or a test stubbing the model) overrides this.
+   */
+  createExecutors(): AgentRequestExecutors {
+    if (!this.env.OPENAI_API_KEY) {
+      throw new Error("Set the OPENAI_API_KEY binding (.dev.vars or `wrangler secret`).");
+    }
+    const openai = createOpenAI({ apiKey: this.env.OPENAI_API_KEY });
+    return createAiSdkExecutors({
+      models: {
+        promptEvaluator: openai("gpt-5.4-mini"),
+        emailDrafter: openai("gpt-5.4-mini"),
+      },
+    });
+  }
 
   /** Lazy so the DO's storage is bound before the table is created. */
   get #log(): AgentEventLogStore {
@@ -166,7 +133,7 @@ export class EmailDrafter extends Agent<Env> {
    * the call that was in flight.
    */
   async #run(event?: EventFrom<typeof emailDrafter>): Promise<Turn> {
-    this.#executors ??= resolveExecutors(this.env);
+    this.#executors ??= this.createExecutors();
 
     const result = await runAgent(emailDrafter, {
       store: this.#log,
