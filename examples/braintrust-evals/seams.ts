@@ -20,20 +20,21 @@
  * - `draft` — prompt + clarifications → draft (`draftEmail`, first call).
  * - `revise` — draft + revision request → new draft (`draftEmail`, second call).
  *
- * WHETHER to ask is not a seam: it is a Jev judgment (TypeSafe System One),
- * a typed probability per required detail, not a text request, so `runSeam`
- * does not route it. `runSeamCase` takes the Jev client instead: the test
- * scripts it, the live run asks the real one. The branch that judgment picks
+ * WHETHER to ask is not a seam: it is a Jev judgment (the AI SDK's
+ * `experimental_evaluate` with `@ai-sdk/typesafe-ai`), a typed probability
+ * per required detail, not a text request, so `runSeam` does not route it.
+ * `runSeamCase` takes the judge model instead: the test scripts it, the live
+ * run asks the real one. The branch that judgment picks
  * is scored end to end in `./index.ts` (`complete-prompt-drafts-directly`).
  *
  * Each is its own `Eval()`/experiment, so a vendor tracks per-seam scores over
  * time instead of one blended number.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/braintrust-evals/seams.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/braintrust-evals/seams.ts
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic } from "xstate";
-import type { TypeSafeClient } from "@typesafe-ai/sdk";
+import type { Experimental_EvaluationModel } from "ai";
 import { matchesTrajectory, runSeam } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -113,19 +114,19 @@ function respondFor(input: SeamCaseInput) {
 
 /**
  * Runs one row through `runSeam` and flattens it into JSON an eval row can
- * carry. `jevClient` answers the prompt check; omitted, the SDK reads
- * `TYPESAFE_API_KEY`.
+ * carry. `judge` answers the prompt check; omitted, the default judge is Jev,
+ * which reads `TYPESAFE_AI_API_KEY`.
  */
 export async function runSeamCase(
   input: SeamCaseInput,
   candidate: AgentRequestExecutors["generateText"] | null,
-  jevClient?: TypeSafeClient,
+  judge?: Experimental_EvaluationModel,
 ): Promise<SeamOutcome> {
   const run = await runSeam(emailDrafter, {
     scripts: input.scripts,
     seam: input.seam,
     ...(candidate ? { candidate } : {}),
-    ...(jevClient ? { actors: { evaluatePrompt: createEvaluatePrompt(jevClient) } } : {}),
+    ...(judge ? { actors: { evaluatePrompt: createEvaluatePrompt(judge) } } : {}),
     respond: respondFor(input),
   });
 
@@ -378,15 +379,15 @@ export const seams = [
 // ─── Braintrust wiring: one experiment per seam ───
 
 export async function main() {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
     throw new Error(
-      "Set OPENAI_API_KEY and TYPESAFE_API_KEY to run the seam evals: the seam call hits the " +
+      "Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run the seam evals: the seam call hits the " +
         "real model, and the prompt check is a live Jev judgment.",
     );
   }
   const upload = Boolean(process.env.BRAINTRUST_API_KEY);
   // The seam under test hits the real model; every other text call replays its
-  // script. The Jev judgment is live (the SDK reads TYPESAFE_API_KEY).
+  // script. The Jev judgment is live (it reads TYPESAFE_AI_API_KEY).
   const candidate = createAiSdkExecutors({ models }).generateText;
 
   console.log(

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import {
   INPUT_THRESHOLD,
   OUTPUT_THRESHOLD,
@@ -24,14 +24,14 @@ function classify(name: string | undefined): Step {
   }
 }
 
-/** A Jev answer: a probability, or a boolean (0.95 / 0.05). */
+/** A judge answer: a probability, or a boolean (0.95 / 0.05). */
 type Verdict = number | boolean;
 
 /**
- * Builds a mock `generateText` executor, a mock Jev client for the two
+ * Builds a mock `generateText` executor, a mock judge for the two
  * guardrails, and one call log across both. Each guardrail's answers are
  * supplied by the caller; `verify` may vary per call (index into an array).
- * The Jev entries log `validate` / `verify` once per call, on its first
+ * The judge entries log `validate` / `verify` once per call, on its first
  * question.
  */
 function createModel(opts: {
@@ -44,7 +44,7 @@ function createModel(opts: {
     const seq = opts.verify ?? [{ correct: true }];
     return seq[Math.min(verifyIndex, seq.length - 1)]!;
   };
-  const jev = createMockJevClient({
+  const jev = createMockJudge({
     answerable: () => {
       calls.push("validate");
       return opts.validate.answerable;
@@ -73,8 +73,8 @@ function createModel(opts: {
     }
   };
   const actors = {
-    validateQuestion: createValidateQuestion(jev.client),
-    verifyAnswer: createVerifyAnswer(jev.client),
+    validateQuestion: createValidateQuestion(jev.model),
+    verifyAnswer: createVerifyAnswer(jev.model),
   };
   return { generateText, actors, calls, jevCalls: jev.calls };
 }
@@ -149,7 +149,7 @@ describe("guardrails", () => {
     expect(calls.filter((c) => c === "revise")).toHaveLength(1);
   });
 
-  test("the input guardrail asks Jev two nouls over question and topic; just under the threshold refuses", async () => {
+  test("the input guardrail asks Jev two boolean questions over question and topic; just under the threshold refuses", async () => {
     const at = createModel({
       validate: { answerable: INPUT_THRESHOLD, inScope: INPUT_THRESHOLD },
     });
@@ -162,7 +162,7 @@ describe("guardrails", () => {
     const call = at.jevCalls[0]!;
     expect(call.state).toEqual({ question: "What is the capital of France?", topic: "geography" });
     expect(Object.keys(call.questions)).toEqual(["answerable", "inScope"]);
-    expect(Object.values(call.questions).every((q) => q.type === "noul")).toBe(true);
+    expect(Object.values(call.questions).every((q) => q.type === "boolean")).toBe(true);
     expect(passed.status === "done" && passed.output.status).toBe("answered");
 
     const under = createModel({
@@ -180,7 +180,7 @@ describe("guardrails", () => {
     expect(under.calls).toEqual(["validate"]);
   });
 
-  test("the output guardrail asks Jev two nouls over question and answer; just under the threshold revises", async () => {
+  test("the output guardrail asks Jev two boolean questions over question and answer; just under the threshold revises", async () => {
     const { generateText, actors, calls, jevCalls } = createModel({
       validate: { answerable: true, inScope: true },
       verify: [{ correct: OUTPUT_THRESHOLD - 0.01 }, { correct: OUTPUT_THRESHOLD }],
@@ -194,7 +194,7 @@ describe("guardrails", () => {
     const verify = jevCalls[1]!;
     expect(verify.state).toEqual({ question: "What is the capital of France?", answer: "Paris." });
     expect(Object.keys(verify.questions)).toEqual(["correct", "responsive"]);
-    expect(Object.values(verify.questions).every((q) => q.type === "noul")).toBe(true);
+    expect(Object.values(verify.questions).every((q) => q.type === "boolean")).toBe(true);
     expect(calls).toEqual(["validate", "answer", "verify", "revise", "verify"]);
     expect(result.status === "done" && result.output).toMatchObject({
       status: "answered",

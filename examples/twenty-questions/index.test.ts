@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
 import type { AgentDecisionRequest, AgentRequestExecutor, ChosenEvent } from "@statelyai/agent";
-import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
+import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import {
   GUESS_CORRECT_THRESHOLD,
   PLAY_AGAIN_THRESHOLD,
@@ -34,8 +34,8 @@ const replyOf = (state: unknown) => (state as { reply: string }).reply;
  * The three free-text judgments, answered by Jev question name from the raw
  * reply in the request state. Overrides replace a question's entry.
  */
-function createJev(overrides: Record<string, MockJevEntry | MockJevEntry[]> = {}) {
-  const jev = createMockJevClient({
+function createJev(overrides: Record<string, MockJudgeEntry | MockJudgeEntry[]> = {}) {
+  const jev = createMockJudge({
     // A reply ending in '?' is a side question back at the agent.
     reply: (state) => {
       const reply = replyOf(state);
@@ -47,9 +47,9 @@ function createJev(overrides: Record<string, MockJevEntry | MockJevEntry[]> = {}
     ...overrides,
   });
   const actors = {
-    classifyAnswer: createClassifyAnswer(jev.client),
-    classifyGuessFeedback: createClassifyGuessFeedback(jev.client),
-    classifyPlayAgain: createClassifyPlayAgain(jev.client),
+    classifyAnswer: createClassifyAnswer(jev.model),
+    classifyGuessFeedback: createClassifyGuessFeedback(jev.model),
+    classifyPlayAgain: createClassifyPlayAgain(jev.model),
   };
   return { calls: jev.calls, actors };
 }
@@ -415,7 +415,7 @@ describe("twenty-questions", () => {
     expect(prompts.slice(0, 2)).toEqual(["Is it an animal?", "Is it an animal?"]);
   });
 
-  test("guess feedback and play-again are one noul each; just under the threshold reads as no", async () => {
+  test("guess feedback and play-again are one boolean question each; just under the threshold reads as no", async () => {
     const jev = createJev({
       guessCorrect: GUESS_CORRECT_THRESHOLD - 0.01,
       playAgain: PLAY_AGAIN_THRESHOLD - 0.01,
@@ -435,8 +435,8 @@ describe("twenty-questions", () => {
       { question: "Do you want to play another round?", reply: "maybe later" },
     ]);
     expect(jev.calls.map((call) => Object.values(call.questions)[0]!.type)).toEqual([
-      "noul",
-      "noul",
+      "boolean",
+      "boolean",
     ]);
     expect(result.status === "done" && result.output).toMatchObject({
       userScore: 1,

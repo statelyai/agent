@@ -13,15 +13,26 @@ import {
   toAnthropicTools,
   toDecisionMessages,
 } from "./index.js";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { createClassifyTicket, triageMachine, triageSchema } from "../triage/index.js";
 
-/** Triage's classifier is a Jev judgment; script it so only the reply hits the stub. */
-const jevActors = () => ({
-  classifyTicket: createClassifyTicket(
-    createMockJevClient({ category: "billing", sentiment: "negative" }).client,
-  ),
-});
+/**
+ * Triage's classifier is a Jev judgment; script it so only the reply hits the
+ * stub. Triage reads Jev's `category` confidence from TypeSafe's provider
+ * metadata, so the scripted judge reports one above the threshold.
+ */
+const judgeActors = () => {
+  const { model } = createMockJudge({ category: "billing", sentiment: "negative" });
+  return {
+    classifyTicket: createClassifyTicket({
+      ...model,
+      doEvaluate: async (options) => ({
+        ...(await model.doEvaluate(options)),
+        providerMetadata: { typesafe: { confidence: { category: 0.9 } } },
+      }),
+    }),
+  };
+};
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 
 // A minimal Standard Schema fixture exposing the optional
@@ -338,7 +349,7 @@ describe("createAnthropicExecutors + runAgent", () => {
     const result = await runAgent(triageMachine, {
       input: { ticket: "My invoice is wrong and I am furious." },
       executors: { generateText },
-      actors: jevActors(),
+      actors: judgeActors(),
     });
 
     // The stub reports 1 input + 1 output token per call, and triage makes one
@@ -369,7 +380,7 @@ describe("createAnthropicExecutors + runAgent", () => {
     const result = await runAgent(triageMachine, {
       input: { ticket: "My invoice is wrong and I am furious." },
       executors: { generateText },
-      actors: jevActors(),
+      actors: judgeActors(),
     });
 
     expect(result.status).toBe("done");

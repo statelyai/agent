@@ -11,7 +11,7 @@
   "comparison": {
     "targets": ["Braintrust", "LangSmith datasets", "agent eval harnesses"],
     "purpose": "Evals observe typed output, transition trajectories, named request calls, and usage while a simulated user drives ordinary idle states; the prompt-completeness check is a Jev judgment the eval scripts or runs live beside the text seams.",
-    "requires": "OPENAI_API_KEY to run the text model and TYPESAFE_API_KEY for the Jev judgment; a Braintrust account (BRAINTRUST_API_KEY) only to upload the experiment, since the eval itself runs locally without one."
+    "requires": "OPENAI_API_KEY to run the text model and TYPESAFE_AI_API_KEY for the Jev judgment; a Braintrust account (BRAINTRUST_API_KEY) only to upload the experiment, since the eval itself runs locally without one."
   },
   "starters": []
 }

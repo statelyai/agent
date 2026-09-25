@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor, ChosenEvent } from "@statelyai/agent";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { JOKE_LEVELS, createRateJoke, jokeMachine } from "./index.js";
 
 /**
@@ -14,7 +14,7 @@ import { JOKE_LEVELS, createRateJoke, jokeMachine } from "./index.js";
 function createJokeExecutors(options: { levels: number[]; decision: ChosenEvent["type"] }) {
   const revisionInputs: { topic: string; previousJoke: string; rating: number | null }[] = [];
   let decideCount = 0;
-  const jev = createMockJevClient({ rating: options.levels });
+  const judge = createMockJudge({ rating: options.levels });
 
   const streamText: AgentRequestExecutor = async (request) => {
     if (request.name !== "tellJoke") throw new Error(`unexpected stream request: ${request.name}`);
@@ -41,8 +41,8 @@ function createJokeExecutors(options: { levels: number[]; decision: ChosenEvent[
 
   return {
     executors: { streamText, decide },
-    actors: { rateJoke: createRateJoke(jev.client) },
-    jevCalls: jev.calls,
+    actors: { rateJoke: createRateJoke(judge.model) },
+    jevCalls: judge.calls,
     revisionInputs,
     get decideCount() {
       return decideCount;
@@ -134,11 +134,11 @@ describe("joke-teller", () => {
       },
       actors: {
         rateJoke: createRateJoke(
-          createMockJevClient({
+          createMockJudge({
             rating: () => {
               throw new Error("rater offline");
             },
-          }).client,
+          }).model,
         ),
       },
     });

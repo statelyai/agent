@@ -14,11 +14,11 @@
  * never judges tone, so a "worse" draft here means a draft missing facts.
  *
  * Live, from `demo/`:
- * OPENAI_API_KEY=... TYPESAFE_API_KEY=... pnpm exec tsx src/lib/email-drafter-compare.ts
+ * OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... pnpm exec tsx src/lib/email-drafter-compare.ts
  * Writes demo/results/email-drafter/comparison.json.
  */
 import type { AnyStateMachine, SnapshotFrom } from "xstate";
-import type { TypeSafeClient } from "@typesafe-ai/sdk";
+import type { Experimental_EvaluationModel } from "ai";
 import {
   type AgentRequestExecutors,
   type AgentTraceEvent,
@@ -124,7 +124,7 @@ export interface RunMetrics {
   revisions: number;
   /** Text-model calls (`request.start`). Jev judgments are counted in `jevCalls`. */
   modelCalls: number;
-  /** System One (Jev) judgments: one per entry into v1's `evaluating`. */
+  /** Jev judgments (`experimental_evaluate` calls): one per entry into v1's `evaluating`. */
   jevCalls: number;
   /** Sum over every model call, or `null` if any call did not report usage. */
   totalTokens: number | null;
@@ -202,8 +202,8 @@ export async function runCase(
   machine: AnyStateMachine,
   emailCase: EmailCase,
   executors: Partial<AgentRequestExecutors>,
-  /** Injected by tests; omitted, Jev's client reads `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient,
+  /** Injected by tests; omitted, Jev reads `TYPESAFE_AI_API_KEY`. */
+  judge?: Experimental_EvaluationModel,
 ): Promise<RunMetrics> {
   const metrics: RunMetrics = {
     caseId: emailCase.id,
@@ -250,7 +250,7 @@ export async function runCase(
     }
   };
 
-  const actors = jevClient ? { actors: { evaluatePrompt: createEvaluatePrompt(jevClient) } } : {};
+  const actors = judge ? { actors: { evaluatePrompt: createEvaluatePrompt(judge) } } : {};
   let result = await runAgent(machine, {
     input: { prompt: emailCase.prompt },
     executors,
@@ -342,7 +342,7 @@ export async function runCase(
 export async function runComparison(
   executors: Partial<AgentRequestExecutors>,
   selectedCases: EmailCase[] = cases,
-  jevClient?: TypeSafeClient,
+  judge?: Experimental_EvaluationModel,
 ): Promise<MachineSummary[]> {
   const machines = [
     { name: "v1", machine: emailDrafterV1Machine },
@@ -353,7 +353,7 @@ export async function runComparison(
   for (const { name, machine } of machines) {
     const runs: RunMetrics[] = [];
     for (const emailCase of selectedCases) {
-      runs.push(await runCase(machine, emailCase, executors, jevClient));
+      runs.push(await runCase(machine, emailCase, executors, judge));
     }
     summaries.push(summarize(name, runs));
   }
@@ -482,8 +482,8 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run the comparison.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run the comparison.");
     process.exit(1);
   }
   main().catch((error) => {

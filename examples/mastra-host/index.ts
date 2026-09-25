@@ -12,8 +12,8 @@
  *     { handle, interaction, draft }.
  *   - `resume_workflow` reloads that snapshot and delivers the human's event.
  *
- * Everything the host owns lives inside `createHost({ executors, jevClient,
- * store })`: the executors and Jev client it runs with (the drafter's prompt
+ * Everything the host owns lives inside `createHost({ executors, judge,
+ * store })`: the executors and judge model it runs with (the drafter's prompt
  * check is a Jev judgment), the snapshot store, the handle counter, and the two
  * tools. Nothing is module-level mutable state, so two hosts (one per request
  * in a server, or one per test) never share a run.
@@ -25,13 +25,13 @@
  * An event the state does not handle is ignored by the machine (`result.ignored`),
  * so no hand-rolled legality check lives in the tools.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/mastra-host/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/mastra-host/index.ts
  *   The live Mastra agent calls the two tools, and the machine runs against
  *   real generations and a real Jev judgment.
  */
 import { z } from "zod";
 import type { Snapshot } from "xstate";
-import type { TypeSafeClient } from "@typesafe-ai/sdk";
+import type { Experimental_EvaluationModel } from "ai";
 import { Agent } from "@mastra/core/agent";
 import { createTool, isValidationError, type ValidationError } from "@mastra/core/tools";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -127,10 +127,10 @@ export interface CreateHostOptions {
   /** Model executors every tool call runs with. */
   executors: AgentRequestExecutors;
   /**
-   * The Jev client for the drafter's prompt check. Omitted, the machine's own
-   * judgment reads `TYPESAFE_API_KEY` from the environment.
+   * The judge model for the drafter's prompt check. Omitted, the machine's own
+   * Jev judgment reads `TYPESAFE_AI_API_KEY` from the environment.
    */
-  jevClient?: TypeSafeClient;
+  judge?: Experimental_EvaluationModel;
   /** Where paused runs are persisted. Defaults to a fresh in-memory store. */
   store?: RunStore;
 }
@@ -141,13 +141,13 @@ export interface CreateHostOptions {
  */
 export function createHost({
   executors,
-  jevClient,
+  judge,
   store = createInMemoryRunStore(),
 }: CreateHostOptions) {
   let nextHandle = 0;
   const run = {
     executors,
-    ...(jevClient ? { actors: { evaluatePrompt: createEvaluatePrompt(jevClient) } } : {}),
+    ...(judge ? { actors: { evaluatePrompt: createEvaluatePrompt(judge) } } : {}),
   };
 
   /**
@@ -310,8 +310,8 @@ export function unwrapToolResult(value: ToolResult | ValidationError<unknown> | 
 
 /** Hand the two tools to the real Mastra agent loop. */
 export async function main() {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    throw new Error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
   }
   const { agent } = createHost({ executors: createAiSdkExecutors({ models }) });
   const result = await agent.generate(

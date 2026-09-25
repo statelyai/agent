@@ -9,9 +9,7 @@
  * Run with a built dist present: `pnpm build && pnpm check:dts`.
  */
 import { z } from "zod";
-import { noul } from "@typesafe-ai/sdk";
 import { runAgent, setupAgent } from "@statelyai/agent";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 
 // Something from every entry — proves each entry's public types resolve
 // from the shipped package, not just source. The root block also asserts the
@@ -34,14 +32,6 @@ export {
   type OtelTraceHandler,
   type OtelTraceHandlerOptions,
 } from "@statelyai/agent/otel";
-export { type SystemOneLogicOptions, type SystemOneOutput } from "@statelyai/agent/typesafe";
-
-// A System One actor's inferred type names the SDK's question and answer
-// types through the shipped `typesafe` declarations.
-export const judgeTopic = createSystemOneLogic({
-  state: (input: { topic: string }) => ({ topic: input.topic }),
-  questions: () => ({ onTopic: noul("Is `topic` about state machines?") }),
-});
 
 const setup = setupAgent({
   models: { quick: "openai/gpt-5.4-mini" },

@@ -3,7 +3,7 @@ import type { AgentRequestExecutors } from "@statelyai/agent";
 import type { Snapshot } from "xstate";
 import { resumeScenarioRun, startScenarioRun } from "./agent-runner";
 import { cases, runCase, runComparison } from "./email-drafter-compare";
-import { createTestJev } from "./test-jev";
+import { createTestJudge } from "./test-judge";
 import {
   ASSESSMENT_THRESHOLD,
   REQUIRED_DETAILS,
@@ -15,10 +15,10 @@ const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
 
 // v1's prompt check is a Jev judgment, scripted by rule: a detail is stated
 // when the request has an address / the word "subject"; the body always is.
-function createJev(overrides: Parameters<typeof createTestJev>[0] = {}) {
+function createJudge(overrides: Parameters<typeof createTestJudge>[0] = {}) {
   const hasTo = (state: { request: string }) => EMAIL.test(state.request);
   const namesSubject = (state: { request: string }) => /subject/i.test(state.request);
-  return createTestJev({
+  return createTestJudge({
     satisfied: (state) => (hasTo(state) && namesSubject(state) ? 0.9 : 0.1),
     recipient: (state) => (hasTo(state) ? 0.9 : 0.1),
     subject: (state) => (namesSubject(state) ? 0.9 : 0.1),
@@ -26,7 +26,7 @@ function createJev(overrides: Parameters<typeof createTestJev>[0] = {}) {
     ...overrides,
   });
 }
-const jev = createJev();
+const judge = createJudge();
 
 // A rule-based stand-in model, the same for both versions: the follow-up
 // writer asks one question per missing detail; the drafter copies the request
@@ -53,8 +53,8 @@ const optionalCase = cases.find((entry) => entry.id === "optional-1")!;
 const recipientCase = cases.find((entry) => entry.id === "recipient-1")!;
 
 test("v1 asks before drafting when only optional details are missing; v2 drafts first", async () => {
-  const v1 = await runCase(emailDrafterV1Machine, optionalCase, executors, jev.client);
-  const v2 = await runCase(emailDrafterV2Machine, optionalCase, executors, jev.client);
+  const v1 = await runCase(emailDrafterV1Machine, optionalCase, executors, judge.model);
+  const v2 = await runCase(emailDrafterV2Machine, optionalCase, executors, judge.model);
 
   expect(v1.clarificationTurns).toBeGreaterThan(0);
   expect(v1.path).toContain("needsMoreInfo");
@@ -121,7 +121,7 @@ test("v1 'draft anyway' cannot send without a recipient; SEND asks instead", asy
       undefined,
       executors,
       undefined,
-      jev.client,
+      judge.model,
     );
   const asked = await startScenarioRun(
     "email-drafter-v1",
@@ -129,7 +129,7 @@ test("v1 'draft anyway' cannot send without a recipient; SEND asks instead", asy
     undefined,
     executors,
     undefined,
-    jev.client,
+    judge.model,
   );
   const reviewing = await resume(asked.idle!.snapshot, { type: "DRAFT_ANYWAY" });
   expect(reviewing.status).toBe("idle");
@@ -180,7 +180,7 @@ test("v1 idle label surfaces the evaluator's questions", async () => {
     undefined,
     executors,
     undefined,
-    jev.client,
+    judge.model,
   );
   expect(first.status).toBe("idle");
   expect(first.idle?.prompt).toContain("What is the recipient?");
@@ -188,7 +188,7 @@ test("v1 idle label surfaces the evaluator's questions", async () => {
 });
 
 test("the comparison holds the send rule for both versions and v2 asks less", async () => {
-  const [v1, v2] = await runComparison(executors, cases, jev.client);
+  const [v1, v2] = await runComparison(executors, cases, judge.model);
   expect(v1?.machine).toBe("v1");
   expect(v2?.machine).toBe("v2");
 
@@ -291,7 +291,7 @@ test("v1 SEND with no subject asks, the same way it asks for a recipient", async
       undefined,
       executors,
       undefined,
-      jev.client,
+      judge.model,
     );
   const reviewing = await startScenarioRun(
     "email-drafter-v1",
@@ -299,7 +299,7 @@ test("v1 SEND with no subject asks, the same way it asks for a recipient", async
     undefined,
     executors,
     undefined,
-    jev.client,
+    judge.model,
   );
   expect(reviewing.status).toBe("idle");
   expect(reviewing.response).toContain("(no subject yet)");
@@ -311,28 +311,28 @@ test("v1 SEND with no subject asks, the same way it asks for a recipient", async
 
 test("v1's prompt check is one Jev call, and ASSESSMENT_THRESHOLD decides the branch", async () => {
   const prompt = cases.find((entry) => entry.id === "complete-1")!.prompt;
-  const start = (client: ReturnType<typeof createJev>) =>
-    startScenarioRun("email-drafter-v1", prompt, undefined, executors, undefined, client.client);
+  const start = (scripted: ReturnType<typeof createJudge>) =>
+    startScenarioRun("email-drafter-v1", prompt, undefined, executors, undefined, scripted.model);
 
   // At the threshold a detail counts as stated: straight to review.
-  const sure = createJev({ recipient: ASSESSMENT_THRESHOLD });
+  const sure = createJudge({ recipient: ASSESSMENT_THRESHOLD });
   const reviewing = await start(sure);
   expect(reviewing.idle?.events.map((event) => event.type)).toEqual(["REQUEST_CHANGES", "SEND"]);
 
-  // The evidence is named state; the questions are four `noul`s in one call.
+  // The evidence is named state; the questions are four boolean questions in one call.
   expect(sure.calls).toHaveLength(1);
   expect(sure.calls[0]!.state).toEqual({ request: prompt, requiredDetails: REQUIRED_DETAILS });
   expect(
     Object.entries(sure.calls[0]!.questions).map(([name, question]) => [name, question.type]),
   ).toEqual([
-    ["satisfied", "noul"],
-    ["recipient", "noul"],
-    ["subject", "noul"],
-    ["body", "noul"],
+    ["satisfied", "boolean"],
+    ["recipient", "boolean"],
+    ["subject", "boolean"],
+    ["body", "boolean"],
   ]);
 
   // Just under it, the same request asks about that one detail.
-  const unsure = createJev({ recipient: ASSESSMENT_THRESHOLD - 0.01 });
+  const unsure = createJudge({ recipient: ASSESSMENT_THRESHOLD - 0.01 });
   const asked = await start(unsure);
   expect(asked.idle?.prompt).toContain("What is the recipient?");
   expect(asked.idle?.prompt).not.toContain("What is the subject?");

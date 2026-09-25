@@ -18,7 +18,6 @@
   "alias": {
     "@statelyai/agent": "./node_modules/@statelyai/agent/dist/index.mjs",
     "@statelyai/agent/ai-sdk": "./node_modules/@statelyai/agent/dist/ai-sdk.mjs",
-    "@statelyai/agent/typesafe": "./node_modules/@statelyai/agent/dist/typesafe.mjs",
   },
   "observability": { "enabled": true },
 }

@@ -46,8 +46,9 @@
  *     then the checkpoint is recorded as failed and the session moves on.
  *   - The pass/fail decision is a threshold the machine checks (PASS_SCORE),
  *     not a model's "understood: yes/no".
- *   - Grading is a JUDGMENT, not a generation. `verifying` asks TypeSafe
- *     System One (Jev) one `score` question over `{ checkpoint, keyIdea,
+ *   - Grading is a JUDGMENT, not a generation. `verifying` asks the AI SDK's
+ *     `experimental_evaluate`, with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model, one `score` question over `{ checkpoint, keyIdea,
  *     explanation }` on five concrete levels (`UNDERSTANDING_LEVELS`), mapped
  *     to 0-100 in code as `score / (levels - 1) * 100`. The feedback the
  *     learner sees is the matched level's description; the text model is kept
@@ -66,14 +67,14 @@
  * `generateText` and scripted human events (tests pass both, so CI needs no
  * API key); the direct run uses real models and stdin.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/feynman-tutor/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/feynman-tutor/index.ts
  */
 import { z } from "zod";
-import type { SnapshotFrom } from "xstate";
+import { createAsyncLogic, type SnapshotFrom } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { score, type ScoreResponse, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   getInteraction,
   getStatePath,
@@ -86,6 +87,12 @@ import {
 const models = {
   tutor: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Most checkpoints a session covers, whatever the planner returns. */
 export const MAX_CHECKPOINTS = 3;
@@ -106,35 +113,42 @@ export const UNDERSTANDING_LEVELS = [
 ] as const;
 
 /**
- * verify_answer as a System One judgment: the checkpoint, its key idea and
- * the learner's explanation are the state, and one `score` places the
- * explanation on `UNDERSTANDING_LEVELS`. `client` is injected by tests and
- * hosts; omitted, the SDK reads `TYPESAFE_API_KEY` from the environment.
+ * verify_answer as a judgment: the checkpoint, its key idea and the learner's
+ * explanation are the state, and one `score` question places the explanation
+ * on `UNDERSTANDING_LEVELS`. The judge model is injected by tests and hosts;
+ * the default is Jev.
  */
-export function createVerifyExplanation(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { title: string; keyIdea: string; explanation: string }) => ({
-      checkpoint: input.title,
-      keyIdea: input.keyIdea,
-      explanation: input.explanation,
-    }),
-    questions: () => ({
-      understanding: score(
-        "How well does `explanation` capture `keyIdea` for the checkpoint `checkpoint`? " +
-          "Judge accuracy and completeness only, not style.",
-        UNDERSTANDING_LEVELS,
-      ),
-    }),
+export function createVerifyExplanation(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { understanding: { score: number } } },
+    { title: string; keyIdea: string; explanation: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { checkpoint: input.title, keyIdea: input.keyIdea, explanation: input.explanation },
+        questions: {
+          understanding: {
+            type: "score" as const,
+            instructions:
+              "How well does `explanation` capture `keyIdea` for the checkpoint `checkpoint`? " +
+              "Judge accuracy and completeness only, not style.",
+            criteria: UNDERSTANDING_LEVELS,
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
 /** The level on 0-100 and the matched level's description as feedback. */
-function toVerdict(answer: ScoreResponse) {
-  const top = Object.keys(answer.legend).length - 1;
+function toVerdict(answer: { score: number }) {
+  const top = UNDERSTANDING_LEVELS.length - 1;
   return {
     lastScore: Math.round((answer.score / top) * 100),
-    lastFeedback: String(answer.legend[Math.round(answer.score)]),
+    lastFeedback: String(UNDERSTANDING_LEVELS[Math.round(answer.score)]),
   };
 }
 
@@ -449,8 +463,8 @@ export interface RunFeynmanTutorOptions {
   topic?: string;
   /** Injected for tests; the direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Scripted learner events, consumed in order on each idle settle; then stdin. */
   humanEvents?: FeynmanHumanEvent[];
   /** Observes each machine transition. */
@@ -472,7 +486,7 @@ export async function runFeynmanTutorExample(
   const {
     topic = "How public-key cryptography works",
     generateText,
-    jevClient,
+    judge,
     onProgress,
     onPrompt,
   } = options;
@@ -480,7 +494,7 @@ export async function runFeynmanTutorExample(
   const progress: string[] = [];
   const shared = {
     executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
-    ...(jevClient ? { actors: { verifyExplanation: createVerifyExplanation(jevClient) } } : {}),
+    ...(judge ? { actors: { verifyExplanation: createVerifyExplanation(judge) } } : {}),
     onTransition: (snapshot: FeynmanSnapshot) => {
       const state = getStatePath(snapshot);
       // A resume re-reports the restored state; record each state once per visit.
@@ -528,8 +542,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

@@ -40,7 +40,7 @@ For the optional raw OpenAI SDK executor (`@statelyai/agent/openai`):
 pnpm add openai
 ```
 
-For classification, grading, relevance, and yes/no checks as TypeSafe System One (Jev) judgments, `@statelyai/agent/typesafe` needs `pnpm add @typesafe-ai/sdk`; see [Judgments with TypeSafe](docs/typesafe.md).
+Classification, grading, relevance, and yes/no checks are judgments: call the AI SDK's `experimental_evaluate` with `@ai-sdk/typesafe-ai` (`pnpm add ai @ai-sdk/typesafe-ai`) from an ordinary actor; see [Judgments with the AI SDK](docs/judgments.md).
 
 Requirements:
 

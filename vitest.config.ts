@@ -18,7 +18,6 @@ export default {
       { find: "@statelyai/agent/openai", replacement: src("openai/index.ts") },
       { find: "@statelyai/agent/otel", replacement: src("otel/index.ts") },
       { find: "@statelyai/agent/testing", replacement: src("testing/index.ts") },
-      { find: "@statelyai/agent/typesafe", replacement: src("typesafe/index.ts") },
       { find: "@statelyai/agent/validate", replacement: src("validate/index.ts") },
       { find: /^@statelyai\/agent$/, replacement: src("index.ts") },
     ],

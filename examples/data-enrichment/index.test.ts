@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { type AgentTextRequest } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
-import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
+import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   dataEnrichmentMachine,
@@ -39,16 +39,16 @@ function queryForMissing(request: AgentTextRequest): { query: string } {
 
 /**
  * Text model mocked by request name; the search actor runs its real keyword
- * logic. The reviewer is a Jev judgment scripted by question name (one `noul`
+ * logic. The reviewer is a Jev judgment scripted by question name (one boolean question
  * per requested field); by default every value is backed.
  */
-function scripted(review: Record<string, MockJevEntry | MockJevEntry[]> = { "*": true }) {
-  const jev = createMockJevClient(review);
+function scripted(review: Record<string, MockJudgeEntry | MockJudgeEntry[]> = { "*": true }) {
+  const jev = createMockJudge(review);
   return {
     generateText: createMockModelExecutors({
       text: { planSearch: queryForMissing, extractRecord: extractFromPassages },
     }).generateText,
-    jevClient: jev.client,
+    judge: jev.model,
     jev,
   };
 }
@@ -187,7 +187,7 @@ test("starters behave as their labels advertise", async () => {
   }
 });
 
-test("the reviewer asks Jev one noul per requested field; the threshold decides", async () => {
+test("the reviewer asks Jev one boolean question per requested field; the threshold decides", async () => {
   const executors = scripted({ ceo: [SUPPORT_THRESHOLD - 0.01, SUPPORT_THRESHOLD], "*": 0.9 });
   const result = await runDataEnrichmentExample({
     company: "Northwind Robotics",
@@ -205,7 +205,7 @@ test("the reviewer asks Jev one noul per requested field; the threshold decides"
   expect(state.record).toEqual({ founded: "2014", ceo: "Dana Okafor" });
   expect(state.passages.length).toBeGreaterThan(0);
   expect(Object.keys(call.questions)).toEqual(["founded", "ceo"]);
-  expect(Object.values(call.questions).every((q) => q.type === "noul")).toBe(true);
+  expect(Object.values(call.questions).every((q) => q.type === "boolean")).toBe(true);
   // The just-under answer cost one more search pass before the second review.
   expect(result.progress.filter((state) => state === "reflecting")).toHaveLength(2);
   expect(result.loops).toBe(2);

@@ -1,12 +1,12 @@
 /**
  * No API key, no Braintrust service: a mock model answers each row's text
- * calls and a scripted Jev client answers the prompt check.
+ * calls and a scripted judge answers the prompt check.
  * The scorers are plain functions over a `runAgent` result, so they are
  * testable on their own — which is the point of the example.
  */
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { describe, expect, test } from "vitest";
-import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
+import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   dataset,
@@ -20,10 +20,10 @@ import {
 /** Canned model answers for one row. */
 interface RowScript {
   /**
-   * The Jev prompt check, by question name (`satisfied`, `recipient`,
+   * The Jev prompt check, by question id (`satisfied`, `recipient`,
    * `subject`, `body`); a list answers successive `evaluating` visits.
    */
-  judgments: Record<string, MockJevEntry | MockJevEntry[]>;
+  judgments: Record<string, MockJudgeEntry | MockJudgeEntry[]>;
   /** The draft the model returns. */
   draft: { to: string; subject: string; body: string };
   /** Tokens each call reports, so the budget scorer has real numbers. */
@@ -81,9 +81,9 @@ function scriptFor(row: { metadata: { case: string } }): RowScript {
   return scripts[row.metadata.case]!;
 }
 
-/** A fresh scripted Jev client per run, so answer queues never leak between runs. */
+/** A fresh scripted judge per run, so answer queues never leak between runs. */
 function jevFor(script: RowScript) {
-  return createMockJevClient(script.judgments).client;
+  return createMockJudge(script.judgments).model;
 }
 
 describe("braintrust-evals", () => {

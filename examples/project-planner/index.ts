@@ -45,7 +45,8 @@
  *     duplicate id, an unknown dependency, or a cycle sends the tasks back to
  *     the model with the problems listed, at most MAX_REGENERATIONS times.
  *   - Risk is a JUDGMENT, the mitigation a generation. LangGraph asks one LLM
- *     for both. Here `assessingRisk` asks TypeSafe System One (Jev) one
+ *     for both. Here `assessingRisk` asks the AI SDK's `experimental_evaluate`
+ *     with Jev (`@ai-sdk/typesafe-ai`) as the evaluation model one
  *     `choice` over `{ goal, schedule, projectDays, deadlineDays }` (the
  *     computed schedule, not the model's), and only the mitigation, free text
  *     the output and the replanner both read, stays a text-model request.
@@ -63,19 +64,25 @@
  * `generateText` (tests pass a scripted mock, CI needs no API key); the
  * direct run uses real models.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/project-planner/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/project-planner/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
   planner: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Most tasks a plan may hold, whatever the model returns. */
 export const MAX_TASKS = 8;
@@ -101,37 +108,43 @@ type ScheduleEntry = z.infer<typeof scheduleEntrySchema>;
 const riskSchema = z.enum(["low", "medium", "high"]);
 
 /**
- * risk_assessment as a System One judgment: the computed schedule and the
- * deadline are the state, and one `choice` names the delivery risk. `client`
- * is injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ * risk_assessment as a judgment: the computed schedule and the deadline are
+ * the state, and one `choice` names the delivery risk. The judge model is
+ * injected by tests and hosts; the default is Jev.
  */
-export function createAssessRisk(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: {
-      goal: string;
-      schedule: string[];
-      projectDays: number;
-      deadlineDays: number;
-    }) => ({
-      goal: input.goal,
-      schedule: input.schedule,
-      projectDays: input.projectDays,
-      deadlineDays: input.deadlineDays,
-    }),
-    questions: () => ({
-      risk: choice(
-        "How likely is the project in `goal` to miss `deadlineDays`, given the computed " +
-          "`schedule` (one line per task, in days) that finishes on day `projectDays`?",
-        {
-          low: "The schedule finishes well inside the deadline, with slack to absorb a slipped task.",
-          medium:
-            "The schedule fits the deadline with little slack, or one long task or dependency " +
-            "chain would push it over if it slipped.",
-          high: "The schedule misses the deadline, or finishes so close to it that any slip on the critical path misses it.",
+export function createAssessRisk(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { risk: { choice: "low" | "medium" | "high" } } },
+    { goal: string; schedule: string[]; projectDays: number; deadlineDays: number }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: {
+          goal: input.goal,
+          schedule: input.schedule,
+          projectDays: input.projectDays,
+          deadlineDays: input.deadlineDays,
         },
-      ),
-    }),
+        questions: {
+          risk: {
+            type: "choice" as const,
+            instructions:
+              "How likely is the project in `goal` to miss `deadlineDays`, given the computed " +
+              "`schedule` (one line per task, in days) that finishes on day `projectDays`?",
+            criteria: {
+              low: "The schedule finishes well inside the deadline, with slack to absorb a slipped task.",
+              medium:
+                "The schedule fits the deadline with little slack, or one long task or dependency " +
+                "chain would push it over if it slipped.",
+              high: "The schedule misses the deadline, or finishes so close to it that any slip on the critical path misses it.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -569,8 +582,8 @@ export interface RunProjectPlannerOptions {
   deadlineDays?: number;
   /** Injected for tests; the direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -589,14 +602,14 @@ export async function runProjectPlannerExample(
     goal = "Ship a mobile app MVP for iOS and Android",
     deadlineDays = DEFAULT_DEADLINE_DAYS,
     generateText,
-    jevClient,
+    judge,
     onProgress,
   } = options;
   const progress: string[] = [];
   const result = await runAgent(projectPlannerMachine, {
     input: { goal, deadlineDays },
     executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
-    ...(jevClient ? { actors: { assessRisk: createAssessRisk(jevClient) } } : {}),
+    ...(judge ? { actors: { assessRisk: createAssessRisk(judge) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -611,8 +624,8 @@ export async function runProjectPlannerExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

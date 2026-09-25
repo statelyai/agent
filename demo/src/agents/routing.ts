@@ -4,8 +4,10 @@
  *
  * What JEV owns: one `choice` over the request (`billing` / `technical` /
  * `account` / `unclear`). Routing is a typed judgment over text the machine
- * already holds, not a generation, so it goes to TypeSafe's System One model
- * rather than a text model: the answer is a label with a confidence, no prose.
+ * already holds, not a generation, so it goes to the AI SDK's
+ * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * model rather than to a text model: the answer is a label, no prose, and Jev
+ * reports its confidence in the label in the result's provider metadata.
  * What the MACHINE owns: where each label goes, and how sure is sure enough.
  * The routing table is the invoke's `onDone`, and a pick below
  * `ROUTING_CONFIDENCE` goes to clarification like `unclear` does. The reason
@@ -13,9 +15,13 @@
  * the same text Jev was asked to judge against.
  */
 import { z } from "zod";
-import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { setupAgent } from "@statelyai/agent";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
+
+/** The judge: Jev through the AI SDK. Reads `TYPESAFE_AI_API_KEY`; tests inject a mock. */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Route only when Jev's confidence in its pick clears this; otherwise ask. */
 export const ROUTING_CONFIDENCE = 0.5;
@@ -27,14 +33,34 @@ const INTENTS = {
   unclear: "The request does not say enough to pick a queue.",
 } as const;
 
-/** The routing judgment: one `choice` over the request. `client` is injected by tests. */
-export function createClassifyIntent(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { query: string }) => ({ query: input.query }),
-    questions: () => ({
-      intent: choice("Which support queue should handle `query`?", INTENTS),
-    }),
+/**
+ * The routing judgment: one `choice` over the request. `model` is injected by
+ * tests. Jev's confidence in the label comes from the result's TypeSafe
+ * provider metadata; a judge that reports none counts as unsure (0).
+ */
+export function createClassifyIntent(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { intent: { choice: keyof typeof INTENTS } }; confidence: number },
+    { query: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers, providerMetadata } = await evaluate({
+        model,
+        state: { query: input.query },
+        questions: {
+          intent: {
+            type: "choice" as const,
+            instructions: "Which support queue should handle `query`?",
+            criteria: INTENTS,
+          },
+        },
+        abortSignal: signal,
+      });
+      const reported = (
+        providerMetadata?.typesafe?.confidence as Record<string, unknown> | undefined
+      )?.intent;
+      return { answers, confidence: typeof reported === "number" ? reported : 0 };
+    },
   });
 }
 
@@ -74,7 +100,8 @@ export const routingMachine = agentSetup.createMachine({
         // every target stays visible in this expression. A pick Jev is unsure
         // of goes to clarification like `unclear` does.
         onDone: ({ output }) => {
-          const { choice: intent, confidence } = output.answers.intent;
+          const { choice: intent } = output.answers.intent;
+          const { confidence } = output;
           const reason = reasonFor(intent, confidence);
           return intent === "unclear" || confidence < ROUTING_CONFIDENCE
             ? { target: "needsClarification", context: { queue: "unclear", reason } }

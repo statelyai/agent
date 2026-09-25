@@ -5,7 +5,7 @@ import {
   runAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import {
   ASSESSMENT_THRESHOLD,
   MAX_REVISIONS,
@@ -28,9 +28,9 @@ const executors = {
         },
 } satisfies Partial<AgentRequestExecutors>;
 
-/** The prompt check is a Jev judgment: every `noul` scripted to the same answer. */
+/** The prompt check is a Jev judgment: every boolean question scripted to the same answer. */
 const judgment = (complete: boolean | number) => ({
-  evaluatePrompt: createEvaluatePrompt(createMockJevClient({ "*": complete }).client),
+  evaluatePrompt: createEvaluatePrompt(createMockJudge({ "*": complete }).model),
 });
 const actors = judgment(true);
 
@@ -88,8 +88,8 @@ test("a failed request ends in `failed`, with the reason in the output", async (
     snapshot: opened.snapshot,
     event: eventFromInteraction(opened.snapshot, { text: "Anything." }),
     executors,
-    // A Jev client with no scripted answers: the judgment call fails.
-    actors: { evaluatePrompt: createEvaluatePrompt(createMockJevClient({}).client) },
+    // A judge with no scripted answers: the judgment call fails.
+    actors: { evaluatePrompt: createEvaluatePrompt(createMockJudge({}).model) },
   });
 
   expect(result.status).toBe("done");
@@ -124,8 +124,8 @@ test("SEND then END finishes with the sent email and no failure", async () => {
   expect(done.output.failure).toBeNull();
 });
 
-test("the prompt check asks Jev one noul per required detail, and the threshold decides what is missing", async () => {
-  const jev = createMockJevClient({
+test("the prompt check asks Jev one boolean question per required detail, and the threshold decides what is missing", async () => {
+  const jev = createMockJudge({
     satisfied: 0.9,
     recipient: ASSESSMENT_THRESHOLD - 0.01,
     "*": ASSESSMENT_THRESHOLD,
@@ -143,7 +143,7 @@ test("the prompt check asks Jev one noul per required detail, and the threshold 
         return executors.generateText(request);
       },
     },
-    actors: { evaluatePrompt: createEvaluatePrompt(jev.client) },
+    actors: { evaluatePrompt: createEvaluatePrompt(jev.model) },
   });
 
   expect(jev.calls).toHaveLength(1);
@@ -153,7 +153,7 @@ test("the prompt check asks Jev one noul per required detail, and the threshold 
     requiredDetails: REQUIRED_DETAILS,
   });
   expect(Object.keys(call.questions)).toEqual(["satisfied", ...Object.keys(REQUIRED_DETAILS)]);
-  expect(Object.values(call.questions).every((question) => question.type === "noul")).toBe(true);
+  expect(Object.values(call.questions).every((question) => question.type === "boolean")).toBe(true);
 
   // Just under the threshold is missing; exactly at it is stated. Only then
   // does the text model word a follow-up, and the human is asked.

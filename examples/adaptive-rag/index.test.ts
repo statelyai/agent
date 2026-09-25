@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { lintAgentMachine } from "@statelyai/agent/testing";
-import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
+import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   GROUNDED_THRESHOLD,
@@ -16,9 +16,10 @@ import {
 /**
  * Mock the text model, keyed by REQUEST NAME (`rewriteQuestion` /
  * `generateAnswer`), so an answer cannot land on the wrong call when the
- * machine takes a different branch. The router and the three graders are Jev
- * judgments, scripted separately by QUESTION NAME (`datasource`, `doc<i>`,
- * `grounded`, `useful`) through the real SDK client. The retrieve/webSearch
+ * machine takes a different branch. The router and the three graders are
+ * evaluation-model judgments, scripted separately by QUESTION NAME
+ * (`datasource`, `doc<i>`, `grounded`, `useful`) through a mock judge that
+ * implements the AI SDK's evaluation-model spec. The retrieve/webSearch
  * actors run REAL keyword logic.
  */
 function scripted(text: Record<string, unknown[]>) {
@@ -26,21 +27,21 @@ function scripted(text: Record<string, unknown[]>) {
 }
 
 /**
- * Jev answers. `relevant` scripts every `doc<i>` question through the `"*"`
+ * Judge answers. `relevant` scripts every `doc<i>` question through the `"*"`
  * fallback; each document name keeps its own cursor, so `[false, true]` means
  * "none relevant on the first grading, all relevant on the second".
  */
 function jev(script: {
   datasource?: string;
-  relevant?: MockJevEntry | MockJevEntry[];
-  grounded?: MockJevEntry | MockJevEntry[];
-  useful?: MockJevEntry | MockJevEntry[];
+  relevant?: MockJudgeEntry | MockJudgeEntry[];
+  grounded?: MockJudgeEntry | MockJudgeEntry[];
+  useful?: MockJudgeEntry | MockJudgeEntry[];
 }) {
   const { relevant, ...named } = script;
-  const entries: Record<string, MockJevEntry | MockJevEntry[]> = {};
+  const entries: Record<string, MockJudgeEntry | MockJudgeEntry[]> = {};
   for (const [name, entry] of Object.entries(named)) if (entry !== undefined) entries[name] = entry;
   if (relevant !== undefined) entries["*"] = relevant;
-  return createMockJevClient(entries);
+  return createMockJudge(entries);
 }
 
 const toVectorstore = "vectorstore";
@@ -52,8 +53,7 @@ test("vectorstore route: retrieve → grade → generate → both checks pass �
     generateText: scripted({
       generateAnswer: ["Agents persist long-term memory in an external store via tools."],
     }),
-    jevClient: jev({ datasource: toVectorstore, relevant: true, grounded: true, useful: true })
-      .client,
+    judge: jev({ datasource: toVectorstore, relevant: true, grounded: true, useful: true }).model,
   });
 
   expect(result.finalState).toBe("done");
@@ -79,7 +79,7 @@ test("websearch route: skips retrieval and grading, answers from the sample web 
     generateText: scripted({
       generateAnswer: ["Treat retrieved text as untrusted and separate privileges."],
     }),
-    jevClient: jev({ datasource: toWebsearch, grounded: true, useful: true }).client,
+    judge: jev({ datasource: toWebsearch, grounded: true, useful: true }).model,
   });
 
   expect(result.finalState).toBe("done");
@@ -97,12 +97,12 @@ test("nothing relevant → rewrite → retrieve again → answered", async () =>
       rewriteQuestion: ["agent planning task decomposition subgoals"],
       generateAnswer: ["Agents decompose a goal into ordered subgoals."],
     }),
-    jevClient: jev({
+    judge: jev({
       datasource: toVectorstore,
       relevant: [false, true],
       grounded: true,
       useful: true,
-    }).client,
+    }).model,
   });
 
   expect(result.finalState).toBe("done");
@@ -124,12 +124,12 @@ test("hallucination check fails once → regenerate → answered", async () => {
     generateText: scripted({
       generateAnswer: ["Agents store memory on the moon.", "Agents persist memory externally."],
     }),
-    jevClient: jev({
+    judge: jev({
       datasource: toVectorstore,
       relevant: true,
       grounded: [false, true],
       useful: true,
-    }).client,
+    }).model,
   });
 
   expect(result.finalState).toBe("done");
@@ -144,7 +144,7 @@ test("never grounded → regeneration budget exhausted → failed with the unver
     generateText: scripted({
       generateAnswer: ["Agents store memory on the moon."],
     }),
-    jevClient: jev({ datasource: toVectorstore, relevant: true, grounded: false }).client,
+    judge: jev({ datasource: toVectorstore, relevant: true, grounded: false }).model,
   });
 
   expect(result.finalState).toBe("failed");
@@ -162,12 +162,12 @@ test("grounded but not useful → rewrite → retrieve → answered", async () =
       rewriteQuestion: ["long-term memory tools for LLM agents"],
       generateAnswer: ["Memory is a thing.", "A retrieval tool fetches past facts."],
     }),
-    jevClient: jev({
+    judge: jev({
       datasource: toVectorstore,
       relevant: true,
       grounded: true,
       useful: [false, true],
-    }).client,
+    }).model,
   });
 
   expect(result.finalState).toBe("done");
@@ -187,7 +187,7 @@ test("corpus miss → rewrite budget exhausted → failed, with no fabricated an
     generateText: scripted({
       rewriteQuestion: ["chain of thought prompting explained"],
     }),
-    jevClient: jev({ datasource: toVectorstore }).client,
+    judge: jev({ datasource: toVectorstore }).model,
   });
 
   expect(result.finalState).toBe("failed");
@@ -202,9 +202,9 @@ test("corpus miss → rewrite budget exhausted → failed, with no fabricated an
 test("a failing model call lands in failed, not an unhandled error", async () => {
   const result = await runAdaptiveRagExample({
     generateText: scripted({}),
-    jevClient: jev({ datasource: toVectorstore }).client,
+    judge: jev({ datasource: toVectorstore }).model,
   });
-  // The `doc<i>` questions have no scripted answer, so the Jev call throws.
+  // The `doc<i>` questions have no scripted answer, so the judge call throws.
   expect(result.finalState).toBe("failed");
   expect(result.trail).toContain("gradeDocuments failed");
 });
@@ -236,12 +236,12 @@ test("starters behave as their labels advertise", async () => {
           rewriteQuestion: [starter.input.question],
           generateAnswer: ["answer"],
         }),
-        jevClient: jev({
+        judge: jev({
           datasource: starter.label === CURRENT_EVENTS ? toWebsearch : toVectorstore,
           relevant: true,
           grounded: true,
           useful: true,
-        }).client,
+        }).model,
       }),
     );
   }
@@ -266,7 +266,7 @@ test("the router asks Jev one choice over the question and routes on the chosen 
   const result = await runAdaptiveRagExample({
     question: "What is the latest guidance on defending agents against prompt injection?",
     generateText: scripted({ generateAnswer: ["answer"] }),
-    jevClient: mock.client,
+    judge: mock.model,
   });
 
   const routing = mock.calls[0]!;
@@ -281,8 +281,8 @@ test("the router asks Jev one choice over the question and routes on the chosen 
   expect(result.progress).toContain("searchingWeb");
 });
 
-test("the document grader asks one noul per document and keeps only those at the threshold", async () => {
-  const mock = createMockJevClient({
+test("the document grader asks one boolean question per document and keeps only those at the threshold", async () => {
+  const mock = createMockJudge({
     datasource: toVectorstore,
     doc0: RELEVANCE_THRESHOLD,
     "*": RELEVANCE_THRESHOLD - 0.01,
@@ -292,7 +292,7 @@ test("the document grader asks one noul per document and keeps only those at the
   const result = await runAdaptiveRagExample({
     question: "How do LLM agents use long-term memory?",
     generateText: scripted({ generateAnswer: ["answer"] }),
-    jevClient: mock.client,
+    judge: mock.model,
   });
 
   const grading = mock.calls[1]!;
@@ -300,12 +300,12 @@ test("the document grader asks one noul per document and keeps only those at the
   expect(grading.state).toMatchObject({ question: "How do LLM agents use long-term memory?" });
   expect(documents.length).toBeGreaterThan(1);
   expect(Object.keys(grading.questions)).toEqual(documents.map((_, i) => `doc${i}`));
-  expect(Object.values(grading.questions).every((q) => q.type === "noul")).toBe(true);
+  expect(Object.values(grading.questions).every((q) => q.type === "boolean")).toBe(true);
   expect(result.documents).toEqual([documents[0]]);
   expect(result.trail).toContain(`the grader kept 1.`);
 });
 
-test("the hallucination check asks one noul over documents and answer; just under the threshold regenerates", async () => {
+test("the hallucination check asks one boolean question over documents and answer; just under the threshold regenerates", async () => {
   const mock = jev({
     datasource: toVectorstore,
     relevant: true,
@@ -314,19 +314,19 @@ test("the hallucination check asks one noul over documents and answer; just unde
   });
   const result = await runAdaptiveRagExample({
     generateText: scripted({ generateAnswer: ["draft one", "draft two"] }),
-    jevClient: mock.client,
+    judge: mock.model,
   });
 
   const grounding = mock.calls.filter((call) => "grounded" in call.questions);
   expect(grounding).toHaveLength(2);
   expect(Object.keys(grounding[0]!.questions)).toEqual(["grounded"]);
-  expect(grounding[0]!.questions.grounded!.type).toBe("noul");
+  expect(grounding[0]!.questions.grounded!.type).toBe("boolean");
   expect(grounding[0]!.state).toEqual({ documents: result.documents, answer: "draft one" });
   expect(result.regenerations).toBe(1);
   expect(result.answer).toBe("draft two");
 });
 
-test("the usefulness check asks one noul over question and answer; just under the threshold rewrites", async () => {
+test("the usefulness check asks one boolean question over question and answer; just under the threshold rewrites", async () => {
   const mock = jev({
     datasource: toVectorstore,
     relevant: true,
@@ -339,13 +339,13 @@ test("the usefulness check asks one noul over question and answer; just under th
       rewriteQuestion: ["long-term memory tools for LLM agents"],
       generateAnswer: ["draft one", "draft two"],
     }),
-    jevClient: mock.client,
+    judge: mock.model,
   });
 
   const usefulness = mock.calls.filter((call) => "useful" in call.questions);
   expect(usefulness).toHaveLength(2);
   expect(Object.keys(usefulness[0]!.questions)).toEqual(["useful"]);
-  expect(usefulness[0]!.questions.useful!.type).toBe("noul");
+  expect(usefulness[0]!.questions.useful!.type).toBe("boolean");
   expect(usefulness[0]!.state).toEqual({
     question: "How do LLM agents use long-term memory?",
     answer: "draft one",

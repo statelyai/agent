@@ -10,14 +10,16 @@
  *                                             └─ failed     (reply degraded)
  *
  * The pieces:
- *   - Classification as a JUDGMENT, not a generation. `classifying` invokes a
- *     TypeSafe System One actor (Jev) with the ticket as state and two
- *     `choice` questions asked in one call: `category` (billing, technical,
+ *   - Classification as a JUDGMENT, not a generation. `classifying` calls the
+ *     AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model, the ticket as state, and two `choice` questions asked
+ *     in one call: `category` (billing, technical,
  *     other) and `sentiment` (positive, neutral, negative). The labels come
  *     back typed, with probabilities, so nothing has to parse prose. The reply
  *     draft stays a text request: it is a generation the machine forwards.
  *   - A confidence guard. Jev reports how concentrated its `category`
- *     probabilities are (its `confidence`); below the
+ *     probabilities are (its `confidence`, in the result's TypeSafe provider
+ *     metadata); below the
  *     threshold the run does NOT reply on its own — it settles idle in
  *     `escalating` and waits for a person to confirm the category or type the
  *     right one. `meta.interaction` tells a host how to render that, and the
@@ -28,14 +30,14 @@
  *   - A simulated SLA note, computed host-side from category and sentiment. No
  *     wall-clock timers: a demo should not make you wait four hours.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/triage/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/triage/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import type { SnapshotFrom } from "xstate";
-import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { createAsyncLogic, type SnapshotFrom } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   createAgentSchemas,
   getInteraction,
@@ -80,27 +82,61 @@ export const triageOutputSchema = z.object({
 export const CONFIDENCE_THRESHOLD = 0.6;
 
 /**
- * The classifier as a System One judgment: the ticket is the state, and the
- * queue and the tone are two independent `choice` questions in one call.
- * `client` is injected by tests and hosts; omitted, the SDK reads
- * `TYPESAFE_API_KEY` from the environment.
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
  */
-export function createClassifyTicket(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { ticket: string }) => ({ ticket: input.ticket }),
-    questions: () => ({
-      category: choice("Which support queue should handle `ticket`?", {
-        billing: "Charges, refunds, invoices, plans, subscriptions, or payment methods.",
-        technical: "Something in the product is broken or not working: login, errors, setup.",
-        other: "Anything else, including vague messages with no clear request.",
-      }),
-      sentiment: choice("What is the customer's tone in `ticket`?", {
-        positive: "Pleased, thankful, or upbeat.",
-        neutral: "Matter-of-fact, with no strong feeling either way.",
-        negative: "Frustrated, angry, or upset.",
-      }),
-    }),
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+
+/**
+ * The classifier as a judgment: the ticket is the state, and the queue and the
+ * tone are two independent `choice` questions in one `experimental_evaluate`
+ * call. Jev's confidence in `category` comes from the result's TypeSafe
+ * provider metadata; a judge that reports none counts as not confident (0), so
+ * a person decides. The judge model is injected by tests and hosts; the default
+ * is Jev.
+ */
+export function createClassifyTicket(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    {
+      answers: {
+        category: { choice: "billing" | "technical" | "other" };
+        sentiment: { choice: "positive" | "neutral" | "negative" };
+      };
+      confidence: number;
+    },
+    { ticket: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers, providerMetadata } = await evaluate({
+        model,
+        state: { ticket: input.ticket },
+        questions: {
+          category: {
+            type: "choice" as const,
+            instructions: "Which support queue should handle `ticket`?",
+            criteria: {
+              billing: "Charges, refunds, invoices, plans, subscriptions, or payment methods.",
+              technical: "Something in the product is broken or not working: login, errors, setup.",
+              other: "Anything else, including vague messages with no clear request.",
+            },
+          },
+          sentiment: {
+            type: "choice" as const,
+            instructions: "What is the customer's tone in `ticket`?",
+            criteria: {
+              positive: "Pleased, thankful, or upbeat.",
+              neutral: "Matter-of-fact, with no strong feeling either way.",
+              negative: "Frustrated, angry, or upset.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      const reported = (
+        providerMetadata?.typesafe?.confidence as Record<string, unknown> | undefined
+      )?.category;
+      return { answers, confidence: typeof reported === "number" ? reported : 0 };
+    },
   });
 }
 
@@ -214,7 +250,7 @@ export const triageMachine = triageAgentSetup.createMachine({
           const classification = {
             category: output.answers.category.choice,
             sentiment: output.answers.sentiment.choice,
-            confidence: Math.round(output.answers.category.confidence * 100) / 100,
+            confidence: Math.round(output.confidence * 100) / 100,
           };
           return {
             target: "checkingConfidence",
@@ -424,8 +460,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

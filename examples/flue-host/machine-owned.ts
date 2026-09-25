@@ -26,15 +26,15 @@
  * examples/next-host); swap it for Redis/Postgres and the tools are
  * unchanged.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... ANTHROPIC_API_KEY=... npx tsx examples/flue-host/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... ANTHROPIC_API_KEY=... npx tsx examples/flue-host/index.ts
  *   A real model calls the two tools, and the machine runs against real
  *   generations and a real Jev judgment. (This way needs OPENAI_API_KEY and
- *   TYPESAFE_API_KEY; ./flue-owned.ts also reviews with an Anthropic model.)
+ *   TYPESAFE_AI_API_KEY; ./flue-owned.ts also reviews with an Anthropic model.)
  */
 import assert from "node:assert/strict";
 import type { z } from "zod";
 import type { Snapshot } from "xstate";
-import type { TypeSafeClient } from "@typesafe-ai/sdk";
+import type { Experimental_EvaluationModel } from "ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getInteraction,
@@ -98,18 +98,21 @@ export const completed: EmailDraft[][] = [];
 
 /**
  * What the tools run with: real generations through the email-drafter's
- * declared models, and the machine's own Jev judgment (the SDK reads
- * `TYPESAFE_API_KEY`). `useToolExecutors()` swaps in other executors and,
- * optionally, a Jev client (a test's mocks, or a host's own provider setup).
+ * declared models, and the machine's own Jev judgment (`@ai-sdk/typesafe-ai` reads
+ * `TYPESAFE_AI_API_KEY`). `useToolExecutors()` swaps in other executors and,
+ * optionally, a judge model (a test's mocks, or a host's own provider setup).
  */
 let toolRunOptions: RunAgentOptions<typeof emailDrafter> = {
   executors: createAiSdkExecutors({ models }),
 };
 
-export function useToolExecutors(executors: AgentRequestExecutors, jevClient?: TypeSafeClient) {
+export function useToolExecutors(
+  executors: AgentRequestExecutors,
+  judge?: Experimental_EvaluationModel,
+) {
   toolRunOptions = {
     executors,
-    ...(jevClient ? { actors: { evaluatePrompt: createEvaluatePrompt(jevClient) } } : {}),
+    ...(judge ? { actors: { evaluatePrompt: createEvaluatePrompt(judge) } } : {}),
   };
 }
 
@@ -373,8 +376,8 @@ function humanReply(): string {
 }
 
 export async function main() {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    throw new Error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
   }
   completed.length = 0;
 

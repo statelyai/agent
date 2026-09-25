@@ -32,8 +32,9 @@
  *   - calculate_final_score → the `scoring` final state's `output`
  *
  * Differences from LangGraph worth calling out:
- *   - Grading is a JUDGMENT, not a generation. Each pass asks TypeSafe System
- *     One (Jev) one `score` question whose five levels describe concrete
+ *   - Grading is a JUDGMENT, not a generation. Each pass asks the AI SDK's
+ *     `experimental_evaluate`, with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model, one `score` question whose five levels describe concrete
  *     essays, lowest to highest (`RUBRICS`). The machine maps the level to
  *     [0, 1] as `score / (levels - 1)`, so the gate thresholds and the
  *     weighted final score keep the tutorial's meaning, and the comment is the
@@ -52,17 +53,19 @@
  * model runs at all (nothing here is generated, only graded), so the direct
  * run needs only a TypeSafe key.
  *
- * Run: TYPESAFE_API_KEY=... npx tsx examples/essay-grader/index.ts
+ * Run: TYPESAFE_AI_API_KEY=... npx tsx examples/essay-grader/index.ts
  */
 import { z } from "zod";
-import {
-  score,
-  type ScoreQuestion,
-  type ScoreResponse,
-  type TypeSafeClient,
-} from "@typesafe-ai/sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { getStatePath, runAgent, setupAgent } from "@statelyai/agent";
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Each gate passes only on a score strictly above its threshold. */
 export const RELEVANCE_THRESHOLD = 0.5;
@@ -136,36 +139,50 @@ export const RUBRICS: Record<Criterion, Rubric> = {
 };
 
 /**
- * One grading pass as a System One judgment: the essay is the state, and the
- * pass's rubric is one `score` question named after the criterion. `client` is
- * injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ * One grading pass as a judgment: the essay is the state, and the pass's
+ * rubric is one `score` question named after the criterion. The judge model is
+ * injected by tests and hosts; the default is Jev.
  */
-export function createGrader<C extends Criterion>(criterion: C, client?: TypeSafeClient) {
+export function createGrader<C extends Criterion>(
+  criterion: C,
+  model: Experimental_EvaluationModel = judgeModel,
+) {
   const rubric = RUBRICS[criterion];
-  return createSystemOneLogic({
-    client,
-    state: (input: { essay: string }) => ({ essay: input.essay }),
-    questions: () =>
-      ({ [criterion]: score(rubric.instructions, rubric.levels) }) as Record<C, ScoreQuestion>,
+  return createAsyncLogic<{ answers: Record<C, { score: number }> }, { essay: string }>({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { essay: input.essay },
+        questions: {
+          [criterion]: {
+            type: "score" as const,
+            instructions: rubric.instructions,
+            criteria: rubric.levels,
+          },
+        } as Record<C, { type: "score"; instructions: string; criteria: Rubric["levels"] }>,
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
-/** The four passes' actors, all over one (optional) client. */
-function graderActors(client?: TypeSafeClient) {
+/** The four passes' actors, all over one (optional) judge model. */
+function graderActors(model?: Experimental_EvaluationModel) {
   return {
-    checkRelevance: createGrader("relevance", client),
-    checkGrammar: createGrader("grammar", client),
-    analyzeStructure: createGrader("structure", client),
-    evaluateDepth: createGrader("depth", client),
+    checkRelevance: createGrader("relevance", model),
+    checkGrammar: createGrader("grammar", model),
+    analyzeStructure: createGrader("structure", model),
+    evaluateDepth: createGrader("depth", model),
   };
 }
 
 /** A rubric answer as `{ score, comment }`: the level on [0, 1] and the matched level's text. */
-function toGrade(answer: ScoreResponse): z.infer<typeof gradeSchema> {
-  const top = Object.keys(answer.legend).length - 1;
+function toGrade(criterion: Criterion, answer: { score: number }): z.infer<typeof gradeSchema> {
+  const levels = RUBRICS[criterion].levels;
   return {
-    score: answer.score / top,
-    comment: String(answer.legend[Math.round(answer.score)]),
+    score: answer.score / (levels.length - 1),
+    comment: String(levels[Math.round(answer.score)]),
   };
 }
 
@@ -240,7 +257,7 @@ export const essayGraderMachine = agentSetup.createMachine({
         input: ({ context }) => ({ essay: context.essay }),
         onDone: ({ output }) => ({
           target: "relevanceGate",
-          context: { relevance: toGrade(output.answers.relevance) },
+          context: { relevance: toGrade("relevance", output.answers.relevance) },
         }),
         onError: { target: "failed" },
       },
@@ -259,7 +276,7 @@ export const essayGraderMachine = agentSetup.createMachine({
         input: ({ context }) => ({ essay: context.essay }),
         onDone: ({ output }) => ({
           target: "grammarGate",
-          context: { grammar: toGrade(output.answers.grammar) },
+          context: { grammar: toGrade("grammar", output.answers.grammar) },
         }),
         onError: { target: "failed" },
       },
@@ -277,7 +294,7 @@ export const essayGraderMachine = agentSetup.createMachine({
         input: ({ context }) => ({ essay: context.essay }),
         onDone: ({ output }) => ({
           target: "structureGate",
-          context: { structure: toGrade(output.answers.structure) },
+          context: { structure: toGrade("structure", output.answers.structure) },
         }),
         onError: { target: "failed" },
       },
@@ -295,7 +312,7 @@ export const essayGraderMachine = agentSetup.createMachine({
         input: ({ context }) => ({ essay: context.essay }),
         onDone: ({ output }) => ({
           target: "scoring",
-          context: { depth: toGrade(output.answers.depth) },
+          context: { depth: toGrade("depth", output.answers.depth) },
         }),
         onError: { target: "failed" },
       },
@@ -315,8 +332,8 @@ export const essayGraderMachine = agentSetup.createMachine({
 
 export interface RunEssayGraderOptions {
   essay?: string;
-  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   onProgress?: (state: string) => void;
 }
 
@@ -336,11 +353,11 @@ export const SAMPLE_ESSAY =
 export async function runEssayGraderExample(
   options: RunEssayGraderOptions = {},
 ): Promise<EssayGraderResult> {
-  const { essay = SAMPLE_ESSAY, jevClient, onProgress } = options;
+  const { essay = SAMPLE_ESSAY, judge, onProgress } = options;
   const progress: string[] = [];
   const result = await runAgent(essayGraderMachine, {
     input: { essay },
-    ...(jevClient ? { actors: graderActors(jevClient) } : {}),
+    ...(judge ? { actors: graderActors(judge) } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -356,8 +373,8 @@ export async function runEssayGraderExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.TYPESAFE_API_KEY) {
-    console.error("Set TYPESAFE_API_KEY to run this example.");
+  if (!process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import { TypeSafeClient } from "@typesafe-ai/sdk";
-import { type AgentTextRequest } from "@statelyai/agent";
+import { createAsyncLogic } from "xstate";
+import { getStatePath, runAgent, type AgentTextRequest } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { createMockModelExecutors, type MockModelScript } from "../mock-model.js";
 import { MAX_JUDGE_RETRIES, MAX_SUBJECTS, mapReduceMachine, runMapReduceExample } from "./index.js";
 
@@ -14,38 +14,44 @@ import { MAX_JUDGE_RETRIES, MAX_SUBJECTS, mapReduceMachine, runMapReduceExample 
  */
 function scripted(text: MockModelScript["text"], best: string | string[] = "joke0") {
   const executors = createMockModelExecutors({ text });
-  const jev = createMockJevClient({ best });
+  const jev = createMockJudge({ best });
   return {
     generateText: executors.generateText,
     calls: executors.calls,
-    jevClient: jev.client,
+    judge: jev.model,
     jev,
   };
 }
 
 /**
- * A judge that answers labels the machine never offered. The mock client
- * refuses those, so this is a bare `TypeSafeClient` over a scripted `fetch`:
- * it stands in for a swapped-in judge the choice state has to guard against.
+ * A judge that answers labels the machine never offered. `experimental_evaluate`
+ * rejects those for any evaluation model, so this is a swapped-in judge ACTOR
+ * (the `judgeJokes` slot itself): what the choice state has to guard against.
  */
 function offListJudge(picks: string[]) {
   let sent = 0;
-  const client = new TypeSafeClient({
-    apiKey: "test-key",
-    retry: { maxRetries: 0 },
-    fetch: async (_url, init) => {
-      const body = JSON.parse(String(init?.body)) as { model: string };
-      const pick = picks[Math.min(sent++, picks.length - 1)]!;
-      return Response.json({
-        model: body.model,
-        answers: {
-          best: { type: "choice", choice: pick, confidence: 0.9, probabilities: { [pick]: 0.9 } },
-        },
-        usage: { input_tokens: 0, output_tokens: 0 },
-      });
-    },
+  const actor = createAsyncLogic<{ answers: { best: { choice: string } } }, unknown>({
+    run: async () => ({
+      answers: { best: { choice: picks[Math.min(sent++, picks.length - 1)]! } },
+    }),
   });
-  return { client, calls: () => sent };
+  return { actor, calls: () => sent };
+}
+
+/** `runMapReduceExample`'s result shape, with the judge actor swapped in directly. */
+async function runWithJudgeActor(
+  options: { generateText: ReturnType<typeof scripted>["generateText"] },
+  judgeJokes: ReturnType<typeof offListJudge>["actor"],
+) {
+  const progress: string[] = [];
+  const result = await runAgent(mapReduceMachine, {
+    input: { topic: "animals" },
+    executors: { generateText: options.generateText },
+    actors: { judgeJokes },
+    onTransition: (snapshot) => progress.push(getStatePath(snapshot)),
+  });
+  if (result.status !== "done") throw new Error(`did not complete: ${result.status}`);
+  return { outcome: getStatePath(result.snapshot), ...result.output, progress };
 }
 
 /** State path with consecutive repeats (context-only updates) collapsed. */
@@ -128,10 +134,10 @@ test("a failing branch records a placeholder joke and the run continues", async 
 
 test("an out-of-range label is retried once", async () => {
   const judge = offListJudge(["joke7", "joke0"]);
-  const result = await runMapReduceExample({
-    ...scripted({ generateSubjects: [{ subjects: ["lions", "penguins"] }], writeJoke: jokeAbout }),
-    jevClient: judge.client,
-  });
+  const result = await runWithJudgeActor(
+    scripted({ generateSubjects: [{ subjects: ["lions", "penguins"] }], writeJoke: jokeAbout }),
+    judge.actor,
+  );
 
   expect(result.outcome).toBe("done");
   // The retry re-enters `judging` through the choice state.
@@ -142,10 +148,10 @@ test("an out-of-range label is retried once", async () => {
 
 test("a label that names no joke is rejected like an out-of-range one", async () => {
   const judge = offListJudge(["joke0.5", "joke1"]);
-  const result = await runMapReduceExample({
-    ...scripted({ generateSubjects: [{ subjects: ["lions", "penguins"] }], writeJoke: jokeAbout }),
-    jevClient: judge.client,
-  });
+  const result = await runWithJudgeActor(
+    scripted({ generateSubjects: [{ subjects: ["lions", "penguins"] }], writeJoke: jokeAbout }),
+    judge.actor,
+  );
 
   expect(result.outcome).toBe("done");
   expect(judge.calls()).toBe(2);
@@ -154,10 +160,10 @@ test("a label that names no joke is rejected like an out-of-range one", async ()
 
 test("a label still out of range after MAX_JUDGE_RETRIES lands in failed", async () => {
   const judge = offListJudge(["joke3"]);
-  const result = await runMapReduceExample({
-    ...scripted({ generateSubjects: [{ subjects: ["lions", "penguins"] }], writeJoke: jokeAbout }),
-    jevClient: judge.client,
-  });
+  const result = await runWithJudgeActor(
+    scripted({ generateSubjects: [{ subjects: ["lions", "penguins"] }], writeJoke: jokeAbout }),
+    judge.actor,
+  );
 
   expect(result.outcome).toBe("failed");
   expect(judge.calls()).toBe(1 + MAX_JUDGE_RETRIES);

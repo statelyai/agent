@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { lintAgentMachine } from "@statelyai/agent/testing";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   MAX_REGENERATIONS,
@@ -45,7 +45,7 @@ function scripted(text: Record<string, unknown[]>) {
 /** The runner with Jev's risk judgment scripted to "medium" unless a test passes its own. */
 function plan(options: Parameters<typeof runProjectPlannerExample>[0]) {
   return runProjectPlannerExample({
-    jevClient: createMockJevClient({ risk: "medium" }).client,
+    judge: createMockJudge({ risk: "medium" }).model,
     ...options,
   });
 }
@@ -218,12 +218,12 @@ test("starters behave as their labels advertise", async () => {
 });
 
 test("assessingRisk asks Jev one choice over the computed schedule; the deadline, not the label, routes", async () => {
-  const jev = createMockJevClient({ risk: "high" });
+  const jev = createMockJudge({ risk: "high" });
   const executors = scripted({ generateTasks: [slowPlan] });
   const result = await plan({
     deadlineDays: 30,
     generateText: executors.generateText,
-    jevClient: jev.client,
+    judge: jev.model,
   });
 
   expect(jev.calls).toHaveLength(1);

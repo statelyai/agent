@@ -28,7 +28,7 @@
  *
  * What maps to what:
  *   - retrieve            → `retrieving`  (typed plain actor over a sample corpus)
- *   - grade_documents     → `grading`     (ONE Jev call, one `noul` per doc — see note)
+ *   - grade_documents     → `grading`     (ONE evaluate call, one boolean per doc — see note)
  *   - decide_to_generate  → grading's two `onDone` targets (the conditional edge)
  *   - transform_query     → `transformingQuery` (a model request that rewrites the question)
  *   - web_search          → `webSearching` (a second sample-data actor, clearly labeled)
@@ -36,13 +36,14 @@
  *
  * Differences from LangGraph worth calling out:
  *   - Grading is a JUDGMENT, not a generation. LangGraph loops a chat model
- *     with structured output once PER document. Here `grading` invokes a
- *     TypeSafe System One actor (Jev): one call carrying every document as
- *     state and one `noul` question per document ("does this document help
- *     answer the question?"), which returns a probability per document. The
- *     machine keeps a document when that probability clears
- *     `RELEVANCE_THRESHOLD`. A yes/no over given evidence is what a System One
- *     model is for; the text model is reserved for the rewrite and the answer.
+ *     with structured output once PER document. Here `grading` asks the AI
+ *     SDK's `experimental_evaluate` with TypeSafe's Jev as the evaluation
+ *     model: one call carrying every document as state and one boolean
+ *     question per document ("does this document help answer the question?"),
+ *     which returns a probability per document. The machine keeps a document
+ *     when that probability clears `RELEVANCE_THRESHOLD`. A yes/no over given
+ *     evidence is what an evaluation model is for; the language model is
+ *     reserved for the rewrite and the answer.
  *   - The rewrite loop is bounded by construction: no edge returns to `retrieving`
  *     or `grading`, so at most ONE rewrite + web-search pass happens before
  *     `generating`. LangGraph relies on the same acyclic wiring (plus
@@ -60,19 +61,25 @@
  * `generateText` (tests pass a scripted mock — CI with no API key); the direct run uses
  * real models.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/corrective-rag/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/corrective-rag/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
   crag: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /**
  * Sample data: the primary knowledge base `retrieve` searches. Stand-in for a
@@ -183,31 +190,38 @@ function searchCorpus(
 export const RELEVANCE_THRESHOLD = 0.5;
 
 /**
- * grade_documents as a System One judgment: the question and every candidate
- * document are the state, and each document gets its own `noul`. One call,
- * one probability per document, no prose. `client` is injected by tests and
- * hosts; omitted, the SDK reads `TYPESAFE_API_KEY` from the environment.
+ * grade_documents as a judgment: one `experimental_evaluate` call whose state
+ * is the question and every candidate document, with one boolean question per
+ * document. One call, one probability per document, no prose. The judge model
+ * is injected by tests and hosts; the default is Jev.
  */
-export function createGradeDocuments(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { question: string; documents: string[] }) => ({
-      question: input.question,
-      documents: input.documents,
-    }),
-    questions: (input) =>
-      Object.fromEntries(
+export function createGradeDocuments(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: Record<string, { probability: number }> },
+    { question: string; documents: string[] }
+  >({
+    run: async ({ input, signal }) => {
+      const questions = Object.fromEntries(
         input.documents.map((_doc, index) => [
           `doc${index}`,
-          noul(
-            `Does \`documents[${index}]\` contain information that directly helps answer \`question\`?`,
-            {
+          {
+            type: "boolean" as const,
+            instructions: `Does \`documents[${index}]\` contain information that directly helps answer \`question\`?`,
+            criteria: {
               true: "The document states facts the answer would be built from.",
               false: "The document is off-topic, or only shares vocabulary with the question.",
             },
-          ),
+          },
         ]),
-      ),
+      );
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, documents: input.documents },
+        questions,
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -269,7 +283,7 @@ const agentSetup = setupAgent({
     done: { schemas: { context: cragContextSchema.extend({ generation: z.string() }) } },
   },
   actors: {
-    // grade_documents: a Jev judgment per document (see createGradeDocuments).
+    // grade_documents: one judgment per document (see createGradeDocuments).
     gradeDocuments: createGradeDocuments(),
     // retrieve: keyword search over the primary corpus. Top 3 docs.
     retrieve: createAsyncLogic<string[], { question: string }>({
@@ -368,7 +382,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
         // none survived → correct via rewrite + fallback index.
         onDone: ({ context, output }) => {
           const relevant = context.documents.filter(
-            (_doc, i) => (output.answers[`doc${i}`]?.noul ?? 0) >= RELEVANCE_THRESHOLD,
+            (_doc, i) => (output.answers[`doc${i}`]?.probability ?? 0) >= RELEVANCE_THRESHOLD,
           );
           return {
             target: relevant.length > 0 ? "generating" : "transformingQuery",
@@ -451,8 +465,8 @@ export interface RunCorrectiveRagOptions {
   question?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition (the visible corrective flow). */
   onProgress?: (state: string) => void;
 }
@@ -473,7 +487,7 @@ export async function runCorrectiveRagExample(
   const {
     question = "How does long-term memory work for LLM agents?",
     generateText,
-    jevClient,
+    judge,
     onProgress,
   } = options;
 
@@ -483,7 +497,7 @@ export async function runCorrectiveRagExample(
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
-    ...(jevClient ? { actors: { gradeDocuments: createGradeDocuments(jevClient) } } : {}),
+    ...(judge ? { actors: { gradeDocuments: createGradeDocuments(judge) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -499,8 +513,8 @@ export async function runCorrectiveRagExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

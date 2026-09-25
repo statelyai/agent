@@ -18,20 +18,23 @@
  * branch (no pre-binding, no fixed parallel region). Branches are collected via
  * the canonical `xstate.done.actor` event's `actorId` (see docs/multi-agent.md).
  *
- * Reflection is a JUDGMENT, not a generation: `reflecting` invokes a TypeSafe
- * System One actor (Jev) with the question and the findings as state and one
- * `noul`, "do these findings answer the question comprehensively?". The
+ * Reflection is a JUDGMENT, not a generation: `reflecting` calls the AI SDK's
+ * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * model, with the question and the findings as state and one boolean
+ * question, "do these findings answer the question comprehensively?". The
  * `reflected` choice state compares that probability to
  * `SUFFICIENCY_THRESHOLD`. Naming what is missing is generative, so it moves
  * into the planner: a follow-up round hands `planResearch` the previous
  * findings as feedback, and the planner targets what they leave out. The text
  * model plans, researches and writes; Jev only grades.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/deep-research/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/deep-research/index.ts
  */
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   createTextLogic,
   getStatePath,
@@ -41,7 +44,6 @@ import {
   type DoneActorEventOf,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 
 const queriesSchema = z.array(z.string()).min(2).max(4);
 
@@ -50,6 +52,12 @@ const models = {
   researcher: openai("gpt-5.4-mini"),
   writer: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 const BRANCH_PREFIX = "research-";
 
@@ -117,23 +125,34 @@ const MAX_ROUNDS = 2;
 export const SUFFICIENCY_THRESHOLD = 0.5;
 
 /**
- * reflect as a System One judgment: the question and the round's findings
- * are the state, and one `noul` asks whether they cover it. `client` is
- * injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ * reflect as a judgment: the question and the round's findings are the
+ * state, and one boolean question asks whether they cover it. The judge model
+ * is injected by tests and hosts; the default is Jev.
  */
-export function createReflect(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { question: string; findings: string[] }) => ({
-      question: input.question,
-      findings: input.findings,
-    }),
-    questions: () => ({
-      sufficient: noul("Do `findings`, taken together, answer `question` comprehensively?", {
-        true: "Every major part of the question is addressed by at least one finding.",
-        false: "Some part of the question is unaddressed, or the findings are thin or off-topic.",
-      }),
-    }),
+export function createReflect(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { sufficient: { probability: number } } },
+    { question: string; findings: string[] }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, findings: input.findings },
+        questions: {
+          sufficient: {
+            type: "boolean" as const,
+            instructions: "Do `findings`, taken together, answer `question` comprehensively?",
+            criteria: {
+              true: "Every major part of the question is addressed by at least one finding.",
+              false:
+                "Some part of the question is unaddressed, or the findings are thin or off-topic.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -356,7 +375,7 @@ export const deepResearchMachine = setup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "reflected",
-          context: { sufficiency: output.answers.sufficient.noul },
+          context: { sufficiency: output.answers.sufficient.probability },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -405,8 +424,8 @@ export interface RunDeepResearchOptions {
   question?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -415,7 +434,7 @@ export async function runDeepResearchExample(options: RunDeepResearchOptions = {
   const {
     question = "What makes durable AI workflows reliable?",
     generateText,
-    jevClient,
+    judge,
     onProgress,
   } = options;
   const result = await runAgent(deepResearchMachine, {
@@ -423,7 +442,7 @@ export async function runDeepResearchExample(options: RunDeepResearchOptions = {
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
-    ...(jevClient ? { actors: { reflect: createReflect(jevClient) } } : {}),
+    ...(judge ? { actors: { reflect: createReflect(judge) } } : {}),
     ...(onProgress ? { onTransition: (snapshot) => onProgress(getStatePath(snapshot)) } : {}),
   });
   if (result.status !== "done") throw new Error(`Deep research did not complete: ${result.status}`);
@@ -431,8 +450,8 @@ export async function runDeepResearchExample(options: RunDeepResearchOptions = {
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    throw new Error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
   }
   void runDeepResearchExample().then(({ report, sourceLedger }) =>
     console.log(`${report}\n\nSources:\n${sourceLedger}`),

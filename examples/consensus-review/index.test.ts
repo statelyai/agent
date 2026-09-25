@@ -1,14 +1,13 @@
 /**
- * The runner defaults to a real Jev client. These tests script Jev through the
- * repo's mock client, answering the `verdict` choice by question name, or by a
- * function of the request state where a test is about which reviewer asked.
+ * The runner defaults to Jev. These tests script the judge through the repo's
+ * mock evaluation model, answering the `verdict` choice by question id, or by
+ * a function of the request state where a test is about which reviewer asked.
  */
 import { expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
-import { TypeSafeClient } from "@typesafe-ai/sdk";
 import { getInteraction } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge, type MockJudgeModel } from "../mock-judge.js";
 import {
   consensusReviewMachine,
   createReview,
@@ -17,7 +16,7 @@ import {
 } from "./index.js";
 
 /** Every reviewer approves. */
-const approving = () => createMockJevClient({ verdict: "approve" }).client;
+const approving = () => createMockJudge({ verdict: "approve" }).model;
 
 /** The reviewer a Jev call was made for, read from its state. */
 const reviewerOf = (state: unknown) => (state as { reviewer: string }).reviewer;
@@ -28,7 +27,7 @@ test("two approvals reach quorum, regardless of completion order", async () => {
   const started: string[] = [];
   const releases = new Map<string, (label: string) => void>();
   const invoked: string[] = [];
-  const jev = createMockJevClient({
+  const jev = createMockJudge({
     verdict: (state) =>
       new Promise<string>((resolve) => {
         started.push(reviewerOf(state));
@@ -36,7 +35,7 @@ test("two approvals reach quorum, regardless of completion order", async () => {
       }),
   });
   const pending = runConsensusReviewExample({
-    jevClient: jev.client,
+    judge: jev.model,
     inspect: (event) => {
       if (event.type === "@xstate.actor") invoked.push(event.id);
     },
@@ -55,12 +54,12 @@ test("two approvals reach quorum, regardless of completion order", async () => {
 
 test("review failures abstain; human rejection survives a JSON snapshot round trip", async () => {
   const pending = await runConsensusReviewExample({
-    jevClient: createMockJevClient({
+    judge: createMockJudge({
       verdict: (state) => {
         if (reviewerOf(state) !== "security") throw new Error("Reviewer offline");
         return "approve";
       },
-    }).client,
+    }).model,
   });
   expect(pending.status).toBe("idle");
   expect(getInteraction(pending.snapshot)?.events.map((event) => event.type)).toEqual([
@@ -70,7 +69,7 @@ test("review failures abstain; human rejection survives a JSON snapshot round tr
   const result = await runConsensusReviewExample({
     snapshot: JSON.parse(JSON.stringify(pending.persist())),
     event: { type: "REJECT" },
-    jevClient: approving(),
+    judge: approving(),
   });
   expect(result.status).toBe("done");
   if (result.status !== "done") return;
@@ -79,10 +78,10 @@ test("review failures abstain; human rejection survives a JSON snapshot round tr
 });
 
 test("same machine runs in a native XState host with identical output", async () => {
-  const jevClient = approving();
-  const managed = await runConsensusReviewExample({ jevClient });
+  const judge = approving();
+  const managed = await runConsensusReviewExample({ judge });
   const actor = createActor(
-    consensusReviewMachine.provide({ actors: { review: createReview(jevClient) } }),
+    consensusReviewMachine.provide({ actors: { review: createReview(judge) } }),
     {
       // A native host parses no input schema, so it supplies `source` itself.
       input: { patch: "Validate input before writing to the database.", source: "trusted" },
@@ -102,30 +101,25 @@ test("same machine runs in a native XState host with identical output", async ()
 });
 
 test("invalid model output cannot count as an approval", async () => {
-  // A label outside approve/reject/abstain. The mock client refuses to answer
-  // one, so this is a bare client over a scripted `fetch`.
-  const jevClient = new TypeSafeClient({
-    apiKey: "test-key",
-    retry: { maxRetries: 0 },
-    fetch: async (_url, init) => {
-      const body = JSON.parse(String(init?.body)) as { model: string };
-      return Response.json({
-        model: body.model,
-        answers: {
-          verdict: { type: "choice", choice: "yes", confidence: 1, probabilities: { yes: 1 } },
-        },
-        usage: { input_tokens: 0, output_tokens: 0 },
-      });
-    },
-  });
-  const pending = await runConsensusReviewExample({ jevClient });
+  // A label outside approve/reject/abstain. The mock judge refuses to answer
+  // one, so this is a bare evaluation model returning it; the AI SDK rejects
+  // the answer and the reviewer abstains.
+  const judge: MockJudgeModel = {
+    ...createMockJudge({}).model,
+    doEvaluate: async () => ({
+      answers: { verdict: { type: "choice", choice: "yes", probabilities: { yes: 1 } } },
+      usage: { inputTokens: 0, outputTokens: 0 },
+      warnings: [],
+    }),
+  };
+  const pending = await runConsensusReviewExample({ judge });
   expect(pending.status).toBe("idle");
   expect(pending.snapshot.context.votes).toEqual([]);
   expect(pending.snapshot.context.abstentions).toHaveLength(3);
   const result = await runConsensusReviewExample({
     snapshot: pending.persist(),
     event: { type: "APPROVE" },
-    jevClient,
+    judge,
   });
   expect(result.status).toBe("done");
   if (result.status === "done")
@@ -143,7 +137,7 @@ test("an external patch cannot auto-accept, even on a unanimous model vote", asy
   // pass `source` through the runner.
   const pending = await runConsensusReviewExample({
     patch: adversarial,
-    jevClient: approving(),
+    judge: approving(),
   });
   expect(pending.status).toBe("idle");
   expect(pending.snapshot.value).toBe("humanReview");
@@ -152,7 +146,7 @@ test("an external patch cannot auto-accept, even on a unanimous model vote", asy
   const result = await runConsensusReviewExample({
     snapshot: JSON.parse(JSON.stringify(pending.persist())),
     event: { type: "APPROVE" },
-    jevClient: approving(),
+    judge: approving(),
   });
   expect(result.status).toBe("done");
   if (result.status === "done")
@@ -160,7 +154,7 @@ test("an external patch cannot auto-accept, even on a unanimous model vote", asy
 });
 
 test("the trusted default still auto-accepts a unanimous vote", async () => {
-  const result = await runConsensusReviewExample({ jevClient: approving() });
+  const result = await runConsensusReviewExample({ judge: approving() });
   expect(result.status).toBe("done");
   if (result.status === "done")
     expect(result.output).toMatchObject({ approved: true, humanReviewed: false });
@@ -169,7 +163,7 @@ test("the trusted default still auto-accepts a unanimous vote", async () => {
 test("a caller cannot promote a supplied patch to trusted, even with the built-in text", async () => {
   const pending = await runConsensusReviewExample({
     patch: "Validate input before writing to the database.",
-    jevClient: approving(),
+    judge: approving(),
   });
   expect(pending.status).toBe("idle");
   expect(pending.snapshot.value).toBe("humanReview");
@@ -180,28 +174,28 @@ test("an untyped `input` passed to the runner cannot overwrite the derived sourc
   const pending = await runConsensusReviewExample({
     patch: "Validate input before writing to the database.",
     input: { patch: "anything", source: "trusted" },
-    jevClient: approving(),
+    judge: approving(),
   } as never);
   expect(pending.status).toBe("idle");
   expect(pending.snapshot.value).toBe("humanReview");
   expect(pending.snapshot.context.source).toBe("external");
 });
 
-test("without an injected Jev client or a key, the runner rejects naming the env var", async () => {
-  const key = process.env.TYPESAFE_API_KEY;
-  delete process.env.TYPESAFE_API_KEY;
+test("without an injected judge or a key, the runner rejects naming the env var", async () => {
+  const key = process.env.TYPESAFE_AI_API_KEY;
+  delete process.env.TYPESAFE_AI_API_KEY;
   try {
-    await expect(runConsensusReviewExample()).rejects.toThrow("TYPESAFE_API_KEY");
+    await expect(runConsensusReviewExample()).rejects.toThrow("TYPESAFE_AI_API_KEY");
   } finally {
-    if (key !== undefined) process.env.TYPESAFE_API_KEY = key;
+    if (key !== undefined) process.env.TYPESAFE_AI_API_KEY = key;
   }
 });
 
 test("each reviewer asks Jev one choice over the patch and its brief; reason is rendered", async () => {
-  const jev = createMockJevClient({
+  const jev = createMockJudge({
     verdict: (state) => (reviewerOf(state) === "maintainability" ? "abstain" : "approve"),
   });
-  const result = await runConsensusReviewExample({ jevClient: jev.client });
+  const result = await runConsensusReviewExample({ judge: jev.model });
 
   expect(jev.calls).toHaveLength(3);
   for (const call of jev.calls) {

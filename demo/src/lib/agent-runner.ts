@@ -7,16 +7,18 @@
  * snapshot the client sends back to resume.
  *
  * Runs need a real model and Jev: `createAiSdkExecutors` with `OPENAI_API_KEY`
- * for text requests and decisions, and `TYPESAFE_API_KEY` for the System One
- * judgments (routing, reflection's scoring, the free-text review). Tests import
- * the `*Run` functions directly and inject their own executors and a
- * `TypeSafeClient` over a fake `fetch`.
+ * for text requests and decisions, and `TYPESAFE_AI_API_KEY` for the judgments
+ * (routing, reflection's scoring, the free-text review), which call the AI
+ * SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ * evaluation model. Tests import the `*Run` functions directly and inject
+ * their own executors and a mock evaluation model as the `judge`.
  */
 import { runAgent, type AgentRequestExecutors, type RunAgentResult } from "@statelyai/agent";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
-import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   createActor,
+  createAsyncLogic,
   toPromise,
   type AnyActorLogic,
   type AnyMachineSnapshot,
@@ -173,19 +175,19 @@ async function resolveExecutors(
 }
 
 /**
- * The scenario's Jev actors bound to an injected client. Without one, each
- * machine's registered default builds its client from `TYPESAFE_API_KEY`.
+ * The scenario's judgment actors bound to an injected judge model. Without
+ * one, each machine's registered default uses Jev, which reads
+ * `TYPESAFE_AI_API_KEY`.
  */
-function jevActors(
+function judgeActors(
   scenarioId: ScenarioId,
-  jevClient: TypeSafeClient | undefined,
+  judge: Experimental_EvaluationModel | undefined,
 ): { actors?: Record<string, AnyActorLogic> } {
-  if (!jevClient) return {};
-  if (scenarioId === "routing")
-    return { actors: { classifyIntent: createClassifyIntent(jevClient) } };
-  if (scenarioId === "reflection") return { actors: { evaluate: createEvaluate(jevClient) } };
+  if (!judge) return {};
+  if (scenarioId === "routing") return { actors: { classifyIntent: createClassifyIntent(judge) } };
+  if (scenarioId === "reflection") return { actors: { evaluate: createEvaluate(judge) } };
   if (scenarioId === "email-drafter-v1")
-    return { actors: { evaluatePrompt: createEvaluatePrompt(jevClient) } };
+    return { actors: { evaluatePrompt: createEvaluatePrompt(judge) } };
   return {};
 }
 
@@ -294,14 +296,14 @@ export async function startScenarioRun(
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
-  jevClient?: TypeSafeClient,
+  judge?: Experimental_EvaluationModel,
 ): Promise<ScenarioResult> {
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   const machine = machineFor(scenarioId);
   const result = await runAgent(machine, {
     input: inputFor(scenarioId, prompt),
     executors,
-    ...jevActors(scenarioId, jevClient),
+    ...judgeActors(scenarioId, judge),
     ...(signal ? { signal } : {}),
     onTransition,
     on: { "*": onEmitted },
@@ -319,7 +321,7 @@ export async function resumeScenarioRun(
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
-  jevClient?: TypeSafeClient,
+  judge?: Experimental_EvaluationModel,
 ): Promise<ScenarioResult> {
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   const machine = machineFor(scenarioId);
@@ -329,7 +331,7 @@ export async function resumeScenarioRun(
     snapshot,
     event,
     executors,
-    ...jevActors(scenarioId, jevClient),
+    ...judgeActors(scenarioId, judge),
     ...(signal ? { signal } : {}),
     onTransition,
     on: { "*": onEmitted },
@@ -355,57 +357,80 @@ export async function resumeScenario(
   snapshot: Snapshot<unknown>,
   event: ResumeEvent,
   signal?: AbortSignal,
-  /** Injected by tests; omitted, Jev's client reads `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient,
+  /** Injected by tests; omitted, Jev reads `TYPESAFE_AI_API_KEY`. */
+  judge?: Experimental_EvaluationModel,
 ): Promise<ScenarioResult> {
   const { model, executors } = await resolveExecutors(scenarioId);
 
   // Free-text review ("looks good") → map to a typed event before delivering.
   if (isInterpretEvent(event)) {
-    const verdict = await interpretReview(event.text, jevClient);
+    const verdict = await interpretReview(event.text, judge);
     if (verdict === "UNCLEAR") {
       // Re-settle idle without delivering an event: still awaiting a clear verdict.
       return startResumeIdleEcho(scenarioId, snapshot, model);
     }
     const typed =
       verdict === "REJECT" ? { type: "REJECT", reason: event.text } : { type: "APPROVE" };
-    return resumeScenarioRun(scenarioId, snapshot, typed, model, executors, signal, jevClient);
+    return resumeScenarioRun(scenarioId, snapshot, typed, model, executors, signal, judge);
   }
 
-  return resumeScenarioRun(scenarioId, snapshot, event, model, executors, signal, jevClient);
+  return resumeScenarioRun(scenarioId, snapshot, event, model, executors, signal, judge);
 }
 
 /** Below this confidence, a review reads as unclear and the run asks again. */
 export const REVIEW_CONFIDENCE = 0.6;
 
+/** The judge: Jev through the AI SDK. Reads `TYPESAFE_AI_API_KEY`; tests inject a mock. */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+
 /**
  * Reading a review as approve / reject is a typed judgment over the person's
- * words, so it is one Jev `choice`, not a text generation to parse.
+ * words, so it is one Jev `choice`, not a text generation to parse. Jev's
+ * confidence in the label comes from the result's TypeSafe provider metadata;
+ * a judge that reports none counts as unsure (0).
  */
-export function createInterpretReview(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { review: string }) => ({ review: input.review }),
-    questions: () => ({
-      verdict: choice("What does `review`, a person's reply to a draft, decide?", {
-        approve: "Accepts the draft as it is.",
-        reject: "Asks for changes or criticizes the draft. Negative feedback counts as reject.",
-        unclear: "Neither accepts the draft nor asks for changes.",
-      }),
-    }),
+export function createInterpretReview(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { verdict: { choice: "approve" | "reject" | "unclear" } }; confidence: number },
+    { review: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers, providerMetadata } = await evaluate({
+        model,
+        state: { review: input.review },
+        questions: {
+          verdict: {
+            type: "choice" as const,
+            instructions: "What does `review`, a person's reply to a draft, decide?",
+            criteria: {
+              approve: "Accepts the draft as it is.",
+              reject:
+                "Asks for changes or criticizes the draft. Negative feedback counts as reject.",
+              unclear: "Neither accepts the draft nor asks for changes.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      const reported = (
+        providerMetadata?.typesafe?.confidence as Record<string, unknown> | undefined
+      )?.verdict;
+      return { answers, confidence: typeof reported === "number" ? reported : 0 };
+    },
   });
 }
 
 /** Interprets a free-text review as a typed verdict; a failed or unsure call reads as UNCLEAR. */
 async function interpretReview(
   text: string,
-  jevClient?: TypeSafeClient,
+  judge?: Experimental_EvaluationModel,
 ): Promise<"APPROVE" | "REJECT" | "UNCLEAR"> {
   try {
-    const actor = createActor(createInterpretReview(jevClient), { input: { review: text } });
+    const actor = createActor(createInterpretReview(judge), { input: { review: text } });
     actor.start();
-    const { verdict } = (await toPromise(actor)).answers;
-    if (verdict.confidence < REVIEW_CONFIDENCE) return "UNCLEAR";
+    const { answers, confidence } = await toPromise(actor);
+    const { verdict } = answers;
+    if (confidence < REVIEW_CONFIDENCE) return "UNCLEAR";
     return verdict.choice === "approve"
       ? "APPROVE"
       : verdict.choice === "reject"

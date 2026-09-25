@@ -23,9 +23,10 @@
  *   - Two paths into the same state: button events are deterministic (no model
  *     call), free text goes through a Jev judgment instead.
  *   - Reading the player's free text is a JUDGMENT, not a generation. Each of
- *     the three classifying states invokes a TypeSafe System One actor (Jev)
- *     with the pending prompt and the raw reply as state: a `choice` among
- *     yes / no / sideQuestion for an answer, and a `noul` each for "does the
+ *     the three classifying states calls the AI SDK's `experimental_evaluate`
+ *     with Jev (`@ai-sdk/typesafe-ai`) as the evaluation model, with the
+ *     pending prompt and the raw reply as state: a `choice` among
+ *     yes / no / sideQuestion for an answer, and a boolean question each for "does the
  *     player say the guess was right?" and "does the player want another
  *     round?", compared with `GUESS_CORRECT_THRESHOLD` and
  *     `PLAY_AGAIN_THRESHOLD`. The asker stays an `agent.decide` (it chooses
@@ -37,14 +38,14 @@
  *     (`SIDE_ANSWER`), and re-asks the SAME pending question. No turn is
  *     consumed and the transcript entry is untouched.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/twenty-questions/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/twenty-questions/index.ts
  */
 import { z } from "zod";
-import type { SnapshotFrom } from "xstate";
+import { createAsyncLogic, type SnapshotFrom } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { choice, noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   type AgentMessage,
   assistantMessage,
@@ -83,56 +84,91 @@ export const GUESS_CORRECT_THRESHOLD = 0.5;
 export const PLAY_AGAIN_THRESHOLD = 0.5;
 
 /**
- * The player's reply to a yes/no question, as a System One `choice`: yes, no,
- * or a side question asked back. `client` is injected by tests and hosts;
- * omitted, the SDK reads `TYPESAFE_API_KEY` from the environment.
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
  */
-export function createClassifyAnswer(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { question: string; rawAnswer: string }) => ({
-      question: input.question,
-      reply: input.rawAnswer,
-    }),
-    questions: () => ({
-      reply: choice("How does `reply` respond to the yes/no `question`?", {
-        yes: 'An affirmation: "mhm", "for sure", "correct", or an indirect confirmation.',
-        no: "A denial, a correction, or a contradiction.",
-        sideQuestion:
-          'A question asked back instead of an answer, e.g. "is a lizard considered domestic?".',
-      }),
-    }),
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+
+/**
+ * The player's reply to a yes/no question, as a `choice` judgment: yes, no,
+ * or a side question asked back. The judge model is injected by tests and
+ * hosts; the default is Jev.
+ */
+export function createClassifyAnswer(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { reply: { choice: "yes" | "no" | "sideQuestion" } } },
+    { question: string; rawAnswer: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, reply: input.rawAnswer },
+        questions: {
+          reply: {
+            type: "choice" as const,
+            instructions: "How does `reply` respond to the yes/no `question`?",
+            criteria: {
+              yes: 'An affirmation: "mhm", "for sure", "correct", or an indirect confirmation.',
+              no: "A denial, a correction, or a contradiction.",
+              sideQuestion:
+                'A question asked back instead of an answer, e.g. "is a lizard considered domestic?".',
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
-/** Free-text guess feedback as a System One `noul`. */
-export function createClassifyGuessFeedback(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { guess: string; rawAnswer: string }) => ({
-      guess: input.guess,
-      reply: input.rawAnswer,
-    }),
-    questions: () => ({
-      guessCorrect: noul("Does `reply` say that `guess` was correct?", {
-        true: "Yes, correct, right, got it.",
-        false: "No, wrong, incorrect, or a different answer.",
-      }),
-    }),
+/** Free-text guess feedback as a boolean question. */
+export function createClassifyGuessFeedback(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { guessCorrect: { probability: number } } },
+    { guess: string; rawAnswer: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { guess: input.guess, reply: input.rawAnswer },
+        questions: {
+          guessCorrect: {
+            type: "boolean" as const,
+            instructions: "Does `reply` say that `guess` was correct?",
+            criteria: {
+              true: "Yes, correct, right, got it.",
+              false: "No, wrong, incorrect, or a different answer.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
-/** Free-text reply to the play-again prompt as a System One `noul`. */
-export function createClassifyPlayAgain(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { rawAnswer: string }) => ({
-      question: PLAY_AGAIN_PROMPT,
-      reply: input.rawAnswer,
-    }),
-    questions: () => ({
-      playAgain: noul("Does `reply` say the player wants another round?"),
-    }),
+/** Free-text reply to the play-again prompt as a boolean question. */
+export function createClassifyPlayAgain(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { playAgain: { probability: number } } },
+    { rawAnswer: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { question: PLAY_AGAIN_PROMPT, reply: input.rawAnswer },
+        questions: {
+          playAgain: {
+            type: "boolean" as const,
+            instructions: "Does `reply` say the player wants another round?",
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -512,7 +548,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
           target: "awaitingPlayAgain",
           context: withGuessFeedback(
             context,
-            output.answers.guessCorrect.noul >= GUESS_CORRECT_THRESHOLD,
+            output.answers.guessCorrect.probability >= GUESS_CORRECT_THRESHOLD,
             context.pendingRawAnswer ?? "",
           ),
         }),
@@ -563,7 +599,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
           rawAnswer: context.pendingRawAnswer ?? "",
         }),
         onDone: ({ context, output }) =>
-          output.answers.playAgain.noul >= PLAY_AGAIN_THRESHOLD
+          output.answers.playAgain.probability >= PLAY_AGAIN_THRESHOLD
             ? { target: "deciding", context: freshRound(context) }
             : {
                 target: "gameOver",
@@ -690,8 +726,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

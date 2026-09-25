@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { type AgentRequestExecutors, type ChosenEvent } from "@statelyai/agent";
 import { lintAgentMachine, simulateAgent } from "@statelyai/agent/testing";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { MAX_LOOKUPS, runRetrofitExample, supportMachine } from "./index.js";
 
 /**
@@ -10,15 +10,13 @@ import { MAX_LOOKUPS, runRetrofitExample, supportMachine } from "./index.js";
  */
 const TRIAGE = {
   answers: {
-    category: { type: "choice", choice: "refund", confidence: 0.9, probabilities: {} },
-    sentiment: { type: "choice", choice: "neutral", confidence: 0.9, probabilities: {} },
+    category: { type: "choice", choice: "refund" },
+    sentiment: { type: "choice", choice: "neutral" },
   },
-  model: "jev-latest",
-  usage: { input_tokens: 0, output_tokens: 0 },
 };
 
-/** The same triage through the real SDK client, for `runRetrofitExample`. */
-const triageJev = () => createMockJevClient({ category: "refund", sentiment: "neutral" });
+/** The same triage through a mock evaluation model, for `runRetrofitExample`. */
+const triageJev = () => createMockJudge({ category: "refund", sentiment: "neutral" });
 
 // ─── (a) the final machine is structurally sound ───
 
@@ -112,7 +110,7 @@ test("mock run reaches the refunded final state", async () => {
   const result = await runRetrofitExample({
     ticket: "Refund order B2002, $60.",
     executors: mockExecutors([{ type: "REFUND", amount: 60, reason: "defective" }]),
-    jevClient: triageJev().client,
+    judge: triageJev().model,
   });
 
   expect(result.settledIdle).toBe(false);
@@ -126,7 +124,7 @@ test("mock run: large refund settles idle, then APPROVE resumes to refunded", as
     ticket: "Refund order A1001, $5000.",
     approve: true,
     executors: mockExecutors([{ type: "REFUND", amount: 5000, reason: "damaged" }]),
-    jevClient: triageJev().client,
+    judge: triageJev().model,
   });
 
   expect(result.settledIdle).toBe(true);
@@ -139,11 +137,11 @@ test("mock run: large refund settles idle, then APPROVE resumes to refunded", as
 });
 
 test("triage asks Jev two choices over the ticket, and the decision reads the labels", async () => {
-  const jev = createMockJevClient({ category: "complaint", sentiment: "negative" });
+  const jev = createMockJudge({ category: "complaint", sentiment: "negative" });
   const prompts: string[] = [];
   const result = await runRetrofitExample({
     ticket: "The keyboard from order B2002 double-types. Very annoying.",
-    jevClient: jev.client,
+    judge: jev.model,
     executors: {
       decide: async (request) => {
         prompts.push(request.prompt ?? "");

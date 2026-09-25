@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { createAsyncLogic } from "xstate";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import {
   AUTO_APPROVAL_LIMIT,
   VALID_THRESHOLD,
@@ -15,10 +15,10 @@ type RefundState = { refund: { amountDollars: number } };
 
 /** Run options over a scripted Jev policy check; processRefund is a no-op side effect. */
 function optionsWith(valid: (state: RefundState) => boolean | number) {
-  const jev = createMockJevClient({ valid: (state) => valid(state as RefundState) });
+  const jev = createMockJudge({ valid: (state) => valid(state as RefundState) });
   const options: RefundRunOptions = {
     actors: {
-      validateRefund: createValidateRefund(jev.client),
+      validateRefund: createValidateRefund(jev.model),
       processRefund: createAsyncLogic({ run: async () => ({ ok: true }) }),
     },
   };
@@ -149,7 +149,7 @@ test("the exported demo runs the over-limit path end to end", async () => {
   expect(finished.status).toBe("done");
 });
 
-test("the policy check asks Jev one noul over the refund and the policy; the threshold decides", async () => {
+test("the policy check asks Jev one boolean question over the refund and the policy; the threshold decides", async () => {
   const under = optionsWith(() => VALID_THRESHOLD);
   const started = await startTool({ amount: 129.99, orderId: "ORD-4471" }, under.options);
 
@@ -160,7 +160,7 @@ test("the policy check asks Jev one noul over the refund and the policy; the thr
     policy: { autoApprovalLimitDollars: AUTO_APPROVAL_LIMIT },
   });
   expect(Object.keys(call.questions)).toEqual(["valid"]);
-  expect(call.questions.valid!.type).toBe("noul");
+  expect(call.questions.valid!.type).toBe("boolean");
   // Exactly at the threshold auto-approves ...
   expect(started.status).toBe("done");
 

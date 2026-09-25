@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Removed: keyless walkthrough and scripted-executor modes; the demo now requires OPENAI_API_KEY.
-- Changed: the demo also requires TYPESAFE_API_KEY. Intent routing, reflection's scoring, and the free-text review interpretation are Jev (TypeSafe System One) judgments via `@statelyai/agent/typesafe`; drafting and revising stay text requests. Without either key the shell names the missing one.
+- Changed: the demo also requires TYPESAFE_AI_API_KEY. Intent routing, reflection's scoring, and the free-text review interpretation are judgments made with the AI SDK's `experimental_evaluate`, with Jev (`@ai-sdk/typesafe-ai`) as the evaluation model; drafting and revising stay text requests. Without either key the shell names the missing one.
 
 ## 0.0.1-alpha.13
 

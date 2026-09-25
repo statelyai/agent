@@ -33,8 +33,9 @@
  *   - A speaker cannot speak out of turn or end the debate early: neither
  *     request can choose a next state. Only the machine's edges can.
  *   - Any speaker or judge failure lands in `failed` with the transcript so far.
- *   - Judging is a JUDGMENT, not a generation. `judging` asks TypeSafe System
- *     One (Jev) three questions in one call over `{ motion, transcript }`:
+ *   - Judging is a JUDGMENT, not a generation. `judging` asks the AI SDK's
+ *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model three questions in one call over `{ motion, transcript }`:
  *     `winner` (a `choice` of pro / con / draw) and `proCase` / `conCase` (a
  *     `score` per side on six concrete levels, `CASE_LEVELS`, mapped to 0-10
  *     in code). The reasoning is rendered from the winner's probability and
@@ -42,18 +43,25 @@
  *     text-model requests: arguing is generative.
  *
  * No stand-ins: every speaker is a model call and the judge a Jev call.
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/multi-agent-debate/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/multi-agent-debate/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { choice, score as scoreQuestion, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
   debater: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Upper bound on debate rounds (one pro turn + one con turn each). */
 export const MAX_ROUNDS = 3;
@@ -104,39 +112,57 @@ export const CASE_LEVELS = [
 /** One side's case, judged on argument quality over that side's turns. */
 function caseQuestion(side: Turn["side"]) {
   const stance = side === "pro" ? "for" : "against";
-  return scoreQuestion(
-    `How strong is the case made by the \`transcript\` turns whose \`side\` is "${side}" ` +
+  return {
+    type: "score" as const,
+    instructions:
+      `How strong is the case made by the \`transcript\` turns whose \`side\` is "${side}" ` +
       `(arguing ${stance} \`motion\`)? Judge argument quality only, not your view of the motion.`,
-    CASE_LEVELS,
-  );
+    criteria: CASE_LEVELS,
+  };
 }
 
 /**
- * The judge node as a System One judgment: the motion and the transcript are
- * the state; one `choice` names the winner and one `score` per side rates its
- * case. `client` is injected by tests and hosts; omitted, the SDK reads
- * `TYPESAFE_API_KEY` from the environment.
+ * The judge node as a judgment: the motion and the transcript are the state;
+ * one `choice` names the winner and one `score` per side rates its case. The
+ * judge model is injected by tests and hosts; the default is Jev.
  */
-export function createJudgeDebate(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { motion: string; transcript: Turn[] }) => ({
-      motion: input.motion,
-      transcript: input.transcript,
-    }),
-    questions: () => ({
-      winner: choice(
-        "Which side argued `motion` better across `transcript`? Judge argument quality only, " +
-          "not your view of the motion.",
-        {
-          pro: 'The "pro" side made the stronger case: its points stood and its rebuttals landed.',
-          con: 'The "con" side made the stronger case: its points stood and its rebuttals landed.',
-          draw: "Neither case was clearly stronger: points and rebuttals were evenly matched.",
+export function createJudgeDebate(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    {
+      answers: {
+        winner: {
+          choice: "pro" | "con" | "draw";
+          probabilities?: Record<"pro" | "con" | "draw", number>;
+        };
+        proCase: { score: number };
+        conCase: { score: number };
+      };
+    },
+    { motion: string; transcript: Turn[] }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { motion: input.motion, transcript: input.transcript },
+        questions: {
+          winner: {
+            type: "choice" as const,
+            instructions:
+              "Which side argued `motion` better across `transcript`? Judge argument quality only, " +
+              "not your view of the motion.",
+            criteria: {
+              pro: 'The "pro" side made the stronger case: its points stood and its rebuttals landed.',
+              con: 'The "con" side made the stronger case: its points stood and its rebuttals landed.',
+              draw: "Neither case was clearly stronger: points and rebuttals were evenly matched.",
+            },
+          },
+          proCase: caseQuestion("pro"),
+          conCase: caseQuestion("con"),
         },
-      ),
-      proCase: caseQuestion("pro"),
-      conCase: caseQuestion("con"),
-    }),
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -288,7 +314,7 @@ export const multiAgentDebateMachine = agentSetup.createMachine({
               verdict: {
                 winner: winner.choice,
                 reasoning: renderReasoning(
-                  winner.probabilities[winner.choice],
+                  winner.probabilities?.[winner.choice] ?? 1,
                   proCase.score,
                   conCase.score,
                 ),
@@ -334,8 +360,8 @@ export interface RunMultiAgentDebateOptions {
   rounds?: number;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -349,14 +375,14 @@ export type MultiAgentDebateResult = z.infer<typeof outputSchema> & {
 export async function runMultiAgentDebateExample(
   options: RunMultiAgentDebateOptions = {},
 ): Promise<MultiAgentDebateResult> {
-  const { motion = DEFAULT_MOTION, rounds, generateText, jevClient, onProgress } = options;
+  const { motion = DEFAULT_MOTION, rounds, generateText, judge, onProgress } = options;
   const progress: string[] = [];
   const result = await runAgent(multiAgentDebateMachine, {
     input: { motion, ...(rounds !== undefined ? { rounds } : {}) },
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
-    ...(jevClient ? { actors: { judgeDebate: createJudgeDebate(jevClient) } } : {}),
+    ...(judge ? { actors: { judgeDebate: createJudgeDebate(judge) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -371,8 +397,8 @@ export async function runMultiAgentDebateExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    throw new Error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
   }
   void runMultiAgentDebateExample({ onProgress: (state) => console.log(`  → ${state}`) }).then(
     (result) => console.log(`\n${result.transcript}\n\n${result.verdict}`),

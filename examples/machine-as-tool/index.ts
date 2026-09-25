@@ -30,19 +30,21 @@
  * over it pauses at `awaitingApproval`. That branch lives in a `choice` state
  * so `explorePaths`/`canReach` can see both arms.
  *
- * The policy check is a JUDGMENT, not a generation: `validateRefund` asks
- * TypeSafe System One (Jev) one `noul`, `valid`, over the refund and the
- * written policy, and the machine auto-approves when that probability clears
- * `VALID_THRESHOLD`. It is the only model call, so the example needs no text
- * model at all. `runOptions` passes the Jev client with
- * `actors: { validateRefund: createValidateRefund(client) }`.
+ * The policy check is a JUDGMENT, not a generation: `validateRefund` calls
+ * the AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as
+ * the evaluation model and asks one boolean question, `valid`, over the refund
+ * and the written policy, and the machine auto-approves when that probability
+ * clears `VALID_THRESHOLD`. It is the only model call, so the example needs no
+ * text model at all. `runOptions` passes a judge model with
+ * `actors: { validateRefund: createValidateRefund(model) }`.
  *
- * Run: TYPESAFE_API_KEY=... npx tsx examples/machine-as-tool/index.ts
+ * Run: TYPESAFE_AI_API_KEY=... npx tsx examples/machine-as-tool/index.ts
  */
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   getInteraction,
   interactionMetaSchema,
@@ -54,7 +56,12 @@ import {
   type RunAgentResult,
   type SnapshotOf,
 } from "@statelyai/agent";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Refunds at or under this amount need no human approval. */
 export const AUTO_APPROVAL_LIMIT = 500;
@@ -63,27 +70,40 @@ export const AUTO_APPROVAL_LIMIT = 500;
 export const VALID_THRESHOLD = 0.5;
 
 /**
- * The refund policy check as a System One judgment: the refund and the policy
- * are the state, `valid` is one `noul`. Stands in for a real validation model
- * (fraud check, policy, …). `client` is injected by tests and hosts; omitted,
- * the SDK reads `TYPESAFE_API_KEY` from the environment.
+ * The refund policy check as a judgment: the refund and the policy are the
+ * state, `valid` is one boolean question. Stands in for a real validation
+ * model (fraud check, policy, …). The judge model is injected by tests and
+ * hosts; the default is Jev, which reads `TYPESAFE_AI_API_KEY`.
  */
-export function createValidateRefund(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { amount: number; orderId: string }) => ({
-      refund: { orderId: input.orderId, amountDollars: input.amount },
-      policy: {
-        autoApprovalLimitDollars: AUTO_APPROVAL_LIMIT,
-        rule: "A refund is valid when it has a plausible order id and its amount is at or below the auto-approval limit.",
-      },
-    }),
-    questions: () => ({
-      valid: noul("Is `refund` valid under `policy.rule`?", {
-        true: "The order id is plausible and `refund.amountDollars` is at or below `policy.autoApprovalLimitDollars`.",
-        false: "The amount is above the limit, or the order id is blank or malformed.",
-      }),
-    }),
+export function createValidateRefund(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { valid: { probability: number } } },
+    { amount: number; orderId: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: {
+          refund: { orderId: input.orderId, amountDollars: input.amount },
+          policy: {
+            autoApprovalLimitDollars: AUTO_APPROVAL_LIMIT,
+            rule: "A refund is valid when it has a plausible order id and its amount is at or below the auto-approval limit.",
+          },
+        },
+        questions: {
+          valid: {
+            type: "boolean" as const,
+            instructions: "Is `refund` valid under `policy.rule`?",
+            criteria: {
+              true: "The order id is plausible and `refund.amountDollars` is at or below `policy.autoApprovalLimitDollars`.",
+              false: "The amount is above the limit, or the order id is blank or malformed.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -138,7 +158,7 @@ export const refundMachine = agentSetup.createMachine({
         input: ({ context }) => ({ amount: context.amount, orderId: context.orderId }),
         onDone: ({ output }) => ({
           target: "checked",
-          context: { check: { valid: output.answers.valid.noul >= VALID_THRESHOLD } },
+          context: { check: { valid: output.answers.valid.probability >= VALID_THRESHOLD } },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -322,7 +342,7 @@ export async function runMachineAsToolExample(runOptions: RefundRunOptions) {
 // the round-trip a real tool-calling loop performs, minus the human.
 export async function main() {
   const runOptions: RefundRunOptions = {
-    // The machine's own `validateRefund` reads TYPESAFE_API_KEY; no text model.
+    // The machine's own `validateRefund` reads TYPESAFE_AI_API_KEY; no text model.
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   };
 
@@ -346,8 +366,8 @@ export async function main() {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.TYPESAFE_API_KEY) {
-    console.error("Set TYPESAFE_API_KEY to run this example.");
+  if (!process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

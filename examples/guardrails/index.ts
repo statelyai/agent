@@ -13,9 +13,9 @@
  *     answer is revised at most once, then re-verified. A second failure ends
  *     in an `unverified` final state carrying the critique as the reason —
  *     the content is flagged, never returned as if trusted.
- *   - Both guardrails are JUDGMENTS, not generations. Each invokes a TypeSafe
- *     System One actor (Jev) that answers `noul` questions over explicit
- *     state: the input check asks "is the question answerable?" and "is it
+ *   - Both guardrails are JUDGMENTS, not generations. Each calls the AI SDK's
+ *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model, which answers boolean questions over explicit state: the input check asks "is the question answerable?" and "is it
  *     within the topic?" over `{ question, topic }`; the output check asks "is
  *     every claim correct?" and "does it answer the question?" over
  *     `{ question, answer }`. The machine compares each probability with an
@@ -37,18 +37,25 @@
  * *gate*: they can refuse before any answer exists, and they refuse to vouch
  * for an answer they could not verify.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/guardrails/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/guardrails/index.ts
  */
 import { z } from "zod";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { createAgentSchemas, getStatePath, runAgent, setupAgent } from "@statelyai/agent";
 
 const models = {
   quick: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Scope the input guardrail enforces. Hardcoded so input is just the question. */
 const DEFAULT_TOPIC = "geography";
@@ -66,48 +73,76 @@ export const INPUT_THRESHOLD = 0.5;
 export const OUTPUT_THRESHOLD = 0.7;
 
 /**
- * Input guardrail as a System One judgment: two independent `noul` questions
- * over the question and the allowed topic, in one call. `client` is injected
- * by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ * Input guardrail as a judgment: two independent boolean questions over the
+ * question and the allowed topic, in one `experimental_evaluate` call. The
+ * judge model is injected by tests and hosts; the default is Jev.
  */
-export function createValidateQuestion(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { question: string; topic: string | null }) => ({
-      question: input.question,
-      topic: input.topic ?? "(any topic)",
-    }),
-    questions: () => ({
-      answerable: noul("Does `question` have a definite factual answer?", {
-        true: "A factual question with a checkable answer.",
-        false: "An opinion, nonsense, a creative request, or a request for harmful content.",
-      }),
-      inScope: noul("Is `question` about `topic`?", {
-        true: "Answering it needs knowledge of the topic.",
-        false: "It is about something else, even if it mentions a place or a name.",
-      }),
-    }),
+export function createValidateQuestion(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { answerable: { probability: number }; inScope: { probability: number } } },
+    { question: string; topic: string | null }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, topic: input.topic ?? "(any topic)" },
+        questions: {
+          answerable: {
+            type: "boolean" as const,
+            instructions: "Does `question` have a definite factual answer?",
+            criteria: {
+              true: "A factual question with a checkable answer.",
+              false: "An opinion, nonsense, a creative request, or a request for harmful content.",
+            },
+          },
+          inScope: {
+            type: "boolean" as const,
+            instructions: "Is `question` about `topic`?",
+            criteria: {
+              true: "Answering it needs knowledge of the topic.",
+              false: "It is about something else, even if it mentions a place or a name.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
-/** Output guardrail as a System One judgment: correctness and responsiveness, one `noul` each. */
-export function createVerifyAnswer(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { question: string; answer: string }) => ({
-      question: input.question,
-      answer: input.answer,
-    }),
-    questions: () => ({
-      correct: noul("Is every claim in `answer` factually correct?", {
-        true: "Each statement is established fact.",
-        false: "At least one statement is wrong, invented, or unsupported.",
-      }),
-      responsive: noul("Does `answer` directly answer `question`?", {
-        true: "It gives what the question asks for.",
-        false: "It is evasive, partial, or answers a different question.",
-      }),
-    }),
+/** Output guardrail as a judgment: correctness and responsiveness, one boolean question each. */
+export function createVerifyAnswer(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { correct: { probability: number }; responsive: { probability: number } } },
+    { question: string; answer: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, answer: input.answer },
+        questions: {
+          correct: {
+            type: "boolean" as const,
+            instructions: "Is every claim in `answer` factually correct?",
+            criteria: {
+              true: "Each statement is established fact.",
+              false: "At least one statement is wrong, invented, or unsupported.",
+            },
+          },
+          responsive: {
+            type: "boolean" as const,
+            instructions: "Does `answer` directly answer `question`?",
+            criteria: {
+              true: "It gives what the question asks for.",
+              false: "It is evasive, partial, or answers a different question.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -208,8 +243,8 @@ export const guardrailsMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question, topic: context.topic }),
         // The verdict, plus a reason rendered from whichever check failed.
         onDone: ({ context, output }) => {
-          const answerable = output.answers.answerable.noul >= INPUT_THRESHOLD;
-          const inScope = output.answers.inScope.noul >= INPUT_THRESHOLD;
+          const answerable = output.answers.answerable.probability >= INPUT_THRESHOLD;
+          const inScope = output.answers.inScope.probability >= INPUT_THRESHOLD;
           const reason = !answerable
             ? "Not a question with a definite factual answer."
             : !inScope
@@ -263,8 +298,8 @@ export const guardrailsMachine = agentSetup.createMachine({
         // The verdict, plus a critique for `revise` rendered from whichever
         // check failed.
         onDone: ({ output }) => {
-          const correct = output.answers.correct.noul >= OUTPUT_THRESHOLD;
-          const responsive = output.answers.responsive.noul >= OUTPUT_THRESHOLD;
+          const correct = output.answers.correct.probability >= OUTPUT_THRESHOLD;
+          const responsive = output.answers.responsive.probability >= OUTPUT_THRESHOLD;
           const critique = [
             correct ? "" : "The answer states something that is not established fact.",
             responsive ? "" : "The answer does not directly answer the question.",
@@ -375,8 +410,8 @@ export async function main() {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

@@ -21,8 +21,9 @@
  *     the intermediate tool calls — same as LangGraph's safe-tools path, minus
  *     the extra node. (See examples/tool-calling.)
  *   - Intent routing as a JUDGMENT that SELECTS instead of generating. `classify`
- *     is ONE TypeSafe System One call (Jev) over `{ message, knownCodes,
- *     flights }`, where code pre-parses the candidates first: `knownCodes` are
+ *     is ONE call to the AI SDK's `experimental_evaluate` with Jev
+ *     (`@ai-sdk/typesafe-ai`) as the evaluation model, over `{ message,
+ *     knownCodes, flights }`, where code pre-parses the candidates first: `knownCodes` are
  *     the confirmation-code-shaped spans in the message (`findCodeCandidates`),
  *     and `flights` are the sample schedule's alternatives for the bookings
  *     those codes name (`FLIGHTS`). Jev answers a `choice` for `intent`
@@ -57,18 +58,17 @@
  *     examples/human-in-the-loop.)
  *
  * Dual-mode: `runCustomerSupportExample(options?)` takes an injectable
- * `generateText` and `jevClient` (tests with no API key pass mocks); the direct
+ * `generateText` and `judge` (tests with no API key pass mocks); the direct
  * run uses real models and a readline approve/deny prompt.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/customer-support/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/customer-support/index.ts
  */
 import { z } from "zod";
-import { tool } from "ai";
+import { experimental_evaluate as evaluate, tool, type Experimental_EvaluationModel } from "ai";
 import { openai } from "@ai-sdk/openai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAsyncLogic, type StateValue } from "xstate";
-import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   getAcceptedEvents,
   getInteraction,
@@ -184,49 +184,77 @@ export function flightCandidates(knownCodes: string[]): typeof FLIGHTS {
 const NONE = "none";
 
 /**
- * `classify` as ONE System One call: the message and the pre-parsed candidates
- * are the state; `intent`, `newFlight`, and (with 2+ candidates)
- * `confirmationCode` are `choice` questions whose labels ARE the candidates.
- * `client` is injected by tests and hosts; omitted, the SDK reads
- * `TYPESAFE_API_KEY` from the environment.
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
  */
-export function createClassify(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { query: string }) => {
-      const knownCodes = findCodeCandidates(input.query);
-      return { message: input.query, knownCodes, flights: flightCandidates(knownCodes) };
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+
+/**
+ * `classify` as ONE `experimental_evaluate` call: the message and the
+ * pre-parsed candidates are the state; `intent`, `newFlight`, and (with 2+
+ * candidates) `confirmationCode` are `choice` questions whose labels ARE the
+ * candidates. The judge model is injected by tests and hosts; the default is
+ * Jev.
+ */
+export function createClassify(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    {
+      answers: {
+        intent: { choice: "question" | "cancel" | "rebook" };
+        newFlight: { choice: string };
+        confirmationCode?: { choice: string };
+      };
     },
-    questions: (input) => {
+    { query: string }
+  >({
+    run: async ({ input, signal }) => {
       const knownCodes = findCodeCandidates(input.query);
       const flights = flightCandidates(knownCodes);
-      return {
-        intent: choice("What is the customer asking the airline assistant to do in `message`?", {
-          question:
-            "Anything answerable from bookings or policies: fees, baggage, what their flight " +
-            "is. Also anything that does not explicitly ask to change a booking.",
-          cancel: "Explicitly asks to cancel a booking.",
-          rebook: "Explicitly asks to move a booking to a different flight.",
-        }),
-        newFlight: choice("Which flight in `flights` does `message` ask to move the booking to?", {
-          ...Object.fromEntries(
-            flights.map((flight) => [flight.id, `${flight.route}, departs ${flight.departs}`]),
-          ),
-          [NONE]: "The message names no new flight, or none of these fits it.",
-        }),
-        ...(knownCodes.length > 1
-          ? {
-              confirmationCode: choice(
-                "Which of `knownCodes` is the booking confirmation code in `message`?",
-                {
-                  ...Object.fromEntries(knownCodes.map((code) => [code, null])),
-                  [NONE]:
-                    "None of these is a booking confirmation code (e.g. all are flight numbers).",
-                },
-              ),
-            }
-          : {}),
+      const questions = {
+        intent: {
+          type: "choice" as const,
+          instructions: "What is the customer asking the airline assistant to do in `message`?",
+          criteria: {
+            question:
+              "Anything answerable from bookings or policies: fees, baggage, what their flight " +
+              "is. Also anything that does not explicitly ask to change a booking.",
+            cancel: "Explicitly asks to cancel a booking.",
+            rebook: "Explicitly asks to move a booking to a different flight.",
+          },
+        },
+        newFlight: {
+          type: "choice" as const,
+          instructions: "Which flight in `flights` does `message` ask to move the booking to?",
+          criteria: {
+            ...Object.fromEntries(
+              flights.map((flight) => [flight.id, `${flight.route}, departs ${flight.departs}`]),
+            ),
+            [NONE]: "The message names no new flight, or none of these fits it.",
+          },
+        },
       };
+      const { answers } = await evaluate({
+        model,
+        state: { message: input.query, knownCodes, flights },
+        questions:
+          knownCodes.length > 1
+            ? {
+                ...questions,
+                confirmationCode: {
+                  type: "choice" as const,
+                  instructions:
+                    "Which of `knownCodes` is the booking confirmation code in `message`?",
+                  criteria: {
+                    ...Object.fromEntries(knownCodes.map((code) => [code, null])),
+                    [NONE]:
+                      "None of these is a booking confirmation code (e.g. all are flight numbers).",
+                  },
+                },
+              }
+            : questions,
+        abortSignal: signal,
+      });
+      return { answers };
     },
   });
 }
@@ -597,8 +625,8 @@ export interface RunCustomerSupportOptions {
   replies?: string[];
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition across both runAgent calls. */
   onProgress?: (state: string) => void;
 }
@@ -633,14 +661,14 @@ export async function runCustomerSupportExample(
     approve = true,
     denyReason = "Changed my mind.",
     generateText,
-    jevClient,
+    judge,
     onProgress,
   } = options;
   const executors = {
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
-    ...(jevClient ? { actors: { classify: createClassify(jevClient) } } : {}),
+    ...(judge ? { actors: { classify: createClassify(judge) } } : {}),
   };
 
   const progress: string[] = [];
@@ -729,8 +757,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { InspectionEvent } from "xstate";
 import type { AgentDecisionExecutor, ChosenEvent } from "@statelyai/agent";
 import type { SnapshotFrom } from "xstate";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { gameMachine, PLAY_AGAIN_THRESHOLD, runGameLoopExample, type HumanEvent } from "./index.js";
 import { getInteraction } from "@statelyai/agent";
 
@@ -24,14 +24,14 @@ function createMockPlayer() {
 }
 
 /**
- * Scripted referee: a Jev client answering the `playAgain` noul in order
+ * Scripted referee: a mock judge answering the `playAgain` boolean question in order
  * (`false` once the script runs out). `prompts` reads each call's reply back
  * out of the state Jev was asked over.
  */
 function createMockReferee(replies: Array<boolean | number>) {
-  const jev = createMockJevClient({ playAgain: [...replies, false] });
+  const jev = createMockJudge({ playAgain: [...replies, false] });
   return {
-    jevClient: jev.client,
+    judge: jev.model,
     calls: jev.calls,
     get prompts() {
       return jev.calls.map((call) => (call.state as { reply: string }).reply);
@@ -67,7 +67,7 @@ describe("game-loop-agent", () => {
     const output = await runGameLoopExample({
       input: { seed: 5, target: 10, maxRounds: 5 },
       decide: player.decide,
-      jevClient: referee.jevClient,
+      judge: referee.judge,
       nextHumanEvent: human.nextHumanEvent,
     });
 
@@ -107,7 +107,7 @@ describe("game-loop-agent", () => {
     await runGameLoopExample({
       input: { seed: 5, target: 10, maxRounds: 5 },
       decide: player.decide,
-      jevClient: referee.jevClient,
+      judge: referee.judge,
       nextHumanEvent,
     });
 
@@ -127,7 +127,7 @@ describe("game-loop-agent", () => {
     const output = await runGameLoopExample({
       input: { seed: 5, target: 10, maxRounds: 5 },
       decide: player.decide,
-      jevClient: referee.jevClient,
+      judge: referee.judge,
       nextHumanEvent: human.nextHumanEvent,
     });
 
@@ -145,7 +145,7 @@ describe("game-loop-agent", () => {
     await runGameLoopExample({
       input: { seed: 5, target: 10, maxRounds: 5 },
       decide: player.decide,
-      jevClient: referee.jevClient,
+      judge: referee.judge,
       nextHumanEvent: human.nextHumanEvent,
       inspect: (inspectionEvent) => events.push(inspectionEvent),
     });
@@ -175,7 +175,7 @@ describe("game-loop-agent", () => {
     expect(inspectedEventTypes).toContain("AGENT_MOVE");
   });
 
-  test("the referee asks Jev one noul over the reply and standings; the threshold decides", async () => {
+  test("the referee asks Jev one boolean question over the reply and standings; the threshold decides", async () => {
     const player = createMockPlayer();
     // Just over the threshold plays on; just under stops.
     const referee = createMockReferee([PLAY_AGAIN_THRESHOLD + 0.01, PLAY_AGAIN_THRESHOLD - 0.01]);
@@ -184,7 +184,7 @@ describe("game-loop-agent", () => {
     const output = await runGameLoopExample({
       input: { seed: 5, target: 10, maxRounds: 5 },
       decide: player.decide,
-      jevClient: referee.jevClient,
+      judge: referee.judge,
       nextHumanEvent: human.nextHumanEvent,
     });
 
@@ -197,7 +197,7 @@ describe("game-loop-agent", () => {
       standings: expect.stringMatching(/^round 1: human \d wins, agent \d wins$/),
     });
     expect(Object.keys(call.questions)).toEqual(["playAgain"]);
-    expect(call.questions.playAgain!.type).toBe("noul");
+    expect(call.questions.playAgain!.type).toBe("boolean");
   });
 
   test("the round limit ends the match even when the user keeps saying yes", async () => {
@@ -208,7 +208,7 @@ describe("game-loop-agent", () => {
     const output = await runGameLoopExample({
       input: { seed: 5, target: 10, maxRounds: 2 },
       decide: player.decide,
-      jevClient: referee.jevClient,
+      judge: referee.judge,
       nextHumanEvent: human.nextHumanEvent,
     });
 

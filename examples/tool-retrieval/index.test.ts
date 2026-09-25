@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { type AgentDecisionRequest } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { createMockModelExecutors, type MockDecisionEntry } from "../mock-model.js";
 import {
   MAX_RESELECTIONS,
@@ -25,7 +25,7 @@ function scripted(chooseTool: MockDecisionEntry | MockDecisionEntry[]) {
  * One entry per registry tool, keyed by the tool's name like the questions.
  */
 function selector(relevant: Record<string, string[]>) {
-  return createMockJevClient(
+  return createMockJudge(
     Object.fromEntries(
       TOOL_REGISTRY.map((tool) => [
         tool.name,
@@ -48,7 +48,7 @@ test("selects matching tools → calls one → answers", async () => {
       { type: "CALL_TOOL", tool: "km_to_miles", arg: "42.195" },
       { type: "ANSWER", answer: "About 26.22 miles." },
     ]),
-    jevClient: selector({ [MARATHON]: ["km_to_miles"] }).client,
+    judge: selector({ [MARATHON]: ["km_to_miles"] }).model,
   });
 
   expect(result.finalState).toBe("done");
@@ -68,7 +68,7 @@ test("a registry tool outside the selected set is rejected, and the decision ret
   const seen: string[][] = [];
   const result = await runToolRetrievalExample({
     question: MARATHON,
-    jevClient: selector({ [MARATHON]: ["km_to_miles"] }).client,
+    judge: selector({ [MARATHON]: ["km_to_miles"] }).model,
     decide: scripted((request) => {
       seen.push(request.attempts.map((attempt) => attempt.failure));
       return request.attempts.length === 0
@@ -86,10 +86,10 @@ test("a registry tool outside the selected set is rejected, and the decision ret
 test("RESELECT searches again and ADDS the new tools to the selected set", async () => {
   const result = await runToolRetrievalExample({
     question: MARATHON,
-    jevClient: selector({
+    judge: selector({
       [MARATHON]: ["km_to_miles"],
       "capital city of a country": ["lookup_capital"],
-    }).client,
+    }).model,
     decide: scripted([
       { type: "RESELECT", query: "capital city of a country" },
       { type: "CALL_TOOL", tool: "lookup_capital", arg: "Kenya" },
@@ -112,7 +112,7 @@ test("RESELECT searches again and ADDS the new tools to the selected set", async
 test("reselection budget: RESELECT is refused after MAX_RESELECTIONS, so the model answers", async () => {
   const result = await runToolRetrievalExample({
     question: "What is the capital of Australia?",
-    jevClient: selector({ "What is the capital of Australia?": ["lookup_capital"] }).client,
+    judge: selector({ "What is the capital of Australia?": ["lookup_capital"] }).model,
     decide: scripted((request) =>
       rejected(request).has("RESELECT")
         ? { type: "ANSWER", answer: "Canberra, from memory." }
@@ -130,7 +130,7 @@ test("reselection budget: RESELECT is refused after MAX_RESELECTIONS, so the mod
 test("tool-call budget exhausted and the model never answers → failed", async () => {
   const result = await runToolRetrievalExample({
     question: MARATHON,
-    jevClient: selector({ [MARATHON]: ["km_to_miles"] }).client,
+    judge: selector({ [MARATHON]: ["km_to_miles"] }).model,
     decide: scripted({ type: "CALL_TOOL", tool: "km_to_miles", arg: "1" }),
   });
 
@@ -171,7 +171,7 @@ test("starters behave as their labels advertise", async () => {
     const { tool, arg, result: toolResult } = expected[index]!;
     const result = await runToolRetrievalExample({
       question,
-      jevClient: selector({ [question]: [tool] }).client,
+      judge: selector({ [question]: [tool] }).model,
       decide: scripted([
         { type: "CALL_TOOL", tool, arg },
         { type: "ANSWER", answer: "done" },
@@ -184,9 +184,9 @@ test("starters behave as their labels advertise", async () => {
   }
 });
 
-test("selection asks Jev one noul per registry tool and keeps the top few above the threshold", async () => {
+test("selection asks Jev one boolean question per registry tool and keeps the top few above the threshold", async () => {
   // Four tools clear the threshold (only three fit), one sits just under it.
-  const jev = createMockJevClient({
+  const jev = createMockJudge({
     kg_to_pounds: [0.6, 0.05],
     km_to_miles: [0.9, 0.05],
     celsius_to_fahrenheit: [0.8, 0.05],
@@ -197,7 +197,7 @@ test("selection asks Jev one noul per registry tool and keeps the top few above 
   });
   const result = await runToolRetrievalExample({
     question: MARATHON,
-    jevClient: jev.client,
+    judge: jev.model,
     decide: scripted([
       { type: "RESELECT", query: "capital city of a country" },
       { type: "ANSWER", answer: "done" },
@@ -214,7 +214,9 @@ test("selection asks Jev one noul per registry tool and keeps the top few above 
     TOOL_REGISTRY.map(({ name, description }) => ({ name, description })),
   );
   expect(Object.keys(first!.questions)).toEqual(TOOL_REGISTRY.map((tool) => tool.name));
-  expect(Object.values(first!.questions).every((question) => question.type === "noul")).toBe(true);
+  expect(Object.values(first!.questions).every((question) => question.type === "boolean")).toBe(
+    true,
+  );
 
   // Best first, cut at TOOLS_PER_SELECTION; the just-under tool never shows up;
   // the reselection adds to the set.

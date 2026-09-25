@@ -34,8 +34,10 @@
  * What stays prose: voice and question formatting (`QUIZ_VOICE`). Models follow
  * that well, and encoding it as states would be ceremony.
  *
- * Grading is split along the judgment/generation line. `grading` asks TypeSafe
- * System One (Jev) one `noul`, `correct`, over `{ passage, question, answer }`,
+ * Grading is split along the judgment/generation line. `grading` calls the AI
+ * SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ * evaluation model: one boolean question, `correct`, over
+ * `{ passage, question, answer }`,
  * and the answer counts as correct when that probability clears
  * `CORRECT_THRESHOLD`. `explaining` then asks the text model only for the prose
  * the learner reads (the expected answer and an explanation), told the verdict
@@ -45,15 +47,15 @@
  * `examples/rag`). A real build swaps `queryPdfContent` for a vector store; the
  * machine shape is unchanged.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/chat-with-pdf/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/chat-with-pdf/index.ts
  */
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { createAsyncLogic } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   createAgentSchemas,
   getInteraction,
@@ -104,25 +106,39 @@ const gradeSchema = z.object({
 export const CORRECT_THRESHOLD = 0.5;
 
 /**
- * The verdict as a System One judgment: the passage the question came from,
- * the question, and the learner's answer are the state; `correct` is one
- * `noul`. `client` is injected by tests and hosts; omitted, the SDK reads
- * `TYPESAFE_API_KEY` from the environment.
+ * The verdict as a judgment: the passage the question came from, the
+ * question, and the learner's answer are the state; `correct` is one boolean
+ * question. The judge model is injected by tests and hosts; the default is
+ * Jev, which reads `TYPESAFE_AI_API_KEY` from the environment.
  */
-export function createGradeAnswer(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { prompt: string; answer: string; sourceText: string; pageNumber: number }) => ({
-      passage: { page: input.pageNumber, text: input.sourceText },
-      question: input.prompt,
-      answer: input.answer,
-    }),
-    questions: () => ({
-      correct: noul("Is `answer` a correct answer to `question`, according to `passage.text`?", {
-        true: "Right in substance per the passage, even if worded differently.",
-        false: "Wrong, off the point, or not supported by the passage.",
-      }),
-    }),
+export function createGradeAnswer(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { correct: { probability: number } } },
+    { prompt: string; answer: string; sourceText: string; pageNumber: number }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: {
+          passage: { page: input.pageNumber, text: input.sourceText },
+          question: input.prompt,
+          answer: input.answer,
+        },
+        questions: {
+          correct: {
+            type: "boolean" as const,
+            instructions:
+              "Is `answer` a correct answer to `question`, according to `passage.text`?",
+            criteria: {
+              true: "Right in substance per the passage, even if worded differently.",
+              false: "Wrong, off the point, or not supported by the passage.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -283,6 +299,12 @@ const resultSchema = z.object({
 const models = {
   quiz: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 export const chatWithPdfSchemas = createAgentSchemas({
   // The library's own interaction protocol, not a per-machine restatement.
@@ -623,7 +645,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
       },
     },
 
-    // The verdict: one Jev `noul` against the threshold.
+    // The verdict: one Jev boolean question against the threshold.
     grading: {
       invoke: {
         src: "gradeAnswer",
@@ -635,7 +657,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "explaining",
-          context: { verdict: output.answers.correct.noul >= CORRECT_THRESHOLD },
+          context: { verdict: output.answers.correct.probability >= CORRECT_THRESHOLD },
         }),
         onError: { target: "continuing", context: { pending: null, lastGrade: null } },
       },
@@ -809,8 +831,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

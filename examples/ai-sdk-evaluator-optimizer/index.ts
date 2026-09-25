@@ -8,23 +8,25 @@
  * has something to catch and every run shows a real before/after revision.
  *
  * The evaluator is split along the judgment/generation line. The grade is a
- * JUDGMENT: `evaluating` asks TypeSafe System One (Jev) one `score`
+ * JUDGMENT: `evaluating` calls the AI SDK's `experimental_evaluate` with Jev
+ * (`@ai-sdk/typesafe-ai`) as the evaluation model and asks one `score`
  * (`quality`, on `QUALITY_LEVELS`, mapped to the 1-10 `qualityScore`) and three
- * `noul`s (`preservesTone`, `preservesNuance`, `culturallyAccurate`, each
- * against `ASPECT_THRESHOLD`) in one call. The optimizer needs prose feedback
+ * boolean questions (`preservesTone`, `preservesNuance`, `culturallyAccurate`,
+ * each against `ASPECT_THRESHOLD`) in one call. The optimizer needs prose feedback
  * to act on, so a failing grade goes on to `critiquing`, where the text model
  * lists the issues and suggestions, told the grade rather than asked for it.
  *
  * Compare: https://ai-sdk.dev/docs/agents/workflows#evaluator-optimizer
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/ai-sdk-evaluator-optimizer/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/ai-sdk-evaluator-optimizer/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { noul, score, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { setupAgent, runAgent } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 
 const translationEvaluationSchema = z.object({
   qualityScore: z.number().min(1).max(10),
@@ -58,32 +60,56 @@ export function toQualityScore(level: number): number {
 }
 
 /**
- * The grade as a System One judgment: the original, the translation, and the
- * target language are the state; one `score` and three `noul`s are asked in
- * one call. `client` is injected by tests and hosts; omitted, the SDK reads
- * `TYPESAFE_API_KEY` from the environment.
+ * The grade as a judgment: the original, the translation, and the target
+ * language are the state; one `score` and three boolean questions are asked in
+ * one call. The judge model is injected by tests and hosts; the default is
+ * Jev, which reads `TYPESAFE_AI_API_KEY` from the environment.
  */
-export function createGradeTranslation(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { original: string; translation: string; targetLanguage: string }) => ({
-      original: input.original,
-      translation: input.translation,
-      targetLanguage: input.targetLanguage,
-    }),
-    questions: () => ({
-      quality: score(
-        "How well does `translation` render `original` in `targetLanguage` for a native speaker?",
-        QUALITY_LEVELS,
-      ),
-      preservesTone: noul("Does `translation` keep the tone and register of `original`?"),
-      preservesNuance: noul(
-        "Does `translation` keep the nuance of `original`, using the target language's own idiom rather than a literal calque?",
-      ),
-      culturallyAccurate: noul(
-        "Is `translation` culturally accurate for speakers of `targetLanguage`?",
-      ),
-    }),
+export function createGradeTranslation(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    {
+      answers: {
+        quality: { score: number };
+        preservesTone: { probability: number };
+        preservesNuance: { probability: number };
+        culturallyAccurate: { probability: number };
+      };
+    },
+    { original: string; translation: string; targetLanguage: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: {
+          original: input.original,
+          translation: input.translation,
+          targetLanguage: input.targetLanguage,
+        },
+        questions: {
+          quality: {
+            type: "score" as const,
+            instructions:
+              "How well does `translation` render `original` in `targetLanguage` for a native speaker?",
+            criteria: QUALITY_LEVELS,
+          },
+          preservesTone: {
+            type: "boolean" as const,
+            instructions: "Does `translation` keep the tone and register of `original`?",
+          },
+          preservesNuance: {
+            type: "boolean" as const,
+            instructions:
+              "Does `translation` keep the nuance of `original`, using the target language's own idiom rather than a literal calque?",
+          },
+          culturallyAccurate: {
+            type: "boolean" as const,
+            instructions: "Is `translation` culturally accurate for speakers of `targetLanguage`?",
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -102,6 +128,12 @@ const models = {
   critic: openai("gpt-5.4-mini"),
   improver: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 const contextSchema = z.object({
   text: z.string(),
@@ -282,9 +314,9 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
         onDone: ({ context, output: { answers } }, enq) => {
           const evaluation: TranslationEvaluation = {
             qualityScore: toQualityScore(answers.quality.score),
-            preservesTone: answers.preservesTone.noul >= ASPECT_THRESHOLD,
-            preservesNuance: answers.preservesNuance.noul >= ASPECT_THRESHOLD,
-            culturallyAccurate: answers.culturallyAccurate.noul >= ASPECT_THRESHOLD,
+            preservesTone: answers.preservesTone.probability >= ASPECT_THRESHOLD,
+            preservesNuance: answers.preservesNuance.probability >= ASPECT_THRESHOLD,
+            culturallyAccurate: answers.culturallyAccurate.probability >= ASPECT_THRESHOLD,
             specificIssues: [],
             improvementSuggestions: [],
           };
@@ -417,8 +449,8 @@ export async function runAiSdkEvaluatorOptimizerExample() {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

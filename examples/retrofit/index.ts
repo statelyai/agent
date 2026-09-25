@@ -16,20 +16,21 @@
  * tests inject mock executors (no API key); a direct run uses real models.
  *
  * The final form adds triage, and triage is a JUDGMENT, not a generation:
- * `triageTicket` asks TypeSafe System One (Jev) two `choice` questions over
+ * `triageTicket` calls the AI SDK's `experimental_evaluate` with Jev
+ * (`@ai-sdk/typesafe-ai`) as the evaluation model: two `choice` questions over
  * `{ ticket }` in one call, `category` (refund | question | complaint) and
  * `sentiment` (positive | neutral | negative). The labels land in context and
  * the decision reads them. The text model is left with the one open-ended
  * call, `agent.decide`.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/retrofit/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/retrofit/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   createAgentSchemas,
   getInteraction,
@@ -56,33 +57,61 @@ const models = {
   agent: openai("gpt-5.4-mini"),
 };
 
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+
 const triageSchema = z.object({
   category: z.enum(["refund", "question", "complaint"]),
   sentiment: z.enum(["positive", "neutral", "negative"]),
 });
 
 /**
- * Triage as a System One judgment: the ticket is the state, and `category`
- * and `sentiment` are two independent `choice` questions asked in one call.
- * `client` is injected by tests and hosts; omitted, the SDK reads
- * `TYPESAFE_API_KEY` from the environment.
+ * Triage as a judgment: the ticket is the state, and `category` and
+ * `sentiment` are two independent `choice` questions asked in one call. The
+ * judge model is injected by tests and hosts; the default is Jev, which reads
+ * `TYPESAFE_AI_API_KEY` from the environment.
  */
-export function createTriageTicket(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { ticket: string }) => ({ ticket: input.ticket }),
-    questions: () => ({
-      category: choice("What is the customer asking for in `ticket`?", {
-        refund: "Money back for an order, in full or in part.",
-        question: "Information: order status, shipping, how something works.",
-        complaint: "A problem reported without asking for money back.",
-      }),
-      sentiment: choice("What is the customer's tone in `ticket`?", {
-        positive: "Pleased or appreciative.",
-        neutral: "Matter-of-fact.",
-        negative: "Frustrated, upset, or angry.",
-      }),
-    }),
+export function createTriageTicket(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    {
+      answers: {
+        category: { choice: z.infer<typeof triageSchema>["category"] };
+        sentiment: { choice: z.infer<typeof triageSchema>["sentiment"] };
+      };
+    },
+    { ticket: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { ticket: input.ticket },
+        questions: {
+          category: {
+            type: "choice" as const,
+            instructions: "What is the customer asking for in `ticket`?",
+            criteria: {
+              refund: "Money back for an order, in full or in part.",
+              question: "Information: order status, shipping, how something works.",
+              complaint: "A problem reported without asking for money back.",
+            },
+          },
+          sentiment: {
+            type: "choice" as const,
+            instructions: "What is the customer's tone in `ticket`?",
+            criteria: {
+              positive: "Pleased or appreciative.",
+              neutral: "Matter-of-fact.",
+              negative: "Frustrated, upset, or angry.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -341,8 +370,8 @@ export interface RunRetrofitOptions {
   denyReason?: string;
   /** Injected for tests; a direct run builds real executors. */
   executors?: Pick<AgentRequestExecutors, "decide">;
-  /** Injected for tests; a direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, a direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   onProgress?: (state: string) => void;
 }
 
@@ -370,10 +399,10 @@ export async function runRetrofitExample(
     approve = true,
     denyReason = "Outside refund policy.",
     executors = buildExecutors(),
-    jevClient,
+    judge,
     onProgress,
   } = options;
-  const actors = jevClient ? { triageTicket: createTriageTicket(jevClient) } : undefined;
+  const actors = judge ? { triageTicket: createTriageTicket(judge) } : undefined;
 
   const progress: string[] = [];
   const track = (snapshot: { value: Parameters<typeof getStatePath>[0] }) => {
@@ -436,8 +465,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

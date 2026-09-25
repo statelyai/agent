@@ -12,8 +12,8 @@
  *
  * The machine owns legality and state; the LangChain agent only converses.
  * The machine's text requests run on a LangChain model; its prompt check is a
- * Jev judgment, so the bridge also takes a Jev client (`useModel(model,
- * jevClient)`), falling back to the SDK's `TYPESAFE_API_KEY`.
+ * Jev judgment, so the bridge also takes a judge model (`useModel(model,
+ * judge)`), falling back to Jev via `TYPESAFE_AI_API_KEY`.
  * Nothing here hardcodes a state name — the event to send is derived from the
  * machine's own `meta.interaction`. An event the current state does not handle
  * is ignored by the machine (`result.ignored`), so no hand-rolled legality check
@@ -24,7 +24,7 @@
  */
 import { z } from "zod";
 import type { Snapshot } from "xstate";
-import type { TypeSafeClient } from "@typesafe-ai/sdk";
+import type { Experimental_EvaluationModel } from "ai";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { createAgent } from "langchain";
@@ -95,15 +95,15 @@ const runs = new Map<string, StoredRun>();
  * Direction A powering Direction B: the machine inside the LangChain tools is
  * itself driven by a LangChain model. Both halves of the "best of both worlds"
  * in one call — LangChain owns every text-model call, the machine owns the
- * flow, and `jevClient` (when given) answers the prompt check.
+ * flow, and `judge` (when given) answers the prompt check.
  */
 export function langChainRunOptions(
   model: BaseChatModel,
-  jevClient?: TypeSafeClient,
+  judge?: Experimental_EvaluationModel,
 ): RunAgentOptions<typeof emailDrafter> {
   return {
     executors: createLangChainExecutors({ model }),
-    ...(jevClient ? { actors: { evaluatePrompt: createEvaluatePrompt(jevClient) } } : {}),
+    ...(judge ? { actors: { evaluatePrompt: createEvaluatePrompt(judge) } } : {}),
   };
 }
 
@@ -113,9 +113,9 @@ export function langChainRunOptions(
  */
 let toolRunOptions: RunAgentOptions<typeof emailDrafter> | null = null;
 
-/** Point the bridge tools at a LangChain model (and, optionally, a Jev client). */
-export function useModel(model: BaseChatModel, jevClient?: TypeSafeClient) {
-  toolRunOptions = langChainRunOptions(model, jevClient);
+/** Point the bridge tools at a LangChain model (and, optionally, a judge model). */
+export function useModel(model: BaseChatModel, judge?: Experimental_EvaluationModel) {
+  toolRunOptions = langChainRunOptions(model, judge);
 }
 
 function currentRunOptions(): RunAgentOptions<typeof emailDrafter> {
@@ -276,11 +276,11 @@ export const SYSTEM_PROMPT =
 export function createEmailHostAgent(
   model: BaseChatModel,
   machineModel: BaseChatModel = model,
-  jevClient?: TypeSafeClient,
+  judge?: Experimental_EvaluationModel,
 ) {
   // The conversing model and the model *inside* the machine are separable, and
   // separate models keep the test's scripts readable; live, they are one model.
-  useModel(machineModel, jevClient);
+  useModel(machineModel, judge);
   return createAgent({
     model,
     tools: bridgeTools,

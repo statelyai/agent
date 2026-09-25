@@ -26,7 +26,7 @@
  *          └──END_SESSION──▶ done
  *
  * What maps to what:
- *   - store.search(namespace)   → `recalling` (ONE Jev call, one `noul` per stored
+ *   - store.search(namespace)   → `recalling` (ONE Jev call, one boolean question per stored
  *                                 memory; top `RECALL_LIMIT` above `RECALL_THRESHOLD`)
  *   - call_model                → `answering` (request `answer`: reply + the new
  *                                 facts worth remembering, as structured output)
@@ -41,9 +41,10 @@
  *
  * Differences from LangGraph worth calling out:
  *   - Recall is a JUDGMENT, not a search. The template embeds the message and
- *     takes the nearest memories. Here `recalling` invokes a TypeSafe System
- *     One actor (Jev) with the message and the whole store as state and one
- *     `noul` per memory ("does this fact bear on the message?"). The
+ *     takes the nearest memories. Here `recalling` calls the AI SDK's
+ *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model, with the message and the whole store as state and one
+ *     boolean question per memory ("does this fact bear on the message?"). The
  *     probabilities rank the store; the threshold and `RECALL_LIMIT` are code
  *     (`searchMemoryStore`). The text model is reserved for `answering`.
  *   - The store is injected, not ambient. There is no module-level store and no
@@ -62,23 +63,23 @@
  *     that owe an answer they could not produce; this one owes nothing.)
  *
  * Stand-in: the store is an in-memory list, and every recall judges all of
- * it (at most `MAX_MEMORIES`). An empty store has nothing to judge: the SDK
- * refuses an empty question set before any request is sent, and `recalling`'s
- * `onError` answers with nothing recalled, the same as a failed search.
+ * it (at most `MAX_MEMORIES`). An empty store has nothing to judge: the actor
+ * returns no answers without calling the judge, so `recalling` answers with
+ * nothing recalled, the same as a failed search.
  *
  * Dual-mode: `runLongTermMemoryExample(options?)` takes an injectable
- * `generateText`, an injectable Jev client, and scripted human events (tests
+ * `generateText`, an injectable judge model, and scripted human events (tests
  * pass all three, so CI needs no API key); the direct run uses real models
  * and stdin.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/long-term-memory/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/long-term-memory/index.ts
  */
 import { z } from "zod";
-import type { SnapshotFrom } from "xstate";
+import { createAsyncLogic, type SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   getInteraction,
   getStatePath,
@@ -91,6 +92,12 @@ import {
 const models = {
   assistant: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Messages one session answers before it closes (in `done`, not `failed`). */
 export const MAX_TURNS = 8;
@@ -108,31 +115,38 @@ const TRANSCRIPT_TAIL = 6;
 export const RECALL_THRESHOLD = 0.5;
 
 /**
- * store.search as a System One judgment: the message and every stored memory
- * are the state, and each memory gets its own `noul`. One call, one
- * probability per memory. `client` is injected by tests and hosts; omitted,
- * the SDK reads `TYPESAFE_API_KEY` from the environment.
+ * store.search as a judgment: the message and every stored memory are the
+ * state, and each memory gets its own boolean question. One call, one
+ * probability per memory. The judge model is injected by tests and hosts; the
+ * default is Jev, which reads `TYPESAFE_AI_API_KEY` from the environment.
  */
-export function createSearchMemories(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { message: string; memories: string[] }) => ({
-      message: input.message,
-      memories: input.memories,
-    }),
-    questions: (input) =>
-      Object.fromEntries(
-        input.memories.map((_memory, index) => [
-          `memory${index}`,
-          noul(
-            `Does \`memories[${index}]\` state a fact about the user that bears on answering \`message\`?`,
+export function createSearchMemories(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: Record<string, { probability: number }> },
+    { message: string; memories: string[] }
+  >({
+    run: async ({ input, signal }) => {
+      if (input.memories.length === 0) return { answers: {} };
+      const { answers } = await evaluate({
+        model,
+        state: { message: input.message, memories: input.memories },
+        questions: Object.fromEntries(
+          input.memories.map((_memory, index) => [
+            `memory${index}`,
             {
-              true: "The reply would be better or more personal for knowing this fact.",
-              false: "The fact is about something else, or only shares a word with the message.",
+              type: "boolean" as const,
+              instructions: `Does \`memories[${index}]\` state a fact about the user that bears on answering \`message\`?`,
+              criteria: {
+                true: "The reply would be better or more personal for knowing this fact.",
+                false: "The fact is about something else, or only shares a word with the message.",
+              },
             },
-          ),
-        ]),
-      ),
+          ]),
+        ),
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -323,7 +337,7 @@ export const longTermMemoryMachine = agentSetup.createMachine({
         onDone: ({ context, output }) => {
           const recalled = searchMemoryStore(
             context.memories,
-            context.memories.map((_memory, index) => output.answers[`memory${index}`]?.noul),
+            context.memories.map((_memory, index) => output.answers[`memory${index}`]?.probability),
             RECALL_LIMIT,
           );
           return {
@@ -416,8 +430,8 @@ export interface RunLongTermMemoryOptions {
   memories?: string[];
   /** Injected for tests; the direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Scripted human events, consumed in order on each idle settle; then stdin. */
   humanEvents?: LongTermMemoryHumanEvent[];
   /** Observes each machine transition. */
@@ -439,12 +453,12 @@ export interface LongTermMemoryResult {
 export async function runLongTermMemoryExample(
   options: RunLongTermMemoryOptions = {},
 ): Promise<LongTermMemoryResult> {
-  const { userId = "demo", memories = [], generateText, jevClient, onProgress, onReply } = options;
+  const { userId = "demo", memories = [], generateText, judge, onProgress, onReply } = options;
   const queued = [...(options.humanEvents ?? [])];
   const progress: string[] = [];
   const shared = {
     executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
-    ...(jevClient ? { actors: { searchMemories: createSearchMemories(jevClient) } } : {}),
+    ...(judge ? { actors: { searchMemories: createSearchMemories(judge) } } : {}),
     onTransition: (snapshot: LongTermMemorySnapshot) => {
       const state = getStatePath(snapshot);
       // A resume re-reports the restored state; record each state once per visit.
@@ -490,8 +504,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

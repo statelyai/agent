@@ -1,10 +1,10 @@
 /**
- * No API key: every seam runs scripted, and a scripted Jev client answers the
+ * No API key: every seam runs scripted, and a scripted judge answers the
  * prompt check, so the routing, the slicing, and the scorers are testable with
  * no key and no network.
  */
 import { describe, expect, test } from "vitest";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import {
   clarifySeam,
   draftSeam,
@@ -24,12 +24,11 @@ import {
  */
 function jevFor(row: SeamRow) {
   const { prompt, details } = row.input;
-  if (prompt.includes("@")) return createMockJevClient({ "*": true }).client;
+  if (prompt.includes("@")) return createMockJudge({ "*": true }).model;
   if (details !== null) {
-    return createMockJevClient({ satisfied: [false, true], recipient: [false, true], "*": true })
-      .client;
+    return createMockJudge({ satisfied: [false, true], recipient: [false, true], "*": true }).model;
   }
-  return createMockJevClient({ "*": false }).client;
+  return createMockJudge({ "*": false }).model;
 }
 
 describe("seam evals", () => {
@@ -82,7 +81,7 @@ describe("seam evals", () => {
 
   test("a judgment that waves the vague prompt through never reaches the seam, and the path scorer says where it diverged", async () => {
     const row = clarifySeam[0]!;
-    const output = await runSeamCase(row.input, null, createMockJevClient({ "*": true }).client);
+    const output = await runSeamCase(row.input, null, createMockJudge({ "*": true }).model);
 
     expect(output.status).toBe("done");
     expect(output.seamOutput).toBeUndefined();

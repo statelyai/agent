@@ -3,9 +3,10 @@
  *
  * What JEV owns: judging whether the request has enough detail
  * (`evaluatePrompt`). A completeness check is a typed judgment over text the
- * machine already holds, not a generation, so it goes to TypeSafe's System One
- * model: one `noul` for "enough to draft from?" plus one `noul` per required
- * detail, in one call. Code turns the probabilities into `missing` against
+ * machine already holds, not a generation, so it goes to the AI SDK's
+ * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * model: one boolean question for "enough to draft from?" plus one per
+ * required detail, in one call. Code turns the probabilities into `missing` against
  * `ASSESSMENT_THRESHOLD`.
  * What the MODEL owns: wording the follow-up questions (`writeFollowUps`, run
  * only when something is missing) and writing the draft (`draftEmail`).
@@ -22,10 +23,13 @@
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { setupAgent } from "@statelyai/agent";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { type EmailDraft, emailDraftSchema, hasRecipient, hasSubject } from "./email-draft";
+
+/** The judge: Jev through the AI SDK. Reads `TYPESAFE_AI_API_KEY`; tests inject a mock. */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Revision rounds `reviewing` allows before only SEND is legal. */
 export const MAX_REVISIONS = 2;
@@ -51,31 +55,43 @@ export const ASSESSMENT_THRESHOLD = 0.5;
 
 /**
  * The prompt check as one Jev call: the request and the required details are
- * the state; `satisfied` plus one `noul` per detail are the questions.
- * `client` is injected by tests; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ * the state; `satisfied` plus one boolean question per detail are the
+ * questions. `model` is injected by tests; omitted, Jev reads
+ * `TYPESAFE_AI_API_KEY`.
  */
-export function createEvaluatePrompt(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { prompt: string }) => ({
-      request: input.prompt,
-      requiredDetails: REQUIRED_DETAILS,
-    }),
-    questions: () => ({
-      satisfied: noul(
-        "Does `request` give enough to draft the email without inventing any detail listed in `requiredDetails`?",
-        {
-          true: "Every required detail is stated or plainly implied.",
-          false: "At least one required detail would have to be guessed.",
+export function createEvaluatePrompt(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: Record<"satisfied" | RequiredDetail, { probability: number }> },
+    { prompt: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { request: input.prompt, requiredDetails: REQUIRED_DETAILS },
+        questions: {
+          satisfied: {
+            type: "boolean" as const,
+            instructions:
+              "Does `request` give enough to draft the email without inventing any detail listed in `requiredDetails`?",
+            criteria: {
+              true: "Every required detail is stated or plainly implied.",
+              false: "At least one required detail would have to be guessed.",
+            },
+          },
+          ...(Object.fromEntries(
+            Object.keys(REQUIRED_DETAILS).map((detail) => [
+              detail,
+              {
+                type: "boolean" as const,
+                instructions: `Does \`request\` state the ${detail} described in \`requiredDetails.${detail}\`?`,
+              },
+            ]),
+          ) as Record<RequiredDetail, { type: "boolean"; instructions: string }>),
         },
-      ),
-      ...(Object.fromEntries(
-        Object.keys(REQUIRED_DETAILS).map((detail) => [
-          detail,
-          noul(`Does \`request\` state the ${detail} described in \`requiredDetails.${detail}\`?`),
-        ]),
-      ) as Record<RequiredDetail, ReturnType<typeof noul>>),
-    }),
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -168,9 +184,9 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
         input: ({ context }) => ({ prompt: context.prompt }),
         onDone: ({ output: { answers } }) => {
           const missing = (Object.keys(REQUIRED_DETAILS) as RequiredDetail[]).filter(
-            (detail) => answers[detail].noul < ASSESSMENT_THRESHOLD,
+            (detail) => answers[detail].probability < ASSESSMENT_THRESHOLD,
           );
-          return answers.satisfied.noul >= ASSESSMENT_THRESHOLD && missing.length === 0
+          return answers.satisfied.probability >= ASSESSMENT_THRESHOLD && missing.length === 0
             ? { target: "drafting", context: { missing, questions: "" } }
             : { target: "clarifying", context: { missing } };
         },

@@ -35,16 +35,17 @@
  *     call). The model's choice is a typed machine event, not a message whose
  *     `tool_calls` field a router has to inspect.
  *   - retrieve (ToolNode)    → `retrieving` (keyword actor over the sample posts)
- *   - grade_documents        → `grading` (ONE Jev call, one `noul` per passage),
+ *   - grade_documents        → `grading` (ONE Jev call, one boolean question per passage),
  *                              its `onDone` choosing generate or rewrite
  *   - rewrite                → `rewriting` (request), then back to `deciding`
  *   - generate               → `generating`
  *
  * Differences from LangGraph worth calling out:
  *   - Grading is a JUDGMENT, not a generation. LangGraph asks a chat model for
- *     one structured yes/no over all passages. Here `grading` invokes a
- *     TypeSafe System One actor (Jev): the question and the passages are the
- *     state, and each passage gets its own `noul` ("does it help answer the
+ *     one structured yes/no over all passages. Here `grading` calls the AI
+ *     SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model: the question and the passages are the state, and each
+ *     passage gets its own boolean question ("does it help answer the
  *     question?"). Passages whose probability clears `RELEVANCE_THRESHOLD` are
  *     kept; none kept → rewrite. The RETRIEVE / ANSWER choice stays an
  *     `agent.decide`: it is the model choosing its next move, not a judgment
@@ -63,22 +64,28 @@
  *   - Every invoke has an `onError` that lands in `failed`.
  *
  * Dual-mode: `runAgenticRagExample(options?)` takes injectable `generateText`
- * and `decide` executors and a `jevClient` (tests pass scripted mocks, so CI
+ * and `decide` executors and a `judge` (tests pass scripted mocks, so CI
  * needs no API key); the direct run uses real models.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/agentic-rag/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/agentic-rag/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
   rag: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Retrievals the model may make per run. Past it, RETRIEVE is rejected. */
 export const MAX_RETRIEVALS = 3;
@@ -168,30 +175,38 @@ function scoreDocument(query: string, text: string): number {
 export const RELEVANCE_THRESHOLD = 0.5;
 
 /**
- * grade_documents as a System One judgment: the question and every retrieved
- * passage are the state, and each passage gets its own `noul`. `client` is
- * injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ * grade_documents as a judgment: the question and every retrieved passage are
+ * the state, and each passage gets its own boolean question, all in one
+ * `experimental_evaluate` call. The judge model is injected by tests and
+ * hosts; the default is Jev.
  */
-export function createGradeDocuments(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { question: string; documents: string[] }) => ({
-      question: input.question,
-      documents: input.documents,
-    }),
-    questions: (input) =>
-      Object.fromEntries(
+export function createGradeDocuments(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: Record<string, { probability: number }> },
+    { question: string; documents: string[] }
+  >({
+    run: async ({ input, signal }) => {
+      const questions = Object.fromEntries(
         input.documents.map((_doc, index) => [
           `doc${index}`,
-          noul(
-            `Does \`documents[${index}]\` contain information that directly helps answer \`question\`?`,
-            {
+          {
+            type: "boolean" as const,
+            instructions: `Does \`documents[${index}]\` contain information that directly helps answer \`question\`?`,
+            criteria: {
               true: "The passage states facts the answer would be built from.",
               false: "The passage is off-topic, or only shares vocabulary with the question.",
             },
-          ),
+          },
         ]),
-      ),
+      );
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, documents: input.documents },
+        questions,
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -415,7 +430,7 @@ export const agenticRagMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question, documents: context.documents }),
         onDone: ({ context, output }) => {
           const relevant = context.documents.filter(
-            (_doc, i) => (output.answers[`doc${i}`]?.noul ?? 0) >= RELEVANCE_THRESHOLD,
+            (_doc, i) => (output.answers[`doc${i}`]?.probability ?? 0) >= RELEVANCE_THRESHOLD,
           );
           return relevant.length > 0
             ? { target: "generating", context: { documents: relevant } }
@@ -489,8 +504,8 @@ export interface RunAgenticRagOptions {
   /** Injected for tests; direct run supplies real model executors. */
   generateText?: AgentRequestExecutors["generateText"];
   decide?: AgentRequestExecutors["decide"];
-  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -514,7 +529,7 @@ export async function runAgenticRagExample(
     question = "What does Lilian Weng say about the types of agent memory?",
     generateText,
     decide,
-    jevClient,
+    judge,
     onProgress,
   } = options;
 
@@ -524,7 +539,7 @@ export async function runAgenticRagExample(
   const result = await runAgent(agenticRagMachine, {
     input: { question },
     executors,
-    ...(jevClient ? { actors: { gradeDocuments: createGradeDocuments(jevClient) } } : {}),
+    ...(judge ? { actors: { gradeDocuments: createGradeDocuments(judge) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -540,8 +555,8 @@ export async function runAgenticRagExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

@@ -9,7 +9,6 @@ export default defineConfig({
     openai: "src/openai/index.ts",
     otel: "src/otel/index.ts",
     testing: "src/testing/index.ts",
-    typesafe: "src/typesafe/index.ts",
     validate: "src/validate/index.ts",
   },
   format: ["esm", "cjs"],

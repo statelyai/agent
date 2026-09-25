@@ -1,6 +1,6 @@
 # Statechart policy examples
 
-Three examples put consequential decisions in visible machine states. Each exports its machine and a runner accepting `RunAgentOptions`. The consensus-review runner takes `patch` instead of `input`, because the host, not the caller, decides whether a patch is trusted. The booking-compensation and deadline-escalation runners default to real AI SDK executors (`openai("gpt-5.4-mini")`), which need `OPENAI_API_KEY`; pass `executors` to swap the model layer. The consensus-review runner uses no text model: each reviewer is a [Jev](typesafe.md) `choice` actor built by `createReview(client)`, which needs `TYPESAFE_API_KEY`; pass `jevClient` to swap it. Override booking actors through native XState `actors` bindings.
+Three examples put consequential decisions in visible machine states. Each exports its machine and a runner accepting `RunAgentOptions`. The consensus-review runner takes `patch` instead of `input`, because the host, not the caller, decides whether a patch is trusted. The booking-compensation and deadline-escalation runners default to real AI SDK executors (`openai("gpt-5.4-mini")`), which need `OPENAI_API_KEY`; pass `executors` to swap the model layer. The consensus-review runner uses no text model: each reviewer is a [judgment](judgments.md) actor built by `createReview(model)` that asks Jev one `choice` question through the AI SDK's `experimental_evaluate`, which needs `TYPESAFE_AI_API_KEY`; pass `judge` to swap the evaluation model. Override booking actors through native XState `actors` bindings.
 
 <!-- policy example catalog derived from examples/consensus-review, examples/booking-compensation, and examples/deadline-escalation -->
 
@@ -13,12 +13,12 @@ Three examples put consequential decisions in visible machine states. Each expor
 Run against a real model:
 
 ```sh
-TYPESAFE_API_KEY=... pnpm tsx examples/consensus-review/index.ts
+TYPESAFE_AI_API_KEY=... pnpm tsx examples/consensus-review/index.ts
 OPENAI_API_KEY=... pnpm tsx examples/booking-compensation/index.ts
 OPENAI_API_KEY=... pnpm tsx examples/deadline-escalation/index.ts
 ```
 
-The first CLI collects three Jev votes. The second restores an approval checkpoint and demonstrates compensation using simulated bookings. The third restores a checkpoint and delivers a simulated scheduler expiry. Tests need no key: they answer consensus-review's `verdict` choice through a `TypeSafeClient` over a scripted `fetch`, script the model by request name (`plan`, `propose`) through the AI SDK's mock model, and also run the alternate outcomes.
+The first CLI collects three Jev votes. The second restores an approval checkpoint and demonstrates compensation using simulated bookings. The third restores a checkpoint and delivers a simulated scheduler expiry. Tests need no key: they answer consensus-review's `verdict` choice through a scripted evaluation model passed as `judge`, script the model by request name (`plan`, `propose`) through the AI SDK's mock model, and also run the alternate outcomes.
 
 ## Reviewer quorum
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
 import { createOpenAiExecutors } from "@statelyai/agent/openai";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { createClassifyTicket, triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 import { createRateJoke, jokeMachine } from "../joke/index.js";
@@ -9,6 +9,22 @@ import { createRateJoke, jokeMachine } from "../joke/index.js";
 // The adapter's own unit tests live in `src/openai/index.test.ts`. These cover
 // the host end to end: real example machines driven by `createOpenAiExecutors`
 // over a stubbed client, no network.
+
+/**
+ * Triage's classifier, scripted. Triage reads Jev's `category` confidence from
+ * TypeSafe's provider metadata, so the judge reports one above the threshold.
+ */
+function confidentJudge() {
+  const { model } = createMockJudge({ category: "billing", sentiment: "negative" });
+  return {
+    ...model,
+    doEvaluate: async (options: Parameters<typeof model.doEvaluate>[0]) => ({
+      ...(await model.doEvaluate(options)),
+      providerMetadata: { typesafe: { confidence: { category: 0.9 } } },
+    }),
+  };
+}
+
 describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => {
   test("generateText: structured output via response_format json_schema", async () => {
     const stubClient = {
@@ -45,11 +61,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
       input: { ticket: "My invoice is wrong." },
       executors: { generateText },
       // The classifier is a Jev judgment; only the reply reaches the stub.
-      actors: {
-        classifyTicket: createClassifyTicket(
-          createMockJevClient({ category: "billing", sentiment: "negative" }).client,
-        ),
-      },
+      actors: { classifyTicket: createClassifyTicket(confidentJudge()) },
     });
 
     expect(result.status).toBe("done");
@@ -169,7 +181,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
       // The critic is a Jev score; level 4 of the rubric is a 10/10.
-      actors: { rateJoke: createRateJoke(createMockJevClient({ rating: 4 }).client) },
+      actors: { rateJoke: createRateJoke(createMockJudge({ rating: 4 }).model) },
       executors: {
         streamText: async (request, info) => {
           const seen: string[] = [];

@@ -5,7 +5,7 @@
   "manual": true,
   "origin": {
     "type": "platform-adapter",
-    "source": "Real @flue/runtime@2 (not a shim): the agent is the exported function returning its instructions, composed by hooks (useModel/useSkill/useTool/usePersistentState) with Valibot tool input/output and run({ data }); booted in-process with start() from @flue/runtime/node and driven via init()/dispatch()/read(); needs OPENAI_API_KEY, TYPESAFE_API_KEY, and ANTHROPIC_API_KEY (drafting runs on an OpenAI model, the prompt check is a Jev judgment, review on an Anthropic one)",
+    "source": "Real @flue/runtime@2 (not a shim): the agent is the exported function returning its instructions, composed by hooks (useModel/useSkill/useTool/usePersistentState) with Valibot tool input/output and run({ data }); booted in-process with start() from @flue/runtime/node and driven via init()/dispatch()/read(); needs OPENAI_API_KEY, TYPESAFE_AI_API_KEY, and ANTHROPIC_API_KEY (drafting runs on an OpenAI model, the prompt check is a Jev judgment, review on an Anthropic one)",
     "url": "https://flueframework.com/docs/guide/agent-hooks"
   },
   "comparison": {

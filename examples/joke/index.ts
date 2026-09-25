@@ -14,8 +14,9 @@
  * `canReach` can see all three outcomes: revise, ask the model, or stop at the
  * `MAX_JOKES` cap. Any request failure lands in a `failed` final state.
  *
- * Rating is a JUDGMENT, not a generation. `rateJoke` asks TypeSafe System One
- * (Jev) one `score` question, `rating`, over `{ joke }` on five concrete
+ * Rating is a JUDGMENT, not a generation. `rateJoke` asks the AI SDK's
+ * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * model one `score` question, `rating`, over `{ joke }` on five concrete
  * levels (`JOKE_LEVELS`), lowest to highest. The machine maps the level to the
  * 1-10 rating it already stores as `1 + score / (levels - 1) * 9`, and the
  * explanation is the matched level's description. Telling the joke stays a
@@ -25,13 +26,14 @@
  * against real models (readline topic, streaming to stdout) or against mocked
  * executors in tests. See index.test.ts.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/joke/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/joke/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { score, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   createAgentSchemas,
   createTextLogic,
@@ -95,6 +97,12 @@ const models = {
   critic: openai("gpt-5.4-mini"),
 };
 
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+
 export const tellJoke = createTextLogic({
   mode: "stream",
   // Stamped onto every lowered request as `request.name`, so hosts, traces and
@@ -133,17 +141,27 @@ export const JOKE_LEVELS = [
 ] as const;
 
 /**
- * The critic as a System One judgment: the joke is the state, and one `score`
- * places it on `JOKE_LEVELS`. `client` is injected by tests and hosts;
- * omitted, the SDK reads `TYPESAFE_API_KEY` from the environment.
+ * The critic as a judgment: the joke is the state, and one `score` question
+ * places it on `JOKE_LEVELS`. The judge model is injected by tests and hosts;
+ * the default is Jev.
  */
-export function createRateJoke(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { joke: string }) => ({ joke: input.joke }),
-    questions: () => ({
-      rating: score("How well does `joke` land as a joke?", JOKE_LEVELS),
-    }),
+export function createRateJoke(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<{ answers: { rating: { score: number } } }, { joke: string }>({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { joke: input.joke },
+        questions: {
+          rating: {
+            type: "score" as const,
+            instructions: "How well does `joke` land as a joke?",
+            criteria: JOKE_LEVELS,
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -351,8 +369,8 @@ export async function main() {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

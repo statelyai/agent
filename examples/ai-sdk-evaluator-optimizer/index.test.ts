@@ -1,7 +1,7 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { runAgent } from "@statelyai/agent";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   ASPECT_THRESHOLD,
@@ -17,7 +17,7 @@ import {
  * second pass level 3 (8/10) with every aspect held.
  */
 function gradingJev() {
-  return createMockJevClient({
+  return createMockJudge({
     quality: [2, 3],
     preservesTone: true,
     preservesNuance: [false, true],
@@ -51,7 +51,7 @@ test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {
       IMPROVED: (e) => improved.push(e.translation),
     },
     executors,
-    actors: { gradeTranslation: createGradeTranslation(gradingJev().client) },
+    actors: { gradeTranslation: createGradeTranslation(gradingJev().model) },
   });
   assert.equal(result.status, "done");
   const output = result.status === "done" ? result.output : undefined;
@@ -100,13 +100,13 @@ test("a failed first translation lands in `failed`, not in `done` with an empty 
   assert.equal(result.status === "done" ? result.output.detail.translation : "?", "");
 });
 
-test("the grade asks Jev one score and three nouls in one call; thresholds decide the loop", async () => {
+test("the grade asks Jev one score and three boolean questions in one call; thresholds decide the loop", async () => {
   assert.equal(toQualityScore(0), 1);
   assert.equal(toQualityScore(QUALITY_LEVELS.length - 1), 10);
   assert.equal(toQualityScore(3), PASSING_QUALITY);
 
   // Top quality, but nuance just under the aspect threshold: not a pass.
-  const jev = createMockJevClient({
+  const jev = createMockJudge({
     quality: 4,
     preservesTone: ASPECT_THRESHOLD,
     preservesNuance: [ASPECT_THRESHOLD - 0.01, ASPECT_THRESHOLD],
@@ -129,7 +129,7 @@ test("the grade asks Jev one score and three nouls in one call; thresholds decid
         return mock.generateText(request, info);
       },
     },
-    actors: { gradeTranslation: createGradeTranslation(jev.client) },
+    actors: { gradeTranslation: createGradeTranslation(jev.model) },
   });
 
   assert.equal(jev.calls.length, 2);
@@ -143,9 +143,9 @@ test("the grade asks Jev one score and three nouls in one call; thresholds decid
     Object.fromEntries(Object.entries(call.questions).map(([name, q]) => [name, q.type])),
     {
       quality: "score",
-      preservesTone: "noul",
-      preservesNuance: "noul",
-      culturallyAccurate: "noul",
+      preservesTone: "boolean",
+      preservesNuance: "boolean",
+      culturallyAccurate: "boolean",
     },
   );
   // Failed once (critique + improve), then passed exactly at the threshold.

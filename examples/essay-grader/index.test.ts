@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { lintAgentMachine } from "@statelyai/agent/testing";
-import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
+import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import {
   RELEVANCE_THRESHOLD,
   RUBRICS,
@@ -12,16 +12,16 @@ import {
 } from "./index.js";
 
 /**
- * Mock only Jev, keyed by QUESTION NAME (the criterion). Answers are rubric
+ * Mock only the judge, keyed by QUESTION NAME (the criterion). Answers are rubric
  * level indexes 0-4, which the machine maps to 0, 0.25, 0.5, 0.75, 1.
  */
-function scripted(levels: Record<string, MockJevEntry | MockJevEntry[]>) {
-  return createMockJevClient(levels).client;
+function scripted(levels: Record<string, MockJudgeEntry | MockJudgeEntry[]>) {
+  return createMockJudge(levels).model;
 }
 
 test("every gate passes → all four passes run → weighted score", async () => {
   const result = await runEssayGraderExample({
-    jevClient: scripted({ relevance: 4, grammar: 3, structure: 3, depth: 3 }),
+    judge: scripted({ relevance: 4, grammar: 3, structure: 3, depth: 3 }),
   });
 
   expect(result.finalState).toBe("scoring");
@@ -42,7 +42,7 @@ test("every gate passes → all four passes run → weighted score", async () =>
 
 test("low relevance → early exit after the first pass", async () => {
   const result = await runEssayGraderExample({
-    jevClient: scripted({ relevance: 1 }),
+    judge: scripted({ relevance: 1 }),
   });
 
   expect(result.finalState).toBe("scoring");
@@ -56,13 +56,13 @@ test("low relevance → early exit after the first pass", async () => {
 test("a score exactly at the threshold does not pass the gate", async () => {
   // Level 2 of 0-4 maps to 0.5, which is RELEVANCE_THRESHOLD itself.
   expect(2 / 4).toBe(RELEVANCE_THRESHOLD);
-  const result = await runEssayGraderExample({ jevClient: scripted({ relevance: 2 }) });
+  const result = await runEssayGraderExample({ judge: scripted({ relevance: 2 }) });
   expect(result.stage).toBe("stopped after relevance");
 });
 
 test("low grammar → early exit after the second pass", async () => {
   const result = await runEssayGraderExample({
-    jevClient: scripted({ relevance: 4, grammar: 1 }),
+    judge: scripted({ relevance: 4, grammar: 1 }),
   });
 
   expect(result.stage).toBe("stopped after grammar");
@@ -72,7 +72,7 @@ test("low grammar → early exit after the second pass", async () => {
 
 test("weak structure → early exit after the third pass", async () => {
   const result = await runEssayGraderExample({
-    jevClient: scripted({ relevance: 4, grammar: 4, structure: 2 }),
+    judge: scripted({ relevance: 4, grammar: 4, structure: 2 }),
   });
 
   expect(result.stage).toBe("stopped after structure");
@@ -86,8 +86,8 @@ test("weak structure → early exit after the third pass", async () => {
 });
 
 test("a failing grading call lands in failed with the scores gathered so far", async () => {
-  // `grammar` has no scripted answer, so the Jev call fails.
-  const result = await runEssayGraderExample({ jevClient: scripted({ relevance: 4 }) });
+  // `grammar` has no scripted answer, so the judge call fails.
+  const result = await runEssayGraderExample({ judge: scripted({ relevance: 4 }) });
 
   expect(result.finalState).toBe("failed");
   expect(result.stage).toBe("stopped after relevance");
@@ -97,14 +97,14 @@ test("a failing grading call lands in failed with the scores gathered so far", a
 
 test("an out-of-range score fails validation → failed", async () => {
   // Level 7 does not exist on a five-level rubric; the call errors.
-  const result = await runEssayGraderExample({ jevClient: scripted({ relevance: 7 }) });
+  const result = await runEssayGraderExample({ judge: scripted({ relevance: 7 }) });
   expect(result.finalState).toBe("failed");
   expect(result.stage).toBe("no stage completed");
 });
 
 test("each pass asks Jev one five-level score over the essay, and stops asking at a failed gate", async () => {
-  const jev = createMockJevClient({ relevance: 4, grammar: 4, structure: 2 });
-  const result = await runEssayGraderExample({ essay: "An essay.", jevClient: jev.client });
+  const jev = createMockJudge({ relevance: 4, grammar: 4, structure: 2 });
+  const result = await runEssayGraderExample({ essay: "An essay.", judge: jev.model });
 
   // One call per pass that ran; depth is never asked once structure fails.
   expect(jev.calls.map((call) => Object.keys(call.questions))).toEqual([
@@ -143,7 +143,7 @@ test("starters behave as their labels advertise", async () => {
   // Answer each criterion from the essay the call's state carries.
   const levelFor = (key: "relevance" | "grammar" | "structure" | "depth") => (state: unknown) =>
     byEssay.get((state as { essay: string }).essay)![key];
-  const jevClient = scripted({
+  const judge = scripted({
     relevance: levelFor("relevance"),
     grammar: levelFor("grammar"),
     structure: levelFor("structure"),
@@ -152,7 +152,7 @@ test("starters behave as their labels advertise", async () => {
 
   const stages = [];
   for (const essay of starters) {
-    stages.push((await runEssayGraderExample({ essay, jevClient })).stage);
+    stages.push((await runEssayGraderExample({ essay, judge })).stage);
   }
   expect(stages).toEqual([
     "all four stages ran",

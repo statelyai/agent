@@ -12,10 +12,11 @@
  * - `token_budget` — `result.usage`, summed across the run's resume legs.
  *
  * The models are real: `OPENAI_API_KEY` for the text requests (follow-up
- * questions, the draft) and `TYPESAFE_API_KEY` for the Jev judgment that
- * decides whether the prompt is complete. `runDrafterCase` takes its executors
- * and Jev client as arguments, so the test drives the same dataset and scorers
- * over a mock model and a scripted Jev client instead — only those change.
+ * questions, the draft) and `TYPESAFE_AI_API_KEY` for the Jev judgment (the
+ * AI SDK's `experimental_evaluate` with `@ai-sdk/typesafe-ai`) that decides
+ * whether the prompt is complete. `runDrafterCase` takes its executors and
+ * judge model as arguments, so the test drives the same dataset and scorers
+ * over a mock model and a scripted judge instead — only those change.
  *
  * Braintrust: `Eval()` runs locally with `noSendLogs: true` and prints a local
  * summary, so the eval runs with no Braintrust account. Set `BRAINTRUST_API_KEY`
@@ -25,11 +26,11 @@
  * This file scores whole runs. `./seams.ts` scores ONE transition at a time:
  * same machine, routed executors, one `Eval()` per seam.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/braintrust-evals/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/braintrust-evals/index.ts
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic, Snapshot, SnapshotFrom } from "xstate";
-import type { TypeSafeClient } from "@typesafe-ai/sdk";
+import type { Experimental_EvaluationModel } from "ai";
 import { getStatePath, runAgent } from "@statelyai/agent";
 import { matchesTrajectory } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
@@ -115,16 +116,16 @@ function nextUserEvent(
  * The machine pauses for the human, so a run is several `runAgent` legs chained
  * by native persisted snapshots and events. Usage is summed across legs; it
  * counts text-model calls, so the Jev judgment is outside the token budget.
- * `jevClient` answers the prompt check; omitted, the SDK reads
- * `TYPESAFE_API_KEY`.
+ * `judge` answers the prompt check; omitted, the default judge is Jev, which
+ * reads `TYPESAFE_AI_API_KEY`.
  */
 export async function runDrafterCase(
   drafterCase: DrafterCase,
   executors: Partial<AgentRequestExecutors>,
-  jevClient?: TypeSafeClient,
+  judge?: Experimental_EvaluationModel,
   maxLegs = 12,
 ): Promise<DrafterOutcome> {
-  const actors = jevClient ? { evaluatePrompt: createEvaluatePrompt(jevClient) } : undefined;
+  const actors = judge ? { evaluatePrompt: createEvaluatePrompt(judge) } : undefined;
   const statePath: string[] = [];
   const eventTrajectory: string[] = [];
   let snapshot: Snapshot<unknown> | undefined;
@@ -350,8 +351,10 @@ export const dataset: {
 // ─── Braintrust wiring ───
 
 export async function main() {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    throw new Error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run the braintrust-evals example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    throw new Error(
+      "Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run the braintrust-evals example.",
+    );
   }
   const upload = Boolean(process.env.BRAINTRUST_API_KEY);
   const executors = createAiSdkExecutors({ models });

@@ -11,9 +11,9 @@ import {
 } from "../examples/index.js";
 import { createEvaluatePrompt, writeFollowUps } from "../examples/email-drafter/agent-logic.js";
 import { createRateJoke } from "../examples/joke/index.js";
-// The examples' repo-internal Jev double: a real TypeSafeClient over a
-// scripted fetch, answers keyed by question name.
-import { createMockJevClient } from "../examples/mock-jev.js";
+// The examples' repo-internal judge double: an AI SDK evaluation model with
+// scripted answers keyed by question id.
+import { createMockJudge } from "../examples/mock-judge.js";
 import { runAgent, type AgentTextRequest } from "./index.js";
 // The step envelope (getAgentRequests/resolveAgentStep/transitionAgentStep) is
 // internal now — imported straight from ./steps.js (it backs verify.ts and these
@@ -31,8 +31,7 @@ describe("curated XState setup examples", () => {
         // The completeness check is a Jev judgment: the first pass finds the
         // recipient missing, the second (after MORE_INFO) finds it present.
         evaluatePrompt: createEvaluatePrompt(
-          createMockJevClient({ satisfied: [false, true], recipient: [false, true], "*": true })
-            .client,
+          createMockJudge({ satisfied: [false, true], recipient: [false, true], "*": true }).model,
         ),
         writeFollowUps: writeFollowUps.withExecutor(async ({ request }) => {
           calls.push(request);
@@ -214,7 +213,7 @@ describe("curated XState setup examples", () => {
           jokes.push(joke);
           return { result: joke };
         }),
-        rateJoke: createRateJoke(createMockJevClient({ rating: [1, 4] }).client),
+        rateJoke: createRateJoke(createMockJudge({ rating: [1, 4] }).model),
       },
     });
     return { machine, jokes };

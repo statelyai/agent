@@ -39,9 +39,9 @@ convention in a prompt.
 - [agentic-rag](agentic-rag): the model picks `RETRIEVE` or `ANSWER` through `agent.decide`, Jev grades each passage, and a guard rejects `RETRIEVE` once `MAX_RETRIEVALS` is spent, so an answer forced by the budget lands in `failed`
 - [reflexion](reflexion): the critique drives real searches and each revision must cite what came back; citations to passages the run never retrieved are dropped, and a revision budget caps the loop
 - [tree-of-thoughts](tree-of-thoughts): a hand-written scorer rechecks every proposed Game of 24 step and rejects any that uses a number not on the table; a beam capped at `BEAM_SIZE` and `MAX_DEPTH` ends in `failed` when no line reaches 24
-- [self-discover](self-discover): Jev judges each reasoning module with a `noul`; a choice state keeps the top `MAX_SELECTED_MODULES` above `MODULE_THRESHOLD` and fails with a notice naming the threshold when none clears it, a check the LangGraph chain leaves to trust
+- [self-discover](self-discover): Jev judges each reasoning module with a yes/no question; a choice state keeps the top `MAX_SELECTED_MODULES` above `MODULE_THRESHOLD` and fails with a notice naming the threshold when none clears it, a check the LangGraph chain leaves to trust
 - [prompt-chaining](prompt-chaining): the punchline gate is a choice state over a pure check, and a failed check regenerates at most twice before landing in `failed` instead of ending silently
-- [data-enrichment](data-enrichment): a choice state, not the model, decides the record is complete; the reviewer is one Jev `noul` per field, its feedback is built from the fields no passage backs, and gap searches and rejections share one `MAX_LOOPS` budget that ends in `failed` with the partial record
+- [data-enrichment](data-enrichment): a choice state, not the model, decides the record is complete; the reviewer is one Jev yes/no question per field, its feedback is built from the fields no passage backs, and gap searches and rejections share one `MAX_LOOPS` budget that ends in `failed` with the partial record
 - [tnt-llm](tnt-llm): one summary child spawned per document, then a batch index in context drives generate, update per batch, and review through choice states, with a category cap
 - [tool-retrieval](tool-retrieval): a Jev rerank (one probability per registry tool) picks the tools, and a guard lets `agent.decide` call only those, with tool-call and reselection budgets forcing an answer
 - [model-fallback](model-fallback): a validator actor plus a choice state send a rejected cheap-model tool call to a stronger model exactly once (`MAX_FALLBACKS`), then `failed`
@@ -104,7 +104,7 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 - [verification](verification): `canReach` proves a violation state unreachable across every branch, without one model call
 - [braintrust-evals](braintrust-evals): evals over typed output, transition trajectories, named request calls, and usage
 - [ai-sdk-evaluator-optimizer](ai-sdk-evaluator-optimizer): the evaluator-optimizer loop as explicit states, with a Jev score and aspect checks gating the exit
-- [chatbot-simulation-eval](chatbot-simulation-eval): a simulated customer and the bot under test alternate under a `MAX_EXCHANGES` choice guard, the bot's request input provably omits the persona, and a Jev judge (policy `noul` plus quality `score`) runs inside the machine
+- [chatbot-simulation-eval](chatbot-simulation-eval): a simulated customer and the bot under test alternate under a `MAX_EXCHANGES` choice guard, the bot's request input provably omits the persona, and a Jev judge (a policy yes/no plus a quality score) runs inside the machine
 - [essay-grader](essay-grader): each pass is a Jev score over a five-level rubric; three choice states over exported score thresholds stop grading at the first weak pass, and the result names the stage it stopped after
 
 ## Statechart policies
@@ -138,6 +138,11 @@ Every example follows these. A new example that breaks one is probably wrong.
   routes on `request.name` too. Never on a prompt substring, a call index, a
   positional array, or `request.model` — those pass while silently exercising
   the wrong request.
+- **Tests mock the judge with `examples/mock-judge.ts`**: an object that
+  implements the AI SDK's evaluation-model spec, passed wherever an example
+  takes its judge model, with answers keyed by question id (the key in the
+  `questions` map). It runs `experimental_evaluate`'s real validation over
+  scripted answers. Repo-internal and not published, like `mock-model.ts`.
 - **Context is replay-stable**: no `Date.now()`, `Math.random()`, or
   `randomUUID()` in context, and no module-level mutable state. Pass stores and
   executors in, or use a factory function.
@@ -147,5 +152,6 @@ Every example follows these. A new example that breaks one is probably wrong.
 - **Event names are facts or commands** from the human or host. Choices the
   model makes go through `agent.decide` and are filtered by guards.
 - **Sibling imports are allowed** — an example may import another example's
-  machine — but there is no shared test harness beyond the
-  `examples/mock-model.ts` model double. Each example's test stands on its own.
+  machine — but the only shared test helpers are the `examples/mock-model.ts`
+  language-model double and the `examples/mock-judge.ts` evaluation-model
+  double. Each example's test stands on its own.

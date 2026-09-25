@@ -16,13 +16,7 @@ import { humanInTheLoopMachine, jokeMachine, twentyQuestionsMachine } from "../e
 
 /** What the joke machine's Jev critic resolves with: a `score` answer at `level`. */
 function jevRating(level: number) {
-  return {
-    answers: {
-      rating: { type: "score", score: level, confidence: 0.9, legend: {}, probabilities: {} },
-    },
-    model: "jev-latest",
-    usage: { input_tokens: 0, output_tokens: 0 },
-  };
+  return { answers: { rating: { type: "score", score: level } } };
 }
 
 // A refund machine mirroring the README's no-API-key example: an `agent.decide`
@@ -734,7 +728,7 @@ describe("scripted key taxonomy — invokes", () => {
     const report = await explorePaths(jokeMachine, {
       input: { topic: "state machines" },
       text: { tellJoke: "Why did the state cross the transition?" },
-      // The critic is a System One (Jev) actor, so its answer is an invoke output.
+      // The critic is a Jev judgment actor, so its answer is an invoke output.
       invokes: { rateJoke: jevRating(1) },
     });
     expect(report.terminals.some((terminal) => terminal.status === "needs-output")).toBe(false);

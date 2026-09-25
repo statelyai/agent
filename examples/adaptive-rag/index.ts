@@ -47,25 +47,27 @@
  *   - route_question      → `routing` (a Jev `choice` over the datasource) +
  *                           `routed` (a choice state: the conditional edge)
  *   - retrieve            → `retrieving` (keyword actor over the sample corpus)
- *   - grade_documents     → `grading` (ONE Jev call, one `noul` per doc)
+ *   - grade_documents     → `grading` (ONE Jev call, one boolean question per doc)
  *   - decide_to_generate  → grading's `onDone` targets: any relevant doc →
  *                           `generating`, none → the rewrite budget check
  *   - transform_query     → `rewriting` (request), behind `rewriteBudget`
  *   - web_search          → `searchingWeb` (keyword actor over the sample web index)
  *   - generate            → `generating`
  *   - grade_generation_v_documents_and_question → TWO states:
- *       hallucination grader → `checkingGrounding` (a Jev `noul`)
- *       answer grader        → `checkingUsefulness` (a Jev `noul`)
+ *       hallucination grader → `checkingGrounding` (a Jev boolean question)
+ *       answer grader        → `checkingUsefulness` (a Jev boolean question)
  *     so each verdict is its own transition instead of one function returning
  *     "not supported" / "useful" / "not useful".
  *
  * Differences from LangGraph worth calling out:
  *   - Routing and all three graders are JUDGMENTS, not generations. LangGraph
  *     runs each through a chat model with structured output. Here each one
- *     invokes a TypeSafe System One actor (Jev) that answers a typed question
- *     over the evidence the machine already holds: a `choice` between the two
- *     datasources, one `noul` per document ("does it help answer the
- *     question?"), and a `noul` each for "is every claim supported by the
+ *     calls the AI SDK's `experimental_evaluate` with Jev
+ *     (`@ai-sdk/typesafe-ai`) as the evaluation model, which answers a typed
+ *     question over the evidence the machine already holds: a `choice` between
+ *     the two datasources, one boolean question per document ("does it help
+ *     answer the question?"), and a boolean question each for "is every claim
+ *     supported by the
  *     documents?" and "does the answer address the question?". The machine
  *     compares each probability with an exported threshold
  *     (`RELEVANCE_THRESHOLD`, `GROUNDED_THRESHOLD`, `USEFUL_THRESHOLD`). The
@@ -83,7 +85,7 @@
  *     the corpus.
  *   - An empty retrieval skips grading (nothing to grade) and goes straight to
  *     the rewrite budget check.
- *   - Per-doc grading is ONE Jev call with a `noul` per document, as in
+ *   - Per-doc grading is ONE Jev call with a boolean question per document, as in
  *     `examples/corrective-rag`; LangGraph calls the grader once per doc.
  *   - The two answer checks stay two states and two calls: grounding runs
  *     again after every regeneration, while usefulness runs only once an
@@ -92,22 +94,28 @@
  *     had so far.
  *
  * Dual-mode: `runAdaptiveRagExample(options?)` takes an injectable
- * `generateText` and `jevClient` (tests pass scripted mocks, so CI needs no API
+ * `generateText` and `judge` (tests pass scripted mocks, so CI needs no API
  * key); the direct run uses real models.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/adaptive-rag/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/adaptive-rag/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { choice, noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
   rag: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Rewrites allowed per run, shared by "nothing relevant" and "not useful". */
 export const MAX_REWRITES = 2;
@@ -240,82 +248,123 @@ export const GROUNDED_THRESHOLD = 0.7;
 export const USEFUL_THRESHOLD = 0.5;
 
 /**
- * route_question as a System One `choice`: the question is the state, the two
- * datasources are the labels. `client` is injected by tests and hosts;
- * omitted, the SDK reads `TYPESAFE_API_KEY` from the environment.
+ * route_question as a judgment: the question is the state, the two
+ * datasources are the labels of one `choice` question. The judge model is
+ * injected by tests and hosts; the default is Jev.
  */
-export function createRouteQuestion(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { question: string }) => ({ question: input.question }),
-    questions: () => ({
-      datasource: choice("Which datasource should answer `question`?", {
-        vectorstore:
-          "The sample vector store: documents about LLM agents (memory, tools, " +
-          "self-reflection, planning), prompt engineering, and adversarial attacks on LLMs.",
-        websearch:
-          "Web search: current events, the latest news or guidance, or anything the " +
-          "vector store does not cover.",
-      }),
-    }),
+export function createRouteQuestion(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { datasource: { choice: "vectorstore" | "websearch" } } },
+    { question: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question },
+        questions: {
+          datasource: {
+            type: "choice" as const,
+            instructions: "Which datasource should answer `question`?",
+            criteria: {
+              vectorstore:
+                "The sample vector store: documents about LLM agents (memory, tools, " +
+                "self-reflection, planning), prompt engineering, and adversarial attacks on LLMs.",
+              websearch:
+                "Web search: current events, the latest news or guidance, or anything the " +
+                "vector store does not cover.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
-/** grade_documents as a System One judgment: one `noul` per document. */
-export function createGradeDocuments(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { question: string; documents: string[] }) => ({
-      question: input.question,
-      documents: input.documents,
-    }),
-    questions: (input) =>
-      Object.fromEntries(
+/** grade_documents as a judgment: one boolean question per document. */
+export function createGradeDocuments(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: Record<string, { probability: number }> },
+    { question: string; documents: string[] }
+  >({
+    run: async ({ input, signal }) => {
+      const questions = Object.fromEntries(
         input.documents.map((_doc, index) => [
           `doc${index}`,
-          noul(
-            `Does \`documents[${index}]\` contain information that directly helps answer \`question\`?`,
-            {
+          {
+            type: "boolean" as const,
+            instructions: `Does \`documents[${index}]\` contain information that directly helps answer \`question\`?`,
+            criteria: {
               true: "The document states facts the answer would be built from.",
               false: "The document is off-topic, or only shares vocabulary with the question.",
             },
-          ),
+          },
         ]),
-      ),
+      );
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, documents: input.documents },
+        questions,
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
-/** The hallucination grader as a System One `noul` over the documents and the answer. */
-export function createGradeGrounding(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { documents: string[]; generation: string }) => ({
-      documents: input.documents,
-      answer: input.generation,
-    }),
-    questions: () => ({
-      grounded: noul("Is every claim in `answer` supported by `documents`?", {
-        true: "Each statement in the answer is stated in, or follows directly from, the documents.",
-        false: "The answer adds at least one fact, figure, or detail the documents do not contain.",
-      }),
-    }),
+/** The hallucination grader as a boolean question over the documents and the answer. */
+export function createGradeGrounding(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { grounded: { probability: number } } },
+    { documents: string[]; generation: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { documents: input.documents, answer: input.generation },
+        questions: {
+          grounded: {
+            type: "boolean" as const,
+            instructions: "Is every claim in `answer` supported by `documents`?",
+            criteria: {
+              true: "Each statement in the answer is stated in, or follows directly from, the documents.",
+              false:
+                "The answer adds at least one fact, figure, or detail the documents do not contain.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
-/** The answer grader as a System One `noul` over the question and the answer. */
-export function createGradeUsefulness(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { question: string; generation: string }) => ({
-      question: input.question,
-      answer: input.generation,
-    }),
-    questions: () => ({
-      useful: noul("Does `answer` directly address `question`?", {
-        true: "The answer responds to what the question asks.",
-        false: "The answer is vague, off-topic, or responds to a different question.",
-      }),
-    }),
+/** The answer grader as a boolean question over the question and the answer. */
+export function createGradeUsefulness(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { useful: { probability: number } } },
+    { question: string; generation: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, answer: input.generation },
+        questions: {
+          useful: {
+            type: "boolean" as const,
+            instructions: "Does `answer` directly address `question`?",
+            criteria: {
+              true: "The answer responds to what the question asks.",
+              false: "The answer is vague, off-topic, or responds to a different question.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -510,7 +559,7 @@ export const adaptiveRagMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question, documents: context.documents }),
         onDone: ({ context, output }) => {
           const relevant = context.documents.filter(
-            (_doc, i) => (output.answers[`doc${i}`]?.noul ?? 0) >= RELEVANCE_THRESHOLD,
+            (_doc, i) => (output.answers[`doc${i}`]?.probability ?? 0) >= RELEVANCE_THRESHOLD,
           );
           return {
             target: relevant.length > 0 ? "generating" : "rewriteBudget",
@@ -590,7 +639,7 @@ export const adaptiveRagMachine = agentSetup.createMachine({
         }),
         onDone: ({ output }) => ({
           target:
-            output.answers.grounded.noul >= GROUNDED_THRESHOLD
+            output.answers.grounded.probability >= GROUNDED_THRESHOLD
               ? "checkingUsefulness"
               : "regenerationBudget",
         }),
@@ -621,7 +670,7 @@ export const adaptiveRagMachine = agentSetup.createMachine({
           generation: context.generation ?? "",
         }),
         onDone: ({ context, output }) =>
-          output.answers.useful.noul >= USEFUL_THRESHOLD && context.generation !== null
+          output.answers.useful.probability >= USEFUL_THRESHOLD && context.generation !== null
             ? { target: "done", context: { generation: context.generation } }
             : { target: "rewriteBudget" },
         onError: ({ event }) => ({
@@ -664,8 +713,8 @@ export interface RunAdaptiveRagOptions {
   question?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -689,7 +738,7 @@ export async function runAdaptiveRagExample(
   const {
     question = "How do LLM agents use long-term memory?",
     generateText,
-    jevClient,
+    judge,
     onProgress,
   } = options;
 
@@ -699,13 +748,13 @@ export async function runAdaptiveRagExample(
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
-    ...(jevClient
+    ...(judge
       ? {
           actors: {
-            routeQuestion: createRouteQuestion(jevClient),
-            gradeDocuments: createGradeDocuments(jevClient),
-            gradeGrounding: createGradeGrounding(jevClient),
-            gradeUsefulness: createGradeUsefulness(jevClient),
+            routeQuestion: createRouteQuestion(judge),
+            gradeDocuments: createGradeDocuments(judge),
+            gradeGrounding: createGradeGrounding(judge),
+            gradeUsefulness: createGradeUsefulness(judge),
           },
         }
       : {}),
@@ -724,8 +773,8 @@ export async function runAdaptiveRagExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

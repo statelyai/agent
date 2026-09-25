@@ -20,9 +20,10 @@
  *
  * Executors are resolved per Durable Object, not at import: Workers have no
  * ambient `process.env`, so the provider is constructed from the `env` binding.
- * The same goes for the drafter's prompt check, a Jev judgment (TypeSafe
- * System One): its client is built from the `TYPESAFE_API_KEY` binding and
- * passed as an `actors` override. Set `OPENAI_API_KEY` and `TYPESAFE_API_KEY`
+ * The same goes for the drafter's prompt check, a Jev judgment (the AI SDK's
+ * `experimental_evaluate`): its evaluation model is built from the
+ * `TYPESAFE_AI_API_KEY` binding and passed as an `actors` override. Set
+ * `OPENAI_API_KEY` and `TYPESAFE_AI_API_KEY`
  * (via `.dev.vars` locally — `dev:live` writes them from the repo `.env` — or
  * `wrangler secret` in production). Without them a turn fails with a 500
  * naming the missing binding; there is no fallback model.
@@ -45,7 +46,7 @@
 import type { EventFrom } from "xstate";
 import { Agent, routeAgentRequest, type Connection } from "agents";
 import { createOpenAI } from "@ai-sdk/openai";
-import { TypeSafeClient } from "@typesafe-ai/sdk";
+import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   getAcceptedEvents,
   getInteraction,
@@ -68,7 +69,7 @@ interface Env {
   /** Required for any turn: the model provider's key. */
   OPENAI_API_KEY?: string;
   /** Required for any turn: the key for the Jev prompt check. */
-  TYPESAFE_API_KEY?: string;
+  TYPESAFE_AI_API_KEY?: string;
 }
 
 type Turn = RunAgentResult<typeof emailDrafter>;
@@ -121,16 +122,16 @@ export class EmailDrafter extends Agent<Env> {
 
   /**
    * The drafter's Jev judgment, bound to this Durable Object's
-   * `TYPESAFE_API_KEY` for the same reason as the executors. A test stubs this
-   * with a scripted client.
+   * `TYPESAFE_AI_API_KEY` for the same reason as the executors. A test stubs
+   * this with a scripted judge model.
    */
   createJudgments(): { evaluatePrompt: ReturnType<typeof createEvaluatePrompt> } {
-    if (!this.env.TYPESAFE_API_KEY) {
-      throw new Error("Set the TYPESAFE_API_KEY binding (.dev.vars or `wrangler secret`).");
+    if (!this.env.TYPESAFE_AI_API_KEY) {
+      throw new Error("Set the TYPESAFE_AI_API_KEY binding (.dev.vars or `wrangler secret`).");
     }
     return {
       evaluatePrompt: createEvaluatePrompt(
-        new TypeSafeClient({ apiKey: this.env.TYPESAFE_API_KEY }),
+        createTypeSafeAi({ apiKey: this.env.TYPESAFE_AI_API_KEY }).evaluationModel("jev-latest"),
       ),
     };
   }

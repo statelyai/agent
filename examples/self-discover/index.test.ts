@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { lintAgentMachine } from "@statelyai/agent/testing";
-import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
+import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   MAX_SELECTED_MODULES,
@@ -13,15 +13,15 @@ import {
 
 /**
  * Mock the text model keyed by REQUEST NAME, and the module selection as Jev
- * answers keyed by QUESTION NAME (`module<i>`, one `noul` per module).
+ * answers keyed by QUESTION NAME (`module<i>`, one boolean question per module).
  */
 function scripted(
   text: Record<string, unknown[]>,
-  selection: Record<string, MockJevEntry | MockJevEntry[]> = pickTwo,
+  selection: Record<string, MockJudgeEntry | MockJudgeEntry[]> = pickTwo,
 ) {
   const executors = createMockModelExecutors({ text });
-  const jev = createMockJevClient(selection);
-  return { ...executors, jevClient: jev.client, jev };
+  const jev = createMockJudge(selection);
+  return { ...executors, judge: jev.model, jev };
 }
 
 const twoModules = { modules: [REASONING_MODULES[4]!, REASONING_MODULES[14]!] };
@@ -103,7 +103,7 @@ test("starters behave as their labels advertise", async () => {
   }
 });
 
-test("select asks Jev one noul per module and keeps the top-k above the threshold", async () => {
+test("select asks Jev one boolean question per module and keeps the top-k above the threshold", async () => {
   // Seven modules clear the threshold; module 7 sits just under it.
   const probabilities = [0.6, 0.95, 0.7, 0.9, 0.8, 0.65, 0.85, MODULE_THRESHOLD - 0.01];
   const selection = Object.fromEntries(probabilities.map((p, i) => [`module${i}`, p]));
@@ -115,7 +115,7 @@ test("select asks Jev one noul per module and keeps the top-k above the threshol
   // The evidence is the state: the task and every module, in order.
   expect(call.state).toMatchObject({ modules: [...REASONING_MODULES] });
   expect(Object.keys(call.questions)).toEqual(REASONING_MODULES.map((_, i) => `module${i}`));
-  expect(Object.values(call.questions).every((q) => q.type === "noul")).toBe(true);
+  expect(Object.values(call.questions).every((q) => q.type === "boolean")).toBe(true);
   // Top MAX_SELECTED_MODULES by probability, most probable first.
   expect(result.selectedModules).toHaveLength(MAX_SELECTED_MODULES);
   expect(result.selectedModules).toEqual([1, 3, 6, 4, 2].map((i) => REASONING_MODULES[i]!));

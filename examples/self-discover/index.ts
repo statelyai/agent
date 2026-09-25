@@ -20,7 +20,7 @@
  *                                └─ failed (no module clears MODULE_THRESHOLD)
  *
  * What maps to what:
- *   - select    → `selecting` (ONE Jev call, one `noul` per module in the
+ *   - select    → `selecting` (ONE Jev call, one boolean question per module in the
  *                 exported `REASONING_MODULES` — see note), then
  *                 `selectionValid` (a choice state: top-k above the threshold,
  *                 or `failed`)
@@ -30,9 +30,10 @@
  *
  * Differences from LangGraph worth calling out:
  *   - Selection is a JUDGMENT, not a generation. The tutorial asks a chat
- *     model to copy the chosen modules' text back. Here `selecting` invokes a
- *     TypeSafe System One actor (Jev) with the task and every module as state
- *     and one `noul` per module ("would `modules[i]` help solve `task`?"). The
+ *     model to copy the chosen modules' text back. Here `selecting` asks the
+ *     AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model, with the task and every module as state and one
+ *     boolean question per module ("would `modules[i]` help solve `task`?"). The
  *     machine keeps the modules whose probability clears `MODULE_THRESHOLD`,
  *     most probable first, capped at `MAX_SELECTED_MODULES`. No module text
  *     is retyped, so a selection can only name modules that exist. The text
@@ -50,21 +51,28 @@
  *     prompts small. Add the rest and the machine is unchanged.
  *
  * Dual-mode: `runSelfDiscoverExample(options?)` takes an injectable
- * `generateText` and `jevClient` (tests pass scripted mocks, so CI needs no
+ * `generateText` and `judge` (tests pass scripted mocks, so CI needs no
  * API key); the direct run uses real models.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/self-discover/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/self-discover/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
   reasoner: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** The most modules a selection may contain. */
 export const MAX_SELECTED_MODULES = 5;
@@ -92,26 +100,35 @@ export const REASONING_MODULES: readonly string[] = [
 ];
 
 /**
- * select as a System One judgment: the task and every reasoning module are the
- * state, and each module gets its own `noul`. One call, one probability per
- * module, no prose. `client` is injected by tests and hosts; omitted, the SDK
- * reads `TYPESAFE_API_KEY` from the environment.
+ * select as a judgment: the task and every reasoning module are the state, and
+ * each module gets its own boolean question. One call, one probability per
+ * module, no prose. The judge model is injected by tests and hosts; the
+ * default is Jev.
  */
-export function createSelectModules(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { task: string }) => ({ task: input.task, modules: [...REASONING_MODULES] }),
-    questions: () =>
-      Object.fromEntries(
-        REASONING_MODULES.map((_module, index) => [
-          `module${index}`,
-          noul(`Would the reasoning module \`modules[${index}]\` help solve \`task\`?`, {
-            true: "Applying this module moves this particular task toward its answer.",
-            false:
-              "The module does not fit this kind of task, or adds nothing beyond restating it.",
-          }),
-        ]),
-      ),
+export function createSelectModules(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<{ answers: Record<string, { probability: number }> }, { task: string }>({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { task: input.task, modules: [...REASONING_MODULES] },
+        questions: Object.fromEntries(
+          REASONING_MODULES.map((_module, index) => [
+            `module${index}`,
+            {
+              type: "boolean" as const,
+              instructions: `Would the reasoning module \`modules[${index}]\` help solve \`task\`?`,
+              criteria: {
+                true: "Applying this module moves this particular task toward its answer.",
+                false:
+                  "The module does not fit this kind of task, or adds nothing beyond restating it.",
+              },
+            },
+          ]),
+        ),
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -119,10 +136,10 @@ export function createSelectModules(client?: TypeSafeClient) {
  * The modules that clear `MODULE_THRESHOLD`, most probable first, capped at
  * `MAX_SELECTED_MODULES` — the top-k of the per-module answers.
  */
-function pickModules(answers: Record<string, { noul: number } | undefined>): string[] {
+function pickModules(answers: Record<string, { probability: number } | undefined>): string[] {
   return REASONING_MODULES.map((module, index) => ({
     module,
-    probability: answers[`module${index}`]?.noul ?? 0,
+    probability: answers[`module${index}`]?.probability ?? 0,
   }))
     .filter((scored) => scored.probability >= MODULE_THRESHOLD)
     .sort((left, right) => right.probability - left.probability)
@@ -348,8 +365,8 @@ export interface RunSelfDiscoverOptions {
   task?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -371,7 +388,7 @@ export async function runSelfDiscoverExample(
   const {
     task = "Alice, Bob, and Carol each own one pet: a cat, a dog, or a fish. Alice is allergic to fur. Bob's pet cannot live in water. Carol does not own the dog. Who owns which pet?",
     generateText,
-    jevClient,
+    judge,
     onProgress,
   } = options;
 
@@ -381,7 +398,7 @@ export async function runSelfDiscoverExample(
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
-    ...(jevClient ? { actors: { selectModules: createSelectModules(jevClient) } } : {}),
+    ...(judge ? { actors: { selectModules: createSelectModules(judge) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -397,8 +414,8 @@ export async function runSelfDiscoverExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

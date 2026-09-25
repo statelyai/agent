@@ -10,11 +10,12 @@
  * render, because `getInteraction` filters them through `snapshot.can`.
  * Swap this loop for a web form or Slack modal and the same machine drives it.
  *
- * The "is this request complete?" check is a Jev judgment (TypeSafe System
- * One), so a run needs both keys: OpenAI for the follow-up questions and the
+ * The "is this request complete?" check is a judgment: the AI SDK's
+ * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * model, so a run needs both keys: OpenAI for the follow-up questions and the
  * draft, TypeSafe for the judgment.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/email-drafter/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/email-drafter/index.ts
  */
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { eventFromInteraction, getInteraction, runAgent } from "@statelyai/agent";
@@ -121,8 +122,8 @@ async function withReadline<T>(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

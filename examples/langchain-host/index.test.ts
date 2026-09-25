@@ -19,7 +19,7 @@ import {
   useModel,
   type ToolResult,
 } from "./index.js";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { ScriptedChatModel, type ScriptedEntry, type ScriptedResponse } from "./scripted-model.js";
 
 /**
@@ -43,10 +43,10 @@ const jokeScript: ScriptedResponse[] = [
  * The joke's rating is a Jev `score`, not a LangChain call: level 2 (6/10) for
  * the first joke, level 3 (8/10) for the rewrite.
  */
-const jokeRatings = () => createMockJevClient({ rating: [2, 3] }).client;
+const jokeRatings = () => createMockJudge({ rating: [2, 3] }).model;
 
 /** The drafter's prompt check is a Jev judgment: every request judged complete. */
-const completeJudgment = () => createMockJevClient({ "*": true }).client;
+const completeJudgment = () => createMockJudge({ "*": true }).model;
 
 /** The handle from the most recent tool result — what a live model would read. */
 function lastHandle(messages: BaseMessage[]): string {

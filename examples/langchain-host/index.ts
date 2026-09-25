@@ -20,9 +20,10 @@
  * Stacked, that is the best of both worlds: LangChain makes every text-model
  * call (Direction A) inside a machine that a LangChain agent calls as a tool
  * (Direction B). The judgments are the exception: the joke's rating and the
- * drafter's "is this request complete?" check are Jev judgments (TypeSafe
- * System One), typed answers over explicit state rather than generations, so
- * each demo takes a Jev client beside the LangChain model.
+ * drafter's "is this request complete?" check are Jev judgments (the AI SDK's
+ * `experimental_evaluate` with Jev as the evaluation model), typed answers
+ * over explicit state rather than generations, so each demo takes a judge
+ * model beside the LangChain model.
  *
  * LangSmith: because the model call is LangChain's own, tracing is env-var
  * driven and needs no code here — set `LANGSMITH_TRACING=true` and
@@ -30,13 +31,13 @@
  * shows up as a trace. Use `@statelyai/agent/otel` when the host should trace
  * the machine's own spans instead.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/langchain-host/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/langchain-host/index.ts
  *   Both directions run live against ChatOpenAI.
  */
 import assert from "node:assert/strict";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { HumanMessage } from "@langchain/core/messages";
-import type { TypeSafeClient } from "@typesafe-ai/sdk";
+import type { Experimental_EvaluationModel } from "ai";
 import { ChatOpenAI } from "@langchain/openai";
 import { runAgent } from "@statelyai/agent";
 import { createRateJoke, jokeMachine } from "../joke/index.js";
@@ -59,19 +60,19 @@ const LIVE_MODEL = "gpt-5.4-mini";
 /**
  * The joke machine exercises two executor slots in one run: `streamText`
  * (tell) and `decide` (keep going or stop), both LangChain model calls. The
- * rating is a Jev `score` judgment, so it takes `jevClient` instead; omitted,
- * the SDK reads `TYPESAFE_API_KEY`. (Direction B covers structured
+ * rating is a Jev `score` judgment, so it takes `judge` instead; omitted,
+ * the default Jev model reads `TYPESAFE_AI_API_KEY`. (Direction B covers structured
  * `generateText`.)
  */
 export async function runJokeDemo(
   model: BaseChatModel,
   onChunk?: (chunk: string) => void,
-  jevClient?: TypeSafeClient,
+  judge?: Experimental_EvaluationModel,
 ) {
   const result = await runAgent(jokeMachine, {
     input: { topic: "state machines" },
     executors: createLangChainExecutors({ model }),
-    ...(jevClient ? { actors: { rateJoke: createRateJoke(jevClient) } } : {}),
+    ...(judge ? { actors: { rateJoke: createRateJoke(judge) } } : {}),
     ...(onChunk ? { onChunk } : {}),
   });
   if (result.status !== "done") {
@@ -87,8 +88,11 @@ export async function runJokeDemo(
  * read back the JSON they return. No agent loop, no model in the conversation
  * seat — just the bridge.
  */
-export async function runBridgeDemo(machineModel: BaseChatModel, jevClient?: TypeSafeClient) {
-  useModel(machineModel, jevClient);
+export async function runBridgeDemo(
+  machineModel: BaseChatModel,
+  judge?: Experimental_EvaluationModel,
+) {
+  useModel(machineModel, judge);
 
   const started = JSON.parse(
     await startWorkflowTool.invoke({
@@ -115,9 +119,9 @@ export async function runAgentLoopDemo(
   model: BaseChatModel,
   machineModel: BaseChatModel,
   ask: string,
-  jevClient?: TypeSafeClient,
+  judge?: Experimental_EvaluationModel,
 ) {
-  const agent = createEmailHostAgent(model, machineModel, jevClient);
+  const agent = createEmailHostAgent(model, machineModel, judge);
   const result = await agent.invoke({ messages: [new HumanMessage(ask)] });
   return result.messages.at(-1)?.text ?? "";
 }
@@ -126,8 +130,10 @@ export async function runAgentLoopDemo(
 
 /** Both directions against a real ChatOpenAI. */
 export async function main() {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    throw new Error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run the langchain-host example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    throw new Error(
+      "Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run the langchain-host example.",
+    );
   }
   const model = new ChatOpenAI({ model: LIVE_MODEL });
 

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { lintAgentMachine } from "@statelyai/agent/testing";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   DEFAULT_BOT_SYSTEM,
@@ -14,7 +14,7 @@ import {
 } from "./index.js";
 
 /** The Jev judge: followed the policy, quality level 4 of 0-5 (→ 8/10). */
-const judged = () => createMockJevClient({ followedPolicy: true, quality: 4 });
+const judged = () => createMockJudge({ followedPolicy: true, quality: 4 });
 
 test("the customer finishes → one more bot reply → judged, endedBy user", async () => {
   const executors = createMockModelExecutors({
@@ -31,7 +31,7 @@ test("the customer finishes → one more bot reply → judged, endedBy user", as
   });
   const result = await runChatbotSimulationEvalExample({
     generateText: executors.generateText,
-    jevClient: judged().client,
+    judge: judged().model,
   });
 
   expect(result.outcome).toBe("done");
@@ -66,7 +66,7 @@ test("the bot's request never carries the persona; the judge's does", async () =
   const jev = judged();
   await runChatbotSimulationEvalExample({
     generateText: executors.generateText,
-    jevClient: jev.client,
+    judge: jev.model,
   });
 
   const bot = executors.calls.find((call) => call.name === "supportBot")!;
@@ -94,7 +94,7 @@ test("MAX_EXCHANGES without the customer finishing → judged anyway, endedBy bu
   const jev = judged();
   const result = await runChatbotSimulationEvalExample({
     generateText: executors.generateText,
-    jevClient: jev.client,
+    judge: jev.model,
   });
 
   expect(result.outcome).toBe("done");
@@ -114,7 +114,7 @@ test("a failing judge verdict comes through as passed: false", async () => {
         supportBot: [{ message: "Sure, full refund issued." }],
       },
     }).generateText,
-    jevClient: createMockJevClient({ followedPolicy: false, quality: 0 }).client,
+    judge: createMockJudge({ followedPolicy: false, quality: 0 }).model,
   });
   expect(result.outcome).toBe("done");
   expect(result.passed).toBe(false);
@@ -134,13 +134,13 @@ test("any model error lands in `failed` with the partial transcript", async () =
         if (request.name === broken) throw new Error("provider down");
         return scripted.generateText(request, info);
       },
-      jevClient: createMockJevClient({
+      judge: createMockJudge({
         followedPolicy: () => {
           if (broken === "judgeConversation") throw new Error("provider down");
           return true;
         },
         quality: 4,
-      }).client,
+      }).model,
     });
     expect(result.outcome).toBe("failed");
     expect(result.passed).toBe(false);
@@ -173,7 +173,7 @@ test("starters behave as their labels advertise", async () => {
     const result = await runChatbotSimulationEvalExample({
       ...starter.input,
       generateText: executors.generateText,
-      jevClient: judged().client,
+      judge: judged().model,
     });
     // The persona the label names drives the simulated customer, and the
     // default airline policy is what the bot and the judge see.
@@ -186,9 +186,9 @@ test("starters behave as their labels advertise", async () => {
   }
 });
 
-test("the judge asks Jev a policy noul and a quality score in one call; PASS_THRESHOLD decides passed", async () => {
+test("the judge asks Jev a policy boolean question and a quality score in one call; PASS_THRESHOLD decides passed", async () => {
   const run = (followedPolicy: number) => {
-    const jev = createMockJevClient({ followedPolicy, quality: 3 });
+    const jev = createMockJudge({ followedPolicy, quality: 3 });
     const result = runChatbotSimulationEvalExample({
       generateText: createMockModelExecutors({
         text: {
@@ -196,7 +196,7 @@ test("the judge asks Jev a policy noul and a quality score in one call; PASS_THR
           supportBot: [{ message: "Outside the window; I can offer credit." }],
         },
       }).generateText,
-      jevClient: jev.client,
+      judge: jev.model,
     });
     return { jev, result };
   };
@@ -210,7 +210,7 @@ test("the judge asks Jev a policy noul and a quality score in one call; PASS_THR
     { role: "bot", text: "Outside the window; I can offer credit." },
   ]);
   expect(Object.fromEntries(Object.entries(call.questions).map(([k, q]) => [k, q.type]))).toEqual({
-    followedPolicy: "noul",
+    followedPolicy: "boolean",
     quality: "score",
   });
   expect(aboveResult).toMatchObject({ passed: true, score: 6 });

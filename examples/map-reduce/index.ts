@@ -47,15 +47,16 @@
  *     settled, so one broken writer cannot park the run. In LangGraph a
  *     failing `Send` branch fails the superstep.
  *   - Judging is a JUDGMENT, not a generation. LangGraph asks a chat model to
- *     write back an index. Here `judging` invokes a TypeSafe System One actor
- *     (Jev) with the topic and every `{ subject, joke }` as state and one
+ *     write back an index. Here `judging` asks the AI SDK's
+ *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model, with the topic and every `{ subject, joke }` as state and one
  *     `choice` question whose labels are the jokes themselves (`joke0`,
- *     `joke1`, …, one per landed joke). Jev can only answer with a label it was
+ *     `joke1`, …, one per landed joke). `evaluate` rejects a label that was not
  *     offered, so an out-of-range or fractional index cannot happen by
  *     construction; the text model is reserved for the subjects and the jokes.
  *   - LangGraph indexes `state["jokes"][response.id]` directly; an index the
  *     model makes up raises. Here `checkingJudgement` still checks that the
- *     label names a joke that exists (a host could swap in any judge), retries
+ *     label names a joke that exists (a host could swap in any judge actor), retries
  *     `MAX_JUDGE_RETRIES` time(s), then the run ends in `failed` with every
  *     joke still in the output.
  *
@@ -63,16 +64,17 @@
  * order, which is the order the judge sees them.
  *
  * Dual-mode: `runMapReduceExample(options?)` takes an injectable
- * `generateText` and `jevClient` (tests script both); the direct run uses real
+ * `generateText` and `judge` (tests script both); the direct run uses real
  * models.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/map-reduce/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/map-reduce/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   createTextLogic,
   getStatePath,
@@ -85,6 +87,12 @@ import {
 const models = {
   jokes: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Most subjects fanned out; extra subjects are dropped and `truncated` is set. */
 export const MAX_SUBJECTS = 4;
@@ -121,29 +129,37 @@ function labelIndex(label: string): number | null {
 }
 
 /**
- * best_joke as a System One judgment: the topic and every landed joke are the
- * state, and one `choice` question offers one label per joke. `client` is
- * injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ * best_joke as a judgment: the topic and every landed joke are the state, and
+ * one `choice` question offers one label per joke. The judge model is injected
+ * by tests and hosts; the default is Jev.
  */
-export function createJudgeJokes(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { topic: string; jokes: Joke[] }) => ({
-      topic: input.topic,
-      jokes: input.jokes,
-    }),
-    questions: (input) => ({
-      best: choice(
-        "Which joke in `jokes` is the funniest take on `topic`? A `joke` in square " +
-          "brackets is a placeholder for a writer that failed, never the funniest.",
-        Object.fromEntries(
-          input.jokes.map((entry, index) => [
-            jokeLabel(index),
-            `\`jokes[${index}]\`, the joke about "${entry.subject}".`,
-          ]),
-        ),
-      ),
-    }),
+export function createJudgeJokes(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { best: { choice: string } } },
+    { topic: string; jokes: Joke[] }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { topic: input.topic, jokes: input.jokes },
+        questions: {
+          best: {
+            type: "choice" as const,
+            instructions:
+              "Which joke in `jokes` is the funniest take on `topic`? A `joke` in square " +
+              "brackets is a placeholder for a writer that failed, never the funniest.",
+            criteria: Object.fromEntries(
+              input.jokes.map((entry, index) => [
+                jokeLabel(index),
+                `\`jokes[${index}]\`, the joke about "${entry.subject}".`,
+              ]),
+            ),
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -308,8 +324,8 @@ export const mapReduceMachine = agentSetup.createMachine({
         }),
       },
     },
-    // The label must name a joke that exists. Jev only answers with offered
-    // labels, so this guards a swapped-in judge: retry once, then give up with
+    // The label must name a joke that exists. `evaluate` only returns offered
+    // labels, so this guards a swapped-in judge actor: retry once, then give up with
     // every joke still in the output.
     checkingJudgement: {
       type: "choice",
@@ -370,15 +386,15 @@ export interface RunMapReduceOptions {
   topic?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
-  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
 
 /** Runs the map-reduce flow; `outcome` says which final state it reached. */
 export async function runMapReduceExample(options: RunMapReduceOptions = {}) {
-  const { topic = "animals", generateText, jevClient, onProgress } = options;
+  const { topic = "animals", generateText, judge, onProgress } = options;
 
   const progress: string[] = [];
   const result = await runAgent(mapReduceMachine, {
@@ -386,7 +402,7 @@ export async function runMapReduceExample(options: RunMapReduceOptions = {}) {
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
-    ...(jevClient ? { actors: { judgeJokes: createJudgeJokes(jevClient) } } : {}),
+    ...(judge ? { actors: { judgeJokes: createJudgeJokes(judge) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -402,8 +418,8 @@ export async function runMapReduceExample(options: RunMapReduceOptions = {}) {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void runMapReduceExample({ onProgress: (state) => console.log(`  → ${state}`) })

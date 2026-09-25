@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
-import { createMockJevClient, type MockJevCall } from "../mock-jev.js";
+import { createMockJudge, type MockJudgeCall } from "../mock-judge.js";
 import {
   CORRECT_THRESHOLD,
   chatWithPdfMachine,
@@ -49,7 +49,7 @@ interface PlayResult {
   /** Prompts `explainGrade` was given, in order. */
   gradePrompts: string[];
   /** Every Jev grading call, in order. */
-  jevCalls: MockJevCall[];
+  jevCalls: MockJudgeCall[];
   /** Every idle label the run settled on. */
   idleLabels: string[];
 }
@@ -61,13 +61,13 @@ async function play(options: PlayOptions): Promise<PlayResult> {
   let questionNumber = 0;
 
   // The verdict is a Jev judgment over the passage, question, and answer.
-  const jev = createMockJevClient({
+  const jev = createMockJudge({
     correct: (state) => {
       const { answer } = state as { answer: string };
       return options.grade ? options.grade(answer) : true;
     },
   });
-  const actors = { gradeAnswer: createGradeAnswer(jev.client) };
+  const actors = { gradeAnswer: createGradeAnswer(jev.model) };
 
   const generateText: AgentRequestExecutor = async (request) => {
     if (request.name === "explainGrade") {
@@ -194,7 +194,7 @@ describe("chat-with-pdf quiz mode", () => {
     });
   });
 
-  test("the verdict is one Jev noul over passage, question, and answer; the threshold decides", async () => {
+  test("the verdict is one Jev boolean question over passage, question, and answer; the threshold decides", async () => {
     const result = await play({
       input: { documentId: "statecharts", maxQuestions: 2, refreshEvery: 2 },
       learnerEvents: answers(2),
@@ -208,7 +208,7 @@ describe("chat-with-pdf quiz mode", () => {
       answer: "answer 1",
     });
     expect(Object.keys(call.questions)).toEqual(["correct"]);
-    expect(call.questions.correct!.type).toBe("noul");
+    expect(call.questions.correct!.type).toBe("boolean");
     expect(result.output?.results.map((entry) => entry.correct)).toEqual([true, false]);
     // The explanation is told the verdict, not asked for it.
     expect(result.gradePrompts[0]).toContain("Grade: correct");

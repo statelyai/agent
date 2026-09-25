@@ -38,12 +38,12 @@
  * Every run needs a text model (OpenAI) and Jev (TypeSafe) for its judgments.
  * The server checks both and the shell names whichever is missing.
  */
-export const REQUIRED_KEYS = ["OPENAI_API_KEY", "TYPESAFE_API_KEY"] as const;
+export const REQUIRED_KEYS = ["OPENAI_API_KEY", "TYPESAFE_AI_API_KEY"] as const;
 
 export type RequiredKey = (typeof REQUIRED_KEYS)[number];
 
 export const MISSING_KEY_MESSAGE =
-  "Set OPENAI_API_KEY and TYPESAFE_API_KEY on the demo server to run examples.";
+  "Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY on the demo server to run examples.";
 
 /** The required keys `env` lacks. Server-side callers pass `process.env`. */
 export function missingKeys(env: Record<string, string | undefined>): RequiredKey[] {

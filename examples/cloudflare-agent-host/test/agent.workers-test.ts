@@ -4,10 +4,10 @@
  * real thing — not a Node stand-in. Only the models are stubbed: the suite
  * overrides `EmailDrafter.prototype.createExecutors` with a plain-function
  * executor keyed by request name, and `createJudgments` with the drafter's Jev
- * judgment over a scripted client. `vitest.config.ts` also forces the
- * `OPENAI_API_KEY` and `TYPESAFE_API_KEY` bindings empty (they would otherwise
- * be picked up from a `.dev.vars` left behind by `dev:live`), so this suite
- * never bills a provider.
+ * judgment over a scripted evaluation model. `vitest.config.ts` also forces
+ * the `OPENAI_API_KEY` and `TYPESAFE_AI_API_KEY` bindings empty (they would
+ * otherwise be picked up from a `.dev.vars` left behind by `dev:live`), so
+ * this suite never bills a provider.
  *
  * What these specs are really testing is the host's durability claim: the
  * append-only log in the Durable Object is the ONLY persisted state, and a
@@ -17,9 +17,9 @@
 import { getAgentByName } from "agents";
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { TypeSafeClient } from "@typesafe-ai/sdk";
+import { createAsyncLogic, type InputFrom, type OutputFrom } from "xstate";
+import type { Experimental_EvaluationModel } from "ai";
 import type { AgentLogEntry, AgentRequestExecutors } from "@statelyai/agent";
-import { createMockJevClient } from "../../mock-jev.js";
 import { createEvaluatePrompt } from "../../email-drafter/agent-logic.js";
 import { EmailDrafter } from "../index.js";
 import { createDurableObjectEventLogStore } from "../event-log-store.js";
@@ -58,12 +58,40 @@ const stubExecutors = (): AgentRequestExecutors => ({
 });
 
 /**
- * The Jev stand-in: every request is judged complete. `jev.calls` makes the
- * same durability claim observable for the judgment as `modelCalls` does for
- * the text model.
+ * The judge stand-in, an AI SDK evaluation model written inline (the Worker
+ * bundle cannot reach `../../mock-judge.ts` across the wrangler alias). It
+ * judges every request complete; `judge.calls` makes the same durability
+ * claim observable for the judgment as `modelCalls` does for the text model.
  */
-const jev = createMockJevClient({ "*": true });
-const stubJudgments = () => ({ evaluatePrompt: createEvaluatePrompt(jev.client) });
+type JudgeModel = Exclude<Experimental_EvaluationModel, string>;
+type JudgeCall = Parameters<JudgeModel["doEvaluate"]>[0];
+type Judgment = ReturnType<typeof createEvaluatePrompt>;
+
+const judge: { calls: JudgeCall[]; model: JudgeModel } = {
+  calls: [],
+  model: {
+    specificationVersion: "v4",
+    provider: "stub-judge",
+    modelId: "stub-judge",
+    supportedQuestionTypes: ["boolean"],
+    doEvaluate: async (options) => {
+      judge.calls.push(options);
+      const answers = Object.fromEntries(
+        Object.keys(options.questions).map((id) => [
+          id,
+          { type: "boolean" as const, probability: 0.95 },
+        ]),
+      );
+      return {
+        answers,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        warnings: [],
+        response: { modelId: "stub-judge", timestamp: new Date(0) },
+      };
+    },
+  },
+};
+const stubJudgments = () => ({ evaluatePrompt: createEvaluatePrompt(judge.model) });
 
 // The Durable Object runs in this isolate, so patching the class the Worker
 // exports reaches every instance the requests below create.
@@ -169,7 +197,7 @@ describe("cloudflare agent host", () => {
     expect(drafted.draft?.subject).toBe("Friday's launch");
 
     const callsAfterDrafting = modelCalls.count;
-    const judgmentsAfterDrafting = jev.calls.length;
+    const judgmentsAfterDrafting = judge.calls.length;
     const journaledAfterDrafting = (await journal(name)).length;
 
     // Eviction #1: the instance that drafted is gone.
@@ -180,7 +208,7 @@ describe("cloudflare agent host", () => {
     expect(resumed.view.draft?.subject).toBe("Friday's launch");
     // Folding the log re-executed nothing and appended nothing.
     expect(modelCalls.count).toBe(callsAfterDrafting);
-    expect(jev.calls.length).toBe(judgmentsAfterDrafting);
+    expect(judge.calls.length).toBe(judgmentsAfterDrafting);
     expect(await journal(name)).toHaveLength(journaledAfterDrafting);
 
     const sent = await send(name, { type: "SEND" });
@@ -193,7 +221,7 @@ describe("cloudflare agent host", () => {
     expect(done.status).toBe("done");
     expect(done.output?.sentEmails).toHaveLength(1);
     expect(modelCalls.count).toBe(callsAfterDrafting);
-    expect(jev.calls.length).toBe(judgmentsAfterDrafting);
+    expect(judge.calls.length).toBe(judgmentsAfterDrafting);
 
     const entries = await journal(name);
     expect(entries.map((entry) => entry.index)).toEqual(entries.map((_entry, i) => i));
@@ -279,20 +307,15 @@ describe("cloudflare agent host", () => {
 
   it("leaves the cached turn where the journal is when an append fails", async () => {
     const name = "append-fails";
-    // The failed turn tears down the Jev call it started. Under workerd the
-    // SDK's response buffering reports that abort as an unhandled rejection,
-    // so this conversation's judgment waits for the abort instead of answering.
+    // The failed turn tears down the judgment it started, so this
+    // conversation's judgment never answers. It is a bare pending actor, not
+    // `evaluate` over a waiting judge: under workerd, an `experimental_evaluate`
+    // call whose `abortSignal` fires at teardown surfaces as an unhandled
+    // rejection after the turn has already failed.
     createJudgments.mockImplementationOnce(() => ({
-      evaluatePrompt: createEvaluatePrompt(
-        new TypeSafeClient({
-          apiKey: "test-key",
-          retry: { maxRetries: 0 },
-          fetch: (_url, init) =>
-            new Promise<Response>((_resolve, reject) => {
-              init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
-            }),
-        }),
-      ),
+      evaluatePrompt: createAsyncLogic<OutputFrom<Judgment>, InputFrom<Judgment>>({
+        run: () => new Promise(() => {}),
+      }),
     }));
     await get(name);
     const before = await journal(name);
@@ -347,7 +370,7 @@ describe("cloudflare agent host", () => {
     });
     const { status, view } = await get("no-typesafe-key");
     expect(status).toBe(500);
-    expect(view.error).toContain("TYPESAFE_API_KEY");
+    expect(view.error).toContain("TYPESAFE_AI_API_KEY");
   });
 
   it("keeps each :name in its own Durable Object", async () => {

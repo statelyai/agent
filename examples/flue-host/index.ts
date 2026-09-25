@@ -12,9 +12,9 @@
  * `start()` from `@flue/runtime/node` and drive an agent through
  * `init()` / `dispatch()` / `read()`.
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... ANTHROPIC_API_KEY=... npx tsx examples/flue-host/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... ANTHROPIC_API_KEY=... npx tsx examples/flue-host/index.ts
  *   Real models drive both agents; the machine-owned workflow's prompt check
- *   is a Jev judgment (TYPESAFE_API_KEY), and the flue-owned agent reviews
+ *   is a Jev judgment (TYPESAFE_AI_API_KEY), and the flue-owned agent reviews
  *   with an Anthropic model, so all three keys are required.
  *
  * Flue holds one runtime per process, so the demos run in sequence, each
@@ -40,7 +40,7 @@ if (import.meta.url === new URL(process.argv[1] ?? "", "file:").href) {
   (async () => {
     // The machine-owned workflow asks Jev and the flue-owned agent reviews
     // with an Anthropic model, so every key is checked before either starts.
-    for (const key of ["OPENAI_API_KEY", "TYPESAFE_API_KEY", "ANTHROPIC_API_KEY"]) {
+    for (const key of ["OPENAI_API_KEY", "TYPESAFE_AI_API_KEY", "ANTHROPIC_API_KEY"]) {
       if (!process.env[key]) throw new Error(`Set ${key} to run this example.`);
     }
     console.log("=== Way 1: machine-owned ===");

@@ -1,13 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { noopObserve } from "@mastra/core/tools";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import { createHost, main, unwrapToolResult } from "./index.js";
 
 const ctx = { observe: noopObserve };
 
 /** The Jev prompt check: every request judged complete, so no follow-up request runs. */
-const completeJudgment = () => createMockJevClient({ "*": true }).client;
+const completeJudgment = () => createMockJudge({ "*": true }).model;
 
 /** The text call the machine makes, answered by request name. */
 function mockExecutors() {
@@ -26,7 +26,7 @@ function mockExecutors() {
 function host() {
   const { startWorkflow, resumeWorkflow, startDraft, resumeDraft, agent } = createHost({
     executors: mockExecutors(),
-    jevClient: completeJudgment(),
+    judge: completeJudgment(),
   });
   return {
     agent,
@@ -129,7 +129,7 @@ describe("mastra-host", () => {
     });
     const { startDraft } = createHost({
       executors: markerExecutors,
-      jevClient: completeJudgment(),
+      judge: completeJudgment(),
     });
 
     const started = await startDraft("Announce the faster deploys.");

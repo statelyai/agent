@@ -1,8 +1,7 @@
 import { describe, expect, test } from "vitest";
-import type { TypeSafeClient } from "@typesafe-ai/sdk";
 import { runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
-import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
+import { createMockJudge, type MockJudgeEntry, type MockJudgeModel } from "../mock-judge.js";
 import {
   CONFIDENCE_THRESHOLD,
   createClassifyTicket,
@@ -36,30 +35,27 @@ function scriptedExecutor(reply: string | Error = REPLY): {
 }
 
 /**
- * The classifier's Jev answers, by question name. `mock-jev` reports every
- * `choice` at confidence 0.9; `confidence` overrides the `category` answer's
- * value after the real SDK parse, so a test can land below the threshold.
+ * The classifier's judge answers, by question name. The mock judge wraps
+ * `doEvaluate` to report Jev's `category` confidence the way TypeSafe does, in
+ * `providerMetadata.typesafe.confidence`: 0.9 by default, or `confidence` so a
+ * test can land below the threshold.
  */
 function classifier(
-  answers: { category?: MockJevEntry; sentiment?: MockJevEntry },
-  confidence?: number,
+  answers: { category?: MockJudgeEntry; sentiment?: MockJudgeEntry },
+  confidence = 0.9,
 ) {
-  const script: Record<string, MockJevEntry> = {};
+  const script: Record<string, MockJudgeEntry> = {};
   if (answers.category !== undefined) script.category = answers.category;
   if (answers.sentiment !== undefined) script.sentiment = answers.sentiment;
-  const jev = createMockJevClient(script);
-  let client: TypeSafeClient = jev.client;
-  if (confidence !== undefined) {
-    const inner = jev.client;
-    client = Object.assign(Object.create(inner) as TypeSafeClient, {
-      systemOne: async (...args: Parameters<TypeSafeClient["systemOne"]>) => {
-        const result = await inner.systemOne(...args);
-        const category = result.answers.category!;
-        return { ...result, answers: { ...result.answers, category: { ...category, confidence } } };
-      },
-    });
-  }
-  return { calls: jev.calls, actors: { classifyTicket: createClassifyTicket(client) } };
+  const judge = createMockJudge(script);
+  const model: MockJudgeModel = {
+    ...judge.model,
+    doEvaluate: async (options) => ({
+      ...(await judge.model.doEvaluate(options)),
+      providerMetadata: { typesafe: { confidence: { category: confidence } } },
+    }),
+  };
+  return { calls: judge.calls, actors: { classifyTicket: createClassifyTicket(model) } };
 }
 
 describe("ticket-triage", () => {

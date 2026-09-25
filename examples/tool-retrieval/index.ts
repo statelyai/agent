@@ -25,7 +25,7 @@
  *
  * What maps to what:
  *   - select_tools / retrieve_tools → `selectingTools`: ONE Jev call that
- *     reranks the whole registry (one `noul` per tool, see note); the machine
+ *     reranks the whole registry (one boolean question per tool, see note); the machine
  *     keeps the top TOOLS_PER_SELECTION above TOOL_RELEVANCE_THRESHOLD
  *   - agent → `deciding`: `agent.decide` (name `chooseTool`) over CALL_TOOL,
  *     RESELECT and ANSWER
@@ -37,8 +37,10 @@
  * Differences from LangGraph worth calling out:
  *   - Selection is a JUDGMENT, not a search or a generation. bigtool embeds
  *     the query and takes the nearest tool descriptions. Here `selectingTools`
- *     invokes a TypeSafe System One actor (Jev) with the query and every
- *     registry tool's name and description as state, and one `noul` per tool
+ *     calls the AI SDK's `experimental_evaluate` with Jev
+ *     (`@ai-sdk/typesafe-ai`) as the evaluation model, with the query and
+ *     every registry tool's name and description as state, and one boolean
+ *     question per tool
  *     ("could this tool help answer the question?"). The probabilities are the
  *     rerank scores; the threshold and the top-k cut are code, in `onDone`.
  *     The text model only makes the `chooseTool` decision.
@@ -57,17 +59,23 @@
  * string utilities, arithmetic, ISO date math, a capital-city lookup over a
  * tiny table).
  *
- * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/tool-retrieval/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/tool-retrieval/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = { agent: openai("gpt-5.4-mini") };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** How many tools one selection exposes. */
 export const TOOLS_PER_SELECTION = 3;
@@ -195,34 +203,43 @@ export const TOOL_REGISTRY: RegistryTool[] = [
 const TOOL_NAMES = TOOL_REGISTRY.map((tool) => tool.name) as [string, ...string[]];
 
 /**
- * select_tools as a System One rerank: the query and every registry tool's
- * name and description are the state, and each tool gets its own `noul`,
- * keyed by the tool's name. One call, one probability per tool. `client` is
- * injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ * select_tools as a judgment rerank: the query and every registry tool's
+ * name and description are the state, and each tool gets its own boolean
+ * question, keyed by the tool's name. One call, one probability per tool. The
+ * judge model is injected by tests and hosts; the default is Jev.
  */
-export function createSelectTools(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { query: string }) => ({
-      question: input.query,
-      tools: TOOL_REGISTRY.map(({ name, description }) => ({ name, description })),
-    }),
-    questions: () =>
-      Object.fromEntries(
-        TOOL_REGISTRY.map((tool, index) => [
-          tool.name,
-          noul(`Could the tool \`tools[${index}]\` be used to answer \`question\`?`, {
-            true: "Calling this tool with some argument produces a result the answer needs.",
-            false: "The tool does something else, or only shares vocabulary with the question.",
-          }),
-        ]),
-      ),
+export function createSelectTools(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<{ answers: Record<string, { probability: number }> }, { query: string }>({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: {
+          question: input.query,
+          tools: TOOL_REGISTRY.map(({ name, description }) => ({ name, description })),
+        },
+        questions: Object.fromEntries(
+          TOOL_REGISTRY.map((tool, index) => [
+            tool.name,
+            {
+              type: "boolean" as const,
+              instructions: `Could the tool \`tools[${index}]\` be used to answer \`question\`?`,
+              criteria: {
+                true: "Calling this tool with some argument produces a result the answer needs.",
+                false: "The tool does something else, or only shares vocabulary with the question.",
+              },
+            },
+          ]),
+        ),
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
 /** Tool names whose probability clears the threshold, best first, top TOOLS_PER_SELECTION. */
-function rankTools(answers: Record<string, { noul: number } | undefined>): string[] {
-  return TOOL_REGISTRY.map((tool) => ({ name: tool.name, p: answers[tool.name]?.noul ?? 0 }))
+function rankTools(answers: Record<string, { probability: number } | undefined>): string[] {
+  return TOOL_REGISTRY.map((tool) => ({ name: tool.name, p: answers[tool.name]?.probability ?? 0 }))
     .filter((scored) => scored.p >= TOOL_RELEVANCE_THRESHOLD)
     .sort((left, right) => right.p - left.p)
     .slice(0, TOOLS_PER_SELECTION)
@@ -407,8 +424,8 @@ export interface RunToolRetrievalOptions {
   question?: string;
   /** Injected for tests; the direct run supplies a real model executor. */
   decide?: AgentRequestExecutors["decide"];
-  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
-  jevClient?: TypeSafeClient;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   onProgress?: (state: string) => void;
 }
 
@@ -429,14 +446,14 @@ export async function runToolRetrievalExample(
   const {
     question = "How many miles is a 42.195 km marathon?",
     decide,
-    jevClient,
+    judge,
     onProgress,
   } = options;
   const progress: string[] = [];
   const result = await runAgent(toolRetrievalMachine, {
     input: { question },
     ...(decide ? { executors: { decide } } : { executors: createAiSdkExecutors({ models }) }),
-    ...(jevClient ? { actors: { selectTools: createSelectTools(jevClient) } } : {}),
+    ...(judge ? { actors: { selectTools: createSelectTools(judge) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -452,8 +469,8 @@ export async function runToolRetrievalExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
-    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

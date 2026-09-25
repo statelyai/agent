@@ -4,18 +4,23 @@
  * What the MODEL owns: writing the draft (`writeDraft`, a text request).
  * What JEV owns: scoring it (`evaluate`). Grading a draft against a rubric is a
  * typed judgment over text the machine holds, not a generation, so it goes to
- * TypeSafe's System One model: one `score` on the described levels in
- * `QUALITY_LEVELS`, plus one `noul` per criterion in the same call. The
- * criteria Jev reads as unmet become the feedback for the next draft.
+ * the AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ * evaluation model: one `score` on the described levels in `QUALITY_LEVELS`,
+ * plus one boolean question per criterion in the same call. The criteria Jev
+ * reads as unmet become the feedback for the next draft.
  * What the MACHINE owns: the revise/stop decision. The `checking` choice state
  * stops when the score clears `SCORE_THRESHOLD` OR the revision budget
  * (`MAX_REVISIONS = 2`) is spent — named numbers you can point at, not a fixed,
  * implicit message-count loop.
  */
 import { z } from "zod";
-import { noul, score, type TypeSafeClient } from "@typesafe-ai/sdk";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { setupAgent } from "@statelyai/agent";
-import { createSystemOneLogic } from "@statelyai/agent/typesafe";
+
+/** The judge: Jev through the AI SDK. Reads `TYPESAFE_AI_API_KEY`; tests inject a mock. */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 const MAX_REVISIONS = 2;
 
@@ -59,26 +64,40 @@ const CRITERIA = {
   },
 } as const;
 
-/** The evaluator as one Jev call: a rubric `score` and a `noul` per criterion. */
-export function createEvaluate(client?: TypeSafeClient) {
-  return createSystemOneLogic({
-    client,
-    state: (input: { topic: string; draft: string }) => ({
-      topic: input.topic,
-      draft: input.draft,
-    }),
-    questions: () => ({
-      quality: score(
-        "How well does `draft`, a one-paragraph piece about `topic`, meet all four criteria: " +
-          "concrete sensory detail, no clichés or filler, a controlling idea, and varied rhythm " +
-          "with precise words?",
-        QUALITY_LEVELS,
-      ),
-      concrete: noul(CRITERIA.concrete.question),
-      noFiller: noul(CRITERIA.noFiller.question),
-      controllingIdea: noul(CRITERIA.controllingIdea.question),
-      rhythm: noul(CRITERIA.rhythm.question),
-    }),
+/** The evaluator as one Jev call: a rubric `score` and a boolean question per criterion. */
+export function createEvaluate(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    {
+      answers: { quality: { score: number } } & Record<
+        keyof typeof CRITERIA,
+        { probability: number }
+      >;
+    },
+    { topic: string; draft: string }
+  >({
+    run: async ({ input, signal }) => {
+      const criterion = (instructions: string) => ({ type: "boolean" as const, instructions });
+      const { answers } = await evaluate({
+        model,
+        state: { topic: input.topic, draft: input.draft },
+        questions: {
+          quality: {
+            type: "score" as const,
+            instructions:
+              "How well does `draft`, a one-paragraph piece about `topic`, meet all four criteria: " +
+              "concrete sensory detail, no clichés or filler, a controlling idea, and varied rhythm " +
+              "with precise words?",
+            criteria: QUALITY_LEVELS,
+          },
+          concrete: criterion(CRITERIA.concrete.question),
+          noFiller: criterion(CRITERIA.noFiller.question),
+          controllingIdea: criterion(CRITERIA.controllingIdea.question),
+          rhythm: criterion(CRITERIA.rhythm.question),
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
   });
 }
 
@@ -181,10 +200,10 @@ export const reflectionMachine = agentSetup.createMachine({
             return {
               score: quality.score,
               feedback: feedbackFrom({
-                concrete: concrete.noul,
-                noFiller: noFiller.noul,
-                controllingIdea: controllingIdea.noul,
-                rhythm: rhythm.noul,
+                concrete: concrete.probability,
+                noFiller: noFiller.probability,
+                controllingIdea: controllingIdea.probability,
+                rhythm: rhythm.probability,
               }),
             };
           },

@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import type { TypeSafeClient } from "@typesafe-ai/sdk";
+import type { Experimental_EvaluationModel } from "ai";
 import type { Snapshot } from "xstate";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import {
@@ -11,15 +11,20 @@ import {
 import { ROUTING_CONFIDENCE } from "@/agents/routing";
 import { CRITERION_THRESHOLD, SCORE_THRESHOLD } from "@/agents/reflection";
 import type { ScenarioId } from "./scenarios";
-import { createTestJev } from "./test-jev";
+import { createTestJudge } from "./test-judge";
 
 type Executors = Partial<AgentRequestExecutors>;
 
 // Every test runs the REAL machine with a small stub executor that stands in
-// for the model's answer in that test, and a TypeSafeClient over a fake fetch
-// for Jev's judgments. No network, no key.
-function start(id: ScenarioId, prompt: string, executors: Executors, jev?: TypeSafeClient) {
-  return startScenarioRun(id, prompt, undefined, executors, undefined, jev);
+// for the model's answer in that test, and a scripted evaluation model for
+// Jev's judgments. No network, no key.
+function start(
+  id: ScenarioId,
+  prompt: string,
+  executors: Executors,
+  judge?: Experimental_EvaluationModel,
+) {
+  return startScenarioRun(id, prompt, undefined, executors, undefined, judge);
 }
 // The persisted snapshot crosses the wire as opaque JSON; cast it back at the boundary
 // (mirrors the zod-validated server fn) before handing it to runAgent.
@@ -143,12 +148,12 @@ describe("scenario outcomes", () => {
   });
 
   test("routing picks a typed queue", async () => {
-    const jev = createTestJev({ intent: "billing" });
+    const judge = createTestJudge({ intent: "billing" });
     const result = await start(
       "routing",
       "I was charged twice and cannot download my invoice.",
       {},
-      jev.client,
+      judge.model,
     );
     expect(result.status).toBe("done");
     const output = result.output as { queue: string; reason: string };
@@ -255,7 +260,7 @@ describe("scenario outcomes", () => {
 
   test("reflection revises once then accepts", async () => {
     const revised = (state: { draft: string }) => state.draft === "Revised draft.";
-    const jev = createTestJev({
+    const judge = createTestJudge({
       quality: (state) => (revised(state) ? 4 : 1),
       concrete: (state) => (revised(state) ? 0.9 : 0.1),
       noFiller: 0.9,
@@ -270,7 +275,7 @@ describe("scenario outcomes", () => {
           result: request.prompt?.includes("Revise") ? "Revised draft." : "Flat draft.",
         }),
       },
-      jev.client,
+      judge.model,
     );
     expect(result.status).toBe("done");
     const output = result.output as {
@@ -308,7 +313,7 @@ describe("bounded exits", () => {
   });
 
   test("reflection labels a best effort when the revision budget runs out", async () => {
-    const jev = createTestJev({
+    const judge = createTestJudge({
       quality: 2,
       concrete: 0.1,
       noFiller: 0.9,
@@ -323,7 +328,7 @@ describe("bounded exits", () => {
           result: `Draft about the shoreline (${request.prompt?.length ?? 0}).`,
         }),
       },
-      jev.client,
+      judge.model,
     );
     expect(result.status).toBe("done");
     const output = result.output as { revisions: number; accepted: boolean; verdict: string };
@@ -338,8 +343,8 @@ describe("ambiguous free-text review", () => {
   test("re-idles with the snapshot's own event descriptors (REJECT still needs a reason)", async () => {
     // Jev reads the review as unclear; no model call leaves the process.
     vi.stubEnv("OPENAI_API_KEY", "test-key");
-    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
-    const jev = createTestJev({ verdict: "unclear" });
+    vi.stubEnv("TYPESAFE_AI_API_KEY", "test-key");
+    const judge = createTestJudge({ verdict: "unclear" });
     const first = await start("approval", "Announce the outage.", writes("Heads up: an outage."));
     expect(first.status).toBe("idle");
 
@@ -348,7 +353,7 @@ describe("ambiguous free-text review", () => {
       first.idle!.snapshot as unknown as Snapshot<unknown>,
       { kind: "interpret", text: "hmm, not sure" },
       undefined,
-      jev.client,
+      judge.model,
     );
     expect(echoed.status).toBe("idle");
 
@@ -365,20 +370,20 @@ describe("ambiguous free-text review", () => {
 describe("model key", () => {
   test("a run without OPENAI_API_KEY refuses instead of running", async () => {
     vi.stubEnv("OPENAI_API_KEY", "");
-    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
+    vi.stubEnv("TYPESAFE_AI_API_KEY", "test-key");
     await expect(
       resumeScenario("approval", {} as Snapshot<unknown>, { type: "APPROVE" }),
     ).rejects.toThrow("Set OPENAI_API_KEY");
     vi.unstubAllEnvs();
   });
 
-  test("a run without TYPESAFE_API_KEY refuses and names the missing key", async () => {
+  test("a run without TYPESAFE_AI_API_KEY refuses and names the missing key", async () => {
     vi.stubEnv("OPENAI_API_KEY", "test-key");
-    vi.stubEnv("TYPESAFE_API_KEY", "");
+    vi.stubEnv("TYPESAFE_AI_API_KEY", "");
     await expect(
       resumeScenario("approval", {} as Snapshot<unknown>, { type: "APPROVE" }),
     ).rejects.toThrow(
-      "Set OPENAI_API_KEY and TYPESAFE_API_KEY on the demo server to run examples. Missing: TYPESAFE_API_KEY.",
+      "Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY on the demo server to run examples. Missing: TYPESAFE_AI_API_KEY.",
     );
     vi.unstubAllEnvs();
   });
@@ -386,31 +391,33 @@ describe("model key", () => {
 
 describe("Jev judgments", () => {
   test("routing asks one choice over the query; a pick below ROUTING_CONFIDENCE asks for clarification", async () => {
-    const sure = createTestJev({ intent: { value: "technical", confidence: ROUTING_CONFIDENCE } });
-    const routed = await start("routing", "The app crashes on settings.", {}, sure.client);
+    const sure = createTestJudge({
+      intent: { value: "technical", confidence: ROUTING_CONFIDENCE },
+    });
+    const routed = await start("routing", "The app crashes on settings.", {}, sure.model);
     expect((routed.output as { queue: string }).queue).toBe("technical");
     expect(sure.calls).toHaveLength(1);
     expect(sure.calls[0]!.state).toEqual({ query: "The app crashes on settings." });
     expect(Object.keys(sure.calls[0]!.questions)).toEqual(["intent"]);
     expect(sure.calls[0]!.questions.intent!.type).toBe("choice");
 
-    const unsure = createTestJev({
+    const unsure = createTestJudge({
       intent: { value: "technical", confidence: ROUTING_CONFIDENCE - 0.01 },
     });
-    const asked = await start("routing", "The app crashes on settings.", {}, unsure.client);
+    const asked = await start("routing", "The app crashes on settings.", {}, unsure.model);
     expect((asked.output as { queue: string }).queue).toBe("unclear");
   });
 
   test("routing degrades to clarification when Jev fails", async () => {
-    const jev = createTestJev({});
-    const result = await start("routing", "Help.", {}, jev.client);
+    const judge = createTestJudge({});
+    const result = await start("routing", "Help.", {}, judge.model);
     expect(result.status).toBe("done");
     expect(result.output).toEqual({ queue: "unclear", reason: "The classifier was unavailable." });
   });
 
-  test("reflection scores the draft with one score and a noul per criterion; unmet criteria become feedback", async () => {
+  test("reflection scores the draft with one score and a boolean question per criterion; unmet criteria become feedback", async () => {
     const prompts: string[] = [];
-    const jev = createTestJev({
+    const judge = createTestJudge({
       quality: (state) => (state.draft === "Second." ? SCORE_THRESHOLD : SCORE_THRESHOLD - 1),
       concrete: CRITERION_THRESHOLD - 0.01,
       noFiller: CRITERION_THRESHOLD,
@@ -426,19 +433,22 @@ describe("Jev judgments", () => {
           return { result: prompts.length === 1 ? "First." : "Second." };
         },
       },
-      jev.client,
+      judge.model,
     );
     expect((result.output as { accepted: boolean; revisions: number }).accepted).toBe(true);
     expect((result.output as { revisions: number }).revisions).toBe(1);
-    expect(jev.calls[0]!.state).toEqual({ topic: "A night market in the rain.", draft: "First." });
+    expect(judge.calls[0]!.state).toEqual({
+      topic: "A night market in the rain.",
+      draft: "First.",
+    });
     expect(
-      Object.fromEntries(Object.entries(jev.calls[0]!.questions).map(([k, q]) => [k, q.type])),
+      Object.fromEntries(Object.entries(judge.calls[0]!.questions).map(([k, q]) => [k, q.type])),
     ).toEqual({
       quality: "score",
-      concrete: "noul",
-      noFiller: "noul",
-      controllingIdea: "noul",
-      rhythm: "noul",
+      concrete: "boolean",
+      noFiller: "boolean",
+      controllingIdea: "boolean",
+      rhythm: "boolean",
     });
     // Only the criterion under CRITERION_THRESHOLD reaches the writer.
     expect(prompts[1]).toContain("concrete, specific sensory detail");
@@ -447,22 +457,24 @@ describe("Jev judgments", () => {
 
   test("a free-text review is one Jev choice; approve resumes, low confidence re-asks", async () => {
     vi.stubEnv("OPENAI_API_KEY", "test-key");
-    vi.stubEnv("TYPESAFE_API_KEY", "test-key");
+    vi.stubEnv("TYPESAFE_AI_API_KEY", "test-key");
     const first = await start("approval", "Announce the outage.", writes("Heads up: an outage."));
     const snapshot = first.idle!.snapshot as unknown as Snapshot<unknown>;
     const review = { kind: "interpret", text: "looks good, ship it" } as const;
 
-    const approve = createTestJev({ verdict: { value: "approve", confidence: REVIEW_CONFIDENCE } });
-    const approved = await resumeScenario("approval", snapshot, review, undefined, approve.client);
+    const approve = createTestJudge({
+      verdict: { value: "approve", confidence: REVIEW_CONFIDENCE },
+    });
+    const approved = await resumeScenario("approval", snapshot, review, undefined, approve.model);
     expect(approved.status).toBe("done");
     expect((approved.output as { published: boolean }).published).toBe(true);
     expect(approve.calls[0]!.state).toEqual({ review: "looks good, ship it" });
     expect(approve.calls[0]!.questions.verdict!.type).toBe("choice");
 
-    const unsure = createTestJev({
+    const unsure = createTestJudge({
       verdict: { value: "approve", confidence: REVIEW_CONFIDENCE - 0.01 },
     });
-    const echoed = await resumeScenario("approval", snapshot, review, undefined, unsure.client);
+    const echoed = await resumeScenario("approval", snapshot, review, undefined, unsure.model);
     expect(echoed.status).toBe("idle");
     vi.unstubAllEnvs();
   });

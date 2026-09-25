@@ -1,9 +1,9 @@
 import { expect, test } from "vitest";
-import { createMockJevClient } from "../mock-jev.js";
+import { createMockJudge } from "../mock-judge.js";
 import { SUFFICIENCY_THRESHOLD, runDeepResearchExample } from "./index.js";
 
-/** The reflection is a Jev judgment: one `sufficient` noul per round, in order. */
-const reflector = (...sufficient: Array<boolean | number>) => createMockJevClient({ sufficient });
+/** The reflection is a Jev judgment: one `sufficient` boolean question per round, in order. */
+const reflector = (...sufficient: Array<boolean | number>) => createMockJudge({ sufficient });
 
 /** A researcher result: one finding plus the page it came from. */
 const found = (query: string, index: number) => ({
@@ -22,7 +22,7 @@ test("plans, researches in parallel, reflects, and writes", async () => {
   let researched = 0;
   const output = await runDeepResearchExample({
     question: "durability",
-    jevClient: reflector(true).client,
+    judge: reflector(true).model,
     generateText: async (request) => {
       calls.push(request.name);
       if (request.name === "planResearch") {
@@ -54,7 +54,7 @@ test("the writer is handed the ledger and the findings' markers", async () => {
   let writerPrompt = "";
   await runDeepResearchExample({
     question: "durability",
-    jevClient: reflector(true).client,
+    judge: reflector(true).model,
     generateText: async (request) => {
       if (request.name === "planResearch") return { result: { queries: ["one", "two"] } };
       if (request.name === "research") {
@@ -81,7 +81,7 @@ test("the writer is handed the ledger and the findings' markers", async () => {
 test("generic search URLs never reach the ledger", async () => {
   const output = await runDeepResearchExample({
     question: "durability",
-    jevClient: reflector(true).client,
+    judge: reflector(true).model,
     generateText: async (request) => {
       if (request.name === "planResearch") return { result: { queries: ["one", "two"] } };
       if (request.name === "research") {
@@ -107,7 +107,7 @@ test("runs one targeted follow-up round when reflection finds a gap", async () =
   const jev = reflector(false, true);
   const output = await runDeepResearchExample({
     question: "durability",
-    jevClient: jev.client,
+    judge: jev.model,
     generateText: async (request) => {
       if (request.name === "planResearch") {
         return { result: { queries: ["one", "two", "three"] } };
@@ -134,7 +134,7 @@ test("a researcher failure counts as a settlement, so collecting cannot hang", a
   let researched = 0;
   const output = await runDeepResearchExample({
     question: "durability",
-    jevClient: reflector(true).client,
+    judge: reflector(true).model,
     generateText: async (request) => {
       if (request.name === "planResearch") return { result: { queries: ["one", "two"] } };
       if (request.name === "research") {
@@ -172,13 +172,13 @@ test("a failed request ends the run in `failed`, naming the reason", async () =>
   expect(output.report).toBe("");
 });
 
-test("reflection asks Jev one noul over the findings, and the threshold decides another round", async () => {
+test("reflection asks Jev one boolean question over the findings, and the threshold decides another round", async () => {
   const planned: Array<string | undefined> = [];
   const run = (sufficient: number) => {
     const jev = reflector(sufficient, 1);
     return runDeepResearchExample({
       question: "durability",
-      jevClient: jev.client,
+      judge: jev.model,
       generateText: async (request) => {
         if (request.name === "planResearch") {
           planned.push(request.prompt);
@@ -207,7 +207,7 @@ test("reflection asks Jev one noul over the findings, and the threshold decides 
     findings: ["snapshots persist state [1]", "snapshots persist state [1]"],
   });
   expect(Object.keys(call.questions)).toEqual(["sufficient"]);
-  expect(call.questions.sufficient!.type).toBe("noul");
+  expect(call.questions.sufficient!.type).toBe("boolean");
 
   // Just under it: a second round, and the planner is handed the findings.
   planned.length = 0;
