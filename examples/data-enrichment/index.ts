@@ -33,7 +33,7 @@
  *   - tools: search / scrape               → `searching` (sample-data actor, labeled)
  *   - call_agent_model (Info tool call)    → `extracting` (structured output over a FIXED schema)
  *   - "is the Info payload complete?"      → `checkingCompleteness` (a `choice` state)
- *   - reflect                              → `reflecting` (a request: satisfactory + feedback)
+ *   - reflect                              → `reflecting` (ONE Jev call, one `noul` per field — see note)
  *   - reflect's conditional edge           → `reviewed` (a `choice` state)
  *   - max_loops                            → `loops` in context vs the exported `MAX_LOOPS`
  *
@@ -49,13 +49,24 @@
  *     it is incomplete.
  *   - One query per pass instead of a free-form tool-calling turn, so every
  *     search is a transition in the trail.
+ *   - Reflection is a JUDGMENT, not a generation. LangGraph asks a chat model
+ *     for `{ is_satisfactory, reason }`. Here `reflecting` invokes a TypeSafe
+ *     System One actor (Jev) with the company, the requested fields of the
+ *     record, and every passage as state, and asks one `noul` per requested
+ *     field ("does a passage state `record.<field>`?"). The record is
+ *     satisfactory when every probability clears `SUPPORT_THRESHOLD`; the
+ *     feedback that steers the next search is RENDERED from the fields that
+ *     did not, so it names exactly what to look for. The text model is
+ *     reserved for the query and the extraction.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/data-enrichment/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/data-enrichment/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
+import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
@@ -210,6 +221,53 @@ function mergeRecord(previous: CompanyRecord, next: CompanyRecord): CompanyRecor
   };
 }
 
+/** A value counts as backed by the passages when Jev's probability clears this. */
+export const SUPPORT_THRESHOLD = 0.5;
+
+/**
+ * reflect as a System One judgment: the company, the requested fields of the
+ * record, and every passage are the state, and each requested field gets its
+ * own `noul`. One call, one probability per field, no prose. `client` is
+ * injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ */
+export function createReviewRecord(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: {
+      company: string;
+      fields: Field[];
+      passages: string[];
+      record: CompanyRecord;
+    }) => ({
+      company: input.company,
+      record: Object.fromEntries(input.fields.map((field) => [field, input.record[field]])),
+      passages: input.passages,
+    }),
+    questions: (input) =>
+      Object.fromEntries(
+        input.fields.map((field) => [
+          field,
+          noul(
+            `Does a passage in \`passages\` directly state \`record.${field}\` ` +
+              `(the ${FIELD_LABELS[field].toLowerCase()}) for \`company\`?`,
+            {
+              true: "A passage about this company states this exact value.",
+              false:
+                "No passage states it, a passage contradicts it, or the passage is about another company.",
+            },
+          ),
+        ]),
+      ),
+  });
+}
+
+/** The reviewer feedback, rendered from the fields Jev did not find backed. */
+function renderReviewFeedback(unsupported: Field[]): string {
+  return unsupported.length === 0
+    ? "Every value is backed by a passage."
+    : `Not backed by the passages: ${unsupported.map((field) => FIELD_LABELS[field]).join(", ")}. Search for these again.`;
+}
+
 /** `Founded: 2014` lines for the requested fields. */
 function renderRecord(context: EnrichmentContext): string {
   return context.fields
@@ -237,6 +295,8 @@ const agentSetup = setupAgent({
     searchWeb: createAsyncLogic<string[], { company: string; query: string; seen: string[] }>({
       run: async ({ input }) => searchIndex(input),
     }),
+    // reflect: a Jev judgment per requested field (see createReviewRecord).
+    reviewRecord: createReviewRecord(),
   },
   requests: {
     // call_agent_model, search turn: one query aimed at the missing fields.
@@ -283,29 +343,6 @@ const agentSetup = setupAgent({
           ...(input.passages.length
             ? input.passages.map((passage, i) => `[${i + 1}] ${passage}`)
             : ["(none found)"]),
-        ].join("\n"),
-    },
-    // reflect: is the complete record believable and supported?
-    reviewRecord: {
-      schemas: {
-        input: z.object({
-          company: z.string(),
-          passages: z.array(z.string()),
-          record: recordSchema,
-        }),
-        output: z.object({ satisfactory: z.boolean(), feedback: z.string() }),
-      },
-      model: "researcher",
-      system:
-        "Review an extracted company record against its source passages. It is satisfactory " +
-        "when every value is directly supported by a passage. Otherwise say which value is " +
-        "unsupported and what to search for.",
-      prompt: ({ input }) =>
-        [
-          `Company: ${input.company}`,
-          `Record: ${JSON.stringify(input.record)}`,
-          "Passages:",
-          ...input.passages.map((passage, i) => `[${i + 1}] ${passage}`),
         ].join("\n"),
     },
   },
@@ -402,10 +439,26 @@ export const dataEnrichmentMachine = agentSetup.createMachine({
         src: "reviewRecord",
         input: ({ context }) => ({
           company: context.company,
+          fields: context.fields,
           passages: context.passages,
           record: context.record,
         }),
-        onDone: ({ output }) => ({ target: "reviewed", context: { review: output.result } }),
+        // Satisfactory iff every requested field clears the threshold; the
+        // feedback names the ones that did not.
+        onDone: ({ context, output }) => {
+          const unsupported = context.fields.filter(
+            (field) => (output.answers[field]?.noul ?? 0) < SUPPORT_THRESHOLD,
+          );
+          return {
+            target: "reviewed",
+            context: {
+              review: {
+                satisfactory: unsupported.length === 0,
+                feedback: renderReviewFeedback(unsupported),
+              },
+            },
+          };
+        },
         onError: ({ event }) => ({
           target: "failed",
           context: { failure: `reviewRecord failed: ${String(event.error)}` },
@@ -457,6 +510,8 @@ export interface RunDataEnrichmentOptions {
   fields?: Field[];
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -471,13 +526,14 @@ export type DataEnrichmentResult = z.infer<typeof outputSchema> & {
 export async function runDataEnrichmentExample(
   options: RunDataEnrichmentOptions = {},
 ): Promise<DataEnrichmentResult> {
-  const { company = "Northwind Robotics", fields, generateText, onProgress } = options;
+  const { company = "Northwind Robotics", fields, generateText, jevClient, onProgress } = options;
   const progress: string[] = [];
   const result = await runAgent(dataEnrichmentMachine, {
     input: { company, ...(fields ? { fields } : {}) },
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
+    ...(jevClient ? { actors: { reviewRecord: createReviewRecord(jevClient) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -492,8 +548,8 @@ export async function runDataEnrichmentExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

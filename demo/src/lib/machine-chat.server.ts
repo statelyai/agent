@@ -25,13 +25,15 @@ import { maybeCreateRunInspection } from "./inspection.server";
 import {
   humanizeEventType,
   humanizeFieldName,
-  MISSING_KEY_MESSAGE,
+  missingKeyMessage,
+  missingKeys,
   schemaNeedsPayload,
   singleStringField,
   type AcceptedEvent,
   type ChatIdle,
   type Json,
   type JsonObject,
+  type RequiredKey,
 } from "./machine-ui";
 
 // ─── trace capture (shared with the curated scenario runner) ───
@@ -747,7 +749,8 @@ async function resolveExecutors(): Promise<{
   model: string;
   executors: Partial<AgentRequestExecutors>;
 }> {
-  if (!hasApiKey()) throw new Error(MISSING_KEY_MESSAGE);
+  const missing = missingApiKeys();
+  if (missing.length) throw new Error(missingKeyMessage(missing));
   const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
@@ -803,8 +806,13 @@ export async function runExampleRunner(
   }
 }
 
+/** The model keys the server lacks: OpenAI for text requests, TypeSafe for Jev judgments. */
+export function missingApiKeys(): RequiredKey[] {
+  return missingKeys(process.env);
+}
+
 export function hasApiKey(): boolean {
-  return Boolean(process.env.OPENAI_API_KEY);
+  return missingApiKeys().length === 0;
 }
 
 export async function startMachineChat(

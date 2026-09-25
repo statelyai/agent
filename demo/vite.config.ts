@@ -16,7 +16,7 @@ export default defineConfig({
       // the bare alias below would prefix-match them too, and the first
       // matching entry wins.
       ...Object.fromEntries(
-        ["ai-sdk", "log", "machines", "openai", "otel", "testing"].map((sub) => [
+        ["ai-sdk", "log", "machines", "openai", "otel", "testing", "typesafe"].map((sub) => [
           `@statelyai/agent/${sub}`,
           fileURLToPath(new URL(`../src/${sub}/index.ts`, import.meta.url)),
         ]),

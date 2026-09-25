@@ -2,11 +2,13 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { getInteraction, runAgent } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
+import { createMockJevClient } from "../mock-jev.js";
 import { createMockModelExecutors, type MockModelExecutors } from "../mock-model.js";
 import {
   MAX_MEMORIES,
   MAX_TURNS,
   RECALL_LIMIT,
+  RECALL_THRESHOLD,
   longTermMemoryMachine,
   runLongTermMemoryExample,
   type LongTermMemoryHumanEvent,
@@ -26,6 +28,25 @@ function answerInputs(executors: MockModelExecutors): AnswerInput[] {
 
 const DOG_FACT = "The user's dog is named Biscuit.";
 
+/**
+ * The Jev recall, scripted: `memories[i]` is relevant to `message` when
+ * `pick` says so (0.95), otherwise not (0.05). The memory is read back from
+ * the request state by the index the question names.
+ */
+function recaller(pick: (message: string, memory: string) => boolean) {
+  return createMockJevClient({
+    "*": (state, question) => {
+      const { message, memories } = state as { message: string; memories: string[] };
+      const index = Number(/memories\[(\d+)\]/.exec(String(question.instructions))?.[1]);
+      return pick(message, memories[index] ?? "");
+    },
+  });
+}
+
+/** Recalls a memory only when both it and the message mention the dog. */
+const aboutDog = recaller((message, memory) => /dog/i.test(message) && /dog/i.test(memory));
+const nothingRelevant = () => recaller(() => false).client;
+
 test("a fact told in turn 1 is recalled into the answer request in turn 3", async () => {
   const executors = createMockModelExecutors({
     text: {
@@ -39,6 +60,7 @@ test("a fact told in turn 1 is recalled into the answer request in turn 3", asyn
   const replies: string[] = [];
   const result = await runLongTermMemoryExample({
     generateText: executors.generateText,
+    jevClient: aboutDog.client,
     humanEvents: [
       say("My dog is named Biscuit."),
       say("I like hiking in the Alps."),
@@ -50,7 +72,7 @@ test("a fact told in turn 1 is recalled into the answer request in turn 3", asyn
 
   const inputs = answerInputs(executors);
   expect(inputs).toHaveLength(3);
-  // Turn 1: nothing stored yet. Turn 2: the dog fact does not match hiking.
+  // Turn 1: nothing stored yet. Turn 2: the dog fact does not bear on hiking.
   expect(inputs[0]!.memories).toEqual([]);
   expect(inputs[1]!.memories).toEqual([]);
   // Turn 3: recall put the turn-1 fact in front of the model.
@@ -98,6 +120,7 @@ test("a second run started from the first run's output recalls the fact (cross-t
   const second = await runLongTermMemoryExample({
     memories: first.memories,
     generateText: executors.generateText,
+    jevClient: aboutDog.client,
     humanEvents: [say("Remind me what my dog is called?"), end],
   });
   const [input] = answerInputs(executors);
@@ -116,6 +139,7 @@ test("saving dedupes, caps the store at MAX_MEMORIES, and counts evictions", asy
         answer: [{ reply: "ok", newMemories: ["fact  NUMBER 3.", "", "New A.", "New B."] }],
       },
     }).generateText,
+    jevClient: nothingRelevant(),
     humanEvents: [say("hello"), end],
   });
   expect(result.memories).toHaveLength(MAX_MEMORIES);
@@ -131,6 +155,7 @@ test("recall returns at most RECALL_LIMIT memories", async () => {
   await runLongTermMemoryExample({
     memories: ["coffee one", "coffee two", "coffee three", "coffee four", "tea five"],
     generateText: executors.generateText,
+    jevClient: recaller((_message, memory) => memory.includes("coffee")).client,
     humanEvents: [say("coffee?"), end],
   });
   expect(answerInputs(executors)[0]!.memories).toHaveLength(RECALL_LIMIT);
@@ -141,6 +166,7 @@ test("MAX_TURNS messages close the session in `done` (not a failure)", async () 
     generateText: createMockModelExecutors({
       text: { answer: [{ reply: "ok", newMemories: [] }] },
     }).generateText,
+    jevClient: nothingRelevant(),
     humanEvents: Array.from({ length: MAX_TURNS + 3 }, (_, index) => say(`message ${index}`)),
   });
   expect(result.outcome).toBe("done");
@@ -188,6 +214,7 @@ test("a model error lands in `failed` and still returns the store", async () => 
     generateText: async () => {
       throw new Error("provider down");
     },
+    jevClient: nothingRelevant(),
     humanEvents: [say("hello")],
   });
   expect(result.outcome).toBe("failed");
@@ -200,6 +227,8 @@ test("starters behave as their labels advertise", async () => {
     .starters as Array<{ label: string; input: { userId: string; memories: string[] } }>;
   expect(starters).toHaveLength(3);
 
+  // Jev is scripted to recall name and answer-style facts, and nothing else.
+  const namesAndStyle = recaller((_message, memory) => /name|prefers/.test(memory));
   const run = (memories: string[], message: string) => {
     const executors = createMockModelExecutors({
       text: { answer: [{ reply: "ok", newMemories: ["The user's favourite colour is green."] }] },
@@ -207,6 +236,7 @@ test("starters behave as their labels advertise", async () => {
     return runLongTermMemoryExample({
       memories,
       generateText: executors.generateText,
+      jevClient: namesAndStyle.client,
       humanEvents: [say(message), end],
     }).then((result) => ({ result, input: answerInputs(executors)[0]! }));
   };
@@ -226,6 +256,50 @@ test("starters behave as their labels advertise", async () => {
   expect(evicting.result.memories).toHaveLength(MAX_MEMORIES);
   expect(evicting.result.memories[0]).toBe(capped.input.memories[1]);
   expect(evicting.result.summary).toContain("1 oldest evicted");
+});
+
+test("recall asks Jev one noul per memory and keeps the most relevant above the threshold", async () => {
+  const memories = ["Fact A.", "Fact B.", "Fact C.", "Fact D.", "Fact E."];
+  // Two clear the threshold (one exactly at it); one sits just under it.
+  const jev = createMockJevClient({
+    memory0: RECALL_THRESHOLD,
+    memory1: 0.9,
+    memory2: RECALL_THRESHOLD - 0.01,
+    "*": 0.05,
+  });
+  const executors = createMockModelExecutors({
+    text: { answer: [{ reply: "ok", newMemories: [] }] },
+  });
+  await runLongTermMemoryExample({
+    memories,
+    generateText: executors.generateText,
+    jevClient: jev.client,
+    humanEvents: [say("What do you know about me?"), end],
+  });
+
+  expect(jev.calls).toHaveLength(1);
+  const call = jev.calls[0]!;
+  expect(call.state).toEqual({ message: "What do you know about me?", memories });
+  expect(Object.keys(call.questions)).toEqual(memories.map((_, i) => `memory${i}`));
+  expect(Object.values(call.questions).every((q) => q.type === "noul")).toBe(true);
+  // Best first; the just-under memory is dropped although RECALL_LIMIT has room.
+  expect(answerInputs(executors)[0]!.memories).toEqual(["Fact B.", "Fact A."]);
+  expect(RECALL_LIMIT).toBeGreaterThan(2);
+});
+
+test("an empty store asks Jev nothing and answers with nothing recalled", async () => {
+  const jev = recaller(() => true);
+  const executors = createMockModelExecutors({
+    text: { answer: [{ reply: "ok", newMemories: [] }] },
+  });
+  const result = await runLongTermMemoryExample({
+    generateText: executors.generateText,
+    jevClient: jev.client,
+    humanEvents: [say("hello"), end],
+  });
+  expect(jev.calls).toHaveLength(0);
+  expect(answerInputs(executors)[0]!.memories).toEqual([]);
+  expect(result.outcome).toBe("done");
 });
 
 test("lintAgentMachine is clean", () => {

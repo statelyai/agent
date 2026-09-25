@@ -1,24 +1,99 @@
 /**
- * Reflection — a writer drafts, an evaluator scores, the machine loops.
+ * Reflection — a writer drafts, Jev scores, the machine loops.
  *
- * What the MODEL owns: writing the draft (`writeDraft`) and scoring it
- * (`evaluate` returns a numeric score plus feedback).
+ * What the MODEL owns: writing the draft (`writeDraft`, a text request).
+ * What JEV owns: scoring it (`evaluate`). Grading a draft against a rubric is a
+ * typed judgment over text the machine holds, not a generation, so it goes to
+ * TypeSafe's System One model: one `score` on the described levels in
+ * `QUALITY_LEVELS`, plus one `noul` per criterion in the same call. The
+ * criteria Jev reads as unmet become the feedback for the next draft.
  * What the MACHINE owns: the revise/stop decision. The `checking` choice state
- * stops when the score clears the threshold OR the revision budget
- * (`maxRevisions = 2`) is spent — a named number you can point at, not a fixed,
- * implicit message-count loop. Below threshold, the critique feeds back into the
- * next draft.
+ * stops when the score clears `SCORE_THRESHOLD` OR the revision budget
+ * (`MAX_REVISIONS = 2`) is spent — named numbers you can point at, not a fixed,
+ * implicit message-count loop.
  */
 import { z } from "zod";
+import { noul, score, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { setupAgent } from "@statelyai/agent";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 
 const MAX_REVISIONS = 2;
-const SCORE_THRESHOLD = 8;
 
-const evaluationSchema = z.object({
-  score: z.number().min(0).max(10),
-  feedback: z.string(),
-});
+/**
+ * The rubric, lowest first. The levels are deliberately strict: a vague
+ * "score it" rubric rates first drafts near the top, and the revision loop
+ * never runs.
+ */
+const QUALITY_LEVELS = [
+  "Generic throughout: no concrete detail, clichés or filler, and no idea it builds to.",
+  "Mostly generic: one concrete detail at most, with clichés or filler and no clear idea.",
+  "Mixed: some concrete detail and a discernible idea, but clichés, filler, or sagging sentences remain.",
+  "Strong: concrete detail and a clear idea it builds to, with one small weakness in rhythm or word choice.",
+  "Every criterion met: concrete sensory detail, no clichés or filler, a controlling idea, varied rhythm, and precise words.",
+] as const;
+
+/** The top rubric level. */
+const MAX_SCORE = QUALITY_LEVELS.length - 1;
+/** Accept a draft whose expected level reaches this. */
+export const SCORE_THRESHOLD = 3;
+/** A criterion counts as met when Jev's probability that it holds clears this. */
+export const CRITERION_THRESHOLD = 0.5;
+
+/** Each criterion's question, and the revision note when Jev reads it as unmet. */
+const CRITERIA = {
+  concrete: {
+    question: "Does `draft` use concrete, specific sensory detail rather than generic imagery?",
+    fix: "Replace generic imagery with concrete, specific sensory detail.",
+  },
+  noFiller: {
+    question: "Is `draft` free of clichés, filler, and throat-clearing?",
+    fix: "Cut the clichés, filler, and throat-clearing.",
+  },
+  controllingIdea: {
+    question: "Does `draft` build to one clear controlling idea?",
+    fix: "Give the paragraph one clear idea and build to it.",
+  },
+  rhythm: {
+    question: "Does `draft` vary its sentence rhythm and choose words precisely?",
+    fix: "Vary the sentence rhythm and replace imprecise words.",
+  },
+} as const;
+
+/** The evaluator as one Jev call: a rubric `score` and a `noul` per criterion. */
+export function createEvaluate(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { topic: string; draft: string }) => ({
+      topic: input.topic,
+      draft: input.draft,
+    }),
+    questions: () => ({
+      quality: score(
+        "How well does `draft`, a one-paragraph piece about `topic`, meet all four criteria: " +
+          "concrete sensory detail, no clichés or filler, a controlling idea, and varied rhythm " +
+          "with precise words?",
+        QUALITY_LEVELS,
+      ),
+      concrete: noul(CRITERIA.concrete.question),
+      noFiller: noul(CRITERIA.noFiller.question),
+      controllingIdea: noul(CRITERIA.controllingIdea.question),
+      rhythm: noul(CRITERIA.rhythm.question),
+    }),
+  });
+}
+
+/** Renders the revision notes from the criteria Jev read as unmet. */
+function feedbackFrom(met: Record<keyof typeof CRITERIA, number>): string {
+  const notes = (Object.keys(CRITERIA) as (keyof typeof CRITERIA)[])
+    .filter((name) => met[name] < CRITERION_THRESHOLD)
+    .map((name) => CRITERIA[name].fix);
+  return notes.length ? notes.join(" ") : "Tighten the weakest sentence.";
+}
+
+/** A Jev score is an expected level, so it can fall between levels. */
+function formatScore(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
 
 const reflectionContextSchema = z.object({
   topic: z.string(),
@@ -43,6 +118,7 @@ const agentSetup = setupAgent({
     accepted: z.boolean(),
     verdict: z.string(),
   }),
+  actors: { evaluate: createEvaluate() },
   requests: {
     writeDraft: {
       schemas: {
@@ -59,23 +135,6 @@ const agentSetup = setupAgent({
         input.feedback
           ? `Topic: ${input.topic}\n\nRevise to address this feedback:\n${input.feedback}`
           : `Topic: ${input.topic}\n\nFirst pass only: two flat, generic sentences. No sensory detail, no polish, no strong verbs.`,
-    },
-    evaluate: {
-      schemas: { input: z.object({ draft: z.string() }), output: evaluationSchema },
-      model: "critic",
-      // The rubric is deliberately strict: a vague "score it 0-10" prompt hands
-      // out 8s and 9s to first drafts, and the revision loop never runs.
-      system:
-        "You are a demanding editor. Score the draft 0-10 against ALL four criteria: " +
-        "(1) concrete, specific sensory detail rather than generic imagery; " +
-        "(2) no clichés, filler, or throat-clearing; " +
-        "(3) a clear controlling idea the paragraph actually builds to; " +
-        "(4) varied rhythm and precise word choice, with no sagging sentence. " +
-        "A score of 8 or above means every criterion is met and you cannot name a " +
-        "single concrete improvement. First drafts almost never clear that bar — " +
-        "if you can name any improvement at all, score 7 or below. Give specific, " +
-        "actionable feedback naming the weakest criterion and how to fix it.",
-      prompt: ({ input }) => `Score this draft:\n${input.draft}`,
     },
   },
   states: {
@@ -114,13 +173,21 @@ export const reflectionMachine = agentSetup.createMachine({
     evaluating: {
       invoke: {
         src: "evaluate",
-        input: ({ context }) => ({ draft: context.draft }),
+        input: ({ context }) => ({ topic: context.topic, draft: context.draft }),
         onDone: {
           target: "checking",
-          context: ({ output }) => ({
-            score: output.result.score,
-            feedback: output.result.feedback,
-          }),
+          context: ({ output }) => {
+            const { quality, concrete, noFiller, controllingIdea, rhythm } = output.answers;
+            return {
+              score: quality.score,
+              feedback: feedbackFrom({
+                concrete: concrete.noul,
+                noFiller: noFiller.noul,
+                controllingIdea: controllingIdea.noul,
+                rhythm: rhythm.noul,
+              }),
+            };
+          },
         },
         onError: { target: "done" },
       },
@@ -136,14 +203,16 @@ export const reflectionMachine = agentSetup.createMachine({
         if (score >= SCORE_THRESHOLD) {
           return {
             target: "done",
-            context: { verdict: `Reached target in ${rounds} (score ${score}/10).` },
+            context: {
+              verdict: `Reached target in ${rounds} (score ${formatScore(score)}/${MAX_SCORE}).`,
+            },
           };
         }
         if (context.revisions >= MAX_REVISIONS) {
           return {
             target: "done",
             context: {
-              verdict: `Best effort after ${rounds} (score ${score}/10, target ${SCORE_THRESHOLD}/10).`,
+              verdict: `Best effort after ${rounds} (score ${formatScore(score)}/${MAX_SCORE}, target ${SCORE_THRESHOLD}/${MAX_SCORE}).`,
             },
           };
         }

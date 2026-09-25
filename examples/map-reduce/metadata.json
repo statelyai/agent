@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Lists subjects for a topic, spawns one joke writer per subject in parallel, collects the jokes as they land, and has a judge pick the best by index. The fan-out width is capped, a failed branch records a placeholder instead of stalling the run, and an out-of-range pick is retried once before the run ends in failed."
+    "purpose": "Lists subjects for a topic, spawns one joke writer per subject in parallel, collects the jokes as they land, and has Jev pick the best as a typed choice with one label per landed joke. The fan-out width is capped, a failed branch records a placeholder instead of stalling the run, and an out-of-range pick is retried once before the run ends in failed."
   },
   "starters": ["animals", "office life", "space travel"]
 }

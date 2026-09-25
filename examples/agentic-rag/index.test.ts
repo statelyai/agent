@@ -2,13 +2,20 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { type AgentDecisionRequest } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
+import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
 import { createMockModelExecutors, type MockModelScript } from "../mock-model.js";
-import { MAX_RETRIEVALS, agenticRagMachine, runAgenticRagExample } from "./index.js";
+import {
+  MAX_RETRIEVALS,
+  RELEVANCE_THRESHOLD,
+  agenticRagMachine,
+  runAgenticRagExample,
+} from "./index.js";
 
 /**
- * Mock only the model: text answers keyed by REQUEST NAME, and the one
- * decision keyed by its explicit name `chooseAction`. The retriever actor runs
- * REAL keyword logic over the sample posts.
+ * Mock only the models: text answers keyed by REQUEST NAME, the one decision
+ * keyed by its explicit name `chooseAction`, and the grader's Jev answers keyed
+ * by QUESTION NAME (`doc<i>`). The retriever actor runs REAL keyword logic over
+ * the sample posts.
  */
 function scripted(script: MockModelScript) {
   const { generateText, decide } = createMockModelExecutors(script);
@@ -17,6 +24,13 @@ function scripted(script: MockModelScript) {
 
 const retrieve = (keywords: string) => ({ type: "RETRIEVE" as const, keywords });
 const answer = (text: string) => ({ type: "ANSWER" as const, answer: text });
+/**
+ * Every passage graded relevant (or not). Each `doc<i>` keeps its own cursor,
+ * so `[false, true]` means "none on the first grading, all on the second".
+ */
+const grader = (relevant: MockJevEntry | MockJevEntry[]) =>
+  createMockJevClient({ "*": relevant }).client;
+
 /** A model that obeys the guard: RETRIEVE until told it may not, then ANSWER. */
 const retrieveUntilRejected = (request: AgentDecisionRequest) =>
   request.attempts.some((attempt) => attempt.failure === "rejected-by-guard")
@@ -28,11 +42,9 @@ test("on-corpus: RETRIEVE → relevant → generate → done", async () => {
     question: "What does Lilian Weng say about the types of agent memory?",
     ...scripted({
       decisions: { chooseAction: [retrieve("agent memory types")] },
-      text: {
-        gradeDocuments: [{ relevant: true }],
-        generateAnswer: ["Sensory, short-term, and long-term memory."],
-      },
+      text: { generateAnswer: ["Sensory, short-term, and long-term memory."] },
     }),
+    jevClient: grader(true),
   });
 
   expect(result.finalState).toBe("done");
@@ -64,11 +76,11 @@ test("graded irrelevant → rewrite → the model retrieves again → done", asy
         chooseAction: [retrieve("agent memory"), retrieve("long-term memory vector store")],
       },
       text: {
-        gradeDocuments: [{ relevant: false }, { relevant: true }],
         rewriteQuestion: ["How does long-term memory work in LLM agents?"],
         generateAnswer: ["Long-term memory lives in an external vector store."],
       },
     }),
+    jevClient: grader([false, true]),
   });
 
   expect(result.finalState).toBe("done");
@@ -108,15 +120,13 @@ test("empty retrieval skips grading and goes straight to the rewrite", async () 
 test("budget spent: the guard rejects RETRIEVE, the forced ANSWER lands in failed", async () => {
   const executors = createMockModelExecutors({
     decisions: { chooseAction: [retrieveUntilRejected] },
-    text: {
-      gradeDocuments: [{ relevant: false }],
-      rewriteQuestion: ["agent memory, rephrased"],
-    },
+    text: { rewriteQuestion: ["agent memory, rephrased"] },
   });
   const result = await runAgenticRagExample({
     question: "What does Lilian Weng say about agent memory?",
     generateText: executors.generateText,
     decide: executors.decide,
+    jevClient: grader(false),
   });
 
   expect(result.finalState).toBe("failed");
@@ -136,11 +146,9 @@ test("a model that keeps choosing RETRIEVE past the budget exhausts the decision
     question: "What does Lilian Weng say about agent memory?",
     ...scripted({
       decisions: { chooseAction: [retrieve("agent memory")] },
-      text: {
-        gradeDocuments: [{ relevant: false }],
-        rewriteQuestion: ["agent memory, rephrased"],
-      },
+      text: { rewriteQuestion: ["agent memory, rephrased"] },
     }),
+    jevClient: grader(false),
   });
 
   expect(result.finalState).toBe("failed");
@@ -164,8 +172,9 @@ test("starters behave as their labels advertise", async () => {
     question: onCorpus!.input.question,
     ...scripted({
       decisions: { chooseAction: [retrieve(onCorpus!.input.question)] },
-      text: { gradeDocuments: [{ relevant: true }], generateAnswer: ["answer"] },
+      text: { generateAnswer: ["answer"] },
     }),
+    jevClient: grader(true),
   });
   expect(hit.finalState).toBe("done");
   expect(hit.progress).toContain("generating");
@@ -191,6 +200,39 @@ test("starters behave as their labels advertise", async () => {
   });
   expect(direct.answeredDirectly).toBe(true);
   expect(direct.progress).toEqual(["deciding", "done"]);
+});
+
+test("the grader asks Jev one noul per passage and keeps only those at the threshold", async () => {
+  const jev = createMockJevClient({ doc0: RELEVANCE_THRESHOLD, "*": RELEVANCE_THRESHOLD - 0.01 });
+  const result = await runAgenticRagExample({
+    question: "What does Lilian Weng say about the types of agent memory?",
+    ...scripted({
+      decisions: { chooseAction: [retrieve("agent memory types")] },
+      text: { generateAnswer: ["answer"] },
+    }),
+    jevClient: jev.client,
+  });
+
+  expect(jev.calls).toHaveLength(1);
+  const call = jev.calls[0]!;
+  const state = call.state as { question: string; documents: string[] };
+  expect(state.question).toBe("What does Lilian Weng say about the types of agent memory?");
+  expect(state.documents.length).toBeGreaterThan(1);
+  expect(Object.keys(call.questions)).toEqual(state.documents.map((_, i) => `doc${i}`));
+  expect(Object.values(call.questions).every((q) => q.type === "noul")).toBe(true);
+  expect(result.trail).toContain("Answered from 1 passage(s) graded relevant");
+  expect(result.progress).toContain("generating");
+
+  // Every passage just under the threshold → rewrite instead of generate.
+  const under = await runAgenticRagExample({
+    question: "What does Lilian Weng say about agent memory?",
+    ...scripted({
+      decisions: { chooseAction: [retrieve("agent memory"), answer("Unsure.")] },
+      text: { rewriteQuestion: ["agent memory, rephrased"] },
+    }),
+    jevClient: grader(RELEVANCE_THRESHOLD - 0.01),
+  });
+  expect(under.progress.slice(0, 4)).toEqual(["deciding", "retrieving", "grading", "rewriting"]);
 });
 
 test("machine lints clean", () => {

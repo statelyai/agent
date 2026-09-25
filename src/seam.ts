@@ -285,8 +285,8 @@ async function seamOutputOf(result: ExecutorReturn, request: AgentTextRequest): 
  * @example No API key: the seam is scripted too, so the whole thing runs offline.
  * ```ts
  * const run = await runSeam(emailDrafter, {
- *   scripts: { promptEvaluator: [vague, complete], emailDrafter: [draft] },
- *   seam: { request: 'evaluatePrompt' },
+ *   scripts: { writeFollowUps: [followUps], emailDrafter: [draft] },
+ *   seam: { request: 'writeFollowUps' },
  *   respond: ({ state }) => (state === 'prompting' ? { type: 'PROMPT_SUBMITTED', prompt } : null),
  * });
  *

@@ -1,30 +1,32 @@
 import { expect, test } from "vitest";
 import { createAsyncLogic } from "xstate";
+import { createMockJevClient } from "../mock-jev.js";
 import {
   AUTO_APPROVAL_LIMIT,
+  VALID_THRESHOLD,
+  createValidateRefund,
   resumeTool,
   runMachineAsToolExample,
   startTool,
   type RefundRunOptions,
 } from "./index.js";
 
-// Mock executors: the policy check applies the same limit the machine's
-// prompt states (routed on the request name, never on prompt text), and
-// processRefund is a no-op side effect.
-const runOptions: RefundRunOptions = {
-  executors: {
-    generateText: async (request) => {
-      if (request.name !== "validateRefund") {
-        throw new Error(`Unexpected request '${request.name}'.`);
-      }
-      const { amount } = request.input as { amount: number };
-      return { result: { valid: amount <= AUTO_APPROVAL_LIMIT } };
+type RefundState = { refund: { amountDollars: number } };
+
+/** Run options over a scripted Jev policy check; processRefund is a no-op side effect. */
+function optionsWith(valid: (state: RefundState) => boolean | number) {
+  const jev = createMockJevClient({ valid: (state) => valid(state as RefundState) });
+  const options: RefundRunOptions = {
+    actors: {
+      validateRefund: createValidateRefund(jev.client),
+      processRefund: createAsyncLogic({ run: async () => ({ ok: true }) }),
     },
-  },
-  actors: {
-    processRefund: createAsyncLogic({ run: async () => ({ ok: true }) }),
-  },
-};
+  };
+  return { jev, options };
+}
+
+// The scripted judgment applies the same limit the policy states.
+const runOptions = optionsWith(({ refund }) => refund.amountDollars <= AUTO_APPROVAL_LIMIT).options;
 
 test("under the limit: the policy check auto-approves, no human pause", async () => {
   const started = await startTool({ amount: 129.99, orderId: "ORD-4471" }, runOptions);
@@ -145,4 +147,25 @@ test("the handle is the whole run: two paused runs resume in any order, with no 
 test("the exported demo runs the over-limit path end to end", async () => {
   const finished = await runMachineAsToolExample(runOptions);
   expect(finished.status).toBe("done");
+});
+
+test("the policy check asks Jev one noul over the refund and the policy; the threshold decides", async () => {
+  const under = optionsWith(() => VALID_THRESHOLD);
+  const started = await startTool({ amount: 129.99, orderId: "ORD-4471" }, under.options);
+
+  expect(under.jev.calls).toHaveLength(1);
+  const call = under.jev.calls[0]!;
+  expect(call.state).toMatchObject({
+    refund: { orderId: "ORD-4471", amountDollars: 129.99 },
+    policy: { autoApprovalLimitDollars: AUTO_APPROVAL_LIMIT },
+  });
+  expect(Object.keys(call.questions)).toEqual(["valid"]);
+  expect(call.questions.valid!.type).toBe("noul");
+  // Exactly at the threshold auto-approves ...
+  expect(started.status).toBe("done");
+
+  // ... and just under it pauses for a human.
+  const justUnder = optionsWith(() => VALID_THRESHOLD - 0.01).options;
+  const paused = await startTool({ amount: 129.99, orderId: "ORD-4471" }, justUnder);
+  expect(paused.status).toBe("pending");
 });

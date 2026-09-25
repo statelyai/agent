@@ -309,3 +309,9 @@ declare function completeAssessment(...args: any[]): any;
 declare function ajvCompileSchema(schema: any): any;
 
 declare function myCustomStreamText(options: any): any;
+
+// --- typesafe.md -----------------------------------------------------------
+
+declare const triageMachine: AnyStateMachine;
+
+declare function createClassifyTicket(client?: unknown): import("xstate").AnyActorLogic;

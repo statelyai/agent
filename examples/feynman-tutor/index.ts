@@ -33,7 +33,8 @@
  *   - context_builder      → `presenting` (request `introduceCheckpoint`)
  *   - user_answer interrupt→ `awaitingExplanation` (`meta.interaction`,
  *                            `textEvent: "EXPLAIN"`, plus a SKIP button)
- *   - verify_answer        → `verifying` (request `verifyExplanation`: score + feedback)
+ *   - verify_answer        → `verifying` (Jev judgment `verifyExplanation`: one
+ *                            `score` question — see note below)
  *   - understanding check  → `grading` (a `choice` state on PASS_SCORE and MAX_RETEACHES)
  *   - teach_concept        → `teaching` (request `explainSimply`)
  *   - next_checkpoint      → `advancing` (a `choice` state on `checkpointIndex`)
@@ -45,24 +46,34 @@
  *     then the checkpoint is recorded as failed and the session moves on.
  *   - The pass/fail decision is a threshold the machine checks (PASS_SCORE),
  *     not a model's "understood: yes/no".
+ *   - Grading is a JUDGMENT, not a generation. `verifying` asks TypeSafe
+ *     System One (Jev) one `score` question over `{ checkpoint, keyIdea,
+ *     explanation }` on five concrete levels (`UNDERSTANDING_LEVELS`), mapped
+ *     to 0-100 in code as `score / (levels - 1) * 100`. The feedback the
+ *     learner sees is the matched level's description; the text model is kept
+ *     for what is generative: the plan, the intro, and the re-teach, which
+ *     reads the learner's own attempt to address the specific gap.
  *   - The learner can SKIP a checkpoint — a real event, recorded in the output.
  *   - The number of checkpoints is capped (MAX_CHECKPOINTS) whatever the model
  *     returns, so a session has a known worst-case length.
  *   - Chiron's web search for checkpoint context is replaced by the model's
  *     own introduction; there is no retrieval step.
  *
- * Stand-ins: none. Every node is a model call; there is no tool or search.
+ * Stand-ins: none. Every node is a model call or a Jev judgment; there is no
+ * tool or search.
  *
  * Dual-mode: `runFeynmanTutorExample(options?)` takes an injectable
  * `generateText` and scripted human events (tests pass both, so CI needs no
  * API key); the direct run uses real models and stdin.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/feynman-tutor/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/feynman-tutor/index.ts
  */
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
+import { score, type ScoreResponse, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   getInteraction,
   getStatePath,
@@ -84,6 +95,48 @@ export const PASS_SCORE = 70;
 export const MAX_RETEACHES = 2;
 
 const checkpointSchema = z.object({ title: z.string(), keyIdea: z.string() });
+
+/** How well an explanation captures the key idea, lowest to highest. */
+export const UNDERSTANDING_LEVELS = [
+  'Does not address the key idea: off-topic, empty, or "I don\'t know".',
+  "Mentions the topic but states the key idea wrongly, or confuses it with a different idea.",
+  "Gets part of the key idea right but leaves out or misstates a central piece of it.",
+  "States the key idea correctly in its own words, with a minor gap or imprecision.",
+  "States the key idea correctly and completely in plain words, as if teaching it.",
+] as const;
+
+/**
+ * verify_answer as a System One judgment: the checkpoint, its key idea and
+ * the learner's explanation are the state, and one `score` places the
+ * explanation on `UNDERSTANDING_LEVELS`. `client` is injected by tests and
+ * hosts; omitted, the SDK reads `TYPESAFE_API_KEY` from the environment.
+ */
+export function createVerifyExplanation(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { title: string; keyIdea: string; explanation: string }) => ({
+      checkpoint: input.title,
+      keyIdea: input.keyIdea,
+      explanation: input.explanation,
+    }),
+    questions: () => ({
+      understanding: score(
+        "How well does `explanation` capture `keyIdea` for the checkpoint `checkpoint`? " +
+          "Judge accuracy and completeness only, not style.",
+        UNDERSTANDING_LEVELS,
+      ),
+    }),
+  });
+}
+
+/** The level on 0-100 and the matched level's description as feedback. */
+function toVerdict(answer: ScoreResponse) {
+  const top = Object.keys(answer.legend).length - 1;
+  return {
+    lastScore: Math.round((answer.score / top) * 100),
+    lastFeedback: String(answer.legend[Math.round(answer.score)]),
+  };
+}
 
 const resultSchema = z.object({
   title: z.string(),
@@ -180,6 +233,8 @@ const agentSetup = setupAgent({
     EXPLAIN: z.object({ text: z.string() }),
     SKIP: z.object({}),
   },
+  // verify_answer: a Jev judgment (see createVerifyExplanation).
+  actors: { verifyExplanation: createVerifyExplanation() },
   requests: {
     // generate_checkpoints: an ordered list of small learning goals.
     planCheckpoints: {
@@ -206,24 +261,6 @@ const agentSetup = setupAgent({
         "and what the learner should understand. Do not quiz; the learner will explain it back.",
       prompt: ({ input }) =>
         `Topic: ${input.topic}\nCheckpoint: ${input.title}\nKey idea: ${input.keyIdea}`,
-    },
-    // verify_answer: score the learner's explanation against the key idea.
-    verifyExplanation: {
-      schemas: {
-        input: z.object({ title: z.string(), keyIdea: z.string(), explanation: z.string() }),
-        output: z.object({ score: z.number().min(0).max(100), feedback: z.string() }),
-      },
-      model: "tutor",
-      system:
-        "Grade a learner's own-words explanation against the key idea. Score 0-100 for " +
-        "accuracy and completeness; ignore style. Feedback: one or two sentences naming " +
-        "what is missing or wrong.",
-      prompt: ({ input }) =>
-        [
-          `Checkpoint: ${input.title}`,
-          `Key idea: ${input.keyIdea}`,
-          `Learner's explanation: ${input.explanation}`,
-        ].join("\n"),
     },
     // teach_concept: a simpler, analogy-first re-explanation.
     explainSimply: {
@@ -339,7 +376,7 @@ export const feynmanTutorMachine = agentSetup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "grading",
-          context: { lastScore: output.result.score, lastFeedback: output.result.feedback },
+          context: toVerdict(output.answers.understanding),
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -412,6 +449,8 @@ export interface RunFeynmanTutorOptions {
   topic?: string;
   /** Injected for tests; the direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient;
   /** Scripted learner events, consumed in order on each idle settle; then stdin. */
   humanEvents?: FeynmanHumanEvent[];
   /** Observes each machine transition. */
@@ -433,6 +472,7 @@ export async function runFeynmanTutorExample(
   const {
     topic = "How public-key cryptography works",
     generateText,
+    jevClient,
     onProgress,
     onPrompt,
   } = options;
@@ -440,6 +480,7 @@ export async function runFeynmanTutorExample(
   const progress: string[] = [];
   const shared = {
     executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+    ...(jevClient ? { actors: { verifyExplanation: createVerifyExplanation(jevClient) } } : {}),
     onTransition: (snapshot: FeynmanSnapshot) => {
       const state = getStatePath(snapshot);
       // A resume re-reports the restored state; record each state once per visit.
@@ -487,8 +528,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

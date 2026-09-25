@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
 import { createOpenAiExecutors } from "@statelyai/agent/openai";
-import { triageMachine } from "../triage/index.js";
+import { createMockJevClient } from "../mock-jev.js";
+import { createClassifyTicket, triageMachine } from "../triage/index.js";
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
-import { jokeMachine } from "../joke/index.js";
+import { createRateJoke, jokeMachine } from "../joke/index.js";
 
 // The adapter's own unit tests live in `src/openai/index.test.ts`. These cover
 // the host end to end: real example machines driven by `createOpenAiExecutors`
@@ -43,6 +44,12 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     const result = await runAgent(triageMachine, {
       input: { ticket: "My invoice is wrong." },
       executors: { generateText },
+      // The classifier is a Jev judgment; only the reply reaches the stub.
+      actors: {
+        classifyTicket: createClassifyTicket(
+          createMockJevClient({ category: "billing", sentiment: "negative" }).client,
+        ),
+      },
     });
 
     expect(result.status).toBe("done");
@@ -161,8 +168,9 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
+      // The critic is a Jev score; level 4 of the rubric is a 10/10.
+      actors: { rateJoke: createRateJoke(createMockJevClient({ rating: 4 }).client) },
       executors: {
-        generateText: async () => ({ result: { rating: 9, explanation: "stub" } }),
         streamText: async (request, info) => {
           const seen: string[] = [];
           passes.push(seen);

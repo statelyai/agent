@@ -13,7 +13,15 @@ import {
   toAnthropicTools,
   toDecisionMessages,
 } from "./index.js";
-import { triageMachine, triageSchema } from "../triage/index.js";
+import { createMockJevClient } from "../mock-jev.js";
+import { createClassifyTicket, triageMachine, triageSchema } from "../triage/index.js";
+
+/** Triage's classifier is a Jev judgment; script it so only the reply hits the stub. */
+const jevActors = () => ({
+  classifyTicket: createClassifyTicket(
+    createMockJevClient({ category: "billing", sentiment: "negative" }).client,
+  ),
+});
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 
 // A minimal Standard Schema fixture exposing the optional
@@ -330,14 +338,16 @@ describe("createAnthropicExecutors + runAgent", () => {
     const result = await runAgent(triageMachine, {
       input: { ticket: "My invoice is wrong and I am furious." },
       executors: { generateText },
+      actors: jevActors(),
     });
 
-    // The stub reports 1 input + 1 output token per call, and triage makes two.
+    // The stub reports 1 input + 1 output token per call, and triage makes one
+    // text call (the reply); the classification is a Jev judgment, not a model call.
     expect(result.usage).toMatchObject({
-      modelCalls: 2,
-      inputTokens: 2,
-      outputTokens: 2,
-      totalTokens: 4,
+      modelCalls: 1,
+      inputTokens: 1,
+      outputTokens: 1,
+      totalTokens: 2,
     });
   });
 
@@ -359,6 +369,7 @@ describe("createAnthropicExecutors + runAgent", () => {
     const result = await runAgent(triageMachine, {
       input: { ticket: "My invoice is wrong and I am furious." },
       executors: { generateText },
+      actors: jevActors(),
     });
 
     expect(result.status).toBe("done");

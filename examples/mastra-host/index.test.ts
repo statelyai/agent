@@ -1,15 +1,18 @@
 import { describe, expect, test } from "vitest";
 import { noopObserve } from "@mastra/core/tools";
+import { createMockJevClient } from "../mock-jev.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import { createHost, main, unwrapToolResult } from "./index.js";
 
 const ctx = { observe: noopObserve };
 
-/** The two model calls the machine makes, answered by request name. */
+/** The Jev prompt check: every request judged complete, so no follow-up request runs. */
+const completeJudgment = () => createMockJevClient({ "*": true }).client;
+
+/** The text call the machine makes, answered by request name. */
 function mockExecutors() {
   return createMockModelExecutors({
     text: {
-      evaluatePrompt: { satisfied: true, missing: [], questions: [] },
       draftEmail: {
         to: "team@example.com",
         subject: "Deploy pipeline is faster",
@@ -23,6 +26,7 @@ function mockExecutors() {
 function host() {
   const { startWorkflow, resumeWorkflow, startDraft, resumeDraft, agent } = createHost({
     executors: mockExecutors(),
+    jevClient: completeJudgment(),
   });
   return {
     agent,
@@ -116,7 +120,6 @@ describe("mastra-host", () => {
   test("the injected executors are the ones the tools run with", async () => {
     const markerExecutors = createMockModelExecutors({
       text: {
-        evaluatePrompt: { satisfied: true, missing: [], questions: [] },
         draftEmail: {
           to: "marker@example.com",
           subject: "MARKER SUBJECT",
@@ -124,7 +127,10 @@ describe("mastra-host", () => {
         },
       },
     });
-    const { startDraft } = createHost({ executors: markerExecutors });
+    const { startDraft } = createHost({
+      executors: markerExecutors,
+      jevClient: completeJudgment(),
+    });
 
     const started = await startDraft("Announce the faster deploys.");
     expect(started.status).toBe("pending");

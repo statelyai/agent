@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, expect, test } from "vitest";
 import type { AgentTool } from "@statelyai/agent";
+import { createMockJevClient } from "../mock-jev.js";
 import {
   BOOKINGS,
   customerSupportMachine,
+  findCodeCandidates,
   MAX_CLARIFICATIONS,
   resetBookings,
   runCustomerSupportExample,
@@ -12,16 +14,15 @@ import {
 // `executeAction` writes to BOOKINGS, so each test starts from the fixture.
 beforeEach(resetBookings);
 
-// Mock host: routes on `request.name` (the setupAgent request key). The
-// `classify` request returns a scripted intent; the `answer` request plays the
-// adapter's tool loop — picks the named tool, runs its REAL logic, formats the
-// result. Only the model call is mocked.
+// Mock host: the `answer` request plays the adapter's tool loop — picks the
+// named tool, runs its REAL logic, formats the result. `classify` is a Jev
+// call, scripted by question name (`intent`, `newFlight`, `confirmationCode`)
+// through the real SDK client; the candidate pre-parsing runs for real.
 function executeTool(tool: AgentTool | undefined, input: unknown) {
   return typeof tool === "function" ? tool(input) : tool?.execute?.(input);
 }
 
 interface MockScript {
-  intent: unknown;
   answerTool?: { name: string; input: unknown };
   /** Questions the answer request asks before it answers, in order. */
   asks?: string[];
@@ -30,9 +31,6 @@ interface MockScript {
 function mockGenerateText(script: MockScript) {
   let asked = 0;
   return async (request: { name?: string; tools?: Record<string, AgentTool | undefined> }) => {
-    if (request.name === "classify") {
-      return { result: script.intent };
-    }
     // The answer request now reports whether it actually answered.
     const ask = script.asks?.[asked];
     if (ask !== undefined) {
@@ -46,13 +44,24 @@ function mockGenerateText(script: MockScript) {
   };
 }
 
+/**
+ * The classifier's Jev answers. `newFlight` is always asked (default `none`);
+ * `confirmationCode` only when the message holds 2+ candidate codes.
+ */
+function classifier(answers: { intent: string; newFlight?: string; confirmationCode?: string }) {
+  return createMockJevClient({
+    newFlight: "none",
+    ...answers,
+  });
+}
+
 test("direct-answer path: classify → answer runs a real read-only tool, done in one call", async () => {
   const result = await runCustomerSupportExample({
     query: "What's the baggage policy?",
     generateText: mockGenerateText({
-      intent: { intent: "question" },
       answerTool: { name: "searchPolicies", input: { topic: "baggage" } },
     }),
+    jevClient: classifier({ intent: "question" }).client,
   });
 
   expect(result.settledIdle).toBe(false);
@@ -69,9 +78,9 @@ test("lookupBooking tool reads the sample booking table", async () => {
   const result = await runCustomerSupportExample({
     query: "What's my flight for AB1234?",
     generateText: mockGenerateText({
-      intent: { intent: "question" },
       answerTool: { name: "lookupBooking", input: { confirmationCode: "AB1234" } },
     }),
+    jevClient: classifier({ intent: "question" }).client,
   });
 
   expect(result.message).toContain("Ada Lovelace");
@@ -83,10 +92,10 @@ test("a question it cannot answer alone pauses for the detail instead of ending"
     query: "What's the carry-on baggage allowance on my ticket?",
     replies: ["AB1234"],
     generateText: mockGenerateText({
-      intent: { intent: "question" },
       asks: ["Which booking is this? Please send your confirmation code."],
       answerTool: { name: "lookupBooking", input: { confirmationCode: "AB1234" } },
     }),
+    jevClient: classifier({ intent: "question" }).client,
   });
 
   // The old machine reported `answered` here having answered nothing.
@@ -102,9 +111,9 @@ test("declining to answer ends the turn unresolved, not answered", async () => {
     query: "What's the carry-on baggage allowance on my ticket?",
     replies: [], // the customer says nothing, so the host sends STOP_ASKING
     generateText: mockGenerateText({
-      intent: { intent: "question" },
       asks: ["Which booking is this?"],
     }),
+    jevClient: classifier({ intent: "question" }).client,
   });
 
   expect(result.resolution).toBe("unresolved");
@@ -117,7 +126,8 @@ test("the machine stops asking once its clarification budget is spent", async ()
     query: "What's my allowance?",
     // Always willing to answer: the bound has to come from the machine.
     replies: asks.map((_, index) => `reply ${index + 1}`),
-    generateText: mockGenerateText({ intent: { intent: "question" }, asks }),
+    generateText: mockGenerateText({ asks }),
+    jevClient: classifier({ intent: "question" }).client,
   });
 
   expect(result.resolution).toBe("unresolved");
@@ -131,9 +141,8 @@ test("the machine stops asking once its clarification budget is spent", async ()
 test("sensitive path settles idle with the pending action, label, and legal events", async () => {
   const result = await runCustomerSupportExample({
     query: "Please cancel my booking AB1234.",
-    generateText: mockGenerateText({
-      intent: { intent: "cancel", confirmationCode: "AB1234" },
-    }),
+    generateText: mockGenerateText({}),
+    jevClient: classifier({ intent: "cancel" }).client,
     // approve so the whole round-trip runs, but assert the idle-phase details.
     approve: true,
   });
@@ -156,9 +165,8 @@ test("APPROVE resumes from the persisted snapshot and executes the action", asyn
   const result = await runCustomerSupportExample({
     query: "Please cancel my booking AB1234.",
     approve: true,
-    generateText: mockGenerateText({
-      intent: { intent: "cancel", confirmationCode: "AB1234" },
-    }),
+    generateText: mockGenerateText({}),
+    jevClient: classifier({ intent: "cancel" }).client,
   });
 
   expect(result.resolution).toBe("executed");
@@ -175,9 +183,8 @@ test("an unknown confirmation code fails the turn instead of reporting a change"
   const result = await runCustomerSupportExample({
     query: "Please cancel my booking ZZ9999.",
     approve: true,
-    generateText: mockGenerateText({
-      intent: { intent: "cancel", confirmationCode: "ZZ9999" },
-    }),
+    generateText: mockGenerateText({}),
+    jevClient: classifier({ intent: "cancel" }).client,
   });
 
   expect(result.resolution).toBe("failed");
@@ -197,7 +204,8 @@ test("the advertised cancel starter approves onto a real booking", async () => {
   const result = await runCustomerSupportExample({
     query: cancelStarter,
     approve: true,
-    generateText: mockGenerateText({ intent: { intent: "cancel", confirmationCode: code } }),
+    generateText: mockGenerateText({}),
+    jevClient: classifier({ intent: "cancel" }).client,
   });
 
   expect(result.resolution).toBe("executed");
@@ -209,13 +217,9 @@ test("rebook APPROVE carries the new flight through to execution", async () => {
   const result = await runCustomerSupportExample({
     query: "Move CD5678 to the morning flight.",
     approve: true,
-    generateText: mockGenerateText({
-      intent: {
-        intent: "rebook",
-        confirmationCode: "CD5678",
-        newFlight: "AA106 JFK→LHR, 2026-09-14 09:00",
-      },
-    }),
+    generateText: mockGenerateText({}),
+    // "the morning flight" resolves by SELECTION among CD5678's route alternatives.
+    jevClient: classifier({ intent: "rebook", newFlight: "AA106" }).client,
   });
 
   expect(result.resolution).toBe("executed");
@@ -234,9 +238,8 @@ test("DENY resumes and skips the action, capturing the reason", async () => {
     query: "Please cancel my booking AB1234.",
     approve: false,
     denyReason: "Actually I still need the flight.",
-    generateText: mockGenerateText({
-      intent: { intent: "cancel", confirmationCode: "AB1234" },
-    }),
+    generateText: mockGenerateText({}),
+    jevClient: classifier({ intent: "cancel" }).client,
   });
 
   expect(result.resolution).toBe("denied");
@@ -246,6 +249,67 @@ test("DENY resumes and skips the action, capturing the reason", async () => {
   expect(result.message).toContain("Actually I still need the flight.");
   // The booking is genuinely untouched.
   expect(BOOKINGS.AB1234?.status).toBe("confirmed");
+});
+
+test("classify is one Jev call: intent and newFlight choices over the pre-parsed candidates", async () => {
+  const jev = classifier({ intent: "rebook", newFlight: "AA106" });
+  await runCustomerSupportExample({
+    query: "Move CD5678 to the morning flight.",
+    approve: false,
+    generateText: mockGenerateText({}),
+    jevClient: jev.client,
+  });
+
+  expect(jev.calls).toHaveLength(1);
+  const call = jev.calls[0]!;
+  const state = call.state as { message: string; knownCodes: string[]; flights: { id: string }[] };
+  expect(state.message).toBe("Move CD5678 to the morning flight.");
+  // One candidate code: code takes it, so no confirmationCode question.
+  expect(state.knownCodes).toEqual(["CD5678"]);
+  // Only CD5678's route (JFK→LHR) alternatives are offered.
+  expect(state.flights.map((flight) => flight.id)).toEqual(["AA106", "AA104"]);
+  expect(Object.keys(call.questions)).toEqual(["intent", "newFlight"]);
+  const questions = call.questions as Record<string, { type: string; criteria: object }>;
+  expect(Object.values(questions).every((question) => question.type === "choice")).toBe(true);
+  expect(Object.keys(questions.intent!.criteria)).toEqual(["question", "cancel", "rebook"]);
+  expect(Object.keys(questions.newFlight!.criteria)).toEqual(["AA106", "AA104", "none"]);
+});
+
+test("two candidate codes: Jev picks which span is the confirmation code", async () => {
+  const query = "Move CD5678 onto AA106 please.";
+  expect(findCodeCandidates(query)).toEqual(["CD5678", "AA106"]);
+  const jev = classifier({ intent: "rebook", newFlight: "AA106", confirmationCode: "CD5678" });
+  const result = await runCustomerSupportExample({
+    query,
+    approve: false,
+    generateText: mockGenerateText({}),
+    jevClient: jev.client,
+  });
+
+  const question = jev.calls[0]!.questions.confirmationCode as { type: string; criteria: object };
+  expect(question.type).toBe("choice");
+  expect(Object.keys(question.criteria)).toEqual(["CD5678", "AA106", "none"]);
+  expect(result.pendingAction).toMatchObject({ type: "rebook", confirmationCode: "CD5678" });
+});
+
+test("a sensitive intent without a code or a target flight fails before the approval gate", async () => {
+  const noCode = await runCustomerSupportExample({
+    query: "Please cancel my flight.",
+    generateText: mockGenerateText({}),
+    jevClient: classifier({ intent: "cancel" }).client,
+  });
+  expect(noCode.resolution).toBe("failed");
+  expect(noCode.message).toContain("confirmation code");
+  expect(noCode.progress).not.toContain("confirming");
+
+  const noFlight = await runCustomerSupportExample({
+    query: "Move CD5678 to a better flight.",
+    generateText: mockGenerateText({}),
+    jevClient: classifier({ intent: "rebook", newFlight: "none" }).client,
+  });
+  expect(noFlight.resolution).toBe("failed");
+  expect(noFlight.message).toContain("which scheduled flight");
+  expect(BOOKINGS.CD5678?.flight).toBe("AA100 JFK→LHR, 2026-09-14 18:15");
 });
 
 test("machine exports a runnable definition", () => {

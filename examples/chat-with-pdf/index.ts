@@ -26,24 +26,34 @@
  *     is enforced by the query, not remembered by the model
  *   - `documentId` in context, threaded into every retrieval by the machine
  *   - the page hint is read off the retrieved chunk, never generated
- *   - grading is grounded on the exact chunk that produced the question
+ *   - grading is grounded on the exact chunk that produced the question, and
+ *     the verdict is a Jev judgment (see below), not the text model's say-so
  *   - `choosingDocument` is a real idle state, so an ambiguous corpus cannot be
  *     silently guessed past
  *
  * What stays prose: voice and question formatting (`QUIZ_VOICE`). Models follow
  * that well, and encoding it as states would be ceremony.
  *
+ * Grading is split along the judgment/generation line. `grading` asks TypeSafe
+ * System One (Jev) one `noul`, `correct`, over `{ passage, question, answer }`,
+ * and the answer counts as correct when that probability clears
+ * `CORRECT_THRESHOLD`. `explaining` then asks the text model only for the prose
+ * the learner reads (the expected answer and an explanation), told the verdict
+ * rather than asked for it.
+ *
  * Retrieval is honest keyword scoring over an in-file corpus (same approach as
  * `examples/rag`). A real build swaps `queryPdfContent` for a vector store; the
  * machine shape is unchanged.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/chat-with-pdf/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/chat-with-pdf/index.ts
  */
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { createAsyncLogic } from "xstate";
 import { openai } from "@ai-sdk/openai";
+import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   createAgentSchemas,
   getInteraction,
@@ -89,6 +99,32 @@ const gradeSchema = z.object({
   expected: z.string(),
   explanation: z.string(),
 });
+
+/** An answer counts as correct when Jev's probability that it is clears this. */
+export const CORRECT_THRESHOLD = 0.5;
+
+/**
+ * The verdict as a System One judgment: the passage the question came from,
+ * the question, and the learner's answer are the state; `correct` is one
+ * `noul`. `client` is injected by tests and hosts; omitted, the SDK reads
+ * `TYPESAFE_API_KEY` from the environment.
+ */
+export function createGradeAnswer(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { prompt: string; answer: string; sourceText: string; pageNumber: number }) => ({
+      passage: { page: input.pageNumber, text: input.sourceText },
+      question: input.prompt,
+      answer: input.answer,
+    }),
+    questions: () => ({
+      correct: noul("Is `answer` a correct answer to `question`, according to `passage.text`?", {
+        true: "Right in substance per the passage, even if worded differently.",
+        false: "Wrong, off the point, or not supported by the passage.",
+      }),
+    }),
+  });
+}
 
 /**
  * Sample data: two indexed "documents". Two, not one, so the ambiguous-corpus
@@ -271,6 +307,8 @@ export const chatWithPdfSchemas = createAgentSchemas({
     results: z.array(resultSchema),
     /** What the learner typed for the pending question, awaiting grading. */
     answer: z.string(),
+    /** Jev's verdict on `answer`, awaiting its explanation; `null` otherwise. */
+    verdict: z.boolean().nullable(),
     /** The previous grade, as DATA — the label renders it above the next question. */
     lastGrade: gradedAnswerSchema.nullable(),
     /** Set when retrieval comes back empty; explains an early summary. */
@@ -317,6 +355,8 @@ const agentSetup = setupAgent({
     retrieve: createAsyncLogic<Chunk[], QueryPdfInput>({
       run: async ({ input }) => queryPdfContent(input),
     }),
+    // The verdict: a Jev judgment (see createGradeAnswer).
+    gradeAnswer: createGradeAnswer(),
   },
   requests: {
     writeQuestion: {
@@ -339,21 +379,24 @@ const agentSetup = setupAgent({
           `\nWrite question ${input.questionNumber} from this passage only.`,
         ].join("\n"),
     },
-    gradeAnswer: {
+    // The prose around the verdict Jev already gave: what the passage says
+    // the answer is, and why.
+    explainGrade: {
       schemas: {
         input: z.object({
           prompt: z.string(),
           answer: z.string(),
-          // Grading sees the source passage, so it cannot grade from memory.
+          // The explanation sees the source passage, so it cannot explain from memory.
           sourceText: z.string(),
           pageNumber: z.number(),
+          correct: z.boolean(),
         }),
-        output: gradeSchema,
+        output: gradeSchema.pick({ expected: true, explanation: true }),
       },
       model: "quiz",
       system:
-        "Grade a quiz answer against the source passage ONLY. Be encouraging. " +
-        "Accept answers that are right in substance even if worded differently. " +
+        "A quiz answer has been graded against the source passage. Explain the grade " +
+        "from the passage ONLY. Be encouraging. " +
         "Return `expected` as the answer the passage supports, in one line. " +
         "In the explanation, quote or paraphrase the passage and name the page.",
       prompt: ({ input }) =>
@@ -361,6 +404,7 @@ const agentSetup = setupAgent({
           `Source passage (page ${input.pageNumber}):\n${input.sourceText}`,
           `\nQuestion: ${input.prompt}`,
           `Learner's answer: ${input.answer}`,
+          `Grade: ${input.correct ? "correct" : "incorrect"}`,
         ].join("\n"),
     },
   },
@@ -372,6 +416,14 @@ const agentSetup = setupAgent({
     },
     grading: {
       schemas: { context: chatWithPdfSchemas.context.extend({ pending: askedQuestionSchema }) },
+    },
+    explaining: {
+      schemas: {
+        context: chatWithPdfSchemas.context.extend({
+          pending: askedQuestionSchema,
+          verdict: z.boolean(),
+        }),
+      },
     },
   },
 });
@@ -426,6 +478,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
     pending: null,
     results: [],
     answer: "",
+    verdict: null,
     lastGrade: null,
     exhausted: false,
   }),
@@ -570,6 +623,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
       },
     },
 
+    // The verdict: one Jev `noul` against the threshold.
     grading: {
       invoke: {
         src: "gradeAnswer",
@@ -579,21 +633,37 @@ export const chatWithPdfMachine = agentSetup.createMachine({
           sourceText: context.pending.sourceText,
           pageNumber: context.pending.pageNumber,
         }),
+        onDone: ({ output }) => ({
+          target: "explaining",
+          context: { verdict: output.answers.correct.noul >= CORRECT_THRESHOLD },
+        }),
+        onError: { target: "continuing", context: { pending: null, lastGrade: null } },
+      },
+    },
+
+    // The prose around the verdict. Failing to write it still scores the
+    // answer; the next question just has no feedback above it.
+    explaining: {
+      invoke: {
+        src: "explainGrade",
+        input: ({ context }) => ({
+          prompt: context.pending.prompt,
+          answer: context.answer,
+          sourceText: context.pending.sourceText,
+          pageNumber: context.pending.pageNumber,
+          correct: context.verdict,
+        }),
         onDone: ({ context, output }, enq) => {
-          enq.emit({
-            type: "GRADED",
-            correct: output.result.correct,
-            expected: output.result.expected,
-            explanation: output.result.explanation,
-          });
+          const grade = { correct: context.verdict, ...output.result };
+          enq.emit({ type: "GRADED", ...grade });
           const results = [
             ...context.results,
             {
               pageNumber: context.pending.pageNumber,
               prompt: context.pending.prompt,
               answer: context.answer,
-              correct: output.result.correct,
-              explanation: output.result.explanation,
+              correct: grade.correct,
+              explanation: grade.explanation,
             },
           ];
           return {
@@ -602,15 +672,34 @@ export const chatWithPdfMachine = agentSetup.createMachine({
               results,
               pending: null,
               answer: "",
+              verdict: null,
               lastGrade: {
-                ...output.result,
+                ...grade,
                 pageNumber: context.pending.pageNumber,
                 sourceText: context.pending.sourceText,
               },
             },
           };
         },
-        onError: { target: "continuing", context: { pending: null, lastGrade: null } },
+        onError: ({ context }) => ({
+          target: "continuing",
+          context: {
+            results: [
+              ...context.results,
+              {
+                pageNumber: context.pending.pageNumber,
+                prompt: context.pending.prompt,
+                answer: context.answer,
+                correct: context.verdict,
+                explanation: "",
+              },
+            ],
+            pending: null,
+            answer: "",
+            verdict: null,
+            lastGrade: null,
+          },
+        }),
       },
     },
 
@@ -720,8 +809,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

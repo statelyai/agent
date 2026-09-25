@@ -26,8 +26,8 @@
  *          └──END_SESSION──▶ done
  *
  * What maps to what:
- *   - store.search(namespace)   → `recalling` (a keyword-overlap `createAsyncLogic`
- *                                 over `context.memories`, top `RECALL_LIMIT`)
+ *   - store.search(namespace)   → `recalling` (ONE Jev call, one `noul` per stored
+ *                                 memory; top `RECALL_LIMIT` above `RECALL_THRESHOLD`)
  *   - call_model                → `answering` (request `answer`: reply + the new
  *                                 facts worth remembering, as structured output)
  *   - upsert_memory tool call   → `newMemories` in that structured output; there is
@@ -40,6 +40,12 @@
  *                                 in output `memories` for the host to persist
  *
  * Differences from LangGraph worth calling out:
+ *   - Recall is a JUDGMENT, not a search. The template embeds the message and
+ *     takes the nearest memories. Here `recalling` invokes a TypeSafe System
+ *     One actor (Jev) with the message and the whole store as state and one
+ *     `noul` per memory ("does this fact bear on the message?"). The
+ *     probabilities rank the store; the threshold and `RECALL_LIMIT` are code
+ *     (`searchMemoryStore`). The text model is reserved for `answering`.
  *   - The store is injected, not ambient. There is no module-level store and no
  *     `BaseStore` handle in config: the host passes the user's memories in and
  *     saves `output.memories` back. Cross-thread memory is "start the next run
@@ -55,21 +61,24 @@
  *     `END_SESSION`. (The usual "budget exhausted → failed" rule is for loops
  *     that owe an answer they could not produce; this one owes nothing.)
  *
- * Stand-in: recall is honest keyword overlap over the in-memory list (NOT
- * embeddings, NOT a vector store). Swap the `searchMemories` actor for a
- * semantic search and the machine is unchanged.
+ * Stand-in: the store is an in-memory list, and every recall judges all of
+ * it (at most `MAX_MEMORIES`). An empty store has nothing to judge: the SDK
+ * refuses an empty question set before any request is sent, and `recalling`'s
+ * `onError` answers with nothing recalled, the same as a failed search.
  *
  * Dual-mode: `runLongTermMemoryExample(options?)` takes an injectable
- * `generateText` and scripted human events (tests pass both, so CI needs no
- * API key); the direct run uses real models and stdin.
+ * `generateText`, an injectable Jev client, and scripted human events (tests
+ * pass all three, so CI needs no API key); the direct run uses real models
+ * and stdin.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/long-term-memory/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/long-term-memory/index.ts
  */
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
-import { createAsyncLogic } from "xstate";
 import { openai } from "@ai-sdk/openai";
+import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   getInteraction,
   getStatePath,
@@ -95,59 +104,52 @@ export const RECALL_LIMIT = 3;
 /** Transcript lines the model sees besides the recalled memories. */
 const TRANSCRIPT_TAIL = 6;
 
-/** Content-word stop list for keyword recall. */
-const STOP_WORDS = new Set([
-  "the",
-  "and",
-  "are",
-  "was",
-  "what",
-  "who",
-  "how",
-  "why",
-  "does",
-  "can",
-  "you",
-  "your",
-  "that",
-  "this",
-  "for",
-  "with",
-  "about",
-  "tell",
-  "please",
-  "remind",
-  "remember",
-  "user",
-  "user's",
-  "have",
-  "has",
-  "any",
-]);
+/** A memory is recalled when Jev's probability that it bears on the message clears this. */
+export const RECALL_THRESHOLD = 0.5;
 
-/** Lower-case content words longer than two letters. */
-function contentWords(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .split(/[^a-z']+/)
-      .map((word) => word.replace(/'s$/, ""))
-      .filter((word) => word.length > 2 && !STOP_WORDS.has(word)),
-  );
+/**
+ * store.search as a System One judgment: the message and every stored memory
+ * are the state, and each memory gets its own `noul`. One call, one
+ * probability per memory. `client` is injected by tests and hosts; omitted,
+ * the SDK reads `TYPESAFE_API_KEY` from the environment.
+ */
+export function createSearchMemories(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { message: string; memories: string[] }) => ({
+      message: input.message,
+      memories: input.memories,
+    }),
+    questions: (input) =>
+      Object.fromEntries(
+        input.memories.map((_memory, index) => [
+          `memory${index}`,
+          noul(
+            `Does \`memories[${index}]\` state a fact about the user that bears on answering \`message\`?`,
+            {
+              true: "The reply would be better or more personal for knowing this fact.",
+              false: "The fact is about something else, or only shares a word with the message.",
+            },
+          ),
+        ]),
+      ),
+  });
 }
 
-/** Top-`limit` memories sharing content words with the query, best first. */
-export function searchMemoryStore(memories: string[], query: string, limit: number): string[] {
-  const terms = contentWords(query);
+/**
+ * The recall cut, pure: memories whose relevance clears `RECALL_THRESHOLD`,
+ * most relevant first (newer first on a tie), at most `limit`. `relevance[i]`
+ * is Jev's probability for `memories[i]`.
+ */
+export function searchMemoryStore(
+  memories: string[],
+  relevance: Array<number | undefined>,
+  limit: number,
+): string[] {
   return memories
-    .map((text, index) => {
-      const words = contentWords(text);
-      let score = 0;
-      for (const term of terms) if (words.has(term)) score += 1;
-      return { text, index, score };
-    })
-    .filter((scored) => scored.score > 0)
-    .sort((left, right) => right.score - left.score || right.index - left.index)
+    .map((text, index) => ({ text, index, p: relevance[index] ?? 0 }))
+    .filter((scored) => scored.p >= RECALL_THRESHOLD)
+    .sort((left, right) => right.p - left.p || right.index - left.index)
     .slice(0, limit)
     .map((scored) => scored.text);
 }
@@ -224,11 +226,8 @@ const agentSetup = setupAgent({
     END_SESSION: z.object({}),
   },
   actors: {
-    // store.search: keyword overlap over the injected list (a stand-in for
-    // semantic search), top RECALL_LIMIT.
-    searchMemories: createAsyncLogic<string[], { query: string; memories: string[] }>({
-      run: async ({ input }) => searchMemoryStore(input.memories, input.query, RECALL_LIMIT),
-    }),
+    // store.search: a Jev judgment per memory (see createSearchMemories).
+    searchMemories: createSearchMemories(),
   },
   requests: {
     // call_model: answer with the recalled memories in view, and name any new
@@ -313,16 +312,25 @@ export const longTermMemoryMachine = agentSetup.createMachine({
         END_SESSION: { target: "done" },
       },
     },
-    // store.search before every answer. A search failure degrades to answering
-    // with nothing recalled rather than dropping the message.
+    // store.search before every answer: keep the top RECALL_LIMIT memories
+    // that clear the threshold. A search failure (or an empty store, which has
+    // no questions to ask) degrades to answering with nothing recalled rather
+    // than dropping the message.
     recalling: {
       invoke: {
         src: "searchMemories",
-        input: ({ context }) => ({ query: context.message, memories: context.memories }),
-        onDone: ({ context, output }) => ({
-          target: "answering",
-          context: { recalled: output, recalledTotal: context.recalledTotal + output.length },
-        }),
+        input: ({ context }) => ({ message: context.message, memories: context.memories }),
+        onDone: ({ context, output }) => {
+          const recalled = searchMemoryStore(
+            context.memories,
+            context.memories.map((_memory, index) => output.answers[`memory${index}`]?.noul),
+            RECALL_LIMIT,
+          );
+          return {
+            target: "answering",
+            context: { recalled, recalledTotal: context.recalledTotal + recalled.length },
+          };
+        },
         onError: () => ({ target: "answering", context: { recalled: [] } }),
       },
     },
@@ -408,6 +416,8 @@ export interface RunLongTermMemoryOptions {
   memories?: string[];
   /** Injected for tests; the direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient;
   /** Scripted human events, consumed in order on each idle settle; then stdin. */
   humanEvents?: LongTermMemoryHumanEvent[];
   /** Observes each machine transition. */
@@ -429,11 +439,12 @@ export interface LongTermMemoryResult {
 export async function runLongTermMemoryExample(
   options: RunLongTermMemoryOptions = {},
 ): Promise<LongTermMemoryResult> {
-  const { userId = "demo", memories = [], generateText, onProgress, onReply } = options;
+  const { userId = "demo", memories = [], generateText, jevClient, onProgress, onReply } = options;
   const queued = [...(options.humanEvents ?? [])];
   const progress: string[] = [];
   const shared = {
     executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+    ...(jevClient ? { actors: { searchMemories: createSearchMemories(jevClient) } } : {}),
     onTransition: (snapshot: LongTermMemorySnapshot) => {
       const state = getStatePath(snapshot);
       // A resume re-reports the restored state; record each state once per visit.
@@ -479,8 +490,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

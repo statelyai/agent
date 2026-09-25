@@ -39,6 +39,7 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | `@statelyai/agent/openai`    | Executors over the raw `openai` package                                        |
 | `@statelyai/agent/machines`  | Preset machines: tool loop, sequential, parallel, router, supervisor, handoff  |
 | `@statelyai/agent/otel`      | OpenTelemetry trace handler                                                    |
+| `@statelyai/agent/typesafe`  | `createSystemOneLogic`, TypeSafe System One (Jev) judgments as actors          |
 | `@statelyai/agent/validate`  | JSON workflow config validation                                                |
 
 Core has no runtime dependency on the AI SDK.

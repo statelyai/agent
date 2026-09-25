@@ -1,7 +1,7 @@
 /**
  * Self-Discover — the model composes its own reasoning structure for a task,
- * then follows it. Four model stages in a fixed order, plus one bound the
- * LangGraph version leaves to trust.
+ * then follows it. Four stages in a fixed order, plus one bound the LangGraph
+ * version leaves to trust.
  *
  * The idea (Zhou et al. 2024, "Self-Discover: Large Language Models
  * Self-Compose Reasoning Structures"): instead of one fixed prompting style
@@ -17,41 +17,49 @@
  * Machine shape:
  *
  *   selecting → selectionValid? ─┬─ adapting → structuring → reasoning → done
- *       ▲                        └─ selectionRejected? ─┬─ selecting (retry once)
- *       └───────────────────────────────────────────────┘└─ failed
+ *                                └─ failed (no module clears MODULE_THRESHOLD)
  *
  * What maps to what:
- *   - select    → `selecting` (structured request: `{ modules: string[] }`,
- *                 chosen from the exported `REASONING_MODULES`)
+ *   - select    → `selecting` (ONE Jev call, one `noul` per module in the
+ *                 exported `REASONING_MODULES` — see note), then
+ *                 `selectionValid` (a choice state: top-k above the threshold,
+ *                 or `failed`)
  *   - adapt     → `adapting`
  *   - structure → `structuring`
  *   - reason    → `reasoning` (returns the answer and the filled-in trace)
  *
  * Differences from LangGraph worth calling out:
- *   - The selection is checked. The tutorial passes whatever the select step
- *     returns straight to adapt, so an empty selection, or all thirty-nine
- *     modules, flows through unnoticed. Here the `selectionValid` choice state
- *     requires between 1 and `MAX_SELECTED_MODULES` modules. A selection
- *     outside that range goes to `selectionRejected`, which retries `selecting`
- *     with the problem stated in the prompt, at most `MAX_SELECTION_RETRIES`
- *     time(s), and then lands in `failed`.
- *   - The range is checked by the machine, not by the output schema. A zod
- *     `.min(1).max(5)` would turn a bad selection into a request error; the
- *     choice state turns it into a retry with feedback, visible as a state.
+ *   - Selection is a JUDGMENT, not a generation. The tutorial asks a chat
+ *     model to copy the chosen modules' text back. Here `selecting` invokes a
+ *     TypeSafe System One actor (Jev) with the task and every module as state
+ *     and one `noul` per module ("would `modules[i]` help solve `task`?"). The
+ *     machine keeps the modules whose probability clears `MODULE_THRESHOLD`,
+ *     most probable first, capped at `MAX_SELECTED_MODULES`. No module text
+ *     is retyped, so a selection can only name modules that exist. The text
+ *     model is reserved for adapt, structure, and reason.
+ *   - The selection is checked. The tutorial trusts the select step and passes
+ *     whatever it returns straight to adapt, so an empty selection flows
+ *     through unnoticed. Here the requirement is stated: the `selectionValid`
+ *     choice state needs between 1 and `MAX_SELECTED_MODULES` modules, and
+ *     when no module clears `MODULE_THRESHOLD` the run lands in `failed` with
+ *     a notice naming the threshold. There is no retry: asking Jev the same
+ *     question over the same state would return the same answer.
  *   - Every invoke has an `onError` that lands in `failed` with whatever stages
  *     completed.
  *   - `REASONING_MODULES` is 16 of the paper's 39 modules, shortened, to keep
  *     prompts small. Add the rest and the machine is unchanged.
  *
  * Dual-mode: `runSelfDiscoverExample(options?)` takes an injectable
- * `generateText` (tests pass a scripted mock, so CI needs no API key); the
- * direct run uses real models.
+ * `generateText` and `jevClient` (tests pass scripted mocks, so CI needs no
+ * API key); the direct run uses real models.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/self-discover/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/self-discover/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
+import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
@@ -60,8 +68,8 @@ const models = {
 
 /** The most modules a selection may contain. */
 export const MAX_SELECTED_MODULES = 5;
-/** Times `selecting` may be retried after an out-of-range selection. */
-export const MAX_SELECTION_RETRIES = 1;
+/** A module is selected when Jev's probability that it helps clears this. */
+export const MODULE_THRESHOLD = 0.5;
 
 /** 16 of the paper's 39 generic reasoning modules, shortened. */
 export const REASONING_MODULES: readonly string[] = [
@@ -83,11 +91,49 @@ export const REASONING_MODULES: readonly string[] = [
   "Let's make a step-by-step plan and carry it out with clear notation and explanation.",
 ];
 
+/**
+ * select as a System One judgment: the task and every reasoning module are the
+ * state, and each module gets its own `noul`. One call, one probability per
+ * module, no prose. `client` is injected by tests and hosts; omitted, the SDK
+ * reads `TYPESAFE_API_KEY` from the environment.
+ */
+export function createSelectModules(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { task: string }) => ({ task: input.task, modules: [...REASONING_MODULES] }),
+    questions: () =>
+      Object.fromEntries(
+        REASONING_MODULES.map((_module, index) => [
+          `module${index}`,
+          noul(`Would the reasoning module \`modules[${index}]\` help solve \`task\`?`, {
+            true: "Applying this module moves this particular task toward its answer.",
+            false:
+              "The module does not fit this kind of task, or adds nothing beyond restating it.",
+          }),
+        ]),
+      ),
+  });
+}
+
+/**
+ * The modules that clear `MODULE_THRESHOLD`, most probable first, capped at
+ * `MAX_SELECTED_MODULES` — the top-k of the per-module answers.
+ */
+function pickModules(answers: Record<string, { noul: number } | undefined>): string[] {
+  return REASONING_MODULES.map((module, index) => ({
+    module,
+    probability: answers[`module${index}`]?.noul ?? 0,
+  }))
+    .filter((scored) => scored.probability >= MODULE_THRESHOLD)
+    .sort((left, right) => right.probability - left.probability)
+    .slice(0, MAX_SELECTED_MODULES)
+    .map((scored) => scored.module);
+}
+
 const selfDiscoverContextSchema = z.object({
   task: z.string(),
-  // The latest selection, valid or not: the rejection prompt reads its size.
+  // The modules that cleared the threshold (empty when none did).
   selectedModules: z.array(z.string()),
-  selectionRetries: z.number(),
   adaptedModules: z.string().nullable(),
   reasoningStructure: z.string().nullable(),
   answer: z.string().nullable(),
@@ -122,32 +168,11 @@ const agentSetup = setupAgent({
       },
     },
   },
+  actors: {
+    // select: a Jev judgment per reasoning module (see createSelectModules).
+    selectModules: createSelectModules(),
+  },
   requests: {
-    // select: pick the modules that suit this task.
-    selectModules: {
-      schemas: {
-        input: z.object({
-          task: z.string(),
-          rejectedCount: z.number().nullable(),
-        }),
-        output: z.object({ modules: z.array(z.string()) }),
-      },
-      model: "reasoner",
-      system:
-        "Select the reasoning modules that are crucial for solving the task. Copy each " +
-        `selected module's text exactly. Select at least 1 and at most ${MAX_SELECTED_MODULES}.`,
-      prompt: ({ input }) =>
-        [
-          `Task: ${input.task}`,
-          "",
-          "Reasoning modules:",
-          ...REASONING_MODULES.map((module, i) => `${i + 1}. ${module}`),
-          input.rejectedCount === null
-            ? ""
-            : `\nYour previous selection had ${input.rejectedCount} module(s), which is outside ` +
-              `the allowed range. Select between 1 and ${MAX_SELECTED_MODULES}.`,
-        ].join("\n"),
-    },
     // adapt: rephrase the selected modules for this task.
     adaptModules: {
       schemas: {
@@ -203,7 +228,6 @@ export const selfDiscoverMachine = agentSetup.createMachine({
   context: ({ input }) => ({
     task: input.task,
     selectedModules: [],
-    selectionRetries: 0,
     adaptedModules: null,
     reasoningStructure: null,
     answer: null,
@@ -215,14 +239,10 @@ export const selfDiscoverMachine = agentSetup.createMachine({
     selecting: {
       invoke: {
         src: "selectModules",
-        input: ({ context }) => ({
-          task: context.task,
-          // On a retry, tell the model how far off the last selection was.
-          rejectedCount: context.selectionRetries > 0 ? context.selectedModules.length : null,
-        }),
+        input: ({ context }) => ({ task: context.task }),
         onDone: ({ output }) => ({
           target: "selectionValid",
-          context: { selectedModules: output.result.modules },
+          context: { selectedModules: pickModules(output.answers) },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -230,28 +250,22 @@ export const selfDiscoverMachine = agentSetup.createMachine({
         }),
       },
     },
-    // The bound the tutorial lacks: 1..MAX_SELECTED_MODULES modules.
+    // The bound the tutorial lacks: 1..MAX_SELECTED_MODULES modules. The top-k
+    // pick already caps the count; no module above the threshold ends the run.
     selectionValid: {
       type: "choice",
       choice: ({ context }) =>
         context.selectedModules.length >= 1 &&
         context.selectedModules.length <= MAX_SELECTED_MODULES
           ? { target: "adapting" }
-          : { target: "selectionRejected" },
-    },
-    selectionRejected: {
-      type: "choice",
-      choice: ({ context }) =>
-        context.selectionRetries >= MAX_SELECTION_RETRIES
-          ? {
+          : {
               target: "failed",
               context: {
                 failure:
-                  `selection still had ${context.selectedModules.length} module(s) after ` +
-                  `${MAX_SELECTION_RETRIES} retry (allowed: 1 to ${MAX_SELECTED_MODULES})`,
+                  `no reasoning module cleared MODULE_THRESHOLD (${MODULE_THRESHOLD}); ` +
+                  `a plan needs 1 to ${MAX_SELECTED_MODULES} modules`,
               },
-            }
-          : { target: "selecting", context: { selectionRetries: context.selectionRetries + 1 } },
+            },
     },
     adapting: {
       invoke: {
@@ -334,6 +348,8 @@ export interface RunSelfDiscoverOptions {
   task?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -343,7 +359,7 @@ export interface SelfDiscoverResult {
   reasoningStructure: string;
   selectedModules: string[];
   adaptedModules: string;
-  /** `done`, or `failed` when the selection stayed out of range or a call failed. */
+  /** `done`, or `failed` when no module cleared the threshold or a call failed. */
   finalState: string;
   progress: string[];
 }
@@ -355,6 +371,7 @@ export async function runSelfDiscoverExample(
   const {
     task = "Alice, Bob, and Carol each own one pet: a cat, a dog, or a fish. Alice is allergic to fur. Bob's pet cannot live in water. Carol does not own the dog. Who owns which pet?",
     generateText,
+    jevClient,
     onProgress,
   } = options;
 
@@ -364,6 +381,7 @@ export async function runSelfDiscoverExample(
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
+    ...(jevClient ? { actors: { selectModules: createSelectModules(jevClient) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -379,8 +397,8 @@ export async function runSelfDiscoverExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

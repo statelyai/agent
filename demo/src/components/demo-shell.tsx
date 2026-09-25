@@ -17,7 +17,7 @@ import {
   type ExampleSummary,
   type InspectionInfo,
 } from "@/lib/example-library";
-import { humanizeEventType, MISSING_KEY_MESSAGE } from "@/lib/machine-ui";
+import { humanizeEventType, missingKeyMessage, type RequiredKey } from "@/lib/machine-ui";
 import {
   declareScenarioMachine,
   getApiKeyStatus,
@@ -149,14 +149,17 @@ export function DemoShell() {
     };
   }, []);
 
-  // Every run needs a model key on the server. Unknown until this resolves;
-  // only a confirmed `false` blocks runs.
+  // Every run needs both model keys on the server (OpenAI and TypeSafe).
+  // Unknown until this resolves; only a confirmed `false` blocks runs.
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  const [missingKeys, setMissingKeys] = useState<RequiredKey[]>([]);
   useEffect(() => {
     let cancelled = false;
     void getApiKeyStatus().then(
       (status) => {
-        if (!cancelled) setHasApiKey(status.hasApiKey);
+        if (cancelled) return;
+        setHasApiKey(status.hasApiKey);
+        setMissingKeys(status.missing);
       },
       () => {},
     );
@@ -516,7 +519,12 @@ export function DemoShell() {
 
   const textPolicy: TextPolicy = (() => {
     if (missingKey) {
-      return { visible: false, placeholder: "", submitLabel: "", note: MISSING_KEY_MESSAGE };
+      return {
+        visible: false,
+        placeholder: "",
+        submitLabel: "",
+        note: missingKeyMessage(missingKeys),
+      };
     }
     if (isScenario) {
       return {

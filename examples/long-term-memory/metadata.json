@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "A chat assistant that recalls relevant facts about the user before each answer and saves new ones after it. The store is machine input and output rather than an ambient handle, recall and saving are their own states, the store is capped at MAX_MEMORIES with the oldest evicted, and the session is bounded at MAX_TURNS messages."
+    "purpose": "A chat assistant that has Jev judge which stored facts about the user bear on each message before answering, and saves new ones after it. The store is machine input and output rather than an ambient handle, recall and saving are their own states, the store is capped at MAX_MEMORIES with the oldest evicted, and the session is bounded at MAX_TURNS messages."
   },
   "starters": [
     {

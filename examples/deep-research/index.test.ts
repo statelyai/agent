@@ -1,5 +1,9 @@
 import { expect, test } from "vitest";
-import { runDeepResearchExample } from "./index.js";
+import { createMockJevClient } from "../mock-jev.js";
+import { SUFFICIENCY_THRESHOLD, runDeepResearchExample } from "./index.js";
+
+/** The reflection is a Jev judgment: one `sufficient` noul per round, in order. */
+const reflector = (...sufficient: Array<boolean | number>) => createMockJevClient({ sufficient });
 
 /** A researcher result: one finding plus the page it came from. */
 const found = (query: string, index: number) => ({
@@ -18,6 +22,7 @@ test("plans, researches in parallel, reflects, and writes", async () => {
   let researched = 0;
   const output = await runDeepResearchExample({
     question: "durability",
+    jevClient: reflector(true).client,
     generateText: async (request) => {
       calls.push(request.name);
       if (request.name === "planResearch") {
@@ -27,7 +32,6 @@ test("plans, researches in parallel, reflects, and writes", async () => {
         researched += 1;
         return { result: found(request.prompt ?? "", researched) };
       }
-      if (request.name === "reflect") return { result: { sufficient: true, gaps: "" } };
       return { result: "Durable workflows combine snapshots [1], events [2], and retries [3]." };
     },
   });
@@ -50,6 +54,7 @@ test("the writer is handed the ledger and the findings' markers", async () => {
   let writerPrompt = "";
   await runDeepResearchExample({
     question: "durability",
+    jevClient: reflector(true).client,
     generateText: async (request) => {
       if (request.name === "planResearch") return { result: { queries: ["one", "two"] } };
       if (request.name === "research") {
@@ -63,7 +68,6 @@ test("the writer is handed the ledger and the findings' markers", async () => {
           },
         };
       }
-      if (request.name === "reflect") return { result: { sufficient: true, gaps: "" } };
       writerPrompt = request.prompt ?? "";
       return { result: "Report [1]" };
     },
@@ -77,6 +81,7 @@ test("the writer is handed the ledger and the findings' markers", async () => {
 test("generic search URLs never reach the ledger", async () => {
   const output = await runDeepResearchExample({
     question: "durability",
+    jevClient: reflector(true).client,
     generateText: async (request) => {
       if (request.name === "planResearch") return { result: { queries: ["one", "two"] } };
       if (request.name === "research") {
@@ -91,7 +96,6 @@ test("generic search URLs never reach the ledger", async () => {
           },
         };
       }
-      if (request.name === "reflect") return { result: { sufficient: true, gaps: "" } };
       return { result: "Report [1]" };
     },
   });
@@ -100,9 +104,10 @@ test("generic search URLs never reach the ledger", async () => {
 });
 
 test("runs one targeted follow-up round when reflection finds a gap", async () => {
-  let reflections = 0;
+  const jev = reflector(false, true);
   const output = await runDeepResearchExample({
     question: "durability",
+    jevClient: jev.client,
     generateText: async (request) => {
       if (request.name === "planResearch") {
         return { result: { queries: ["one", "two", "three"] } };
@@ -115,16 +120,12 @@ test("runs one targeted follow-up round when reflection finds a gap", async () =
           },
         };
       }
-      if (request.name === "reflect") {
-        reflections++;
-        return { result: { sufficient: reflections === 2, gaps: "failure recovery" } };
-      }
       return { result: "Final report [1]" };
     },
   });
 
   expect(output.rounds).toBe(2);
-  expect(reflections).toBe(2);
+  expect(jev.calls).toHaveLength(2);
   // The ledger survives the follow-up round instead of restarting with it.
   expect(output.sourceLedger).toBe("[1] Page — https://example.com/a/b");
 });
@@ -133,6 +134,7 @@ test("a researcher failure counts as a settlement, so collecting cannot hang", a
   let researched = 0;
   const output = await runDeepResearchExample({
     question: "durability",
+    jevClient: reflector(true).client,
     generateText: async (request) => {
       if (request.name === "planResearch") return { result: { queries: ["one", "two"] } };
       if (request.name === "research") {
@@ -141,7 +143,6 @@ test("a researcher failure counts as a settlement, so collecting cannot hang", a
         if (researched === 1) throw new Error("search backend down");
         return { result: found("two", 1) };
       }
-      if (request.name === "reflect") return { result: { sufficient: true, gaps: "" } };
       return { result: "Report [1]" };
     },
   });
@@ -169,4 +170,51 @@ test("a failed request ends the run in `failed`, naming the reason", async () =>
   expect(states.at(-1)).toBe("failed");
   expect(output.failure).toMatch(/planResearch failed/);
   expect(output.report).toBe("");
+});
+
+test("reflection asks Jev one noul over the findings, and the threshold decides another round", async () => {
+  const planned: Array<string | undefined> = [];
+  const run = (sufficient: number) => {
+    const jev = reflector(sufficient, 1);
+    return runDeepResearchExample({
+      question: "durability",
+      jevClient: jev.client,
+      generateText: async (request) => {
+        if (request.name === "planResearch") {
+          planned.push(request.prompt);
+          return { result: { queries: ["one", "two"] } };
+        }
+        if (request.name === "research") {
+          return {
+            result: {
+              finding: "snapshots persist state",
+              sources: [{ title: "Page", url: "https://example.com/a/b", quote: "q" }],
+            },
+          };
+        }
+        return { result: "Report [1]" };
+      },
+    }).then((output) => ({ output, jev }));
+  };
+
+  // Exactly at the threshold: sufficient, one round.
+  const enough = await run(SUFFICIENCY_THRESHOLD);
+  expect(enough.output.rounds).toBe(1);
+  expect(enough.jev.calls).toHaveLength(1);
+  const call = enough.jev.calls[0]!;
+  expect(call.state).toEqual({
+    question: "durability",
+    findings: ["snapshots persist state [1]", "snapshots persist state [1]"],
+  });
+  expect(Object.keys(call.questions)).toEqual(["sufficient"]);
+  expect(call.questions.sufficient!.type).toBe("noul");
+
+  // Just under it: a second round, and the planner is handed the findings.
+  planned.length = 0;
+  const short = await run(SUFFICIENCY_THRESHOLD - 0.01);
+  expect(short.output.rounds).toBe(2);
+  expect(short.jev.calls).toHaveLength(2);
+  expect(planned[0]).toContain("Coverage feedback: none");
+  expect(planned[1]).toContain("do not answer the question comprehensively");
+  expect(planned[1]).toContain("- snapshots persist state [1]");
 });

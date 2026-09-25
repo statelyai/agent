@@ -5,7 +5,7 @@
  *
  * Three views of the same runs, so the numbers can be put back on the graph:
  * - operation: did drafting produce an acceptable draft (accepted on send)?
- * - path: clarification turns, revisions, model calls, edge traversals
+ * - path: clarification turns, revisions, model calls, Jev judgments, edge traversals
  * - outcome: sent, and did the send rule (a real recipient) ever break?
  *
  * The simulated user is deliberately dumb and deterministic: it answers
@@ -13,10 +13,12 @@
  * mentions every required fact, and otherwise asks for the missing one. It
  * never judges tone, so a "worse" draft here means a draft missing facts.
  *
- * Live, from `demo/`: OPENAI_API_KEY=... pnpm exec tsx src/lib/email-drafter-compare.ts
+ * Live, from `demo/`:
+ * OPENAI_API_KEY=... TYPESAFE_API_KEY=... pnpm exec tsx src/lib/email-drafter-compare.ts
  * Writes demo/results/email-drafter/comparison.json.
  */
 import type { AnyStateMachine, SnapshotFrom } from "xstate";
+import type { TypeSafeClient } from "@typesafe-ai/sdk";
 import {
   type AgentRequestExecutors,
   type AgentTraceEvent,
@@ -24,7 +26,7 @@ import {
   getStatePath,
   runAgent,
 } from "@statelyai/agent";
-import { emailDrafterV1Machine } from "@/agents/email-drafter-v1";
+import { createEvaluatePrompt, emailDrafterV1Machine } from "@/agents/email-drafter-v1";
 import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
 import { hasRecipient } from "@/agents/email-draft";
 
@@ -120,7 +122,10 @@ export interface RunMetrics {
   /** Every question the workflow raised, blocking (v1) or alongside the draft (v2). */
   clarifications: string[];
   revisions: number;
+  /** Text-model calls (`request.start`). Jev judgments are counted in `jevCalls`. */
   modelCalls: number;
+  /** System One (Jev) judgments: one per entry into v1's `evaluating`. */
+  jevCalls: number;
   /** Sum over every model call, or `null` if any call did not report usage. */
   totalTokens: number | null;
   /** The draft mentioned every required fact when the user sent it. */
@@ -145,6 +150,7 @@ export interface MachineSummary {
     clarificationsRaised: number;
     revisions: number;
     modelCalls: number;
+    jevCalls: number;
     totalTokens: number | null;
     accepted: number;
     sent: number;
@@ -196,6 +202,8 @@ export async function runCase(
   machine: AnyStateMachine,
   emailCase: EmailCase,
   executors: Partial<AgentRequestExecutors>,
+  /** Injected by tests; omitted, Jev's client reads `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient,
 ): Promise<RunMetrics> {
   const metrics: RunMetrics = {
     caseId: emailCase.id,
@@ -204,6 +212,7 @@ export async function runCase(
     clarifications: [],
     revisions: 0,
     modelCalls: 0,
+    jevCalls: 0,
     totalTokens: null,
     acceptedDraft: false,
     sent: false,
@@ -232,6 +241,7 @@ export async function runCase(
         metrics.edges[key] = (metrics.edges[key] ?? 0) + 1;
       }
       if (previous !== current) metrics.path.push(current);
+      if (previous !== current && current === "evaluating") metrics.jevCalls += 1;
       if (current === "sending") {
         const draft = (event.snapshot as SnapshotFrom<typeof emailDrafterV2Machine>).context.draft;
         if (!hasRecipient(draft)) metrics.sendRuleViolations += 1;
@@ -240,7 +250,13 @@ export async function runCase(
     }
   };
 
-  let result = await runAgent(machine, { input: { prompt: emailCase.prompt }, executors, onTrace });
+  const actors = jevClient ? { actors: { evaluatePrompt: createEvaluatePrompt(jevClient) } } : {};
+  let result = await runAgent(machine, {
+    input: { prompt: emailCase.prompt },
+    executors,
+    ...actors,
+    onTrace,
+  });
 
   let guard = 0;
   while (result.status === "idle" && guard++ < 30) {
@@ -291,10 +307,18 @@ export async function runCase(
         throw new Error(`Simulated user has no policy for state "${state}"`);
     }
     if (!accepted.has(event.type)) {
-      throw new Error(`"${event.type}" is not accepted in "${state}" (accepted: ${[...accepted].join(", ")})`);
+      throw new Error(
+        `"${event.type}" is not accepted in "${state}" (accepted: ${[...accepted].join(", ")})`,
+      );
     }
 
-    result = await runAgent(machine, { snapshot, event: event as never, executors, onTrace });
+    result = await runAgent(machine, {
+      snapshot,
+      event: event as never,
+      executors,
+      ...actors,
+      onTrace,
+    });
   }
 
   // A partial sum would read as a total, so any call without usage voids it.
@@ -318,6 +342,7 @@ export async function runCase(
 export async function runComparison(
   executors: Partial<AgentRequestExecutors>,
   selectedCases: EmailCase[] = cases,
+  jevClient?: TypeSafeClient,
 ): Promise<MachineSummary[]> {
   const machines = [
     { name: "v1", machine: emailDrafterV1Machine },
@@ -328,7 +353,7 @@ export async function runComparison(
   for (const { name, machine } of machines) {
     const runs: RunMetrics[] = [];
     for (const emailCase of selectedCases) {
-      runs.push(await runCase(machine, emailCase, executors));
+      runs.push(await runCase(machine, emailCase, executors, jevClient));
     }
     summaries.push(summarize(name, runs));
   }
@@ -344,6 +369,7 @@ function summarize(machine: string, runs: RunMetrics[]): MachineSummary {
     clarificationsRaised: 0,
     revisions: 0,
     modelCalls: 0,
+    jevCalls: 0,
     totalTokens: null,
     accepted: 0,
     sent: 0,
@@ -354,6 +380,7 @@ function summarize(machine: string, runs: RunMetrics[]): MachineSummary {
     totals.clarificationsRaised += run.clarifications.length;
     totals.revisions += run.revisions;
     totals.modelCalls += run.modelCalls;
+    totals.jevCalls += run.jevCalls;
     totals.accepted += run.acceptedDraft ? 1 : 0;
     totals.sent += run.sent ? 1 : 0;
     totals.sendRuleViolations += run.sendRuleViolations;
@@ -392,6 +419,7 @@ export function renderComparison(summaries: MachineSummary[]): string {
   row("clarifications raised", (s) => s.totals.clarificationsRaised);
   row("revisions", (s) => s.totals.revisions);
   row("model calls", (s) => s.totals.modelCalls);
+  row("Jev judgments", (s) => s.totals.jevCalls);
   row("total tokens", (s) => s.totals.totalTokens ?? "n/a");
   row("accepted drafts", (s) => `${s.totals.accepted}/${s.totals.runs}`);
   row("sent", (s) => `${s.totals.sent}/${s.totals.runs}`);
@@ -409,7 +437,8 @@ export function renderComparison(summaries: MachineSummary[]): string {
 /** The evidence a proposer sees for one machine: totals, categories, edges, per-run paths. */
 export function renderEvidence(summary: MachineSummary): string {
   const lines = [`Machine: ${summary.machine}`, "", "Totals:"];
-  for (const [key, value] of Object.entries(summary.totals)) lines.push(`- ${key}: ${String(value)}`);
+  for (const [key, value] of Object.entries(summary.totals))
+    lines.push(`- ${key}: ${String(value)}`);
   lines.push("", "By category:");
   for (const [category, bucket] of Object.entries(summary.byCategory)) {
     lines.push(
@@ -423,7 +452,7 @@ export function renderEvidence(summary: MachineSummary): string {
   lines.push("", "Per-run paths:");
   for (const run of summary.runs) {
     lines.push(
-      `- ${run.caseId} (${run.category}): ${run.path.join(" > ")} | clarificationTurns=${run.clarificationTurns} revisions=${run.revisions} modelCalls=${run.modelCalls} accepted=${run.acceptedDraft}`,
+      `- ${run.caseId} (${run.category}): ${run.path.join(" > ")} | clarificationTurns=${run.clarificationTurns} revisions=${run.revisions} modelCalls=${run.modelCalls} jevCalls=${run.jevCalls} accepted=${run.acceptedDraft}`,
     );
   }
   return lines.join("\n");
@@ -453,8 +482,8 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run the comparison.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run the comparison.");
     process.exit(1);
   }
   main().catch((error) => {

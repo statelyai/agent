@@ -20,9 +20,12 @@
  *
  * Executors are resolved per Durable Object, not at import: Workers have no
  * ambient `process.env`, so the provider is constructed from the `env` binding.
- * Set `OPENAI_API_KEY` (via `.dev.vars` locally — `dev:live` writes it from the
- * repo `.env` — or `wrangler secret` in production). Without it a turn fails
- * with a 500 naming the missing binding; there is no fallback model.
+ * The same goes for the drafter's prompt check, a Jev judgment (TypeSafe
+ * System One): its client is built from the `TYPESAFE_API_KEY` binding and
+ * passed as an `actors` override. Set `OPENAI_API_KEY` and `TYPESAFE_API_KEY`
+ * (via `.dev.vars` locally — `dev:live` writes them from the repo `.env` — or
+ * `wrangler secret` in production). Without them a turn fails with a 500
+ * naming the missing binding; there is no fallback model.
  *
  * HTTP protocol (one Agent instance per `:name`, i.e. one conversation):
  *   GET  /agents/email-drafter/:name        -> current view (state, interaction,
@@ -42,6 +45,7 @@
 import type { EventFrom } from "xstate";
 import { Agent, routeAgentRequest, type Connection } from "agents";
 import { createOpenAI } from "@ai-sdk/openai";
+import { TypeSafeClient } from "@typesafe-ai/sdk";
 import {
   getAcceptedEvents,
   getInteraction,
@@ -52,13 +56,19 @@ import {
   type RunAgentResult,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { emailDrafter, emailDrafterSchemas } from "../email-drafter/agent-logic.js";
+import {
+  createEvaluatePrompt,
+  emailDrafter,
+  emailDrafterSchemas,
+} from "../email-drafter/agent-logic.js";
 import { createDurableObjectEventLogStore } from "./event-log-store.js";
 
 interface Env {
   EmailDrafter: DurableObjectNamespace<EmailDrafter>;
   /** Required for any turn: the model provider's key. */
   OPENAI_API_KEY?: string;
+  /** Required for any turn: the key for the Jev prompt check. */
+  TYPESAFE_API_KEY?: string;
 }
 
 type Turn = RunAgentResult<typeof emailDrafter>;
@@ -80,6 +90,7 @@ const messageOf = (error: unknown) =>
 export class EmailDrafter extends Agent<Env> {
   #store: AgentEventLogStore | undefined;
   #executors: AgentRequestExecutors | undefined;
+  #judgments: { evaluatePrompt: ReturnType<typeof createEvaluatePrompt> } | undefined;
   /**
    * The last settled turn — a cache of what the log already implies, held only
    * for this DO's lifetime. Undefined after an eviction (and before the first
@@ -102,10 +113,26 @@ export class EmailDrafter extends Agent<Env> {
     const openai = createOpenAI({ apiKey: this.env.OPENAI_API_KEY });
     return createAiSdkExecutors({
       models: {
-        promptEvaluator: openai("gpt-5.4-mini"),
+        followUpWriter: openai("gpt-5.4-mini"),
         emailDrafter: openai("gpt-5.4-mini"),
       },
     });
+  }
+
+  /**
+   * The drafter's Jev judgment, bound to this Durable Object's
+   * `TYPESAFE_API_KEY` for the same reason as the executors. A test stubs this
+   * with a scripted client.
+   */
+  createJudgments(): { evaluatePrompt: ReturnType<typeof createEvaluatePrompt> } {
+    if (!this.env.TYPESAFE_API_KEY) {
+      throw new Error("Set the TYPESAFE_API_KEY binding (.dev.vars or `wrangler secret`).");
+    }
+    return {
+      evaluatePrompt: createEvaluatePrompt(
+        new TypeSafeClient({ apiKey: this.env.TYPESAFE_API_KEY }),
+      ),
+    };
   }
 
   /** Lazy so the DO's storage is bound before the table is created. */
@@ -134,6 +161,7 @@ export class EmailDrafter extends Agent<Env> {
    */
   async #run(event?: EventFrom<typeof emailDrafter>): Promise<Turn> {
     this.#executors ??= this.createExecutors();
+    this.#judgments ??= this.createJudgments();
 
     const result = await runAgent(emailDrafter, {
       store: this.#log,
@@ -145,6 +173,7 @@ export class EmailDrafter extends Agent<Env> {
       // it, the machine ignores it and the turn reports `result.ignored`.
       ...(event !== undefined ? { event } : {}),
       executors: this.#executors,
+      actors: this.#judgments,
       onTransition: (snapshot) => {
         this.broadcast(
           JSON.stringify({

@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "A pro speaker and a con speaker take turns on a motion for a set number of rounds, then a judge scores both sides and names a winner. Turn order and the round count are machine edges with a MAX_ROUNDS ceiling in the input schema, so no speaker can end the debate or speak out of turn, and nothing depends on a prompt telling the model how many rounds are left."
+    "purpose": "A pro speaker and a con speaker take turns on a motion for a set number of rounds, then a Jev judge scores both sides and names a winner. Turn order and the round count are machine edges with a MAX_ROUNDS ceiling in the input schema, so no speaker can end the debate or speak out of turn, and nothing depends on a prompt telling the model how many rounds are left."
   },
   "starters": [
     {

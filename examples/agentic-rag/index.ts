@@ -35,12 +35,20 @@
  *     call). The model's choice is a typed machine event, not a message whose
  *     `tool_calls` field a router has to inspect.
  *   - retrieve (ToolNode)    → `retrieving` (keyword actor over the sample posts)
- *   - grade_documents        → `grading` (one request, one relevant/irrelevant
- *                              verdict), its `onDone` choosing generate or rewrite
+ *   - grade_documents        → `grading` (ONE Jev call, one `noul` per passage),
+ *                              its `onDone` choosing generate or rewrite
  *   - rewrite                → `rewriting` (request), then back to `deciding`
  *   - generate               → `generating`
  *
  * Differences from LangGraph worth calling out:
+ *   - Grading is a JUDGMENT, not a generation. LangGraph asks a chat model for
+ *     one structured yes/no over all passages. Here `grading` invokes a
+ *     TypeSafe System One actor (Jev): the question and the passages are the
+ *     state, and each passage gets its own `noul` ("does it help answer the
+ *     question?"). Passages whose probability clears `RELEVANCE_THRESHOLD` are
+ *     kept; none kept → rewrite. The RETRIEVE / ANSWER choice stays an
+ *     `agent.decide`: it is the model choosing its next move, not a judgment
+ *     over evidence.
  *   - The loop is bounded. In LangGraph nothing stops the agent from calling
  *     the retriever forever except `recursion_limit`, which raises an error.
  *     Here `RETRIEVE` is guarded: once `retrievals >= MAX_RETRIEVALS`, the
@@ -55,15 +63,17 @@
  *   - Every invoke has an `onError` that lands in `failed`.
  *
  * Dual-mode: `runAgenticRagExample(options?)` takes injectable `generateText`
- * and `decide` executors (tests pass scripted mocks, so CI needs no API key);
- * the direct run uses real models.
+ * and `decide` executors and a `jevClient` (tests pass scripted mocks, so CI
+ * needs no API key); the direct run uses real models.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/agentic-rag/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/agentic-rag/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
+import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
@@ -154,6 +164,37 @@ function scoreDocument(query: string, text: string): number {
   return score;
 }
 
+/** A passage is kept when Jev's probability that it helps clears this. */
+export const RELEVANCE_THRESHOLD = 0.5;
+
+/**
+ * grade_documents as a System One judgment: the question and every retrieved
+ * passage are the state, and each passage gets its own `noul`. `client` is
+ * injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ */
+export function createGradeDocuments(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { question: string; documents: string[] }) => ({
+      question: input.question,
+      documents: input.documents,
+    }),
+    questions: (input) =>
+      Object.fromEntries(
+        input.documents.map((_doc, index) => [
+          `doc${index}`,
+          noul(
+            `Does \`documents[${index}]\` contain information that directly helps answer \`question\`?`,
+            {
+              true: "The passage states facts the answer would be built from.",
+              false: "The passage is off-topic, or only shares vocabulary with the question.",
+            },
+          ),
+        ]),
+      ),
+  });
+}
+
 /** Numbered document list for prompts. */
 function renderDocuments(documents: string[]): string {
   return documents.map((doc, i) => `[${i + 1}] ${doc}`).join("\n");
@@ -228,6 +269,8 @@ const agentSetup = setupAgent({
     },
   },
   actors: {
+    // grade_documents: a Jev judgment per passage (see createGradeDocuments).
+    gradeDocuments: createGradeDocuments(),
     // The retriever tool: keyword search over the sample posts. Top 2.
     retrieve: createAsyncLogic<string[], { keywords: string }>({
       run: async ({ input }) =>
@@ -239,21 +282,6 @@ const agentSetup = setupAgent({
     }),
   },
   requests: {
-    // grade_documents: one binary verdict over the retrieved passages.
-    gradeDocuments: {
-      schemas: {
-        input: z.object({ question: z.string(), documents: z.array(z.string()) }),
-        output: z.object({ relevant: z.boolean() }),
-      },
-      model: "rag",
-      system:
-        "You grade retrieved passages for relevance to a question. Return relevant=true " +
-        "if the passages contain keywords or meaning that help answer it.",
-      prompt: ({ input }) =>
-        [`Question: ${input.question}`, "", "Passages:", renderDocuments(input.documents)].join(
-          "\n",
-        ),
-    },
     // rewrite: reason about the intent and produce a better question.
     rewriteQuestion: {
       schemas: {
@@ -379,15 +407,20 @@ export const agenticRagMachine = agentSetup.createMachine({
         }),
       },
     },
-    // grade_documents: relevant → generate; irrelevant → rewrite.
+    // grade_documents: keep the passages that clear the threshold; any kept →
+    // generate, none → rewrite.
     grading: {
       invoke: {
         src: "gradeDocuments",
         input: ({ context }) => ({ question: context.question, documents: context.documents }),
-        onDone: ({ output }) =>
-          output.result.relevant
-            ? { target: "generating" }
-            : { target: "rewriting", context: { documents: [] } },
+        onDone: ({ context, output }) => {
+          const relevant = context.documents.filter(
+            (_doc, i) => (output.answers[`doc${i}`]?.noul ?? 0) >= RELEVANCE_THRESHOLD,
+          );
+          return relevant.length > 0
+            ? { target: "generating", context: { documents: relevant } }
+            : { target: "rewriting", context: { documents: [] } };
+        },
         onError: ({ event }) => ({
           target: "failed",
           context: { failure: `gradeDocuments failed: ${String(event.error)}` },
@@ -456,6 +489,8 @@ export interface RunAgenticRagOptions {
   /** Injected for tests; direct run supplies real model executors. */
   generateText?: AgentRequestExecutors["generateText"];
   decide?: AgentRequestExecutors["decide"];
+  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -479,6 +514,7 @@ export async function runAgenticRagExample(
     question = "What does Lilian Weng say about the types of agent memory?",
     generateText,
     decide,
+    jevClient,
     onProgress,
   } = options;
 
@@ -488,6 +524,7 @@ export async function runAgenticRagExample(
   const result = await runAgent(agenticRagMachine, {
     input: { question },
     executors,
+    ...(jevClient ? { actors: { gradeDocuments: createGradeDocuments(jevClient) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -503,8 +540,8 @@ export async function runAgenticRagExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

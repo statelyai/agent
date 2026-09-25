@@ -5,13 +5,20 @@ import {
   runAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
-import { MAX_REVISIONS, emailDrafter } from "./agent-logic.js";
+import { createMockJevClient } from "../mock-jev.js";
+import {
+  ASSESSMENT_THRESHOLD,
+  MAX_REVISIONS,
+  REQUIRED_DETAILS,
+  createEvaluatePrompt,
+  emailDrafter,
+} from "./agent-logic.js";
 
 /** Routes on the request's declared name, never on prompt text. */
 const executors = {
   generateText: async ({ name }) =>
-    name === "evaluatePrompt"
-      ? { result: { satisfied: true, missing: [], questions: [] } }
+    name === "writeFollowUps"
+      ? { result: { questions: ["Who should receive it?"] } }
       : {
           result: {
             to: "team@example.com",
@@ -21,14 +28,21 @@ const executors = {
         },
 } satisfies Partial<AgentRequestExecutors>;
 
+/** The prompt check is a Jev judgment: every `noul` scripted to the same answer. */
+const judgment = (complete: boolean | number) => ({
+  evaluatePrompt: createEvaluatePrompt(createMockJevClient({ "*": complete }).client),
+});
+const actors = judgment(true);
+
 /** Start the machine and deliver the opening request as free text. */
 async function openAtReview() {
-  const opened = await runAgent(emailDrafter, { input: undefined, executors });
+  const opened = await runAgent(emailDrafter, { input: undefined, executors, actors });
   if (opened.status !== "idle") throw new Error(`Expected idle, got ${opened.status}`);
   return runAgent(emailDrafter, {
     snapshot: opened.snapshot,
     event: eventFromInteraction(opened.snapshot, { text: "Tell the team deploys are faster." }),
     executors,
+    actors,
   });
 }
 
@@ -53,6 +67,7 @@ test("the revision budget stops rendering REQUEST_CHANGES once it is spent", asy
       snapshot: result.snapshot,
       event: eventFromInteraction(result.snapshot, { text: "Shorter, please." }),
       executors,
+      actors,
     });
   }
 
@@ -66,17 +81,15 @@ test("the revision budget stops rendering REQUEST_CHANGES once it is spent", asy
 });
 
 test("a failed request ends in `failed`, with the reason in the output", async () => {
-  const opened = await runAgent(emailDrafter, { input: undefined, executors });
+  const opened = await runAgent(emailDrafter, { input: undefined, executors, actors });
   if (opened.status !== "idle") throw new Error(`Expected idle, got ${opened.status}`);
 
   const result = await runAgent(emailDrafter, {
     snapshot: opened.snapshot,
     event: eventFromInteraction(opened.snapshot, { text: "Anything." }),
-    executors: {
-      generateText: async () => {
-        throw new Error("model offline");
-      },
-    },
+    executors,
+    // A Jev client with no scripted answers: the judgment call fails.
+    actors: { evaluatePrompt: createEvaluatePrompt(createMockJevClient({}).client) },
   });
 
   expect(result.status).toBe("done");
@@ -93,6 +106,7 @@ test("SEND then END finishes with the sent email and no failure", async () => {
     snapshot: reviewing.snapshot,
     event: eventFromInteraction(reviewing.snapshot, { type: "SEND" }),
     executors,
+    actors,
   });
   if (sent.status !== "idle") throw new Error("expected the 'draft another?' pause");
 
@@ -100,6 +114,7 @@ test("SEND then END finishes with the sent email and no failure", async () => {
     snapshot: sent.snapshot,
     event: eventFromInteraction(sent.snapshot, { type: "END" }),
     executors,
+    actors,
   });
 
   expect(done.status).toBe("done");
@@ -107,4 +122,71 @@ test("SEND then END finishes with the sent email and no failure", async () => {
   expect(done.output.sentEmails).toHaveLength(1);
   expect(done.output.sentEmails[0]?.to).toBe("team@example.com");
   expect(done.output.failure).toBeNull();
+});
+
+test("the prompt check asks Jev one noul per required detail, and the threshold decides what is missing", async () => {
+  const jev = createMockJevClient({
+    satisfied: 0.9,
+    recipient: ASSESSMENT_THRESHOLD - 0.01,
+    "*": ASSESSMENT_THRESHOLD,
+  });
+  const requests: string[] = [];
+  const opened = await runAgent(emailDrafter, { input: undefined, executors });
+  if (opened.status !== "idle") throw new Error(`Expected idle, got ${opened.status}`);
+
+  const result = await runAgent(emailDrafter, {
+    snapshot: opened.snapshot,
+    event: eventFromInteraction(opened.snapshot, { text: "Tell them deploys are faster." }),
+    executors: {
+      generateText: async (request) => {
+        requests.push(request.name ?? request.model);
+        return executors.generateText(request);
+      },
+    },
+    actors: { evaluatePrompt: createEvaluatePrompt(jev.client) },
+  });
+
+  expect(jev.calls).toHaveLength(1);
+  const call = jev.calls[0]!;
+  expect(call.state).toEqual({
+    request: "Tell them deploys are faster.",
+    requiredDetails: REQUIRED_DETAILS,
+  });
+  expect(Object.keys(call.questions)).toEqual(["satisfied", ...Object.keys(REQUIRED_DETAILS)]);
+  expect(Object.values(call.questions).every((question) => question.type === "noul")).toBe(true);
+
+  // Just under the threshold is missing; exactly at it is stated. Only then
+  // does the text model word a follow-up, and the human is asked.
+  if (result.status !== "idle") throw new Error(`Expected idle, got ${result.status}`);
+  expect(result.snapshot.matches("needsMoreInfo")).toBe(true);
+  expect(result.snapshot.context.assessment).toEqual({
+    satisfied: false,
+    missing: ["recipient"],
+    questions: ["Who should receive it?"],
+  });
+  expect(requests).toEqual(["writeFollowUps"]);
+});
+
+test("a complete request skips the follow-up request and goes straight to drafting", async () => {
+  const requests: string[] = [];
+  const opened = await runAgent(emailDrafter, { input: undefined, executors, actors });
+  if (opened.status !== "idle") throw new Error(`Expected idle, got ${opened.status}`);
+
+  const result = await runAgent(emailDrafter, {
+    snapshot: opened.snapshot,
+    event: eventFromInteraction(opened.snapshot, {
+      text: "Email team@example.com: deploys are faster.",
+    }),
+    executors: {
+      generateText: async (request) => {
+        requests.push(request.name ?? request.model);
+        return executors.generateText(request);
+      },
+    },
+    actors: judgment(ASSESSMENT_THRESHOLD),
+  });
+
+  if (result.status !== "idle") throw new Error(`Expected idle, got ${result.status}`);
+  expect(result.snapshot.matches("reviewing")).toBe(true);
+  expect(requests).toEqual(["draftEmail"]);
 });

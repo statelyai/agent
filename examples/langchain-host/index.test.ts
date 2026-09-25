@@ -19,6 +19,7 @@ import {
   useModel,
   type ToolResult,
 } from "./index.js";
+import { createMockJevClient } from "../mock-jev.js";
 import { ScriptedChatModel, type ScriptedEntry, type ScriptedResponse } from "./scripted-model.js";
 
 /**
@@ -30,17 +31,22 @@ import { ScriptedChatModel, type ScriptedEntry, type ScriptedResponse } from "./
 const jokeScript: ScriptedResponse[] = [
   // 1. `telling` streams the first joke.
   { text: "A state machine walks into a bar. It refuses the transition." },
-  // 2. `rating` asks for structured output — the `{ result }` provider schema.
-  { structured: { result: { rating: 6, explanation: "Setup is longer than the punchline." } } },
-  // 3. `telling` again: the machine always takes one improvement pass, so the
+  // 2. `telling` again: the machine always takes one improvement pass, so the
   //    writer gets the first joke plus the critique and rewrites it.
   { text: "A state machine walks into a bar. Illegal transition." },
-  // 4. `rating` scores the rewrite.
-  { structured: { result: { rating: 9, explanation: "Tight setup, legal punchline." } } },
-  // 5. `deciding` forces one event tool. Event tools are named
+  // 3. `deciding` forces one event tool. Event tools are named
   //    `send_event_<EVENT_TYPE>`, so ending the loop is `send_event_END`.
   { toolCall: { name: "send_event_END" } },
 ];
+
+/**
+ * The joke's rating is a Jev `score`, not a LangChain call: level 2 (6/10) for
+ * the first joke, level 3 (8/10) for the rewrite.
+ */
+const jokeRatings = () => createMockJevClient({ rating: [2, 3] }).client;
+
+/** The drafter's prompt check is a Jev judgment: every request judged complete. */
+const completeJudgment = () => createMockJevClient({ "*": true }).client;
 
 /** The handle from the most recent tool result — what a live model would read. */
 function lastHandle(messages: BaseMessage[]): string {
@@ -66,10 +72,12 @@ const agentScript: ScriptedEntry[] = [
   { text: "Sent one email to team@example.com about the faster deploy pipeline." },
 ];
 
-/** A scripted LangChain model for the machine *inside* the tools. */
+/**
+ * A scripted LangChain model for the machine *inside* the tools. `evaluating`
+ * is a Jev judgment (`completeJudgment`), so the only LangChain call per round
+ * is the draft.
+ */
 const machineScript: ScriptedResponse[] = [
-  // `evaluating` — the prompt evaluator's structured verdict.
-  { structured: { result: { satisfied: true, missing: [], questions: [] } } },
   // `drafting` — the draft itself.
   {
     structured: {
@@ -133,10 +141,10 @@ describe("langchain-host: request mapping", () => {
 });
 
 describe("langchain-host: Direction A (LangChain model as executor)", () => {
-  test("one scripted model drives streamText, structured generateText, and decide", async () => {
+  test("one scripted model drives streamText and decide while Jev rates", async () => {
     const model = new ScriptedChatModel({ responses: jokeScript });
     const chunks: string[] = [];
-    const output = await runJokeDemo(model, (chunk) => chunks.push(chunk));
+    const output = await runJokeDemo(model, (chunk) => chunks.push(chunk), jokeRatings());
 
     // Two jokes: the first attempt, then the improvement pass the machine
     // always takes before the decision.
@@ -144,12 +152,12 @@ describe("langchain-host: Direction A (LangChain model as executor)", () => {
     expect(output.firstJoke).toBe(output.jokes[0]);
     expect(output.joke).toBe(output.jokes[1]);
     expect(output.revisionNotice).toContain("First attempt scored 6/10");
-    expect(output.lastRating).toBe(9);
+    expect(output.lastRating).toBe(8);
     // Streaming really streamed: more than one chunk, reassembling to both jokes.
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.join("")).toBe(output.jokes.join(""));
-    // Five model calls: tell + rate twice, then decide (tool call).
-    expect(model.calls).toBe(5);
+    // Three LangChain calls: tell twice, then decide (tool call).
+    expect(model.calls).toBe(3);
   });
 
   test("the machine, not the model, ends the loop — decide returns the chosen event", async () => {
@@ -192,7 +200,7 @@ describe("langchain-host: Direction A (LangChain model as executor)", () => {
 
 describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
   test("start_workflow drafts and pauses for review", async () => {
-    useModel(machineModel());
+    useModel(machineModel(), completeJudgment());
     const result = await startDraft("Tell the team the deploy pipeline is twice as fast.");
 
     expect(result.status).toBe("pending");
@@ -206,7 +214,7 @@ describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
   });
 
   test("the two tools run the machine to done and return JSON", async () => {
-    const { started, finished } = await runBridgeDemo(machineModel());
+    const { started, finished } = await runBridgeDemo(machineModel(), completeJudgment());
     expect(started.status).toBe("pending");
     if (finished.status !== "done") throw new Error("expected done");
     expect(finished.sentEmails).toHaveLength(1);
@@ -214,7 +222,10 @@ describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
   });
 
   test("revision text is delivered through the interaction's declared textEvent", async () => {
-    useModel(new ScriptedChatModel({ responses: [...machineScript, machineScript[1]!] }));
+    useModel(
+      new ScriptedChatModel({ responses: [...machineScript, machineScript[0]!] }),
+      completeJudgment(),
+    );
     const started = await startDraft("Announce the faster deploys.");
     if (started.status !== "pending") throw new Error("expected pending");
 
@@ -228,7 +239,7 @@ describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
   });
 
   test("an event the state does not handle is ignored", async () => {
-    useModel(machineModel());
+    useModel(machineModel(), completeJudgment());
     const started = await startDraft("Announce the faster deploys.");
     if (started.status !== "pending") throw new Error("expected pending");
 
@@ -239,7 +250,7 @@ describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
   });
 
   test("an unknown handle is rejected", async () => {
-    useModel(machineModel());
+    useModel(machineModel(), completeJudgment());
     await expect(resumeDraft("draft-nope", "SEND")).rejects.toThrow(/Unknown handle/);
   });
 
@@ -247,6 +258,7 @@ describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
     const agent = createEmailHostAgent(
       new ScriptedChatModel({ responses: agentScript }),
       machineModel(),
+      completeJudgment(),
     );
     const result = await agent.invoke({
       messages: [new HumanMessage("Tell the team deploys are faster, send it, then we're done.")],
@@ -265,14 +277,19 @@ describe("langchain-host: Direction B (machine as a LangChain tool)", () => {
 });
 
 describe("langchain-host: playthrough", () => {
-  test("both directions run end to end against scripted LangChain models", async () => {
-    const jokeOutput = await runJokeDemo(new ScriptedChatModel({ responses: jokeScript }));
-    expect(jokeOutput.lastRating).toBe(9);
+  test("both directions run end to end against scripted LangChain models and Jev", async () => {
+    const jokeOutput = await runJokeDemo(
+      new ScriptedChatModel({ responses: jokeScript }),
+      undefined,
+      jokeRatings(),
+    );
+    expect(jokeOutput.lastRating).toBe(8);
 
     const reply = await runAgentLoopDemo(
       new ScriptedChatModel({ responses: agentScript }),
       machineModel(),
       "Tell the team deploys are faster, send it, then we're done.",
+      completeJudgment(),
     );
     expect(reply).toContain("team@example.com");
   });

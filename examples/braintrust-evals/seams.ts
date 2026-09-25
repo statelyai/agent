@@ -14,24 +14,31 @@
  * simulated user, and the slicing. What stays here is the vendor's business —
  * the datasets, the scorers, and the `Eval()` wiring.
  *
- * The drafter has three seams:
- * - `clarify` — prompt → assessment (`evaluatePrompt`). Does it notice a
- *   missing recipient, i.e. does the machine go to `needsMoreInfo`?
+ * The drafter has three seams, one per text request:
+ * - `clarify` — missing details → follow-up questions (`writeFollowUps`).
+ *   Does it ask the human about each gap?
  * - `draft` — prompt + clarifications → draft (`draftEmail`, first call).
  * - `revise` — draft + revision request → new draft (`draftEmail`, second call).
+ *
+ * WHETHER to ask is not a seam: it is a Jev judgment (TypeSafe System One),
+ * a typed probability per required detail, not a text request, so `runSeam`
+ * does not route it. `runSeamCase` takes the Jev client instead: the test
+ * scripts it, the live run asks the real one. The branch that judgment picks
+ * is scored end to end in `./index.ts` (`complete-prompt-drafts-directly`).
  *
  * Each is its own `Eval()`/experiment, so a vendor tracks per-seam scores over
  * time instead of one blended number.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/braintrust-evals/seams.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/braintrust-evals/seams.ts
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic } from "xstate";
+import type { TypeSafeClient } from "@typesafe-ai/sdk";
 import { matchesTrajectory, runSeam } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import type { SeamRef, SeamScriptEntry, SeamTurn, TrajectoryMatch } from "@statelyai/agent/testing";
-import { emailDrafter, models } from "../email-drafter/agent-logic.js";
+import { createEvaluatePrompt, emailDrafter, models } from "../email-drafter/agent-logic.js";
 
 type DrafterEvent = EventFromLogic<typeof emailDrafter>;
 
@@ -41,9 +48,7 @@ interface EmailDraft {
   body: string;
 }
 
-interface Assessment {
-  satisfied: boolean;
-  missing: string[];
+interface FollowUps {
   questions: string[];
 }
 
@@ -106,15 +111,21 @@ function respondFor(input: SeamCaseInput) {
   };
 }
 
-/** Runs one row through `runSeam` and flattens it into JSON an eval row can carry. */
+/**
+ * Runs one row through `runSeam` and flattens it into JSON an eval row can
+ * carry. `jevClient` answers the prompt check; omitted, the SDK reads
+ * `TYPESAFE_API_KEY`.
+ */
 export async function runSeamCase(
   input: SeamCaseInput,
   candidate: AgentRequestExecutors["generateText"] | null,
+  jevClient?: TypeSafeClient,
 ): Promise<SeamOutcome> {
   const run = await runSeam(emailDrafter, {
     scripts: input.scripts,
     seam: input.seam,
     ...(candidate ? { candidate } : {}),
+    ...(jevClient ? { actors: { evaluatePrompt: createEvaluatePrompt(jevClient) } } : {}),
     respond: respondFor(input),
   });
 
@@ -144,8 +155,8 @@ export interface SeamExpectation {
   events: string[];
   /** Substrings the seam's own answer must contain, lowercased. */
   mentions?: string[];
-  /** For the `clarify` seam: whether the prompt should have been judged complete. */
-  satisfied?: boolean;
+  /** For the `clarify` seam: the fewest questions that cover the gaps. */
+  questionCount?: number;
   /** For draft seams: the recipient the draft must be addressed to. */
   to?: string;
 }
@@ -175,20 +186,19 @@ export function scoreSeamEvents(output: SeamOutcome, expected: SeamExpectation):
   };
 }
 
-/** The seam's own answer: did `evaluatePrompt` judge the prompt correctly? */
-export function scoreAssessment(output: SeamOutcome, expected: SeamExpectation): Score {
-  const assessment = output.seamOutput as Assessment | undefined;
-  const text = JSON.stringify(assessment ?? {}).toLowerCase();
+/** The seam's own answer: did `writeFollowUps` ask about every gap? */
+export function scoreFollowUps(output: SeamOutcome, expected: SeamExpectation): Score {
+  const questions = (output.seamOutput as FollowUps | undefined)?.questions ?? [];
+  const text = questions.join("\n").toLowerCase();
   const checks = [
-    typeof assessment?.satisfied === "boolean",
-    assessment?.satisfied === expected.satisfied,
+    questions.length > 0 && questions.every((question) => question.trim() !== ""),
+    questions.length >= (expected.questionCount ?? 1),
     (expected.mentions ?? []).every((term) => text.includes(term)),
-    assessment?.satisfied === true || (assessment?.questions.length ?? 0) > 0,
   ];
   return {
-    name: "assessment",
+    name: "follow_ups",
     score: checks.filter(Boolean).length / checks.length,
-    metadata: { satisfied: assessment?.satisfied, missing: assessment?.missing },
+    metadata: { questions },
   };
 }
 
@@ -216,12 +226,10 @@ export interface SeamRow {
   metadata: { case: string };
 }
 
-const VAGUE_ASSESSMENT: Assessment = {
-  satisfied: false,
-  missing: ["recipient"],
-  questions: ["Who should receive it?"],
+const RECIPIENT_QUESTION: FollowUps = { questions: ["Who should receive it?"] };
+const EVERY_GAP_QUESTIONS: FollowUps = {
+  questions: ["Who should receive it?", "What is it about?", "What should it say?"],
 };
-const COMPLETE_ASSESSMENT: Assessment = { satisfied: true, missing: [], questions: [] };
 const DRAFT: EmailDraft = {
   to: "team@example.com",
   subject: "Deploy pipeline is twice as fast",
@@ -236,45 +244,48 @@ const COMPLETE_PROMPT =
   "Email team@example.com with subject 'Deploy pipeline is twice as fast' telling them the " +
   "deploy pipeline now runs in half the time, and that details are in the thread.";
 
-/** Seam 1: prompt → clarifications. The seam is the only `evaluatePrompt` call. */
+/**
+ * Seam 1: missing details → follow-up questions. The seam is the first
+ * `writeFollowUps` call, which runs only after the judgment found a gap.
+ */
 export const clarifySeam: SeamRow[] = [
   {
-    metadata: { case: "vague-prompt-must-ask" },
+    metadata: { case: "asks-about-the-missing-recipient" },
     input: {
       prompt: "Tell them the deploy pipeline is twice as fast now.",
       details: "Send it to team@example.com.",
       changes: null,
       scripts: {
-        evaluatePrompt: [VAGUE_ASSESSMENT, COMPLETE_ASSESSMENT],
+        writeFollowUps: [RECIPIENT_QUESTION],
         draftEmail: [DRAFT],
       },
-      seam: { request: "evaluatePrompt", occurrence: 0 },
+      seam: { request: "writeFollowUps", occurrence: 0 },
     },
     expected: {
-      // A prompt with no recipient must send the machine to `needsMoreInfo`.
+      // The questions land at `needsMoreInfo`, the answer goes back through
+      // the judgment, and the run drafts.
       statePath: ["needsMoreInfo", "evaluating", "drafting", "reviewing"],
       events: ["MORE_INFO", "SEND", "END"],
-      satisfied: false,
-      mentions: ["recipient"],
+      questionCount: 1,
     },
   },
   {
-    metadata: { case: "complete-prompt-must-not-ask" },
+    metadata: { case: "asks-about-every-gap" },
     input: {
-      prompt: COMPLETE_PROMPT,
+      prompt: "Send an update.",
       details: null,
       changes: null,
       scripts: {
-        evaluatePrompt: [COMPLETE_ASSESSMENT],
+        writeFollowUps: [EVERY_GAP_QUESTIONS],
         draftEmail: [DRAFT],
       },
-      seam: { request: "evaluatePrompt", occurrence: 0 },
+      seam: { request: "writeFollowUps", occurrence: 0 },
     },
     expected: {
-      // Straight to drafting: no clarification round.
-      statePath: ["drafting", "reviewing", "sending", "sent"],
-      events: ["SEND", "END"],
-      satisfied: true,
+      // Nothing to go on: the user declines, so the run drafts anyway.
+      statePath: ["needsMoreInfo", "drafting", "reviewing"],
+      events: ["DRAFT_ANYWAY", "SEND", "END"],
+      questionCount: 2,
     },
   },
 ];
@@ -288,7 +299,6 @@ export const draftSeam: SeamRow[] = [
       details: null,
       changes: null,
       scripts: {
-        evaluatePrompt: [COMPLETE_ASSESSMENT],
         draftEmail: [DRAFT],
       },
       seam: { request: "draftEmail", occurrence: 0 },
@@ -307,7 +317,7 @@ export const draftSeam: SeamRow[] = [
       details: "Send it to team@example.com.",
       changes: null,
       scripts: {
-        evaluatePrompt: [VAGUE_ASSESSMENT, COMPLETE_ASSESSMENT],
+        writeFollowUps: [RECIPIENT_QUESTION],
         draftEmail: [DRAFT],
       },
       seam: { request: "draftEmail", occurrence: 0 },
@@ -330,7 +340,6 @@ export const reviseSeam: SeamRow[] = [
       details: null,
       changes: "Add that we ship the change on Friday.",
       scripts: {
-        evaluatePrompt: [COMPLETE_ASSESSMENT],
         emailDrafter: [DRAFT, REVISED_DRAFT],
       },
       seam: { request: "draftEmail", occurrence: 1 },
@@ -348,9 +357,9 @@ export const reviseSeam: SeamRow[] = [
 export const seams = [
   {
     id: "clarify",
-    title: "prompt -> clarifications",
+    title: "missing details -> follow-up questions",
     rows: clarifySeam,
-    scorers: [scoreSeamStatePath, scoreSeamEvents, scoreAssessment],
+    scorers: [scoreSeamStatePath, scoreSeamEvents, scoreFollowUps],
   },
   {
     id: "draft",
@@ -369,11 +378,15 @@ export const seams = [
 // ─── Braintrust wiring: one experiment per seam ───
 
 export async function main() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("Set OPENAI_API_KEY to run the seam evals: the seam call hits the real model.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    throw new Error(
+      "Set OPENAI_API_KEY and TYPESAFE_API_KEY to run the seam evals: the seam call hits the " +
+        "real model, and the prompt check is a live Jev judgment.",
+    );
   }
   const upload = Boolean(process.env.BRAINTRUST_API_KEY);
-  // The seam under test hits the real model; every other call replays its script.
+  // The seam under test hits the real model; every other text call replays its
+  // script. The Jev judgment is live (the SDK reads TYPESAFE_API_KEY).
   const candidate = createAiSdkExecutors({ models }).generateText;
 
   console.log(

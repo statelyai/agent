@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { lintAgentMachine } from "@statelyai/agent/testing";
+import { createMockJevClient } from "../mock-jev.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   MAX_REGENERATIONS,
@@ -34,11 +35,19 @@ const fastPlan = {
   tasks: [task("T1", 3), task("T2", 5, ["T1"]), task("T3", 3, ["T1"]), task("T4", 4, ["T1"])],
 };
 const cyclicPlan = { tasks: [task("T1", 2, ["T2"]), task("T2", 2, ["T1"])] };
-const risk = { risk: "medium", mitigation: "Parallelize testing." };
+const mitigation = { mitigation: "Parallelize testing." };
 
 /** Mock ONLY the model, by request name; validation and scheduling run for real. */
 function scripted(text: Record<string, unknown[]>) {
-  return createMockModelExecutors({ text: { assessRisk: [risk], ...text } });
+  return createMockModelExecutors({ text: { suggestMitigation: [mitigation], ...text } });
+}
+
+/** The runner with Jev's risk judgment scripted to "medium" unless a test passes its own. */
+function plan(options: Parameters<typeof runProjectPlannerExample>[0]) {
+  return runProjectPlannerExample({
+    jevClient: createMockJevClient({ risk: "medium" }).client,
+    ...options,
+  });
 }
 
 test("critical path: each task starts when its last dependency finishes", () => {
@@ -59,7 +68,7 @@ test("critical path: each task starts when its last dependency finishes", () => 
 });
 
 test("on time: the first plan fits the deadline", async () => {
-  const result = await runProjectPlannerExample({
+  const result = await plan({
     deadlineDays: 30,
     generateText: scripted({ generateTasks: [slowPlan] }).generateText,
   });
@@ -87,13 +96,14 @@ test("on time: the first plan fits the deadline", async () => {
     "validatingGraph",
     "scheduling",
     "assessingRisk",
+    "suggestingMitigation",
     "done",
   ]);
 });
 
 test("one replan shortens the plan to fit", async () => {
   const executors = scripted({ generateTasks: [slowPlan], replanTasks: [fastPlan] });
-  const result = await runProjectPlannerExample({
+  const result = await plan({
     deadlineDays: 10,
     generateText: executors.generateText,
   });
@@ -112,7 +122,7 @@ test("one replan shortens the plan to fit", async () => {
 
 test("a cycle is sent back for regeneration, then scheduled", async () => {
   const executors = scripted({ generateTasks: [cyclicPlan], regenerateTasks: [fastPlan] });
-  const result = await runProjectPlannerExample({ generateText: executors.generateText });
+  const result = await plan({ generateText: executors.generateText });
 
   expect(result).toMatchObject({ outcome: "done", projectDays: 8 });
   expect(result.progress.slice(0, 5)).toEqual([
@@ -130,7 +140,7 @@ test("a cycle is sent back for regeneration, then scheduled", async () => {
 
 test("an invalid graph after MAX_REGENERATIONS ends in failed", async () => {
   const executors = scripted({ generateTasks: [cyclicPlan], regenerateTasks: [cyclicPlan] });
-  const result = await runProjectPlannerExample({ generateText: executors.generateText });
+  const result = await plan({ generateText: executors.generateText });
 
   expect(result).toMatchObject({ outcome: "failed", onTime: false, projectDays: null });
   expect(result.summary).toContain(`still invalid after ${MAX_REGENERATIONS} regeneration(s)`);
@@ -143,7 +153,7 @@ test("an invalid graph after MAX_REGENERATIONS ends in failed", async () => {
 test("replan budget exhausted: failed with the best schedule found", async () => {
   const mediumPlan = { tasks: [task("T1", 5), task("T2", 7, ["T1"])] };
   const executors = scripted({ generateTasks: [slowPlan], replanTasks: [mediumPlan, slowPlan] });
-  const result = await runProjectPlannerExample({
+  const result = await plan({
     deadlineDays: 5,
     generateText: executors.generateText,
   });
@@ -164,18 +174,18 @@ test("replan budget exhausted: failed with the best schedule found", async () =>
 test("tasks are capped at MAX_TASKS; zero tasks or a model error is failed", async () => {
   const many = { tasks: Array.from({ length: MAX_TASKS + 3 }, (_, i) => task(`T${i + 1}`, 1)) };
   const executors = scripted({ generateTasks: [many] });
-  const capped = await runProjectPlannerExample({ generateText: executors.generateText });
+  const capped = await plan({ generateText: executors.generateText });
   expect(capped.summary.split("\n").filter((line) => line.includes(": day "))).toHaveLength(
     MAX_TASKS,
   );
 
-  const empty = await runProjectPlannerExample({
+  const empty = await plan({
     generateText: scripted({ generateTasks: [{ tasks: [] }] }).generateText,
   });
   expect(empty).toMatchObject({ outcome: "failed" });
   expect(empty.summary).toContain("no tasks");
 
-  const broken = await runProjectPlannerExample({
+  const broken = await plan({
     generateText: scripted({
       generateTasks: [
         () => {
@@ -193,7 +203,7 @@ test("starters behave as their labels advertise", async () => {
     .starters as Array<{ label: string; input: { goal: string; deadlineDays: number } }>;
   // The same 25-day first plan for every starter; the deadline decides the branch.
   for (const starter of starters) {
-    const result = await runProjectPlannerExample({
+    const result = await plan({
       ...starter.input,
       generateText: scripted({ generateTasks: [slowPlan], replanTasks: [fastPlan] }).generateText,
     });
@@ -205,6 +215,46 @@ test("starters behave as their labels advertise", async () => {
       expect(result.onTime).toBe(true);
     }
   }
+});
+
+test("assessingRisk asks Jev one choice over the computed schedule; the deadline, not the label, routes", async () => {
+  const jev = createMockJevClient({ risk: "high" });
+  const executors = scripted({ generateTasks: [slowPlan] });
+  const result = await plan({
+    deadlineDays: 30,
+    generateText: executors.generateText,
+    jevClient: jev.client,
+  });
+
+  expect(jev.calls).toHaveLength(1);
+  const call = jev.calls[0]!;
+  expect(call.state).toEqual({
+    goal: "Ship a mobile app MVP for iOS and Android",
+    schedule: [
+      "T1 Task T1: day 0–5",
+      "T2 Task T2: day 5–15",
+      "T3 Task T3: day 5–8",
+      "T4 Task T4: day 15–25",
+    ],
+    projectDays: 25,
+    deadlineDays: 30,
+  });
+  expect(Object.keys(call.questions)).toEqual(["risk"]);
+  const question = call.questions.risk!;
+  expect(question.type).toBe("choice");
+  expect(question.type === "choice" && Object.keys(question.criteria)).toEqual([
+    "low",
+    "medium",
+    "high",
+  ]);
+  // The judged label reaches the output and the mitigation request...
+  expect(result.risk).toBe("high");
+  const mitigationInput = executors.calls.find((c) => c.name === "suggestMitigation")!.input as {
+    risk: string;
+  };
+  expect(mitigationInput.risk).toBe("high");
+  // ...but a "high" plan that fits the deadline is still done, with no replan.
+  expect(result).toMatchObject({ outcome: "done", onTime: true, replans: 0 });
 });
 
 test("lintAgentMachine is clean", () => {

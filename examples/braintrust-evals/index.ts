@@ -11,9 +11,11 @@
  *   XState transitions through `onTransition`.
  * - `token_budget` — `result.usage`, summed across the run's resume legs.
  *
- The model is real: set `OPENAI_API_KEY`. `runDrafterCase` takes its executors
- * as an argument, so the test drives the same dataset and scorers over a mock
- * model instead — only the executors change.
+ * The models are real: `OPENAI_API_KEY` for the text requests (follow-up
+ * questions, the draft) and `TYPESAFE_API_KEY` for the Jev judgment that
+ * decides whether the prompt is complete. `runDrafterCase` takes its executors
+ * and Jev client as arguments, so the test drives the same dataset and scorers
+ * over a mock model and a scripted Jev client instead — only those change.
  *
  * Braintrust: `Eval()` runs locally with `noSendLogs: true` and prints a local
  * summary, so the eval runs with no Braintrust account. Set `BRAINTRUST_API_KEY`
@@ -23,15 +25,16 @@
  * This file scores whole runs. `./seams.ts` scores ONE transition at a time:
  * same machine, routed executors, one `Eval()` per seam.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/braintrust-evals/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/braintrust-evals/index.ts
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic, Snapshot, SnapshotFrom } from "xstate";
+import type { TypeSafeClient } from "@typesafe-ai/sdk";
 import { getStatePath, runAgent } from "@statelyai/agent";
 import { matchesTrajectory } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { emailDrafter, models } from "../email-drafter/agent-logic.js";
+import { createEvaluatePrompt, emailDrafter, models } from "../email-drafter/agent-logic.js";
 
 type DrafterEvent = EventFromLogic<typeof emailDrafter>;
 type DrafterSnapshot = SnapshotFrom<typeof emailDrafter>;
@@ -110,13 +113,18 @@ function nextUserEvent(
  * Runs one dataset row to completion and collects everything the scorers need.
  *
  * The machine pauses for the human, so a run is several `runAgent` legs chained
- * by native persisted snapshots and events. Usage is summed across legs.
+ * by native persisted snapshots and events. Usage is summed across legs; it
+ * counts text-model calls, so the Jev judgment is outside the token budget.
+ * `jevClient` answers the prompt check; omitted, the SDK reads
+ * `TYPESAFE_API_KEY`.
  */
 export async function runDrafterCase(
   drafterCase: DrafterCase,
   executors: Partial<AgentRequestExecutors>,
+  jevClient?: TypeSafeClient,
   maxLegs = 12,
 ): Promise<DrafterOutcome> {
+  const actors = jevClient ? { evaluatePrompt: createEvaluatePrompt(jevClient) } : undefined;
   const statePath: string[] = [];
   const eventTrajectory: string[] = [];
   let snapshot: Snapshot<unknown> | undefined;
@@ -137,6 +145,7 @@ export async function runDrafterCase(
     const result = await runAgent(emailDrafter, {
       ...(snapshot ? { snapshot, event } : { event }),
       executors,
+      ...(actors ? { actors } : {}),
       onTransition: (next, causedBy) => {
         if (snapshot && (causedBy as { type: string }).type === "@xstate.init") return;
         statePath.push(getStatePath(next));
@@ -276,6 +285,7 @@ export const dataset: {
       statePath: [
         "prompting",
         "evaluating",
+        "clarifying",
         "needsMoreInfo",
         "evaluating",
         "drafting",
@@ -287,7 +297,8 @@ export const dataset: {
       eventTrajectory: ["@xstate.init", "PROMPT_SUBMITTED", "MORE_INFO", "SEND", "END"],
       to: "team@example.com",
       sentCount: 1,
-      maxTokens: 900,
+      // Two text calls: the follow-up questions and the draft.
+      maxTokens: 600,
     },
   },
   {
@@ -304,7 +315,8 @@ export const dataset: {
       eventTrajectory: ["@xstate.init", "PROMPT_SUBMITTED", "SEND", "END"],
       to: "team@example.com",
       sentCount: 1,
-      maxTokens: 600,
+      // One text call: the draft.
+      maxTokens: 300,
     },
   },
   {
@@ -317,6 +329,7 @@ export const dataset: {
       statePath: [
         "prompting",
         "evaluating",
+        "clarifying",
         "needsMoreInfo",
         "drafting",
         "reviewing",
@@ -337,8 +350,8 @@ export const dataset: {
 // ─── Braintrust wiring ───
 
 export async function main() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("Set OPENAI_API_KEY to run the braintrust-evals example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run the braintrust-evals example.");
   }
   const upload = Boolean(process.env.BRAINTRUST_API_KEY);
   const executors = createAiSdkExecutors({ models });

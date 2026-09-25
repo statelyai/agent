@@ -6,23 +6,40 @@
  * settled result. The host stays stateless — an idle run returns a persisted
  * snapshot the client sends back to resume.
  *
- * Runs need a real model: `createAiSdkExecutors` with `OPENAI_API_KEY`. Tests
- * import the `*Run` functions directly and inject their own executors.
+ * Runs need a real model and Jev: `createAiSdkExecutors` with `OPENAI_API_KEY`
+ * for text requests and decisions, and `TYPESAFE_API_KEY` for the System One
+ * judgments (routing, reflection's scoring, the free-text review). Tests import
+ * the `*Run` functions directly and inject their own executors and a
+ * `TypeSafeClient` over a fake `fetch`.
  */
 import { runAgent, type AgentRequestExecutors, type RunAgentResult } from "@statelyai/agent";
-import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
+import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
+import {
+  createActor,
+  toPromise,
+  type AnyActorLogic,
+  type AnyMachineSnapshot,
+  type AnyStateMachine,
+  type Snapshot,
+} from "xstate";
 import { maybeCreateRunInspection } from "./inspection.server";
-import { createTraceRecorder, describeIdle, type TraceEntry } from "./machine-chat.server";
-import { MISSING_KEY_MESSAGE, type ChatIdle } from "./machine-ui";
+import {
+  createTraceRecorder,
+  describeIdle,
+  missingApiKeys,
+  type TraceEntry,
+} from "./machine-chat.server";
+import { missingKeyMessage, type ChatIdle } from "./machine-ui";
 import { refundMachine } from "@/agents/refund";
 import { approvalMachine } from "@/agents/approval";
-import { routingMachine } from "@/agents/routing";
+import { createClassifyIntent, routingMachine } from "@/agents/routing";
 import { researchMachine } from "@/agents/research";
 import { pipelineMachine } from "@/agents/pipeline";
 import { retryMachine } from "@/agents/retry";
 import { toolsMachine } from "@/agents/tools";
-import { reflectionMachine } from "@/agents/reflection";
-import { emailDrafterV1Machine } from "@/agents/email-drafter-v1";
+import { createEvaluate, reflectionMachine } from "@/agents/reflection";
+import { createEvaluatePrompt, emailDrafterV1Machine } from "@/agents/email-drafter-v1";
 import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
 import { scenarioSource, type ScenarioId } from "./scenarios";
 
@@ -106,7 +123,8 @@ function inputFor(scenarioId: ScenarioId, prompt: string): Record<string, string
 async function resolveExecutors(
   scenarioId: ScenarioId,
 ): Promise<{ model: string; executors: Partial<AgentRequestExecutors> }> {
-  if (!process.env.OPENAI_API_KEY) throw new Error(MISSING_KEY_MESSAGE);
+  const missing = missingApiKeys();
+  if (missing.length) throw new Error(missingKeyMessage(missing));
   // Lazy import: keeps @ai-sdk/openai out of the client bundle.
   const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),
@@ -117,7 +135,6 @@ async function resolveExecutors(
   const models = {
     fast: openai(primary),
     writer: openai(primary),
-    router: openai(primary),
     analyst: openai(primary),
     planner: openai(primary),
     critic: openai(primary),
@@ -153,6 +170,23 @@ async function resolveExecutors(
     }
   }
   return { model: primary, executors };
+}
+
+/**
+ * The scenario's Jev actors bound to an injected client. Without one, each
+ * machine's registered default builds its client from `TYPESAFE_API_KEY`.
+ */
+function jevActors(
+  scenarioId: ScenarioId,
+  jevClient: TypeSafeClient | undefined,
+): { actors?: Record<string, AnyActorLogic> } {
+  if (!jevClient) return {};
+  if (scenarioId === "routing")
+    return { actors: { classifyIntent: createClassifyIntent(jevClient) } };
+  if (scenarioId === "reflection") return { actors: { evaluate: createEvaluate(jevClient) } };
+  if (scenarioId === "email-drafter-v1")
+    return { actors: { evaluatePrompt: createEvaluatePrompt(jevClient) } };
+  return {};
 }
 
 // ─── result shaping ───
@@ -260,12 +294,14 @@ export async function startScenarioRun(
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
+  jevClient?: TypeSafeClient,
 ): Promise<ScenarioResult> {
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   const machine = machineFor(scenarioId);
   const result = await runAgent(machine, {
     input: inputFor(scenarioId, prompt),
     executors,
+    ...jevActors(scenarioId, jevClient),
     ...(signal ? { signal } : {}),
     onTransition,
     on: { "*": onEmitted },
@@ -283,6 +319,7 @@ export async function resumeScenarioRun(
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
+  jevClient?: TypeSafeClient,
 ): Promise<ScenarioResult> {
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   const machine = machineFor(scenarioId);
@@ -292,6 +329,7 @@ export async function resumeScenarioRun(
     snapshot,
     event,
     executors,
+    ...jevActors(scenarioId, jevClient),
     ...(signal ? { signal } : {}),
     onTransition,
     on: { "*": onEmitted },
@@ -317,41 +355,60 @@ export async function resumeScenario(
   snapshot: Snapshot<unknown>,
   event: ResumeEvent,
   signal?: AbortSignal,
+  /** Injected by tests; omitted, Jev's client reads `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient,
 ): Promise<ScenarioResult> {
   const { model, executors } = await resolveExecutors(scenarioId);
 
   // Free-text review ("looks good") → map to a typed event before delivering.
   if (isInterpretEvent(event)) {
-    const verdict = await interpretReview(event.text);
+    const verdict = await interpretReview(event.text, jevClient);
     if (verdict === "UNCLEAR") {
       // Re-settle idle without delivering an event: still awaiting a clear verdict.
       return startResumeIdleEcho(scenarioId, snapshot, model);
     }
     const typed =
       verdict === "REJECT" ? { type: "REJECT", reason: event.text } : { type: "APPROVE" };
-    return resumeScenarioRun(scenarioId, snapshot, typed, model, executors, signal);
+    return resumeScenarioRun(scenarioId, snapshot, typed, model, executors, signal, jevClient);
   }
 
-  return resumeScenarioRun(scenarioId, snapshot, event, model, executors, signal);
+  return resumeScenarioRun(scenarioId, snapshot, event, model, executors, signal, jevClient);
 }
 
-/** Interprets a free-text review as a typed verdict; a failed call reads as UNCLEAR. */
-async function interpretReview(text: string): Promise<"APPROVE" | "REJECT" | "UNCLEAR"> {
+/** Below this confidence, a review reads as unclear and the run asks again. */
+export const REVIEW_CONFIDENCE = 0.6;
+
+/**
+ * Reading a review as approve / reject is a typed judgment over the person's
+ * words, so it is one Jev `choice`, not a text generation to parse.
+ */
+export function createInterpretReview(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { review: string }) => ({ review: input.review }),
+    questions: () => ({
+      verdict: choice("What does `review`, a person's reply to a draft, decide?", {
+        approve: "Accepts the draft as it is.",
+        reject: "Asks for changes or criticizes the draft. Negative feedback counts as reject.",
+        unclear: "Neither accepts the draft nor asks for changes.",
+      }),
+    }),
+  });
+}
+
+/** Interprets a free-text review as a typed verdict; a failed or unsure call reads as UNCLEAR. */
+async function interpretReview(
+  text: string,
+  jevClient?: TypeSafeClient,
+): Promise<"APPROVE" | "REJECT" | "UNCLEAR"> {
   try {
-    const [{ generateText }, { openai }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const { text: out } = await generateText({
-      model: openai(process.env.OPENAI_MODEL || "gpt-5.4-mini"),
-      system:
-        "Interpret the human's review of a draft as exactly one word: APPROVE, REJECT, or UNCLEAR. Negative feedback means REJECT.",
-      prompt: text,
-    });
-    const verdict = out.trim().toUpperCase();
-    return verdict.includes("APPROVE")
+    const actor = createActor(createInterpretReview(jevClient), { input: { review: text } });
+    actor.start();
+    const { verdict } = (await toPromise(actor)).answers;
+    if (verdict.confidence < REVIEW_CONFIDENCE) return "UNCLEAR";
+    return verdict.choice === "approve"
       ? "APPROVE"
-      : verdict.includes("REJECT")
+      : verdict.choice === "reject"
         ? "REJECT"
         : "UNCLEAR";
   } catch {

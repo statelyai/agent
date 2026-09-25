@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr"],
-    "purpose": "Shows an XState-authored agent with reusable text logic, message history, human review, and typed outputs."
+    "purpose": "Shows an XState-authored agent with reusable text logic, a Jev judgment for whether the request is complete, message history, human review, and typed outputs."
   },
   "starters": [
     "Email Priya to reschedule Thursday's design review to Friday at 10am.",

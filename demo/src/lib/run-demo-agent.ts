@@ -73,10 +73,10 @@ export const declareScenarioMachine = createServerFn({ method: "POST" })
     };
   });
 
-/** Whether the server has a model key; without one the shell runs nothing. */
+/** Whether the server has both model keys, and which are missing; without them the shell runs nothing. */
 export const getApiKeyStatus = createServerFn({ method: "GET" }).handler(async () => {
-  const { hasApiKey } = await import("./machine-chat.server");
-  return { hasApiKey: hasApiKey() };
+  const { hasApiKey, missingApiKeys } = await import("./machine-chat.server");
+  return { hasApiKey: hasApiKey(), missing: missingApiKeys() };
 });
 
 /** Request abort (Cancel / closed tab) OR the default time budget. */

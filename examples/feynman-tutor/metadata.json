@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Splits a topic into a few checkpoints, waits for the learner to explain each one in their own words, scores the explanation, and re-teaches it more simply when the score is low. The pass threshold, the per-checkpoint re-teach budget and the checkpoint cap are guards in choice states, so a stuck learner fails that checkpoint and moves on instead of looping until a recursion limit."
+    "purpose": "Splits a topic into a few checkpoints, waits for the learner to explain each one in their own words, scores the explanation with a Jev rubric judgment, and re-teaches it more simply when the score is low. The pass threshold, the per-checkpoint re-teach budget and the checkpoint cap are guards in choice states, so a stuck learner fails that checkpoint and moves on instead of looping until a recursion limit."
   },
   "starters": [
     "How public-key cryptography works",

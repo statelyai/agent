@@ -21,20 +21,30 @@
  *     with whatever the agent just asked. Resume with
  *     `runAgent(machine, { snapshot: result.persist(), event })`.
  *   - Two paths into the same state: button events are deterministic (no model
- *     call), free text goes through a classifier request instead.
+ *     call), free text goes through a Jev judgment instead.
+ *   - Reading the player's free text is a JUDGMENT, not a generation. Each of
+ *     the three classifying states invokes a TypeSafe System One actor (Jev)
+ *     with the pending prompt and the raw reply as state: a `choice` among
+ *     yes / no / sideQuestion for an answer, and a `noul` each for "does the
+ *     player say the guess was right?" and "does the player want another
+ *     round?", compared with `GUESS_CORRECT_THRESHOLD` and
+ *     `PLAY_AGAIN_THRESHOLD`. The asker stays an `agent.decide` (it chooses
+ *     the machine's next event), and the side answer stays a text request.
  *   - Side-question detour: the player's free-text reply to a yes/no question
- *     may itself be a question ("is a lizard considered domestic?").
- *     `classifyAnswer` returns a discriminated union — a yes/no answer OR a side
- *     question — and the side-question branch answers it (without revealing the
- *     secret), emits the answer (`SIDE_ANSWER`), and re-asks the SAME pending
- *     question. No turn is consumed and the transcript entry is untouched.
+ *     may itself be a question ("is a lizard considered domestic?"). When Jev
+ *     picks `sideQuestion`, the reply itself is the side question: the branch
+ *     answers it (without revealing the secret), emits the answer
+ *     (`SIDE_ANSWER`), and re-asks the SAME pending question. No turn is
+ *     consumed and the transcript entry is untouched.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/twenty-questions/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/twenty-questions/index.ts
  */
 import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
+import { choice, noul, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   type AgentMessage,
   assistantMessage,
@@ -65,27 +75,66 @@ const transcriptTurnSchema = z.object({
   rawAnswer: z.string(),
 });
 
-// Three-way classification of the player's reply: a yes/no answer, or a side
-// question asked back at the agent. A plain `z.union` (not
-// `z.discriminatedUnion`) emits `anyOf`, which OpenAI structured output
-// accepts where it rejects `oneOf`.
-const answerClassificationSchema = z.union([
-  z.object({
-    kind: z.literal("answer"),
-    answer: z.enum(["yes", "no"]),
-    reasoning: z.string(),
-  }),
-  z.object({
-    kind: z.literal("sideQuestion"),
-    question: z.string(),
-    reasoning: z.string(),
-  }),
-]);
+const PLAY_AGAIN_PROMPT = "Do you want to play another round?";
 
-const guessFeedbackClassificationSchema = z.object({
-  correct: z.boolean(),
-  reasoning: z.string(),
-});
+/** Free-text guess feedback counts as "right" when Jev's probability clears this. */
+export const GUESS_CORRECT_THRESHOLD = 0.5;
+/** A free-text reply starts another round when Jev's probability clears this. */
+export const PLAY_AGAIN_THRESHOLD = 0.5;
+
+/**
+ * The player's reply to a yes/no question, as a System One `choice`: yes, no,
+ * or a side question asked back. `client` is injected by tests and hosts;
+ * omitted, the SDK reads `TYPESAFE_API_KEY` from the environment.
+ */
+export function createClassifyAnswer(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { question: string; rawAnswer: string }) => ({
+      question: input.question,
+      reply: input.rawAnswer,
+    }),
+    questions: () => ({
+      reply: choice("How does `reply` respond to the yes/no `question`?", {
+        yes: 'An affirmation: "mhm", "for sure", "correct", or an indirect confirmation.',
+        no: "A denial, a correction, or a contradiction.",
+        sideQuestion:
+          'A question asked back instead of an answer, e.g. "is a lizard considered domestic?".',
+      }),
+    }),
+  });
+}
+
+/** Free-text guess feedback as a System One `noul`. */
+export function createClassifyGuessFeedback(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { guess: string; rawAnswer: string }) => ({
+      guess: input.guess,
+      reply: input.rawAnswer,
+    }),
+    questions: () => ({
+      guessCorrect: noul("Does `reply` say that `guess` was correct?", {
+        true: "Yes, correct, right, got it.",
+        false: "No, wrong, incorrect, or a different answer.",
+      }),
+    }),
+  });
+}
+
+/** Free-text reply to the play-again prompt as a System One `noul`. */
+export function createClassifyPlayAgain(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { rawAnswer: string }) => ({
+      question: PLAY_AGAIN_PROMPT,
+      reply: input.rawAnswer,
+    }),
+    questions: () => ({
+      playAgain: noul("Does `reply` say the player wants another round?"),
+    }),
+  });
+}
 
 const models = {
   quick: openai("gpt-5.4-mini"),
@@ -142,36 +191,13 @@ export const twentyQuestionsSchemas = createAgentSchemas({
 const agentSetup = setupAgent({
   schemas: twentyQuestionsSchemas,
   models,
+  actors: {
+    // Reading free-text replies: Jev judgments (see createClassify* above).
+    classifyAnswer: createClassifyAnswer(),
+    classifyGuessFeedback: createClassifyGuessFeedback(),
+    classifyPlayAgain: createClassifyPlayAgain(),
+  },
   requests: {
-    classifyAnswer: {
-      schemas: {
-        input: z.object({
-          question: z.string(),
-          rawAnswer: z.string(),
-          messages: messagesField,
-          transcript: z.array(transcriptTurnSchema),
-        }),
-        output: answerClassificationSchema,
-      },
-      model: "quick",
-      system:
-        "Classify a natural-language reply to a Twenty Questions yes/no question. " +
-        'Return kind=answer with answer=yes for affirmations like "mhm", "for sure", "correct", or indirect confirmations, ' +
-        "and answer=no for denials, corrections, or contradictions. " +
-        "Return kind=sideQuestion (with the question text) when the reply is itself a question " +
-        'asked back at you — e.g. "is a lizard considered domestic?" — instead of a yes/no answer. ' +
-        "Keep reasoning short.",
-      messages: ({ input }) => [
-        ...input.messages,
-        userMessage(
-          [
-            `Question: ${input.question}`,
-            `Raw answer: ${input.rawAnswer}`,
-            "Classify the raw answer as a yes/no answer or a side question.",
-          ].join("\n"),
-        ),
-      ],
-    },
     answerSideQuestion: {
       schemas: {
         input: z.object({
@@ -195,58 +221,9 @@ const agentSetup = setupAgent({
           `Side question: ${input.question}`,
         ].join("\n"),
     },
-    classifyGuessFeedback: {
-      schemas: {
-        input: z.object({
-          guess: z.string(),
-          rawAnswer: z.string(),
-          messages: messagesField,
-        }),
-        output: guessFeedbackClassificationSchema,
-      },
-      model: "quick",
-      system:
-        "Classify whether the user says the Twenty Questions guess was correct. " +
-        "Return correct=true for yes/correct/right. Return correct=false for no/wrong/incorrect.",
-      messages: ({ input }) => [
-        ...input.messages,
-        userMessage(
-          [
-            `Guess: ${input.guess}`,
-            `Raw answer: ${input.rawAnswer}`,
-            "Classify whether the guess was correct.",
-          ].join("\n"),
-        ),
-      ],
-    },
-    classifyPlayAgain: {
-      schemas: {
-        input: z.object({
-          rawAnswer: z.string(),
-          messages: messagesField,
-        }),
-        output: z.object({
-          playAgain: z.boolean(),
-          reasoning: z.string(),
-        }),
-      },
-      model: "quick",
-      system:
-        "Classify whether the user wants to play another round. Return playAgain=true for yes; false for no.",
-      messages: ({ input }) => [
-        ...input.messages,
-        userMessage(
-          [
-            "Question: Do you want to play another round?",
-            `Raw answer: ${input.rawAnswer}`,
-            "Classify whether the user wants another round.",
-          ].join("\n"),
-        ),
-      ],
-    },
   },
   // Only `gameOver` is narrowed. The only transition into it is
-  // classifyingPlayAgain's onDone (playAgain=false), reached only after a GUESS
+  // classifyingPlayAgain's onDone (playAgain below threshold), reached only after a GUESS
   // event already set `guess` — guaranteed non-null there. Every other state is
   // left at the base context: partial `states` means unlisted states keep it,
   // and states whose reset transitions write `guess`/`pendingSideQuestion` back
@@ -283,8 +260,6 @@ function renderTranscriptPrompt(context: {
       : "This is the final turn. You must make your guess now (GUESS).",
   ].join("\n");
 }
-
-const PLAY_AGAIN_PROMPT = "Do you want to play another round?";
 
 /**
  * Append the pending question to the transcript, now that it has an answer.
@@ -438,25 +413,25 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
         input: ({ context }) => ({
           question: context.question,
           rawAnswer: context.pendingRawAnswer ?? "",
-          messages: context.messages,
-          transcript: context.transcript,
         }),
-        onDone: ({ context, output: { result: output } }) =>
-          output.kind === "sideQuestion"
+        onDone: ({ context, output }) => {
+          const reply = output.answers.reply.choice;
+          return reply === "sideQuestion"
             ? {
-                // Detour: answer the player's side question, then re-ask the
-                // SAME pending question. The transcript entry and turn count
-                // are untouched.
+                // Detour: answer the player's side question (the reply
+                // itself), then re-ask the SAME pending question. The
+                // transcript entry and turn count are untouched.
                 target: "answeringSideQuestion",
                 context: {
-                  pendingSideQuestion: output.question,
+                  pendingSideQuestion: context.pendingRawAnswer ?? "",
                   pendingRawAnswer: null,
                 },
               }
             : {
                 target: "deciding",
-                context: withAnswer(context, output.answer, context.pendingRawAnswer ?? ""),
-              },
+                context: withAnswer(context, reply, context.pendingRawAnswer ?? ""),
+              };
+        },
         onError: { target: "stumped" },
       },
     },
@@ -532,13 +507,12 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
         input: ({ context }) => ({
           guess: context.guess ?? "",
           rawAnswer: context.pendingRawAnswer ?? "",
-          messages: context.messages,
         }),
         onDone: ({ context, output }) => ({
           target: "awaitingPlayAgain",
           context: withGuessFeedback(
             context,
-            output.result.correct,
+            output.answers.guessCorrect.noul >= GUESS_CORRECT_THRESHOLD,
             context.pendingRawAnswer ?? "",
           ),
         }),
@@ -587,10 +561,9 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
         src: "classifyPlayAgain",
         input: ({ context }) => ({
           rawAnswer: context.pendingRawAnswer ?? "",
-          messages: context.messages,
         }),
         onDone: ({ context, output }) =>
-          output.result.playAgain
+          output.answers.playAgain.noul >= PLAY_AGAIN_THRESHOLD
             ? { target: "deciding", context: freshRound(context) }
             : {
                 target: "gameOver",
@@ -717,8 +690,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

@@ -2,8 +2,14 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { type AgentTextRequest } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
+import { createMockJevClient } from "../mock-jev.js";
 import { createMockModelExecutors } from "../mock-model.js";
-import { MAX_ROUNDS, multiAgentDebateMachine, runMultiAgentDebateExample } from "./index.js";
+import {
+  CASE_LEVELS,
+  MAX_ROUNDS,
+  multiAgentDebateMachine,
+  runMultiAgentDebateExample,
+} from "./index.js";
 
 /** Each speaker names its side and round, read from the request input. */
 function speaker(side: string) {
@@ -12,20 +18,26 @@ function speaker(side: string) {
   });
 }
 
-function scripted(
-  judge: unknown = { winner: "pro", reasoning: "Sharper rebuttals.", scores: { pro: 8, con: 6 } },
-) {
+/** The speakers, mocked by request name. */
+function scripted() {
   return createMockModelExecutors({
-    text: { argueFor: speaker("pro"), argueAgainst: speaker("con"), judgeDebate: [judge] },
+    text: { argueFor: speaker("pro"), argueAgainst: speaker("con") },
   });
+}
+
+/** The Jev judge: winner label, and each side's case level 0-5 (→ 0-10 in steps of 2). */
+function judge(winner = "pro", proCase = 4, conCase = 3) {
+  return createMockJevClient({ winner, proCase, conCase });
 }
 
 test("two rounds alternate pro/con, then the judge decides", async () => {
   const executors = scripted();
+  const jev = judge();
   const result = await runMultiAgentDebateExample({
     motion: "Agent control flow belongs in code.",
     rounds: 2,
     generateText: executors.generateText,
+    jevClient: jev.client,
   });
   expect(result.progress).toEqual([
     "proSpeaking",
@@ -40,12 +52,14 @@ test("two rounds alternate pro/con, then the judge decides", async () => {
     "argueAgainst",
     "argueFor",
     "argueAgainst",
-    "judgeDebate",
   ]);
+  expect(jev.calls).toHaveLength(1);
   expect(result.rounds).toBe(2);
   expect(result.winner).toBe("pro");
   expect(result.scores).toEqual({ pro: 8, con: 6 });
-  expect(result.verdict).toBe("Winner: pro — Sharper rebuttals.");
+  expect(result.verdict).toBe(
+    `Winner: pro — Judge 90% sure. Pro: ${CASE_LEVELS[4]} Con: ${CASE_LEVELS[3]}`,
+  );
   expect(result.transcript.split("\n\n")).toEqual([
     "Round 1 — PRO: pro point for round 1",
     "Round 1 — CON: con point for round 1",
@@ -55,12 +69,17 @@ test("two rounds alternate pro/con, then the judge decides", async () => {
 });
 
 test("rounds defaults to 2 and the judge sees the whole transcript", async () => {
-  const executors = scripted({ winner: "draw", reasoning: "Even.", scores: { pro: 5, con: 5 } });
-  const result = await runMultiAgentDebateExample({ generateText: executors.generateText });
+  const jev = judge("draw", 3, 3);
+  const result = await runMultiAgentDebateExample({
+    generateText: scripted().generateText,
+    jevClient: jev.client,
+  });
   expect(result.rounds).toBe(2);
   expect(result.winner).toBe("draw");
-  const judgeCall = executors.calls.find((call) => call.name === "judgeDebate")!;
-  expect((judgeCall.input as { transcript: string }).transcript).toContain("Round 2 — CON");
+  const transcript = (jev.calls[0]!.state as { transcript: Array<{ side: string; round: number }> })
+    .transcript;
+  expect(transcript).toHaveLength(4);
+  expect(transcript.at(-1)).toMatchObject({ side: "con", round: 2 });
 });
 
 test("rounds above MAX_ROUNDS are rejected at the input boundary", async () => {
@@ -101,11 +120,14 @@ test("a judge failure ends in `failed`, not a verdict", async () => {
       text: {
         argueFor: speaker("pro"),
         argueAgainst: speaker("con"),
-        judgeDebate: () => {
-          throw new Error("judge offline");
-        },
       },
     }).generateText,
+    jevClient: createMockJevClient({
+      winner: () => {
+        throw new Error("judge offline");
+      },
+      "*": 0,
+    }).client,
   });
   expect(result.finalState).toBe("failed");
   expect(result.verdict).toContain("judgeDebate failed");
@@ -120,6 +142,7 @@ test("starters behave as their labels advertise", async () => {
     const result = await runMultiAgentDebateExample({
       ...starter.input,
       generateText: scripted().generateText,
+      jevClient: judge().client,
     });
     expect(result.finalState).toBe("done");
     expect(result.rounds).toBe(starter.input.rounds);
@@ -130,6 +153,34 @@ test("starters behave as their labels advertise", async () => {
     if (starter.label.startsWith("One round")) expect(starter.input.rounds).toBe(1);
     if (starter.label.startsWith("Two rounds")) expect(starter.input.rounds).toBe(2);
   }
+});
+
+test("the judge asks Jev a winner choice and one score per side in one call over the transcript", async () => {
+  const jev = judge("con", 2, 5);
+  const result = await runMultiAgentDebateExample({
+    motion: "Cities should ban cars.",
+    rounds: 1,
+    generateText: scripted().generateText,
+    jevClient: jev.client,
+  });
+
+  expect(jev.calls).toHaveLength(1);
+  const call = jev.calls[0]!;
+  expect(call.state).toEqual({
+    motion: "Cities should ban cars.",
+    transcript: [
+      { side: "pro", round: 1, argument: "pro point for round 1" },
+      { side: "con", round: 1, argument: "con point for round 1" },
+    ],
+  });
+  expect(Object.fromEntries(Object.entries(call.questions).map(([k, q]) => [k, q.type]))).toEqual({
+    winner: "choice",
+    proCase: "score",
+    conCase: "score",
+  });
+  const winner = call.questions.winner!;
+  expect(winner.type === "choice" && Object.keys(winner.criteria)).toEqual(["pro", "con", "draw"]);
+  expect(result).toMatchObject({ winner: "con", scores: { pro: 4, con: 10 } });
 });
 
 test("machine is structurally sound", () => {

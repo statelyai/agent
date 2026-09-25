@@ -20,7 +20,8 @@
       "@statelyai/agent/openai": ["./src/openai/index.ts"],
       "@statelyai/agent/log": ["./src/log/index.ts"],
       "@statelyai/agent/otel": ["./src/otel/index.ts"],
-      "@statelyai/agent/testing": ["./src/testing/index.ts"]
+      "@statelyai/agent/testing": ["./src/testing/index.ts"],
+      "@statelyai/agent/typesafe": ["./src/typesafe/index.ts"]
     }
   },
   "include": ["src"],

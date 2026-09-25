@@ -18,10 +18,12 @@
  *
  * Machine shape:
  *
- *   generatingSubjects → checkingSubjects ─┬─ generatingJokes → judging → checkingJudgement ─┬─ done
- *                                          └─ failed (no subjects)          ▲                 ├─ judging (retry once)
- *                                                                           └─────────────────┘
- *                                                                                             └─ failed
+ *   generatingSubjects → checkingSubjects ─┬─ generatingJokes ─┬─ judging → checkingJudgement ─┬─ done
+ *                                          │                   │     ▲                         ├─ judging (retry once)
+ *                                          │                   │     └─────────────────────────┘
+ *                                          │                   │                               └─ failed
+ *                                          │                   └─ done (one joke: nothing to judge)
+ *                                          └─ failed (no subjects)
  *
  * What maps to what:
  *   - generate_topics            → `generatingSubjects`, a request with
@@ -29,10 +31,13 @@
  *   - Send(...) per subject      → `generatingJokes` entry: `enq.spawn` of one
  *                                  `writeJoke` child per subject, N decided at runtime
  *   - operator.add reducer       → the `xstate.done.actor` handler, which appends
- *                                  `{ subject, joke }` to `context.jokes` as each lands
- *   - best_joke                  → `judging`, a request returning `{ bestIndex }`
+ *                                  `{ subject, joke }` to `context.jokes` as each lands,
+ *                                  and once all have settled routes to `judging`
+ *                                  (two or more jokes) or straight to `done` (one)
+ *   - best_joke                  → `judging`, ONE Jev `choice` over the jokes
+ *                                  (see note)
  *   - the list index lookup      → `checkingJudgement`, a choice state that
- *                                  rejects an out-of-range index
+ *                                  rejects a label the machine did not offer
  *
  * Differences from LangGraph worth calling out:
  *   - The fan-out width is bounded: more than `MAX_SUBJECTS` subjects are
@@ -41,26 +46,33 @@
  *   - A branch that errors records a placeholder joke and still counts as
  *     settled, so one broken writer cannot park the run. In LangGraph a
  *     failing `Send` branch fails the superstep.
+ *   - Judging is a JUDGMENT, not a generation. LangGraph asks a chat model to
+ *     write back an index. Here `judging` invokes a TypeSafe System One actor
+ *     (Jev) with the topic and every `{ subject, joke }` as state and one
+ *     `choice` question whose labels are the jokes themselves (`joke0`,
+ *     `joke1`, …, one per landed joke). Jev can only answer with a label it was
+ *     offered, so an out-of-range or fractional index cannot happen by
+ *     construction; the text model is reserved for the subjects and the jokes.
  *   - LangGraph indexes `state["jokes"][response.id]` directly; an index the
- *     model makes up raises. Here the index is checked in a choice state,
- *     retried `MAX_JUDGE_RETRIES` time(s), then the run ends in `failed` with
- *     every joke still in the output.
- *   - The judge's schema is `z.number().min(0)` with no maximum and no
- *     `.int()`: the upper bound depends on how many jokes landed, so the choice
- *     state checks both range and integrality. (zod's `.int()` would also emit
- *     a `maximum` of MAX_SAFE_INTEGER into the JSON schema the model sees.)
+ *     model makes up raises. Here `checkingJudgement` still checks that the
+ *     label names a joke that exists (a host could swap in any judge), retries
+ *     `MAX_JUDGE_RETRIES` time(s), then the run ends in `failed` with every
+ *     joke still in the output.
  *
  * No stand-ins: every node here is a model call. The jokes land in arrival
  * order, which is the order the judge sees them.
  *
  * Dual-mode: `runMapReduceExample(options?)` takes an injectable
- * `generateText` (tests script it); the direct run uses real models.
+ * `generateText` and `jevClient` (tests script both); the direct run uses real
+ * models.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/map-reduce/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/map-reduce/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
+import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   createTextLogic,
   getStatePath,
@@ -76,7 +88,7 @@ const models = {
 
 /** Most subjects fanned out; extra subjects are dropped and `truncated` is set. */
 export const MAX_SUBJECTS = 4;
-/** Extra judging rounds after an out-of-range index, before `failed`. */
+/** Extra judging rounds after a label that names no joke, before `failed`. */
 export const MAX_JUDGE_RETRIES = 1;
 
 const BRANCH_PREFIX = "joke-";
@@ -97,6 +109,43 @@ export const writeJoke = createTextLogic({
 });
 
 const jokeSchema = z.object({ subject: z.string(), joke: z.string() });
+type Joke = z.infer<typeof jokeSchema>;
+
+/** The label the judge answers with for the joke at `jokes[index]`. */
+const jokeLabel = (index: number) => `joke${index}`;
+
+/** The joke index a judge label names, or `null` for a label that names none. */
+function labelIndex(label: string): number | null {
+  const match = /^joke(\d+)$/.exec(label);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * best_joke as a System One judgment: the topic and every landed joke are the
+ * state, and one `choice` question offers one label per joke. `client` is
+ * injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ */
+export function createJudgeJokes(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { topic: string; jokes: Joke[] }) => ({
+      topic: input.topic,
+      jokes: input.jokes,
+    }),
+    questions: (input) => ({
+      best: choice(
+        "Which joke in `jokes` is the funniest take on `topic`? A `joke` in square " +
+          "brackets is a placeholder for a writer that failed, never the funniest.",
+        Object.fromEntries(
+          input.jokes.map((entry, index) => [
+            jokeLabel(index),
+            `\`jokes[${index}]\`, the joke about "${entry.subject}".`,
+          ]),
+        ),
+      ),
+    }),
+  });
+}
 
 const contextSchema = z.object({
   topic: z.string(),
@@ -111,16 +160,25 @@ const contextSchema = z.object({
 });
 type MapReduceContext = z.infer<typeof contextSchema>;
 
-/** Reduce step: append a landed joke; move on once every branch has settled. */
+/**
+ * Reduce step: append a landed joke; move on once every branch has settled.
+ * A lone joke is the best by default: a one-label `choice` is not a judgment,
+ * so it skips `judging` and lands in `done` as index 0.
+ */
 function landJoke(context: MapReduceContext, entry: { subject: string; joke: string }) {
   const jokes = [...context.jokes, entry];
   const next = {
     jokes,
     notice: `Wrote ${jokes.length} of ${context.subjects.length} jokes.`,
   };
-  return jokes.length >= context.subjects.length
-    ? { target: "judging" as const, context: next }
-    : { context: next };
+  if (jokes.length < context.subjects.length) return { context: next };
+  if (jokes.length === 1) {
+    return {
+      target: "done" as const,
+      context: { jokes, bestIndex: 0, notice: "Only one joke; no judging needed." },
+    };
+  }
+  return { target: "judging" as const, context: next };
 }
 
 function branchIndex(actorId: string): number {
@@ -146,7 +204,11 @@ const agentSetup = setupAgent({
     jokes: z.array(jokeSchema),
     trail: z.array(z.string()),
   }),
-  actors: { writeJoke },
+  actors: {
+    writeJoke,
+    // best_joke: a Jev choice over the landed jokes (see createJudgeJokes).
+    judgeJokes: createJudgeJokes(),
+  },
   requests: {
     generateSubjects: {
       schemas: {
@@ -156,18 +218,6 @@ const agentSetup = setupAgent({
       model: "jokes",
       system: `List two to ${MAX_SUBJECTS} distinct subjects related to the topic, a few words each.`,
       prompt: ({ input }) => `Topic: ${input.topic}`,
-    },
-    judgeJokes: {
-      schemas: {
-        input: z.object({ topic: z.string(), jokes: z.array(z.string()) }),
-        output: z.object({ bestIndex: z.number().min(0) }),
-      },
-      model: "jokes",
-      system:
-        "Pick the funniest joke. Answer with its 0-based index in the numbered list, and " +
-        "nothing outside the list's range.",
-      prompt: ({ input }) =>
-        [`Topic: ${input.topic}`, "", ...input.jokes.map((joke, i) => `[${i}] ${joke}`)].join("\n"),
     },
   },
 });
@@ -247,13 +297,10 @@ export const mapReduceMachine = agentSetup.createMachine({
     judging: {
       invoke: {
         src: "judgeJokes",
-        input: ({ context }) => ({
-          topic: context.topic,
-          jokes: context.jokes.map((entry) => entry.joke),
-        }),
+        input: ({ context }) => ({ topic: context.topic, jokes: context.jokes }),
         onDone: ({ output }) => ({
           target: "checkingJudgement",
-          context: { bestIndex: output.result.bestIndex },
+          context: { bestIndex: labelIndex(output.answers.best.choice) },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -261,8 +308,9 @@ export const mapReduceMachine = agentSetup.createMachine({
         }),
       },
     },
-    // The index must be a whole number pointing at a joke that exists.
-    // Otherwise: retry once, then give up with every joke still in the output.
+    // The label must name a joke that exists. Jev only answers with offered
+    // labels, so this guards a swapped-in judge: retry once, then give up with
+    // every joke still in the output.
     checkingJudgement: {
       type: "choice",
       choice: ({ context }) => {
@@ -281,14 +329,14 @@ export const mapReduceMachine = agentSetup.createMachine({
             target: "judging",
             context: {
               judgeRetries: context.judgeRetries + 1,
-              notice: `The judge picked index ${context.bestIndex}, out of range; asking again.`,
+              notice: `The judge picked index ${context.bestIndex ?? "(no joke)"}, out of range; asking again.`,
             },
           };
         }
         return {
           target: "failed",
           context: {
-            notice: `The judge picked index ${context.bestIndex} of ${context.jokes.length} jokes after ${MAX_JUDGE_RETRIES} retry.`,
+            notice: `The judge picked index ${context.bestIndex ?? "(no joke)"} of ${context.jokes.length} jokes after ${MAX_JUDGE_RETRIES} retry.`,
           },
         };
       },
@@ -322,13 +370,15 @@ export interface RunMapReduceOptions {
   topic?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
 
 /** Runs the map-reduce flow; `outcome` says which final state it reached. */
 export async function runMapReduceExample(options: RunMapReduceOptions = {}) {
-  const { topic = "animals", generateText, onProgress } = options;
+  const { topic = "animals", generateText, jevClient, onProgress } = options;
 
   const progress: string[] = [];
   const result = await runAgent(mapReduceMachine, {
@@ -336,6 +386,7 @@ export async function runMapReduceExample(options: RunMapReduceOptions = {}) {
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
+    ...(jevClient ? { actors: { judgeJokes: createJudgeJokes(jevClient) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -351,8 +402,8 @@ export async function runMapReduceExample(options: RunMapReduceOptions = {}) {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   void runMapReduceExample({ onProgress: (state) => console.log(`  → ${state}`) })

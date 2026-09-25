@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr", "Flowise"],
-    "purpose": "Shows a decision loop with guard-enforced legality (the final turn must be a GUESS) where every player turn is an idle state with meta.interaction hints — Yes/No buttons plus free text routed to a classifier, including a side-question detour that costs no turn."
+    "purpose": "Shows a decision loop with guard-enforced legality (the final turn must be a GUESS) where every player turn is an idle state with meta.interaction hints — Yes/No buttons plus free text read by a Jev judgment, including a side-question detour that costs no turn."
   },
   "starters": [
     {

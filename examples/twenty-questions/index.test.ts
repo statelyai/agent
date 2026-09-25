@@ -1,72 +1,64 @@
 import { describe, expect, test } from "vitest";
 import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
-import type {
-  AgentDecisionRequest,
-  AgentMessage,
-  AgentRequestExecutor,
-  ChosenEvent,
-} from "@statelyai/agent";
-import { idlePrompt, twentyQuestionsMachine, type PlayerEvent } from "./index.js";
+import type { AgentDecisionRequest, AgentRequestExecutor, ChosenEvent } from "@statelyai/agent";
+import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
+import {
+  GUESS_CORRECT_THRESHOLD,
+  PLAY_AGAIN_THRESHOLD,
+  createClassifyAnswer,
+  createClassifyGuessFeedback,
+  createClassifyPlayAgain,
+  idlePrompt,
+  twentyQuestionsMachine,
+  type PlayerEvent,
+} from "./index.js";
 
-function textContent(message: AgentMessage | undefined) {
-  return typeof message?.content === "string" ? message.content : "";
-}
-
-function rawAnswerFrom(request: Parameters<AgentRequestExecutor>[0]) {
-  return textContent(request.messages?.at(-1)).match(/Raw answer: (.*)/)?.[1] ?? "";
-}
-
-/** Routed on `request.name` — the `setupAgent({ requests })` key. */
+/** The one text request left (`answerSideQuestion`), routed on `request.name`. */
 function createClassifier(seenModels: string[] = []): AgentRequestExecutor {
   return async (request) => {
     seenModels.push(request.model);
-    const rawAnswer = rawAnswerFrom(request);
     switch (request.name) {
-      case "classifyGuessFeedback":
-        return {
-          result: {
-            correct: /^(yes|correct|right)$/i.test(rawAnswer),
-            reasoning: `classified guess feedback ${rawAnswer}`,
-          },
-        };
-      case "classifyPlayAgain":
-        return {
-          result: {
-            playAgain: /^yes$/i.test(rawAnswer),
-            reasoning: `classified play again ${rawAnswer}`,
-          },
-        };
       case "answerSideQuestion": {
         const question = request.prompt?.match(/Side question: (.*)/)?.[1] ?? "";
         return { result: `Briefly: the answer to "${question}" is yes.` };
       }
-      case "classifyAnswer":
-        // A reply ending in '?' is a side question back at the agent.
-        return rawAnswer.endsWith("?")
-          ? {
-              result: {
-                kind: "sideQuestion",
-                question: rawAnswer,
-                reasoning: `classified side question ${rawAnswer}`,
-              },
-            }
-          : {
-              result: {
-                kind: "answer",
-                answer: rawAnswer === "mhm" || rawAnswer === "for sure" ? "yes" : "no",
-                reasoning: `classified ${rawAnswer}`,
-              },
-            };
       default:
         throw new Error(`Unexpected request '${request.name}'.`);
     }
   };
 }
 
+const replyOf = (state: unknown) => (state as { reply: string }).reply;
+
+/**
+ * The three free-text judgments, answered by Jev question name from the raw
+ * reply in the request state. Overrides replace a question's entry.
+ */
+function createJev(overrides: Record<string, MockJevEntry | MockJevEntry[]> = {}) {
+  const jev = createMockJevClient({
+    // A reply ending in '?' is a side question back at the agent.
+    reply: (state) => {
+      const reply = replyOf(state);
+      if (reply.endsWith("?")) return "sideQuestion";
+      return reply === "mhm" || reply === "for sure" ? "yes" : "no";
+    },
+    guessCorrect: (state) => /^(yes|correct|right)$/i.test(replyOf(state)),
+    playAgain: (state) => /^yes$/i.test(replyOf(state)),
+    ...overrides,
+  });
+  const actors = {
+    classifyAnswer: createClassifyAnswer(jev.client),
+    classifyGuessFeedback: createClassifyGuessFeedback(jev.client),
+    classifyPlayAgain: createClassifyPlayAgain(jev.client),
+  };
+  return { calls: jev.calls, actors };
+}
+
 interface PlayOptions {
   input?: { questionsRemaining: number };
   decide: (request: AgentDecisionRequest) => Promise<{ event: ChosenEvent }>;
   generateText?: AgentRequestExecutor;
+  jev?: ReturnType<typeof createJev>;
   /** Consumed in order on each idle settle. */
   playerEvents: PlayerEvent[];
   on?: { SIDE_ANSWER?: (payload: { question: string; answer: string }) => void };
@@ -85,6 +77,7 @@ async function play(options: PlayOptions) {
       generateText: options.generateText ?? createClassifier(),
       decide: options.decide,
     },
+    actors: (options.jev ?? createJev()).actors,
     ...(options.on ? { on: options.on } : {}),
   };
 
@@ -123,6 +116,7 @@ describe("twenty-questions", () => {
     let askCount = 0;
     const decisionModels: string[] = [];
     const textModels: string[] = [];
+    const jev = createJev();
 
     const decide = async (request: AgentDecisionRequest): Promise<{ event: ChosenEvent }> => {
       decisionModels.push(request.model);
@@ -136,6 +130,7 @@ describe("twenty-questions", () => {
     const { result, prompts, interactions } = await play({
       decide,
       generateText: createClassifier(textModels),
+      jev,
       playerEvents: [
         { type: "ANSWER", rawAnswer: "mhm" },
         { type: "ANSWER", rawAnswer: "for sure" },
@@ -167,7 +162,14 @@ describe("twenty-questions", () => {
       { events: ["PLAY_AGAIN_YES", "PLAY_AGAIN_NO", "PLAY_AGAIN"], textEvent: "PLAY_AGAIN" },
     ]);
     expect(decisionModels).toEqual(["quick", "quick", "quick"]);
-    expect(textModels).toEqual(["quick", "quick", "quick", "quick"]);
+    // Every free-text reply was read by a Jev judgment, not the text model.
+    expect(jev.calls.map((call) => Object.keys(call.questions)[0])).toEqual([
+      "reply",
+      "reply",
+      "guessCorrect",
+      "playAgain",
+    ]);
+    expect(textModels).toEqual([]);
   });
 
   test("the pending question stays out of the transcript until it is answered", async () => {
@@ -179,6 +181,7 @@ describe("twenty-questions", () => {
     const asked = await runAgent(twentyQuestionsMachine, {
       input: { questionsRemaining: 20 },
       executors: { generateText: createClassifier(), decide },
+      actors: createJev().actors,
     });
 
     expect(asked.status).toBe("idle");
@@ -191,6 +194,7 @@ describe("twenty-questions", () => {
       snapshot: asked.persist(),
       event: { type: "ANSWER_YES" },
       executors: { generateText: createClassifier(), decide },
+      actors: createJev().actors,
     });
 
     expect(answered.snapshot.context.transcript).toEqual([
@@ -210,6 +214,7 @@ describe("twenty-questions", () => {
     const asked = await runAgent(twentyQuestionsMachine, {
       input: { questionsRemaining: 20 },
       executors: { generateText: createClassifier(), decide },
+      actors: createJev().actors,
     });
     if (asked.status !== "idle") throw new Error("expected idle");
 
@@ -217,6 +222,7 @@ describe("twenty-questions", () => {
       snapshot: asked.persist(),
       event: { type: "ANSWER", rawAnswer: "mhm" },
       executors: { generateText: createClassifier(), decide },
+      actors: createJev().actors,
     });
 
     expect(answered.snapshot.context.transcript).toEqual([
@@ -226,10 +232,12 @@ describe("twenty-questions", () => {
 
   test("button events answer deterministically, without a classifier call", async () => {
     const textModels: string[] = [];
+    const jev = createJev();
     let askCount = 0;
 
     const { result, prompts } = await play({
       generateText: createClassifier(textModels),
+      jev,
       decide: async () => {
         askCount += 1;
         return askCount === 1
@@ -253,8 +261,9 @@ describe("twenty-questions", () => {
       "My guess is a cat. Was I right?",
       "Do you want to play another round?",
     ]);
-    // No request executor ran: every reply came from a button.
+    // No request executor or Jev call ran: every reply came from a button.
     expect(textModels).toEqual([]);
+    expect(jev.calls).toEqual([]);
   });
 
   test("guard rejects ASK on the final turn; resolveDecision retries through runAgent", async () => {
@@ -376,6 +385,83 @@ describe("twenty-questions", () => {
       userScore: 0,
       agentScore: 1,
       roundsPlayed: 1,
+    });
+  });
+
+  test("a free-text reply asks Jev one choice over the pending question and the reply", async () => {
+    const jev = createJev();
+    const { prompts } = await play({
+      jev,
+      decide: async (request) =>
+        request.prompt?.includes("(none yet)")
+          ? { event: { type: "ASK", question: "Is it an animal?" } }
+          : { event: { type: "GUESS", guess: "a cat" } },
+      playerEvents: [
+        { type: "ANSWER", rawAnswer: "is a cat an animal?" },
+        { type: "ANSWER", rawAnswer: "nope" },
+        { type: "GUESS_RIGHT" },
+        { type: "PLAY_AGAIN_NO" },
+      ],
+    });
+
+    const [side, answer] = jev.calls;
+    expect(side!.state).toEqual({ question: "Is it an animal?", reply: "is a cat an animal?" });
+    expect(Object.keys(side!.questions)).toEqual(["reply"]);
+    const question = side!.questions.reply as { type: string; criteria: object };
+    expect(question.type).toBe("choice");
+    expect(Object.keys(question.criteria)).toEqual(["yes", "no", "sideQuestion"]);
+    // sideQuestion re-asked the same question; "nope" was then read as no.
+    expect(answer!.state).toEqual({ question: "Is it an animal?", reply: "nope" });
+    expect(prompts.slice(0, 2)).toEqual(["Is it an animal?", "Is it an animal?"]);
+  });
+
+  test("guess feedback and play-again are one noul each; just under the threshold reads as no", async () => {
+    const jev = createJev({
+      guessCorrect: GUESS_CORRECT_THRESHOLD - 0.01,
+      playAgain: PLAY_AGAIN_THRESHOLD - 0.01,
+    });
+    const { result } = await play({
+      input: { questionsRemaining: 1 },
+      jev,
+      decide: async () => ({ event: { type: "GUESS", guess: "a fish" } }),
+      playerEvents: [
+        { type: "GUESS_FEEDBACK", rawAnswer: "sort of" },
+        { type: "PLAY_AGAIN", rawAnswer: "maybe later" },
+      ],
+    });
+
+    expect(jev.calls.map((call) => call.state)).toEqual([
+      { guess: "a fish", reply: "sort of" },
+      { question: "Do you want to play another round?", reply: "maybe later" },
+    ]);
+    expect(jev.calls.map((call) => Object.values(call.questions)[0]!.type)).toEqual([
+      "noul",
+      "noul",
+    ]);
+    expect(result.status === "done" && result.output).toMatchObject({
+      userScore: 1,
+      agentScore: 0,
+      roundsPlayed: 1,
+    });
+
+    // At the threshold, both read as yes: the agent scores and a round starts.
+    const at = await play({
+      input: { questionsRemaining: 1 },
+      jev: createJev({
+        guessCorrect: GUESS_CORRECT_THRESHOLD,
+        playAgain: [PLAY_AGAIN_THRESHOLD, 0],
+      }),
+      decide: async () => ({ event: { type: "GUESS", guess: "a fish" } }),
+      playerEvents: [
+        { type: "GUESS_FEEDBACK", rawAnswer: "sort of" },
+        { type: "PLAY_AGAIN", rawAnswer: "maybe later" },
+        { type: "GUESS_FEEDBACK", rawAnswer: "sort of" },
+        { type: "PLAY_AGAIN", rawAnswer: "no" },
+      ],
+    });
+    expect(at.result.status === "done" && at.result.output).toMatchObject({
+      agentScore: 2,
+      roundsPlayed: 2,
     });
   });
 });

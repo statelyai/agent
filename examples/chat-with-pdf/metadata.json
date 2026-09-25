@@ -10,7 +10,7 @@
   },
   "comparison": {
     "targets": ["agentcn", "LangGraph", "Mastra"],
-    "purpose": "The same quiz recipe agentcn ships as prose instructions, with the sequencing moved into the machine: one question per state entry, a refresh guard instead of \"after 3-4 questions\", covered pages excluded by the query instead of remembered, documentId in context, and page hints read off the retrieved chunk. Voice and question formatting stay in the prompt."
+    "purpose": "The same quiz recipe agentcn ships as prose instructions, with the sequencing moved into the machine: one question per state entry, a refresh guard instead of \"after 3-4 questions\", covered pages excluded by the query instead of remembered, documentId in context, and page hints read off the retrieved chunk. The grading verdict is a Jev judgment against a threshold; voice, question formatting, and the explanation stay with the text model."
   },
   "starters": [
     {

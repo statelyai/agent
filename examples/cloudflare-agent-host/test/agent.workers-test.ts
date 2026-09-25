@@ -1,11 +1,13 @@
 /**
  * Runs the Worker in real workerd (via @cloudflare/vitest-plugin), so the
  * Durable Object, its SQLite event log, and the folded XState machine are the
- * real thing — not a Node stand-in. Only the model is stubbed: the suite
+ * real thing — not a Node stand-in. Only the models are stubbed: the suite
  * overrides `EmailDrafter.prototype.createExecutors` with a plain-function
- * executor keyed by request name. `vitest.config.ts` also forces the
- * `OPENAI_API_KEY` binding empty (it would otherwise be picked up from a
- * `.dev.vars` left behind by `dev:live`), so this suite never bills a provider.
+ * executor keyed by request name, and `createJudgments` with the drafter's Jev
+ * judgment over a scripted client. `vitest.config.ts` also forces the
+ * `OPENAI_API_KEY` and `TYPESAFE_API_KEY` bindings empty (they would otherwise
+ * be picked up from a `.dev.vars` left behind by `dev:live`), so this suite
+ * never bills a provider.
  *
  * What these specs are really testing is the host's durability claim: the
  * append-only log in the Durable Object is the ONLY persisted state, and a
@@ -15,7 +17,10 @@
 import { getAgentByName } from "agents";
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { TypeSafeClient } from "@typesafe-ai/sdk";
 import type { AgentLogEntry, AgentRequestExecutors } from "@statelyai/agent";
+import { createMockJevClient } from "../../mock-jev.js";
+import { createEvaluatePrompt } from "../../email-drafter/agent-logic.js";
 import { EmailDrafter } from "../index.js";
 import { createDurableObjectEventLogStore } from "../event-log-store.js";
 
@@ -30,14 +35,14 @@ interface View {
 
 /**
  * The model stand-in, keyed by the request NAME the machine declares
- * (`evaluatePrompt` / `draftEmail` in `../../email-drafter/agent-logic.ts`), so
+ * (`writeFollowUps` / `draftEmail` in `../../email-drafter/agent-logic.ts`), so
  * each answer lands on the request it was written for however many rounds the
  * conversation takes. The counter makes the durability claim observable: a
  * resume REPLAYS journaled calls instead of re-running them.
  */
 const modelCalls = { count: 0 };
 const answers: Record<string, unknown> = {
-  evaluatePrompt: { satisfied: true, missing: [], questions: [] },
+  writeFollowUps: { questions: ["Who should receive it?"] },
   draftEmail: {
     to: "ana@example.com",
     subject: "Friday's launch",
@@ -52,15 +57,27 @@ const stubExecutors = (): AgentRequestExecutors => ({
   },
 });
 
+/**
+ * The Jev stand-in: every request is judged complete. `jev.calls` makes the
+ * same durability claim observable for the judgment as `modelCalls` does for
+ * the text model.
+ */
+const jev = createMockJevClient({ "*": true });
+const stubJudgments = () => ({ evaluatePrompt: createEvaluatePrompt(jev.client) });
+
 // The Durable Object runs in this isolate, so patching the class the Worker
 // exports reaches every instance the requests below create.
 const realCreateExecutors = EmailDrafter.prototype.createExecutors;
+const realCreateJudgments = EmailDrafter.prototype.createJudgments;
 const createExecutors = vi.spyOn(EmailDrafter.prototype, "createExecutors");
+const createJudgments = vi.spyOn(EmailDrafter.prototype, "createJudgments");
 beforeAll(() => {
   createExecutors.mockImplementation(stubExecutors);
+  createJudgments.mockImplementation(stubJudgments);
 });
 afterAll(() => {
   createExecutors.mockRestore();
+  createJudgments.mockRestore();
 });
 
 const url = (name: string) => `https://example.com/agents/email-drafter/${name}`;
@@ -152,6 +169,7 @@ describe("cloudflare agent host", () => {
     expect(drafted.draft?.subject).toBe("Friday's launch");
 
     const callsAfterDrafting = modelCalls.count;
+    const judgmentsAfterDrafting = jev.calls.length;
     const journaledAfterDrafting = (await journal(name)).length;
 
     // Eviction #1: the instance that drafted is gone.
@@ -162,6 +180,7 @@ describe("cloudflare agent host", () => {
     expect(resumed.view.draft?.subject).toBe("Friday's launch");
     // Folding the log re-executed nothing and appended nothing.
     expect(modelCalls.count).toBe(callsAfterDrafting);
+    expect(jev.calls.length).toBe(judgmentsAfterDrafting);
     expect(await journal(name)).toHaveLength(journaledAfterDrafting);
 
     const sent = await send(name, { type: "SEND" });
@@ -174,6 +193,7 @@ describe("cloudflare agent host", () => {
     expect(done.status).toBe("done");
     expect(done.output?.sentEmails).toHaveLength(1);
     expect(modelCalls.count).toBe(callsAfterDrafting);
+    expect(jev.calls.length).toBe(judgmentsAfterDrafting);
 
     const entries = await journal(name);
     expect(entries.map((entry) => entry.index)).toEqual(entries.map((_entry, i) => i));
@@ -259,6 +279,21 @@ describe("cloudflare agent host", () => {
 
   it("leaves the cached turn where the journal is when an append fails", async () => {
     const name = "append-fails";
+    // The failed turn tears down the Jev call it started. Under workerd the
+    // SDK's response buffering reports that abort as an unhandled rejection,
+    // so this conversation's judgment waits for the abort instead of answering.
+    createJudgments.mockImplementationOnce(() => ({
+      evaluatePrompt: createEvaluatePrompt(
+        new TypeSafeClient({
+          apiKey: "test-key",
+          retry: { maxRetries: 0 },
+          fetch: (_url, init) =>
+            new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+            }),
+        }),
+      ),
+    }));
     await get(name);
     const before = await journal(name);
 
@@ -304,6 +339,15 @@ describe("cloudflare agent host", () => {
     const { status, view } = await get("no-key");
     expect(status).toBe(500);
     expect(view.error).toContain("OPENAI_API_KEY");
+  });
+
+  it("without a TypeSafe binding, a turn fails naming it instead of faking the judgment", async () => {
+    createJudgments.mockImplementationOnce(function (this: EmailDrafter) {
+      return realCreateJudgments.call(this);
+    });
+    const { status, view } = await get("no-typesafe-key");
+    expect(status).toBe(500);
+    expect(view.error).toContain("TYPESAFE_API_KEY");
   });
 
   it("keeps each :name in its own Durable Object", async () => {

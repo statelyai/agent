@@ -1,16 +1,20 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { lintAgentMachine } from "@statelyai/agent/testing";
+import { createMockJevClient } from "../mock-jev.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   DEFAULT_BOT_SYSTEM,
   MAX_EXCHANGES,
+  PASS_THRESHOLD,
+  QUALITY_LEVELS,
   REFUND_PERSONA,
   chatbotSimulationEvalMachine,
   runChatbotSimulationEvalExample,
 } from "./index.js";
 
-const judged = { passed: true, verdict: "Declined the refund and offered credit.", score: 9 };
+/** The Jev judge: followed the policy, quality level 4 of 0-5 (→ 8/10). */
+const judged = () => createMockJevClient({ followedPolicy: true, quality: 4 });
 
 test("the customer finishes → one more bot reply → judged, endedBy user", async () => {
   const executors = createMockModelExecutors({
@@ -23,17 +27,19 @@ test("the customer finishes → one more bot reply → judged, endedBy user", as
         { message: "That trip is past our 30-day refund window; I can offer travel credit." },
         { message: "Sorry I couldn't help more. Have a good day." },
       ],
-      judgeConversation: [judged],
     },
   });
-  const result = await runChatbotSimulationEvalExample({ generateText: executors.generateText });
+  const result = await runChatbotSimulationEvalExample({
+    generateText: executors.generateText,
+    jevClient: judged().client,
+  });
 
   expect(result.outcome).toBe("done");
   expect(result.endedBy).toBe("user");
   expect(result.exchanges).toBe(2);
   expect(result.passed).toBe(true);
-  expect(result.score).toBe(9);
-  expect(result.verdict).toBe("PASS (9/10): Declined the refund and offered credit.");
+  expect(result.score).toBe(8);
+  expect(result.verdict).toBe(`PASS (8/10): ${QUALITY_LEVELS[4]}`);
   expect(result.transcript.split("\n")).toEqual([
     "Customer: I want a full refund for my Alaska trip.",
     "Support: That trip is past our 30-day refund window; I can offer travel credit.",
@@ -55,10 +61,13 @@ test("the bot's request never carries the persona; the judge's does", async () =
     text: {
       simulateUser: [{ message: "Refund please.", finished: true }],
       supportBot: [{ message: "Let me check." }],
-      judgeConversation: [judged],
     },
   });
-  await runChatbotSimulationEvalExample({ generateText: executors.generateText });
+  const jev = judged();
+  await runChatbotSimulationEvalExample({
+    generateText: executors.generateText,
+    jevClient: jev.client,
+  });
 
   const bot = executors.calls.find((call) => call.name === "supportBot")!;
   expect(Object.keys(bot.input as object).sort()).toEqual(["system", "transcript"]);
@@ -68,8 +77,11 @@ test("the bot's request never carries the persona; the judge's does", async () =
 
   const user = executors.calls.find((call) => call.name === "simulateUser")!;
   expect(user.request.prompt).toContain(REFUND_PERSONA.persona);
-  const judge = executors.calls.find((call) => call.name === "judgeConversation")!;
-  expect(judge.input).toMatchObject({ endedBy: "user", policy: DEFAULT_BOT_SYSTEM });
+  expect(jev.calls[0]!.state).toMatchObject({
+    endedBy: "user",
+    policy: DEFAULT_BOT_SYSTEM,
+    persona: REFUND_PERSONA.persona,
+  });
 });
 
 test("MAX_EXCHANGES without the customer finishing → judged anyway, endedBy budget", async () => {
@@ -77,10 +89,13 @@ test("MAX_EXCHANGES without the customer finishing → judged anyway, endedBy bu
     text: {
       simulateUser: [{ message: "Still want my money.", finished: false }],
       supportBot: [{ message: "Still can't refund that." }],
-      judgeConversation: [{ passed: true, verdict: "Held the line.", score: 8 }],
     },
   });
-  const result = await runChatbotSimulationEvalExample({ generateText: executors.generateText });
+  const jev = judged();
+  const result = await runChatbotSimulationEvalExample({
+    generateText: executors.generateText,
+    jevClient: jev.client,
+  });
 
   expect(result.outcome).toBe("done");
   expect(result.endedBy).toBe("budget");
@@ -88,9 +103,7 @@ test("MAX_EXCHANGES without the customer finishing → judged anyway, endedBy bu
   expect(executors.calls.filter((call) => call.name === "simulateUser")).toHaveLength(
     MAX_EXCHANGES,
   );
-  expect(executors.calls.find((call) => call.name === "judgeConversation")!.input).toMatchObject({
-    endedBy: "budget",
-  });
+  expect(jev.calls[0]!.state).toMatchObject({ endedBy: "budget" });
 });
 
 test("a failing judge verdict comes through as passed: false", async () => {
@@ -99,13 +112,13 @@ test("a failing judge verdict comes through as passed: false", async () => {
       text: {
         simulateUser: [{ message: "Refund!", finished: true }],
         supportBot: [{ message: "Sure, full refund issued." }],
-        judgeConversation: [{ passed: false, verdict: "Refunded a 5-year-old trip.", score: 1 }],
       },
     }).generateText,
+    jevClient: createMockJevClient({ followedPolicy: false, quality: 0 }).client,
   });
   expect(result.outcome).toBe("done");
   expect(result.passed).toBe(false);
-  expect(result.verdict).toBe("FAIL (1/10): Refunded a 5-year-old trip.");
+  expect(result.verdict).toBe(`FAIL (0/10): ${QUALITY_LEVELS[0]}`);
 });
 
 test("any model error lands in `failed` with the partial transcript", async () => {
@@ -114,7 +127,6 @@ test("any model error lands in `failed` with the partial transcript", async () =
       text: {
         simulateUser: [{ message: "Refund!", finished: true }],
         supportBot: [{ message: "No." }],
-        judgeConversation: [judged],
       },
     });
     const result = await runChatbotSimulationEvalExample({
@@ -122,6 +134,13 @@ test("any model error lands in `failed` with the partial transcript", async () =
         if (request.name === broken) throw new Error("provider down");
         return scripted.generateText(request, info);
       },
+      jevClient: createMockJevClient({
+        followedPolicy: () => {
+          if (broken === "judgeConversation") throw new Error("provider down");
+          return true;
+        },
+        quality: 4,
+      }).client,
     });
     expect(result.outcome).toBe("failed");
     expect(result.passed).toBe(false);
@@ -149,12 +168,12 @@ test("starters behave as their labels advertise", async () => {
       text: {
         simulateUser: [{ message: "hello", finished: true }],
         supportBot: [{ message: "hi" }],
-        judgeConversation: [judged],
       },
     });
     const result = await runChatbotSimulationEvalExample({
       ...starter.input,
       generateText: executors.generateText,
+      jevClient: judged().client,
     });
     // The persona the label names drives the simulated customer, and the
     // default airline policy is what the bot and the judge see.
@@ -165,6 +184,40 @@ test("starters behave as their labels advertise", async () => {
     );
     expect(result.outcome).toBe("done");
   }
+});
+
+test("the judge asks Jev a policy noul and a quality score in one call; PASS_THRESHOLD decides passed", async () => {
+  const run = (followedPolicy: number) => {
+    const jev = createMockJevClient({ followedPolicy, quality: 3 });
+    const result = runChatbotSimulationEvalExample({
+      generateText: createMockModelExecutors({
+        text: {
+          simulateUser: [{ message: "Refund!", finished: true }],
+          supportBot: [{ message: "Outside the window; I can offer credit." }],
+        },
+      }).generateText,
+      jevClient: jev.client,
+    });
+    return { jev, result };
+  };
+
+  const above = run(PASS_THRESHOLD + 0.05);
+  const aboveResult = await above.result;
+  expect(above.jev.calls).toHaveLength(1);
+  const call = above.jev.calls[0]!;
+  expect((call.state as { transcript: unknown }).transcript).toEqual([
+    { role: "user", text: "Refund!" },
+    { role: "bot", text: "Outside the window; I can offer credit." },
+  ]);
+  expect(Object.fromEntries(Object.entries(call.questions).map(([k, q]) => [k, q.type]))).toEqual({
+    followedPolicy: "noul",
+    quality: "score",
+  });
+  expect(aboveResult).toMatchObject({ passed: true, score: 6 });
+
+  const below = await run(PASS_THRESHOLD - 0.05).result;
+  expect(below).toMatchObject({ passed: false, score: 6 });
+  expect(below.verdict).toBe(`FAIL (6/10): ${QUALITY_LEVELS[3]}`);
 });
 
 test("lintAgentMachine is clean", () => {

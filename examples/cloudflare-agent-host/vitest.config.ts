@@ -9,8 +9,9 @@ export default defineConfig({
       // once anyone has run `dev:live` a real key would reach the Worker and
       // these tests would silently bill OpenAI. This binding is applied on
       // top of the wrangler/.dev.vars ones, so the real provider can never be
-      // built here: the suite stubs the model (see test/agent.workers-test.ts).
-      miniflare: { bindings: { OPENAI_API_KEY: "" } },
+      // built here: the suite stubs the model and the Jev client (see
+      // test/agent.workers-test.ts).
+      miniflare: { bindings: { OPENAI_API_KEY: "", TYPESAFE_API_KEY: "" } },
     }),
   ],
   test: {

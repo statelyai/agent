@@ -10,15 +10,28 @@
  * `setupAgent` and read back with `getInteraction` — so hosts render
  * the conversation generically and never hardcode state names.
  *
- * Flow: prompting → evaluating → (needsMoreInfo)? → drafting → reviewing →
- * sending → sent → (another | done), with `failed` for a request that errors.
- * After MAX_REVISIONS revision rounds, drafting lands in `finalReview`, which
- * accepts SEND and nothing else — the bound is a state, not a hidden guard.
+ * Flow: prompting → evaluating → (clarifying → needsMoreInfo)? → drafting →
+ * reviewing → sending → sent → (another | done), with `failed` for a request
+ * that errors. After MAX_REVISIONS revision rounds, drafting lands in
+ * `finalReview`, which accepts SEND and nothing else — the bound is a state,
+ * not a hidden guard.
+ *
+ * `evaluating` is a JUDGMENT, not a generation: a TypeSafe System One actor
+ * (Jev) reads the request and the required details as state and answers one
+ * `noul` for "is this enough to draft from?" plus one `noul` per required
+ * detail, in one call. Code turns those probabilities into `missing` against
+ * `ASSESSMENT_THRESHOLD`. Only when something is missing does `clarifying`
+ * ask the text model for follow-up questions, the one generative part of the
+ * check. `draftEmail` stays a text request. Hosts pass their own Jev client
+ * with `createEvaluatePrompt(client)` as an `actors` override; omitted, the
+ * SDK reads `TYPESAFE_API_KEY`.
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
+import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
 import type { AiSdkModelMap } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   type AgentInteraction,
   type AgentMessage,
@@ -79,21 +92,75 @@ const outputSchema = z.object({
   failure: z.string().nullable(),
 });
 
-export const models: AiSdkModelMap<"promptEvaluator" | "emailDrafter"> = {
-  promptEvaluator: openai("gpt-5.4-mini"),
+export const models: AiSdkModelMap<"followUpWriter" | "emailDrafter"> = {
+  followUpWriter: openai("gpt-5.4-mini"),
   emailDrafter: openai("gpt-5.4-mini"),
 };
 
-export const evaluatePrompt = createTextLogic({
+/**
+ * What a request must state before drafting, keyed by the name `missing`
+ * reports. The descriptions are the evidence Jev reads (`requiredDetails`).
+ */
+export const REQUIRED_DETAILS = {
+  recipient: "Who the email goes to: a name, a team, or an address.",
+  subject: "What the email is about, clearly enough to write a subject line.",
+  body: "The message or facts the email must convey.",
+} as const;
+
+export type RequiredDetail = keyof typeof REQUIRED_DETAILS;
+
+/** A detail counts as stated, and the request as complete, at or above this probability. */
+export const ASSESSMENT_THRESHOLD = 0.5;
+
+/**
+ * The prompt check as a System One judgment: the request and the required
+ * details are the state; `satisfied` plus one `noul` per detail are the
+ * questions, asked in one call. `client` is injected by tests and hosts;
+ * omitted, the SDK reads `TYPESAFE_API_KEY` from the environment.
+ */
+export function createEvaluatePrompt(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { prompt: string }) => ({
+      request: input.prompt,
+      requiredDetails: REQUIRED_DETAILS,
+    }),
+    questions: () => ({
+      satisfied: noul(
+        "Does `request` give enough to draft the email without inventing any detail listed in `requiredDetails`?",
+        {
+          true: "Every required detail is stated or plainly implied, or the user asked to draft anyway.",
+          false: "At least one required detail would have to be guessed.",
+        },
+      ),
+      ...(Object.fromEntries(
+        Object.keys(REQUIRED_DETAILS).map((detail) => [
+          detail,
+          noul(`Does \`request\` state the ${detail} described in \`requiredDetails.${detail}\`?`),
+        ]),
+      ) as Record<RequiredDetail, ReturnType<typeof noul>>),
+    }),
+  });
+}
+
+/** The default judgment, registered on the machine; hosts override it per run. */
+export const evaluatePrompt = createEvaluatePrompt();
+
+/**
+ * The follow-up questions are prose the human reads, so they stay a text
+ * request. `clarifying` runs it only when the judgment found a gap.
+ */
+export const writeFollowUps = createTextLogic({
   schemas: {
-    input: z.object({ prompt: z.string() }),
-    output: promptAssessmentSchema,
+    input: z.object({ prompt: z.string(), missing: z.array(z.string()) }),
+    output: z.object({ questions: z.array(z.string()) }),
   },
-  name: "evaluatePrompt",
-  model: "promptEvaluator",
+  name: "writeFollowUps",
+  model: "followUpWriter",
   system:
-    "Evaluate an email drafting request. Require recipient, subject, and body details. Return missing fields and one question per gap.",
-  prompt: ({ input }) => input.prompt,
+    "An email drafting request is missing details. Write one short question to the user per missing detail.",
+  prompt: ({ input }) =>
+    `Request:\n${input.prompt}\n\nMissing: ${input.missing.join(", ") || "(unclear what is missing)"}`,
 });
 
 export const draftEmail = createTextLogic({
@@ -127,6 +194,7 @@ export const emailDrafterActors = {
     },
   }),
   evaluatePrompt,
+  writeFollowUps,
   draftEmail,
 };
 
@@ -173,18 +241,49 @@ export const emailDrafter = agentSetup.createMachine({
       },
     },
 
+    // A Jev judgment: probabilities in, `missing` computed here against the
+    // threshold. Complete → draft; anything missing → ask about it.
     evaluating: {
       invoke: {
         src: "evaluatePrompt",
         input: ({ context }) => ({ prompt: context.prompt }),
-        onDone: ({ output }) => ({
-          target: output.result.satisfied ? "drafting" : "needsMoreInfo",
-          context: { assessment: output.result },
-        }),
+        onDone: ({ output: { answers } }) => {
+          const missing = (Object.keys(REQUIRED_DETAILS) as RequiredDetail[]).filter(
+            (detail) => answers[detail].noul < ASSESSMENT_THRESHOLD,
+          );
+          const satisfied = answers.satisfied.noul >= ASSESSMENT_THRESHOLD && missing.length === 0;
+          return {
+            target: satisfied ? "drafting" : "clarifying",
+            context: { assessment: { satisfied, missing, questions: [] } },
+          };
+        },
         onError: ({ event }) => ({
           target: "failed",
           context: { failure: `evaluatePrompt failed: ${String(event.error)}` },
         }),
+      },
+    },
+
+    // Only reached when something is missing: the text model words the
+    // follow-up questions. Failing to word them still asks the human.
+    clarifying: {
+      invoke: {
+        src: "writeFollowUps",
+        input: ({ context }) => ({
+          prompt: context.prompt,
+          missing: context.assessment?.missing ?? [],
+        }),
+        onDone: ({ context, output }) => ({
+          target: "needsMoreInfo",
+          context: {
+            assessment: {
+              satisfied: false,
+              missing: context.assessment?.missing ?? [],
+              questions: output.result.questions,
+            },
+          },
+        }),
+        onError: { target: "needsMoreInfo" },
       },
     },
 

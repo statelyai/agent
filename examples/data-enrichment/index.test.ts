@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { type AgentTextRequest } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
+import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   dataEnrichmentMachine,
@@ -9,6 +10,7 @@ import {
   MAX_LOOPS,
   runDataEnrichmentExample,
   SAMPLE_WEB_INDEX,
+  SUPPORT_THRESHOLD,
   type Field,
 } from "./index.js";
 
@@ -35,21 +37,26 @@ function queryForMissing(request: AgentTextRequest): { query: string } {
   return { query: `${company} ${missingFields.join(" ")}` };
 }
 
-/** Model mocked by request name; the search actor runs its real keyword logic. */
-function scripted(reviewRecord: unknown[] = [{ satisfactory: true, feedback: "Supported." }]) {
-  return createMockModelExecutors({
-    text: {
-      planSearch: queryForMissing,
-      extractRecord: extractFromPassages,
-      reviewRecord,
-    },
-  }).generateText;
+/**
+ * Text model mocked by request name; the search actor runs its real keyword
+ * logic. The reviewer is a Jev judgment scripted by question name (one `noul`
+ * per requested field); by default every value is backed.
+ */
+function scripted(review: Record<string, MockJevEntry | MockJevEntry[]> = { "*": true }) {
+  const jev = createMockJevClient(review);
+  return {
+    generateText: createMockModelExecutors({
+      text: { planSearch: queryForMissing, extractRecord: extractFromPassages },
+    }).generateText,
+    jevClient: jev.client,
+    jev,
+  };
 }
 
 test("fully covered company: one search pass, reviewed, done", async () => {
   const result = await runDataEnrichmentExample({
     company: "Northwind Robotics",
-    generateText: scripted(),
+    ...scripted(),
   });
   expect(result.progress).toEqual([
     "planningSearch",
@@ -73,7 +80,7 @@ test("fully covered company: one search pass, reviewed, done", async () => {
 test("partially covered company: a missing field sends the loop back to search", async () => {
   const result = await runDataEnrichmentExample({
     company: "Bluefin Analytics",
-    generateText: scripted(),
+    ...scripted(),
   });
   expect(result.progress).toEqual([
     "planningSearch",
@@ -92,7 +99,7 @@ test("partially covered company: a missing field sends the loop back to search",
 test("a field missing everywhere spends MAX_LOOPS and ends in `failed` with the partial record", async () => {
   const result = await runDataEnrichmentExample({
     company: "Cedar Grid Energy",
-    generateText: scripted(),
+    ...scripted(),
   });
   expect(result.finalState).toBe("failed");
   expect(result.loops).toBe(MAX_LOOPS);
@@ -109,7 +116,7 @@ test("requesting fewer fields changes what counts as complete", async () => {
   const result = await runDataEnrichmentExample({
     company: "Cedar Grid Energy",
     fields: ["founded", "headquarters", "ceo"],
-    generateText: scripted(),
+    ...scripted(),
   });
   expect(result.finalState).toBe("done");
   expect(result.loops).toBe(2);
@@ -119,10 +126,8 @@ test("requesting fewer fields changes what counts as complete", async () => {
 test("a reviewer rejection costs a search pass, then the record is accepted", async () => {
   const result = await runDataEnrichmentExample({
     company: "Northwind Robotics",
-    generateText: scripted([
-      { satisfactory: false, feedback: "Confirm the headcount." },
-      { satisfactory: true, feedback: "Supported." },
-    ]),
+    // The headcount is judged unbacked once, then backed.
+    ...scripted({ employees: [false, true], "*": true }),
   });
   expect(result.finalState).toBe("done");
   expect(result.loops).toBe(2);
@@ -132,12 +137,14 @@ test("a reviewer rejection costs a search pass, then the record is accepted", as
 test("a reviewer that never accepts exhausts the budget → `failed`", async () => {
   const result = await runDataEnrichmentExample({
     company: "Northwind Robotics",
-    generateText: scripted([{ satisfactory: false, feedback: "Values look stale." }]),
+    ...scripted({ "*": false }),
   });
   expect(result.finalState).toBe("failed");
   expect(result.loops).toBe(MAX_LOOPS);
   expect(result.missingFields).toEqual([]);
-  expect(result.summary).toContain("Values look stale.");
+  expect(result.summary).toContain(
+    "Not backed by the passages: Founded, Headquarters, CEO, Employees.",
+  );
 });
 
 test("a failing extraction ends in `failed` with the reason", async () => {
@@ -164,7 +171,7 @@ test("starters behave as their labels advertise", async () => {
   for (const starter of starters) {
     const result = await runDataEnrichmentExample({
       company: starter.input.company,
-      generateText: scripted(),
+      ...scripted(),
     });
     if (starter.label.startsWith("Fully covered")) {
       expect(result.finalState).toBe("done");
@@ -178,6 +185,54 @@ test("starters behave as their labels advertise", async () => {
       expect(result.loops).toBe(MAX_LOOPS);
     }
   }
+});
+
+test("the reviewer asks Jev one noul per requested field; the threshold decides", async () => {
+  const executors = scripted({ ceo: [SUPPORT_THRESHOLD - 0.01, SUPPORT_THRESHOLD], "*": 0.9 });
+  const result = await runDataEnrichmentExample({
+    company: "Northwind Robotics",
+    fields: ["founded", "ceo"],
+    ...executors,
+  });
+
+  // A probability just under the threshold rejects; at the threshold, accepts.
+  expect(result.finalState).toBe("done");
+  expect(executors.jev.calls).toHaveLength(2);
+  const call = executors.jev.calls[0]!;
+  const state = call.state as { company: string; record: object; passages: string[] };
+  // The evidence is the state: only the requested fields, and every passage read.
+  expect(state.company).toBe("Northwind Robotics");
+  expect(state.record).toEqual({ founded: "2014", ceo: "Dana Okafor" });
+  expect(state.passages.length).toBeGreaterThan(0);
+  expect(Object.keys(call.questions)).toEqual(["founded", "ceo"]);
+  expect(Object.values(call.questions).every((q) => q.type === "noul")).toBe(true);
+  // The just-under answer cost one more search pass before the second review.
+  expect(result.progress.filter((state) => state === "reflecting")).toHaveLength(2);
+  expect(result.loops).toBe(2);
+});
+
+test("the rendered feedback names the unbacked fields and reaches the next search plan", async () => {
+  const executors = scripted({ employees: [false, true], "*": true });
+  const plans: string[] = [];
+  const result = await runDataEnrichmentExample({
+    company: "Northwind Robotics",
+    ...executors,
+    generateText: createMockModelExecutors({
+      text: {
+        planSearch: (request: AgentTextRequest) => {
+          plans.push(request.prompt ?? "");
+          return queryForMissing(request);
+        },
+        extractRecord: extractFromPassages,
+      },
+    }).generateText,
+  });
+
+  expect(result.finalState).toBe("done");
+  expect(plans).toHaveLength(2);
+  expect(plans[1]).toContain(
+    "Reviewer feedback: Not backed by the passages: Employees. Search for these again.",
+  );
 });
 
 test("machine is structurally sound", () => {

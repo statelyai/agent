@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "The model chooses between searching sample summaries of Lilian Weng's posts and answering directly. Retrieved passages are graded, and a search that finds nothing relevant leads to a rewritten question and another turn for the model. In LangGraph, only recursion_limit stops a model that keeps calling the retriever. Here a guard rejects RETRIEVE once MAX_RETRIEVALS is spent, so the model has to answer, and that forced answer ends in a failed state marked as unverified."
+    "purpose": "The model chooses between searching sample summaries of Lilian Weng's posts and answering directly. Retrieved passages are graded one by one as Jev judgments, and a search that finds nothing relevant leads to a rewritten question and another turn for the model. In LangGraph, only recursion_limit stops a model that keeps calling the retriever. Here a guard rejects RETRIEVE once MAX_RETRIEVALS is spent, so the model has to answer, and that forced answer ends in a failed state marked as unverified."
   },
   "starters": [
     {

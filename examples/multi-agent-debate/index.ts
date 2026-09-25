@@ -21,7 +21,8 @@
  *   - pro node            → `proSpeaking` (request `argueFor`)
  *   - con node            → `conSpeaking` (request `argueAgainst`)
  *   - rounds edge         → `checkingRound` (a `choice` state over `round`)
- *   - judge node          → `judging` (structured verdict: winner, reasoning, scores)
+ *   - judge node          → `judging` (Jev judgment `judgeDebate`: a `choice` for
+ *                           the winner + a `score` per side — see note below)
  *   - messages reducer    → `transcript` in context, appended on each speaker's `onDone`
  *
  * Differences from LangGraph worth calling out:
@@ -32,18 +33,26 @@
  *   - A speaker cannot speak out of turn or end the debate early: neither
  *     request can choose a next state. Only the machine's edges can.
  *   - Any speaker or judge failure lands in `failed` with the transcript so far.
+ *   - Judging is a JUDGMENT, not a generation. `judging` asks TypeSafe System
+ *     One (Jev) three questions in one call over `{ motion, transcript }`:
+ *     `winner` (a `choice` of pro / con / draw) and `proCase` / `conCase` (a
+ *     `score` per side on six concrete levels, `CASE_LEVELS`, mapped to 0-10
+ *     in code). The reasoning is rendered from the winner's probability and
+ *     each side's matched level, not written by a model. The speakers stay
+ *     text-model requests: arguing is generative.
  *
- * No stand-ins: every node is a model call.
- * Run: OPENAI_API_KEY=... npx tsx examples/multi-agent-debate/index.ts
+ * No stand-ins: every speaker is a model call and the judge a Jev call.
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/multi-agent-debate/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
+import { choice, score as scoreQuestion, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
   debater: openai("gpt-5.4-mini"),
-  judge: openai("gpt-5.4-mini"),
 };
 
 /** Upper bound on debate rounds (one pro turn + one con turn each). */
@@ -81,6 +90,69 @@ function renderTranscript(transcript: Turn[]): string {
 }
 
 type DebateContext = z.infer<typeof contextSchema>;
+
+/** How strong one side's case was, lowest to highest (mapped to 0-10). */
+export const CASE_LEVELS = [
+  "Made no real argument: off-topic, slogans, or contradicted its own side.",
+  "Asserted positions without reasons or evidence, and ignored the opponent.",
+  "Gave reasons for its side but left the opponent's main points unanswered.",
+  "Gave reasons and rebutted some of the opponent's points, with gaps or thin evidence.",
+  "Made well-supported points and directly rebutted the opponent's strongest points.",
+  "Built a clear, well-evidenced case that answered every major opposing point.",
+] as const;
+
+/** One side's case, judged on argument quality over that side's turns. */
+function caseQuestion(side: Turn["side"]) {
+  const stance = side === "pro" ? "for" : "against";
+  return scoreQuestion(
+    `How strong is the case made by the \`transcript\` turns whose \`side\` is "${side}" ` +
+      `(arguing ${stance} \`motion\`)? Judge argument quality only, not your view of the motion.`,
+    CASE_LEVELS,
+  );
+}
+
+/**
+ * The judge node as a System One judgment: the motion and the transcript are
+ * the state; one `choice` names the winner and one `score` per side rates its
+ * case. `client` is injected by tests and hosts; omitted, the SDK reads
+ * `TYPESAFE_API_KEY` from the environment.
+ */
+export function createJudgeDebate(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { motion: string; transcript: Turn[] }) => ({
+      motion: input.motion,
+      transcript: input.transcript,
+    }),
+    questions: () => ({
+      winner: choice(
+        "Which side argued `motion` better across `transcript`? Judge argument quality only, " +
+          "not your view of the motion.",
+        {
+          pro: 'The "pro" side made the stronger case: its points stood and its rebuttals landed.',
+          con: 'The "con" side made the stronger case: its points stood and its rebuttals landed.',
+          draw: "Neither case was clearly stronger: points and rebuttals were evenly matched.",
+        },
+      ),
+      proCase: caseQuestion("pro"),
+      conCase: caseQuestion("con"),
+    }),
+  });
+}
+
+/** A side's level on 0-10. */
+function toTen(level: number) {
+  return Math.round((level / (CASE_LEVELS.length - 1)) * 10);
+}
+
+/** "Judge 90% sure. Pro: <level>. Con: <level>." — rendered, not generated. */
+function renderReasoning(probability: number, proLevel: number, conLevel: number): string {
+  const describe = (level: number) => CASE_LEVELS[Math.round(level)] ?? "";
+  return (
+    `Judge ${Math.round(probability * 100)}% sure. ` +
+    `Pro: ${describe(proLevel)} Con: ${describe(conLevel)}`
+  );
+}
 
 /** What each speaker sees: the motion, where the debate is, and what was said. */
 function turnInput(context: DebateContext) {
@@ -128,6 +200,8 @@ const agentSetup = setupAgent({
     rounds: z.number().int().min(1).max(MAX_ROUNDS).default(2),
   }),
   output: outputSchema,
+  // The judge node: a Jev judgment (see createJudgeDebate).
+  actors: { judgeDebate: createJudgeDebate() },
   requests: {
     argueFor: {
       schemas: { input: speakerInput, output: z.object({ argument: z.string() }) },
@@ -144,17 +218,6 @@ const agentSetup = setupAgent({
         "You argue AGAINST the motion in a formal debate. Make one new point and rebut the " +
         "proposer's last point. At most four sentences.",
       prompt: speakerPrompt,
-    },
-    judgeDebate: {
-      schemas: {
-        input: z.object({ motion: z.string(), transcript: z.string() }),
-        output: verdictSchema,
-      },
-      model: "judge",
-      system:
-        "You judge a debate on argument quality alone, not on your own view of the motion. " +
-        "Score each side 0-10, name the winner (or a draw), and give your reasoning in two sentences.",
-      prompt: ({ input }) => `Motion: ${input.motion}\n\nTranscript:\n${input.transcript}`,
     },
   },
 });
@@ -215,9 +278,25 @@ export const multiAgentDebateMachine = agentSetup.createMachine({
         src: "judgeDebate",
         input: ({ context }) => ({
           motion: context.motion,
-          transcript: renderTranscript(context.transcript),
+          transcript: context.transcript,
         }),
-        onDone: ({ output }) => ({ target: "done", context: { verdict: output.result } }),
+        onDone: ({ output }) => {
+          const { winner, proCase, conCase } = output.answers;
+          return {
+            target: "done",
+            context: {
+              verdict: {
+                winner: winner.choice,
+                reasoning: renderReasoning(
+                  winner.probabilities[winner.choice],
+                  proCase.score,
+                  conCase.score,
+                ),
+                scores: { pro: toTen(proCase.score), con: toTen(conCase.score) },
+              },
+            },
+          };
+        },
         onError: ({ event }) => ({
           target: "failed",
           context: { failure: `judgeDebate failed: ${String(event.error)}` },
@@ -255,6 +334,8 @@ export interface RunMultiAgentDebateOptions {
   rounds?: number;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -268,13 +349,14 @@ export type MultiAgentDebateResult = z.infer<typeof outputSchema> & {
 export async function runMultiAgentDebateExample(
   options: RunMultiAgentDebateOptions = {},
 ): Promise<MultiAgentDebateResult> {
-  const { motion = DEFAULT_MOTION, rounds, generateText, onProgress } = options;
+  const { motion = DEFAULT_MOTION, rounds, generateText, jevClient, onProgress } = options;
   const progress: string[] = [];
   const result = await runAgent(multiAgentDebateMachine, {
     input: { motion, ...(rounds !== undefined ? { rounds } : {}) },
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
+    ...(jevClient ? { actors: { judgeDebate: createJudgeDebate(jevClient) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -289,7 +371,9 @@ export async function runMultiAgentDebateExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
+  }
   void runMultiAgentDebateExample({ onProgress: (state) => console.log(`  → ${state}`) }).then(
     (result) => console.log(`\n${result.transcript}\n\n${result.verdict}`),
   );

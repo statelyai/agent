@@ -98,6 +98,16 @@
         "default": "./dist/testing.cjs"
       }
     },
+    "./typesafe": {
+      "import": {
+        "types": "./dist/typesafe.d.mts",
+        "default": "./dist/typesafe.mjs"
+      },
+      "require": {
+        "types": "./dist/typesafe.d.cts",
+        "default": "./dist/typesafe.cjs"
+      }
+    },
     "./validate": {
       "import": {
         "types": "./dist/validate.d.mts",
@@ -152,6 +162,7 @@
     "@opentelemetry/sdk-trace-base": "^2.10.0",
     "@types/node": "^20.19.43",
     "@types/react": "^19.2.18",
+    "@typesafe-ai/sdk": "0.6.0",
     "ai": "^7.0.0",
     "ajv": "^8.20.0",
     "braintrust": "^3.28.0",
@@ -172,6 +183,7 @@
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1",
+    "@typesafe-ai/sdk": "^0.6.0",
     "ai": "^7.0.0",
     "ajv": "^8.20.0",
     "openai": ">=5.0.0 <8",
@@ -188,6 +200,9 @@
       "optional": true
     },
     "openai": {
+      "optional": true
+    },
+    "@typesafe-ai/sdk": {
       "optional": true
     }
   },

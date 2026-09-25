@@ -7,14 +7,24 @@
  * The first pass translates literally on purpose, so the strict reviewer always
  * has something to catch and every run shows a real before/after revision.
  *
+ * The evaluator is split along the judgment/generation line. The grade is a
+ * JUDGMENT: `evaluating` asks TypeSafe System One (Jev) one `score`
+ * (`quality`, on `QUALITY_LEVELS`, mapped to the 1-10 `qualityScore`) and three
+ * `noul`s (`preservesTone`, `preservesNuance`, `culturallyAccurate`, each
+ * against `ASPECT_THRESHOLD`) in one call. The optimizer needs prose feedback
+ * to act on, so a failing grade goes on to `critiquing`, where the text model
+ * lists the issues and suggestions, told the grade rather than asked for it.
+ *
  * Compare: https://ai-sdk.dev/docs/agents/workflows#evaluator-optimizer
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/ai-sdk-evaluator-optimizer/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/ai-sdk-evaluator-optimizer/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
+import { noul, score, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { setupAgent, runAgent } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 
 const translationEvaluationSchema = z.object({
   qualityScore: z.number().min(1).max(10),
@@ -25,10 +35,62 @@ const translationEvaluationSchema = z.object({
   improvementSuggestions: z.array(z.string()),
 });
 
-function translationPasses(evaluation: z.infer<typeof translationEvaluationSchema> | null) {
+type TranslationEvaluation = z.infer<typeof translationEvaluationSchema>;
+
+/** A translation passes at or above this 1-10 quality (with every aspect held). */
+export const PASSING_QUALITY = 8;
+
+/** An aspect (tone, nuance, cultural accuracy) holds when Jev's probability clears this. */
+export const ASPECT_THRESHOLD = 0.5;
+
+/** How well a translation reads, lowest to highest (mapped to a 1-10 quality). */
+export const QUALITY_LEVELS = [
+  "Wrong or unreadable: the meaning is lost or garbled.",
+  "The meaning is mostly there, but it is a word-for-word rendering a native speaker finds awkward.",
+  "Accurate and grammatical, but stiff, or it calques an idiom instead of using the local equivalent.",
+  "Reads naturally to a native speaker, with at most a minor word-choice issue.",
+  "Reads as if written in the target language: idiomatic, right register, nuance intact.",
+] as const;
+
+/** A `QUALITY_LEVELS` answer as the 1-10 `qualityScore` the machine reports. */
+export function toQualityScore(level: number): number {
+  return Math.round(1 + (level / (QUALITY_LEVELS.length - 1)) * 9);
+}
+
+/**
+ * The grade as a System One judgment: the original, the translation, and the
+ * target language are the state; one `score` and three `noul`s are asked in
+ * one call. `client` is injected by tests and hosts; omitted, the SDK reads
+ * `TYPESAFE_API_KEY` from the environment.
+ */
+export function createGradeTranslation(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { original: string; translation: string; targetLanguage: string }) => ({
+      original: input.original,
+      translation: input.translation,
+      targetLanguage: input.targetLanguage,
+    }),
+    questions: () => ({
+      quality: score(
+        "How well does `translation` render `original` in `targetLanguage` for a native speaker?",
+        QUALITY_LEVELS,
+      ),
+      preservesTone: noul("Does `translation` keep the tone and register of `original`?"),
+      preservesNuance: noul(
+        "Does `translation` keep the nuance of `original`, using the target language's own idiom rather than a literal calque?",
+      ),
+      culturallyAccurate: noul(
+        "Is `translation` culturally accurate for speakers of `targetLanguage`?",
+      ),
+    }),
+  });
+}
+
+function translationPasses(evaluation: TranslationEvaluation | null) {
   return (
     !!evaluation &&
-    evaluation.qualityScore >= 8 &&
+    evaluation.qualityScore >= PASSING_QUALITY &&
     evaluation.preservesTone &&
     evaluation.preservesNuance &&
     evaluation.culturallyAccurate
@@ -37,7 +99,7 @@ function translationPasses(evaluation: z.infer<typeof translationEvaluationSchem
 
 const models = {
   translator: openai("gpt-5.4-mini"),
-  evaluator: openai("gpt-5.4-mini"),
+  critic: openai("gpt-5.4-mini"),
   improver: openai("gpt-5.4-mini"),
 };
 
@@ -55,13 +117,17 @@ const contextSchema = z.object({
 });
 
 /** "Score 6/10 — literal calque; wrong register" */
-function reviewLine(evaluation: z.infer<typeof translationEvaluationSchema>) {
+function reviewLine(evaluation: TranslationEvaluation) {
   const issues = evaluation.specificIssues.join("; ");
   return `Score ${evaluation.qualityScore}/10${issues ? ` — ${issues}` : " — reads naturally"}`;
 }
 
 const agentSetup = setupAgent({
   models,
+  actors: {
+    // The grade: a Jev judgment (see createGradeTranslation).
+    gradeTranslation: createGradeTranslation(),
+  },
   context: contextSchema,
   input: z.object({
     text: z.string(),
@@ -88,6 +154,14 @@ const agentSetup = setupAgent({
   // `improving` runs only after evaluating set translation + evaluation.
   states: {
     evaluating: { schemas: { context: contextSchema.extend({ translation: z.string() }) } },
+    critiquing: {
+      schemas: {
+        context: contextSchema.extend({
+          translation: z.string(),
+          evaluation: translationEvaluationSchema,
+        }),
+      },
+    },
     improving: {
       schemas: {
         context: contextSchema.extend({
@@ -111,15 +185,31 @@ const agentSetup = setupAgent({
         "You are a fast first-pass translator. Translate the text literally, close to word for word, without hunting for the idiomatic equivalent in the target language. Return only the translation.",
       prompt: ({ input }) => `Translate this text to ${input.targetLanguage}:\n${input.text}`,
     },
-    evaluateTranslation: {
+    // The prose feedback the optimizer acts on, for a grade that failed.
+    critiqueTranslation: {
       schemas: {
-        input: z.object({ original: z.string(), translation: z.string() }),
-        output: translationEvaluationSchema,
+        input: z.object({
+          original: z.string(),
+          translation: z.string(),
+          evaluation: translationEvaluationSchema,
+        }),
+        output: translationEvaluationSchema.pick({
+          specificIssues: true,
+          improvementSuggestions: true,
+        }),
       },
-      model: "evaluator",
+      model: "critic",
       system:
-        "You are a bilingual translation reviewer. Score the translation 1-10 for overall quality and judge whether it preserves tone, preserves nuance, and is culturally accurate. List at most two specific issues and matching improvement suggestions, each a short phrase. Be strict: reserve scores of 8+ for translations that read naturally to a native speaker, and mark any literal calque of an idiom as failing nuance.",
-      prompt: ({ input }) => `Original: ${input.original}\nTranslation: ${input.translation}`,
+        "You are a bilingual translation reviewer. The translation has already been graded and did not pass. List at most two specific issues and matching improvement suggestions, each a short phrase, that explain the grade.",
+      prompt: ({ input }) =>
+        [
+          `Original: ${input.original}`,
+          `Translation: ${input.translation}`,
+          `Quality: ${input.evaluation.qualityScore}/10`,
+          `Preserves tone: ${input.evaluation.preservesTone ? "yes" : "no"}`,
+          `Preserves nuance: ${input.evaluation.preservesNuance ? "yes" : "no"}`,
+          `Culturally accurate: ${input.evaluation.culturallyAccurate ? "yes" : "no"}`,
+        ].join("\n"),
     },
     improveTranslation: {
       schemas: {
@@ -178,27 +268,56 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
         onError: { target: "failed" },
       },
     },
+    // The grade: one Jev call, thresholds applied here. A failing grade needs
+    // prose feedback before the optimizer can act on it.
     evaluating: {
       invoke: {
-        id: "evaluateTranslation",
-        src: "evaluateTranslation",
+        id: "gradeTranslation",
+        src: "gradeTranslation",
         input: ({ context }) => ({
           original: context.text,
           translation: context.translation,
+          targetLanguage: context.targetLanguage,
         }),
-        onDone: ({ context, output }, enq) => {
+        onDone: ({ context, output: { answers } }, enq) => {
+          const evaluation: TranslationEvaluation = {
+            qualityScore: toQualityScore(answers.quality.score),
+            preservesTone: answers.preservesTone.noul >= ASPECT_THRESHOLD,
+            preservesNuance: answers.preservesNuance.noul >= ASPECT_THRESHOLD,
+            culturallyAccurate: answers.culturallyAccurate.noul >= ASPECT_THRESHOLD,
+            specificIssues: [],
+            improvementSuggestions: [],
+          };
           enq.emit({
             type: "EVALUATED",
-            qualityScore: output.result.qualityScore,
+            qualityScore: evaluation.qualityScore,
             iteration: context.iterations + 1,
           });
           return {
-            target: "checking",
-            context: { evaluation: output.result, iterations: context.iterations + 1 },
+            target: translationPasses(evaluation) ? "checking" : "critiquing",
+            context: { evaluation, iterations: context.iterations + 1 },
           };
         },
         // A translation exists; only the review is missing. `done` reports it
         // with whatever score the previous pass produced.
+        onError: { target: "done" },
+      },
+    },
+    critiquing: {
+      invoke: {
+        id: "critiqueTranslation",
+        src: "critiqueTranslation",
+        input: ({ context }) => ({
+          original: context.text,
+          translation: context.translation,
+          evaluation: context.evaluation,
+        }),
+        onDone: ({ context, output }) => ({
+          target: "checking",
+          context: { evaluation: { ...context.evaluation, ...output.result } },
+        }),
+        // The grade stands, but there is no feedback to improve from: `done`
+        // reports the translation with its grade.
         onError: { target: "done" },
       },
     },
@@ -298,8 +417,8 @@ export async function runAiSdkEvaluatorOptimizerExample() {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

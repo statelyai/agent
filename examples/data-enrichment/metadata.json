@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Searches a sample index for a company's founding year, headquarters, CEO and headcount, extracts them into a fixed record, and has a reviewer check the result. A choice state, not the model, decides whether the record is complete, and both the gap loop and the reviewer loop spend one MAX_LOOPS budget that ends in `failed` with the partial record, where LangGraph's max_loops returns whatever it last had."
+    "purpose": "Searches a sample index for a company's founding year, headquarters, CEO and headcount, extracts them into a fixed record, and has Jev check, field by field, that every value is backed by a passage. A choice state, not the model, decides whether the record is complete, and both the gap loop and the reviewer loop spend one MAX_LOOPS budget that ends in `failed` with the partial record, where LangGraph's max_loops returns whatever it last had."
   },
   "starters": [
     {

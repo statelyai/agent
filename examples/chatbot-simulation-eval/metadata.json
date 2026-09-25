@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "A model plays a customer with a hidden persona, another plays the airline support bot, and a judge scores whether the bot held to its policy. The stop rule is a choice state over an exported MAX_EXCHANGES with the reason recorded as endedBy, the judge runs inside the machine, and the bot's request input has no persona field, so it cannot see the customer's agenda."
+    "purpose": "A model plays a customer with a hidden persona, another plays the airline support bot, and a Jev judge scores whether the bot held to its policy. The stop rule is a choice state over an exported MAX_EXCHANGES with the reason recorded as endedBy, the judge runs inside the machine, and the bot's request input has no persona field, so it cannot see the customer's agenda."
   },
   "starters": [
     {

@@ -1,19 +1,42 @@
 /**
- * Intent routing — the model picks one typed event; the machine owns every
+ * Intent routing — Jev classifies the request; the machine owns every
  * destination.
  *
- * What the MODEL owns: choosing exactly one of the legal events
- * (`BILLING` / `TECHNICAL` / `ACCOUNT` / `UNCLEAR`) via `agent.decide`.
- * What the MACHINE owns: where each event goes. There are no application-level
- * `if (category === ...)` conditionals — the routing table IS the state
- * machine's `on` block, and an event the model invents can't type-check into it.
+ * What JEV owns: one `choice` over the request (`billing` / `technical` /
+ * `account` / `unclear`). Routing is a typed judgment over text the machine
+ * already holds, not a generation, so it goes to TypeSafe's System One model
+ * rather than a text model: the answer is a label with a confidence, no prose.
+ * What the MACHINE owns: where each label goes, and how sure is sure enough.
+ * The routing table is the invoke's `onDone`, and a pick below
+ * `ROUTING_CONFIDENCE` goes to clarification like `unclear` does. The reason
+ * shown in the chat is rendered from the chosen label's criterion, so it is
+ * the same text Jev was asked to judge against.
  */
 import { z } from "zod";
+import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { setupAgent } from "@statelyai/agent";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 
-const reasonSchema = z
-  .string()
-  .describe("One short sentence naming the signals in the request that justify this queue.");
+/** Route only when Jev's confidence in its pick clears this; otherwise ask. */
+export const ROUTING_CONFIDENCE = 0.5;
+
+const INTENTS = {
+  billing: "Charges, payments, refunds, or invoices.",
+  technical: "Product failures, crashes, or errors.",
+  account: "Login, password, or profile access.",
+  unclear: "The request does not say enough to pick a queue.",
+} as const;
+
+/** The routing judgment: one `choice` over the request. `client` is injected by tests. */
+export function createClassifyIntent(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { query: string }) => ({ query: input.query }),
+    questions: () => ({
+      intent: choice("Which support queue should handle `query`?", INTENTS),
+    }),
+  });
+}
 
 const agentSetup = setupAgent({
   context: z.object({
@@ -23,14 +46,7 @@ const agentSetup = setupAgent({
   }),
   input: z.object({ query: z.string() }),
   output: z.object({ queue: z.string(), reason: z.string() }),
-  // Every route carries the WHY: the model must justify its pick, and the
-  // justification is typed payload, not prose the machine has to parse.
-  events: {
-    BILLING: z.object({ reason: reasonSchema }),
-    TECHNICAL: z.object({ reason: reasonSchema }),
-    ACCOUNT: z.object({ reason: reasonSchema }),
-    UNCLEAR: z.object({ reason: reasonSchema }),
-  },
+  actors: { classifyIntent: createClassifyIntent() },
 });
 
 function routed(
@@ -40,6 +56,11 @@ function routed(
   return { queue: context.queue ?? fallback, reason: context.reason ?? "No reason given." };
 }
 
+/** Every route carries the WHY: the matched criterion and Jev's confidence in it. */
+function reasonFor(intent: keyof typeof INTENTS, confidence: number): string {
+  return `${INTENTS[intent]} (Jev confidence ${Math.round(confidence * 100)}%)`;
+}
+
 export const routingMachine = agentSetup.createMachine({
   id: "routing",
   context: ({ input }) => ({ query: input.query, queue: null, reason: null }),
@@ -47,36 +68,26 @@ export const routingMachine = agentSetup.createMachine({
   states: {
     classifying: {
       invoke: {
-        src: "agent.decide",
-        input: ({ context }) => ({
-          model: "router",
-          system:
-            "Route the support request. BILLING for charges, payments, or invoices; " +
-            "TECHNICAL for product failures and errors; ACCOUNT for login or profile " +
-            "access; UNCLEAR when there is not enough information.",
-          prompt: context.query,
-          allowedEvents: ["BILLING", "TECHNICAL", "ACCOUNT", "UNCLEAR"],
-        }),
-      },
-      // Static targets — the machine, not the model, owns each queue. The
-      // model only supplies the justification it must carry on the event.
-      on: {
-        BILLING: ({ event }) => ({
-          target: "billingQueue",
-          context: { queue: "billing", reason: event.reason },
-        }),
-        TECHNICAL: ({ event }) => ({
-          target: "technicalQueue",
-          context: { queue: "technical", reason: event.reason },
-        }),
-        ACCOUNT: ({ event }) => ({
-          target: "accountQueue",
-          context: { queue: "account", reason: event.reason },
-        }),
-        UNCLEAR: ({ event }) => ({
+        src: "classifyIntent",
+        input: ({ context }) => ({ query: context.query }),
+        // Static targets: the machine, not the model, owns each queue, and
+        // every target stays visible in this expression. A pick Jev is unsure
+        // of goes to clarification like `unclear` does.
+        onDone: ({ output }) => {
+          const { choice: intent, confidence } = output.answers.intent;
+          const reason = reasonFor(intent, confidence);
+          return intent === "unclear" || confidence < ROUTING_CONFIDENCE
+            ? { target: "needsClarification", context: { queue: "unclear", reason } }
+            : intent === "billing"
+              ? { target: "billingQueue", context: { queue: "billing", reason } }
+              : intent === "technical"
+                ? { target: "technicalQueue", context: { queue: "technical", reason } }
+                : { target: "accountQueue", context: { queue: "account", reason } };
+        },
+        onError: {
           target: "needsClarification",
-          context: { queue: "unclear", reason: event.reason },
-        }),
+          context: { queue: "unclear", reason: "The classifier was unavailable." },
+        },
       },
     },
     billingQueue: { type: "final", output: ({ context }) => routed(context, "billing") },

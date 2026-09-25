@@ -30,6 +30,7 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
     "@statelyai/agent/machines": ["./src/machines/index.ts"],
     "@statelyai/agent/openai": ["./src/openai/index.ts"],
     "@statelyai/agent/otel": ["./src/otel/index.ts"],
+    "@statelyai/agent/typesafe": ["./src/typesafe/index.ts"],
   },
 };
 
@@ -91,6 +92,7 @@ const PACKAGE_ENTRIES: Record<string, string> = {
   "@statelyai/agent/openai": "src/openai/index.ts",
   "@statelyai/agent/otel": "src/otel/index.ts",
   "@statelyai/agent/testing": "src/testing/index.ts",
+  "@statelyai/agent/typesafe": "src/typesafe/index.ts",
 };
 
 function collectPackageExports(): Map<string, string> {

@@ -40,6 +40,8 @@ For the optional raw OpenAI SDK executor (`@statelyai/agent/openai`):
 pnpm add openai
 ```
 
+For classification, grading, relevance, and yes/no checks as TypeSafe System One (Jev) judgments, `@statelyai/agent/typesafe` needs `pnpm add @typesafe-ai/sdk`; see [Judgments with TypeSafe](docs/typesafe.md).
+
 Requirements:
 
 - Node 22.18 or newer, and XState v6 alpha.46 or newer.

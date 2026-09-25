@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Grades an essay for relevance, grammar, structure and depth, skipping the later passes once one scores below its threshold, then combines the scores with the tutorial's 0.3/0.2/0.2/0.3 weights. LangGraph routes with lambdas and regex-parses each score from prose; here each gate is a choice state over an exported threshold, each score is structured output bounded to [0, 1], and the result says which stage grading stopped after."
+    "purpose": "Grades an essay for relevance, grammar, structure and depth, skipping the later passes once one scores below its threshold, then combines the scores with the tutorial's 0.3/0.2/0.2/0.3 weights. LangGraph routes with lambdas and regex-parses each score from prose; here each pass is a Jev score over a five-level rubric mapped to [0, 1], each gate is a choice state over an exported threshold, and the result says which stage grading stopped after."
   },
   "starters": [
     "Public libraries remain essential in the digital age. Search engines put facts at everyone's fingertips, but libraries offer curated knowledge, quiet space, and free internet access for people who have none at home. Librarians teach patrons to judge sources, a skill that matters more as misinformation spreads, and libraries host job workshops and language classes. Critics argue funding should move to digital services, yet many of those services are delivered through libraries. The library has not been replaced by the internet; it is where the internet becomes useful to everyone.",

@@ -24,9 +24,9 @@
  *                              └─ (decide retries exhausted) → failed
  *
  * What maps to what:
- *   - select_tools / retrieve_tools → `selectingTools`: a plain actor doing
- *     keyword-overlap search over TOOL_REGISTRY descriptions, returning the top
- *     TOOLS_PER_SELECTION names
+ *   - select_tools / retrieve_tools → `selectingTools`: ONE Jev call that
+ *     reranks the whole registry (one `noul` per tool, see note); the machine
+ *     keeps the top TOOLS_PER_SELECTION above TOOL_RELEVANCE_THRESHOLD
  *   - agent → `deciding`: `agent.decide` (name `chooseTool`) over CALL_TOOL,
  *     RESELECT and ANSWER
  *   - binding only the selected tools → the CALL_TOOL guard: a tool outside
@@ -35,6 +35,13 @@
  *     function and appends `{ tool, arg, result }` to `calls`
  *
  * Differences from LangGraph worth calling out:
+ *   - Selection is a JUDGMENT, not a search or a generation. bigtool embeds
+ *     the query and takes the nearest tool descriptions. Here `selectingTools`
+ *     invokes a TypeSafe System One actor (Jev) with the query and every
+ *     registry tool's name and description as state, and one `noul` per tool
+ *     ("could this tool help answer the question?"). The probabilities are the
+ *     rerank scores; the threshold and the top-k cut are code, in `onDone`.
+ *     The text model only makes the `chooseTool` decision.
  *   - "Only the selected tools exist" is a guard, not a binding. The model can
  *     name any registry tool, and the machine refuses the ones not selected, so
  *     the rule holds whatever the host's tool-binding does.
@@ -48,21 +55,24 @@
  *
  * Stand-ins: TOOL_REGISTRY is twelve small pure functions (unit conversions,
  * string utilities, arithmetic, ISO date math, a capital-city lookup over a
- * tiny table). The selector is keyword overlap, NOT embeddings — the same
- * machine shape as a vector store search over tool descriptions.
+ * tiny table).
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/tool-retrieval/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/tool-retrieval/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
+import { noul, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = { agent: openai("gpt-5.4-mini") };
 
 /** How many tools one selection exposes. */
 export const TOOLS_PER_SELECTION = 3;
+/** A tool is selectable when Jev's probability that it helps clears this. */
+export const TOOL_RELEVANCE_THRESHOLD = 0.5;
 /** How many times the model may ask for a new selection. */
 export const MAX_RESELECTIONS = 2;
 /** How many tool calls one run may make. */
@@ -184,41 +194,39 @@ export const TOOL_REGISTRY: RegistryTool[] = [
 
 const TOOL_NAMES = TOOL_REGISTRY.map((tool) => tool.name) as [string, ...string[]];
 
-const STOP_WORDS = new Set([
-  "the",
-  "and",
-  "what",
-  "how",
-  "many",
-  "much",
-  "are",
-  "there",
-  "for",
-  "with",
-  "from",
-  "into",
-  "this",
-  "that",
-  "is",
-  "of",
-  "in",
-  "a",
-  "an",
-  "to",
-  "me",
-  "give",
-]);
+/**
+ * select_tools as a System One rerank: the query and every registry tool's
+ * name and description are the state, and each tool gets its own `noul`,
+ * keyed by the tool's name. One call, one probability per tool. `client` is
+ * injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ */
+export function createSelectTools(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { query: string }) => ({
+      question: input.query,
+      tools: TOOL_REGISTRY.map(({ name, description }) => ({ name, description })),
+    }),
+    questions: () =>
+      Object.fromEntries(
+        TOOL_REGISTRY.map((tool, index) => [
+          tool.name,
+          noul(`Could the tool \`tools[${index}]\` be used to answer \`question\`?`, {
+            true: "Calling this tool with some argument produces a result the answer needs.",
+            false: "The tool does something else, or only shares vocabulary with the question.",
+          }),
+        ]),
+      ),
+  });
+}
 
-/** Keyword-overlap score of a query against a tool's name and description (NOT embeddings). */
-function scoreTool(query: string, tool: RegistryTool): number {
-  const haystack = `${tool.name.replaceAll("_", " ")} ${tool.description}`.toLowerCase();
-  const terms = new Set(
-    query
-      .toLowerCase()
-      .split(/[^a-z]+/)
-      .filter((term) => term.length > 2 && !STOP_WORDS.has(term)),
-  );
-  return [...terms].filter((term) => haystack.includes(term)).length;
+/** Tool names whose probability clears the threshold, best first, top TOOLS_PER_SELECTION. */
+function rankTools(answers: Record<string, { noul: number } | undefined>): string[] {
+  return TOOL_REGISTRY.map((tool) => ({ name: tool.name, p: answers[tool.name]?.noul ?? 0 }))
+    .filter((scored) => scored.p >= TOOL_RELEVANCE_THRESHOLD)
+    .sort((left, right) => right.p - left.p)
+    .slice(0, TOOLS_PER_SELECTION)
+    .map((scored) => scored.name);
 }
 
 const callSchema = z.object({ tool: z.string(), arg: z.string(), result: z.string() });
@@ -275,15 +283,8 @@ const agentSetup = setupAgent({
     ANSWER: z.object({ answer: z.string() }),
   },
   actors: {
-    // select_tools: keyword search over the registry (stand-in for embeddings).
-    selectTools: createAsyncLogic<string[], { query: string }>({
-      run: async ({ input }) =>
-        TOOL_REGISTRY.map((tool) => ({ name: tool.name, score: scoreTool(input.query, tool) }))
-          .filter((scored) => scored.score > 0)
-          .sort((left, right) => right.score - left.score)
-          .slice(0, TOOLS_PER_SELECTION)
-          .map((scored) => scored.name),
-    }),
+    // select_tools: a Jev rerank of the registry (see createSelectTools).
+    selectTools: createSelectTools(),
     // tools (ToolNode): run one registry function.
     runTool: createAsyncLogic<string, { tool: string; arg: string }>({
       run: async ({ input }) => {
@@ -314,10 +315,13 @@ export const toolRetrievalMachine = agentSetup.createMachine({
       invoke: {
         src: "selectTools",
         input: ({ context }) => ({ query: context.query }),
-        // Like bigtool, a new selection adds to the tools already selected.
+        // Keep the top TOOLS_PER_SELECTION above the threshold. Like bigtool,
+        // a new selection adds to the tools already selected.
         onDone: ({ context, output }) => ({
           target: "deciding",
-          context: { selectedTools: [...new Set([...context.selectedTools, ...output])] },
+          context: {
+            selectedTools: [...new Set([...context.selectedTools, ...rankTools(output.answers)])],
+          },
         }),
         onError: { target: "failed" },
       },
@@ -403,6 +407,8 @@ export interface RunToolRetrievalOptions {
   question?: string;
   /** Injected for tests; the direct run supplies a real model executor. */
   decide?: AgentRequestExecutors["decide"];
+  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient;
   onProgress?: (state: string) => void;
 }
 
@@ -420,11 +426,17 @@ export interface ToolRetrievalResult {
 export async function runToolRetrievalExample(
   options: RunToolRetrievalOptions = {},
 ): Promise<ToolRetrievalResult> {
-  const { question = "How many miles is a 42.195 km marathon?", decide, onProgress } = options;
+  const {
+    question = "How many miles is a 42.195 km marathon?",
+    decide,
+    jevClient,
+    onProgress,
+  } = options;
   const progress: string[] = [];
   const result = await runAgent(toolRetrievalMachine, {
     input: { question },
     ...(decide ? { executors: { decide } } : { executors: createAiSdkExecutors({ models }) }),
+    ...(jevClient ? { actors: { selectTools: createSelectTools(jevClient) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -440,8 +452,8 @@ export async function runToolRetrievalExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

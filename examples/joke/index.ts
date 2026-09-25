@@ -3,7 +3,7 @@
  * `joke-teller` example.
  *
  * Flow: get a topic from the user → stream a joke about it → rate it 1-10 with
- * an explanation → ALWAYS take one improvement pass (the machine, not the
+ * an explanation (a Jev judgment, see below) → ALWAYS take one improvement pass (the machine, not the
  * model, guarantees the first revision) → then let the model DECIDE (not a
  * regex) whether to keep going or stop. The decision is an `agent.decide`
  * invoke; the state's own `on:` transitions define the legal choices, so the
@@ -14,15 +14,24 @@
  * `canReach` can see all three outcomes: revise, ask the model, or stop at the
  * `MAX_JOKES` cap. Any request failure lands in a `failed` final state.
  *
+ * Rating is a JUDGMENT, not a generation. `rateJoke` asks TypeSafe System One
+ * (Jev) one `score` question, `rating`, over `{ joke }` on five concrete
+ * levels (`JOKE_LEVELS`), lowest to highest. The machine maps the level to the
+ * 1-10 rating it already stores as `1 + score / (levels - 1) * 9`, and the
+ * explanation is the matched level's description. Telling the joke stays a
+ * streamed text request, and the keep-going decision stays `agent.decide`.
+ *
  * Dual-mode: `runAgent` takes host executors, so the same machine runs live
  * against real models (readline topic, streaming to stdout) or against mocked
  * executors in tests. See index.test.ts.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/joke/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/joke/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
+import { score, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import {
   createAgentSchemas,
   createTextLogic,
@@ -35,11 +44,6 @@ const DEFAULT_TOPIC = "state machines";
 
 /** Hard cap on jokes told, so a run stays short no matter what the model decides. */
 const MAX_JOKES = 3;
-
-const ratingSchema = z.object({
-  rating: z.number().min(1).max(10),
-  explanation: z.string(),
-});
 
 const funnyPhrases = [
   "Concocting chuckles...",
@@ -119,16 +123,40 @@ export const tellJoke = createTextLogic({
       : `Tell a joke about ${input.topic}.`,
 });
 
-export const rateJoke = createTextLogic({
-  name: "rateJoke",
-  schemas: {
-    input: z.object({ joke: z.string() }),
-    output: ratingSchema,
-  },
-  model: "critic",
-  system: "You rate jokes on a scale of 1 to 10 and briefly explain the score.",
-  prompt: ({ input }) => `Rate this joke from 1 to 10:\n\n${input.joke}`,
-});
+/** How well a joke lands, lowest to highest (mapped to a 1-10 rating). */
+export const JOKE_LEVELS = [
+  "Not a joke: no setup or punchline, or nothing that reads as humorous.",
+  "Has the shape of a joke, but the punchline does not follow from the setup.",
+  "A coherent joke whose punchline is predictable or a pun most listeners have heard.",
+  "A clever joke whose punchline surprises and fits the setup; it would get a smile.",
+  "A sharp joke whose punchline recasts the setup in an unexpected, specific way; it would get a real laugh.",
+] as const;
+
+/**
+ * The critic as a System One judgment: the joke is the state, and one `score`
+ * places it on `JOKE_LEVELS`. `client` is injected by tests and hosts;
+ * omitted, the SDK reads `TYPESAFE_API_KEY` from the environment.
+ */
+export function createRateJoke(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { joke: string }) => ({ joke: input.joke }),
+    questions: () => ({
+      rating: score("How well does `joke` land as a joke?", JOKE_LEVELS),
+    }),
+  });
+}
+
+export const rateJoke = createRateJoke();
+
+/** A `JOKE_LEVELS` answer as the 1-10 rating and the matched level's text. */
+function toRating(level: number) {
+  const top = JOKE_LEVELS.length - 1;
+  return {
+    lastRating: Math.round(1 + (level / top) * 9),
+    lastExplanation: JOKE_LEVELS[Math.round(level)] ?? "",
+  };
+}
 
 export const jokeActors = { tellJoke, rateJoke };
 
@@ -204,10 +232,7 @@ export const jokeMachine = jokeAgentSetup.createMachine({
         input: ({ context }) => ({ joke: context.jokes.at(-1) ?? "" }),
         onDone: ({ output }) => ({
           target: "checkingRating",
-          context: {
-            lastRating: output.result.rating,
-            lastExplanation: output.result.explanation,
-          },
+          context: toRating(output.answers.rating.score),
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -326,8 +351,8 @@ export async function main() {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

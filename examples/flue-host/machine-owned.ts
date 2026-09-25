@@ -2,7 +2,8 @@
  * Way 1 — THE MACHINE OWNS THE LOGIC.
  *
  * The email-draft machine from ../email-drafter owns the workflow: its own
- * model calls (evaluate, draft), its branches (needs-more-info), its pauses
+ * model calls (the Jev prompt check, follow-up questions, the draft), its
+ * branches (needs-more-info), its pauses
  * (`meta.interaction`), and legality. The Flue 2 agent is a conversational
  * shell with two bridge tools:
  *
@@ -25,14 +26,15 @@
  * examples/next-host); swap it for Redis/Postgres and the tools are
  * unchanged.
  *
- * Run: OPENAI_API_KEY=... ANTHROPIC_API_KEY=... npx tsx examples/flue-host/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... ANTHROPIC_API_KEY=... npx tsx examples/flue-host/index.ts
  *   A real model calls the two tools, and the machine runs against real
- *   generations. (This way needs only OPENAI_API_KEY; ./flue-owned.ts also
- *   reviews with an Anthropic model.)
+ *   generations and a real Jev judgment. (This way needs OPENAI_API_KEY and
+ *   TYPESAFE_API_KEY; ./flue-owned.ts also reviews with an Anthropic model.)
  */
 import assert from "node:assert/strict";
 import type { z } from "zod";
 import type { Snapshot } from "xstate";
+import type { TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getInteraction,
@@ -43,6 +45,7 @@ import {
   type RunAgentResult,
 } from "@statelyai/agent";
 import {
+  createEvaluatePrompt,
   emailDrafter,
   emailDrafterSchemas,
   models,
@@ -95,15 +98,19 @@ export const completed: EmailDraft[][] = [];
 
 /**
  * What the tools run with: real generations through the email-drafter's
- * declared models. `useToolExecutors()` swaps in other executors (a test's
- * mock model, or a host's own provider setup).
+ * declared models, and the machine's own Jev judgment (the SDK reads
+ * `TYPESAFE_API_KEY`). `useToolExecutors()` swaps in other executors and,
+ * optionally, a Jev client (a test's mocks, or a host's own provider setup).
  */
 let toolRunOptions: RunAgentOptions<typeof emailDrafter> = {
   executors: createAiSdkExecutors({ models }),
 };
 
-export function useToolExecutors(executors: AgentRequestExecutors) {
-  toolRunOptions = { executors };
+export function useToolExecutors(executors: AgentRequestExecutors, jevClient?: TypeSafeClient) {
+  toolRunOptions = {
+    executors,
+    ...(jevClient ? { actors: { evaluatePrompt: createEvaluatePrompt(jevClient) } } : {}),
+  };
 }
 
 // ─── Bridge: runAgent <-> JSON-safe tool results ───
@@ -366,8 +373,8 @@ function humanReply(): string {
 }
 
 export async function main() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
   }
   completed.length = 0;
 

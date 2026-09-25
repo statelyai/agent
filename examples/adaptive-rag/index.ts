@@ -44,22 +44,32 @@
  *                                                           └─ failed
  *
  * What maps to what:
- *   - route_question      → `routing` (structured request, enum datasource) +
+ *   - route_question      → `routing` (a Jev `choice` over the datasource) +
  *                           `routed` (a choice state: the conditional edge)
  *   - retrieve            → `retrieving` (keyword actor over the sample corpus)
- *   - grade_documents     → `grading` (ONE request grades ALL docs)
+ *   - grade_documents     → `grading` (ONE Jev call, one `noul` per doc)
  *   - decide_to_generate  → grading's `onDone` targets: any relevant doc →
  *                           `generating`, none → the rewrite budget check
  *   - transform_query     → `rewriting` (request), behind `rewriteBudget`
  *   - web_search          → `searchingWeb` (keyword actor over the sample web index)
  *   - generate            → `generating`
  *   - grade_generation_v_documents_and_question → TWO states:
- *       hallucination grader → `checkingGrounding`
- *       answer grader        → `checkingUsefulness`
+ *       hallucination grader → `checkingGrounding` (a Jev `noul`)
+ *       answer grader        → `checkingUsefulness` (a Jev `noul`)
  *     so each verdict is its own transition instead of one function returning
  *     "not supported" / "useful" / "not useful".
  *
  * Differences from LangGraph worth calling out:
+ *   - Routing and all three graders are JUDGMENTS, not generations. LangGraph
+ *     runs each through a chat model with structured output. Here each one
+ *     invokes a TypeSafe System One actor (Jev) that answers a typed question
+ *     over the evidence the machine already holds: a `choice` between the two
+ *     datasources, one `noul` per document ("does it help answer the
+ *     question?"), and a `noul` each for "is every claim supported by the
+ *     documents?" and "does the answer address the question?". The machine
+ *     compares each probability with an exported threshold
+ *     (`RELEVANCE_THRESHOLD`, `GROUNDED_THRESHOLD`, `USEFUL_THRESHOLD`). The
+ *     text model is reserved for the rewrite and the answer.
  *   - Bounded loops. LangGraph's two cycles (transform_query → retrieve, and
  *     "not supported" → generate) are bounded only by `recursion_limit`, which
  *     raises an error. Here `MAX_REWRITES` and `MAX_REGENERATIONS` are checked
@@ -73,21 +83,26 @@
  *     the corpus.
  *   - An empty retrieval skips grading (nothing to grade) and goes straight to
  *     the rewrite budget check.
- *   - Per-doc grading is ONE request returning a verdict per document, as in
+ *   - Per-doc grading is ONE Jev call with a `noul` per document, as in
  *     `examples/corrective-rag`; LangGraph calls the grader once per doc.
+ *   - The two answer checks stay two states and two calls: grounding runs
+ *     again after every regeneration, while usefulness runs only once an
+ *     answer is grounded.
  *   - Every invoke has an `onError` that lands in `failed` with what the run
  *     had so far.
  *
  * Dual-mode: `runAdaptiveRagExample(options?)` takes an injectable
- * `generateText` (tests pass a scripted mock, so CI needs no API key); the
- * direct run uses real models.
+ * `generateText` and `jevClient` (tests pass scripted mocks, so CI needs no API
+ * key); the direct run uses real models.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/adaptive-rag/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/adaptive-rag/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
+import { choice, noul, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
@@ -213,6 +228,97 @@ function renderDocuments(documents: string[]): string {
 
 const datasourceSchema = z.enum(["vectorstore", "websearch"]);
 
+/** A document is kept when Jev's probability that it helps clears this. */
+export const RELEVANCE_THRESHOLD = 0.5;
+/**
+ * An answer passes the hallucination check when Jev's probability that every
+ * claim is supported clears this. Higher than 0.5: passing an ungrounded
+ * answer costs more than one extra regeneration.
+ */
+export const GROUNDED_THRESHOLD = 0.7;
+/** An answer passes the usefulness check when Jev's probability clears this. */
+export const USEFUL_THRESHOLD = 0.5;
+
+/**
+ * route_question as a System One `choice`: the question is the state, the two
+ * datasources are the labels. `client` is injected by tests and hosts;
+ * omitted, the SDK reads `TYPESAFE_API_KEY` from the environment.
+ */
+export function createRouteQuestion(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { question: string }) => ({ question: input.question }),
+    questions: () => ({
+      datasource: choice("Which datasource should answer `question`?", {
+        vectorstore:
+          "The sample vector store: documents about LLM agents (memory, tools, " +
+          "self-reflection, planning), prompt engineering, and adversarial attacks on LLMs.",
+        websearch:
+          "Web search: current events, the latest news or guidance, or anything the " +
+          "vector store does not cover.",
+      }),
+    }),
+  });
+}
+
+/** grade_documents as a System One judgment: one `noul` per document. */
+export function createGradeDocuments(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { question: string; documents: string[] }) => ({
+      question: input.question,
+      documents: input.documents,
+    }),
+    questions: (input) =>
+      Object.fromEntries(
+        input.documents.map((_doc, index) => [
+          `doc${index}`,
+          noul(
+            `Does \`documents[${index}]\` contain information that directly helps answer \`question\`?`,
+            {
+              true: "The document states facts the answer would be built from.",
+              false: "The document is off-topic, or only shares vocabulary with the question.",
+            },
+          ),
+        ]),
+      ),
+  });
+}
+
+/** The hallucination grader as a System One `noul` over the documents and the answer. */
+export function createGradeGrounding(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { documents: string[]; generation: string }) => ({
+      documents: input.documents,
+      answer: input.generation,
+    }),
+    questions: () => ({
+      grounded: noul("Is every claim in `answer` supported by `documents`?", {
+        true: "Each statement in the answer is stated in, or follows directly from, the documents.",
+        false: "The answer adds at least one fact, figure, or detail the documents do not contain.",
+      }),
+    }),
+  });
+}
+
+/** The answer grader as a System One `noul` over the question and the answer. */
+export function createGradeUsefulness(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: { question: string; generation: string }) => ({
+      question: input.question,
+      answer: input.generation,
+    }),
+    questions: () => ({
+      useful: noul("Does `answer` directly address `question`?", {
+        true: "The answer responds to what the question asks.",
+        false: "The answer is vague, off-topic, or responds to a different question.",
+      }),
+    }),
+  });
+}
+
 const adaptiveRagContextSchema = z.object({
   question: z.string(),
   // The current search query: the question, then each rewrite of it.
@@ -287,6 +393,11 @@ const agentSetup = setupAgent({
     },
   },
   actors: {
+    // route_question and the three graders: Jev judgments (see create* above).
+    routeQuestion: createRouteQuestion(),
+    gradeDocuments: createGradeDocuments(),
+    gradeGrounding: createGradeGrounding(),
+    gradeUsefulness: createGradeUsefulness(),
     // retrieve: keyword search over the sample corpus. Top 3 docs.
     retrieve: createAsyncLogic<string[], { query: string }>({
       run: async ({ input }) => searchCorpus(SAMPLE_CORPUS, input.query, 3),
@@ -303,36 +414,6 @@ const agentSetup = setupAgent({
     }),
   },
   requests: {
-    // route_question: structured output over the datasource enum.
-    routeQuestion: {
-      schemas: {
-        input: z.object({ question: z.string() }),
-        output: z.object({ datasource: datasourceSchema }),
-      },
-      model: "rag",
-      system:
-        "You route a user question to a datasource. The vectorstore contains documents " +
-        "about LLM agents, prompt engineering, and adversarial attacks on LLMs. Use " +
-        "vectorstore for questions on those topics. Use websearch for current events, " +
-        "the latest news, or anything the vectorstore does not cover.",
-      prompt: ({ input }) => `Question: ${input.question}`,
-    },
-    // grade_documents: one call grades every retrieved doc, a verdict per doc.
-    gradeDocuments: {
-      schemas: {
-        input: z.object({ question: z.string(), documents: z.array(z.string()) }),
-        output: z.object({ grades: z.array(z.object({ relevant: z.boolean() })) }),
-      },
-      model: "rag",
-      system:
-        "You grade retrieved documents for relevance to a question. For each document, " +
-        "return relevant=true if it contains keywords or meaning related to the question. " +
-        "Return one verdict per document, in order.",
-      prompt: ({ input }) =>
-        [`Question: ${input.question}`, "", "Documents:", renderDocuments(input.documents)].join(
-          "\n",
-        ),
-    },
     // transform_query: rewrite for better vector-store retrieval.
     rewriteQuestion: {
       schemas: {
@@ -364,34 +445,6 @@ const agentSetup = setupAgent({
           "\n",
         ),
     },
-    // hallucination grader: is the generation grounded in the documents?
-    gradeGrounding: {
-      schemas: {
-        input: z.object({ documents: z.array(z.string()), generation: z.string() }),
-        output: z.object({ grounded: z.boolean() }),
-      },
-      model: "rag",
-      system:
-        "You check an answer for hallucination. Return grounded=true only if every claim " +
-        "in the answer is supported by the documents.",
-      prompt: ({ input }) =>
-        [`Answer: ${input.generation}`, "", "Documents:", renderDocuments(input.documents)].join(
-          "\n",
-        ),
-    },
-    // answer grader: does the generation resolve the question?
-    gradeUsefulness: {
-      schemas: {
-        input: z.object({ question: z.string(), generation: z.string() }),
-        output: z.object({ useful: z.boolean() }),
-      },
-      model: "rag",
-      system:
-        "You check whether an answer resolves a question. Return useful=true if it " +
-        "addresses the question directly.",
-      prompt: ({ input }) =>
-        [`Question: ${input.question}`, `Answer: ${input.generation}`].join("\n"),
-    },
   },
 });
 
@@ -420,7 +473,7 @@ export const adaptiveRagMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question }),
         onDone: ({ output }) => ({
           target: "routed",
-          context: { route: output.result.datasource },
+          context: { route: output.answers.datasource.choice },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -457,7 +510,7 @@ export const adaptiveRagMachine = agentSetup.createMachine({
         input: ({ context }) => ({ question: context.question, documents: context.documents }),
         onDone: ({ context, output }) => {
           const relevant = context.documents.filter(
-            (_doc, i) => output.result.grades[i]?.relevant === true,
+            (_doc, i) => (output.answers[`doc${i}`]?.noul ?? 0) >= RELEVANCE_THRESHOLD,
           );
           return {
             target: relevant.length > 0 ? "generating" : "rewriteBudget",
@@ -536,7 +589,10 @@ export const adaptiveRagMachine = agentSetup.createMachine({
           generation: context.generation ?? "",
         }),
         onDone: ({ output }) => ({
-          target: output.result.grounded ? "checkingUsefulness" : "regenerationBudget",
+          target:
+            output.answers.grounded.noul >= GROUNDED_THRESHOLD
+              ? "checkingUsefulness"
+              : "regenerationBudget",
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -565,7 +621,7 @@ export const adaptiveRagMachine = agentSetup.createMachine({
           generation: context.generation ?? "",
         }),
         onDone: ({ context, output }) =>
-          output.result.useful && context.generation !== null
+          output.answers.useful.noul >= USEFUL_THRESHOLD && context.generation !== null
             ? { target: "done", context: { generation: context.generation } }
             : { target: "rewriteBudget" },
         onError: ({ event }) => ({
@@ -608,6 +664,8 @@ export interface RunAdaptiveRagOptions {
   question?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** Injected for tests; direct run lets the SDK read `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -631,6 +689,7 @@ export async function runAdaptiveRagExample(
   const {
     question = "How do LLM agents use long-term memory?",
     generateText,
+    jevClient,
     onProgress,
   } = options;
 
@@ -640,6 +699,16 @@ export async function runAdaptiveRagExample(
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
+    ...(jevClient
+      ? {
+          actors: {
+            routeQuestion: createRouteQuestion(jevClient),
+            gradeDocuments: createGradeDocuments(jevClient),
+            gradeGrounding: createGradeGrounding(jevClient),
+            gradeUsefulness: createGradeUsefulness(jevClient),
+          },
+        }
+      : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -655,8 +724,8 @@ export async function runAdaptiveRagExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

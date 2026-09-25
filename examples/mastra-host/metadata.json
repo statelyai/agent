@@ -10,7 +10,7 @@
   },
   "comparison": {
     "targets": ["Mastra", "tool-calling agents", "durable agent frameworks"],
-    "purpose": "The Mastra LLM agent gets two tools bridging to the email-drafter machine: start_workflow runs runAgent to idle/done and returns a JSON-safe handle + the machine's typed interaction; resume_workflow reloads the persisted snapshot and delivers the human's event. The machine owns legality; the agent converses."
+    "purpose": "The Mastra LLM agent gets two tools bridging to the email-drafter machine: start_workflow runs runAgent to idle/done and returns a JSON-safe handle + the machine's typed interaction; resume_workflow reloads the persisted snapshot and delivers the human's event. The machine owns legality and its own model calls (the prompt check is a Jev judgment); the agent converses."
   },
   "starters": [
     "Tell the team the deploy pipeline is twice as fast now.",

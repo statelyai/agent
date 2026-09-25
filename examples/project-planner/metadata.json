@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "The model proposes tasks with durations and dependencies; the machine checks the dependency graph (unique ids, known references, no cycles), computes the critical-path schedule itself, and re-plans only when the computed length misses the deadline, with bounded repair and replan budgets that end in failed."
+    "purpose": "The model proposes tasks with durations and dependencies; the machine checks the dependency graph (unique ids, known references, no cycles), computes the critical-path schedule itself, has Jev judge the delivery risk of that schedule, and re-plans only when the computed length misses the deadline, with bounded repair and replan budgets that end in failed."
   },
   "starters": [
     {

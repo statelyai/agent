@@ -1,33 +1,31 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
+import { createMockJevClient } from "../mock-jev.js";
 import { createMockModelExecutors } from "../mock-model.js";
-import { correctiveRagMachine, runCorrectiveRagExample } from "./index.js";
+import { RELEVANCE_THRESHOLD, correctiveRagMachine, runCorrectiveRagExample } from "./index.js";
 
 /**
- * Mock the model, keyed by REQUEST NAME (`gradeDocuments` / `rewriteQuery` /
+ * Mock the text model, keyed by REQUEST NAME (`rewriteQuery` /
  * `generateAnswer`), so an answer cannot land on the wrong call when the
- * machine takes a different branch. The retrieve/webSearch actors run REAL
- * keyword logic — only the model calls are mocked.
+ * machine takes a different branch. The grader is a Jev judgment, scripted
+ * separately by question name through the real SDK client. The
+ * retrieve/webSearch actors run REAL keyword logic.
  */
-function scriptedGenerateText(text: {
-  gradeDocuments?: unknown[];
-  rewriteQuery?: unknown[];
-  generateAnswer?: unknown[];
-}) {
+function scriptedGenerateText(text: { rewriteQuery?: unknown[]; generateAnswer?: unknown[] }) {
   return createMockModelExecutors({ text }).generateText;
 }
 
-const allRelevant = { grades: [{ relevant: true }, { relevant: true }, { relevant: true }] };
-const noneRelevant = { grades: [{ relevant: false }, { relevant: false }, { relevant: false }] };
+/** Every document graded relevant (or not): one noul per `doc<i>` question. */
+const grader = (relevant: boolean) => createMockJevClient({ "*": relevant }).client;
 
 test("relevant docs → straight to generate (no correction)", async () => {
   const result = await runCorrectiveRagExample({
     // On-topic for the sample corpus.
     question: "How does long-term memory work for LLM agents?",
     generateText: scriptedGenerateText({
-      gradeDocuments: [allRelevant],
       generateAnswer: ["Long-term memory persists facts across sessions in an external store."],
     }),
+    jevClient: grader(true),
   });
 
   expect(result.answer).toContain("Long-term memory");
@@ -47,8 +45,8 @@ test("docs retrieved but all irrelevant → rewrite + web-search fallback", asyn
     // Overlaps the corpus ("agents") so retrieval is non-empty, but the grader
     // (mocked) judges every doc irrelevant — the CRAG correction trigger.
     question: "What is prompt injection and how do agents defend against it?",
+    jevClient: grader(false),
     generateText: scriptedGenerateText({
-      gradeDocuments: [noneRelevant],
       rewriteQuery: ["prompt injection attack defense for agents"],
       generateAnswer: [
         "Prompt injection overrides an agent's instructions; defend with sanitization and privilege separation.",
@@ -102,8 +100,8 @@ test("starters behave as their labels advertise", async () => {
       question: starter.input.question,
       // Only the model calls are mocked; retrieve/webSearch run real keyword
       // logic over the sample corpora, so this test measures the corpora.
+      jevClient: grader(keepDocs),
       generateText: scriptedGenerateText({
-        gradeDocuments: [{ grades: Array.from({ length: 3 }, () => ({ relevant: keepDocs })) }],
         rewriteQuery: [starter.input.question],
         generateAnswer: ["answer"],
       }),
@@ -139,6 +137,26 @@ test("starters behave as their labels advertise", async () => {
   expect(offCorpus).toHaveLength(1);
   const miss = results.get(offCorpus[0]!.label)!;
   expect(miss.documents).toEqual(["[sample web result] No external results found for this query."]);
+});
+
+test("the grader asks Jev one noul per document and keeps only those above the threshold", async () => {
+  // Three docs overlap "agents" and "memory"; grade only the first relevant.
+  const jev = createMockJevClient({ doc0: 0.9, "*": RELEVANCE_THRESHOLD - 0.1 });
+  const result = await runCorrectiveRagExample({
+    question: "How does long-term memory work for LLM agents?",
+    generateText: scriptedGenerateText({ generateAnswer: ["answer"] }),
+    jevClient: jev.client,
+  });
+
+  expect(jev.calls).toHaveLength(1);
+  const call = jev.calls[0]!;
+  expect(Object.keys(call.questions)).toEqual(
+    (call.state as { documents: string[] }).documents.map((_, i) => `doc${i}`),
+  );
+  expect(Object.values(call.questions).every((q) => q.type === "noul")).toBe(true);
+  expect(result.documents).toHaveLength(1);
+  expect(result.retrievalNotice).toContain("kept 1 of");
+  expect(result.usedFallbackIndex).toBe(false);
 });
 
 test("machine exports a runnable definition", () => {

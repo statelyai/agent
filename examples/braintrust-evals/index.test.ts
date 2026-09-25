@@ -1,10 +1,12 @@
 /**
- * No API key, no Braintrust service: a mock model answers each row's calls.
+ * No API key, no Braintrust service: a mock model answers each row's text
+ * calls and a scripted Jev client answers the prompt check.
  * The scorers are plain functions over a `runAgent` result, so they are
  * testable on their own — which is the point of the example.
  */
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { describe, expect, test } from "vitest";
+import { createMockJevClient, type MockJevEntry } from "../mock-jev.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   dataset,
@@ -17,8 +19,11 @@ import {
 
 /** Canned model answers for one row. */
 interface RowScript {
-  /** One assessment per `evaluatePrompt` call. */
-  assessments: { satisfied: boolean; missing: string[]; questions: string[] }[];
+  /**
+   * The Jev prompt check, by question name (`satisfied`, `recipient`,
+   * `subject`, `body`); a list answers successive `evaluating` visits.
+   */
+  judgments: Record<string, MockJevEntry | MockJevEntry[]>;
   /** The draft the model returns. */
   draft: { to: string; subject: string; body: string };
   /** Tokens each call reports, so the budget scorer has real numbers. */
@@ -30,22 +35,20 @@ const DRAFT = {
   subject: "Deploy pipeline is twice as fast",
   body: "Hi team, the deploy pipeline now runs in half the time. Details in the thread.",
 };
-const NEEDS_RECIPIENT = {
-  satisfied: false,
-  missing: ["recipient"],
-  questions: ["Who should receive it?"],
-};
-const COMPLETE = { satisfied: true, missing: [], questions: [] };
+/** No recipient on the first look; complete once the user adds one. */
+const NEEDS_RECIPIENT = { satisfied: [false, true], recipient: [false, true], "*": true };
+const COMPLETE = { "*": true };
+const FOLLOW_UPS = { questions: ["Who should receive it?"] };
 
 const scripts: Record<string, RowScript> = {
   "asks-for-missing-recipient": {
-    assessments: [NEEDS_RECIPIENT, COMPLETE],
+    judgments: NEEDS_RECIPIENT,
     draft: DRAFT,
     tokensPerCall: 150,
   },
-  "complete-prompt-drafts-directly": { assessments: [COMPLETE], draft: DRAFT, tokensPerCall: 150 },
+  "complete-prompt-drafts-directly": { judgments: COMPLETE, draft: DRAFT, tokensPerCall: 150 },
   "user-declines-to-add-details": {
-    assessments: [NEEDS_RECIPIENT],
+    judgments: NEEDS_RECIPIENT,
     draft: DRAFT,
     tokensPerCall: 150,
   },
@@ -58,7 +61,7 @@ const scripts: Record<string, RowScript> = {
  */
 function executorsFor(script: RowScript): Partial<AgentRequestExecutors> {
   const mock = createMockModelExecutors({
-    text: { evaluatePrompt: script.assessments, draftEmail: script.draft },
+    text: { writeFollowUps: FOLLOW_UPS, draftEmail: script.draft },
   });
   const usage = {
     inputTokens: script.tokensPerCall,
@@ -78,11 +81,20 @@ function scriptFor(row: { metadata: { case: string } }): RowScript {
   return scripts[row.metadata.case]!;
 }
 
+/** A fresh scripted Jev client per run, so answer queues never leak between runs. */
+function jevFor(script: RowScript) {
+  return createMockJevClient(script.judgments).client;
+}
+
 describe("braintrust-evals", () => {
   test.each(dataset.map((row) => [row.metadata.case, row] as const))(
     "%s: every scorer is perfect on the mock-model run",
     async (_name, row) => {
-      const output = await runDrafterCase(row.input, executorsFor(scriptFor(row)));
+      const output = await runDrafterCase(
+        row.input,
+        executorsFor(scriptFor(row)),
+        jevFor(scriptFor(row)),
+      );
 
       expect(output.status).toBe("done");
       for (const scorer of [
@@ -98,32 +110,46 @@ describe("braintrust-evals", () => {
 
   test("the XState transition events form an ordered trajectory", async () => {
     const row = dataset[0]!;
-    const output = await runDrafterCase(row.input, executorsFor(scriptFor(row)));
+    const output = await runDrafterCase(
+      row.input,
+      executorsFor(scriptFor(row)),
+      jevFor(scriptFor(row)),
+    );
 
     expect(output.eventTrajectory[0]).toBe("@xstate.init");
     expect(output.eventTrajectory).toContain("PROMPT_SUBMITTED");
     expect(output.eventTrajectory).toContain("MORE_INFO");
     expect(output.eventTrajectory).toContain("END");
     // Invoked actor completions are visible as ordinary XState events.
-    expect(output.eventTrajectory.filter((type) => type.startsWith("xstate.done"))).toHaveLength(4);
+    // evaluating, clarifying, evaluating, drafting, sending.
+    expect(output.eventTrajectory.filter((type) => type.startsWith("xstate.done"))).toHaveLength(5);
   });
 
   test("usage sums across resume legs, so the budget scorer sees the whole run", async () => {
     const row = dataset[0]!;
-    const output = await runDrafterCase(row.input, executorsFor(scriptFor(row)));
+    const output = await runDrafterCase(
+      row.input,
+      executorsFor(scriptFor(row)),
+      jevFor(scriptFor(row)),
+    );
 
-    // Two assessments plus one draft, at the row's 150 tokens each.
-    expect(output.modelCalls).toBe(3);
-    expect(output.totalTokens).toBe(450);
+    // One follow-up request plus one draft, at the row's 150 tokens each. The
+    // two Jev judgments are not text-model calls.
+    expect(output.modelCalls).toBe(2);
+    expect(output.totalTokens).toBe(300);
     expect(scoreTokenBudget(output, row.expected).score).toBe(1);
   });
 
   test("scorers discriminate: an evaluator that never asks for the missing recipient loses path credit", async () => {
     const row = dataset[0]!;
-    // Same row, but the model claims the vague prompt is already complete.
-    const overconfident: RowScript = { ...scriptFor(row), assessments: [COMPLETE] };
+    // Same row, but the judgment calls the vague prompt already complete.
+    const overconfident: RowScript = { ...scriptFor(row), judgments: COMPLETE };
 
-    const output = await runDrafterCase(row.input, executorsFor(overconfident));
+    const output = await runDrafterCase(
+      row.input,
+      executorsFor(overconfident),
+      jevFor(overconfident),
+    );
 
     expect(output.status).toBe("done");
     // It never visited `needsMoreInfo`, so the expected path is only partly covered.
@@ -139,10 +165,10 @@ describe("braintrust-evals", () => {
     const row = dataset[0]!;
     const expensive: RowScript = { ...scriptFor(row), tokensPerCall: 600 };
 
-    const output = await runDrafterCase(row.input, executorsFor(expensive));
+    const output = await runDrafterCase(row.input, executorsFor(expensive), jevFor(expensive));
 
-    expect(output.totalTokens).toBe(1800);
-    // 1800 against a 900 budget: exactly twice the budget scores 0.
+    expect(output.totalTokens).toBe(1200);
+    // 1200 against a 600 budget: exactly twice the budget scores 0.
     expect(scoreTokenBudget(output, row.expected).score).toBe(0);
   });
 });

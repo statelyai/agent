@@ -21,9 +21,9 @@
  *                                    └─ validatingGraph → routingGraph ─┬─ scheduling
  *                                                                       ├─ regeneratingTasks → checkingTasks
  *                                                                       └─ failed (MAX_REGENERATIONS)
- *   scheduling → assessingRisk → routingDeadline ─┬─ done (projectDays <= deadlineDays)
- *                                                 ├─ replanning → checkingTasks (replans < MAX_REPLANS)
- *                                                 └─ failed (best schedule + "cannot meet the deadline")
+ *   scheduling → assessingRisk → suggestingMitigation → routingDeadline ─┬─ done (projectDays <= deadlineDays)
+ *                                                                        ├─ replanning → checkingTasks (replans < MAX_REPLANS)
+ *                                                                        └─ failed (best schedule + "cannot meet the deadline")
  *
  * What maps to what:
  *   - task_generation + task_dependencies → `generatingTasks` (request
@@ -31,7 +31,9 @@
  *   - (no LangGraph node)  → `validatingGraph` (actor: unique ids, known
  *     dependencies, acyclic) + `routingGraph` (choice) + `regeneratingTasks`
  *   - task_scheduler       → `scheduling` (actor `computeSchedule`: critical path)
- *   - risk_assessment      → `assessingRisk` (request `assessRisk`)
+ *   - risk_assessment      → `assessingRisk` (Jev judgment `assessRisk`: a
+ *                            `choice` of low/medium/high — see note below)
+ *                            + `suggestingMitigation` (request `suggestMitigation`)
  *   - the risk loop edge   → `routingDeadline` (choice on projectDays vs deadlineDays)
  *   - re-plan              → `replanning` (request `replanTasks`, same task shape)
  *
@@ -42,8 +44,13 @@
  *   - The dependency graph is checked before anything is scheduled. A
  *     duplicate id, an unknown dependency, or a cycle sends the tasks back to
  *     the model with the problems listed, at most MAX_REGENERATIONS times.
- *   - The loop exit is the deadline, not the model's own risk score. The
- *     model's `risk` and `mitigation` are advisory and reported in the output;
+ *   - Risk is a JUDGMENT, the mitigation a generation. LangGraph asks one LLM
+ *     for both. Here `assessingRisk` asks TypeSafe System One (Jev) one
+ *     `choice` over `{ goal, schedule, projectDays, deadlineDays }` (the
+ *     computed schedule, not the model's), and only the mitigation, free text
+ *     the output and the replanner both read, stays a text-model request.
+ *   - The loop exit is the deadline, not the risk label. `risk` and
+ *     `mitigation` are advisory and reported in the output;
  *     `routingDeadline` re-plans only when the computed length misses the
  *     deadline, at most MAX_REPLANS times, then ends in `failed` with the best
  *     (shortest) schedule found.
@@ -56,12 +63,14 @@
  * `generateText` (tests pass a scripted mock, CI needs no API key); the
  * direct run uses real models.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/project-planner/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_API_KEY=... npx tsx examples/project-planner/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
+import { choice, type TypeSafeClient } from "@typesafe-ai/sdk";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createSystemOneLogic } from "@statelyai/agent/typesafe";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
@@ -90,6 +99,41 @@ const scheduleEntrySchema = z.object({ id: z.string(), start: z.number(), finish
 type ScheduleEntry = z.infer<typeof scheduleEntrySchema>;
 
 const riskSchema = z.enum(["low", "medium", "high"]);
+
+/**
+ * risk_assessment as a System One judgment: the computed schedule and the
+ * deadline are the state, and one `choice` names the delivery risk. `client`
+ * is injected by tests and hosts; omitted, the SDK reads `TYPESAFE_API_KEY`.
+ */
+export function createAssessRisk(client?: TypeSafeClient) {
+  return createSystemOneLogic({
+    client,
+    state: (input: {
+      goal: string;
+      schedule: string[];
+      projectDays: number;
+      deadlineDays: number;
+    }) => ({
+      goal: input.goal,
+      schedule: input.schedule,
+      projectDays: input.projectDays,
+      deadlineDays: input.deadlineDays,
+    }),
+    questions: () => ({
+      risk: choice(
+        "How likely is the project in `goal` to miss `deadlineDays`, given the computed " +
+          "`schedule` (one line per task, in days) that finishes on day `projectDays`?",
+        {
+          low: "The schedule finishes well inside the deadline, with slack to absorb a slipped task.",
+          medium:
+            "The schedule fits the deadline with little slack, or one long task or dependency " +
+            "chain would push it over if it slipped.",
+          high: "The schedule misses the deadline, or finishes so close to it that any slip on the critical path misses it.",
+        },
+      ),
+    }),
+  });
+}
 
 /** Kahn's algorithm: the tasks in dependency order, or null if there is a cycle. */
 function topologicalOrder(tasks: PlannedTask[]): PlannedTask[] | null {
@@ -193,6 +237,8 @@ const agentSetup = setupAgent({
   }),
   output: plannerOutputSchema,
   actors: {
+    // risk_assessment: a Jev judgment (see createAssessRisk).
+    assessRisk: createAssessRisk(),
     validateGraph: createAsyncLogic<{ problems: string[] }, { tasks: PlannedTask[] }>({
       run: async ({ input }) => ({ problems: graphProblems(input.tasks) }),
     }),
@@ -234,25 +280,28 @@ const agentSetup = setupAgent({
           ...input.problems.map((problem) => `- ${problem}`),
         ].join("\n"),
     },
-    // risk_assessment: advisory. The machine's loop exit is the deadline.
-    assessRisk: {
+    // The mitigation for the judged risk: advisory, and read by the replanner.
+    // The machine's loop exit is the deadline.
+    suggestMitigation: {
       schemas: {
         input: z.object({
           goal: z.string(),
           gantt: z.array(z.string()),
           projectDays: z.number(),
           deadlineDays: z.number(),
+          risk: riskSchema,
         }),
-        output: z.object({ risk: riskSchema, mitigation: z.string() }),
+        output: z.object({ mitigation: z.string() }),
       },
       model: "planner",
       system:
-        "Assess the delivery risk of a computed project schedule against its deadline. " +
-        "Return low, medium or high, and one concrete mitigation.",
+        "Suggest one concrete mitigation for the delivery risk of a computed project " +
+        "schedule against its deadline. One sentence.",
       prompt: ({ input }) =>
         [
           `Goal: ${input.goal}`,
-          `Schedule (${input.projectDays} days, deadline ${input.deadlineDays} days):`,
+          `Schedule (${input.projectDays} days, deadline ${input.deadlineDays} days, ` +
+            `${input.risk} risk):`,
           ...input.gantt,
         ].join("\n"),
     },
@@ -429,17 +478,37 @@ export const projectPlannerMachine = agentSetup.createMachine({
         src: "assessRisk",
         input: ({ context }) => ({
           goal: context.goal,
-          gantt: renderGantt(context.tasks, context.schedule),
+          schedule: renderGantt(context.tasks, context.schedule),
           projectDays: context.projectDays ?? 0,
           deadlineDays: context.deadlineDays,
         }),
         onDone: ({ output }) => ({
-          target: "routingDeadline",
-          context: { risk: output.result.risk, mitigation: output.result.mitigation },
+          target: "suggestingMitigation",
+          context: { risk: output.answers.risk.choice },
         }),
         onError: ({ event }) => ({
           target: "failed",
           context: { failure: `assessRisk failed: ${String(event.error)}` },
+        }),
+      },
+    },
+    suggestingMitigation: {
+      invoke: {
+        src: "suggestMitigation",
+        input: ({ context }) => ({
+          goal: context.goal,
+          gantt: renderGantt(context.tasks, context.schedule),
+          projectDays: context.projectDays ?? 0,
+          deadlineDays: context.deadlineDays,
+          risk: context.risk ?? "high",
+        }),
+        onDone: ({ output }) => ({
+          target: "routingDeadline",
+          context: { mitigation: output.result.mitigation },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `suggestMitigation failed: ${String(event.error)}` },
         }),
       },
     },
@@ -500,6 +569,8 @@ export interface RunProjectPlannerOptions {
   deadlineDays?: number;
   /** Injected for tests; the direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** Injected for tests; the direct run lets the SDK read `TYPESAFE_API_KEY`. */
+  jevClient?: TypeSafeClient;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -518,12 +589,14 @@ export async function runProjectPlannerExample(
     goal = "Ship a mobile app MVP for iOS and Android",
     deadlineDays = DEFAULT_DEADLINE_DAYS,
     generateText,
+    jevClient,
     onProgress,
   } = options;
   const progress: string[] = [];
   const result = await runAgent(projectPlannerMachine, {
     input: { goal, deadlineDays },
     executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+    ...(jevClient ? { actors: { assessRisk: createAssessRisk(jevClient) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -538,8 +611,8 @@ export async function runProjectPlannerExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {
