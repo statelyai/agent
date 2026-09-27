@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["CrewAI", "LangGraph"],
-    "purpose": "Classifies an incoming ticket, escalates to a human when the classifier is unsure, drafts the reply that fits, and retries once if the draft fails."
+    "purpose": "Classifies an incoming ticket with Jev (queue and tone as typed choices), escalates to a human when the classifier is unsure, drafts the reply that fits, and retries once if the draft fails."
   },
   "starters": [
     "I cannot log in and my password reset email never arrives.",

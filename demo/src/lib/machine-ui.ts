@@ -34,6 +34,29 @@
  *    ```
  */
 
+/**
+ * Every run needs a text model (OpenAI) and Jev (TypeSafe) for its judgments.
+ * The server checks both and the shell names whichever is missing.
+ */
+export const REQUIRED_KEYS = ["OPENAI_API_KEY", "TYPESAFE_AI_API_KEY"] as const;
+
+export type RequiredKey = (typeof REQUIRED_KEYS)[number];
+
+export const MISSING_KEY_MESSAGE =
+  "Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY on the demo server to run examples.";
+
+/** The required keys `env` lacks. Server-side callers pass `process.env`. */
+export function missingKeys(env: Record<string, string | undefined>): RequiredKey[] {
+  return REQUIRED_KEYS.filter((key) => !env[key]);
+}
+
+/** The shared message, naming the missing key(s) when known. */
+export function missingKeyMessage(missing: readonly RequiredKey[]): string {
+  return missing.length
+    ? `${MISSING_KEY_MESSAGE} Missing: ${missing.join(", ")}.`
+    : MISSING_KEY_MESSAGE;
+}
+
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 export type JsonObject = { [key: string]: Json };

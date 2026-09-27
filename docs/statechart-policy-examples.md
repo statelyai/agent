@@ -1,6 +1,6 @@
 # Statechart policy examples
 
-Three offline examples put consequential decisions in visible machine states. Each exports its machine and a runner accepting `RunAgentOptions`. The consensus-review runner takes `patch` instead of `input`, because the host, not the caller, decides whether a patch is trusted. Replace the scripted `generateText` executor with an SDK implementation; override booking actors through native XState `actors` bindings.
+Three examples put consequential decisions in visible machine states. Each exports its machine and a runner accepting `RunAgentOptions`. The consensus-review runner takes `patch` instead of `input`, because the host, not the caller, decides whether a patch is trusted. The booking-compensation and deadline-escalation runners default to real AI SDK executors (`openai("gpt-5.4-mini")`), which need `OPENAI_API_KEY`; pass `executors` to swap the model layer. The consensus-review runner uses no text model: each reviewer is a [judgment](judgments.md) actor built by `createReview(model)` that asks Jev one `choice` question through the AI SDK's `experimental_evaluate`, which needs `TYPESAFE_AI_API_KEY`; pass `judge` to swap the evaluation model. Override booking actors through native XState `actors` bindings.
 
 <!-- policy example catalog derived from examples/consensus-review, examples/booking-compensation, and examples/deadline-escalation -->
 
@@ -10,23 +10,23 @@ Three offline examples put consequential decisions in visible machine states. Ea
 | [booking-compensation](../examples/booking-compensation/index.ts) | Human approval before reservations; confirmed hotel unavailability compensates the flight; uncertain outcomes require reconciliation | No reservation before approval, compensation order, compensation failure, uncertain outcome, success/cancel paths                     |
 | [deadline-escalation](../examples/deadline-escalation/index.ts)   | Matching request identity and host timestamp determine whether approval or expiry is accepted                                        | Deadline equality, stale identities, early expiry, late approval, JSON restoration                                                    |
 
-Run without provider credentials:
+Run against a real model:
 
 ```sh
-pnpm tsx examples/consensus-review/index.ts
-pnpm tsx examples/booking-compensation/index.ts
-pnpm tsx examples/deadline-escalation/index.ts
+TYPESAFE_AI_API_KEY=... pnpm tsx examples/consensus-review/index.ts
+OPENAI_API_KEY=... pnpm tsx examples/booking-compensation/index.ts
+OPENAI_API_KEY=... pnpm tsx examples/deadline-escalation/index.ts
 ```
 
-The first CLI accepts three scripted votes. The second restores an approval checkpoint and demonstrates compensation using simulated bookings. The third restores a checkpoint and delivers a simulated scheduler expiry. Tests also run the alternate outcomes.
+The first CLI collects three Jev votes. The second restores an approval checkpoint and demonstrates compensation using simulated bookings. The third restores a checkpoint and delivers a simulated scheduler expiry. Tests need no key: they answer consensus-review's `verdict` choice through a scripted evaluation model passed as `judge`, script the model by request name (`plan`, `propose`) through the AI SDK's mock model, and also run the alternate outcomes.
 
 ## Reviewer quorum
 
 [Anthropic's voting pattern](https://www.anthropic.com/engineering/building-effective-agents) motivates independent reviews aggregated by policy. This example uses a two-of-three approval threshold, not unanimity: a security dissent can be outweighed. Change the machine policy if a particular reviewer must veto. Model votes do not prove a patch is safe.
 
-Trust is a machine rule, not a prompt instruction. The patch text is embedded in all three reviewer prompts, so a patch the host did not author is untrusted input. Input carries `source: "trusted" | "external"` with no default. Host code decides it, never the caller who supplied the patch: the example runner marks only its built-in patch `"trusted"` and any patch passed in `"external"`, and it does not let a caller set `source`. The `counting` choice state routes any `"external"` patch to `humanReview` regardless of the tally, so model votes can only auto-accept trusted input, and the interaction label tells the human why they were asked. A native XState host parses no input schema and supplies `source` itself.
+Trust is a machine rule, not a prompt instruction. The patch text is in all three reviewers' state, so a patch the host did not author is untrusted input. Input carries `source: "trusted" | "external"` with no default. Host code decides it, never the caller who supplied the patch: the example runner marks only its built-in patch `"trusted"` and any patch passed in `"external"`, and it does not let a caller set `source`. The `counting` choice state routes any `"external"` patch to `humanReview` regardless of the tally, so model votes can only auto-accept trusted input, and the interaction label tells the human why they were asked. A native XState host parses no input schema and supplies `source` itself.
 
-Each reviewer is a named parallel region invoking the same typed request. No host `Promise.all` hides the topology. All regions reach a final state even when their request fails; the parent then counts votes. Human review persists both successful votes and abstentions.
+Each reviewer is a named parallel region invoking the same Jev judgment actor, `review`, with its own reviewer brief. No host `Promise.all` hides the topology. All regions reach a final state even when their call fails; the parent then counts votes. Human review persists both successful votes and abstentions.
 
 The tests execute the same artifact through both `runAgent` and `createActor(provideExecutors(...))`. This establishes those host modes' behavior for this example; it is not certification of every model SDK.
 
@@ -62,7 +62,7 @@ Persist the `awaitingApproval` checkpoint before scheduling expiry. Store an abs
 
 Serialize deliveries per request, or use storage compare-and-swap with conflict handling. Two independent resumes of one snapshot can otherwise produce conflicting outcomes. Retry scheduler deliveries that arrive before the waiting checkpoint exists. Scheduling, authentication, durable storage, and delivery retries belong to the host.
 
-This example is marked manual in the demo catalog because generic chat cannot supply that clock/scheduler contract. Its CLI is fully offline. It exports an ordinary XState machine that a dedicated host can visualize and execute.
+This example is marked manual in the demo catalog because generic chat cannot supply that clock/scheduler contract. Its CLI drafts the proposal with a real model and simulates the scheduler delivery. It exports an ordinary XState machine that a dedicated host can visualize and execute.
 
 ## Visualization and validation
 

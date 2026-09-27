@@ -28,16 +28,22 @@
  *
  * What maps to what:
  *   - retrieve            → `retrieving`  (typed plain actor over a sample corpus)
- *   - grade_documents     → `grading`     (ONE model request grades ALL docs — see note)
+ *   - grade_documents     → `grading`     (ONE evaluate call, one boolean per doc — see note)
  *   - decide_to_generate  → grading's two `onDone` targets (the conditional edge)
  *   - transform_query     → `transformingQuery` (a model request that rewrites the question)
  *   - web_search          → `webSearching` (a second sample-data actor, clearly labeled)
  *   - generate            → `generating`  (grounded answer over the working doc set)
  *
  * Differences from LangGraph worth calling out:
- *   - Per-doc grading: LangGraph loops `retrieval_grader.invoke` once PER document.
- *     Here it's ONE request returning a yes/no per doc — cheaper (a single call),
- *     same decision. Swap to a per-doc loop (a nested invoke) if you want that.
+ *   - Grading is a JUDGMENT, not a generation. LangGraph loops a chat model
+ *     with structured output once PER document. Here `grading` asks the AI
+ *     SDK's `experimental_evaluate` with TypeSafe's Jev as the evaluation
+ *     model: one call carrying every document as state and one boolean
+ *     question per document ("does this document help answer the question?"),
+ *     which returns a probability per document. The machine keeps a document
+ *     when that probability clears `RELEVANCE_THRESHOLD`. A yes/no over given
+ *     evidence is what an evaluation model is for; the language model is
+ *     reserved for the rewrite and the answer.
  *   - The rewrite loop is bounded by construction: no edge returns to `retrieving`
  *     or `grading`, so at most ONE rewrite + web-search pass happens before
  *     `generating`. LangGraph relies on the same acyclic wiring (plus
@@ -55,17 +61,25 @@
  * `generateText` (tests pass a scripted mock — CI with no API key); the direct run uses
  * real models.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/corrective-rag/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/corrective-rag/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
   crag: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /**
  * Sample data: the primary knowledge base `retrieve` searches. Stand-in for a
@@ -172,15 +186,44 @@ function searchCorpus(
     .map((scored) => scored.text);
 }
 
-// Grading output: one yes/no verdict per retrieved document, in order. This is
-// the one-request-over-all-docs form (LangGraph loops one call per doc instead).
-const gradeSchema = z.object({
-  grades: z.array(
-    z.object({
-      relevant: z.boolean(),
-    }),
-  ),
-});
+/** A document is kept when Jev's probability that it helps clears this. */
+export const RELEVANCE_THRESHOLD = 0.5;
+
+/**
+ * grade_documents as a judgment: one `experimental_evaluate` call whose state
+ * is the question and every candidate document, with one boolean question per
+ * document. One call, one probability per document, no prose. The judge model
+ * is injected by tests and hosts; the default is Jev.
+ */
+export function createGradeDocuments(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: Record<string, { probability: number }> },
+    { question: string; documents: string[] }
+  >({
+    run: async ({ input, signal }) => {
+      const questions = Object.fromEntries(
+        input.documents.map((_doc, index) => [
+          `doc${index}`,
+          {
+            type: "boolean" as const,
+            instructions: `Does \`documents[${index}]\` contain information that directly helps answer \`question\`?`,
+            criteria: {
+              true: "The document states facts the answer would be built from.",
+              false: "The document is off-topic, or only shares vocabulary with the question.",
+            },
+          },
+        ]),
+      );
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, documents: input.documents },
+        questions,
+        abortSignal: signal,
+      });
+      return { answers };
+    },
+  });
+}
 
 const cragContextSchema = z.object({
   question: z.string(),
@@ -240,6 +283,8 @@ const agentSetup = setupAgent({
     done: { schemas: { context: cragContextSchema.extend({ generation: z.string() }) } },
   },
   actors: {
+    // grade_documents: one judgment per document (see createGradeDocuments).
+    gradeDocuments: createGradeDocuments(),
     // retrieve: keyword search over the primary corpus. Top 3 docs.
     retrieve: createAsyncLogic<string[], { question: string }>({
       run: async ({ input }) => searchCorpus(SAMPLE_CORPUS, input.question, 3),
@@ -256,30 +301,6 @@ const agentSetup = setupAgent({
     }),
   },
   requests: {
-    // grade_documents: one call grades every retrieved doc for relevance to the
-    // question. Returns a yes/no verdict per doc, in order.
-    gradeDocuments: {
-      schemas: {
-        input: z.object({
-          question: z.string(),
-          documents: z.array(z.string()),
-        }),
-        output: gradeSchema,
-      },
-      model: "crag",
-      system:
-        "You are a relevance grader for retrieval-augmented generation. For each " +
-        "document, decide whether it contains information useful for answering the " +
-        "question. Return one verdict per document, in the same order. Be strict: " +
-        "grade a document relevant ONLY if it directly helps answer the question.",
-      prompt: ({ input }) =>
-        [
-          `Question: ${input.question}`,
-          "",
-          "Documents:",
-          ...input.documents.map((doc, i) => `[${i + 1}] ${doc}`),
-        ].join("\n"),
-    },
     // transform_query: rewrite the question to be a better standalone search query.
     rewriteQuery: {
       schemas: {
@@ -347,9 +368,9 @@ export const correctiveRagMachine = agentSetup.createMachine({
         onError: { target: "failed" },
       },
     },
-    // grade_documents: one request, a verdict per doc. Keep the relevant ones;
-    // flag for web search if none survive. A grader failure degrades to
-    // answering from all retrieved docs (skip correction).
+    // grade_documents: one Jev call, a probability per doc. Keep the ones that
+    // clear the threshold; flag for web search if none survive. A grader
+    // failure degrades to answering from all retrieved docs (skip correction).
     grading: {
       invoke: {
         src: "gradeDocuments",
@@ -361,7 +382,7 @@ export const correctiveRagMachine = agentSetup.createMachine({
         // none survived → correct via rewrite + fallback index.
         onDone: ({ context, output }) => {
           const relevant = context.documents.filter(
-            (_doc, i) => output.result.grades[i]?.relevant === true,
+            (_doc, i) => (output.answers[`doc${i}`]?.probability ?? 0) >= RELEVANCE_THRESHOLD,
           );
           return {
             target: relevant.length > 0 ? "generating" : "transformingQuery",
@@ -444,6 +465,8 @@ export interface RunCorrectiveRagOptions {
   question?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition (the visible corrective flow). */
   onProgress?: (state: string) => void;
 }
@@ -464,6 +487,7 @@ export async function runCorrectiveRagExample(
   const {
     question = "How does long-term memory work for LLM agents?",
     generateText,
+    judge,
     onProgress,
   } = options;
 
@@ -473,6 +497,7 @@ export async function runCorrectiveRagExample(
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
+    ...(judge ? { actors: { gradeDocuments: createGradeDocuments(judge) } } : {}),
     onTransition: (snapshot) => {
       const state = getStatePath(snapshot);
       progress.push(state);
@@ -488,8 +513,8 @@ export async function runCorrectiveRagExample(
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

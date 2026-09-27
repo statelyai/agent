@@ -23,32 +23,43 @@
  *     hosts/demos drive them as buttons (`HUMAN_ROLL` / `HUMAN_BANK`) and a
  *     free-text box (`ROUND_REPLY`). The run settles idle on those states and
  *     resumes with `runAgent(machine, { snapshot: result.persist(), event })`.
- *   - Natural-language round control. The free-text round reply is interpreted
- *     with a structured-output request.
+ *   - Natural-language round control. The free-text round reply is a JUDGMENT,
+ *     not a generation: `classifyingNextRound` asks the AI SDK's
+ *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model, with the reply and the standings as state and one
+ *     boolean question ("does the player want another round?"). Another round starts when the
+ *     probability clears `PLAY_AGAIN_THRESHOLD`. The player's moves stay model
+ *     decisions through `agent.decide`.
  *
- * Dual-mode: `runGameLoopExample(options?)` takes injectable executors and
- * scripted human events (the test passes mocks, so CI needs no API key); the
- * direct run below uses real models and stdin.
+ * Dual-mode: `runGameLoopExample(options?)` takes injectable executors, a
+ * `judge`, and scripted human events (the test passes mocks, so CI needs
+ * no API key); the direct run below uses real models and stdin.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/game-loop-agent/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/game-loop-agent/index.ts
  */
 import { z } from "zod";
-import type { InspectionEvent, SnapshotFrom } from "xstate";
+import { createAsyncLogic, type InspectionEvent, type SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   getInteraction,
   interactionMetaSchema,
   runAgent,
   setupAgent,
   type AgentDecisionExecutor,
-  type AgentRequestExecutor,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const models = {
   player: openai("gpt-5.4-mini"),
-  referee: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 const DEFAULT_TARGET = 50;
 const DEFAULT_MAX_ROUNDS = 3;
@@ -152,6 +163,43 @@ export const playerAgentMachine = playerAgentSetup.createMachine({
   },
 });
 
+// ─── Round control: a Jev judgment over the free-text reply ───
+
+/** Another round starts when Jev's probability that the player wants one clears this. */
+export const PLAY_AGAIN_THRESHOLD = 0.5;
+
+/**
+ * The referee as a judgment: the reply and the standings are the state, and
+ * one boolean question asks whether the player wants another round. The judge
+ * model is injected by tests and hosts; the default is Jev.
+ */
+export function createClassifyRoundControl(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { playAgain: { probability: number } } },
+    { reply: string; standings: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { reply: input.reply, standings: input.standings },
+        questions: {
+          playAgain: {
+            type: "boolean" as const,
+            instructions:
+              'Asked "another round?" after a round of Pig, does `reply` say the player wants to play another round?',
+            criteria: {
+              true: 'Anything affirmative: "sure", "one more", "go on", "again".',
+              false: 'Anything that signals stopping: "i\'m done", "nah", "that\'s enough".',
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
+  });
+}
+
 // ─── Game machine: owns rounds, turn order, and the die ───
 
 const gameSetup = setupAgent({
@@ -190,27 +238,13 @@ const gameSetup = setupAgent({
     /** Human moves, gated by the current state (BANK needs a turn total). */
     HUMAN_ROLL: z.object({}),
     HUMAN_BANK: z.object({}),
-    /** Free-text answer to "another round?", classified by the referee. */
+    /** Free-text answer to "another round?", judged by the referee (Jev). */
     ROUND_REPLY: z.object({ reply: z.string() }),
   },
-  actors: { player: playerAgentMachine },
-  requests: {
-    classifyRoundControl: {
-      schemas: {
-        input: z.object({ reply: z.string(), standings: z.string() }),
-        output: z.object({
-          playAgain: z.boolean(),
-          reasoning: z.string(),
-        }),
-      },
-      model: "referee",
-      system:
-        "Decide whether the player wants another round of Pig. Return playAgain=true for " +
-        'anything affirmative ("sure", "one more", "go on"), false for anything that ' +
-        'signals stopping ("i\'m done", "nah", "that\'s enough"). Keep reasoning short.',
-      prompt: ({ input }) =>
-        [`Standings: ${input.standings}`, `Reply to "another round?": ${input.reply}`].join("\n"),
-    },
+  actors: {
+    player: playerAgentMachine,
+    // The referee: a Jev judgment (see createClassifyRoundControl).
+    classifyRoundControl: createClassifyRoundControl(),
   },
 });
 
@@ -412,7 +446,7 @@ export const gameMachine = gameSetup.createMachine({
           },
         },
         // Idle again, but for free text: the host sends the typed reply as
-        // ROUND_REPLY and the referee classifies it.
+        // ROUND_REPLY and the referee (Jev) judges it.
         askingNextRound: {
           tags: ["waiting"],
           meta: {
@@ -443,7 +477,7 @@ export const gameMachine = gameSetup.createMachine({
             // Wins are already tallied by `roundOver`; this branch only
             // decides whether another round starts.
             onDone: ({ context, output }) => {
-              if (!output.result.playAgain) {
+              if (output.answers.playAgain.probability < PLAY_AGAIN_THRESHOLD) {
                 return { target: "#pig-game.stopped" };
               }
               const next = freshRound(context);
@@ -455,7 +489,7 @@ export const gameMachine = gameSetup.createMachine({
                     context: next,
                   };
             },
-            // If the classifier fails, stop rather than loop forever.
+            // If the referee fails, stop rather than loop forever.
             onError: { target: "#pig-game.stopped" },
           },
         },
@@ -501,7 +535,8 @@ export function toHumanEvent(snapshot: GameSnapshot, text: string): HumanEvent {
 export async function runGameLoopExample(options?: {
   input?: { seed?: number; target?: number; maxRounds?: number };
   decide?: AgentDecisionExecutor;
-  generateText?: AgentRequestExecutor;
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Scripted human events, consumed in order on each idle settle. */
   humanEvents?: HumanEvent[];
   /** Or decide per idle snapshot; falls back to `humanEvents`, then stdin. */
@@ -514,19 +549,16 @@ export async function runGameLoopExample(options?: {
    */
   inspect?: (inspectionEvent: InspectionEvent) => void;
 }) {
-  const mocked = options?.decide ?? options?.generateText;
   let lastNotice = "";
   const queued = [...(options?.humanEvents ?? [])];
 
   const shared = {
-    executors: mocked
-      ? {
-          ...(options?.decide ? { decide: options.decide } : {}),
-          ...(options?.generateText ? { generateText: options.generateText } : {}),
-        }
-      : createAiSdkExecutors({ models }),
-    // No `actors` here: `player` is already registered on the setup, and
-    // re-passing it would just restate what the machine already knows.
+    executors: options?.decide ? { decide: options.decide } : createAiSdkExecutors({ models }),
+    // `player` is already registered on the setup; only the referee's judge
+    // model is swapped when one is injected.
+    ...(options?.judge
+      ? { actors: { classifyRoundControl: createClassifyRoundControl(options.judge) } }
+      : {}),
     ...(options?.inspect ? { inspect: options.inspect } : {}),
     onTransition: (snapshot: GameSnapshot) => {
       if (snapshot.context.notice !== lastNotice) {
@@ -586,8 +618,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

@@ -1,0 +1,28 @@
+{
+  "name": "tree-of-thoughts",
+  "title": "Search for a Game of 24 solution, with the machine checking every step",
+  "kind": "pattern",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph Tree of Thoughts tutorial (Game of 24)",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/tot/tot/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "A model proposes arithmetic steps toward 24, and a beam search keeps the three most promising lines for up to three steps. The machine re-derives every step, rejects any that uses a number not on the table or gets the arithmetic wrong, and only reports a solution it checked itself. No solution ends in a failed state with the reason."
+  },
+  "starters": [
+    {
+      "label": "Solvable — 4, 9, 10, 13 (the tutorial's puzzle)",
+      "input": { "numbers": [4, 9, 10, 13] }
+    },
+    {
+      "label": "Solvable — 1, 2, 3, 4",
+      "input": { "numbers": [1, 2, 3, 4] }
+    },
+    {
+      "label": "Unsolvable — 1, 1, 1, 1 (every line dies, ends in failed)",
+      "input": { "numbers": [1, 1, 1, 1] }
+    }
+  ]
+}

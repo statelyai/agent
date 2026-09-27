@@ -346,7 +346,7 @@ Script one entry per decision attempt, including attempts a transition rejects. 
 
 <!-- simulation queue routing from src/verify.ts -->
 
-`simulateAgent` scripts key by invoke `src`: `assist` for the registered request above and `agent.decide` for an inline decision. Decisions also accept the invoke `id` (`chooseAction`) when no src-keyed queue exists. The `invokes` channel supplies output for non-model actors. Request-name routing belongs to [`createScriptedExecutors`](evals.md#script-keys).
+`simulateAgent` scripts key by invoke `src`: `assist` for the registered request above and `agent.decide` for an inline decision. Decisions also accept the invoke `id` (`chooseAction`) when no src-keyed queue exists. The `invokes` channel supplies output for non-model actors. Executors and [`runSeam` scripts](evals.md#script-keys) route by request name instead.
 
 `explorePaths` enumerates every branch, and `canReach` returns `{ reachable, witness }` for one target state. See [Testing and verification](verify.md).
 

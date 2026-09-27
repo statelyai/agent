@@ -31,8 +31,6 @@ import { getCallUsage, normalizeGeneratorResult } from "./text-logic.js";
 import { runAgent } from "./run-agent.js";
 import type { RunAgentOptions, RunAgentResult } from "./run-agent.js";
 import { isRecord } from "./internal/is-record.js";
-import { describeText, emitScriptedChunk, resolveScriptedTextEntry } from "./scripted-executors.js";
-import type { ScriptedTextEntry } from "./scripted-executors.js";
 import type {
   AgentCallUsage,
   AgentExecutorTextRequest,
@@ -45,6 +43,78 @@ import type {
 import type { AgentTools } from "./types.js";
 import { getStateMeta, type MetaOfSnapshot } from "./utils.js";
 import type { TrajectoryEvent } from "./trajectory.js";
+
+/**
+ * One scripted answer in a {@link RunSeamOptions.scripts} queue: the request's
+ * output value (a string, or the object a structured request declares), or a
+ * function of the {@link AgentTextRequest} returning one.
+ *
+ * An entry is taken as the executor result (instead of the value itself)
+ * only when its OWN keys are a `result` plus, optionally, `messages`/`usage`/
+ * `raw` — that is how an entry reports token `usage`. Anything else, including
+ * an object that merely happens to have a `result` key alongside its own data
+ * (`{ result: 'draft', confidence: 0.9 }`), is the output value. For a
+ * structured request whose declared output is exactly `{ result }` (or
+ * `{ result, usage }`), wrap it once more: `{ result: { result: '…' } }`.
+ */
+export type SeamScriptEntry =
+  | ((request: AgentTextRequest, info?: AgentRequestExecutorInfo) => unknown)
+  // The output value itself. Spelled out rather than `unknown` so a function
+  // entry's `request` parameter is contextually typed.
+  | string
+  | number
+  | boolean
+  | null
+  | object;
+
+/** The only own keys an executor result carries. @internal */
+const TEXT_RESULT_KEYS = new Set(["result", "messages", "usage", "raw"]);
+
+/**
+ * True when a scripted entry is the executor result rather than the output
+ * value: it owns a `result` key and owns NOTHING outside the result's own
+ * vocabulary. Bare `'result' in value` would swallow an output object's
+ * siblings (`{ result: 'draft', confidence: 0.9 }` would lose `confidence`)
+ * and would also match an inherited `result`. @internal
+ */
+function isTextResult(value: Record<string, unknown>): boolean {
+  return (
+    Object.hasOwn(value, "result") && Object.keys(value).every((key) => TEXT_RESULT_KEYS.has(key))
+  );
+}
+
+/**
+ * Resolves ONE scripted entry to an executor result: a function entry is
+ * called with the request, and the value is taken as the executor result only
+ * when it is one (see {@link isTextResult}). @internal
+ */
+async function resolveSeamScriptEntry(
+  entry: SeamScriptEntry,
+  request: AgentTextRequest,
+  info?: AgentRequestExecutorInfo,
+): Promise<{ result: unknown; usage?: AgentCallUsage }> {
+  const value = typeof entry === "function" ? await entry(request, info) : entry;
+  return isRecord(value) && isTextResult(value)
+    ? (value as { result: unknown; usage?: AgentCallUsage })
+    : { result: value };
+}
+
+/** Names a pending text request in an error message. @internal */
+function describeText(request: AgentTextRequest): string {
+  return request.name
+    ? `'${request.name}' (model '${request.model}')`
+    : `(model '${request.model}')`;
+}
+
+/**
+ * Stream semantics with no model: the whole text lands as one chunk. @internal
+ */
+function emitScriptedChunk(result: unknown, info?: AgentRequestExecutorInfo): void {
+  const text = isRecord(result) ? result["result"] : undefined;
+  if (typeof text === "string") {
+    info?.onChunk?.(text);
+  }
+}
 
 /**
  * Which model call is under test: the Nth call with this request `name` (the
@@ -120,12 +190,12 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
    * machine whose requests are named routes by name and an unnamed one routes
    * by model.
    *
-   * Entries follow {@link ScriptedTextEntry} conventions (a value, an
+   * Entries follow {@link SeamScriptEntry} conventions (a value, an
    * `{ result, usage? }` object, or a function of the request). A queue that
    * runs dry throws; set {@link RunSeamOptions.repeatLast} to replay its last
    * entry instead.
    */
-  scripts?: Record<string, ScriptedTextEntry[]>;
+  scripts?: Record<string, SeamScriptEntry[]>;
   /**
    * Replay the LAST entry of a queue once it is exhausted, so a live seam that
    * sends the run down a longer branch still finds an answer. Off by default:
@@ -149,8 +219,9 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
   /** Maximum idle pauses to answer before stopping. Default `12`. */
   maxTurns?: number;
   /**
-   * Base executors merged UNDER the seam routing — supply `decide` (e.g. from
-   * `createScriptedExecutors({ decisions })`) for a machine that also decides.
+   * Base executors merged UNDER the seam routing — supply `decide` (a plain
+   * function of the decision request, or `createAiSdkExecutors` over a mock
+   * model) for a machine that also decides.
    * Text slots are always owned by the routing.
    */
   executors?: Partial<AgentRequestExecutors>;
@@ -214,8 +285,8 @@ async function seamOutputOf(result: ExecutorReturn, request: AgentTextRequest): 
  * @example No API key: the seam is scripted too, so the whole thing runs offline.
  * ```ts
  * const run = await runSeam(emailDrafter, {
- *   scripts: { promptEvaluator: [vague, complete], emailDrafter: [draft] },
- *   seam: { request: 'evaluatePrompt' },
+ *   scripts: { writeFollowUps: [followUps], emailDrafter: [draft] },
+ *   seam: { request: 'writeFollowUps' },
  *   respond: ({ state }) => (state === 'prompting' ? { type: 'PROMPT_SUBMITTED', prompt } : null),
  * });
  *
@@ -233,7 +304,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
   options: RunSeamOptions<TMachine>,
 ): Promise<RunSeamResult<TMachine>> {
   const { seam, candidate } = options;
-  const queues = new Map<string, ScriptedTextEntry[]>(
+  const queues = new Map<string, SeamScriptEntry[]>(
     Object.entries(options.scripts ?? {}).map(([key, answers]) => [key, [...answers]]),
   );
   const statePath: StateValue[] = [];
@@ -266,7 +337,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
       return undefined;
     }
     const entry = options.repeatLast && queue.length === 1 ? queue[0]! : queue.shift()!;
-    return resolveScriptedTextEntry(entry, request, info);
+    return resolveSeamScriptEntry(entry, request, info);
   };
 
   const scriptedAnswer = async (

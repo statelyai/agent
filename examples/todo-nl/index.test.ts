@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
-import { createScriptedExecutors } from "@statelyai/agent/testing";
 import type { AgentDecisionRequest, ChosenEvent } from "@statelyai/agent";
+import { createMockModelExecutors } from "../mock-model.js";
 import { idlePrompt, MAX_STEPS_PER_COMMAND, runTodoNlExample, todoMachine } from "./index.js";
 
 /**
@@ -11,7 +11,7 @@ import { idlePrompt, MAX_STEPS_PER_COMMAND, runTodoNlExample, todoMachine } from
 function scriptedDecide(events: ChosenEvent[]) {
   const seen: AgentDecisionRequest[] = [];
   const queue = [...events];
-  const executors = createScriptedExecutors({
+  const executors = createMockModelExecutors({
     decisions: {
       planStep: [
         (request) => {

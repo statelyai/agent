@@ -25,12 +25,15 @@ import { maybeCreateRunInspection } from "./inspection.server";
 import {
   humanizeEventType,
   humanizeFieldName,
+  missingKeyMessage,
+  missingKeys,
   schemaNeedsPayload,
   singleStringField,
   type AcceptedEvent,
   type ChatIdle,
   type Json,
   type JsonObject,
+  type RequiredKey,
 } from "./machine-ui";
 
 // ─── trace capture (shared with the curated scenario runner) ───
@@ -536,8 +539,6 @@ export function runSignal(limits: RunLimits): AbortSignal {
 }
 
 export type MachineChatResult = {
-  /** `walkthrough` when the server has no API key and placeholders stood in for the model. */
-  mode: "live" | "walkthrough";
   model?: string;
   status: "done" | "idle" | "error";
   trace: TraceEntry[];
@@ -683,7 +684,6 @@ function toChatResult(
 ): MachineChatResult {
   if (result.status === "done") {
     return {
-      mode: "live",
       model,
       status: "done",
       trace,
@@ -703,7 +703,6 @@ function toChatResult(
       ? `"${result.ignored.type}" isn't an accepted event in this state, so nothing happened.`
       : null;
     return {
-      mode: "live",
       model,
       status: "idle",
       trace,
@@ -728,7 +727,6 @@ function toChatResult(
   if (stopNote) {
     const work = renderIdleWork(latestContext, changedKeys, omitValues);
     return {
-      mode: "live",
       model,
       status: "error",
       trace,
@@ -736,7 +734,6 @@ function toChatResult(
     };
   }
   return {
-    mode: "live",
     model,
     status: "error",
     trace,
@@ -744,29 +741,22 @@ function toChatResult(
   };
 }
 
-type ResolvedExecutors = {
-  mode: "live" | "walkthrough";
-  model?: string;
-  executors: Partial<AgentRequestExecutors>;
-};
-
 /**
- * Live AI SDK executors that resolve EVERY model ref to one OpenAI model — or,
- * with no key on the server, schema-driven placeholders that let every
- * example's machine run anyway (see `walkthrough-executors.ts`).
+ * AI SDK executors that resolve EVERY model ref to one OpenAI model. Every run
+ * needs a key; without one this throws instead of running.
  */
-async function resolveExecutors(): Promise<ResolvedExecutors> {
-  if (!process.env.OPENAI_API_KEY) {
-    const { createWalkthroughExecutors } = await import("./walkthrough-executors");
-    return { mode: "walkthrough", executors: createWalkthroughExecutors() };
-  }
+async function resolveExecutors(): Promise<{
+  model: string;
+  executors: Partial<AgentRequestExecutors>;
+}> {
+  const missing = missingApiKeys();
+  if (missing.length) throw new Error(missingKeyMessage(missing));
   const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
   const model = process.env.OPENAI_MODEL || "gpt-5.4-mini";
   return {
-    mode: "live",
     model,
     executors: createAiSdkExecutors({ resolveModel: () => openai(model) }),
   };
@@ -783,13 +773,11 @@ export async function runExampleRunner(
   runner: (options: Record<string, unknown>) => Promise<unknown>,
   limits: RunLimits = {},
 ): Promise<MachineChatResult> {
-  // A runner scripts its own executors; live ones are offered, placeholders
-  // are not — the story it tells is deterministic by design.
-  const live = process.env.OPENAI_API_KEY ? await resolveExecutors() : null;
+  const live = await resolveExecutors();
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   try {
     const output = await runner({
-      ...(live ? { executors: live.executors } : {}),
+      executors: live.executors,
       signal: runSignal(limits),
       onTransition,
       on: { "*": onEmitted },
@@ -803,8 +791,7 @@ export async function runExampleRunner(
       ),
     });
     return {
-      mode: "live",
-      ...(live?.model ? { model: live.model } : {}),
+      model: live.model,
       status: "done",
       trace,
       response: renderOutput(output),
@@ -812,7 +799,6 @@ export async function runExampleRunner(
     };
   } catch (error) {
     return {
-      mode: "live",
       status: "error",
       trace,
       response: error instanceof Error ? error.message : String(error),
@@ -820,8 +806,13 @@ export async function runExampleRunner(
   }
 }
 
-export function hasLiveExecutors(): boolean {
-  return Boolean(process.env.OPENAI_API_KEY);
+/** The model keys the server lacks: OpenAI for text requests, TypeSafe for Jev judgments. */
+export function missingApiKeys(): RequiredKey[] {
+  return missingKeys(process.env);
+}
+
+export function hasApiKey(): boolean {
+  return missingApiKeys().length === 0;
 }
 
 export async function startMachineChat(
@@ -841,19 +832,16 @@ export async function startMachineChat(
     onTrace,
     inspect: maybeCreateRunInspection(machine, limits.machineSource, "start"),
   });
-  return {
-    ...toChatResult(
-      machine,
-      live.model,
-      result as RunAgentResult<AnyStateMachine>,
-      trace,
-      changedKeys(),
-      stringValuesOf(input),
-      latestContext(),
-      limits,
-    ),
-    mode: live.mode,
-  };
+  return toChatResult(
+    machine,
+    live.model,
+    result as RunAgentResult<AnyStateMachine>,
+    trace,
+    changedKeys(),
+    stringValuesOf(input),
+    latestContext(),
+    limits,
+  );
 }
 
 /** The string values of an input/event object — user-typed text to not echo. */
@@ -897,17 +885,14 @@ export async function resumeMachineChat(
     onTrace,
     inspect: maybeCreateRunInspection(machine, limits.machineSource, "resume"),
   });
-  return {
-    ...toChatResult(
-      machine,
-      live.model,
-      result as RunAgentResult<AnyStateMachine>,
-      trace,
-      changedKeys(),
-      stringValuesOf(parsed),
-      latestContext(),
-      limits,
-    ),
-    mode: live.mode,
-  };
+  return toChatResult(
+    machine,
+    live.model,
+    result as RunAgentResult<AnyStateMachine>,
+    trace,
+    changedKeys(),
+    stringValuesOf(parsed),
+    latestContext(),
+    limits,
+  );
 }

@@ -3,14 +3,17 @@ import { createActor, createAsyncLogic, toPromise, waitFor } from "xstate";
 import {
   emailDrafter,
   emailDrafterSchemas,
-  evaluatePrompt,
   draftEmail,
   gameMachine,
   runRpsExample,
   jokeMachine,
-  rateJoke as rateJokeLogic,
   tellJoke as tellJokeLogic,
 } from "../examples/index.js";
+import { createEvaluatePrompt, writeFollowUps } from "../examples/email-drafter/agent-logic.js";
+import { createRateJoke } from "../examples/joke/index.js";
+// The examples' repo-internal judge double: an AI SDK evaluation model with
+// scripted answers keyed by question id.
+import { createMockJudge } from "../examples/mock-judge.js";
 import { runAgent, type AgentTextRequest } from "./index.js";
 // The step envelope (getAgentRequests/resolveAgentStep/transitionAgentStep) is
 // internal now — imported straight from ./steps.js (it backs verify.ts and these
@@ -25,16 +28,14 @@ describe("curated XState setup examples", () => {
     const sent: unknown[] = [];
     const machine = emailDrafter.provide({
       actors: {
-        evaluatePrompt: evaluatePrompt.withExecutor(async ({ request }) => {
+        // The completeness check is a Jev judgment: the first pass finds the
+        // recipient missing, the second (after MORE_INFO) finds it present.
+        evaluatePrompt: createEvaluatePrompt(
+          createMockJudge({ satisfied: [false, true], recipient: [false, true], "*": true }).model,
+        ),
+        writeFollowUps: writeFollowUps.withExecutor(async ({ request }) => {
           calls.push(request);
-          const satisfied = calls.filter((call) => call.system?.includes("Evaluate")).length > 1;
-          return {
-            result: {
-              satisfied,
-              missing: satisfied ? [] : ["recipient"],
-              questions: satisfied ? [] : ["Who should receive it?"],
-            },
-          };
+          return { result: { questions: ["Who should receive it?"] } };
         }),
         draftEmail: draftEmail.withExecutor(async ({ request }) => {
           calls.push(request);
@@ -199,7 +200,10 @@ describe("curated XState setup examples", () => {
     expect(result.playerScore).toBe(1);
   });
 
-  /** Joke machine wired to counting stubs: `n` jokes told, ratings 3 then 9. */
+  /**
+   * Joke machine wired to counting stubs: `n` jokes told, Jev rubric levels 1
+   * then 4 (3/10 then 10/10 on the machine's scale).
+   */
   function provideJokeStubs() {
     const jokes: string[] = [];
     const machine = jokeMachine.provide({
@@ -209,9 +213,7 @@ describe("curated XState setup examples", () => {
           jokes.push(joke);
           return { result: joke };
         }),
-        rateJoke: rateJokeLogic.withExecutor(async () => ({
-          result: { rating: jokes.length === 1 ? 3 : 9, explanation: "because" },
-        })),
+        rateJoke: createRateJoke(createMockJudge({ rating: [1, 4] }).model),
       },
     });
     return { machine, jokes };
@@ -238,14 +240,14 @@ describe("curated XState setup examples", () => {
     // for until the improvement pass has already produced a second joke.
     expect(jokes).toHaveLength(2);
     expect(decisionPrompts).toHaveLength(1);
-    expect(decisionPrompts[0]).toContain("Last joke rating: 9");
+    expect(decisionPrompts[0]).toContain("Last joke rating: 10");
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toMatchObject({
       topic: "state machines",
       joke: "joke 2 about state machines",
       firstJoke: "joke 1 about state machines",
       jokes: ["joke 1 about state machines", "joke 2 about state machines"],
-      lastRating: 9,
+      lastRating: 10,
     });
     // The revision notice carries the score the first attempt got.
     expect(result.status === "done" && result.output.revisionNotice).toContain(

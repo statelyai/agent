@@ -20,7 +20,7 @@ The snippets below come from [Twenty Questions](../examples/twenty-questions/ind
 Author a decision inline on the invoke that needs one, using the builtin `agent.decide` actor source. Its input takes:
 
 - `model`: which model to use (a key from your models map).
-- `name` (optional): the request's semantic name. It identifies the decision in traces, host mocks, and eval scripts. Without it the name falls back to the invoke `id`, then to the invoke's state path. See [Script keys](evals.md#script-keys).
+- `name` (optional): the request's semantic name. It identifies the decision in traces, host mocks, and eval scripts. Without it the name falls back to the invoke `id`, then to the invoke's state path. See [Plain-function executors](evals.md#plain-function-executors).
 - `system` (optional): system prompt.
 - `prompt` (optional): user prompt, usually built from `context`.
 - `allowedEvents` (optional): the candidate events (exact types or [patterns](#allowedevents-patterns)). Defaults to all currently-legal events.

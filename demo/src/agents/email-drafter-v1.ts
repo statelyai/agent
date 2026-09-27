@@ -1,8 +1,15 @@
 /**
  * Email drafter v1 — ask first, draft second.
  *
- * What the MODEL owns: judging whether the request has enough detail
- * (`evaluatePrompt`) and writing the draft (`draftEmail`).
+ * What JEV owns: judging whether the request has enough detail
+ * (`evaluatePrompt`). A completeness check is a typed judgment over text the
+ * machine already holds, not a generation, so it goes to the AI SDK's
+ * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * model: one boolean question for "enough to draft from?" plus one per
+ * required detail, in one call. Code turns the probabilities into `missing` against
+ * `ASSESSMENT_THRESHOLD`.
+ * What the MODEL owns: wording the follow-up questions (`writeFollowUps`, run
+ * only when something is missing) and writing the draft (`draftEmail`).
  * What the MACHINE owns: the order. Nothing is drafted until the evaluator is
  * satisfied or the human says "draft anyway"; nothing is sent until the human
  * chooses SEND from a review state; after MAX_REVISIONS rounds the only legal
@@ -16,8 +23,13 @@
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { setupAgent } from "@statelyai/agent";
 import { type EmailDraft, emailDraftSchema, hasRecipient, hasSubject } from "./email-draft";
+
+/** The judge: Jev through the AI SDK. Reads `TYPESAFE_AI_API_KEY`; tests inject a mock. */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Revision rounds `reviewing` allows before only SEND is legal. */
 export const MAX_REVISIONS = 2;
@@ -25,14 +37,68 @@ export const MAX_REVISIONS = 2;
 const RECIPIENT_QUESTION = "Who should this go to? Type an email address.";
 const SUBJECT_QUESTION = "What should the subject line be?";
 
-const assessmentSchema = z.object({
-  satisfied: z.boolean(),
-  missing: z.array(z.string()),
-  questions: z.array(z.string()),
-});
+/**
+ * What a request must state before v1 drafts, keyed by the name `missing`
+ * reports. The descriptions are the evidence Jev reads (`requiredDetails`).
+ * The recipient is an address because v1's send rule needs one.
+ */
+export const REQUIRED_DETAILS = {
+  recipient: "The email address the email goes to.",
+  subject: "What the email is about, clearly enough to write a subject line.",
+  body: "The message or facts the email must convey.",
+} as const;
+
+export type RequiredDetail = keyof typeof REQUIRED_DETAILS;
+
+/** A detail counts as stated, and the request as complete, at or above this probability. */
+export const ASSESSMENT_THRESHOLD = 0.5;
+
+/**
+ * The prompt check as one Jev call: the request and the required details are
+ * the state; `satisfied` plus one boolean question per detail are the
+ * questions. `model` is injected by tests; omitted, Jev reads
+ * `TYPESAFE_AI_API_KEY`.
+ */
+export function createEvaluatePrompt(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: Record<"satisfied" | RequiredDetail, { probability: number }> },
+    { prompt: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { request: input.prompt, requiredDetails: REQUIRED_DETAILS },
+        questions: {
+          satisfied: {
+            type: "boolean" as const,
+            instructions:
+              "Does `request` give enough to draft the email without inventing any detail listed in `requiredDetails`?",
+            criteria: {
+              true: "Every required detail is stated or plainly implied.",
+              false: "At least one required detail would have to be guessed.",
+            },
+          },
+          ...(Object.fromEntries(
+            Object.keys(REQUIRED_DETAILS).map((detail) => [
+              detail,
+              {
+                type: "boolean" as const,
+                instructions: `Does \`request\` state the ${detail} described in \`requiredDetails.${detail}\`?`,
+              },
+            ]),
+          ) as Record<RequiredDetail, { type: "boolean"; instructions: string }>),
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
+  });
+}
 
 const contextSchema = z.object({
   prompt: z.string(),
+  /** The required details Jev read as missing, for `clarifying` to ask about. */
+  missing: z.array(z.string()),
   /** The evaluator's open questions, joined for the idle label. */
   questions: z.string(),
   /** Every question the workflow raised, in order. Part of the output. */
@@ -59,12 +125,18 @@ const agentSetup = setupAgent({
     SEND: z.object({}),
   },
   requests: {
-    evaluatePrompt: {
-      schemas: { input: z.object({ prompt: z.string() }), output: assessmentSchema },
+    // The follow-up questions are prose the human reads, so they stay a text
+    // request. `clarifying` runs it only when the judgment found a gap.
+    writeFollowUps: {
+      schemas: {
+        input: z.object({ prompt: z.string(), missing: z.array(z.string()) }),
+        output: z.object({ questions: z.array(z.string()) }),
+      },
       model: "fast",
       system:
-        "Evaluate an email drafting request. Require recipient, subject, and body details. Return missing fields and one question per gap.",
-      prompt: ({ input }) => input.prompt,
+        "An email drafting request is missing details. Write one short question to the user per missing detail.",
+      prompt: ({ input }) =>
+        `Request:\n${input.prompt}\n\nMissing: ${input.missing.join(", ") || "(unclear what is missing)"}`,
     },
     draftEmail: {
       schemas: { input: z.object({ prompt: z.string() }), output: emailDraftSchema },
@@ -81,6 +153,7 @@ const agentSetup = setupAgent({
         return { sent: true };
       },
     }),
+    evaluatePrompt: createEvaluatePrompt(),
   },
   // Every state after `drafting` holds a draft, so narrow it there.
   states: {
@@ -94,6 +167,7 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
   id: "email-drafter-v1",
   context: ({ input }) => ({
     prompt: input.prompt,
+    missing: [],
     questions: "",
     clarifications: [],
     draft: null,
@@ -102,12 +176,35 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
   }),
   initial: "evaluating",
   states: {
+    // A Jev judgment: probabilities in, `missing` computed here against the
+    // threshold. Complete → draft; anything missing → word the questions.
     evaluating: {
       invoke: {
         src: "evaluatePrompt",
         input: ({ context }) => ({ prompt: context.prompt }),
+        onDone: ({ output: { answers } }) => {
+          const missing = (Object.keys(REQUIRED_DETAILS) as RequiredDetail[]).filter(
+            (detail) => answers[detail].probability < ASSESSMENT_THRESHOLD,
+          );
+          return answers.satisfied.probability >= ASSESSMENT_THRESHOLD && missing.length === 0
+            ? { target: "drafting", context: { missing, questions: "" } }
+            : { target: "clarifying", context: { missing } };
+        },
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `evaluatePrompt failed: ${String(event.error)}` },
+        }),
+      },
+    },
+
+    // Only reached when something is missing: the text model words the
+    // follow-up questions. Failing to word them still asks the human.
+    clarifying: {
+      invoke: {
+        src: "writeFollowUps",
+        input: ({ context }) => ({ prompt: context.prompt, missing: context.missing }),
         onDone: ({ context, output: { result: output } }) => ({
-          target: output.satisfied ? "drafting" : "needsMoreInfo",
+          target: "needsMoreInfo",
           context: {
             questions: output.questions.join(" "),
             // The evaluator re-asks about a gap the user did not fill; the
@@ -118,9 +215,9 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
             ],
           },
         }),
-        onError: ({ event }) => ({
-          target: "failed",
-          context: { failure: `evaluatePrompt failed: ${String(event.error)}` },
+        onError: ({ context }) => ({
+          target: "needsMoreInfo",
+          context: { questions: `Missing: ${context.missing.join(", ") || "some details"}.` },
         }),
       },
     },

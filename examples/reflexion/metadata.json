@@ -1,0 +1,19 @@
+{
+  "name": "reflexion",
+  "title": "Draft, critique, search, and revise an answer with citations",
+  "kind": "pattern",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph Reflexion tutorial",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/reflexion/reflexion/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Drafts an answer about adopting AI coding assistants, critiques it, searches a small sample index for what the critique says is missing, and revises with citations. The machine counts revisions against MAX_REVISIONS instead of counting transcript messages, and keeps only citations to passages the run actually retrieved."
+  },
+  "starters": [
+    "How should a small team roll out an AI coding assistant?",
+    "What security and licensing risks come with AI coding assistants?",
+    "How can a team tell whether an AI coding assistant pays off?"
+  ]
+}

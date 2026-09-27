@@ -6,30 +6,44 @@
  * settled result. The host stays stateless — an idle run returns a persisted
  * snapshot the client sends back to resume.
  *
- * The same code path runs with real models (`createAiSdkExecutors`, when
- * `OPENAI_API_KEY` is set) or with scripted executors. Tests import the
- * `*Run` functions directly and inject scripted executors — no API key, no
- * network.
+ * Runs need a real model and Jev: `createAiSdkExecutors` with `OPENAI_API_KEY`
+ * for text requests and decisions, and `TYPESAFE_AI_API_KEY` for the judgments
+ * (routing, reflection's scoring, the free-text review), which call the AI
+ * SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ * evaluation model. Tests import the `*Run` functions directly and inject
+ * their own executors and a mock evaluation model as the `judge`.
  */
 import { runAgent, type AgentRequestExecutors, type RunAgentResult } from "@statelyai/agent";
-import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
+import {
+  createActor,
+  createAsyncLogic,
+  toPromise,
+  type AnyActorLogic,
+  type AnyMachineSnapshot,
+  type AnyStateMachine,
+  type Snapshot,
+} from "xstate";
 import { maybeCreateRunInspection } from "./inspection.server";
-import { createTraceRecorder, describeIdle, type TraceEntry } from "./machine-chat.server";
-import type { ChatIdle } from "./machine-ui";
+import {
+  createTraceRecorder,
+  describeIdle,
+  missingApiKeys,
+  type TraceEntry,
+} from "./machine-chat.server";
+import { missingKeyMessage, type ChatIdle } from "./machine-ui";
 import { refundMachine } from "@/agents/refund";
 import { approvalMachine } from "@/agents/approval";
-import { routingMachine } from "@/agents/routing";
+import { createClassifyIntent, routingMachine } from "@/agents/routing";
 import { researchMachine } from "@/agents/research";
 import { pipelineMachine } from "@/agents/pipeline";
 import { retryMachine } from "@/agents/retry";
 import { toolsMachine } from "@/agents/tools";
-import { reflectionMachine } from "@/agents/reflection";
-import { emailDrafterV1Machine } from "@/agents/email-drafter-v1";
+import { createEvaluate, reflectionMachine } from "@/agents/reflection";
+import { createEvaluatePrompt, emailDrafterV1Machine } from "@/agents/email-drafter-v1";
 import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
-import { scriptedExecutorsFor, scriptedReviewVerdict } from "./scripted-executors";
 import { scenarioSource, type ScenarioId } from "./scenarios";
-
-export type RunMode = "live" | "script";
 
 /** JSON-safe value — server fns must return serializable data (TanStack validates it). */
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -42,7 +56,6 @@ export type IdlePayload = ChatIdle & {
 };
 
 export type ScenarioResult = {
-  mode: RunMode;
   model?: string;
   status: "done" | "idle" | "error";
   trace: TraceEntry[];
@@ -108,15 +121,13 @@ function inputFor(scenarioId: ScenarioId, prompt: string): Record<string, string
 
 // ─── executor resolution ───
 
-/** Resolves live (AI SDK) or scripted executors for a scenario, plus a label. */
+/** Resolves AI SDK executors for a scenario, plus the model label. Throws without a key. */
 async function resolveExecutors(
   scenarioId: ScenarioId,
-): Promise<{ mode: RunMode; model?: string; executors: Partial<AgentRequestExecutors> }> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return { mode: "script", executors: scriptedExecutorsFor(scenarioId) };
-  }
-  // Lazy import: keeps @ai-sdk/openai out of any bundle that only needs scripts.
+): Promise<{ model: string; executors: Partial<AgentRequestExecutors> }> {
+  const missing = missingApiKeys();
+  if (missing.length) throw new Error(missingKeyMessage(missing));
+  // Lazy import: keeps @ai-sdk/openai out of the client bundle.
   const [{ createAiSdkExecutors }, { openai }] = await Promise.all([
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
@@ -126,7 +137,6 @@ async function resolveExecutors(
   const models = {
     fast: openai(primary),
     writer: openai(primary),
-    router: openai(primary),
     analyst: openai(primary),
     planner: openai(primary),
     critic: openai(primary),
@@ -161,7 +171,24 @@ async function resolveExecutors(
       };
     }
   }
-  return { mode: "live", model: primary, executors };
+  return { model: primary, executors };
+}
+
+/**
+ * The scenario's judgment actors bound to an injected judge model. Without
+ * one, each machine's registered default uses Jev, which reads
+ * `TYPESAFE_AI_API_KEY`.
+ */
+function judgeActors(
+  scenarioId: ScenarioId,
+  judge: Experimental_EvaluationModel | undefined,
+): { actors?: Record<string, AnyActorLogic> } {
+  if (!judge) return {};
+  if (scenarioId === "routing") return { actors: { classifyIntent: createClassifyIntent(judge) } };
+  if (scenarioId === "reflection") return { actors: { evaluate: createEvaluate(judge) } };
+  if (scenarioId === "email-drafter-v1")
+    return { actors: { evaluatePrompt: createEvaluatePrompt(judge) } };
+  return {};
 }
 
 // ─── result shaping ───
@@ -239,13 +266,11 @@ function describeEmailOutcome(output: Record<string, unknown>): string {
 
 function toResult(
   scenarioId: ScenarioId,
-  mode: RunMode,
   model: string | undefined,
   result: RunAgentResult<AnyStateMachine>,
   trace: TraceEntry[],
 ): ScenarioResult {
   const base: ScenarioResult = {
-    mode,
     model,
     status: result.status === "done" ? "done" : result.status === "idle" ? "idle" : "error",
     trace,
@@ -268,23 +293,24 @@ function toResult(
 export async function startScenarioRun(
   scenarioId: ScenarioId,
   prompt: string,
-  mode: RunMode,
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
+  judge?: Experimental_EvaluationModel,
 ): Promise<ScenarioResult> {
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   const machine = machineFor(scenarioId);
   const result = await runAgent(machine, {
     input: inputFor(scenarioId, prompt),
     executors,
+    ...judgeActors(scenarioId, judge),
     ...(signal ? { signal } : {}),
     onTransition,
     on: { "*": onEmitted },
     onTrace,
     inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "start"),
   });
-  return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
+  return toResult(scenarioId, model, result as RunAgentResult<AnyStateMachine>, trace);
 }
 
 /** Resumes a persisted idle snapshot with a typed event. Pure — used by tests. */
@@ -292,10 +318,10 @@ export async function resumeScenarioRun(
   scenarioId: ScenarioId,
   snapshot: Snapshot<unknown>,
   event: { type: string; [key: string]: unknown },
-  mode: RunMode,
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
+  judge?: Experimental_EvaluationModel,
 ): Promise<ScenarioResult> {
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   const machine = machineFor(scenarioId);
@@ -305,13 +331,14 @@ export async function resumeScenarioRun(
     snapshot,
     event,
     executors,
+    ...judgeActors(scenarioId, judge),
     ...(signal ? { signal } : {}),
     onTransition,
     on: { "*": onEmitted },
     onTrace,
     inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "resume"),
   });
-  return toResult(scenarioId, mode, model, result as RunAgentResult<AnyStateMachine>, trace);
+  return toResult(scenarioId, model, result as RunAgentResult<AnyStateMachine>, trace);
 }
 
 // ─── env-resolving wrappers (used by the server functions) ───
@@ -321,8 +348,8 @@ export async function startScenario(
   prompt: string,
   signal?: AbortSignal,
 ): Promise<ScenarioResult> {
-  const { mode, model, executors } = await resolveExecutors(scenarioId);
-  return startScenarioRun(scenarioId, prompt, mode, model, executors, signal);
+  const { model, executors } = await resolveExecutors(scenarioId);
+  return startScenarioRun(scenarioId, prompt, model, executors, signal);
 }
 
 export async function resumeScenario(
@@ -330,49 +357,87 @@ export async function resumeScenario(
   snapshot: Snapshot<unknown>,
   event: ResumeEvent,
   signal?: AbortSignal,
+  /** Injected by tests; omitted, Jev reads `TYPESAFE_AI_API_KEY`. */
+  judge?: Experimental_EvaluationModel,
 ): Promise<ScenarioResult> {
-  const { mode, model, executors } = await resolveExecutors(scenarioId);
+  const { model, executors } = await resolveExecutors(scenarioId);
 
   // Free-text review ("looks good") → map to a typed event before delivering.
   if (isInterpretEvent(event)) {
-    const verdict = await interpretReview(event.text, mode);
+    const verdict = await interpretReview(event.text, judge);
     if (verdict === "UNCLEAR") {
       // Re-settle idle without delivering an event: still awaiting a clear verdict.
-      return startResumeIdleEcho(scenarioId, snapshot, mode, model);
+      return startResumeIdleEcho(scenarioId, snapshot, model);
     }
     const typed =
       verdict === "REJECT" ? { type: "REJECT", reason: event.text } : { type: "APPROVE" };
-    return resumeScenarioRun(scenarioId, snapshot, typed, mode, model, executors, signal);
+    return resumeScenarioRun(scenarioId, snapshot, typed, model, executors, signal, judge);
   }
 
-  return resumeScenarioRun(scenarioId, snapshot, event, mode, model, executors, signal);
+  return resumeScenarioRun(scenarioId, snapshot, event, model, executors, signal, judge);
 }
 
-/** Interprets a free-text review as a typed verdict (scripted or live). */
+/** Below this confidence, a review reads as unclear and the run asks again. */
+export const REVIEW_CONFIDENCE = 0.6;
+
+/** The judge: Jev through the AI SDK. Reads `TYPESAFE_AI_API_KEY`; tests inject a mock. */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+
+/**
+ * Reading a review as approve / reject is a typed judgment over the person's
+ * words, so it is one Jev `choice`, not a text generation to parse. Jev's
+ * confidence in the label comes from the result's TypeSafe provider metadata;
+ * a judge that reports none counts as unsure (0).
+ */
+export function createInterpretReview(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { verdict: { choice: "approve" | "reject" | "unclear" } }; confidence: number },
+    { review: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers, providerMetadata } = await evaluate({
+        model,
+        state: { review: input.review },
+        questions: {
+          verdict: {
+            type: "choice" as const,
+            instructions: "What does `review`, a person's reply to a draft, decide?",
+            criteria: {
+              approve: "Accepts the draft as it is.",
+              reject:
+                "Asks for changes or criticizes the draft. Negative feedback counts as reject.",
+              unclear: "Neither accepts the draft nor asks for changes.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      const reported = (
+        providerMetadata?.typesafe?.confidence as Record<string, unknown> | undefined
+      )?.verdict;
+      return { answers, confidence: typeof reported === "number" ? reported : 0 };
+    },
+  });
+}
+
+/** Interprets a free-text review as a typed verdict; a failed or unsure call reads as UNCLEAR. */
 async function interpretReview(
   text: string,
-  mode: RunMode,
+  judge?: Experimental_EvaluationModel,
 ): Promise<"APPROVE" | "REJECT" | "UNCLEAR"> {
-  if (mode === "script") return scriptedReviewVerdict(text);
   try {
-    const [{ generateText }, { openai }] = await Promise.all([
-      import("ai"),
-      import("@ai-sdk/openai"),
-    ]);
-    const { text: out } = await generateText({
-      model: openai(process.env.OPENAI_MODEL || "gpt-5.4-mini"),
-      system:
-        "Interpret the human's review of a draft as exactly one word: APPROVE, REJECT, or UNCLEAR. Negative feedback means REJECT.",
-      prompt: text,
-    });
-    const verdict = out.trim().toUpperCase();
-    return verdict.includes("APPROVE")
+    const actor = createActor(createInterpretReview(judge), { input: { review: text } });
+    actor.start();
+    const { answers, confidence } = await toPromise(actor);
+    const { verdict } = answers;
+    if (confidence < REVIEW_CONFIDENCE) return "UNCLEAR";
+    return verdict.choice === "approve"
       ? "APPROVE"
-      : verdict.includes("REJECT")
+      : verdict.choice === "reject"
         ? "REJECT"
         : "UNCLEAR";
   } catch {
-    return scriptedReviewVerdict(text);
+    return "UNCLEAR";
   }
 }
 
@@ -380,7 +445,6 @@ async function interpretReview(
 function startResumeIdleEcho(
   scenarioId: ScenarioId,
   snapshot: Snapshot<unknown>,
-  mode: RunMode,
   model: string | undefined,
 ): ScenarioResult {
   const machine = machineFor(scenarioId);
@@ -390,7 +454,6 @@ function startResumeIdleEcho(
     snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
   );
   return {
-    mode,
     model,
     status: "idle",
     trace: [],

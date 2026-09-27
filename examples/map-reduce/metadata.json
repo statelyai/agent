@@ -1,0 +1,15 @@
+{
+  "name": "map-reduce",
+  "title": "One joke per subject, written in parallel, then judged",
+  "kind": "pattern",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph map-reduce how-to (Send API)",
+    "url": "https://langchain-ai.github.io/langgraph/how-tos/map-reduce/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Lists subjects for a topic, spawns one joke writer per subject in parallel, collects the jokes as they land, and has Jev pick the best as a typed choice with one label per landed joke. The fan-out width is capped, a failed branch records a placeholder instead of stalling the run, and an out-of-range pick is retried once before the run ends in failed."
+  },
+  "starters": ["animals", "office life", "space travel"]
+}

@@ -8,9 +8,10 @@ export default defineConfig({
       // The plugin loads `<configDir>/.dev.vars` as bindings, so
       // once anyone has run `dev:live` a real key would reach the Worker and
       // these tests would silently bill OpenAI. This binding is applied on
-      // top of the wrangler/.dev.vars ones, forcing the host to run scripted: the
-      // suite is always scripted.
-      miniflare: { bindings: { OPENAI_API_KEY: "" } },
+      // top of the wrangler/.dev.vars ones, so the real provider can never be
+      // built here: the suite stubs the model and the judge model (see
+      // test/agent.workers-test.ts).
+      miniflare: { bindings: { OPENAI_API_KEY: "", TYPESAFE_AI_API_KEY: "" } },
     }),
   ],
   test: {

@@ -7,7 +7,8 @@
  * SEND. The human still reviews every draft; SEND is still a human action.
  *
  * Diff against v1 (`./email-drafter-v1.ts`):
- * - removed: `evaluating`, `needsMoreInfo`, the `evaluatePrompt` request
+ * - removed: `evaluating`, `clarifying`, `needsMoreInfo`, the `evaluatePrompt`
+ *   Jev judgment and the `writeFollowUps` request
  * - added: `needsRecipient`, reached only from a SEND with no valid address
  * - SEND branches on `hasRecipient(draft)` instead of always sending
  * - `draftEmail` is told to leave `to` empty rather than invent an address

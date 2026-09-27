@@ -18,10 +18,23 @@
  * branch (no pre-binding, no fixed parallel region). Branches are collected via
  * the canonical `xstate.done.actor` event's `actorId` (see docs/multi-agent.md).
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/deep-research/index.ts
+ * Reflection is a JUDGMENT, not a generation: `reflecting` calls the AI SDK's
+ * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * model, with the question and the findings as state and one boolean
+ * question, "do these findings answer the question comprehensively?". The
+ * `reflected` choice state compares that probability to
+ * `SUFFICIENCY_THRESHOLD`. Naming what is missing is generative, so it moves
+ * into the planner: a follow-up round hands `planResearch` the previous
+ * findings as feedback, and the planner targets what they leave out. The text
+ * model plans, researches and writes; Jev only grades.
+ *
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/deep-research/index.ts
  */
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   createTextLogic,
   getStatePath,
@@ -37,9 +50,14 @@ const queriesSchema = z.array(z.string()).min(2).max(4);
 const models = {
   planner: openai("gpt-5.4-mini"),
   researcher: openai("gpt-5.4-mini"),
-  reflector: openai("gpt-5.4-mini"),
   writer: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 const BRANCH_PREFIX = "research-";
 
@@ -103,6 +121,49 @@ function renderLedger(sources: Source[]): string {
 /** Reflection rounds before the report is written no matter what. */
 const MAX_ROUNDS = 2;
 
+/** The report is written once Jev's probability that the findings suffice clears this. */
+export const SUFFICIENCY_THRESHOLD = 0.5;
+
+/**
+ * reflect as a judgment: the question and the round's findings are the
+ * state, and one boolean question asks whether they cover it. The judge model
+ * is injected by tests and hosts; the default is Jev.
+ */
+export function createReflect(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { sufficient: { probability: number } } },
+    { question: string; findings: string[] }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, findings: input.findings },
+        questions: {
+          sufficient: {
+            type: "boolean" as const,
+            instructions: "Do `findings`, taken together, answer `question` comprehensively?",
+            criteria: {
+              true: "Every major part of the question is addressed by at least one finding.",
+              false:
+                "Some part of the question is unaddressed, or the findings are thin or off-topic.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
+  });
+}
+
+/** What a follow-up round's planner is told: the findings judged incomplete. */
+function renderFeedback(findings: string[]): string {
+  return [
+    "The findings so far do not answer the question comprehensively:",
+    ...(findings.length ? findings.map((finding) => `- ${finding}`) : ["(no findings)"]),
+  ].join("\n");
+}
+
 const contextSchema = z.object({
   question: z.string(),
   queries: queriesSchema,
@@ -117,8 +178,8 @@ const contextSchema = z.object({
   settled: z.number(),
   /** Branch ids whose researcher errored, so a failure is visible, not silent. */
   failedBranches: z.array(z.string()),
-  /** The reflector's latest verdict; `null` before the first reflection. */
-  assessment: z.object({ sufficient: z.boolean(), gaps: z.string() }).nullable(),
+  /** Jev's latest probability that the findings suffice; `null` before the first reflection. */
+  sufficiency: z.number().nullable(),
   feedback: z.string().nullable(),
   round: z.number(),
   report: z.string().nullable(),
@@ -152,7 +213,7 @@ export const research = createTextLogic({
 const setup = setupAgent({
   models,
   context: contextSchema,
-  actors: { research },
+  actors: { research, reflect: createReflect() },
   input: z.object({ question: z.string() }),
   output: z.object({
     report: z.string(),
@@ -172,20 +233,10 @@ const setup = setupAgent({
       },
       model: "planner",
       system:
-        "Plan two to four complementary research queries. If feedback is present, target the named coverage gaps.",
+        "Plan two to four complementary research queries. If feedback is present, it lists the " +
+        "findings of the previous round, judged incomplete: target what they leave out.",
       prompt: ({ input }) =>
         `Question: ${input.question}\nCoverage feedback: ${input.feedback ?? "none"}`,
-    },
-    reflect: {
-      schemas: {
-        input: z.object({ question: z.string(), findings: z.array(z.string()) }),
-        output: z.object({ sufficient: z.boolean(), gaps: z.string() }),
-      },
-      model: "reflector",
-      system:
-        "Judge whether the combined findings answer the question comprehensively and identify gaps.",
-      prompt: ({ input }) =>
-        `Question: ${input.question}\nFindings:\n${input.findings.join("\n\n")}`,
     },
     writeReport: {
       schemas: {
@@ -218,7 +269,7 @@ export const deepResearchMachine = setup.createMachine({
     expected: 0,
     settled: 0,
     failedBranches: [],
-    assessment: null,
+    sufficiency: null,
     feedback: null,
     round: 0,
     report: null,
@@ -324,7 +375,7 @@ export const deepResearchMachine = setup.createMachine({
         }),
         onDone: ({ output }) => ({
           target: "reflected",
-          context: { assessment: output.result, feedback: output.result.gaps },
+          context: { sufficiency: output.answers.sufficient.probability },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -334,14 +385,18 @@ export const deepResearchMachine = setup.createMachine({
     },
     // A `choice` state: the "research more or write it up" branch is its own
     // state rather than a ternary buried in `reflecting`'s `onDone`, so both
-    // arms are visible to `explorePaths`/`canReach`. The round budget is a
-    // counter in context compared to the MAX_ROUNDS constant.
+    // arms are visible to `explorePaths`/`canReach`. Jev's probability is
+    // compared to SUFFICIENCY_THRESHOLD, and the round budget is a counter in
+    // context compared to the MAX_ROUNDS constant.
     reflected: {
       type: "choice",
       choice: ({ context }) =>
-        context.assessment?.sufficient === true || context.round >= MAX_ROUNDS
+        (context.sufficiency ?? 0) >= SUFFICIENCY_THRESHOLD || context.round >= MAX_ROUNDS
           ? { target: "writing" }
-          : { target: "planning" },
+          : {
+              target: "planning",
+              context: { feedback: renderFeedback(Object.values(context.findings)) },
+            },
     },
     writing: {
       invoke: {
@@ -369,6 +424,8 @@ export interface RunDeepResearchOptions {
   question?: string;
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
@@ -377,6 +434,7 @@ export async function runDeepResearchExample(options: RunDeepResearchOptions = {
   const {
     question = "What makes durable AI workflows reliable?",
     generateText,
+    judge,
     onProgress,
   } = options;
   const result = await runAgent(deepResearchMachine, {
@@ -384,6 +442,7 @@ export async function runDeepResearchExample(options: RunDeepResearchOptions = {
     ...(generateText
       ? { executors: { generateText } }
       : { executors: createAiSdkExecutors({ models }) }),
+    ...(judge ? { actors: { reflect: createReflect(judge) } } : {}),
     ...(onProgress ? { onTransition: (snapshot) => onProgress(getStatePath(snapshot)) } : {}),
   });
   if (result.status !== "done") throw new Error(`Deep research did not complete: ${result.status}`);
@@ -391,7 +450,9 @@ export async function runDeepResearchExample(options: RunDeepResearchOptions = {
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
+  }
   void runDeepResearchExample().then(({ report, sourceLedger }) =>
     console.log(`${report}\n\nSources:\n${sourceLedger}`),
   );

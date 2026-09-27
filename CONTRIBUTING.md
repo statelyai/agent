@@ -31,7 +31,7 @@ pnpm docs:check  # typechecks fenced snippets in docs/
 - Run tests non-interactively. Do not use watch mode in CI or in a submitted change.
 - Add a changeset for any user-visible change: `pnpm changeset`.
 - Docs live in `docs/`. Fenced `ts` blocks are typechecked by `scripts/check-docs-snippets.ts`. Fence a block as `ts no-check` to skip it.
-- Examples live in `examples/`, one flat directory per example with an `index.ts` entrypoint. Each example is self-contained, with no shared harness and no local imports.
+- Examples live in `examples/`, one flat directory per example with an `index.ts` entrypoint. Each example's source is self-contained: it may import files in its own directory and another example's exports, and nothing else local. Tests share exactly two repo-internal model doubles, `examples/mock-model.ts` (a language model, over the AI SDK's `MockLanguageModelV3`) and `examples/mock-judge.ts` (an AI SDK evaluation model); neither is published, and there is no other shared harness.
 
 ## Issues
 

@@ -79,9 +79,9 @@ export const scenarios: Scenario[] = [
   {
     id: "routing",
     name: "Intent routing",
-    eyebrow: "Typed model event",
+    eyebrow: "Typed judgment",
     description:
-      "The model picks one typed event and must justify it. The machine owns every routing destination.",
+      "Jev classifies the request with one typed choice and a confidence. The machine owns every routing destination.",
     placeholder: "I was charged twice and cannot download my latest invoice.",
     startLabel: "Route request",
     starters: [
@@ -148,7 +148,7 @@ export const scenarios: Scenario[] = [
     name: "Reflection",
     eyebrow: "Score & revise",
     description:
-      "A writer drafts, an evaluator scores; the machine loops until good enough or the budget is spent.",
+      "A writer drafts, Jev scores it against a rubric; the machine loops until good enough or the budget is spent.",
     placeholder: "Write a vivid one-paragraph description of a tidal shoreline at dusk.",
     startLabel: "Write & refine",
     starters: [
@@ -162,7 +162,7 @@ export const scenarios: Scenario[] = [
     name: "Email drafter v1",
     eyebrow: "Ask first, draft second",
     description:
-      "The evaluator stops to ask about every missing detail before drafting. Sending is a human action from review.",
+      "Jev checks the request for every required detail and the machine stops to ask about each gap before drafting. Sending is a human action from review.",
     placeholder: "Email jenny@example.com to invite them for coffee after my talk on Thursday.",
     startLabel: "Draft email",
     starters: [

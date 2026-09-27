@@ -20,9 +20,22 @@
  *     runs the tool loop, bounded by the request's `maxSteps`. The machine never sees
  *     the intermediate tool calls — same as LangGraph's safe-tools path, minus
  *     the extra node. (See examples/tool-calling.)
- *   - Intent routing: a structured-output `classify` request returns a
- *     discriminated union (question | cancel | rebook); a `choice` state routes
- *     on it — the typed analogue of `route_tools`.
+ *   - Intent routing as a JUDGMENT that SELECTS instead of generating. `classify`
+ *     is ONE call to the AI SDK's `experimental_evaluate` with Jev
+ *     (`@ai-sdk/typesafe-ai`) as the evaluation model, over `{ message,
+ *     knownCodes, flights }`, where code pre-parses the candidates first: `knownCodes` are
+ *     the confirmation-code-shaped spans in the message (`findCodeCandidates`),
+ *     and `flights` are the sample schedule's alternatives for the bookings
+ *     those codes name (`FLIGHTS`). Jev answers a `choice` for `intent`
+ *     (question | cancel | rebook), a `choice` for `newFlight` over the flight
+ *     ids plus `none`, and — only when there is more than one candidate code —
+ *     a `choice` for `confirmationCode` over the candidates plus `none` (one
+ *     candidate: code takes it; none: null). So "the morning flight" resolves
+ *     to a concrete flight by selection, and a confirmation code is always a
+ *     verbatim span of the message: Jev cannot invent either. A `choice` state
+ *     then routes on the staged action — the typed analogue of `route_tools`.
+ *     A sensitive intent without a code or a target flight ends in `failed`
+ *     with a message saying what was missing, never at the approval gate.
  *   - TWO KINDS OF PAUSE, and the machine tells them apart. `confirming` blocks
  *     a write until a human approves it. `awaitingInfo` blocks an ANSWER until
  *     the customer supplies something only they know — which booking, which
@@ -45,14 +58,15 @@
  *     examples/human-in-the-loop.)
  *
  * Dual-mode: `runCustomerSupportExample(options?)` takes an injectable
- * `generateText` (tests with no API key pass a mock); the direct run uses real models
- * and a readline approve/deny prompt.
+ * `generateText` and `judge` (tests with no API key pass mocks); the direct
+ * run uses real models and a readline approve/deny prompt.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/customer-support/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/customer-support/index.ts
  */
 import { z } from "zod";
-import { tool } from "ai";
+import { experimental_evaluate as evaluate, tool, type Experimental_EvaluationModel } from "ai";
 import { openai } from "@ai-sdk/openai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAsyncLogic, type StateValue } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -66,7 +80,6 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  router: openai("gpt-5.4-mini"),
   assistant: openai("gpt-5.4-mini"),
 };
 
@@ -121,16 +134,175 @@ export const POLICIES: Record<string, string> = {
   changes: "Flight changes incur a $75 fee plus any fare difference, subject to seat availability.",
 };
 
-// ─── schemas ───
+/**
+ * A tiny flight schedule: the alternatives a rebook can move a booking onto
+ * (the tutorial's `search_flights` table, cut down). The rebook path SELECTS
+ * one of these; it never writes a flight the schedule does not list.
+ */
+export const FLIGHTS: Array<{ id: string; route: string; departs: string }> = [
+  { id: "BA247", route: "LHR→GRU", departs: "2026-08-03 21:30" },
+  { id: "BA251", route: "LHR→GRU", departs: "2026-08-02 09:40" },
+  { id: "AA106", route: "JFK→LHR", departs: "2026-09-14 09:00" },
+  { id: "AA104", route: "JFK→LHR", departs: "2026-09-15 18:15" },
+  { id: "UA916", route: "SFO→NRT", departs: "2026-10-03 07:00" },
+  { id: "UA920", route: "SFO→NRT", departs: "2026-10-04 11:05" },
+];
 
-// The classifier's typed decision — the analogue of LangGraph's `route_tools`.
-// `cancel`/`rebook` are the sensitive branches; `question` is the safe branch.
-// A tool/intent the union can't validate never reaches a sensitive path.
-const intentSchema = z.union([
-  z.object({ intent: z.literal("question") }),
-  z.object({ intent: z.literal("cancel"), confirmationCode: z.string() }),
-  z.object({ intent: z.literal("rebook"), confirmationCode: z.string(), newFlight: z.string() }),
-]);
+/** A schedule row in the booking table's `flight` format. */
+function flightLabel(flight: { id: string; route: string; departs: string }): string {
+  return `${flight.id} ${flight.route}, ${flight.departs}`;
+}
+
+// ─── pre-parsing: code finds the candidates, Jev picks among them ───
+
+/**
+ * Confirmation-code candidates: PNR-like spans (5–6 capitals/digits with at
+ * least one digit, so shouted words like "CANCEL" never match), deduplicated,
+ * in message order. Recall-tuned on purpose: a flight number like "AA106"
+ * also matches, and Jev decides which span is the confirmation code.
+ */
+export function findCodeCandidates(message: string): string[] {
+  return [...new Set(message.match(/\b(?=[A-Z0-9]*\d)[A-Z0-9]{5,6}\b/g) ?? [])];
+}
+
+/**
+ * The flights a rebook may select: the schedule's alternatives on the route of
+ * any booking a candidate code names, or the whole schedule when no candidate
+ * names a known booking.
+ */
+export function flightCandidates(knownCodes: string[]): typeof FLIGHTS {
+  const booked = knownCodes.flatMap((code) => BOOKINGS[code] ?? []);
+  if (booked.length === 0) return FLIGHTS;
+  return FLIGHTS.filter((flight) =>
+    booked.some(
+      (booking) => booking.flight.includes(flight.route) && booking.flight !== flightLabel(flight),
+    ),
+  );
+}
+
+/** Label for "no candidate fits" in the two selection questions. */
+const NONE = "none";
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+
+/**
+ * `classify` as ONE `experimental_evaluate` call: the message and the
+ * pre-parsed candidates are the state; `intent`, `newFlight`, and (with 2+
+ * candidates) `confirmationCode` are `choice` questions whose labels ARE the
+ * candidates. The judge model is injected by tests and hosts; the default is
+ * Jev.
+ */
+export function createClassify(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    {
+      answers: {
+        intent: { choice: "question" | "cancel" | "rebook" };
+        newFlight: { choice: string };
+        confirmationCode?: { choice: string };
+      };
+    },
+    { query: string }
+  >({
+    run: async ({ input, signal }) => {
+      const knownCodes = findCodeCandidates(input.query);
+      const flights = flightCandidates(knownCodes);
+      const questions = {
+        intent: {
+          type: "choice" as const,
+          instructions: "What is the customer asking the airline assistant to do in `message`?",
+          criteria: {
+            question:
+              "Anything answerable from bookings or policies: fees, baggage, what their flight " +
+              "is. Also anything that does not explicitly ask to change a booking.",
+            cancel: "Explicitly asks to cancel a booking.",
+            rebook: "Explicitly asks to move a booking to a different flight.",
+          },
+        },
+        newFlight: {
+          type: "choice" as const,
+          instructions: "Which flight in `flights` does `message` ask to move the booking to?",
+          criteria: {
+            ...Object.fromEntries(
+              flights.map((flight) => [flight.id, `${flight.route}, departs ${flight.departs}`]),
+            ),
+            [NONE]: "The message names no new flight, or none of these fits it.",
+          },
+        },
+      };
+      const { answers } = await evaluate({
+        model,
+        state: { message: input.query, knownCodes, flights },
+        questions:
+          knownCodes.length > 1
+            ? {
+                ...questions,
+                confirmationCode: {
+                  type: "choice" as const,
+                  instructions:
+                    "Which of `knownCodes` is the booking confirmation code in `message`?",
+                  criteria: {
+                    ...Object.fromEntries(knownCodes.map((code) => [code, null])),
+                    [NONE]:
+                      "None of these is a booking confirmation code (e.g. all are flight numbers).",
+                  },
+                },
+              }
+            : questions,
+        abortSignal: signal,
+      });
+      return { answers };
+    },
+  });
+}
+
+/**
+ * Maps the answers back onto the candidates code found: the pending action for
+ * a sensitive intent, `null` for a question, or what was missing.
+ */
+function stageAction(
+  query: string,
+  answers: {
+    intent: { choice: string };
+    newFlight: { choice: string };
+    confirmationCode?: { choice: string };
+  },
+): { pendingAction: PendingAction | null } | { missing: string } {
+  const intent = answers.intent.choice;
+  if (intent !== "cancel" && intent !== "rebook") return { pendingAction: null };
+  const candidates = findCodeCandidates(query);
+  const picked =
+    candidates.length === 1 ? candidates[0]! : (answers.confirmationCode?.choice ?? NONE);
+  if (picked === NONE || !candidates.includes(picked)) {
+    return { missing: "Could not find a confirmation code in the request." };
+  }
+  if (intent === "cancel") {
+    return {
+      pendingAction: {
+        type: "cancel",
+        confirmationCode: picked,
+        newFlight: null,
+        summary: `Cancel booking ${picked}`,
+      },
+    };
+  }
+  const flight = FLIGHTS.find((row) => row.id === answers.newFlight.choice);
+  if (!flight) return { missing: "Could not tell which scheduled flight to move the booking to." };
+  const newFlight = flightLabel(flight);
+  return {
+    pendingAction: {
+      type: "rebook",
+      confirmationCode: picked,
+      newFlight,
+      summary: `Rebook ${picked} onto ${newFlight}`,
+    },
+  };
+}
+
+// ─── schemas ───
 
 // The pending sensitive action, held in context while the machine waits idle for
 // approval (the dynamic detail behind the static `meta.interaction` label).
@@ -186,6 +358,8 @@ const agentSetup = setupAgent({
     STOP_ASKING: z.object({}),
   },
   actors: {
+    // Intent routing + argument selection: one Jev call (see createClassify).
+    classify: createClassify(),
     // Applies the approved sensitive action: it WRITES to the booking table,
     // it does not merely describe the write. (A production host would hit its
     // database here — see the tutorial's cancel_ticket.) A missing booking is
@@ -209,30 +383,11 @@ const agentSetup = setupAgent({
     }),
   },
   requests: {
-    // Intent router: structured output only, no tools. The typed union is the
-    // guard — a hallucinated intent can't validate, so it never routes to a
-    // sensitive path.
-    classify: {
-      schemas: {
-        input: z.object({ query: z.string() }),
-        output: intentSchema,
-      },
-      model: "router",
-      system:
-        "You route airline customer-support messages. Return `question` for " +
-        "anything answerable from bookings or policies (fees, baggage, 'what's " +
-        "my flight'). Return `cancel` (with the confirmationCode) to cancel a " +
-        "booking, or `rebook` (with confirmationCode and newFlight) to change " +
-        "one. Only choose cancel/rebook when the user explicitly asks to modify " +
-        "a booking.",
-      prompt: ({ input }) => input.query,
-    },
     // Safe Q&A: one request, real read-only tools, host-run tool loop.
     answer: {
       schemas: {
         input: z.object({ query: z.string(), details: z.array(z.string()) }),
-        // A discriminated union, for the same reason `intentSchema` is one: a
-        // branch the model has to NAME is far harder to get wrong than a
+        // A discriminated union: a branch the model has to NAME is far harder to get wrong than a
         // boolean sitting beside free text. With a `{ needsInfo, text }` pair
         // the model cheerfully reported `needsInfo: false` while `text` asked
         // for a confirmation code — and the turn settled `answered` having
@@ -309,23 +464,14 @@ export const customerSupportMachine = agentSetup.createMachine({
       invoke: {
         src: "classify",
         input: ({ context }) => ({ query: context.query }),
-        onDone: ({ output: { result: output } }) => ({
-          target: "routing",
-          context: {
-            pendingAction:
-              output.intent === "question"
-                ? null
-                : {
-                    type: output.intent,
-                    confirmationCode: output.confirmationCode,
-                    newFlight: output.intent === "rebook" ? output.newFlight : null,
-                    summary:
-                      output.intent === "cancel"
-                        ? `Cancel booking ${output.confirmationCode}`
-                        : `Rebook ${output.confirmationCode} onto ${output.newFlight}`,
-                  },
-          },
-        }),
+        // Map the selections back onto the candidates. A sensitive intent
+        // missing its code or target flight never reaches the approval gate.
+        onDone: ({ context, output }) => {
+          const staged = stageAction(context.query, output.answers);
+          return "missing" in staged
+            ? { target: "failed", context: { message: staged.missing } }
+            : { target: "routing", context: { pendingAction: staged.pendingAction } };
+        },
         onError: {
           target: "failed",
           context: { message: "Could not classify the request." },
@@ -479,6 +625,8 @@ export interface RunCustomerSupportOptions {
   replies?: string[];
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
+  /** The judge model; tests pass a mock, the direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   /** Observes each machine transition across both runAgent calls. */
   onProgress?: (state: string) => void;
 }
@@ -513,11 +661,15 @@ export async function runCustomerSupportExample(
     approve = true,
     denyReason = "Changed my mind.",
     generateText,
+    judge,
     onProgress,
   } = options;
-  const executors = generateText
-    ? { executors: { generateText } }
-    : { executors: createAiSdkExecutors({ models }) };
+  const executors = {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors({ models }) }),
+    ...(judge ? { actors: { classify: createClassify(judge) } } : {}),
+  };
 
   const progress: string[] = [];
   const track = (snapshot: { value: StateValue }) => {
@@ -605,8 +757,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

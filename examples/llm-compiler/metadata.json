@@ -1,0 +1,19 @@
+{
+  "name": "llm-compiler",
+  "title": "Plan tool calls as a graph and run independent ones in parallel",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph LLMCompiler tutorial",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/llm-compiler/LLMCompiler/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "A planner writes every tool call up front with its dependencies, independent lookups run at the same time, and a joiner answers or asks for a new plan. The machine reads each task's dependencies from its $N references, checks the plan only points backward before running it, records which wave each task started in, and caps replanning with MAX_REPLANS instead of a recursion limit."
+  },
+  "starters": [
+    "What is the combined population of France and Germany?",
+    "How much larger is Japan's GDP than France's GDP?",
+    "What percentage of Japan's population lives in Tokyo?"
+  ]
+}

@@ -7,7 +7,7 @@
  *   - the tool-choice `if/else` → `agent.decide` + typed events
  *   - the `$100` `if` → a guard on the REFUND transition
  *   - the `{ pending }` sentinel → an idle `awaitingApproval` state you persist
- *   - the retry/backoff wrapper → a custom `generateText` executor (unchanged)
+ *   - the retry/backoff wrapper → a wrapper around the host's executors (unchanged)
  *   - the `refunded` / `escalated` booleans → gone: each final state declares
  *     its own `output`, so the outcome is the state, not a flag beside it
  *   - the unbounded tool loop → a `lookups` counter checked against MAX_LOOKUPS
@@ -15,11 +15,21 @@
  * `step1/2/3.ts` walk this conversion one shippable step at a time. Dual-mode:
  * tests inject mock executors (no API key); a direct run uses real models.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/retrofit/index.ts
+ * The final form adds triage, and triage is a JUDGMENT, not a generation:
+ * `triageTicket` calls the AI SDK's `experimental_evaluate` with Jev
+ * (`@ai-sdk/typesafe-ai`) as the evaluation model: two `choice` questions over
+ * `{ ticket }` in one call, `category` (refund | question | complaint) and
+ * `sentiment` (positive | neutral | negative). The labels land in context and
+ * the decision reads them. The text model is left with the one open-ended
+ * call, `agent.decide`.
+ *
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/retrofit/index.ts
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
@@ -44,15 +54,66 @@ export const ORDERS: Record<string, { customer: string; total: number; item: str
 };
 
 const models = {
-  triageModel: openai("gpt-5.4-mini"),
   agent: openai("gpt-5.4-mini"),
 };
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 const triageSchema = z.object({
   category: z.enum(["refund", "question", "complaint"]),
   sentiment: z.enum(["positive", "neutral", "negative"]),
-  summary: z.string(),
 });
+
+/**
+ * Triage as a judgment: the ticket is the state, and `category` and
+ * `sentiment` are two independent `choice` questions asked in one call. The
+ * judge model is injected by tests and hosts; the default is Jev, which reads
+ * `TYPESAFE_AI_API_KEY` from the environment.
+ */
+export function createTriageTicket(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    {
+      answers: {
+        category: { choice: z.infer<typeof triageSchema>["category"] };
+        sentiment: { choice: z.infer<typeof triageSchema>["sentiment"] };
+      };
+    },
+    { ticket: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { ticket: input.ticket },
+        questions: {
+          category: {
+            type: "choice" as const,
+            instructions: "What is the customer asking for in `ticket`?",
+            criteria: {
+              refund: "Money back for an order, in full or in part.",
+              question: "Information: order status, shipping, how something works.",
+              complaint: "A problem reported without asking for money back.",
+            },
+          },
+          sentiment: {
+            type: "choice" as const,
+            instructions: "What is the customer's tone in `ticket`?",
+            criteria: {
+              positive: "Pleased or appreciative.",
+              neutral: "Matter-of-fact.",
+              negative: "Frustrated, upset, or angry.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
+  });
+}
 
 const schemas = createAgentSchemas({
   context: z.object({
@@ -91,6 +152,8 @@ const agentSetup = setupAgent({
   schemas,
   models,
   actors: {
+    // Triage: a Jev judgment (see createTriageTicket).
+    triageTicket: createTriageTicket(),
     // The `lookupOrder` tool, now a typed actor. Reads the sample table.
     lookupOrder: createAsyncLogic<string, { orderId: string }>({
       run: async ({ input }) => {
@@ -100,16 +163,6 @@ const agentSetup = setupAgent({
           : `Order ${input.orderId} not found`;
       },
     }),
-  },
-  requests: {
-    triageTicket: {
-      schemas: { input: z.object({ ticket: z.string() }), output: triageSchema },
-      model: "triageModel",
-      system:
-        "Triage a support ticket. Return category (refund | question | complaint), " +
-        "sentiment, and a one-line summary.",
-      prompt: ({ input }) => input.ticket,
-    },
   },
   states: {
     // Each of these is only reachable once the field it needs is set.
@@ -139,7 +192,12 @@ export const supportMachine = agentSetup.createMachine({
       invoke: {
         src: "triageTicket",
         input: ({ context }) => ({ ticket: context.ticket }),
-        onDone: ({ output }) => ({ target: "deciding", context: { triage: output.result } }),
+        onDone: ({ output: { answers } }) => ({
+          target: "deciding",
+          context: {
+            triage: { category: answers.category.choice, sentiment: answers.sentiment.choice },
+          },
+        }),
         onError: ({ event }) => ({
           target: "escalated",
           context: { resolution: `Triage failed, escalated: ${String(event.error)}` },
@@ -283,12 +341,13 @@ export const supportMachine = agentSetup.createMachine({
   },
 });
 
-/** Host executors: the retry/backoff wrapper from `before.ts`, now wrapping the
- * `generateText` executor unchanged; `decide` comes from the AI SDK adapter. */
-function buildExecutors(): Pick<AgentRequestExecutors, "generateText" | "decide"> {
+/** Host executors: the retry/backoff wrapper from `before.ts`, unchanged,
+ * now wrapping the AI SDK adapter's `decide` (the machine's one text-model
+ * call; triage is a Jev judgment). */
+function buildExecutors(): Pick<AgentRequestExecutors, "decide"> {
   const ai = createAiSdkExecutors({ models });
   const withRetry =
-    (fn: NonNullable<AgentRequestExecutors["generateText"]>): typeof fn =>
+    (fn: NonNullable<AgentRequestExecutors["decide"]>): typeof fn =>
     async (request, info) => {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -299,9 +358,9 @@ function buildExecutors(): Pick<AgentRequestExecutors, "generateText" | "decide"
           await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 50));
         }
       }
-      throw new Error(`generateText failed after 3 attempts: ${String(lastError)}`);
+      throw new Error(`decide failed after 3 attempts: ${String(lastError)}`);
     };
-  return { generateText: withRetry(ai.generateText), decide: ai.decide };
+  return { decide: withRetry(ai.decide) };
 }
 
 export interface RunRetrofitOptions {
@@ -310,7 +369,9 @@ export interface RunRetrofitOptions {
   approve?: boolean;
   denyReason?: string;
   /** Injected for tests; a direct run builds real executors. */
-  executors?: Pick<AgentRequestExecutors, "generateText" | "decide">;
+  executors?: Pick<AgentRequestExecutors, "decide">;
+  /** The judge model; tests pass a mock, a direct run uses Jev. */
+  judge?: Experimental_EvaluationModel;
   onProgress?: (state: string) => void;
 }
 
@@ -338,8 +399,10 @@ export async function runRetrofitExample(
     approve = true,
     denyReason = "Outside refund policy.",
     executors = buildExecutors(),
+    judge,
     onProgress,
   } = options;
+  const actors = judge ? { triageTicket: createTriageTicket(judge) } : undefined;
 
   const progress: string[] = [];
   const track = (snapshot: { value: Parameters<typeof getStatePath>[0] }) => {
@@ -351,6 +414,7 @@ export async function runRetrofitExample(
   const first = await runAgent(supportMachine, {
     input: { ticket },
     executors,
+    ...(actors ? { actors } : {}),
     onTransition: track,
   });
 
@@ -372,6 +436,7 @@ export async function runRetrofitExample(
     snapshot: first.persist(),
     event,
     executors,
+    ...(actors ? { actors } : {}),
     onTransition: track,
   });
   if (second.status !== "done") {
@@ -400,8 +465,8 @@ async function promptLine(query: string): Promise<string> {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   void (async () => {

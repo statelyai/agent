@@ -11,6 +11,9 @@
  *   - `resume_workflow` reloads that snapshot and delivers the human's event.
  *
  * The machine owns legality and state; the LangChain agent only converses.
+ * The machine's text requests run on a LangChain model; its prompt check is a
+ * Jev judgment, so the bridge also takes a judge model (`useModel(model,
+ * judge)`), falling back to Jev via `TYPESAFE_AI_API_KEY`.
  * Nothing here hardcodes a state name — the event to send is derived from the
  * machine's own `meta.interaction`. An event the current state does not handle
  * is ignored by the machine (`result.ignored`), so no hand-rolled legality check
@@ -21,6 +24,7 @@
  */
 import { z } from "zod";
 import type { Snapshot } from "xstate";
+import type { Experimental_EvaluationModel } from "ai";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { createAgent } from "langchain";
@@ -31,7 +35,12 @@ import {
   type RunAgentOptions,
   type RunAgentResult,
 } from "@statelyai/agent";
-import { emailDrafter, type DrafterEvent, type Interaction } from "../email-drafter/agent-logic.js";
+import {
+  createEvaluatePrompt,
+  emailDrafter,
+  type DrafterEvent,
+  type Interaction,
+} from "../email-drafter/agent-logic.js";
 import { createLangChainExecutors } from "./executors.js";
 
 // ─── Shared shapes ───
@@ -85,10 +94,17 @@ const runs = new Map<string, StoredRun>();
 /**
  * Direction A powering Direction B: the machine inside the LangChain tools is
  * itself driven by a LangChain model. Both halves of the "best of both worlds"
- * in one call — LangChain owns every model call, the machine owns the flow.
+ * in one call — LangChain owns every text-model call, the machine owns the
+ * flow, and `judge` (when given) answers the prompt check.
  */
-export function langChainRunOptions(model: BaseChatModel): RunAgentOptions<typeof emailDrafter> {
-  return { executors: createLangChainExecutors({ model }) };
+export function langChainRunOptions(
+  model: BaseChatModel,
+  judge?: Experimental_EvaluationModel,
+): RunAgentOptions<typeof emailDrafter> {
+  return {
+    executors: createLangChainExecutors({ model }),
+    ...(judge ? { actors: { evaluatePrompt: createEvaluatePrompt(judge) } } : {}),
+  };
 }
 
 /**
@@ -97,9 +113,9 @@ export function langChainRunOptions(model: BaseChatModel): RunAgentOptions<typeo
  */
 let toolRunOptions: RunAgentOptions<typeof emailDrafter> | null = null;
 
-/** Point the bridge tools at a LangChain model (scripted or live). */
-export function useModel(model: BaseChatModel) {
-  toolRunOptions = langChainRunOptions(model);
+/** Point the bridge tools at a LangChain model (and, optionally, a judge model). */
+export function useModel(model: BaseChatModel, judge?: Experimental_EvaluationModel) {
+  toolRunOptions = langChainRunOptions(model, judge);
 }
 
 function currentRunOptions(): RunAgentOptions<typeof emailDrafter> {
@@ -257,10 +273,14 @@ export const SYSTEM_PROMPT =
  * 1.x's replacement for `createToolCallingAgent` + `AgentExecutor`; it returns
  * a `ReactAgent` whose `invoke({ messages })` resolves `{ messages }`.
  */
-export function createEmailHostAgent(model: BaseChatModel, machineModel: BaseChatModel = model) {
+export function createEmailHostAgent(
+  model: BaseChatModel,
+  machineModel: BaseChatModel = model,
+  judge?: Experimental_EvaluationModel,
+) {
   // The conversing model and the model *inside* the machine are separable, and
-  // separate scripts keep the scripted demo readable; live, they are one model.
-  useModel(machineModel);
+  // separate models keep the test's scripts readable; live, they are one model.
+  useModel(machineModel, judge);
   return createAgent({
     model,
     tools: bridgeTools,

@@ -17,6 +17,8 @@ import { tool } from "ai";
 
 import type { LanguageModel } from "ai";
 
+import { MockLanguageModelV3 } from "ai/test";
+
 import { openai } from "@ai-sdk/openai";
 
 import { createActor } from "xstate";
@@ -286,8 +288,6 @@ declare function appendToStore(entry: any): Promise<void>;
 
 declare function createSubAgentExecute(config: any): any;
 
-declare function scriptedExecutorsFor(config: any): any;
-
 declare function runSeamCase(input: any): Promise<any>;
 
 declare function runDrafterCase(input: any): Promise<any>;
@@ -309,3 +309,9 @@ declare function completeAssessment(...args: any[]): any;
 declare function ajvCompileSchema(schema: any): any;
 
 declare function myCustomStreamText(options: any): any;
+
+// --- judgments.md ----------------------------------------------------------
+
+declare const triageMachine: AnyStateMachine;
+
+declare function createClassifyTicket(model?: unknown): import("xstate").AnyActorLogic;

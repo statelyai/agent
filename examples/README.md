@@ -9,32 +9,43 @@ they happen to call.
 
 ## Start here
 
-- [email-drafter](email-drafter): typed requests, revision, approval, and sending
+- [email-drafter](email-drafter): typed requests, a Jev completeness judgment, revision, approval, and sending
 - [plain-xstate](plain-xstate): an ordinary XState machine that knows nothing about the agent library
-- [retrofit](retrofit): the same agent as a `while(true)` loop and as a machine, refactored step by step
+- [retrofit](retrofit): the same agent as a `while(true)` loop and as a machine, refactored step by step, ending with Jev triage
 - [json-agent](json-agent): the whole workflow authored as a `.json` file and lowered to the same machine
-- [triage](triage): structured model output, with one retry when the draft fails
+- [triage](triage): Jev classifies category and sentiment and escalates when unsure, with one retry when the draft fails
 
 ## Control flow a loop can't express
 
 Each entry names the construct that makes the behavior structural rather than a
 convention in a prompt.
 
-- [twenty-questions](twenty-questions): a guard makes the final turn a `GUESS` — the model cannot spend it on a question
-- [guardrails](guardrails): input and output checks as separate states; an unsupported answer is flagged, not returned
-- [joke](joke): the model itself decides whether to loop again, through `agent.decide` under a guard
+- [twenty-questions](twenty-questions): a guard makes the final turn a `GUESS` — the model cannot spend it on a question; Jev reads the human's yes/no replies
+- [guardrails](guardrails): input and output checks as separate states, each a Jev yes/no judgment; an unsupported answer is flagged, not returned
+- [joke](joke): a Jev score rates each joke on a five-level rubric, and the model itself decides whether to loop again, through `agent.decide` under a guard
 - [reflection-writer](reflection-writer): a revision budget in context, compared against a constant in a guard
 - [code-assistant](code-assistant): a retry budget around code that really runs and really fails
-- [corrective-rag](corrective-rag): a grade-then-branch choice state picks answering or a rewritten fallback lookup
+- [corrective-rag](corrective-rag): Jev grades each retrieved document with one probability, and a grade-then-branch choice state picks answering or a rewritten fallback lookup
 - [plan-and-execute](plan-and-execute): a step budget that can be exhausted — the run ends in `failed` instead of answering from a half-executed plan
 - [river-crossing](river-crossing): the machine is ground truth and solves itself — `REQUEST_PLAN` traverses it with `xstate/graph` and hands back the shortest legal route, and guards reject any crossing the model proposes off it
 - [route-replanning](route-replanning): a plan is a prediction — the machine plans the whole route, drives it a leg at a time without recomputing, and replans from where it stands when a road turns out to be shut
 - [todo-nl](todo-nl): one free-text command becomes a bounded sequence of typed events via an explicit decide loop
 - [context-compaction](context-compaction): an explicit `compacting` state, entered when the window overflows
-- [chat-with-pdf](chat-with-pdf): one question per state entry, and a refresh guard instead of "after 3-4 questions"
+- [chat-with-pdf](chat-with-pdf): one question per state entry, a refresh guard instead of "after 3-4 questions", and a Jev verdict on each answer
 - [game-agent](game-agent): rock-paper-scissors where the event log saved in context is the agent's only memory
-- [game-loop-agent](game-loop-agent): an invoked agent that receives pushed events and can act only on its own turn
+- [game-loop-agent](game-loop-agent): an invoked agent that receives pushed events and can act only on its own turn; Jev reads the human's free-text round reply
 - [generate-and-repair](generate-and-repair): three candidates fanned out as concurrent invokes, judged by the host's own parser, with a repair round the machine caps explicitly
+- [adaptive-rag](adaptive-rag): a Jev router picks the index and Jev grades the documents and the answer, then choice states check `MAX_REWRITES` and `MAX_REGENERATIONS` on both the rewrite loop and the regenerate loop, where LangGraph relies on `recursion_limit`
+- [agentic-rag](agentic-rag): the model picks `RETRIEVE` or `ANSWER` through `agent.decide`, Jev grades each passage, and a guard rejects `RETRIEVE` once `MAX_RETRIEVALS` is spent, so an answer forced by the budget lands in `failed`
+- [reflexion](reflexion): the critique drives real searches and each revision must cite what came back; citations to passages the run never retrieved are dropped, and a revision budget caps the loop
+- [tree-of-thoughts](tree-of-thoughts): a hand-written scorer rechecks every proposed Game of 24 step and rejects any that uses a number not on the table; a beam capped at `BEAM_SIZE` and `MAX_DEPTH` ends in `failed` when no line reaches 24
+- [self-discover](self-discover): Jev judges each reasoning module with a yes/no question; a choice state keeps the top `MAX_SELECTED_MODULES` above `MODULE_THRESHOLD` and fails with a notice naming the threshold when none clears it, a check the LangGraph chain leaves to trust
+- [prompt-chaining](prompt-chaining): the punchline gate is a choice state over a pure check, and a failed check regenerates at most twice before landing in `failed` instead of ending silently
+- [data-enrichment](data-enrichment): a choice state, not the model, decides the record is complete; the reviewer is one Jev yes/no question per field, its feedback is built from the fields no passage backs, and gap searches and rejections share one `MAX_LOOPS` budget that ends in `failed` with the partial record
+- [tnt-llm](tnt-llm): one summary child spawned per document, then a batch index in context drives generate, update per batch, and review through choice states, with a category cap
+- [tool-retrieval](tool-retrieval): a Jev rerank (one probability per registry tool) picks the tools, and a guard lets `agent.decide` call only those, with tool-call and reselection budgets forcing an answer
+- [model-fallback](model-fallback): a validator actor plus a choice state send a rejected cheap-model tool call to a stronger model exactly once (`MAX_FALLBACKS`), then `failed`
+- [project-planner](project-planner): the model only proposes tasks; the machine checks the dependency graph (with a repair budget) and computes the critical-path schedule, Jev rates the risk, and a choice state replans against the deadline until `MAX_REPLANS`
 
 ## Human in the loop
 
@@ -43,19 +54,27 @@ it survives a snapshot round-trip instead of living in a closure.
 
 - [human-in-the-loop](human-in-the-loop): the base shape — an idle review state, a `REJECT`-with-feedback redraft loop bounded by a counter, and a real JSON round-trip
 - [review-tool-calls](review-tool-calls): who owns the tool loop — the machine gates each proposed call behind `APPROVE`/`EDIT`/`REJECT`, or the AI SDK runs the whole loop under `maxSteps` and the machine only appends the messages it returns
-- [customer-support](customer-support): a classify request routes safe questions past the gate and sensitive actions into it
+- [customer-support](customer-support): one Jev call routes safe questions past the gate and sensitive actions into it, selecting the confirmation code and new flight from candidates found in code rather than generating them
 - [sql-agent](sql-agent): the model plans the query, a human approves, and only then does the engine run it
 - [long-running-onboarding](long-running-onboarding): pauses measured in days, with a bounded resend loop and an escalation path off every wait
-- [machine-as-tool](machine-as-tool): the whole machine behind one tool call, where the handle _is_ the persisted snapshot
+- [machine-as-tool](machine-as-tool): the whole machine behind one tool call, where the handle _is_ the persisted snapshot and the policy check is a Jev judgment
+- [info-gathering](info-gathering): a choice state checks the four requirement slots itself (the model only extracts), forces one confirmation turn, and ends in `failed` after `MAX_TURNS` answers
+- [long-term-memory](long-term-memory): the memory store is machine input and output, recall is a Jev relevance judgment per memory and a capped save is its own state, and a second run started from the first run's output remembers
+- [feynman-tutor](feynman-tutor): an idle explain-back state per checkpoint; Jev scores the explanation against a rubric, and a choice state re-teaches below `PASS_SCORE` while a per-checkpoint `MAX_RETEACHES` budget lasts, then records the checkpoint failed and moves on
 
 ## Parallel and multi-agent
 
 - [hierarchical-teams](hierarchical-teams): a coordinator over two child machines, each with its own budget
 - [swarm-handoff](swarm-handoff): the model chooses `HANDOFF` under a guard, and the active agent survives a snapshot round-trip
-- [deep-research](deep-research): dynamic fan-out — a researcher spawned per query, results reduced as they land
+- [deep-research](deep-research): dynamic fan-out: a researcher spawned per query, results reduced as they land, and a Jev sufficiency judgment deciding whether to run another round
 - [parallel-streams](parallel-streams): two regions streaming at once, each chunk tagged with the request it came from
 - [just-one](just-one): isolated parallel regions whose inputs are fixed before any sibling settles; the duplicate-cancelling rule is a pure function, not an instruction
 - [chameleon](chameleon): hidden information enforced by request input shaping — the chameleon's request provably never carries the secret word
+- [agent-supervisor](agent-supervisor): a flat supervisor routes through `agent.decide` under guards: each worker is capped at two reports, `FINISH` is illegal until one lands, and a turn budget ends in `failed`
+- [map-reduce](map-reduce): LangGraph's `Send` fan-out as one spawned `writeJoke` child per subject, reduced as they land, with a capped width and a Jev `choice` judge whose labels are the landed jokes; a choice state still rejects a label that names no joke
+- [llm-compiler](llm-compiler): each task's dependencies are the `$N` references in its args; a choice state rejects references to later or missing tasks before anything runs, each wave of ready tasks is spawned together, and a task's inputs are filled in only after the tasks it references finish
+- [storm-writer](storm-writer): one interview child machine spawned per editor with a turn cap, transcripts reduced as they land; editor, turn and section overflow is dropped and counted against exported constants
+- [multi-agent-debate](multi-agent-debate): turn order and round count are machine edges, with a `MAX_ROUNDS` ceiling in the input schema; no speaker can end the debate or speak out of turn, and a Jev judge picks the winner
 
 ## Persistence and recovery
 
@@ -75,7 +94,7 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 - [ai-sdk-ui-stream](ai-sdk-ui-stream): the AI SDK v7 UI message stream protocol — a text lane per request plus live machine state, to an unmodified `useChat`
 - [tanstack-ai-stream](tanstack-ai-stream): the same run as AG-UI server-sent events
 - [anthropic-sdk-host](anthropic-sdk-host), [openai-sdk-host](openai-sdk-host): the executor contract against the raw provider APIs, with no AI SDK in between
-- [langchain-host](langchain-host), [mastra-host](mastra-host), [flue-host](flue-host): coexistence with a framework — the framework makes the model calls, the machine owns legality
+- [langchain-host](langchain-host), [mastra-host](mastra-host), [flue-host](flue-host): coexistence with a framework — the framework makes the text-model calls, Jev the judgments, the machine owns legality
 - [cloudflare-agent-host](cloudflare-agent-host): a Durable Object whose SQLite event log is the source of truth
 - [cloudflare-workers-ai-host](cloudflare-workers-ai-host): a provider with no native tool calling, so the legal events are serialized into the prompt
 - [next-host](next-host): controlled mode across a stateless Next route handler
@@ -84,15 +103,17 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 
 - [verification](verification): `canReach` proves a violation state unreachable across every branch, without one model call
 - [braintrust-evals](braintrust-evals): evals over typed output, transition trajectories, named request calls, and usage
-- [ai-sdk-evaluator-optimizer](ai-sdk-evaluator-optimizer): the evaluator-optimizer loop as explicit states, with a strict critic gating the exit
+- [ai-sdk-evaluator-optimizer](ai-sdk-evaluator-optimizer): the evaluator-optimizer loop as explicit states, with a Jev score and aspect checks gating the exit
+- [chatbot-simulation-eval](chatbot-simulation-eval): a simulated customer and the bot under test alternate under a `MAX_EXCHANGES` choice guard, the bot's request input provably omits the persona, and a Jev judge (a policy yes/no plus a quality score) runs inside the machine
+- [essay-grader](essay-grader): each pass is a Jev score over a five-level rubric; three choice states over exported score thresholds stop grading at the first weak pass, and the result names the stage it stopped after
 
 ## Statechart policies
 
-- [consensus-review](consensus-review): two-of-three reviewer approval, abstentions, and human escalation
+- [consensus-review](consensus-review): two-of-three reviewer approval (each vote a Jev approve/reject/abstain choice), abstentions, and human escalation
 - [booking-compensation](booking-compensation): approval before effects, compensation, and uncertain-outcome reconciliation
-- [deadline-escalation](deadline-escalation): scheduler-driven approval deadlines and stale-event rejection; `manual: true` because it needs a two-phase CLI and a trusted host clock, not a provider key
+- [deadline-escalation](deadline-escalation): scheduler-driven approval deadlines and stale-event rejection; `manual: true` because it needs a two-phase CLI and a trusted host clock on top of the provider key
 
-All three run offline with `pnpm tsx examples/<name>/index.ts`. See [Statechart policy examples](../docs/statechart-policy-examples.md) for sources, tests, and host contracts.
+All three run against a real model with `OPENAI_API_KEY=... pnpm tsx examples/<name>/index.ts`; their tests script the model by request name through the AI SDK's mock model. See [Statechart policy examples](../docs/statechart-policy-examples.md) for sources, tests, and host contracts.
 
 ## Conventions
 
@@ -110,10 +131,18 @@ Every example follows these. A new example that breaks one is probably wrong.
   with an empty or partial output is a bug, not graceful handling.
 - **Every `invoke` has an `onError`.** The `invoke-without-on-error` lint code
   must stay clean.
-- **Mock executors route on `request.name`** (the `setupAgent({ requests })`
-  key), or use name-keyed `createScriptedExecutors`. Never on a prompt
-  substring, a call index, a positional array, or `request.model` — those pass
-  while silently exercising the wrong request.
+- **Tests mock the model with `examples/mock-model.ts`**: the AI SDK's
+  `MockLanguageModelV3` behind the real `createAiSdkExecutors` adapter, with
+  answers keyed by request name (the `setupAgent({ requests })` key). The
+  helper is repo-internal and not published. A hand-written mock executor
+  routes on `request.name` too. Never on a prompt substring, a call index, a
+  positional array, or `request.model` — those pass while silently exercising
+  the wrong request.
+- **Tests mock the judge with `examples/mock-judge.ts`**: an object that
+  implements the AI SDK's evaluation-model spec, passed wherever an example
+  takes its judge model, with answers keyed by question id (the key in the
+  `questions` map). It runs `experimental_evaluate`'s real validation over
+  scripted answers. Repo-internal and not published, like `mock-model.ts`.
 - **Context is replay-stable**: no `Date.now()`, `Math.random()`, or
   `randomUUID()` in context, and no module-level mutable state. Pass stores and
   executors in, or use a factory function.
@@ -123,5 +152,6 @@ Every example follows these. A new example that breaks one is probably wrong.
 - **Event names are facts or commands** from the human or host. Choices the
   model makes go through `agent.decide` and are filtered by guards.
 - **Sibling imports are allowed** — an example may import another example's
-  machine — but there is no shared test harness. Each example's test stands on
-  its own.
+  machine — but the only shared test helpers are the `examples/mock-model.ts`
+  language-model double and the `examples/mock-judge.ts` evaluation-model
+  double. Each example's test stands on its own.

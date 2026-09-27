@@ -129,16 +129,6 @@ export type {
 } from "./run-agent.js";
 export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";
-// Lint, simulation, scripted executors, trajectories, and seams live in
-// `@statelyai/agent/testing`.
-export type {
-  ScriptedByName,
-  ScriptedDecisionEntry,
-  ScriptedDecisionValue,
-  ScriptedExecutors,
-  ScriptedExecutorsScript,
-  ScriptedTextEntry,
-} from "./scripted-executors.js";
 export {
   assistantMessage,
   getJsonSchema,

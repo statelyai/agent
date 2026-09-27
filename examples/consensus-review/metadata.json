@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Independent model votes, an explicit two-of-three threshold, abstentions, and human escalation."
+    "purpose": "Independent reviewer votes, each a Jev choice (approve, reject, or abstain), an explicit two-of-three threshold, abstentions, and human escalation."
   },
   "starters": [
     {

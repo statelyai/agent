@@ -1,0 +1,22 @@
+{
+  "name": "storm-writer",
+  "title": "Research a topic through parallel interviews, then write it up",
+  "kind": "multi-agent",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph STORM research-writer tutorial (Shao et al. 2024)",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/storm/storm/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Drafts an outline, picks editor perspectives, runs one interview per editor in parallel against a sample source index, refines the outline from what the interviews found, and writes the article one section at a time. Each interview is its own spawned child machine with a turn cap, and editor count, turn count, and section count are exported constants checked by guards, with overflow dropped and counted rather than left to a router function and recursion_limit."
+  },
+  "machine": "stormWriterMachine",
+  "starters": [
+    "state machines for AI agents",
+    "retrieval-augmented generation",
+    "prompt injection defenses",
+    "the history of the Byzantine Empire (off-index: interviews find no sample sources)"
+  ],
+  "budgetMs": 240000
+}

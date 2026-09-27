@@ -4,14 +4,16 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 
-const KEYS = ["OPENAI_API_KEY"];
+const KEYS = ["OPENAI_API_KEY", "TYPESAFE_AI_API_KEY"];
 const envPath = new URL("../../.env", import.meta.url);
 
 let source = "";
 try {
   source = readFileSync(envPath, "utf8");
 } catch {
-  console.error(`No .env at ${envPath.pathname} — starting with scripted executors.`);
+  console.error(
+    `No .env at ${envPath.pathname} — set OPENAI_API_KEY and TYPESAFE_AI_API_KEY there, or turns will fail.`,
+  );
 }
 
 const lines = KEYS.map((key) => {

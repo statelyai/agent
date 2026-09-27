@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["input/output guardrails", "evaluator-optimizer"],
-    "purpose": "Scoped to geography: checks the question before answering and checks the answer before returning it. Off-topic questions are refused up front, and an unsupported answer gets one revision, then is flagged rather than returned as fact."
+    "purpose": "Scoped to geography: checks the question before answering and checks the answer before returning it, both as Jev yes/no judgments. Off-topic questions are refused up front, and an unsupported answer gets one revision, then is flagged rather than returned as fact."
   },
   "starters": [
     "What is the capital of Australia?",

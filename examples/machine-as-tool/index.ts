@@ -30,12 +30,21 @@
  * over it pauses at `awaitingApproval`. That branch lives in a `choice` state
  * so `explorePaths`/`canReach` can see both arms.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/machine-as-tool/index.ts
+ * The policy check is a JUDGMENT, not a generation: `validateRefund` calls
+ * the AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as
+ * the evaluation model and asks one boolean question, `valid`, over the refund
+ * and the written policy, and the machine auto-approves when that probability
+ * clears `VALID_THRESHOLD`. It is the only model call, so the example needs no
+ * text model at all. `runOptions` passes a judge model with
+ * `actors: { validateRefund: createValidateRefund(model) }`.
+ *
+ * Run: TYPESAFE_AI_API_KEY=... npx tsx examples/machine-as-tool/index.ts
  */
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   getInteraction,
   interactionMetaSchema,
@@ -47,18 +56,61 @@ import {
   type RunAgentResult,
   type SnapshotOf,
 } from "@statelyai/agent";
-import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
 
 /** Refunds at or under this amount need no human approval. */
 export const AUTO_APPROVAL_LIMIT = 500;
 
-const models = {
-  validator: openai("gpt-5.4-mini"),
-};
+/** A refund auto-approves when Jev's probability that it is valid clears this. */
+export const VALID_THRESHOLD = 0.5;
+
+/**
+ * The refund policy check as a judgment: the refund and the policy are the
+ * state, `valid` is one boolean question. Stands in for a real validation
+ * model (fraud check, policy, …). The judge model is injected by tests and
+ * hosts; the default is Jev, which reads `TYPESAFE_AI_API_KEY`.
+ */
+export function createValidateRefund(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { valid: { probability: number } } },
+    { amount: number; orderId: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: {
+          refund: { orderId: input.orderId, amountDollars: input.amount },
+          policy: {
+            autoApprovalLimitDollars: AUTO_APPROVAL_LIMIT,
+            rule: "A refund is valid when it has a plausible order id and its amount is at or below the auto-approval limit.",
+          },
+        },
+        questions: {
+          valid: {
+            type: "boolean" as const,
+            instructions: "Is `refund` valid under `policy.rule`?",
+            criteria: {
+              true: "The order id is plausible and `refund.amountDollars` is at or below `policy.autoApprovalLimitDollars`.",
+              false: "The amount is above the limit, or the order id is blank or malformed.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
+  });
+}
 
 const agentSetup = setupAgent({
-  models,
   actors: {
+    // The policy check: a Jev judgment (see createValidateRefund).
+    validateRefund: createValidateRefund(),
     // Plain side-effecting actor (a stand-in for the real refund call).
     // This implementation is used as-is by runAgent; a host can override it
     // per run via runAgent(machine, { actors: { processRefund: ... } }).
@@ -68,7 +120,7 @@ const agentSetup = setupAgent({
     amount: z.number(),
     orderId: z.string(),
     reason: z.string().nullable(),
-    /** The policy model's verdict; `null` until `validating` returns. */
+    /** The policy judgment's verdict; `null` until `validating` returns. */
     check: z.object({ valid: z.boolean() }).nullable(),
   }),
   input: z.object({ amount: z.number(), orderId: z.string() }),
@@ -83,22 +135,6 @@ const agentSetup = setupAgent({
   events: {
     APPROVE: z.object({}),
     REJECT: z.object({ reason: z.string() }),
-  },
-  requests: {
-    // Stands in for a real validation model call (fraud check, policy, …).
-    validateRefund: {
-      schemas: {
-        input: z.object({ amount: z.number(), orderId: z.string() }),
-        output: z.object({ valid: z.boolean() }),
-      },
-      model: "validator",
-      system:
-        "You are a refund policy checker. A refund is valid when it has a " +
-        `plausible order id and an amount at or below the $${AUTO_APPROVAL_LIMIT} auto-approval ` +
-        "limit. Return valid=false for anything above the limit or clearly malformed.",
-      prompt: ({ input }) =>
-        `Order ${input.orderId}, refund amount $${input.amount}. Is this refund valid?`,
-    },
   },
 });
 
@@ -122,7 +158,7 @@ export const refundMachine = agentSetup.createMachine({
         input: ({ context }) => ({ amount: context.amount, orderId: context.orderId }),
         onDone: ({ output }) => ({
           target: "checked",
-          context: { check: { valid: output.result.valid } },
+          context: { check: { valid: output.answers.valid.probability >= VALID_THRESHOLD } },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -301,12 +337,12 @@ export async function runMachineAsToolExample(runOptions: RefundRunOptions) {
   return finished;
 }
 
-// Direct run: drive the harness bridge with a real validation model. Prints
+// Direct run: drive the harness bridge with a real Jev judgment. Prints
 // the interaction the harness would show a human, then auto-approves — exactly
 // the round-trip a real tool-calling loop performs, minus the human.
 export async function main() {
   const runOptions: RefundRunOptions = {
-    executors: createAiSdkExecutors({ models }),
+    // The machine's own `validateRefund` reads TYPESAFE_AI_API_KEY; no text model.
     onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
   };
 
@@ -330,8 +366,8 @@ export async function main() {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {

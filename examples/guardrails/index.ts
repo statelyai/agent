@@ -13,8 +13,17 @@
  *     answer is revised at most once, then re-verified. A second failure ends
  *     in an `unverified` final state carrying the critique as the reason —
  *     the content is flagged, never returned as if trusted.
+ *   - Both guardrails are JUDGMENTS, not generations. Each calls the AI SDK's
+ *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     evaluation model, which answers boolean questions over explicit state: the input check asks "is the question answerable?" and "is it
+ *     within the topic?" over `{ question, topic }`; the output check asks "is
+ *     every claim correct?" and "does it answer the question?" over
+ *     `{ question, answer }`. The machine compares each probability with an
+ *     exported threshold (`INPUT_THRESHOLD`, `OUTPUT_THRESHOLD`) and renders
+ *     the refusal reason and the critique from WHICH check failed. Only the
+ *     answer and its revision stay text requests.
  *   - `type: "choice"` states as explicit, named decision points: each gates a
- *     branch on structured request output and shows up as its own node in the
+ *     branch on a guardrail's verdict and shows up as its own node in the
  *     Stately visualizer, keeping the branching logic separate from the states
  *     that invoke the requests.
  *   - A revision counter in context compared against the `MAX_REVISIONS`
@@ -28,10 +37,13 @@
  * *gate*: they can refuse before any answer exists, and they refuse to vouch
  * for an answer they could not verify.
  *
- * Run: OPENAI_API_KEY=... npx tsx examples/guardrails/index.ts
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/guardrails/index.ts
  */
 import { z } from "zod";
+import { createAsyncLogic } from "xstate";
+import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { openai } from "@ai-sdk/openai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { createAgentSchemas, getStatePath, runAgent, setupAgent } from "@statelyai/agent";
 
@@ -39,11 +51,100 @@ const models = {
   quick: openai("gpt-5.4-mini"),
 };
 
+/**
+ * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ */
+const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+
 /** Scope the input guardrail enforces. Hardcoded so input is just the question. */
 const DEFAULT_TOPIC = "geography";
 
 /** Bound on the revision loop: the counter lives in context, the limit here. */
 const MAX_REVISIONS = 1;
+
+/** The input guardrail passes a question only when both checks clear this. */
+export const INPUT_THRESHOLD = 0.5;
+/**
+ * The output guardrail vouches for an answer only when both checks clear
+ * this. Higher than the input bar: vouching for a wrong answer costs more than
+ * one extra revision.
+ */
+export const OUTPUT_THRESHOLD = 0.7;
+
+/**
+ * Input guardrail as a judgment: two independent boolean questions over the
+ * question and the allowed topic, in one `experimental_evaluate` call. The
+ * judge model is injected by tests and hosts; the default is Jev.
+ */
+export function createValidateQuestion(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { answerable: { probability: number }; inScope: { probability: number } } },
+    { question: string; topic: string | null }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, topic: input.topic ?? "(any topic)" },
+        questions: {
+          answerable: {
+            type: "boolean" as const,
+            instructions: "Does `question` have a definite factual answer?",
+            criteria: {
+              true: "A factual question with a checkable answer.",
+              false: "An opinion, nonsense, a creative request, or a request for harmful content.",
+            },
+          },
+          inScope: {
+            type: "boolean" as const,
+            instructions: "Is `question` about `topic`?",
+            criteria: {
+              true: "Answering it needs knowledge of the topic.",
+              false: "It is about something else, even if it mentions a place or a name.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
+  });
+}
+
+/** Output guardrail as a judgment: correctness and responsiveness, one boolean question each. */
+export function createVerifyAnswer(model: Experimental_EvaluationModel = judgeModel) {
+  return createAsyncLogic<
+    { answers: { correct: { probability: number }; responsive: { probability: number } } },
+    { question: string; answer: string }
+  >({
+    run: async ({ input, signal }) => {
+      const { answers } = await evaluate({
+        model,
+        state: { question: input.question, answer: input.answer },
+        questions: {
+          correct: {
+            type: "boolean" as const,
+            instructions: "Is every claim in `answer` factually correct?",
+            criteria: {
+              true: "Each statement is established fact.",
+              false: "At least one statement is wrong, invented, or unsupported.",
+            },
+          },
+          responsive: {
+            type: "boolean" as const,
+            instructions: "Does `answer` directly answer `question`?",
+            criteria: {
+              true: "It gives what the question asks for.",
+              false: "It is evasive, partial, or answers a different question.",
+            },
+          },
+        },
+        abortSignal: signal,
+      });
+      return { answers };
+    },
+  });
+}
 
 const guardrailsContextSchema = z.object({
   question: z.string(),
@@ -84,30 +185,12 @@ const agentSetup = setupAgent({
       schemas: { context: guardrailsSchemas.context.extend({ answer: z.string() }) },
     },
   },
+  actors: {
+    // The two guardrails: Jev judgments (see createValidateQuestion / createVerifyAnswer).
+    validateQuestion: createValidateQuestion(),
+    verifyAnswer: createVerifyAnswer(),
+  },
   requests: {
-    validateQuestion: {
-      schemas: {
-        input: z.object({ question: z.string(), topic: z.string().nullable() }),
-        output: z.object({
-          answerable: z.boolean(),
-          inScope: z.boolean(),
-          reason: z.string(),
-        }),
-      },
-      model: "quick",
-      system:
-        "INPUT GUARDRAIL. You gate questions before any answer is generated. " +
-        "Decide answerable=true only if the question has a definite factual answer " +
-        "(not opinion, not nonsense, not a request for harmful content). " +
-        "If a topic scope is given, decide inScope=true only if the question falls " +
-        "within that topic; with no topic, inScope is always true. Give a short reason.",
-      prompt: ({ input }) =>
-        [
-          `Question: ${input.question}`,
-          input.topic ? `Allowed topic (scope): ${input.topic}` : "Allowed topic (scope): (none)",
-          "Judge answerable and inScope.",
-        ].join("\n"),
-    },
     answer: {
       schemas: {
         input: z.object({ question: z.string() }),
@@ -118,22 +201,6 @@ const agentSetup = setupAgent({
         "ANSWER STEP. Answer the question concisely and factually. " +
         "Only assert what you are confident is true; do not invent specifics.",
       prompt: ({ input }) => `Question: ${input.question}`,
-    },
-    verifyAnswer: {
-      schemas: {
-        input: z.object({ question: z.string(), answer: z.string() }),
-        output: z.object({ supported: z.boolean(), critique: z.string() }),
-      },
-      model: "quick",
-      system:
-        "OUTPUT GUARDRAIL. You verify whether an answer is supported and actually " +
-        "answers the question. Set supported=true only if the answer is factually " +
-        "correct and directly responsive. Otherwise supported=false with a critique " +
-        "naming the specific problem (wrong, unsupported, evasive, or off-question).",
-      prompt: ({ input }) =>
-        [`Question: ${input.question}`, `Answer: ${input.answer}`, "Is the answer supported?"].join(
-          "\n",
-        ),
     },
     revise: {
       schemas: {
@@ -174,10 +241,20 @@ export const guardrailsMachine = agentSetup.createMachine({
       invoke: {
         src: "validateQuestion",
         input: ({ context }) => ({ question: context.question, topic: context.topic }),
-        onDone: ({ output }) => ({
-          target: "checkingQuestion",
-          context: { validated: output.result },
-        }),
+        // The verdict, plus a reason rendered from whichever check failed.
+        onDone: ({ context, output }) => {
+          const answerable = output.answers.answerable.probability >= INPUT_THRESHOLD;
+          const inScope = output.answers.inScope.probability >= INPUT_THRESHOLD;
+          const reason = !answerable
+            ? "Not a question with a definite factual answer."
+            : !inScope
+              ? `Not about ${context.topic ?? "the allowed topic"}.`
+              : "Answerable and in scope.";
+          return {
+            target: "checkingQuestion",
+            context: { validated: { answerable, inScope, reason } },
+          };
+        },
         onError: {
           target: "refused",
           context: { reason: "Input guardrail failed to run." },
@@ -218,10 +295,20 @@ export const guardrailsMachine = agentSetup.createMachine({
           question: context.question,
           answer: context.answer,
         }),
-        onDone: ({ output }) => ({
-          target: "checkingAnswer",
-          context: { verified: output.result, critique: output.result.critique },
-        }),
+        // The verdict, plus a critique for `revise` rendered from whichever
+        // check failed.
+        onDone: ({ output }) => {
+          const correct = output.answers.correct.probability >= OUTPUT_THRESHOLD;
+          const responsive = output.answers.responsive.probability >= OUTPUT_THRESHOLD;
+          const critique = [
+            correct ? "" : "The answer states something that is not established fact.",
+            responsive ? "" : "The answer does not directly answer the question.",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          const verified = { supported: correct && responsive, critique };
+          return { target: "checkingAnswer", context: { verified, critique } };
+        },
         onError: {
           target: "unverified",
           context: { reason: "Output guardrail failed to run." },
@@ -323,8 +410,8 @@ export async function main() {
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
-  if (!process.env.OPENAI_API_KEY) {
-    console.error("Set OPENAI_API_KEY to run this example.");
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    console.error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
     process.exit(1);
   }
   main().catch((error) => {
