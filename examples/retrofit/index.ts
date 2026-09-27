@@ -44,8 +44,8 @@ export const ORDERS: Record<string, { customer: string; total: number; item: str
 };
 
 const models = {
-  triageModel: openai("gpt-5.4-mini"),
-  agent: openai("gpt-5.4-mini"),
+  triageModel: openai("gpt-6-luna"),
+  agent: openai("gpt-6-luna"),
 };
 
 const triageSchema = z.object({

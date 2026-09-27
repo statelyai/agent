@@ -45,7 +45,7 @@ import {
 export const MAX_REJECTIONS = 2;
 
 const models = {
-  writer: openai("gpt-5.4-mini"),
+  writer: openai("gpt-6-luna"),
 };
 
 const contextSchema = z.object({

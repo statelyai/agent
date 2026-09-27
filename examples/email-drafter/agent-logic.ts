@@ -80,8 +80,8 @@ const outputSchema = z.object({
 });
 
 export const models: AiSdkModelMap<"promptEvaluator" | "emailDrafter"> = {
-  promptEvaluator: openai("gpt-5.4-mini"),
-  emailDrafter: openai("gpt-5.4-mini"),
+  promptEvaluator: openai("gpt-6-luna"),
+  emailDrafter: openai("gpt-6-luna"),
 };
 
 export const evaluatePrompt = createTextLogic({

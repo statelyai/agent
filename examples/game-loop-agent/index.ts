@@ -46,8 +46,8 @@ import {
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const models = {
-  player: openai("gpt-5.4-mini"),
-  referee: openai("gpt-5.4-mini"),
+  player: openai("gpt-6-luna"),
+  referee: openai("gpt-6-luna"),
 };
 
 const DEFAULT_TARGET = 50;

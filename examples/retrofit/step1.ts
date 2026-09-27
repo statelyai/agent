@@ -21,7 +21,7 @@ import {
 } from "@statelyai/agent";
 
 const REFUND_LIMIT = 100;
-const models = { agent: openai("gpt-5.4-mini") };
+const models = { agent: openai("gpt-6-luna") };
 
 // The tool-choice union — still a model output validated after the fact, exactly
 // like the loop's `toolCalls`. Step 2 turns this into typed events + a decision.

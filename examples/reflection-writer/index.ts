@@ -58,9 +58,9 @@ import {
 const models = {
   // One generator model, re-invoked each round over the growing transcript —
   // the tutorial's single `generate` node.
-  writer: openai("gpt-5.4-mini"),
+  writer: openai("gpt-6-luna"),
   // The `reflect` node: a teacher persona grading the latest draft.
-  critic: openai("gpt-5.4-mini"),
+  critic: openai("gpt-6-luna"),
 };
 
 // The critic returns PROSE feedback plus a boolean verdict. The prose is what

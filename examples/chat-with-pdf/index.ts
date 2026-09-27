@@ -245,7 +245,7 @@ const resultSchema = z.object({
 });
 
 const models = {
-  quiz: openai("gpt-5.4-mini"),
+  quiz: openai("gpt-6-luna"),
 };
 
 export const chatWithPdfSchemas = createAgentSchemas({

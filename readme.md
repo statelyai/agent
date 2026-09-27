@@ -135,7 +135,7 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const liveResult = await runAgent(refundMachine, {
   input: { request: "I was charged twice for the same order.", amount: 75 },
-  executors: createAiSdkExecutors({ models: { fast: openai("gpt-5.4-mini") } }),
+  executors: createAiSdkExecutors({ models: { fast: openai("gpt-6-luna") } }),
 });
 ```
 

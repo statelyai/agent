@@ -55,7 +55,7 @@ import {
 
 // Annotated so the exported const has a portable, nameable type (TS2742).
 const models = {
-  chat: openai("gpt-5.4-mini"),
+  chat: openai("gpt-6-luna"),
 };
 
 export const contextCompactionSchemas = createAgentSchemas({

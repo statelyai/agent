@@ -117,8 +117,8 @@ export const parseConfigActor = createAsyncLogic<GeneratedMachineConfig, { text:
 });
 
 const models = {
-  author: openai("gpt-5.4-mini"),
-  repairer: openai("gpt-5.4-mini"),
+  author: openai("gpt-6-luna"),
+  repairer: openai("gpt-6-luna"),
 };
 
 const SHAPE_RULES = [

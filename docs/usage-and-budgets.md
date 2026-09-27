@@ -245,7 +245,7 @@ import {
 
 const researchStep = createTextLogic({
   schemas: { input: z.object({ topic: z.string(), turn: z.number() }), output: z.string() },
-  model: "openai/gpt-5.4-mini",
+  model: "openai/gpt-6-luna",
   prompt: ({ input }) => `Research ${input.topic}. Turn ${input.turn}. One new fact.`,
 });
 
@@ -356,7 +356,7 @@ deciding: {
     id: 'chooseNext',
     src: 'agent.decide',
     input: {
-      model: 'openai/gpt-5.4-mini',
+      model: 'openai/gpt-6-luna',
       prompt: 'Research more, or summarize what we have?',
       allowedEvents: ['RESEARCH_MORE', 'SUMMARIZE'],
     },
@@ -433,7 +433,7 @@ The library ships no price data and never estimates cost. Keep a price table in 
 ```ts
 // USD per 1M tokens. Fill in from your provider's pricing page.
 const PRICES: Record<string, { input: number; output: number }> = {
-  "openai/gpt-5.4-mini": { input: 0, output: 0 },
+  "openai/gpt-6-luna": { input: 0, output: 0 },
 };
 
 function estimateCost(model: string, usage: AgentUsage | AgentCallUsage): number {
@@ -446,7 +446,7 @@ function estimateCost(model: string, usage: AgentUsage | AgentCallUsage): number
   return (input + output) / 1_000_000;
 }
 
-estimateCost("openai/gpt-5.4-mini", result.usage);
+estimateCost("openai/gpt-6-luna", result.usage);
 ```
 
 `result.usage` is aggregated across every model the run used, so a per-model figure needs per-call attribution.

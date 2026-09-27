@@ -141,7 +141,7 @@ export function FlueOwnedAgent() {
   // typo'd step into a compile error instead of a tool-less bricked agent.
   switch (step) {
     case "drafting":
-      useModel("openai/gpt-5.4-mini");
+      useModel("openai/gpt-6-luna");
       useSkill(draftingGuide);
       useTool({
         name: "submit_draft",
@@ -190,7 +190,7 @@ export function FlueOwnedAgent() {
       break;
 
     case "sending":
-      useModel("openai/gpt-5.4-mini");
+      useModel("openai/gpt-6-luna");
       useTool({
         name: "send_email",
         description: "Send the approved draft. Moves the workflow to done.",
@@ -206,7 +206,7 @@ export function FlueOwnedAgent() {
       break;
 
     case "done":
-      useModel("openai/gpt-5.4-mini");
+      useModel("openai/gpt-6-luna");
       useSkill(
         defineSkill({
           name: "wrap-up",
@@ -271,7 +271,7 @@ export function scriptedModel(): { providers: Provider[]; trace: string[][] } {
   // One faux provider per provider id the agent names, so `useModel` resolves
   // the same specifiers it would in production.
   const providers = [
-    fauxProvider({ provider: "openai", models: [{ id: "gpt-5.4-mini" }] }),
+    fauxProvider({ provider: "openai", models: [{ id: "gpt-6-luna" }] }),
     fauxProvider({ provider: "anthropic", models: [{ id: "claude-sonnet-5" }] }),
   ].map((faux) => {
     faux.setResponses(Array.from({ length: MAX_TURNS }, () => respond));

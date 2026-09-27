@@ -68,8 +68,8 @@ export function executeQuery(plan: QueryPlan, table: Order[] = orders): number {
 }
 
 const models = {
-  planner: openai("gpt-5.4-mini"),
-  summarizer: openai("gpt-5.4-mini"),
+  planner: openai("gpt-6-luna"),
+  summarizer: openai("gpt-6-luna"),
 };
 
 const contextSchema = z.object({

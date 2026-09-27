@@ -121,7 +121,7 @@ async function resolveExecutors(
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
-  const primary = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+  const primary = process.env.OPENAI_MODEL || "gpt-6-luna";
   const fallback = process.env.OPENAI_FALLBACK_MODEL || primary;
   const models = {
     fast: openai(primary),
@@ -360,7 +360,7 @@ async function interpretReview(
       import("@ai-sdk/openai"),
     ]);
     const { text: out } = await generateText({
-      model: openai(process.env.OPENAI_MODEL || "gpt-5.4-mini"),
+      model: openai(process.env.OPENAI_MODEL || "gpt-6-luna"),
       system:
         "Interpret the human's review of a draft as exactly one word: APPROVE, REJECT, or UNCLEAR. Negative feedback means REJECT.",
       prompt: text,

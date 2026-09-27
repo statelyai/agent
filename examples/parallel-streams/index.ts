@@ -26,8 +26,8 @@ import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const models = {
-  thinker: openai("gpt-5.4-mini"),
-  poet: openai("gpt-5.4-mini"),
+  thinker: openai("gpt-6-luna"),
+  poet: openai("gpt-6-luna"),
 };
 
 /** Completion order, the part a final view usually drops. Rendered in `output`. */

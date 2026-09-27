@@ -51,7 +51,7 @@ import { describeMachine } from "./describe-machine.js";
 export { describeMachine } from "./describe-machine.js";
 
 const models = {
-  planner: openai("gpt-5.4-mini"),
+  planner: openai("gpt-6-luna"),
 };
 
 // Bank as a zod enum: `"left"`/`"right"` literals are accepted as `Bank`

@@ -36,9 +36,9 @@ function translationPasses(evaluation: z.infer<typeof translationEvaluationSchem
 }
 
 const models = {
-  translator: openai("gpt-5.4-mini"),
-  evaluator: openai("gpt-5.4-mini"),
-  improver: openai("gpt-5.4-mini"),
+  translator: openai("gpt-6-luna"),
+  evaluator: openai("gpt-6-luna"),
+  improver: openai("gpt-6-luna"),
 };
 
 const contextSchema = z.object({

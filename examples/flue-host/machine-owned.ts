@@ -335,7 +335,7 @@ export const resumeWorkflow = defineTool({
  * agent needs no file or shell tools. Its whole world is the two bridge tools.
  */
 export function MachineOwnedAgent() {
-  useModel("openai/gpt-5.4-mini");
+  useModel("openai/gpt-6-luna");
   useTool(startWorkflow);
   useTool(resumeWorkflow);
 
@@ -420,7 +420,7 @@ export function scriptedModel() {
     );
   };
 
-  const faux = fauxProvider({ provider: "openai", models: [{ id: "gpt-5.4-mini" }] });
+  const faux = fauxProvider({ provider: "openai", models: [{ id: "gpt-6-luna" }] });
   faux.setResponses(Array.from({ length: MAX_STEPS + 2 }, () => respond));
   return faux.provider;
 }

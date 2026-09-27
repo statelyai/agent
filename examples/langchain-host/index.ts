@@ -51,7 +51,7 @@ export * from "./executors.js";
 export * from "./scripted-model.js";
 export * from "./bridge.js";
 
-const LIVE_MODEL = "gpt-5.4-mini";
+const LIVE_MODEL = "gpt-6-luna";
 
 // ─── Direction A: LangChain model as the machine's executors ───
 
@@ -196,7 +196,10 @@ export async function main() {
 
 /** Live: the same two directions against a real ChatOpenAI. */
 export async function mainLive() {
-  const model = new ChatOpenAI({ model: LIVE_MODEL });
+  const model = new ChatOpenAI({
+    model: LIVE_MODEL,
+    modelKwargs: { reasoning_effort: "none" },
+  });
 
   console.log("— Direction A (live): LangChain model as executor —");
   const jokeOutput = await runJokeDemo(model, (chunk) => process.stdout.write(chunk));

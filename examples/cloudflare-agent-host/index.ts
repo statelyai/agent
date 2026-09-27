@@ -123,8 +123,8 @@ function resolveExecutors(env: Env): AgentRequestExecutors {
   const openai = createOpenAI({ apiKey: env.OPENAI_API_KEY });
   return createAiSdkExecutors({
     models: {
-      promptEvaluator: openai("gpt-5.4-mini"),
-      emailDrafter: openai("gpt-5.4-mini"),
+      promptEvaluator: openai("gpt-6-luna"),
+      emailDrafter: openai("gpt-6-luna"),
     },
   });
 }

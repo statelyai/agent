@@ -55,7 +55,7 @@ See [The event log](event-log.md).
 ```ts no-check
 import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
 
-const models = { fast: openai("gpt-5.4-mini") };
+const models = { fast: openai("gpt-6-luna") };
 const agent = setupAgent({ models /* schemas and requests */ });
 
 await runAgent(machine, { input, executors: createAiSdkExecutors({ models }) });
@@ -77,7 +77,7 @@ import { createOpenAiExecutors } from "@statelyai/agent/openai";
 
 const executors = createOpenAiExecutors({
   client: new OpenAI(),
-  resolveModel: (modelRef) => (modelRef === "deep" ? "gpt-5.4" : "gpt-5.4-mini"),
+  resolveModel: (modelRef) => (modelRef === "deep" ? "gpt-5.4" : "gpt-6-luna"),
   settings: {
     deep: { reasoning_effort: "high" },
   },

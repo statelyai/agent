@@ -69,7 +69,7 @@ const todoSchema = z.object({
 type Todo = z.infer<typeof todoSchema>;
 
 const models = {
-  quick: openai("gpt-5.4-mini"),
+  quick: openai("gpt-6-luna"),
 };
 
 /** Events one command may apply before only DONE / QUIT stay legal. */

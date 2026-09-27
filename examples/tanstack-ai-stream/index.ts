@@ -59,7 +59,7 @@ import {
 // Unpublished hosts keep their boundaries explicit in ordinary TypeScript.
 
 const models = {
-  writer: openai("gpt-5.4-mini"),
+  writer: openai("gpt-6-luna"),
 };
 
 // ─── The machine: outline the answer, then write it ───

@@ -53,7 +53,7 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 export const AUTO_APPROVAL_LIMIT = 500;
 
 const models = {
-  validator: openai("gpt-5.4-mini"),
+  validator: openai("gpt-6-luna"),
 };
 
 const agentSetup = setupAgent({

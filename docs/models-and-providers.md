@@ -39,10 +39,10 @@ Pass provider-specific settings to `createAiSdkExecutors`, not the machine. An o
 ```ts
 const executors = createAiSdkExecutors({
   models: {
-    quick: openai("gpt-5.4-mini"),
+    quick: openai("gpt-6-luna"),
     careful: { model: openai("gpt-5.4"), settings: { reasoning: "high" } },
   },
-  settings: (request) => ({ temperature: request.name === "draft" ? 0.7 : 0 }),
+  settings: () => ({ reasoning: "low" }),
 });
 ```
 
@@ -76,7 +76,7 @@ export const hostAgent = new Agent({
   id: "drafting-host",
   name: "Drafting Host",
   instructions: "Call start_workflow with the user's request, then report what came back.",
-  model: "openai/gpt-5.4-mini",
+  model: "openai/gpt-6-luna",
   tools: { start_workflow: startWorkflow },
 });
 ```

@@ -168,8 +168,8 @@ import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
 
 // Model IDs here are illustrative; substitute your provider's current models.
 const models = {
-  triage: openai("gpt-5.4-mini"),
-  reviewer: openai("gpt-5.4-mini"),
+  triage: openai("gpt-6-luna"),
+  reviewer: openai("gpt-6-luna"),
 };
 
 const classifyTicket = createTextLogic({

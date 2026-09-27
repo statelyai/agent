@@ -48,11 +48,11 @@ import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const models = {
-  supervisor: openai("gpt-5.4-mini"),
-  searcher: openai("gpt-5.4-mini"),
-  scraper: openai("gpt-5.4-mini"),
-  outliner: openai("gpt-5.4-mini"),
-  writer: openai("gpt-5.4-mini"),
+  supervisor: openai("gpt-6-luna"),
+  searcher: openai("gpt-6-luna"),
+  scraper: openai("gpt-6-luna"),
+  outliner: openai("gpt-6-luna"),
+  writer: openai("gpt-6-luna"),
 };
 
 /** Collapses a worker result to one short line for the team tree. */

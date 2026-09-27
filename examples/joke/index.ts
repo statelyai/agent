@@ -87,8 +87,8 @@ export const jokeSchemas = createAgentSchemas({
 });
 
 const models = {
-  jokeWriter: openai("gpt-5.4-mini"),
-  critic: openai("gpt-5.4-mini"),
+  jokeWriter: openai("gpt-6-luna"),
+  critic: openai("gpt-6-luna"),
 };
 
 export const tellJoke = createTextLogic({
