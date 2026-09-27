@@ -26,7 +26,7 @@
  *   checkingBudget ─┬─ supervising ─┬─ DELEGATE_RESEARCH → researching ─┐
  *        ▲          │               ├─ DELEGATE_CODE     → coding ──────┤
  *        │          │               └─ FINISH            → done         │
- *        │          └─ failed (turn budget spent)                       │
+ *        │          └─ failed (no usable report)                        │
  *        └──────────────────────────────────────────────────────────────┘
  *
  *   researcherMachine: lookingUp → reporting → done | failed
@@ -42,8 +42,10 @@
  *     analysis actor (sum/average), then one `writeAnalysisReport` request
  *   - worker → supervisor edges         → each worker invoke's `onDone`, which
  *     appends the report to `context.reports` and returns to `checkingBudget`
- *   - recursion_limit                   → `MAX_TURNS`, checked by the
- *     `checkingBudget` choice state; exhausted → `failed`
+ *   - recursion_limit                   → `MAX_TURNS`, a cap on delegations:
+ *     guards refuse a delegation past it, and `checkingBudget` sends a run
+ *     with no usable report to `failed`; otherwise the supervisor still
+ *     gets its FINISH after the last permitted worker reports
  *
  * Differences from LangGraph worth calling out:
  *   - Routing rules are guards, not prompt text. A worker that has already
@@ -499,16 +501,18 @@ export const agentSupervisorMachine = agentSetup.createMachine({
   }),
   initial: "checkingBudget",
   states: {
-    // recursion_limit, made a state: the delegation budget is checked before
-    // every routing choice.
+    // recursion_limit, made a state. The budget caps DELEGATIONS, not the
+    // finish: once MAX_TURNS workers have run, the supervisor still sees the
+    // last report and may FINISH. Only when the budget is spent with nothing
+    // usable to finish from does the run fail here.
     checkingBudget: {
       type: "choice",
       choice: ({ context }) =>
-        context.turns >= MAX_TURNS
+        context.turns >= MAX_TURNS && !hasReport(context.reports)
           ? {
               target: "failed",
               context: {
-                notice: `Turn budget spent: ${MAX_TURNS} delegations without a FINISH.`,
+                notice: `Turn budget spent: ${MAX_TURNS} delegations without a usable report.`,
               },
             }
           : { target: "supervising" },
@@ -524,7 +528,11 @@ export const agentSupervisorMachine = agentSetup.createMachine({
             "You supervise two workers: a researcher who looks up notes, and a coder who " +
             "computes sums and averages. Route one worker at a time, then FINISH with the answer.",
           prompt: renderRoutingPrompt(context),
-          allowedEvents: ["DELEGATE_RESEARCH", "DELEGATE_CODE", "FINISH"],
+          // At the cap, only FINISH is offered; the guards below enforce it too.
+          allowedEvents:
+            context.turns >= MAX_TURNS
+              ? ["FINISH"]
+              : ["DELEGATE_RESEARCH", "DELEGATE_CODE", "FINISH"],
         }),
         onError: {
           target: "failed",
@@ -532,12 +540,14 @@ export const agentSupervisorMachine = agentSetup.createMachine({
         },
       },
       on: {
+        // A delegation needs budget left AND the worker's own allowance.
         DELEGATE_RESEARCH: ({ context }) =>
+          context.turns < MAX_TURNS &&
           callsFor(context.reports, "researcher") < MAX_CALLS_PER_WORKER
             ? { target: "researching", context: { turns: context.turns + 1 } }
             : undefined,
         DELEGATE_CODE: ({ context }) =>
-          callsFor(context.reports, "coder") < MAX_CALLS_PER_WORKER
+          context.turns < MAX_TURNS && callsFor(context.reports, "coder") < MAX_CALLS_PER_WORKER
             ? { target: "coding", context: { turns: context.turns + 1 } }
             : undefined,
         FINISH: ({ context, event }) =>

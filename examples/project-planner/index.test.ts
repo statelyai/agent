@@ -150,6 +150,23 @@ test("an invalid graph after MAX_REGENERATIONS ends in failed", async () => {
   expect(result.progress).not.toContain("scheduling");
 });
 
+test("each replan gets its own repair budget", async () => {
+  // The first plan spends every repair before it schedules (25 days, deadline
+  // 10). The replan then has a bad dependency: it must still be repairable.
+  const typoPlan = { tasks: [task("T1", 3), task("T2", 5, ["T9"])] };
+  const executors = scripted({
+    generateTasks: [cyclicPlan],
+    regenerateTasks: [cyclicPlan, slowPlan, fastPlan],
+    replanTasks: [typoPlan],
+  });
+  const result = await plan({ deadlineDays: 10, generateText: executors.generateText });
+
+  expect(result).toMatchObject({ outcome: "done", projectDays: 8, onTime: true, replans: 1 });
+  expect(executors.calls.filter((call) => call.name === "regenerateTasks")).toHaveLength(
+    MAX_REGENERATIONS + 1,
+  );
+});
+
 test("replan budget exhausted: failed with the best schedule found", async () => {
   const mediumPlan = { tasks: [task("T1", 5), task("T2", 7, ["T1"])] };
   const executors = scripted({ generateTasks: [slowPlan], replanTasks: [mediumPlan, slowPlan] });

@@ -158,9 +158,51 @@ test("a failing worker burns turns until MAX_TURNS lands in failed", async () =>
   expect(result.reports).toHaveLength(MAX_TURNS);
   expect(result.reports.every((entry) => entry.status === "failed")).toBe(true);
   expect(result.reports[0]?.report).toContain("provider unavailable");
-  expect(result.answer).toContain(`Turn budget spent: ${MAX_TURNS} delegations`);
+  expect(result.answer).toContain(
+    `Turn budget spent: ${MAX_TURNS} delegations without a usable report`,
+  );
   expect(result.progress.filter((state) => state === "researching")).toHaveLength(MAX_TURNS);
   expect(result.progress.at(-1)).toBe("failed");
+});
+
+test("the last permitted delegation can still end in FINISH", async () => {
+  // One flaky research call, then two good research reports and two good
+  // analysis reports: MAX_TURNS delegations, the last of which succeeds.
+  let researchCalls = 0;
+  const executors = scripted({
+    text: {
+      writeResearchReport: () => {
+        researchCalls += 1;
+        if (researchCalls === 1) throw new Error("provider unavailable");
+        return workerText.writeResearchReport[0]!;
+      },
+      writeAnalysisReport: workerText.writeAnalysisReport,
+    },
+    decisions: {
+      routeWork: [
+        { type: "DELEGATE_RESEARCH" },
+        { type: "DELEGATE_RESEARCH" },
+        { type: "DELEGATE_RESEARCH" },
+        { type: "DELEGATE_CODE" },
+        { type: "DELEGATE_CODE" },
+        { type: "FINISH", answer: "Q2 averaged 171.67 thousand dollars a month." },
+      ],
+    },
+  });
+  const result = await runAgentSupervisorExample({
+    generateText: executors.generateText,
+    decide: executors.decide,
+  });
+
+  expect(result.outcome).toBe("done");
+  expect(result.turns).toBe(MAX_TURNS);
+  expect(result.reports.at(-1)).toMatchObject({ worker: "coder", status: "done" });
+  expect(result.answer).toBe("Q2 averaged 171.67 thousand dollars a month.");
+  // At the cap, FINISH is the only event the supervisor is offered.
+  const last = executors.calls.filter((call) => call.kind === "decide").at(-1)!;
+  expect((last.request as AgentDecisionRequest).events.map((event) => event.type)).toEqual([
+    "FINISH",
+  ]);
 });
 
 test("starters behave as their labels advertise", async () => {

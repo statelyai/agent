@@ -162,13 +162,17 @@ export async function runUntilCrash({
   topic = "state machines",
   threadId = crypto.randomUUID(),
   executors = liveExecutors(),
+  signal,
   ...observers
 }: {
   store: AgentEventLogStore;
   topic?: string;
   threadId?: string;
-} & Omit<ExampleRunOptions, "signal">) {
+} & ExampleRunOptions) {
+  // The staged crash has its own controller; the host's cancellation rides
+  // alongside it, so a cancel stops the in-flight model call too.
   const abort = new AbortController();
+  const runSignal = signal ? AbortSignal.any([abort.signal, signal]) : abort.signal;
 
   // The draft call never resolves; the process dies while it is in flight, so
   // no completion for it is ever journaled.
@@ -185,7 +189,7 @@ export async function runUntilCrash({
     store,
     threadId,
     executors: observed.executors,
-    signal: abort.signal,
+    signal: runSignal,
   });
 
   console.log(`crashed with status '${crashed.status}'`);
@@ -202,11 +206,12 @@ export async function recover({
   store,
   threadId,
   executors = liveExecutors(),
+  signal,
   ...observers
 }: {
   store: AgentEventLogStore;
   threadId: string;
-} & Omit<ExampleRunOptions, "signal">) {
+} & ExampleRunOptions) {
   // The journaled `outline` call is replayed from the log, so only `draft`
   // reaches the model here.
   const observed = observeCalls(executors);
@@ -218,6 +223,7 @@ export async function recover({
     store,
     threadId,
     executors: observed.executors,
+    ...(signal ? { signal } : {}),
   });
 
   console.log(`recovered with status '${recovered.status}'`);
@@ -236,7 +242,7 @@ export async function recover({
  * single machine cannot show it — see {@link ExampleRunOptions}.
  */
 export async function runCrashRecoveryExample(options: ExampleRunOptions = {}) {
-  const { signal: _signal, ...observers } = options;
+  const { signal, ...observers } = options;
   // Stands in for the host's database: an append-only log per thread.
   const store = createInMemoryEventLogStore();
   const {
@@ -245,8 +251,11 @@ export async function runCrashRecoveryExample(options: ExampleRunOptions = {}) {
     calls: callsBeforeCrash,
   } = await runUntilCrash({
     store,
+    ...(signal ? { signal } : {}),
     ...observers,
   });
+  // A host cancel is not the staged crash: stop here instead of recovering.
+  signal?.throwIfAborted();
   const {
     recovered,
     replayedCallKey,
@@ -254,6 +263,7 @@ export async function runCrashRecoveryExample(options: ExampleRunOptions = {}) {
   } = await recover({
     store,
     threadId,
+    ...(signal ? { signal } : {}),
     ...observers,
   });
   return {

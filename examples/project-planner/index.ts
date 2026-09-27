@@ -43,7 +43,8 @@
  *     pass, so the project length is correct by construction.
  *   - The dependency graph is checked before anything is scheduled. A
  *     duplicate id, an unknown dependency, or a cycle sends the tasks back to
- *     the model with the problems listed, at most MAX_REGENERATIONS times.
+ *     the model with the problems listed, at most MAX_REGENERATIONS times per
+ *     proposed plan (a replan starts a fresh repair budget).
  *   - Risk is a JUDGMENT, the mitigation a generation. LangGraph asks one LLM
  *     for both. Here `assessingRisk` asks the AI SDK's `experimental_evaluate`
  *     with Jev (`@ai-sdk/typesafe-ai`) as the evaluation model one
@@ -554,9 +555,11 @@ export const projectPlannerMachine = agentSetup.createMachine({
           deadlineDays: context.deadlineDays,
           mitigation: context.mitigation ?? "",
         }),
+        // A replan is a new proposed graph, so it gets its own repair budget;
+        // MAX_REPLANS still bounds how many graphs are proposed in total.
         onDone: ({ output }) => ({
           target: "checkingTasks",
-          context: { tasks: output.result.tasks.slice(0, MAX_TASKS) },
+          context: { tasks: output.result.tasks.slice(0, MAX_TASKS), regenerations: 0 },
         }),
         onError: ({ event }) => ({
           target: "failed",
