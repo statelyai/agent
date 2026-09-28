@@ -122,6 +122,7 @@ const judgedClueSchema = z.object({
 type JudgedClue = z.infer<typeof judgedClueSchema>;
 
 const contextSchema = z.object({
+  /** The word cards, face down (see `cardBack`): readable by the machine, not at a glance. */
   deck: z.array(z.string()),
   roundIndex: z.number(),
   rounds: z.number(),
@@ -246,11 +247,29 @@ export function isCorrectGuess(guess: string, secretWord: string): boolean {
 }
 
 /**
- * The round's secret word: the deck card at the round index. Derived rather
- * than stored, so no context field the guesser might be shown ever holds it.
+ * A word card turned face down. Context is what hosts show and persist (a
+ * developer view lists it whole), so the deck is kept as card backs: the
+ * machine turns a card over when it needs the word, and nobody reads the
+ * next secrets off the table by accident. Not secrecy, just card backs.
+ */
+export function cardBack(word: string): string {
+  return btoa(encodeURIComponent(word));
+}
+
+function cardFace(back: string): string {
+  try {
+    return decodeURIComponent(atob(back));
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The round's secret word: the deck card at the round index, turned over.
+ * Derived rather than stored, so no context field ever holds it face up.
  */
 export function secretWordOf(context: { deck: string[]; roundIndex: number }): string {
-  return context.deck[context.roundIndex % context.deck.length] ?? "";
+  return cardFace(context.deck[context.roundIndex % context.deck.length] ?? "");
 }
 
 /**
@@ -331,7 +350,7 @@ const agentSetup = setupAgent({
 export const justOneMachine = agentSetup.createMachine({
   id: "just-one",
   context: ({ input }) => ({
-    deck: input.deck ?? [...WORD_DECK],
+    deck: (input.deck ?? WORD_DECK).map(cardBack),
     roundIndex: 0,
     rounds: input.rounds,
     clueA: null,

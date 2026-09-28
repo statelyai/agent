@@ -171,8 +171,8 @@ describe("just-one", () => {
   test("nothing a host can render while the guesser thinks gives the word away", async () => {
     // Iris's clue IS the secret, and every draft's reasoning names it — the
     // worst case for a leak. Each idle snapshot is checked the way a host would
-    // read it: the interaction label and every context field except the deck
-    // (the unchanging input the word is dealt from).
+    // read it: the interaction label and every context field — the deck
+    // included, since it is kept face down.
     const deck = ["piano", "volcano"];
     const { executor } = createClueGivers({
       Iris: ["piano", "lava"],
@@ -188,8 +188,11 @@ describe("just-one", () => {
     for (const secret of deck) {
       expect(result.status).toBe("idle");
       if (result.status !== "idle") throw new Error("expected idle");
-      const { deck: _deck, ...visible } = result.snapshot.context;
-      const shown = JSON.stringify([idlePrompt(result.snapshot), visible]).toLowerCase();
+      const shown = JSON.stringify([
+        idlePrompt(result.snapshot),
+        result.snapshot.context,
+        result.persist(),
+      ]).toLowerCase();
       expect(shown, `leaked "${secret}": ${shown}`).not.toContain(secret);
 
       result = await runToQuiescence(createAgentRuntime(justOneMachine, shared), {

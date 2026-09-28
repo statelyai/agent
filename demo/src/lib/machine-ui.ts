@@ -222,6 +222,8 @@ export type TextCandidate = {
   /** What the choice means, in the words the buttons use. */
   description: string;
   fill: string | null;
+  /** Replies that name this choice outright ("Rock", "Cleo", "2"). */
+  names: string[];
 };
 
 /** Most values a numeric field may offer before free text stops expanding it. */
@@ -261,6 +263,15 @@ function numericChoices(schema: JsonObject | undefined): number[] | null {
 }
 
 /**
+ * What a field's own description says one value means, when it documents its
+ * values as `0=Ada, 1=Bruno` (or `0: Ada`), so "Cleo" can pick seat 2.
+ */
+function valueMeaning(description: string | null, value: number): string | null {
+  const match = description?.match(new RegExp(`(?:^|[\\s,;(])${value}\\s*[=:]\\s*([^,;)]+)`));
+  return match ? match[1]!.trim() : null;
+}
+
+/**
  * The ways free text can map onto the accepted events without a form:
  * a payload-free event is one candidate; an event whose payload is one enum
  * field, or one small bounded number field, is one candidate per value
@@ -271,7 +282,14 @@ export function textCandidates(events: AcceptedEvent[]): TextCandidate[] {
   return events.flatMap((event): TextCandidate[] => {
     const action = `"${event.label}"`;
     if (!event.needsPayload) {
-      return [{ event: { type: event.type }, description: `Chooses ${action}.`, fill: null }];
+      return [
+        {
+          event: { type: event.type },
+          description: `Chooses ${action}.`,
+          fill: null,
+          names: [event.label],
+        },
+      ];
     }
     const fields = event.jsonSchema ? schemaFields(event.jsonSchema) : null;
     if (!fields || fields.length !== 1) return [];
@@ -282,17 +300,22 @@ export function textCandidates(events: AcceptedEvent[]): TextCandidate[] {
         event: { type: event.type, [field.name]: option },
         description: `Chooses ${action} with ${name} ${option}.`,
         fill: null,
+        names: [String(option)],
       }));
     }
     if (field.kind.type === "number" || field.kind.type === "json") {
       const property = (event.jsonSchema?.properties as Record<string, JsonObject> | undefined)?.[
         field.name
       ];
-      return (numericChoices(property) ?? []).map((value) => ({
-        event: { type: event.type, [field.name]: value },
-        description: `Chooses ${action} with ${name} ${value}.`,
-        fill: null,
-      }));
+      return (numericChoices(property) ?? []).map((value) => {
+        const meaning = valueMeaning(field.description, value);
+        return {
+          event: { type: event.type, [field.name]: value },
+          description: `Chooses ${action} with ${name} ${value}${meaning ? ` (${meaning})` : ""}.`,
+          fill: null,
+          names: meaning ? [String(value), meaning] : [String(value)],
+        };
+      });
     }
     if (field.kind.type === "string") {
       return [
@@ -300,6 +323,7 @@ export function textCandidates(events: AcceptedEvent[]): TextCandidate[] {
           event: { type: event.type },
           description: `Is the ${name} to send with ${action}: the reply's own words.`,
           fill: field.name,
+          names: [],
         },
       ];
     }

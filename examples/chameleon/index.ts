@@ -113,7 +113,6 @@ export const chameleonSchemas = createAgentSchemas({
     secretWord: z.string(),
     accused: z.string(),
     words: z.array(spokenWordSchema),
-    log: z.array(z.string()),
   }),
   events: {
     /** The detective's one move: name the seat you suspect. */
@@ -122,7 +121,8 @@ export const chameleonSchemas = createAgentSchemas({
         .number()
         .int()
         .min(0)
-        .max(PLAYERS.length - 1),
+        .max(PLAYERS.length - 1)
+        .describe(`Seat to accuse: ${PLAYERS.map((name, seat) => `${seat}=${name}`).join(", ")}`),
     }),
   },
 });
@@ -199,7 +199,7 @@ function finishGame(context: ChameleonContext, outcome: Outcome) {
     secretWord: context.secretWord,
     accused: context.accusedIndex === null ? "" : (PLAYERS[context.accusedIndex] ?? ""),
     words: context.words,
-    log: context.log,
+    // The log is the summary's body; a separate copy would print it twice.
   };
 }
 

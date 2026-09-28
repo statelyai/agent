@@ -19,6 +19,15 @@ import { textCandidates, type ChatIdle, type JsonObject } from "./machine-ui";
 /** Below this confidence, typed text reads as unclear and nothing is delivered. */
 export const TEXT_EVENT_CONFIDENCE = 0.6;
 
+/** Case, spacing and trailing punctuation don't change which name a reply is. */
+function normalizeName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/, "")
+    .replace(/\s+/g, " ");
+}
+
 /** The label Jev picks when the text asks for none of the offered events. */
 const UNCLEAR = "unclear";
 
@@ -105,6 +114,11 @@ export async function interpretIdleText(
 ): Promise<({ type: string } & JsonObject) | null> {
   const candidates = textCandidates(idle.events);
   if (!candidates.length) return null;
+  // A reply that is exactly one choice's name needs no judgment.
+  const named = candidates.filter((candidate) =>
+    candidate.names.some((name) => normalizeName(name) === normalizeName(text)),
+  );
+  if (named.length === 1) return named[0]!.event;
   const textEvent = idle.textEvent;
   const catchAll = textEvent
     ? candidates.findIndex(

@@ -25,7 +25,7 @@
         "transition xstate.done.actor -> \"generatingPrompt\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "mock requirements\n\n- Prompt: mock prompt\n- Objective: mock objective\n- Variables: mock variables\n- Constraints: mock constraints\n- Turns: 1"
+      "response": "mock prompt\n\n- Turns: 1"
     }
   ],
   "Help me write a prompt that summarizes support tickets for an on-call engineer": [
@@ -54,7 +54,7 @@
         "transition xstate.done.actor -> \"generatingPrompt\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "mock requirements\n\n- Prompt: mock prompt\n- Objective: mock objective\n- Variables: mock variables\n- Constraints: mock constraints\n- Turns: 1"
+      "response": "mock prompt\n\n- Turns: 1"
     }
   ],
   "I want a prompt that turns meeting notes into action items": [
@@ -83,7 +83,7 @@
         "transition xstate.done.actor -> \"generatingPrompt\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "mock requirements\n\n- Prompt: mock prompt\n- Objective: mock objective\n- Variables: mock variables\n- Constraints: mock constraints\n- Turns: 1"
+      "response": "mock prompt\n\n- Turns: 1"
     }
   ]
 }

@@ -975,7 +975,14 @@ export async function resumeMachineChat(
     result as AgentRunResult<AnyStateMachine>,
     trace,
     changedKeys(),
-    stringValuesOf(parsed),
+    // What the user sent, and what earlier turns already showed: neither is
+    // repeated in this turn's output.
+    [
+      ...stringValuesOf(parsed),
+      ...stringValuesOf(
+        ((snapshot as { context?: unknown }).context ?? {}) as Record<string, unknown>,
+      ),
+    ],
     latestContext(),
     limits,
     host.pending(),

@@ -458,7 +458,27 @@ function renderBlock(value: unknown, depth = 0): string | null {
  * would remain. The untouched value still ships as
  * `MachineChatResult.output` for anything that wants the raw JSON.
  */
+/** `amountCents` → `amount`: a number named in cents reads as money. */
+function moneyKey(key: string): string {
+  if (!/cents$/i.test(key)) return key;
+  return key.replace(/_?cents$/i, "") || "amount";
+}
+
+/** Numbers named in cents (`amountCents: 6000`) become money (`amount: "$60.00"`), at any depth. */
+function withMoney(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withMoney);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, field]) =>
+      /cents$/i.test(key) && typeof field === "number" && Number.isFinite(field)
+        ? [moneyKey(key), `$${(field / 100).toFixed(2)}`]
+        : [key, withMoney(field)],
+    ),
+  );
+}
+
 export function renderOutput(output: unknown, shownValues: string[] = []): string {
+  output = withMoney(output);
   if (typeof output === "string" && !parsedJsonString(output)) return prose(output);
   if (isRecord(output)) {
     const shown = new Set(shownValues.map((value) => value.trim()).filter(Boolean));
@@ -538,6 +558,8 @@ export function renderIdleWork(
   const MAX_SECTIONS = 3;
   const MAX_STRING = 4000;
   const MAX_JSON = 1500;
+  context = withMoney(context);
+  changedKeys = changedKeys.map(moneyKey);
   if (!isRecord(context)) return null;
   const omitted = new Set(omitValues.map((value) => value.trim()).filter(Boolean));
   const promptText = prompt?.trim() ?? "";

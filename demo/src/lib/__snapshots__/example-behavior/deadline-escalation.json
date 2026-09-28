@@ -23,7 +23,7 @@
         "transition @xstate.init -> \"awaitingApproval\"",
         "transition APPROVE -> \"approved\""
       ],
-      "response": "Mock reply to: Draft a proposal: Schedule maintenance\n\n- Outcome: approved"
+      "response": "- Outcome: approved"
     }
   ]
 }

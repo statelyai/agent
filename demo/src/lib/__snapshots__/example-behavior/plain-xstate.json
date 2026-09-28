@@ -24,7 +24,7 @@
         "transition @xstate.init -> \"judging\"",
         "transition APPROVE -> \"approved\""
       ],
-      "response": "Mock reply to: Write a two-sentence launch blurb for: a CLI that turns shel\n\n- Drafts: 1\n- Revisions: 0\n- Retries: 0\n- Progress: Draft 1 ready: 0 of 2 revisions used, 0 retries after a failed attempt."
+      "response": "Draft 1 ready: 0 of 2 revisions used, 0 retries after a failed attempt.\n\n- Drafts: 1\n- Revisions: 0\n- Retries: 0"
     }
   ],
   "a solar-powered backyard weather station": [
@@ -52,7 +52,7 @@
         "transition @xstate.init -> \"judging\"",
         "transition APPROVE -> \"approved\""
       ],
-      "response": "Mock reply to: Write a two-sentence launch blurb for: a solar-powered backy\n\n- Drafts: 1\n- Revisions: 0\n- Retries: 0\n- Progress: Draft 1 ready: 0 of 2 revisions used, 0 retries after a failed attempt."
+      "response": "Draft 1 ready: 0 of 2 revisions used, 0 retries after a failed attempt.\n\n- Drafts: 1\n- Revisions: 0\n- Retries: 0"
     }
   ],
   "a note app that deletes anything you have not opened in a year": [
@@ -80,7 +80,7 @@
         "transition @xstate.init -> \"judging\"",
         "transition APPROVE -> \"approved\""
       ],
-      "response": "Mock reply to: Write a two-sentence launch blurb for: a note app that delet\n\n- Drafts: 1\n- Revisions: 0\n- Retries: 0\n- Progress: Draft 1 ready: 0 of 2 revisions used, 0 retries after a failed attempt."
+      "response": "Draft 1 ready: 0 of 2 revisions used, 0 retries after a failed attempt.\n\n- Drafts: 1\n- Revisions: 0\n- Retries: 0"
     }
   ]
 }

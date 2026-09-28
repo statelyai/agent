@@ -268,6 +268,41 @@ const oneField = (name: string, schema: Record<string, unknown>) =>
     required: [name],
   }) as AcceptedEvent["jsonSchema"];
 
+describe("a reply that is exactly a choice's name", () => {
+  test("picks it without asking the judge, even when the judge would be unsure", async () => {
+    const idle: ChatIdle = {
+      prompt: "Who is the chameleon?",
+      events: [
+        event(
+          "ACCUSE",
+          "Accuse this seat",
+          oneField("seat", {
+            type: "integer",
+            minimum: 0,
+            maximum: 3,
+            description: "Seat to accuse: 0=Ada, 1=Bruno, 2=Cleo, 3=Dev",
+          }),
+        ),
+      ],
+      textEvent: null,
+      component: null,
+    };
+    control.pick = "";
+    control.confidence = 0.1;
+    expect(await interpretIdleText("Cleo", idle)).toEqual({ type: "ACCUSE", seat: 2 });
+    expect(await interpretIdleText(" cleo. ", idle)).toEqual({ type: "ACCUSE", seat: 2 });
+    expect(await interpretIdleText("2", idle)).toEqual({ type: "ACCUSE", seat: 2 });
+    const rps: ChatIdle = {
+      prompt: "Your throw?",
+      events: [event("HUMAN_ROCK", "Rock"), event("HUMAN_PAPER", "Paper")],
+      textEvent: null,
+      component: null,
+    };
+    expect(await interpretIdleText("rock", rps)).toEqual({ type: "HUMAN_ROCK" });
+    expect(control.states).toEqual([]);
+  });
+});
+
 describe("numeric choices", () => {
   test("a small bounded integer field, or an enum of numbers, is one candidate per value", () => {
     const seats = textCandidates([
@@ -287,6 +322,23 @@ describe("numeric choices", () => {
     expect(rated.map((candidate) => candidate.event)).toEqual(
       [1, 3, 5].map((stars) => ({ type: "RATE", stars })),
     );
+  });
+
+  test("a field that documents its values names them in each candidate", () => {
+    const seats = textCandidates([
+      event(
+        "ACCUSE",
+        "Accuse this seat",
+        oneField("seat", {
+          type: "integer",
+          minimum: 0,
+          maximum: 3,
+          description: "Seat to accuse: 0=Ada, 1=Bruno, 2=Cleo, 3=Dev",
+        }),
+      ),
+    ]);
+    expect(seats[2]!.description).toContain("seat 2 (Cleo)");
+    expect(seats[0]!.description).toContain("seat 0 (Ada)");
   });
 
   test("an open-ended or wide number field offers no candidates", () => {

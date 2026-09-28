@@ -339,3 +339,17 @@ describe("booleans read as yes/no", () => {
     );
   });
 });
+
+describe("money", () => {
+  test("numbers named in cents read as dollars, nested or top-level", () => {
+    const output = renderOutput({
+      status: "executed",
+      proposal: { orderId: "A-17", amountCents: 6000, reason: "damaged" },
+    });
+    expect(output).toContain("$60.00");
+    expect(output).not.toMatch(/cents/i);
+    const work = renderIdleWork({ amountCents: 2500, note: "x" }, ["amountCents"]);
+    expect(work).toContain("$25.00");
+    expect(work).not.toMatch(/cents/i);
+  });
+});

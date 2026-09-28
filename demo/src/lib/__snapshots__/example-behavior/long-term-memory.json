@@ -63,7 +63,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
@@ -82,7 +82,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
@@ -101,7 +101,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
@@ -120,7 +120,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
@@ -139,7 +139,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
@@ -214,7 +214,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
@@ -233,7 +233,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
@@ -252,7 +252,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
@@ -271,7 +271,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
@@ -290,7 +290,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
@@ -365,7 +365,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
@@ -384,7 +384,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
@@ -403,7 +403,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
@@ -422,7 +422,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
@@ -441,7 +441,7 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "mock reply",
+      "response": "",
       "idle": {
         "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
