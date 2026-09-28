@@ -22,6 +22,10 @@ const MarkdownTextImpl = () => {
       className="aui-md"
       components={defaultComponents}
       defer
+      // Live text already arrives chunk by chunk. The typing animation would
+      // restart whenever a transition lands before it in the same message
+      // (parts are keyed by index), replaying text the reader already saw.
+      smooth={false}
     />
   );
 };

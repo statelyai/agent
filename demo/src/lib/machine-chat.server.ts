@@ -17,6 +17,7 @@ import {
   parseAgentEvent,
   createAgentRuntime,
   runToQuiescence,
+  type AgentRequest,
   type AgentRequestExecutors,
   type AgentRunResult,
 } from "@statelyai/agent";
@@ -529,6 +530,8 @@ export type RunLimits = {
   budgetMs?: number;
   /** Raw source passed to Viz so v6 function transitions remain visible. */
   machineSource?: string;
+  /** Each chunk of a streaming request, as it arrives. */
+  onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
 };
 
 export const DEFAULT_RUN_BUDGET_MS = 120_000;
@@ -780,6 +783,7 @@ export async function runExampleRunner(
     const output = await runner({
       executors: live.executors,
       signal: runSignal(limits),
+      ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
       onTransition,
       on: { "*": onEmitted },
       onTrace,
@@ -828,6 +832,7 @@ export async function startMachineChat(
     createAgentRuntime(machine, {
       executors: live.executors,
       signal: runSignal(limits),
+      ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
       onTransition,
       on: { "*": onEmitted },
       onTrace,
@@ -884,6 +889,7 @@ export async function resumeMachineChat(
     createAgentRuntime(machine, {
       executors: live.executors,
       signal: runSignal(limits),
+      ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
       onTransition,
       on: { "*": onEmitted },
       onTrace,

@@ -1,0 +1,81 @@
+import { describe, expect, test } from "vitest";
+import { readRunStream, streamRun, type RunChunk } from "./run-stream";
+import { createShellStore } from "./shell-store";
+
+type Request = { id: string; src: unknown };
+
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => (resolve = settle));
+  return { promise, resolve };
+}
+
+describe("run streams", () => {
+  test("chunks arrive while the run is going, then the result", async () => {
+    const release = deferred();
+    const seen: RunChunk[] = [];
+    const poet: Request = { id: "0.root.versing", src: "poet" };
+    const stream = streamRun(async ({ onChunk }) => {
+      onChunk("Eight ", { request: poet });
+      onChunk("arms", { request: poet });
+      await release.promise;
+      return { status: "done" };
+    }, new AbortController().signal);
+
+    const result = readRunStream(stream, (chunk) => seen.push(chunk), new AbortController().signal);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Both chunks were read before the run finished.
+    expect(seen.map((chunk) => chunk.delta)).toEqual(["Eight ", "arms"]);
+    expect(seen[0]).toMatchObject({ key: "0.root.versing", label: "poet", call: 1 });
+
+    release.resolve();
+    await expect(result).resolves.toEqual({ status: "done" });
+  });
+
+  test("a second call of the same request is numbered apart", async () => {
+    const seen: RunChunk[] = [];
+    const stream = streamRun(async ({ onChunk }) => {
+      onChunk("first", { request: { id: "telling", src: "tellJoke" } });
+      onChunk("second", { request: { id: "telling", src: "tellJoke" } });
+      return null;
+    }, new AbortController().signal);
+    await readRunStream(stream, (chunk) => seen.push(chunk), new AbortController().signal);
+    expect(seen.map((chunk) => chunk.call)).toEqual([1, 2]);
+  });
+
+  test("a failed run rejects with its message", async () => {
+    const stream = streamRun(async () => {
+      throw new Error("Set OPENAI_API_KEY");
+    }, new AbortController().signal);
+    await expect(readRunStream(stream, () => {}, new AbortController().signal)).rejects.toThrow(
+      "Set OPENAI_API_KEY",
+    );
+  });
+
+  test("cancelling rejects at once with an AbortError and aborts the run", async () => {
+    let runSignal: AbortSignal | undefined;
+    const stream = streamRun(({ signal }) => {
+      runSignal = signal;
+      return new Promise(() => {});
+    }, new AbortController().signal);
+    const cancel = new AbortController();
+    const result = readRunStream(stream, () => {}, cancel.signal);
+
+    cancel.abort();
+    await expect(result).rejects.toMatchObject({ name: "AbortError" });
+    // Reading stopped, which cancels the stream, which aborts the run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runSignal?.aborted).toBe(true);
+  });
+});
+
+describe("a cancelled turn", () => {
+  test("is its own status, not an error, so it renders once", () => {
+    const store = createShellStore({ type: "example", id: "joke" });
+    store.trigger.turnPushed({ id: 1, input: "cats", role: "user", status: "loading" });
+    const { epoch } = store.getSnapshot().context;
+    store.trigger.turnFailed({ epoch, id: 1, message: "Run cancelled.", cancelled: true });
+    expect(store.getSnapshot().context.turns[0]).toMatchObject({ status: "cancelled" });
+    expect(store.getSnapshot().context.turns[0]).not.toHaveProperty("error");
+  });
+});

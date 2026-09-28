@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useSelector } from "@xstate/store-react";
-import { AppPanel, type TextPolicy, type Turn } from "@/components/app-panel";
+import { AppPanel, type LiveText, type TextPolicy, type Turn } from "@/components/app-panel";
 import { liveTraceStep, type TraceStep } from "@/lib/trace-view";
 import { ExampleIntro, ScenarioIntro, type StarterAction } from "@/components/chat-intros";
 import { SiteHeader } from "@/components/site-header";
@@ -24,6 +24,7 @@ import {
   resumeScenario,
   startScenario,
 } from "@/lib/run-demo-agent";
+import { readRunStream, type RunChunk } from "@/lib/run-stream";
 import { getScenario, scenarios, scenarioVizConfig } from "@/lib/scenarios";
 import type { Selection } from "@/lib/selection";
 import {
@@ -270,6 +271,21 @@ export function DemoShell() {
   const abortRef = useRef<AbortController | null>(null);
   const liveRun = useRef<{ sessionId: string | null; startedAt: number } | null>(null);
   const [liveSteps, setLiveSteps] = useState<TraceStep[]>([]);
+  // Streamed text of the turn in flight, one lane per streaming request.
+  const [liveText, setLiveText] = useState<LiveText[]>([]);
+  const appendChunk = useCallback((chunk: RunChunk) => {
+    setLiveText((lanes) => {
+      const index = lanes.findIndex((lane) => lane.key === chunk.key);
+      const lane = { key: chunk.key, call: chunk.call, label: chunk.label, text: chunk.delta };
+      if (index === -1) return [...lanes, lane];
+      const next = lanes.slice();
+      const previous = lanes[index]!;
+      // A new call of the same request (a redraft) replaces what it streamed before.
+      next[index] =
+        previous.call === chunk.call ? { ...previous, text: previous.text + chunk.delta } : lane;
+      return next;
+    });
+  }, []);
 
   const beginRun = () => {
     abortRef.current?.abort();
@@ -277,12 +293,14 @@ export function DemoShell() {
     abortRef.current = controller;
     liveRun.current = { sessionId: lastRootSessionId.current, startedAt: Date.now() };
     setLiveSteps([]);
+    setLiveText([]);
     return controller.signal;
   };
   const endRun = () => {
     abortRef.current = null;
     liveRun.current = null;
     setLiveSteps([]);
+    setLiveText([]);
   };
   const cancelRun = () => abortRef.current?.abort();
 
@@ -349,13 +367,9 @@ export function DemoShell() {
   const fail = (epoch: number, turnId: number, error: unknown) => {
     endRun();
     // An aborted fetch is the user's Cancel, not a failure worth a stack trace.
-    const aborted = error instanceof DOMException && error.name === "AbortError";
-    const message = aborted
-      ? "Run cancelled."
-      : error instanceof Error
-        ? error.message
-        : "Agent request failed";
-    store.trigger.turnFailed({ epoch, id: turnId, message });
+    const cancelled = error instanceof DOMException && error.name === "AbortError";
+    const message = error instanceof Error ? error.message : "Agent request failed";
+    store.trigger.turnFailed({ epoch, id: turnId, message, cancelled });
   };
 
   const loading = turns.some((turn) => turn.status === "loading");
@@ -395,16 +409,18 @@ export function DemoShell() {
         input: machineInput,
       },
       signal,
-    }).then(
-      (result) => {
-        settle(epoch, id, result);
-        const textEvent = result?.status === "idle" ? result.idle?.textEvent : null;
-        if (followUpText && textEvent && store.getSnapshot().context.epoch === epoch) {
-          sendEvent({ type: textEvent.type, [textEvent.field]: followUpText });
-        }
-      },
-      (error) => fail(epoch, id, error),
-    );
+    })
+      .then((stream) => readRunStream(stream, appendChunk, signal))
+      .then(
+        (result) => {
+          settle(epoch, id, result);
+          const textEvent = result?.status === "idle" ? result.idle?.textEvent : null;
+          if (followUpText && textEvent && store.getSnapshot().context.epoch === epoch) {
+            sendEvent({ type: textEvent.type, [textEvent.field]: followUpText });
+          }
+        },
+        (error) => fail(epoch, id, error),
+      );
   };
 
   /**
@@ -458,7 +474,7 @@ export function DemoShell() {
             event,
           },
           signal,
-        });
+        }).then((stream) => readRunStream(stream, appendChunk, signal));
     void deliver.then(
       (result) => settle(epoch, id, result as AnyRunResult),
       (error) => fail(epoch, id, error),
@@ -625,6 +641,7 @@ export function DemoShell() {
       starters={starters}
       turns={turns}
       liveSteps={liveSteps}
+      liveText={liveText}
       pendingIdle={pendingIdle}
       startForm={startForm}
       onSubmit={submit}

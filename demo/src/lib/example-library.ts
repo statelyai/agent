@@ -11,6 +11,7 @@ import type { Snapshot } from "xstate";
 import { nextDeclaration } from "./declaration-ticket";
 import type { ExampleDetail } from "./example-library.server";
 import type { MachineChatResult } from "./machine-chat.server";
+import { streamRun, type RunStreamEvent } from "./run-stream";
 
 export type { ExampleDetail, ExampleMachine, ExampleSummary } from "./example-library.server";
 export type { MachineChatResult } from "./machine-chat.server";
@@ -111,9 +112,12 @@ const resumeExampleInput = machineRef.extend({
   event: z.object({ type: z.string().min(1) }).passthrough(),
 });
 
+/** A run's streamed chunks, then its result — see `run-stream.ts`. */
+export type MachineChatStream = ReadableStream<RunStreamEvent<MachineChatResult>>;
+
 export const startExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => startExampleInput.parse(input))
-  .handler(async ({ data }): Promise<MachineChatResult> => {
+  .handler(async ({ data }): Promise<MachineChatStream> => {
     const [
       { getExampleMachine, getExampleMachineSource, exampleBudgetMs },
       { startMachineChat },
@@ -127,16 +131,21 @@ export const startExample = createServerFn({ method: "POST" })
       getExampleMachine(data.id, data.exportName),
       getExampleMachineSource(data.id, data.exportName),
     ]);
-    return startMachineChat(machine, data.input, {
-      signal: getRequest().signal,
-      budgetMs: exampleBudgetMs(data.id),
-      machineSource,
-    });
+    return streamRun(
+      ({ signal, onChunk }) =>
+        startMachineChat(machine, data.input, {
+          signal,
+          onChunk,
+          budgetMs: exampleBudgetMs(data.id),
+          machineSource,
+        }),
+      getRequest().signal,
+    );
   });
 
 export const resumeExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => resumeExampleInput.parse(input))
-  .handler(async ({ data }): Promise<MachineChatResult> => {
+  .handler(async ({ data }): Promise<MachineChatStream> => {
     const [
       { getExampleMachine, getExampleMachineSource, exampleBudgetMs },
       { resumeMachineChat },
@@ -150,14 +159,14 @@ export const resumeExample = createServerFn({ method: "POST" })
       getExampleMachine(data.id, data.exportName),
       getExampleMachineSource(data.id, data.exportName),
     ]);
-    return resumeMachineChat(
-      machine,
-      data.snapshot,
-      data.event as { type: string } & Record<string, unknown>,
-      {
-        signal: getRequest().signal,
-        budgetMs: exampleBudgetMs(data.id),
-          machineSource,
-      },
+    return streamRun(
+      ({ signal, onChunk }) =>
+        resumeMachineChat(
+          machine,
+          data.snapshot,
+          data.event as { type: string } & Record<string, unknown>,
+          { signal, onChunk, budgetMs: exampleBudgetMs(data.id), machineSource },
+        ),
+      getRequest().signal,
     );
   });

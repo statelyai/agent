@@ -47,7 +47,7 @@ type ShellEvents = {
     eventType?: string;
   };
   turnSettled: { epoch: number; id: number; result: AnyRunResult };
-  turnFailed: { epoch: number; id: number; message: string };
+  turnFailed: { epoch: number; id: number; message: string; cancelled?: boolean };
 };
 
 const themeStorageKey = "stately-agent-demo-theme";
@@ -158,7 +158,11 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
         return {
           ...context,
           turns: context.turns.map((turn) =>
-            turn.id === event.id ? { ...turn, status: "error", error: event.message } : turn,
+            turn.id === event.id
+              ? event.cancelled
+                ? { ...turn, status: "cancelled" }
+                : { ...turn, status: "error", error: event.message }
+              : turn,
           ),
         };
       },
