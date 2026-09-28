@@ -1828,6 +1828,12 @@ export interface AgentRunStart<TMachine extends AnyStateMachine> {
  * first. It resolves `undefined` once nothing but the outside world can move
  * the machine: no effect, child or timer is in flight and the mailbox is
  * empty (or the run finished, was cancelled, or lost its journal).
+ *
+ * "In flight" means any running child that is not a machine at rest: a model
+ * request, an async actor, a child machine whose own children are running.
+ * A callback or subscription child never finishes on its own, so while one
+ * is running the loop keeps reading until it stops; a host that invokes one
+ * for the life of a state should expect `nextEvent` to keep waiting there.
  */
 export interface AgentRuntime<TMachine extends AnyStateMachine> {
   /** Opens the run: a fresh start from `input`, a resume from `snapshot`, or recovery from a log. */

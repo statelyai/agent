@@ -11,6 +11,7 @@ import {
   setupAgent,
   type AgentRequestExecutors,
 } from "./index.js";
+import { replay } from "./log/index.js";
 
 function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -316,6 +317,13 @@ describe("createAgentRuntime", () => {
     expect(result.status).toBe("done");
     expect(seen).toContain("GO");
     expect(seen.some((type) => type.startsWith("xstate.done.actor"))).toBe(false);
+
+    // Never journaled either, so replaying the log lands on the same state.
+    const journaled = result.events.map((entry) => entry.event.type);
+    expect(journaled.some((type) => type.startsWith("xstate.done.actor"))).toBe(false);
+    const replayed = replay(machine, result.events);
+    expect(replayed.snapshot.value).toBe(result.snapshot.value);
+    expect(replayed.snapshot.status).toBe("done");
   });
 
   test("abort stops the loop and aborts the in-flight request's signal", async () => {

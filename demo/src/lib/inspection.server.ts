@@ -41,6 +41,8 @@ const STOPPED_STATUSES = new Set(["done", "error", "stopped"]);
 
 type AnyActorRefLike = {
   id?: string;
+  /** The actor's path in the system (`"<root>/<child>"`), stable across turns. */
+  address?: string;
   _parent?: AnyActorRefLike;
   logic?: { config?: unknown };
   getSnapshot?: () => unknown;
@@ -76,9 +78,7 @@ function serializeSnapshot(snapshot: unknown): {
     status: source.status,
     context: jsonSafe(source.context),
     output: jsonSafe(source.output),
-    error: jsonSafe(
-      source.error instanceof Error ? source.error.message : source.error,
-    ),
+    error: jsonSafe(source.error instanceof Error ? source.error.message : source.error),
   };
 }
 
@@ -125,6 +125,11 @@ type InspectionGlobals = {
   actorIds?: WeakMap<object, string>;
   idCounts?: Map<string, number>;
   registeredIds?: Set<string>;
+  /** Manual id per actor address: a child restored on the next turn is a new
+   * object at the same address, and must keep its id. */
+  addressIds?: Map<string, string>;
+  /** Child ids of the root's latest snapshot. */
+  rootChildIds?: Set<string>;
   /** Root machine published to the room ahead of any actor, so the viz can
    * render the selected example before a run exists. */
   declaredMachine?: unknown;
@@ -273,6 +278,8 @@ function createRoomInspector({ pinSelection }: { pinSelection: boolean }): Inspe
   state.actorIds = new WeakMap();
   state.idCounts = new Map();
   state.registeredIds = new Set();
+  state.addressIds = new Map();
+  state.rootChildIds = new Set();
   return inspector;
 }
 
@@ -355,6 +362,7 @@ export function maybeCreateRunInspection(
   const actorIds = (state.actorIds ??= new WeakMap());
   const idCounts = (state.idCounts ??= new Map());
   const registeredIds = (state.registeredIds ??= new Set());
+  const addressIds = (state.addressIds ??= new Map());
 
   /** Stable manual id: `"root"`, then `"X"`, `"X#2"`… per xstate actor id. */
   function idOf(actorRef: AnyActorRefLike, parentRef?: AnyActorRefLike): string {
@@ -364,11 +372,17 @@ export function maybeCreateRunInspection(
       actorIds.set(actorRef, ROOT_ID);
       return ROOT_ID;
     }
+    const carried = actorRef.address ? addressIds.get(actorRef.address) : undefined;
+    if (carried) {
+      actorIds.set(actorRef, carried);
+      return carried;
+    }
     const base = String(actorRef.id ?? "actor");
     const seen = (idCounts.get(base) ?? 0) + 1;
     idCounts.set(base, seen);
     const id = seen === 1 ? base : `${base}#${seen}`;
     actorIds.set(actorRef, id);
+    if (actorRef.address) addressIds.set(actorRef.address, id);
     return id;
   }
 
@@ -440,14 +454,31 @@ export function maybeCreateRunInspection(
     }
     if (event.type === "@xstate.snapshot" || event.type === "@xstate.transition") {
       const id = register(actorRef, event.snapshot);
-      // runAgent stops the root actor between turns (idle waits, persisted
+      // The runtime stops the root actor between turns (idle waits, persisted
       // snapshot). That stop is a runtime detail, not the session ending:
       // keep the root on its last live snapshot so it never reads as stopped.
       if (id === ROOT_ID && event.event?.type === "@xstate.stop") return;
+      if (id === ROOT_ID) {
+        state.rootChildIds = new Set(
+          Object.keys((event.snapshot as { children?: object } | undefined)?.children ?? {}),
+        );
+      }
+      // The same goes for a child the settled run stops while the root still
+      // holds it (a long-lived agent between turns): the next turn restores
+      // it at the same address, so it stays on screen as it was.
+      if (
+        id !== ROOT_ID &&
+        event.event?.type === "@xstate.stop" &&
+        state.rootChildIds?.has(String(actorRef.id))
+      ) {
+        return;
+      }
       const serialized = serializeSnapshot(event.snapshot);
       inspector.snapshot(id, serialized, event.event);
       if (id !== ROOT_ID && STOPPED_STATUSES.has(String(serialized.status))) {
         inspector.stop(id);
+        // A later invoke at this address is a new actor, with a new id.
+        if (actorRef.address) addressIds.delete(actorRef.address);
       }
     }
   };
