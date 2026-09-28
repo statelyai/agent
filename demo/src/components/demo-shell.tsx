@@ -20,7 +20,8 @@ import {
 import {
   humanizeEventType,
   missingKeyMessage,
-  textCandidates,
+  textRouting,
+  type ChatIdle,
   type RequiredKey,
 } from "@/lib/machine-ui";
 import {
@@ -269,39 +270,53 @@ export function DemoShell() {
   // arrives as a step, so the chat's transition log fills in while the run is
   // still going — and never with another session's run.
   const abortRef = useRef<AbortController | null>(null);
+  // The live feed is mirrored in refs so a cancelled turn can keep what it
+  // showed: the settle callbacks run long after the render that created them.
+  const liveStepsRef = useRef<TraceStep[]>([]);
   const [liveSteps, setLiveSteps] = useState<TraceStep[]>([]);
   const appendStep = useCallback((entry: TraceEntry) => {
     const [step] = traceSteps([entry]);
-    if (step) setLiveSteps((previous) => [...previous, step]);
+    if (!step) return;
+    liveStepsRef.current = [...liveStepsRef.current, step];
+    setLiveSteps(liveStepsRef.current);
   }, []);
   // Streamed text of the turn in flight, one lane per streaming request.
+  const liveTextRef = useRef<LiveText[]>([]);
   const [liveText, setLiveText] = useState<LiveText[]>([]);
   const appendChunk = useCallback((chunk: RunChunk) => {
-    setLiveText((lanes) => {
-      const index = lanes.findIndex((lane) => lane.key === chunk.key);
-      const lane = { key: chunk.key, call: chunk.call, label: chunk.label, text: chunk.delta };
-      if (index === -1) return [...lanes, lane];
-      const next = lanes.slice();
+    const lanes = liveTextRef.current;
+    const index = lanes.findIndex((lane) => lane.key === chunk.key);
+    const lane = { key: chunk.key, call: chunk.call, label: chunk.label, text: chunk.delta };
+    let next: LiveText[];
+    if (index === -1) {
+      next = [...lanes, lane];
+    } else {
+      next = lanes.slice();
       const previous = lanes[index]!;
       // A new call of the same request (a redraft) replaces what it streamed before.
       next[index] =
         previous.call === chunk.call ? { ...previous, text: previous.text + chunk.delta } : lane;
-      return next;
-    });
+    }
+    liveTextRef.current = next;
+    setLiveText(next);
   }, []);
 
+  const clearLive = () => {
+    liveStepsRef.current = [];
+    liveTextRef.current = [];
+    setLiveSteps([]);
+    setLiveText([]);
+  };
   const beginRun = () => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    setLiveSteps([]);
-    setLiveText([]);
+    clearLive();
     return controller.signal;
   };
   const endRun = () => {
     abortRef.current = null;
-    setLiveSteps([]);
-    setLiveText([]);
+    clearLive();
   };
   const cancelRun = () => abortRef.current?.abort();
 
@@ -323,16 +338,28 @@ export function DemoShell() {
   };
 
   const fail = (epoch: number, turnId: number, error: unknown) => {
-    endRun();
     // An aborted fetch is the user's Cancel, not a failure worth a stack trace.
+    // What the run showed before the stop stays in its turn.
     const cancelled = error instanceof DOMException && error.name === "AbortError";
+    const partial = cancelled
+      ? { steps: liveStepsRef.current, text: liveTextRef.current }
+      : undefined;
+    endRun();
     const message = error instanceof Error ? error.message : "Agent request failed";
-    store.trigger.turnFailed({ epoch, id: turnId, message, cancelled });
+    store.trigger.turnFailed({ epoch, id: turnId, message, cancelled, partial });
   };
 
   const loading = turns.some((turn) => turn.status === "loading");
   const started = turns.length > 0;
   const interpretMode = isScenario && scenario.id === "approval" && pendingIdle !== null;
+  const routing = pendingIdle ? textRouting(pendingIdle) : "none";
+  // Where Jev chooses, the placeholder cannot promise one event.
+  const idlePlaceholder =
+    routing === "direct" && pendingIdle?.textEvent
+      ? `Message becomes ${pendingIdle.textEvent.type} (${pendingIdle.textEvent.field})`
+      : routing === "interpret"
+        ? "Type a reply, or pick an action above…"
+        : null;
 
   /** Appends a turn and returns its id + the epoch it belongs to. */
   const pushTurn = (
@@ -373,9 +400,12 @@ export function DemoShell() {
       .then(
         (result) => {
           settle(epoch, id, result);
-          const textEvent = result?.status === "idle" ? result.idle?.textEvent : null;
-          if (followUpText && textEvent && store.getSnapshot().context.epoch === epoch) {
-            sendEvent({ type: textEvent.type, [textEvent.field]: followUpText });
+          if (
+            followUpText &&
+            result?.status === "idle" &&
+            store.getSnapshot().context.epoch === epoch
+          ) {
+            sendIdleText(followUpText, result.idle ?? null);
           }
         },
         (error) => fail(epoch, id, error),
@@ -406,26 +436,18 @@ export function DemoShell() {
       );
   };
 
-  /** Delivers a typed event to the idle machine (either run path). */
-  const sendEvent = (event: { type: string; [key: string]: unknown }) => {
-    const { idleSnapshot, pendingIdle: idle } = store.getSnapshot().context;
+  /**
+   * Resumes the idle machine (either run path) with a typed event, a host
+   * timer firing, or free text for the server to interpret, as one new turn.
+   */
+  const resume = (
+    event: { type: string; [key: string]: unknown } | { kind: "interpret"; text: string },
+    turn: { label: string; role: Turn["role"]; eventType?: string },
+  ) => {
+    const { idleSnapshot } = store.getSnapshot().context;
     if (!idleSnapshot || loading) return;
-    const descriptor = idle?.events.find((candidate) => candidate.type === event.type);
-    const { type: _type, ...payload } = event;
-    // A message typed into the composer reads as what was said, not as
-    // `Send · {"text":"…"}`: the transition log below names the event.
-    const textField = idle?.textEvent?.type === event.type ? idle.textEvent.field : null;
-    const spokenText =
-      textField && Object.keys(payload).length === 1 && typeof payload[textField] === "string"
-        ? payload[textField]
-        : null;
-    const payloadNote = Object.keys(payload).length
-      ? ` · ${JSON.stringify(payload).slice(0, 60)}`
-      : "";
-    const label =
-      spokenText ?? `${descriptor?.label ?? humanizeEventType(event.type)}${payloadNote}`;
     const signal = beginRun();
-    const { id, epoch } = pushTurn(label, spokenText ? "user" : "action", "loading", event.type);
+    const { id, epoch } = pushTurn(turn.label, turn.role, "loading", turn.eventType);
     const deliver: Promise<AnyRunResult> = isScenario
       ? resumeScenario({
           data: {
@@ -452,68 +474,77 @@ export function DemoShell() {
     );
   };
 
-  /** Free chat text: start a run, map to the idle text event, or mark ignored. */
+  /** Delivers a typed event to the idle machine (either run path). */
+  const sendEvent = (event: { type: string; [key: string]: unknown }) => {
+    const idle = store.getSnapshot().context.pendingIdle;
+    const descriptor = idle?.events.find((candidate) => candidate.type === event.type);
+    const { type: _type, ...payload } = event;
+    // A message typed into the composer reads as what was said, not as
+    // `Send · {"text":"…"}`: the transition log below names the event.
+    const textField = idle?.textEvent?.type === event.type ? idle.textEvent.field : null;
+    const spokenText =
+      textField && Object.keys(payload).length === 1 && typeof payload[textField] === "string"
+        ? payload[textField]
+        : null;
+    const payloadNote = Object.keys(payload).length
+      ? ` · ${JSON.stringify(payload).slice(0, 60)}`
+      : "";
+    const label =
+      spokenText ?? `${descriptor?.label ?? humanizeEventType(event.type)}${payloadNote}`;
+    resume(event, { label, role: spokenText ? "user" : "action", eventType: event.type });
+  };
+
+  // ─── host-owned timers ───
+  //
+  // A run waiting on a deadline settles idle with the timers it armed; the
+  // browser is their scheduler. Each fires by resuming with the timer event,
+  // unless the person acts first: sending anything clears `pendingIdle` (and
+  // with it these timeouts), and the next idle result reports whatever is
+  // still pending. Reset, selection changes and unmounting clear them too.
+  const resumeRef = useRef(resume);
+  resumeRef.current = resume;
+  useEffect(() => {
+    // Past `setTimeout`'s 32-bit range a delay would fire at once; a timer
+    // that far out is left to fire never rather than immediately.
+    const timers = (pendingIdle?.timers ?? []).filter((timer) => timer.delay <= 2 ** 31 - 1);
+    const handles = timers.map((timer) =>
+      window.setTimeout(
+        () =>
+          resumeRef.current(
+            { type: "xstate.timer", id: timer.id },
+            { label: "Timer fired", role: "action", eventType: "xstate.timer" },
+          ),
+        timer.delay,
+      ),
+    );
+    return () => handles.forEach((handle) => window.clearTimeout(handle));
+  }, [pendingIdle]);
+
+  /**
+   * Free text for the idle machine. When its text event is the only thing
+   * text can mean, it is sent as that; when several readings are on offer
+   * (buttons, the text event among them), the server reads it (Jev) as one of
+   * them, or says it couldn't. False when nothing can carry text.
+   */
+  const sendIdleText = (text: string, idle: ChatIdle | null): boolean => {
+    const routing = idle ? textRouting(idle) : "none";
+    if (routing === "direct" && idle?.textEvent) {
+      sendEvent({ type: idle.textEvent.type, [idle.textEvent.field]: text });
+      return true;
+    }
+    if (routing === "interpret") {
+      resume({ kind: "interpret", text }, { label: text, role: "user" });
+      return true;
+    }
+    return false;
+  };
+
+  /** Free chat text: start a run, send or interpret it for the idle machine, or mark ignored. */
   const submit = (raw: string) => {
     const text = raw.trim();
     if (!text || loading) return;
     const { idleSnapshot } = store.getSnapshot().context;
-
-    // Approval scenario while idle → model-interpreted free-text review.
-    if (interpretMode && idleSnapshot) {
-      const signal = beginRun();
-      const { id, epoch } = pushTurn(text, "user", "loading");
-      void resumeScenario({
-        data: {
-          scenarioId: scenario.id,
-          snapshot: idleSnapshot as never,
-          event: { kind: "interpret", text },
-          room: inspection?.roomId,
-        },
-        signal,
-      })
-        .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
-        .then(
-          (result) => settle(epoch, id, result),
-          (error) => fail(epoch, id, error),
-        );
-      return;
-    }
-
-    // An example whose text event was only inferred, with other actions on
-    // offer too, lets Jev choose among all of them (see below).
-    const inferredAmongOthers =
-      !isScenario &&
-      pendingIdle?.textEventInferred === true &&
-      textCandidates(pendingIdle.events).length > 1;
-
-    // Idle with a text-mapped event → typed event carrying the message.
-    if (pendingIdle?.textEvent && idleSnapshot && !inferredAmongOthers) {
-      sendEvent({ type: pendingIdle.textEvent.type, [pendingIdle.textEvent.field]: text });
-      return;
-    }
-
-    // Idle with no text event, but buttons the text could name → the server
-    // reads it (Jev) as one of the offered events, or says it couldn't.
-    if (!isScenario && pendingIdle && idleSnapshot && textCandidates(pendingIdle.events).length) {
-      const signal = beginRun();
-      const { id, epoch } = pushTurn(text, "user", "loading");
-      void resumeExample({
-        data: {
-          id: selection.type === "example" ? selection.id : "",
-          exportName: activeMachine?.exportName ?? "",
-          snapshot: idleSnapshot as never,
-          event: { kind: "interpret", text },
-          room: inspection?.roomId,
-        },
-        signal,
-      })
-        .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
-        .then(
-          (result) => settle(epoch, id, result),
-          (error) => fail(epoch, id, error),
-        );
-      return;
-    }
+    if (idleSnapshot && sendIdleText(text, pendingIdle)) return;
 
     // Not started → the prompt starts the run.
     if (!started) {
@@ -556,9 +587,7 @@ export function DemoShell() {
         visible: true,
         placeholder: interpretMode
           ? "Say “looks good” or “that’s no good”…"
-          : pendingIdle?.textEvent
-            ? `Message becomes ${pendingIdle.textEvent.type} (${pendingIdle.textEvent.field})`
-            : scenario.placeholder,
+          : (idlePlaceholder ?? scenario.placeholder),
         submitLabel: interpretMode ? "Interpret review" : started ? "Send" : scenario.startLabel,
       };
     }
@@ -578,12 +607,7 @@ export function DemoShell() {
     return {
       visible: true,
       placeholder:
-        pendingIdle?.textEvent &&
-        !(pendingIdle.textEventInferred && textCandidates(pendingIdle.events).length > 1)
-          ? `Message becomes ${pendingIdle.textEvent.type} (${pendingIdle.textEvent.field})`
-          : started
-            ? "Send a message…"
-            : `${activeMachine.promptField}…`,
+        idlePlaceholder ?? (started ? "Send a message…" : `${activeMachine.promptField}…`),
       submitLabel: started ? "Send" : "Start run",
     };
   })();

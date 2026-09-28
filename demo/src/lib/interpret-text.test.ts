@@ -1,23 +1,28 @@
 /**
- * Free chat text in a state that declares no `textEvent`: Jev reads it as one
- * of the offered events, and the run resumes with that typed event — or, when
- * Jev is unsure, nothing is delivered and the reply names what is available.
- * Driven through the demo's real resume path with the provider layer mocked;
- * the judge picks whichever offered reading mentions `control.pick`.
+ * Free chat text where more than one reading is on offer: Jev reads it as one
+ * of the offered events (the state's text event among them), and the run
+ * resumes with that typed event — or, when Jev is unsure, nothing is
+ * delivered and the reply names what is available. Driven through the demo's
+ * real resume paths with the provider layer mocked; the judge picks whichever
+ * offered reading mentions `control.pick`.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Snapshot } from "xstate";
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
 import { resumeMachineChat, startMachineChat, type MachineChatResult } from "./machine-chat.server";
-import { TEXT_EVENT_CONFIDENCE } from "./interpret-text.server";
-import { textCandidates, type AcceptedEvent } from "./machine-ui";
+import { interpretIdleText, TEXT_EVENT_CONFIDENCE } from "./interpret-text.server";
+import { resumeScenario, startScenarioRun } from "./agent-runner";
+import { textCandidates, textRouting, type AcceptedEvent, type ChatIdle } from "./machine-ui";
 
 const control = vi.hoisted(() => ({
   /** Substring of the criterion the judge picks ("unclear" when none matches). */
   pick: "",
   confidence: 0.9,
   criteria: [] as Record<string, string>[],
+  states: [] as Record<string, unknown>[],
+  /** Set to make the judge throw, like an outage or a bad key. */
+  fail: null as Error | null,
 }));
 
 vi.mock("@ai-sdk/openai", async () => {
@@ -35,7 +40,15 @@ vi.mock("@ai-sdk/typesafe-ai", () => {
     provider: "test-judge",
     modelId: "test-judge",
     supportedQuestionTypes: ["choice"],
-    doEvaluate: async ({ questions }: { questions: Record<string, { criteria: object }> }) => {
+    doEvaluate: async ({
+      questions,
+      state,
+    }: {
+      questions: Record<string, { criteria: object }>;
+      state: Record<string, unknown>;
+    }) => {
+      if (control.fail) throw control.fail;
+      control.states.push(state);
       const answers: Record<string, unknown> = {};
       const confidence: Record<string, number> = {};
       for (const [id, question] of Object.entries(questions)) {
@@ -80,6 +93,8 @@ beforeEach(() => {
   control.pick = "";
   control.confidence = 0.9;
   control.criteria = [];
+  control.states = [];
+  control.fail = null;
 });
 
 /** A turn that waits on buttons only: no `textEvent`, none inferable. */
@@ -179,9 +194,9 @@ describe("free text → an offered event (Jev)", () => {
     // The judge saw the human labels, one reading per enum value, and "unclear".
     const [criteria] = control.criteria;
     const readings = Object.values(criteria);
-    expect(readings.some((text) => text.includes('"Roll again" (event ROLL)'))).toBe(true);
-    expect(readings.filter((text) => text.includes("(event ACCUSE)"))).toHaveLength(2);
-    expect(readings.some((text) => text.includes("TRADE"))).toBe(false);
+    expect(readings.some((text) => text.includes('"Roll again"'))).toBe(true);
+    expect(readings.filter((text) => text.includes('"Accuse"'))).toHaveLength(2);
+    expect(readings.some((text) => text.includes("Trade"))).toBe(false);
     expect(criteria.unclear).toBeDefined();
   });
 
@@ -192,7 +207,7 @@ describe("free text → an offered event (Jev)", () => {
   });
 
   test("a single string field takes the whole message", async () => {
-    control.pick = "(event RENAME)";
+    control.pick = '"Rename"';
     const { result } = await interpret("Call me Captain");
     expect(deliveredEvent(result)).toEqual({ type: "RENAME", name: "Call me Captain" });
   });
@@ -216,5 +231,213 @@ describe("free text → an offered event (Jev)", () => {
     const { result } = await interpret("what's for lunch?");
     expect(result.status).toBe("idle");
     expect(result.trace).toEqual([]);
+  });
+
+  test("a failed judgment reads as unclear to the person and is logged", async () => {
+    control.fail = new Error("401 bad key");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { result } = await interpret("bank");
+      expect(result.status).toBe("idle");
+      expect(result.trace).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Jev judgment failed"),
+        expect.objectContaining({ message: expect.stringContaining("401 bad key") }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+const event = (
+  type: string,
+  label: string,
+  jsonSchema: AcceptedEvent["jsonSchema"] = null,
+): AcceptedEvent => ({
+  type,
+  label,
+  style: "default",
+  jsonSchema,
+  needsPayload: jsonSchema !== null,
+});
+const oneField = (name: string, schema: Record<string, unknown>) =>
+  ({
+    type: "object",
+    properties: { [name]: schema },
+    required: [name],
+  }) as AcceptedEvent["jsonSchema"];
+
+describe("numeric choices", () => {
+  test("a small bounded integer field, or an enum of numbers, is one candidate per value", () => {
+    const seats = textCandidates([
+      event(
+        "ACCUSE",
+        "Accuse this seat",
+        oneField("seat", { type: "integer", minimum: 0, maximum: 3 }),
+      ),
+    ]);
+    expect(seats.map((candidate) => candidate.event)).toEqual(
+      [0, 1, 2, 3].map((seat) => ({ type: "ACCUSE", seat })),
+    );
+    expect(seats[2]!.description).toContain("seat 2");
+    const rated = textCandidates([
+      event("RATE", "Rate", oneField("stars", { type: "number", enum: [1, 3, 5] })),
+    ]);
+    expect(rated.map((candidate) => candidate.event)).toEqual(
+      [1, 3, 5].map((stars) => ({ type: "RATE", stars })),
+    );
+  });
+
+  test("an open-ended or wide number field offers no candidates", () => {
+    const open = (schema: Record<string, unknown>) =>
+      textCandidates([event("SET", "Set", oneField("value", schema))]);
+    expect(open({ type: "integer" })).toEqual([]);
+    expect(open({ type: "integer", minimum: 0 })).toEqual([]);
+    expect(open({ type: "integer", minimum: 0, maximum: 12 })).toEqual([]);
+    // Zod's `int()` alone bounds to the safe-integer range.
+    expect(
+      open({ type: "integer", minimum: -9007199254740991, maximum: 9007199254740991 }),
+    ).toEqual([]);
+    expect(open({ type: "integer", minimum: 1, maximum: 12 })).toHaveLength(12);
+  });
+
+  test("a name maps to its seat: the judge reads the prompt that says which number is whom", async () => {
+    const idle: ChatIdle = {
+      prompt: "Who is the chameleon? (0=Ada, 1=Bruno, 2=Cleo, 3=Dev)",
+      events: [
+        event(
+          "ACCUSE",
+          "Accuse this seat",
+          oneField("seat", { type: "integer", minimum: 0, maximum: 3 }),
+        ),
+      ],
+      textEvent: null,
+      component: null,
+    };
+    expect(textRouting(idle)).toBe("interpret");
+    control.pick = "seat 2";
+    expect(await interpretIdleText("I accuse Cleo", idle)).toEqual({ type: "ACCUSE", seat: 2 });
+    expect(control.states[0]).toMatchObject({
+      reply: "I accuse Cleo",
+      appSaid: expect.stringContaining("2=Cleo"),
+    });
+  });
+});
+
+describe("a text event among other actions", () => {
+  const review: ChatIdle = {
+    prompt: "Approve the draft to publish it, or type what you want changed.",
+    events: [
+      event("APPROVE", "Approve draft"),
+      event("REJECT", "Request changes", oneField("text", { type: "string" })),
+    ],
+    textEvent: { type: "REJECT", field: "text" },
+    component: null,
+  };
+
+  test("routing: direct only when the text event is the one reading", () => {
+    expect(textRouting(review)).toBe("interpret");
+    expect(textRouting({ ...review, textEvent: null })).toBe("interpret");
+    const chat: ChatIdle = {
+      ...review,
+      events: [
+        event("REJECT", "Request changes", oneField("text", { type: "string" })),
+        event("TRADE", "Trade", {
+          type: "object",
+          properties: { give: { type: "string" }, take: { type: "string" } },
+        }),
+      ],
+    };
+    expect(textRouting(chat)).toBe("direct");
+    expect(textRouting({ ...chat, textEvent: null, events: [chat.events[1]!] })).toBe("none");
+  });
+
+  test('"approve it" chooses APPROVE, not the text event', async () => {
+    control.pick = '"Approve draft"';
+    expect(await interpretIdleText("approve it", review)).toEqual({ type: "APPROVE" });
+    // The text event is a catch-all reading, and it replaces "unclear".
+    const [criteria] = control.criteria;
+    expect(criteria.unclear).toBeUndefined();
+    expect(Object.values(criteria).some((text) => text.includes("message of its own"))).toBe(true);
+  });
+
+  test("the text event carries the whole text, even when Jev is unsure", async () => {
+    control.pick = "message of its own";
+    control.confidence = TEXT_EVENT_CONFIDENCE - 0.2;
+    expect(await interpretIdleText("make it shorter", review)).toEqual({
+      type: "REJECT",
+      text: "make it shorter",
+    });
+  });
+
+  test("an unsure pick of another action delivers nothing rather than the text event", async () => {
+    control.pick = '"Approve draft"';
+    control.confidence = TEXT_EVENT_CONFIDENCE - 0.1;
+    expect(await interpretIdleText("looks good?", review)).toBeNull();
+  });
+});
+
+describe("scenario runs interpret free text too", () => {
+  // A drafter that always produces a complete draft, so the run waits in
+  // `reviewing` on SEND / ADD_SUBJECT / REQUEST_CHANGES (the text event).
+  const reviewing = async () => {
+    const started = await startScenarioRun(
+      "email-drafter-v2",
+      "Email alex@example.com",
+      undefined,
+      {
+        generateText: async () => ({
+          result: {
+            to: "alex@example.com",
+            subject: "Coffee",
+            body: "Coffee on Thursday?",
+            openQuestions: [],
+          },
+        }),
+      },
+    );
+    expect(started.status).toBe("idle");
+    expect(textRouting(started.idle!)).toBe("interpret");
+    return started.idle!.snapshot as unknown as Snapshot<unknown>;
+  };
+  const delivered = (result: { trace: MachineChatResult["trace"] }) =>
+    result.trace.find(
+      (entry) =>
+        entry.kind === "transition" &&
+        entry.event.type !== "@xstate.init" &&
+        entry.event.type !== "xstate.init",
+    )?.event;
+
+  test('"send it" sends', async () => {
+    control.pick = '"Send email"';
+    const result = await resumeScenario("email-drafter-v2", await reviewing(), {
+      kind: "interpret",
+      text: "send it",
+    });
+    expect(delivered(result)).toEqual({ type: "SEND" });
+  });
+
+  test('"make it shorter" requests changes with the whole text', async () => {
+    control.pick = "message of its own";
+    const result = await resumeScenario("email-drafter-v2", await reviewing(), {
+      kind: "interpret",
+      text: "make it shorter",
+    });
+    expect(delivered(result)).toEqual({ type: "REQUEST_CHANGES", text: "make it shorter" });
+  });
+
+  test("an unclear reading re-settles idle with the available actions", async () => {
+    control.pick = '"Send email"';
+    control.confidence = TEXT_EVENT_CONFIDENCE - 0.1;
+    const snapshot = await reviewing();
+    const result = await resumeScenario("email-drafter-v2", snapshot, {
+      kind: "interpret",
+      text: "hmm",
+    });
+    expect(result.status).toBe("idle");
+    expect(result.trace).toEqual([]);
+    expect(result.idle?.snapshot).toEqual(snapshot);
+    expect(result.response).toContain("“Send email”");
   });
 });

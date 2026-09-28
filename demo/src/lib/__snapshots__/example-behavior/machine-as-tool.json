@@ -8,7 +8,7 @@
         "transition xstate.done.actor -> \"executing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "- Refunded: true"
+      "response": "- Refunded: yes"
     }
   ],
   "Large refund ($780) — over the approval limit": [
@@ -20,7 +20,7 @@
         "transition xstate.done.actor -> \"executing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "- Refunded: true"
+      "response": "- Refunded: yes"
     }
   ]
 }

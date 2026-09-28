@@ -24,7 +24,8 @@
  *          DENY: { label: "Deny", style: "danger" },
  *        },
  *        // Free chat text becomes this event (payload from its single
- *        // string field). Without it, out-of-place text is not sent.
+ *        // string field) — directly when it is the only thing text can
+ *        // mean, else as one of the readings Jev chooses among.
  *        textEvent: "REJECT",
  *        // Optional custom composer renderer for this state ("rating",
  *        // "cards"). Unknown names fall back to the schema form.
@@ -74,6 +75,9 @@ export type AcceptedEvent = {
   needsPayload: boolean;
 };
 
+/** One pending host-owned timer: the id to deliver back and its delay in ms. */
+export type PendingTimer = { id: string; delay: number };
+
 /** What an idle machine is waiting on — enough for a generic chat UI. */
 export type ChatIdle = {
   /** Human prompt from `meta.interaction.label`, if declared. */
@@ -82,15 +86,19 @@ export type ChatIdle = {
   /**
    * Event type that free chat text maps to while idle (its single string
    * field carries the text), from `meta.interaction.textEvent` or inferred
-   * when exactly one accepted event takes exactly one string field.
+   * when exactly one accepted event takes exactly one string field. When it
+   * is the only reading of free text (see `textCandidates`), text is sent as
+   * it directly; when other actions are on offer too, Jev chooses among all of
+   * them, so "looks good" is not sent as feedback.
    */
   textEvent: { type: string; field: string } | null;
   /**
-   * The text event was inferred (the one single-string-field event), not
-   * declared. Where other actions are on offer too, an example run lets Jev
-   * choose among all of them instead, so "looks good" is not sent as feedback.
+   * Host-owned `after` timers the idle machine is waiting on (a deadline),
+   * with their delay from when the run settled. The client fires each one by
+   * resuming with `{ type: "xstate.timer", id }` unless something else is sent
+   * first. Absent when none is pending.
    */
-  textEventInferred?: boolean;
+  timers?: PendingTimer[];
   /**
    * Optional custom composer renderer name from
    * `meta.interaction.component` (e.g. "rating", "cards"). Null when the
@@ -205,9 +213,9 @@ export function singleStringField(schema: JsonObject | null): string | null {
 }
 
 /**
- * One reading of free chat text as an offered event, for a state that
- * declares no `textEvent`: the server asks Jev which candidate the text
- * means. `fill` names the string field that carries the text itself.
+ * One reading of free chat text as an offered event: the server asks Jev
+ * which candidate the text means. `fill` names the string field that carries
+ * the text itself.
  */
 export type TextCandidate = {
   event: { type: string } & JsonObject;
@@ -216,26 +224,73 @@ export type TextCandidate = {
   fill: string | null;
 };
 
+/** Most values a numeric field may offer before free text stops expanding it. */
+const MAX_NUMERIC_CHOICES = 12;
+
+/**
+ * The values a numeric payload field offers as separate choices: an enum of
+ * numbers, or an integer range with both bounds (a seat 0–3, a rating 1–5).
+ * Null when the field is open-ended or offers too many values to list.
+ */
+function numericChoices(schema: JsonObject | undefined): number[] | null {
+  if (!schema) return null;
+  const values = schema.enum;
+  if (Array.isArray(values)) {
+    return values.length <= MAX_NUMERIC_CHOICES &&
+      values.every((value) => typeof value === "number")
+      ? (values as number[])
+      : null;
+  }
+  if (schema.type !== "integer" && schema.type !== "number") return null;
+  const low =
+    typeof schema.minimum === "number"
+      ? Math.ceil(schema.minimum)
+      : typeof schema.exclusiveMinimum === "number"
+        ? Math.floor(schema.exclusiveMinimum) + 1
+        : null;
+  const high =
+    typeof schema.maximum === "number"
+      ? Math.floor(schema.maximum)
+      : typeof schema.exclusiveMaximum === "number"
+        ? Math.ceil(schema.exclusiveMaximum) - 1
+        : null;
+  if (low === null || high === null || high < low || high - low + 1 > MAX_NUMERIC_CHOICES) {
+    return null;
+  }
+  return Array.from({ length: high - low + 1 }, (_, index) => low + index);
+}
+
 /**
  * The ways free text can map onto the accepted events without a form:
  * a payload-free event is one candidate; an event whose payload is one enum
- * field is one candidate per value (ACCUSE with player = Bruno); an event
- * whose payload is one string field takes the whole text. Events that need
- * more than that are left to their buttons.
+ * field, or one small bounded number field, is one candidate per value
+ * (ACCUSE with seat 2); an event whose payload is one string field takes the
+ * whole text. Events that need more than that are left to their buttons.
  */
 export function textCandidates(events: AcceptedEvent[]): TextCandidate[] {
   return events.flatMap((event): TextCandidate[] => {
-    const action = `"${event.label}" (event ${event.type})`;
+    const action = `"${event.label}"`;
     if (!event.needsPayload) {
-      return [{ event: { type: event.type }, description: `Asks for ${action}.`, fill: null }];
+      return [{ event: { type: event.type }, description: `Chooses ${action}.`, fill: null }];
     }
     const fields = event.jsonSchema ? schemaFields(event.jsonSchema) : null;
     if (!fields || fields.length !== 1) return [];
     const [field] = fields;
+    const name = field.label.toLowerCase();
     if (field.kind.type === "enum") {
       return field.kind.options.map((option) => ({
         event: { type: event.type, [field.name]: option },
-        description: `Asks for ${action} with ${field.label.toLowerCase()} ${option}.`,
+        description: `Chooses ${action} with ${name} ${option}.`,
+        fill: null,
+      }));
+    }
+    if (field.kind.type === "number" || field.kind.type === "json") {
+      const property = (event.jsonSchema?.properties as Record<string, JsonObject> | undefined)?.[
+        field.name
+      ];
+      return (numericChoices(property) ?? []).map((value) => ({
+        event: { type: event.type, [field.name]: value },
+        description: `Chooses ${action} with ${name} ${value}.`,
         fill: null,
       }));
     }
@@ -243,11 +298,22 @@ export function textCandidates(events: AcceptedEvent[]): TextCandidate[] {
       return [
         {
           event: { type: event.type },
-          description: `Gives the ${field.label.toLowerCase()} for ${action}.`,
+          description: `Is the ${name} to send with ${action}: the reply's own words.`,
           fill: field.name,
         },
       ];
     }
     return [];
   });
+}
+
+/**
+ * How free chat text reaches an idle machine: `direct` sends it as the text
+ * event (the only thing text can mean here), `interpret` asks Jev which of
+ * several readings it means, and `none` means no event can carry text.
+ */
+export function textRouting(idle: ChatIdle): "direct" | "interpret" | "none" {
+  const candidates = textCandidates(idle.events).length;
+  if (idle.textEvent && candidates <= 1) return "direct";
+  return candidates > 0 ? "interpret" : "none";
 }

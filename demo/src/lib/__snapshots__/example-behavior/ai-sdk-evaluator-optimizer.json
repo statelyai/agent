@@ -10,7 +10,7 @@
         "transition xstate.done.actor -> \"done\"",
         "emitted EVALUATED -> \"done\""
       ],
-      "response": "**Final translation (Japanese)**\n\nMock reply to: Translate this text to Japanese:  \nThe early bird catches the \n\n**First draft**\n\nMock reply to: Translate this text to Japanese:  \nThe early bird catches the \n\n**Reviewer**\n\nScore 10/10 — reads naturally\n\n- Quality score: 10\n- Iterations: 1\n\n**Detail**\n\n**First draft**\n\nMock reply to: Translate this text to Japanese:  \nThe early bird catches the\n\n**Translation**\n\nMock reply to: Translate this text to Japanese:  \nThe early bird catches the\n\n**Evaluation**\n\n**Quality score**: 10  \n**Preserves tone**: true  \n**Preserves nuance**: true  \n**Culturally accurate**: true\n\n**Specific issues**\n\n```json\n[]\n```\n\n**Improvement suggestions**\n\n```json\n[]\n```"
+      "response": "**Final translation (Japanese)**\n\nMock reply to: Translate this text to Japanese:  \nThe early bird catches the \n\n**First draft**\n\nMock reply to: Translate this text to Japanese:  \nThe early bird catches the \n\n**Reviewer**\n\nScore 10/10 — reads naturally\n\n- Quality score: 10\n- Iterations: 1\n\n**Detail**\n\n**First draft**\n\nMock reply to: Translate this text to Japanese:  \nThe early bird catches the\n\n**Evaluation**\n\n**Quality score**: 10  \n**Preserves tone**: yes  \n**Preserves nuance**: yes  \n**Culturally accurate**: yes\n\n**Specific issues**\n\n```json\n[]\n```\n\n**Improvement suggestions**\n\n```json\n[]\n```"
     }
   ],
   "Idiom into French": [
@@ -24,7 +24,7 @@
         "transition xstate.done.actor -> \"done\"",
         "emitted EVALUATED -> \"done\""
       ],
-      "response": "**Final translation (French)**\n\nMock reply to: Translate this text to French:  \nBreak a leg out there tonight\n\n**First draft**\n\nMock reply to: Translate this text to French:  \nBreak a leg out there tonight\n\n**Reviewer**\n\nScore 10/10 — reads naturally\n\n- Quality score: 10\n- Iterations: 1\n\n**Detail**\n\n**First draft**\n\nMock reply to: Translate this text to French:  \nBreak a leg out there tonight\n\n**Translation**\n\nMock reply to: Translate this text to French:  \nBreak a leg out there tonight\n\n**Evaluation**\n\n**Quality score**: 10  \n**Preserves tone**: true  \n**Preserves nuance**: true  \n**Culturally accurate**: true\n\n**Specific issues**\n\n```json\n[]\n```\n\n**Improvement suggestions**\n\n```json\n[]\n```"
+      "response": "**Final translation (French)**\n\nMock reply to: Translate this text to French:  \nBreak a leg out there tonight\n\n**First draft**\n\nMock reply to: Translate this text to French:  \nBreak a leg out there tonight\n\n**Reviewer**\n\nScore 10/10 — reads naturally\n\n- Quality score: 10\n- Iterations: 1\n\n**Detail**\n\n**First draft**\n\nMock reply to: Translate this text to French:  \nBreak a leg out there tonight\n\n**Evaluation**\n\n**Quality score**: 10  \n**Preserves tone**: yes  \n**Preserves nuance**: yes  \n**Culturally accurate**: yes\n\n**Specific issues**\n\n```json\n[]\n```\n\n**Improvement suggestions**\n\n```json\n[]\n```"
     }
   ],
   "Slogan into Spanish": [
@@ -38,7 +38,7 @@
         "transition xstate.done.actor -> \"done\"",
         "emitted EVALUATED -> \"done\""
       ],
-      "response": "**Final translation (Spanish)**\n\nMock reply to: Translate this text to Spanish:  \nShip it before the coffee ge\n\n**First draft**\n\nMock reply to: Translate this text to Spanish:  \nShip it before the coffee ge\n\n**Reviewer**\n\nScore 10/10 — reads naturally\n\n- Quality score: 10\n- Iterations: 1\n\n**Detail**\n\n**First draft**\n\nMock reply to: Translate this text to Spanish:  \nShip it before the coffee ge\n\n**Translation**\n\nMock reply to: Translate this text to Spanish:  \nShip it before the coffee ge\n\n**Evaluation**\n\n**Quality score**: 10  \n**Preserves tone**: true  \n**Preserves nuance**: true  \n**Culturally accurate**: true\n\n**Specific issues**\n\n```json\n[]\n```\n\n**Improvement suggestions**\n\n```json\n[]\n```"
+      "response": "**Final translation (Spanish)**\n\nMock reply to: Translate this text to Spanish:  \nShip it before the coffee ge\n\n**First draft**\n\nMock reply to: Translate this text to Spanish:  \nShip it before the coffee ge\n\n**Reviewer**\n\nScore 10/10 — reads naturally\n\n- Quality score: 10\n- Iterations: 1\n\n**Detail**\n\n**First draft**\n\nMock reply to: Translate this text to Spanish:  \nShip it before the coffee ge\n\n**Evaluation**\n\n**Quality score**: 10  \n**Preserves tone**: yes  \n**Preserves nuance**: yes  \n**Culturally accurate**: yes\n\n**Specific issues**\n\n```json\n[]\n```\n\n**Improvement suggestions**\n\n```json\n[]\n```"
     }
   ]
 }

@@ -47,7 +47,7 @@
         "transition KEEP -> \"travelTurn\"",
         "transition xstate.done.actor -> \"waiting\""
       ],
-      "response": "The travel concierge answered. Ask a follow-up, or end here.",
+      "response": "",
       "idle": {
         "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
         "events": [
@@ -67,7 +67,7 @@
         "transition KEEP -> \"travelTurn\"",
         "transition xstate.done.actor -> \"budgetSpent\""
       ],
-      "response": "The travel concierge answered. That was the last turn; end here.",
+      "response": "",
       "idle": {
         "prompt": "The travel concierge answered. That was the last turn; end here.",
         "events": [
@@ -134,7 +134,7 @@
         "transition KEEP -> \"travelTurn\"",
         "transition xstate.done.actor -> \"waiting\""
       ],
-      "response": "The travel concierge answered. Ask a follow-up, or end here.",
+      "response": "",
       "idle": {
         "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
         "events": [
@@ -154,7 +154,7 @@
         "transition KEEP -> \"travelTurn\"",
         "transition xstate.done.actor -> \"budgetSpent\""
       ],
-      "response": "The travel concierge answered. That was the last turn; end here.",
+      "response": "",
       "idle": {
         "prompt": "The travel concierge answered. That was the last turn; end here.",
         "events": [

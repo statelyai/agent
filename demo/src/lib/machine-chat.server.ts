@@ -20,6 +20,7 @@ import {
   type AgentRequest,
   type AgentRequestExecutors,
   type AgentRunResult,
+  type AgentTimerScheduler,
 } from "@statelyai/agent";
 import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
 import { z } from "zod";
@@ -36,6 +37,7 @@ import {
   type ChatIdle,
   type Json,
   type JsonObject,
+  type PendingTimer,
   type RequiredKey,
 } from "./machine-ui";
 
@@ -409,10 +411,18 @@ export function jsonSchemaOf(schema: unknown): JsonObject | null {
 
 // ─── interaction hints (meta.interaction convention) ───
 
+type InteractionEventHint = {
+  label?: string;
+  style?: string;
+  /** Fixed payload fields merged into the event when this choice is sent. */
+  event?: Record<string, unknown>;
+};
+
 type InteractionHints = {
   /** A string with `{key}` placeholders, or a function of the context (see `interactionMetaSchema`). */
   label?: string | ((args: { context: unknown }) => string);
-  events?: Record<string, { label?: string; style?: string }>;
+  /** A bare label string, or a descriptor (see `AgentInteractionEventMeta`). */
+  events?: Record<string, string | InteractionEventHint>;
   textEvent?: string;
   /** Custom composer renderer for this state ("rating", "cards", …). */
   component?: string;
@@ -421,6 +431,41 @@ type InteractionHints = {
 function interactionHints(snapshot: AnyMachineSnapshot): InteractionHints {
   const meta = getStateMeta(snapshot) as { interaction?: InteractionHints };
   return meta.interaction && typeof meta.interaction === "object" ? meta.interaction : {};
+}
+
+function eventHint(hints: InteractionHints, type: string): InteractionEventHint {
+  const hint = hints.events?.[type];
+  return typeof hint === "string" ? { label: hint } : (hint ?? {});
+}
+
+/** The fixed payload fields a state's `meta.interaction.events` entry declares for `type`. */
+function fixedFields(hints: InteractionHints, type: string): Record<string, unknown> {
+  const fixed = eventHint(hints, type).event;
+  return fixed && typeof fixed === "object" && !Array.isArray(fixed) ? fixed : {};
+}
+
+/**
+ * The payload schema minus the fields the interaction fixes, so a choice whose
+ * whole payload is fixed (`APPROVE { requestId }` with the id declared in
+ * meta) renders as a plain button instead of a form.
+ */
+function withoutFields(
+  schema: JsonObject | null,
+  fixed: Record<string, unknown>,
+): JsonObject | null {
+  const names = Object.keys(fixed);
+  if (!schema || !names.length || !schema.properties || typeof schema.properties !== "object") {
+    return schema;
+  }
+  const properties = Object.fromEntries(
+    Object.entries(schema.properties as Record<string, Json>).filter(
+      ([name]) => !names.includes(name),
+    ),
+  );
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((name) => typeof name === "string" && !names.includes(name))
+    : undefined;
+  return { ...schema, properties, ...(required ? { required } : {}) };
 }
 
 /**
@@ -473,8 +518,11 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
     events: schemas.events as never,
   })
     .map((descriptor) => {
-      const jsonSchema = jsonSchemaOf(descriptor.inputSchema);
-      const hint = hints.events?.[descriptor.type] ?? {};
+      const jsonSchema = withoutFields(
+        jsonSchemaOf(descriptor.inputSchema),
+        fixedFields(hints, descriptor.type),
+      );
+      const hint = eventHint(hints, descriptor.type);
       return {
         type: descriptor.type,
         label: hint.label
@@ -490,7 +538,11 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
     // now (a guard, or a function transition returning nothing) gets no
     // button — a button that does nothing is worse than a missing one. An
     // event that needs a payload cannot be judged yet, so it stays.
-    .filter((event) => event.needsPayload || snapshot.can({ type: event.type } as never));
+    .filter(
+      (event) =>
+        event.needsPayload ||
+        snapshot.can({ ...fixedFields(hints, event.type), type: event.type } as never),
+    );
 
   // Free text maps to the declared textEvent, or — when unambiguous — the one
   // accepted event whose payload is exactly one string field.
@@ -514,7 +566,6 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
     prompt: rawPrompt ? resolveLabel(rawPrompt, snapshot.context) : null,
     events,
     textEvent: chosen && field ? { type: chosen.type, field } : null,
-    ...(chosen && field && !declared ? { textEventInferred: true } : {}),
     component: typeof hints.component === "string" && hints.component ? hints.component : null,
   };
 }
@@ -567,6 +618,52 @@ export type MachineChatResult = {
   idle?: ChatIdle & { snapshot: Json };
 };
 
+// ─── host-owned timers ───
+
+/**
+ * The demo host owns its runs' `after` timers, the way a durable host would
+ * (see `AgentTimerScheduler`): a run waiting on a deadline settles idle at
+ * once instead of holding the request open until the deadline, and the
+ * pending timers ride the idle result. The browser is the scheduler — it
+ * resumes with `{ type: "xstate.timer", id }` when one comes due, unless the
+ * person acts first. A resumed run re-arms the snapshot's timers through
+ * `schedule`, so each idle result reports whatever is still pending.
+ */
+export function createTimerRecorder(): {
+  timers: Exclude<AgentTimerScheduler, "in-process">;
+  pending: () => PendingTimer[];
+} {
+  const pending = new Map<string, number>();
+  return {
+    timers: {
+      schedule: ({ id, delay }) => void pending.set(id, delay),
+      cancel: (id) => void pending.delete(id),
+    },
+    pending: () => [...pending].map(([id, delay]) => ({ id, delay })),
+  };
+}
+
+/** The root timers a persisted snapshot holds — what a restore would re-arm. */
+function snapshotTimers(snapshot: unknown): PendingTimer[] {
+  const timers = (snapshot as { timers?: unknown } | null)?.timers;
+  if (!timers || typeof timers !== "object") return [];
+  return Object.entries(timers as Record<string, { id?: unknown; delay?: unknown }>).flatMap(
+    ([key, timer]) =>
+      typeof timer?.delay === "number"
+        ? [{ id: typeof timer.id === "string" ? timer.id : key, delay: timer.delay }]
+        : [],
+  );
+}
+
+function withTimers<T extends object>(idle: T, timers: PendingTimer[]): T {
+  return timers.length ? { ...idle, timers } : idle;
+}
+
+/** A host timer firing, delivered back by the client (see `createTimerRecorder`). */
+function isTimerEvent(event: { type: string }): event is { type: "xstate.timer"; id: string } {
+  return event.type === "xstate.timer";
+}
+
 function toChatResult(
   machine: AnyStateMachine,
   model: string | undefined,
@@ -576,13 +673,14 @@ function toChatResult(
   omitValues: string[],
   latestContext?: unknown,
   limits?: RunLimits,
+  timers: PendingTimer[] = [],
 ): MachineChatResult {
   if (result.status === "done") {
     return {
       model,
       status: "done",
       trace,
-      response: renderOutput(result.output),
+      response: renderOutput(result.output, omitValues),
       output: result.output as Json,
     };
   }
@@ -591,7 +689,7 @@ function toChatResult(
     // Show the work the run produced (drafts, answers, queries…) — the idle
     // prompt ships separately in `idle` and renders in the waiting box, so
     // approvals aren't asked for sight unseen.
-    const work = renderIdleWork(result.snapshot.context, changedKeys, omitValues);
+    const work = renderIdleWork(result.snapshot.context, changedKeys, omitValues, idle.prompt);
     // An event the state has no transition for is ignored, not an error: say
     // so instead of re-showing the work as if the event had applied.
     const ignoredNote = result.ignored
@@ -601,11 +699,14 @@ function toChatResult(
       model,
       status: "idle",
       trace,
-      response: ignoredNote ?? work ?? idle.prompt ?? "The machine is idle, waiting for input.",
+      // The waiting box already shows the prompt; repeating it here would
+      // print the same text twice.
+      response:
+        ignoredNote ?? work ?? (idle.prompt ? "" : "The machine is idle, waiting for input."),
       // Resume from the run's persisted snapshot, not the live one — it
       // round-trips invoked children WITH their state (a long-lived agent
       // keeps its context across chat turns).
-      idle: { ...idle, snapshot: result.persist() as unknown as Json },
+      idle: { ...withTimers(idle, timers), snapshot: result.persist() as unknown as Json },
     };
   }
   const error = (result as { error?: unknown }).error;
@@ -720,9 +821,11 @@ export async function startMachineChat(
   const live = await resolveExecutors();
   const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
     createTraceRecorder(undefined, limits.onStep);
+  const host = createTimerRecorder();
   const result = await runToQuiescence(
     createAgentRuntime(machine, {
       executors: live.executors,
+      timers: host.timers,
       signal: runSignal(limits),
       ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
       onTransition,
@@ -748,6 +851,7 @@ export async function startMachineChat(
     stringValuesOf(input),
     latestContext(),
     limits,
+    host.pending(),
   );
 }
 
@@ -757,8 +861,9 @@ function stringValuesOf(source: Record<string, unknown>): string[] {
 }
 
 /**
- * What a resume delivers: a typed event, or free chat text for a state with
- * no `textEvent`, which the server reads as one of the offered events.
+ * What a resume delivers: a typed event (a host timer firing included), or
+ * free chat text for a state that offers several readings of it, which the
+ * server reads as one of the offered events.
  */
 export type MachineChatResumeEvent =
   | ({ type: string } & Record<string, unknown>)
@@ -778,53 +883,75 @@ export async function resumeMachineChat(
   limits: RunLimits = {},
 ): Promise<MachineChatResult> {
   const live = await resolveExecutors();
+  // The RESTORED state: what Jev reads text against, where an interaction's
+  // fixed payload fields come from, and what a typed event is checked against.
+  // Null when the snapshot cannot be rehydrated; the runtime then still
+  // rejects an event the restored state cannot accept.
+  let restored: AnyMachineSnapshot | null = null;
+  try {
+    restored = machine.resolveState(
+      snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
+    ) as AnyMachineSnapshot;
+  } catch {
+    restored = null;
+  }
   let event: { type: string } & Record<string, unknown>;
   if (isInterpretRequest(resumeEvent)) {
-    // Jev reads the text against the RESTORED state's offered events, so the
+    // Jev reads the text against the restored state's offered events, so the
     // run then resumes with the real typed event and the log shows it.
     const idle = describeIdle(
       machine,
-      machine.resolveState(
-        snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
-      ) as AnyMachineSnapshot,
+      restored ??
+        (machine.resolveState(
+          snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
+        ) as AnyMachineSnapshot),
     );
     const chosen = await interpretIdleText(resumeEvent.text, idle, { signal: limits.signal });
     if (!chosen) {
-      // Nothing delivered: the machine is still waiting, unchanged.
+      // Nothing delivered: the machine is still waiting, unchanged, and so
+      // are its deadlines.
       return {
         model: live.model,
         status: "idle",
         trace: [],
         response: unclearTextReply(idle),
-        idle: { ...idle, snapshot: snapshot as unknown as Json },
+        idle: {
+          ...withTimers(idle, snapshotTimers(snapshot)),
+          snapshot: snapshot as unknown as Json,
+        },
       };
     }
     event = chosen;
   } else {
     event = resumeEvent as { type: string } & Record<string, unknown>;
   }
+  // A choice whose payload the interaction fixes arrives as a bare type.
+  if (restored && !isTimerEvent(event)) {
+    event = { ...fixedFields(interactionHints(restored), event.type), ...event };
+  }
   // Baseline: context restored from the snapshot is prior turns' work, not
   // this turn's — only new changes should render as produced output.
   const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
     createTraceRecorder((snapshot as { context?: unknown }).context, limits.onStep);
   // Validate the wire event against the restored snapshot's accepted events
-  // (and payload schema, when registered) before delivering it. If the
-  // snapshot can't be rehydrated for validation, runAgent still rejects an
-  // event the restored state cannot accept.
+  // (and payload schema, when registered) before delivering it. A host timer
+  // firing is not a machine event: the runtime resolves its id against the
+  // snapshot's timers, and an unknown id comes back as ignored.
   let parsed: { type: string } & Record<string, unknown> = event;
-  try {
-    const restored = machine.resolveState(
-      snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
-    );
-    parsed = parseAgentEvent(restored as AnyMachineSnapshot, event, {
-      events: machineSchemas(machine).events as never,
-    }) as { type: string } & Record<string, unknown>;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("parseAgentEvent")) throw error;
+  if (restored && !isTimerEvent(event)) {
+    try {
+      parsed = parseAgentEvent(restored, event, {
+        events: machineSchemas(machine).events as never,
+      }) as { type: string } & Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("parseAgentEvent")) throw error;
+    }
   }
+  const host = createTimerRecorder();
   const result = await runToQuiescence(
     createAgentRuntime(machine, {
       executors: live.executors,
+      timers: host.timers,
       signal: runSignal(limits),
       ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
       onTransition,
@@ -851,5 +978,6 @@ export async function resumeMachineChat(
     stringValuesOf(parsed),
     latestContext(),
     limits,
+    host.pending(),
   );
 }

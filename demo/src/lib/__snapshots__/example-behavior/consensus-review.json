@@ -9,7 +9,7 @@
         "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"done\",\"maintainability\":\"working\"}}",
         "transition xstate.done.actor -> \"accepted\""
       ],
-      "response": "- Approved: true\n- Human reviewed: false\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| true | approve (approve 100% · reject 0% · abstain 0%) | security |\n| true | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| true | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
+      "response": "- Approved: yes\n- Human reviewed: no\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | security |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
     }
   ],
   "External patch (needs human review)": [
@@ -22,24 +22,24 @@
         "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"done\",\"maintainability\":\"working\"}}",
         "transition xstate.done.actor -> \"humanReview\""
       ],
-      "response": "**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| true | approve (approve 100% · reject 0% · abstain 0%) | security |\n| true | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| true | approve (approve 100% · reject 0% · abstain 0%) | maintainability |",
+      "response": "**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | security |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | maintainability |",
       "idle": {
-        "prompt": "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved.",
+        "prompt": "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved. To reject it, say why.",
         "events": [
           "APPROVE",
           "REJECT"
         ],
-        "textEvent": null
+        "textEvent": "REJECT.reason"
       }
     },
     {
-      "sent": "{\"type\":\"APPROVE\"}",
+      "sent": "{\"type\":\"REJECT\",\"reason\":\"Yes, that works. Please continue.\"}",
       "status": "done",
       "trace": [
         "transition @xstate.init -> \"humanReview\"",
-        "transition APPROVE -> \"overridden\""
+        "transition REJECT -> \"rejected\""
       ],
-      "response": "- Approved: true\n- Human reviewed: true\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| true | approve (approve 100% · reject 0% · abstain 0%) | security |\n| true | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| true | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
+      "response": "- Approved: no\n- Human reviewed: yes\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | security |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
     }
   ]
 }

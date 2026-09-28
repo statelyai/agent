@@ -26,7 +26,7 @@
         "transition APPROVE -> \"executing\"",
         "transition xstate.done.actor -> \"executed\""
       ],
-      "response": "- Executed: true\n- Edited: false\n\n**Call**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason"
+      "response": "- Executed: yes\n- Edited: no\n\n**Call**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason"
     }
   ],
   "I want my money back for the subscription I never used.": [
@@ -56,7 +56,7 @@
         "transition APPROVE -> \"executing\"",
         "transition xstate.done.actor -> \"executed\""
       ],
-      "response": "- Executed: true\n- Edited: false\n\n**Call**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason"
+      "response": "- Executed: yes\n- Edited: no\n\n**Call**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason"
     }
   ],
   "What is 6 times 7?": [
@@ -86,7 +86,7 @@
         "transition APPROVE -> \"executing\"",
         "transition xstate.done.actor -> \"executed\""
       ],
-      "response": "- Executed: true\n- Edited: false\n\n**Call**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason"
+      "response": "- Executed: yes\n- Edited: no\n\n**Call**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason"
     }
   ]
 }

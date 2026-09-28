@@ -32,7 +32,7 @@
         "transition xstate.done.actor -> \"awaitingAnswer\"",
         "emitted QUESTION -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 4)\n\n**Pages covered**\n\n1, 4\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 1)",
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 4)\n\n**Pages covered**\n\n1, 4\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)",
       "idle": {
         "prompt": "Correct — the answer is mock expected. mock explanation Source (page 1): \"A state machine is in exactly one of a finite set of states at a time.\" mock question A) mock choices0 (Hint: see page 4)",
         "events": [
@@ -55,7 +55,7 @@
         "transition xstate.done.actor -> \"awaitingAnswer\"",
         "emitted QUESTION -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 7)\n\n**Pages covered**\n\n1, 4, 7\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 4)",
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 7)\n\n**Pages covered**\n\n1, 4, 7\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 4)",
       "idle": {
         "prompt": "Correct — the answer is mock expected. mock explanation Source (page 4): \"Invoking an actor starts it when a state is entered and stops it when the state is exited.\" mock question A) mock choices0 (Hint: see page 7)",
         "events": [
@@ -102,7 +102,7 @@
         "transition xstate.done.actor -> \"awaitingAnswer\"",
         "emitted QUESTION -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 5)\n\n**Pages covered**\n\n1, 4, 7, 2, 5\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 4)\n- Page number: 7 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 7)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 2)",
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 5)\n\n**Pages covered**\n\n1, 4, 7, 2, 5\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 4)\n- Page number: 7 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 7)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 2)",
       "idle": {
         "prompt": "Correct — the answer is mock expected. mock explanation Source (page 2): \"Context is the extended state of a machine: arbitrary data stored alongside the finite state and updated during transitions.\" mock question A) mock choices0 (Hint: see page 5)",
         "events": [
@@ -125,7 +125,7 @@
         "transition xstate.done.actor -> \"awaitingAnswer\"",
         "emitted QUESTION -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 8)\n\n**Pages covered**\n\n1, 4, 7, 2, 5, 8\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 4)\n- Page number: 7 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 7)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 2)\n- Page number: 5 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 5)",
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 8)\n\n**Pages covered**\n\n1, 4, 7, 2, 5, 8\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 4)\n- Page number: 7 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 7)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 2)\n- Page number: 5 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 5)",
       "idle": {
         "prompt": "Correct — the answer is mock expected. mock explanation Source (page 5): \"Hierarchical states nest: a parent state's transitions apply to every child, so shared handling is written once.\" mock question A) mock choices0 (Hint: see page 8)",
         "events": [
@@ -146,7 +146,7 @@
         "transition xstate.done.actor -> \"summary\"",
         "emitted GRADED -> \"summary\""
       ],
-      "response": "- Document id: statecharts\n- Correct: 6\n- Answered: 6\n- Exhausted: false\n\n**Pages covered**\n\n1, 4, 7, 2, 5, 8\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 4)\n- Page number: 7 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 7)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 2)\n- Page number: 5 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 5)\n- Page number: 8 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 8)"
+      "response": "- Document id: statecharts\n- Correct: 6\n- Answered: 6\n- Exhausted: no\n\n**Pages covered**\n\n1, 4, 7, 2, 5, 8\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 4)\n- Page number: 7 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 7)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 2)\n- Page number: 5 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 5)\n- Page number: 8 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 8)"
     }
   ],
   "Retrieval, pages 1-4": [
@@ -182,7 +182,7 @@
         "transition xstate.done.actor -> \"awaitingAnswer\"",
         "emitted QUESTION -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 3)\n\n**Pages covered**\n\n1, 3\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 1)",
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 3)\n\n**Pages covered**\n\n1, 3\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)",
       "idle": {
         "prompt": "Correct — the answer is mock expected. mock explanation Source (page 1): \"Chunking splits a document into passages small enough to embed but large enough to stand alone when read.\" mock question A) mock choices0 (Hint: see page 3)",
         "events": [
@@ -229,7 +229,7 @@
         "transition xstate.done.actor -> \"awaitingAnswer\"",
         "emitted QUESTION -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 4)\n\n**Pages covered**\n\n1, 3, 2, 4\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 1)\n- Page number: 3 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 3)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 2)",
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 4)\n\n**Pages covered**\n\n1, 3, 2, 4\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 3 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 3)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 2)",
       "idle": {
         "prompt": "Correct — the answer is mock expected. mock explanation Source (page 2): \"An embedding maps text to a vector so that semantically similar passages land near each other.\" mock question A) mock choices0 (Hint: see page 4)",
         "events": [
@@ -250,7 +250,7 @@
         "transition xstate.done.actor -> \"summary\"",
         "emitted GRADED -> \"summary\""
       ],
-      "response": "- Document id: retrieval\n- Correct: 4\n- Answered: 4\n- Exhausted: false\n\n**Pages covered**\n\n1, 3, 2, 4\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 1)\n- Page number: 3 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 3)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 2)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: true · Explanation: mock explanation  \n  Prompt: mock question A) mock choices0 (Hint: see page 4)"
+      "response": "- Document id: retrieval\n- Correct: 4\n- Answered: 4\n- Exhausted: no\n\n**Pages covered**\n\n1, 3, 2, 4\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 3 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 3)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 2)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 4)"
     }
   ],
   "Pick a document first": [
@@ -260,7 +260,7 @@
       "trace": [
         "transition @xstate.init -> \"choosingDocument\""
       ],
-      "response": "Which document do you want to be quizzed on? Statecharts in Practice (statecharts), Retrieval Systems (retrieval)",
+      "response": "",
       "idle": {
         "prompt": "Which document do you want to be quizzed on? Statecharts in Practice (statecharts), Retrieval Systems (retrieval)",
         "events": [

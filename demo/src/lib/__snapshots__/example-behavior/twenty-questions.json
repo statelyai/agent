@@ -7,7 +7,7 @@
         "transition @xstate.init -> \"deciding\"",
         "transition ASK -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question\n\n**Messages**\n\nmock question",
+      "response": "",
       "idle": {
         "prompt": "mock question",
         "events": [
@@ -26,7 +26,7 @@
         "transition ANSWER_YES -> \"deciding\"",
         "transition GUESS -> \"awaitingGuessFeedback\""
       ],
-      "response": "**Messages**\n\nMy guess is mock guess. Was I right?\n\n**Question**\n\nMy guess is mock guess. Was I right?\n\n**Guess**\n\nmock guess",
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
         "events": [
@@ -44,7 +44,7 @@
         "transition @xstate.init -> \"awaitingGuessFeedback\"",
         "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
       ],
-      "response": "**Question**\n\nDo you want to play another round?\n\n**Messages**\n\nDo you want to play another round?",
+      "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
         "events": [
@@ -63,7 +63,7 @@
         "transition PLAY_AGAIN_YES -> \"deciding\"",
         "transition ASK -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question\n\n**Messages**\n\nmock question",
+      "response": "",
       "idle": {
         "prompt": "mock question",
         "events": [
@@ -82,7 +82,7 @@
         "transition ANSWER_YES -> \"deciding\"",
         "transition GUESS -> \"awaitingGuessFeedback\""
       ],
-      "response": "**Messages**\n\nMy guess is mock guess. Was I right?\n\n**Question**\n\nMy guess is mock guess. Was I right?\n\n**Guess**\n\nmock guess",
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
         "events": [
@@ -100,7 +100,7 @@
         "transition @xstate.init -> \"awaitingGuessFeedback\"",
         "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
       ],
-      "response": "**Question**\n\nDo you want to play another round?\n\n**Messages**\n\nDo you want to play another round?",
+      "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
         "events": [
@@ -119,7 +119,7 @@
         "transition PLAY_AGAIN_YES -> \"deciding\"",
         "transition ASK -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question\n\n**Messages**\n\nmock question",
+      "response": "",
       "idle": {
         "prompt": "mock question",
         "events": [
@@ -138,7 +138,7 @@
         "transition ANSWER_YES -> \"deciding\"",
         "transition GUESS -> \"awaitingGuessFeedback\""
       ],
-      "response": "**Messages**\n\nMy guess is mock guess. Was I right?\n\n**Question**\n\nMy guess is mock guess. Was I right?\n\n**Guess**\n\nmock guess",
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
         "events": [
@@ -158,7 +158,7 @@
         "transition @xstate.init -> \"deciding\"",
         "transition ASK -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question\n\n**Messages**\n\nmock question",
+      "response": "",
       "idle": {
         "prompt": "mock question",
         "events": [
@@ -177,7 +177,7 @@
         "transition ANSWER_YES -> \"deciding\"",
         "transition GUESS -> \"awaitingGuessFeedback\""
       ],
-      "response": "**Messages**\n\nMy guess is mock guess. Was I right?\n\n**Question**\n\nMy guess is mock guess. Was I right?\n\n**Guess**\n\nmock guess",
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
         "events": [
@@ -195,7 +195,7 @@
         "transition @xstate.init -> \"awaitingGuessFeedback\"",
         "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
       ],
-      "response": "**Question**\n\nDo you want to play another round?\n\n**Messages**\n\nDo you want to play another round?",
+      "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
         "events": [
@@ -214,7 +214,7 @@
         "transition PLAY_AGAIN_YES -> \"deciding\"",
         "transition ASK -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question\n\n**Messages**\n\nmock question",
+      "response": "",
       "idle": {
         "prompt": "mock question",
         "events": [
@@ -233,7 +233,7 @@
         "transition ANSWER_YES -> \"deciding\"",
         "transition GUESS -> \"awaitingGuessFeedback\""
       ],
-      "response": "**Messages**\n\nMy guess is mock guess. Was I right?\n\n**Question**\n\nMy guess is mock guess. Was I right?\n\n**Guess**\n\nmock guess",
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
         "events": [
@@ -251,7 +251,7 @@
         "transition @xstate.init -> \"awaitingGuessFeedback\"",
         "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
       ],
-      "response": "**Question**\n\nDo you want to play another round?\n\n**Messages**\n\nDo you want to play another round?",
+      "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
         "events": [
@@ -270,7 +270,7 @@
         "transition PLAY_AGAIN_YES -> \"deciding\"",
         "transition ASK -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question\n\n**Messages**\n\nmock question",
+      "response": "",
       "idle": {
         "prompt": "mock question",
         "events": [
@@ -289,7 +289,7 @@
         "transition ANSWER_YES -> \"deciding\"",
         "transition GUESS -> \"awaitingGuessFeedback\""
       ],
-      "response": "**Messages**\n\nMy guess is mock guess. Was I right?\n\n**Question**\n\nMy guess is mock guess. Was I right?\n\n**Guess**\n\nmock guess",
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
         "events": [
@@ -309,7 +309,7 @@
         "transition @xstate.init -> \"deciding\"",
         "transition ASK -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question\n\n**Messages**\n\nmock question",
+      "response": "",
       "idle": {
         "prompt": "mock question",
         "events": [
@@ -328,7 +328,7 @@
         "transition ANSWER_YES -> \"deciding\"",
         "transition GUESS -> \"awaitingGuessFeedback\""
       ],
-      "response": "**Messages**\n\nMy guess is mock guess. Was I right?\n\n**Question**\n\nMy guess is mock guess. Was I right?\n\n**Guess**\n\nmock guess",
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
         "events": [
@@ -346,7 +346,7 @@
         "transition @xstate.init -> \"awaitingGuessFeedback\"",
         "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
       ],
-      "response": "**Question**\n\nDo you want to play another round?\n\n**Messages**\n\nDo you want to play another round?",
+      "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
         "events": [
@@ -365,7 +365,7 @@
         "transition PLAY_AGAIN_YES -> \"deciding\"",
         "transition ASK -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question\n\n**Messages**\n\nmock question",
+      "response": "",
       "idle": {
         "prompt": "mock question",
         "events": [
@@ -384,7 +384,7 @@
         "transition ANSWER_YES -> \"deciding\"",
         "transition GUESS -> \"awaitingGuessFeedback\""
       ],
-      "response": "**Messages**\n\nMy guess is mock guess. Was I right?\n\n**Question**\n\nMy guess is mock guess. Was I right?\n\n**Guess**\n\nmock guess",
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
         "events": [
@@ -402,7 +402,7 @@
         "transition @xstate.init -> \"awaitingGuessFeedback\"",
         "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
       ],
-      "response": "**Question**\n\nDo you want to play another round?\n\n**Messages**\n\nDo you want to play another round?",
+      "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
         "events": [
@@ -421,7 +421,7 @@
         "transition PLAY_AGAIN_YES -> \"deciding\"",
         "transition ASK -> \"awaitingAnswer\""
       ],
-      "response": "**Question**\n\nmock question\n\n**Messages**\n\nmock question",
+      "response": "",
       "idle": {
         "prompt": "mock question",
         "events": [
@@ -440,7 +440,7 @@
         "transition ANSWER_YES -> \"deciding\"",
         "transition GUESS -> \"awaitingGuessFeedback\""
       ],
-      "response": "**Messages**\n\nMy guess is mock guess. Was I right?\n\n**Question**\n\nMy guess is mock guess. Was I right?\n\n**Guess**\n\nmock guess",
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
         "events": [

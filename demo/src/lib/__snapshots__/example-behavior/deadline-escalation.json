@@ -1,0 +1,29 @@
+{
+  "Schedule maintenance — 30s to approve": [
+    {
+      "sent": "start {\"requestId\":\"proposal-1\",\"task\":\"Schedule maintenance\",\"windowMs\":30000}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"drafting\"",
+        "transition xstate.done.actor -> \"awaitingApproval\""
+      ],
+      "response": "Mock reply to: Draft a proposal: Schedule maintenance",
+      "idle": {
+        "prompt": "Approve the proposal before the approval window closes.",
+        "events": [
+          "APPROVE"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"approved\""
+      ],
+      "response": "Mock reply to: Draft a proposal: Schedule maintenance\n\n- Outcome: approved"
+    }
+  ]
+}

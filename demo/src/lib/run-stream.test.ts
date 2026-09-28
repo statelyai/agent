@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { TraceEntry } from "./agent-runner";
 import { readRunStream, streamRun, type RunChunk } from "./run-stream";
 import { createShellStore } from "./shell-store";
+import { messagesFromTurns } from "@/components/app-panel";
 import { traceSteps, type TraceStep } from "./trace-view";
 
 type Request = { id: string; src: unknown };
@@ -150,5 +151,33 @@ describe("a cancelled turn", () => {
     store.trigger.turnFailed({ epoch, id: 1, message: "Run cancelled.", cancelled: true });
     expect(store.getSnapshot().context.turns[0]).toMatchObject({ status: "cancelled" });
     expect(store.getSnapshot().context.turns[0]).not.toHaveProperty("error");
+  });
+
+  test("keeps the transitions and streamed text gathered before the stop", () => {
+    const store = createShellStore({ type: "example", id: "joke" });
+    store.trigger.turnPushed({ id: 1, input: "cats", role: "user", status: "loading" });
+    const { epoch } = store.getSnapshot().context;
+    const steps = traceSteps([
+      transition("xstate.init", "drafting", 0),
+      transition("GO", "writing", 5),
+    ]);
+    const text = [{ key: "draft", call: 1, label: "draft", text: "Once upon a" }];
+    store.trigger.turnFailed({
+      epoch,
+      id: 1,
+      message: "Run cancelled.",
+      cancelled: true,
+      partial: { steps, text },
+    });
+    const [turn] = store.getSnapshot().context.turns;
+    expect(turn?.partial).toEqual({ steps, text });
+
+    const [, reply] = messagesFromTurns([turn!], [], []);
+    const content = reply!.content as { type: string; text?: string; toolName?: string }[];
+    expect(content.filter((part) => part.type === "tool-call")).toHaveLength(steps.length);
+    expect(content.filter((part) => part.type === "text").map((part) => part.text)).toEqual([
+      "Once upon a",
+      "Run cancelled.",
+    ]);
   });
 });

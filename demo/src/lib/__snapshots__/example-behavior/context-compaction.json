@@ -6,7 +6,7 @@
       "trace": [
         "transition @xstate.init -> \"awaitingUser\""
       ],
-      "response": "Say something (turn 0 — 0/8 messages, no summary yet). Type 'exit' to finish.",
+      "response": "",
       "idle": {
         "prompt": "Say something (turn 0 — 0/8 messages, no summary yet). Type 'exit' to finish.",
         "events": [
@@ -92,7 +92,7 @@
         "transition xstate.done.actor -> \"compacting\"",
         "transition xstate.done.actor -> \"awaitingUser\""
       ],
-      "response": "**Messages**\n\nMock reply to: Yes, that works. Please continue.\n\n**Summary**\n\nmock summary",
+      "response": "mock summary",
       "idle": {
         "prompt": "Say something (turn 5 — 4/8 messages, summary active). Type 'exit' to finish.",
         "events": [
@@ -143,7 +143,7 @@
       "trace": [
         "transition @xstate.init -> \"awaitingUser\""
       ],
-      "response": "Say something (turn 0 — 0/8 messages, no summary yet). Type 'exit' to finish.",
+      "response": "",
       "idle": {
         "prompt": "Say something (turn 0 — 0/8 messages, no summary yet). Type 'exit' to finish.",
         "events": [
@@ -229,7 +229,7 @@
         "transition xstate.done.actor -> \"compacting\"",
         "transition xstate.done.actor -> \"awaitingUser\""
       ],
-      "response": "**Messages**\n\nMock reply to: Yes, that works. Please continue.\n\n**Summary**\n\nmock summary",
+      "response": "mock summary",
       "idle": {
         "prompt": "Say something (turn 5 — 4/8 messages, summary active). Type 'exit' to finish.",
         "events": [
@@ -280,7 +280,7 @@
       "trace": [
         "transition @xstate.init -> \"awaitingUser\""
       ],
-      "response": "Say something (turn 0 — 0/8 messages, no summary yet). Type 'exit' to finish.",
+      "response": "",
       "idle": {
         "prompt": "Say something (turn 0 — 0/8 messages, no summary yet). Type 'exit' to finish.",
         "events": [
@@ -366,7 +366,7 @@
         "transition xstate.done.actor -> \"compacting\"",
         "transition xstate.done.actor -> \"awaitingUser\""
       ],
-      "response": "**Messages**\n\nMock reply to: Yes, that works. Please continue.\n\n**Summary**\n\nmock summary",
+      "response": "mock summary",
       "idle": {
         "prompt": "Say something (turn 5 — 4/8 messages, summary active). Type 'exit' to finish.",
         "events": [

@@ -6,7 +6,7 @@
       "trace": [
         "transition @xstate.init -> \"awaitingCommand\""
       ],
-      "response": "What should I do with your list? (list is empty)",
+      "response": "",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
         "events": [
@@ -53,7 +53,7 @@
       "trace": [
         "transition @xstate.init -> \"awaitingCommand\""
       ],
-      "response": "What should I do with your list? (list is empty)",
+      "response": "",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
         "events": [
@@ -100,7 +100,7 @@
       "trace": [
         "transition @xstate.init -> \"awaitingCommand\""
       ],
-      "response": "What should I do with your list? (list is empty)",
+      "response": "",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
         "events": [

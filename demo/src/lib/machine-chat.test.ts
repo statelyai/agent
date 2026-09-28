@@ -18,6 +18,7 @@ import {
   schemaFields,
   schemaNeedsPayload,
   singleStringField,
+  textRouting,
   type Json,
 } from "./machine-ui";
 import { renderIdleWork, renderOutput } from "./render-value";
@@ -57,9 +58,9 @@ describe("accepted-event descriptors (unified chat)", () => {
     expect(fields?.map((field) => field.name)).toEqual(["reason"]);
     // Exactly one accepted event takes a single string → free text maps to it.
     expect(result.idle!.textEvent).toEqual({ type: "REJECT", field: "reason" });
-    // Inferred, not declared: with APPROVE on offer too, an example run hands
-    // the text to Jev instead of sending "looks good" as a rejection reason.
-    expect(result.idle!.textEventInferred).toBe(true);
+    // With APPROVE on offer too, text is not sent as REJECT directly: Jev
+    // chooses, so "looks good" is not sent as a rejection reason.
+    expect(textRouting(result.idle!)).toBe("interpret");
     // No custom renderer declared on that state.
     expect(result.idle!.component).toBeNull();
   });
@@ -178,7 +179,7 @@ describe("run output rendering", () => {
     });
     expect(text.startsWith("The request names")).toBe(true);
     expect(text).toContain("Queue: billing");
-    expect(text).toContain("Confident: true");
+    expect(text).toContain("Confident: yes");
     expect(text).not.toContain("```");
   });
 

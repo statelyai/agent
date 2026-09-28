@@ -10,7 +10,7 @@
         "transition xstate.done.actor -> \"reasoning\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "mock answer\n\nReasoning:  \nmock reasoning\n\n- Reasoning structure: mock structure\n- Adapted modules: mock adapted\n\n**Selected modules**\n\n- How could I devise an experiment to help solve the problem?\n- Make a list of ideas for solving the problem, and apply them one by one to see if any makes progress.\n- How can I simplify the problem so that it is easier to solve?\n- What are the key assumptions underlying the problem?\n- How can I break the problem down into smaller, more manageable parts?"
+      "response": "mock answer\n\nReasoning:  \n1. mock reasoning0\n\n- Reasoning structure: 1. mock steps0\n- Adapted modules: mock adapted\n\n**Selected modules**\n\n- How could I devise an experiment to help solve the problem?\n- Make a list of ideas for solving the problem, and apply them one by one to see if any makes progress.\n- How can I simplify the problem so that it is easier to solve?\n- What are the key assumptions underlying the problem?\n- How can I break the problem down into smaller, more manageable parts?"
     }
   ],
   "Alice, Bob, and Carol each own one pet: a cat, a dog, or a fish. Alice is allergic to fur. Bob's pet cannot live in water. Carol does not own the dog. Who owns which pet?": [
@@ -24,7 +24,7 @@
         "transition xstate.done.actor -> \"reasoning\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "mock answer\n\nReasoning:  \nmock reasoning\n\n- Reasoning structure: mock structure\n- Adapted modules: mock adapted\n\n**Selected modules**\n\n- How could I devise an experiment to help solve the problem?\n- Make a list of ideas for solving the problem, and apply them one by one to see if any makes progress.\n- How can I simplify the problem so that it is easier to solve?\n- What are the key assumptions underlying the problem?\n- How can I break the problem down into smaller, more manageable parts?"
+      "response": "mock answer\n\nReasoning:  \n1. mock reasoning0\n\n- Reasoning structure: 1. mock steps0\n- Adapted modules: mock adapted\n\n**Selected modules**\n\n- How could I devise an experiment to help solve the problem?\n- Make a list of ideas for solving the problem, and apply them one by one to see if any makes progress.\n- How can I simplify the problem so that it is easier to solve?\n- What are the key assumptions underlying the problem?\n- How can I break the problem down into smaller, more manageable parts?"
     }
   ],
   "Plan a one-day offsite for 8 people starting at 9am: a 2-hour workshop, lunch, a 90-minute hike that must end before 4pm, and dinner at 7pm.": [
@@ -38,7 +38,7 @@
         "transition xstate.done.actor -> \"reasoning\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "mock answer\n\nReasoning:  \nmock reasoning\n\n- Reasoning structure: mock structure\n- Adapted modules: mock adapted\n\n**Selected modules**\n\n- How could I devise an experiment to help solve the problem?\n- Make a list of ideas for solving the problem, and apply them one by one to see if any makes progress.\n- How can I simplify the problem so that it is easier to solve?\n- What are the key assumptions underlying the problem?\n- How can I break the problem down into smaller, more manageable parts?"
+      "response": "mock answer\n\nReasoning:  \n1. mock reasoning0\n\n- Reasoning structure: 1. mock steps0\n- Adapted modules: mock adapted\n\n**Selected modules**\n\n- How could I devise an experiment to help solve the problem?\n- Make a list of ideas for solving the problem, and apply them one by one to see if any makes progress.\n- How can I simplify the problem so that it is easier to solve?\n- What are the key assumptions underlying the problem?\n- How can I break the problem down into smaller, more manageable parts?"
     }
   ]
 }

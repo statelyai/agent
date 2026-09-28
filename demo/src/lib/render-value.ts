@@ -42,7 +42,41 @@ function oneLine(text: string, max: number): string {
 /** Fits on one line after a label: a number, a boolean, or a short single-line string. */
 function isInline(value: unknown): value is Scalar {
   if (typeof value === "number" || typeof value === "boolean") return true;
-  return typeof value === "string" && !value.includes("\n") && value.length <= INLINE_CHARS;
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  return !text.includes("\n") && text.length <= INLINE_CHARS;
+}
+
+/** A scalar as it reads after a label or in a cell: flags as yes/no, text trimmed. */
+function scalarText(value: Scalar): string {
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  return typeof value === "string" ? value.trim() : String(value);
+}
+
+/**
+ * Multi-line text as the lines of a list item, so an email body in a list
+ * keeps its lines. Blank lines ("") mark paragraph breaks; see {@link bullet}.
+ */
+function textLines(text: string): string[] {
+  return truncate(text.replace(/\r\n?/g, "\n").trim(), BLOCK_CHARS)
+    .replace(/\n{3,}/g, "\n\n")
+    .split("\n")
+    .map((line) => line.trim());
+}
+
+/**
+ * A markdown bullet from its lines: the first after "- ", the rest indented
+ * under it as hard-broken continuation lines ("" is a paragraph break that
+ * stays inside the item).
+ */
+function bullet(lines: string[]): string {
+  let text = `- ${lines[0] ?? "(empty)"}`;
+  for (let index = 1; index < lines.length; index++) {
+    const line = lines[index];
+    if (line === "") text += "\n";
+    else text += `${lines[index - 1] === "" ? "\n" : "  \n"}  ${line}`;
+  }
+  return text;
 }
 
 /**
@@ -81,10 +115,10 @@ function jsonFence(value: unknown): string | null {
 /** A compact one-line rendering of any value, for a bullet or a tool call. */
 function inlineValue(value: unknown, max = INLINE_CHARS): string {
   if (typeof value === "string") return oneLine(value, max);
-  if (isScalar(value)) return String(value);
+  if (isScalar(value)) return scalarText(value);
   if (value == null) return "none";
   if (Array.isArray(value) && value.every(isScalar)) {
-    return oneLine(value.map(String).join(", "), max);
+    return oneLine(value.map(scalarText).join(", "), max);
   }
   try {
     return oneLine(JSON.stringify(value) ?? "", max);
@@ -165,6 +199,93 @@ function renderTranscript(messages: ChatMessageLike[]): string | null {
     .join("\n\n");
 }
 
+/** "User: …" / "Assistant: …" lines: a transcript kept as plain strings. */
+function isRoleLines(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => typeof item === "string" && /^(user|assistant|system|tool):/i.test(item))
+  );
+}
+
+/** A conversation log: a chat message array or role-prefixed lines. */
+function isChatLog(value: unknown): value is ChatMessageLike[] | string[] {
+  return isMessageList(value) || isRoleLines(value);
+}
+
+/** The text of each assistant turn in a conversation log, oldest first. */
+function assistantTexts(log: ChatMessageLike[] | string[]): string[] {
+  return log.flatMap((message): string[] => {
+    if (typeof message === "string") {
+      const match = /^assistant:\s*([\s\S]*)$/i.exec(message);
+      return match?.[1].trim() ? [match[1].trim()] : [];
+    }
+    if (message.role !== "assistant") return [];
+    const source = message.content ?? message.parts;
+    const text = (Array.isArray(source) ? source : [source])
+      .map((part) =>
+        typeof part === "string" ? part : isRecord(part) && part.type === "text" ? part.text : "",
+      )
+      .filter((part): part is string => typeof part === "string")
+      .join("")
+      .trim();
+    return text ? [text] : [];
+  });
+}
+
+/** The log's newest turn when the assistant spoke it; null when the user did. */
+function latestReply(log: ChatMessageLike[] | string[]): string | null {
+  const last = log[log.length - 1];
+  const role = typeof last === "string" ? /^(\w+):/.exec(last)?.[1].toLowerCase() : last.role;
+  return role === "assistant" ? (assistantTexts([last] as typeof log)[0] ?? null) : null;
+}
+
+/** Text a reader would read, not a code or a slug: it has words. */
+function isProse(text: string): boolean {
+  return /\s/.test(text.trim()) && !parsedJsonString(text);
+}
+
+/** Every string a value holds (JSON text parsed, chat logs excluded), trimmed. */
+function textLeaves(value: unknown, depth = 0): string[] {
+  if (typeof value === "string") {
+    const parsed = parsedJsonString(value);
+    if (parsed) return textLeaves(parsed, depth);
+    return value.trim() ? [value.trim()] : [];
+  }
+  if (depth > RENDER_DEPTH || isChatLog(value)) return [];
+  if (Array.isArray(value)) return value.flatMap((item) => textLeaves(item, depth + 1));
+  if (isRecord(value)) return Object.values(value).flatMap((item) => textLeaves(item, depth + 1));
+  return [];
+}
+
+/**
+ * A card's fields without saying anything twice. A string identical to an
+ * earlier one is dropped. A conversation log shows only when it is the
+ * card's only readable text: next to a prose field (a reply, a draft) it
+ * would repeat that text as a transcript, and so it would when every
+ * assistant turn in it already appears in another field.
+ */
+function withoutRepeats(entries: Array<[string, unknown]>): Array<[string, unknown]> {
+  const seen = new Set<string>();
+  const plain = entries.filter(([, value]) => {
+    if (isChatLog(value)) return false;
+    if (typeof value !== "string" || !value.trim()) return true;
+    if (seen.has(value.trim())) return false;
+    seen.add(value.trim());
+    return true;
+  });
+  const texts = plain.flatMap(([, value]) => textLeaves(value));
+  const readable = texts.some(isProse);
+  return entries.filter(([key, value]) => {
+    if (!isChatLog(value)) return plain.some(([plainKey]) => plainKey === key);
+    if (readable) return false;
+    const replies = assistantTexts(value);
+    return !(
+      replies.length && replies.every((reply) => texts.some((text) => text.includes(reply)))
+    );
+  });
+}
+
 // ── lists, tables, fields ──
 
 function moreNote(total: number): string | null {
@@ -172,7 +293,7 @@ function moreNote(total: number): string | null {
 }
 
 function escapeCell(value: Scalar): string {
-  return oneLine(String(value), TABLE_CELL_CHARS).replace(/\|/g, "\\|");
+  return oneLine(scalarText(value), TABLE_CELL_CHARS).replace(/\|/g, "\\|");
 }
 
 /** Items that share the same few short scalar fields read as a table. */
@@ -189,8 +310,8 @@ function renderTable(items: Record<string, unknown>[]): string | null {
           key in item &&
           (item[key] == null ||
             (isScalar(item[key]) &&
-              !String(item[key]).includes("\n") &&
-              String(item[key]).length <= TABLE_CELL_CHARS)),
+              !scalarText(item[key] as Scalar).includes("\n") &&
+              scalarText(item[key] as Scalar).length <= TABLE_CELL_CHARS)),
       )
     );
   });
@@ -210,20 +331,35 @@ function renderTable(items: Record<string, unknown>[]): string | null {
 }
 
 /**
- * One bullet per item: its short fields inline (`key: value · key: value`),
- * longer ones as continuation lines under it.
+ * One bullet per item, every item laid out alike: fields short in every item
+ * sit inline on the first line (`key: value · key: value`); a field long or
+ * multi-line in ANY item goes on its own continuation line in every item,
+ * its text keeping its line breaks.
  */
 function renderItemBullets(items: Record<string, unknown>[]): string {
-  const bullets = items.slice(0, LIST_ITEMS).map((item) => {
-    const entries = Object.entries(item).filter(([, value]) => value != null && value !== "");
+  const shown = items.slice(0, LIST_ITEMS);
+  const present = ([, value]: [string, unknown]) => value != null && value !== "";
+  const blockKeys = new Set(
+    shown.flatMap((item) =>
+      Object.entries(item)
+        .filter((entry) => present(entry) && !isInline(entry[1]))
+        .map(([key]) => key),
+    ),
+  );
+  const bullets = shown.map((item) => {
+    const entries = Object.entries(item).filter(present);
     const short = entries
-      .filter(([, value]) => isInline(value))
-      .map(([key, value]) => `${humanizeFieldName(key)}: ${String(value)}`);
+      .filter(([key]) => !blockKeys.has(key))
+      .map(([key, value]) => `${humanizeFieldName(key)}: ${inlineValue(value)}`);
     const long = entries
-      .filter(([, value]) => !isInline(value))
-      .map(([key, value]) => `${humanizeFieldName(key)}: ${inlineValue(value, BLOCK_CHARS)}`);
-    const [first, ...rest] = short.length ? [short.join(" · "), ...long] : long;
-    return [`- ${first ?? "(empty)"}`, ...rest.map((line) => `  ${line}`)].join("  \n");
+      .filter(([key]) => blockKeys.has(key))
+      .flatMap(([key, value]) => {
+        const label = humanizeFieldName(key);
+        return typeof value === "string" && value.trim().includes("\n")
+          ? [`${label}:`, ...textLines(value)]
+          : [`${label}: ${inlineValue(value, BLOCK_CHARS)}`];
+      });
+    return bullet(short.length ? [short.join(" · "), ...long] : long);
   });
   return [...bullets, moreNote(items.length)]
     .filter((line): line is string => line !== null)
@@ -242,12 +378,12 @@ function renderFields(source: Record<string, unknown>, depth: number): string | 
     if (lines.length) blocks.push(lines.join("  \n"));
     lines = [];
   };
-  for (const [key, value] of Object.entries(source)) {
+  for (const [key, value] of withoutRepeats(Object.entries(source))) {
     if (value == null || value === "") continue;
     const label = humanizeFieldName(key);
     const scalarList = Array.isArray(value) && value.length > 0 && value.every(isScalar);
     if (isInline(value) && !(typeof value === "string" && parsedJsonString(value))) {
-      lines.push(`**${label}**: ${String(value)}`);
+      lines.push(`**${label}**: ${scalarText(value)}`);
     } else if (scalarList && inlineValue(value, Infinity).length <= INLINE_CHARS) {
       lines.push(`**${label}**: ${inlineValue(value, Infinity)}`);
     } else {
@@ -278,7 +414,7 @@ function renderBlock(value: unknown, depth = 0): string | null {
     if (parsed) return renderBlock(parsed, depth);
     return value.trim() ? prose(value) : null;
   }
-  if (isScalar(value)) return String(value);
+  if (isScalar(value)) return scalarText(value);
   if (typeof value !== "object") return null;
   if (depth > RENDER_DEPTH) return jsonFence(value);
   if (isMessageList(value)) return renderTranscript(value) ?? null;
@@ -286,9 +422,9 @@ function renderBlock(value: unknown, depth = 0): string | null {
     if (!value.length) return null;
     if (value.every(isScalar)) {
       // Numbers and flags read as one line ("1, 4, 7"); text as bullets.
-      if (value.every((item) => typeof item !== "string")) return value.map(String).join(", ");
+      if (value.every((item) => typeof item !== "string")) return value.map(scalarText).join(", ");
       return [
-        ...value.slice(0, LIST_ITEMS).map((item) => `- ${oneLine(String(item), BLOCK_CHARS)}`),
+        ...value.slice(0, LIST_ITEMS).map((item) => bullet(textLines(scalarText(item)))),
         moreNote(value.length),
       ]
         .filter((line): line is string => line !== null)
@@ -316,28 +452,36 @@ function renderBlock(value: unknown, depth = 0): string | null {
  * too: the longest prose string field becomes the body, remaining short
  * primitives a compact "Key: value" list under it, and everything else
  * (long text, lists, records, message transcripts) its own titled section —
- * see {@link renderBlock}. The untouched value still ships as
+ * see {@link renderBlock}. Nothing is said twice (see {@link withoutRepeats}),
+ * and a prose field equal to one of `shownValues` — what the user sent, or
+ * what an earlier turn already showed — is left out unless nothing else
+ * would remain. The untouched value still ships as
  * `MachineChatResult.output` for anything that wants the raw JSON.
  */
-export function renderOutput(output: unknown): string {
+export function renderOutput(output: unknown, shownValues: string[] = []): string {
   if (typeof output === "string" && !parsedJsonString(output)) return prose(output);
   if (isRecord(output)) {
-    const entries = Object.entries(output);
+    const shown = new Set(shownValues.map((value) => value.trim()).filter(Boolean));
+    const all = withoutRepeats(Object.entries(output));
+    const fresh = all.filter(
+      ([, value]) => !(typeof value === "string" && isProse(value) && shown.has(value.trim())),
+    );
+    const entries = fresh.some(([, value]) => value != null && value !== "") ? fresh : all;
     // Only prose leads. An identifier-like string (a reference code, a slug)
     // is one more "Key: value" line, and JSON text is structure, not a body.
     const prosy = entries.filter(
-      (entry): entry is [string, string] =>
-        typeof entry[1] === "string" && /\s/.test(entry[1].trim()) && !parsedJsonString(entry[1]),
+      (entry): entry is [string, string] => typeof entry[1] === "string" && isProse(entry[1]),
     );
     const [bodyKey, body] = prosy.length
       ? prosy.reduce((best, entry) => (entry[1].length > best[1].length ? entry : best))
       : [null, null];
     const rest = entries.filter(([key]) => key !== bodyKey);
     const short = rest.filter(
-      ([, value]) => isInline(value) && !(typeof value === "string" && parsedJsonString(value)),
+      (entry): entry is [string, Scalar] =>
+        isInline(entry[1]) && !(typeof entry[1] === "string" && parsedJsonString(entry[1])),
     );
     // Bullets: a bare newline is not a line break in markdown.
-    const list = short.map(([key, value]) => `- ${humanizeFieldName(key)}: ${String(value)}`);
+    const list = short.map(([key, value]) => `- ${humanizeFieldName(key)}: ${scalarText(value)}`);
     // Everything else is still output — readable under its own heading,
     // never dropped.
     const sections = rest
@@ -376,10 +520,12 @@ function cutAtLine(markdown: string, max: number): string {
  * Strings render before objects so prose (drafts, answers, SQL) leads;
  * structured values read as markdown (see {@link renderBlock}), and only a
  * value too deep for that falls back to fenced JSON — small, or skipped.
- * Echoes of what the user just sent
- * (`omitValues`) are plumbing, not work — skipped. A message-history array
- * renders only its newest assistant message: the reply a chat loop keeps in
- * `messages` instead of a dedicated field.
+ * Nothing already in front of the user renders again: echoes of what they
+ * just sent (`omitValues`), text the waiting box's `prompt` already says, and
+ * a string identical to one shown above it. A conversation log (message
+ * array or "User: …" lines) renders only its newest assistant reply — the
+ * reply a chat loop keeps in `messages` instead of a dedicated field — and
+ * only when no other readable text is shown, since that text is the reply.
  * Null when the run changed nothing presentable — the idle prompt alone is
  * then the whole story.
  */
@@ -387,49 +533,40 @@ export function renderIdleWork(
   context: unknown,
   changedKeys: string[],
   omitValues: string[] = [],
+  prompt?: string | null,
 ): string | null {
   const MAX_SECTIONS = 3;
   const MAX_STRING = 4000;
   const MAX_JSON = 1500;
-  if (!context || typeof context !== "object") return null;
-  const source = context as Record<string, unknown>;
+  if (!isRecord(context)) return null;
   const omitted = new Set(omitValues.map((value) => value.trim()).filter(Boolean));
-  const isMessageHistory = (value: unknown): boolean =>
-    Array.isArray(value) &&
-    value.length > 0 &&
-    value.every((item) => item && typeof item === "object" && "role" in item && "content" in item);
+  const promptText = prompt?.trim() ?? "";
+  const alreadyShown = (text: string) =>
+    omitted.has(text) ||
+    text === promptText ||
+    (isProse(text) && promptText.includes(text)) ||
+    shownTexts.includes(text);
 
   const strings: Array<{ key: string; body: string }> = [];
   const objects: Array<{ key: string; body: string }> = [];
-  const latestReply = (history: unknown[]): string | null => {
-    const last = history[history.length - 1] as { role: unknown; content: unknown };
-    if (last.role !== "assistant") return null;
-    const parts = Array.isArray(last.content) ? last.content : [last.content];
-    const text = parts
-      .map((part) =>
-        typeof part === "string"
-          ? part
-          : part &&
-              typeof part === "object" &&
-              typeof (part as { text?: unknown }).text === "string"
-            ? (part as { text: string }).text
-            : "",
-      )
-      .join("")
-      .trim();
-    return text || null;
+  const shownTexts: string[] = [];
+  const replies: Array<{ key: string; text: string }> = [];
+  const pushString = (key: string, text: string) => {
+    strings.push({
+      key,
+      body: prose(text.length > MAX_STRING ? `${text.slice(0, MAX_STRING)}…` : text),
+    });
+    shownTexts.push(text);
   };
 
   for (const key of changedKeys) {
-    const rawValue = source[key];
-    const value = isMessageHistory(rawValue) ? latestReply(rawValue as unknown[]) : rawValue;
-    if (typeof value === "string" && !parsedJsonString(value)) {
+    const value = context[key];
+    if (isChatLog(value)) {
+      const reply = latestReply(value);
+      if (reply) replies.push({ key, text: reply });
+    } else if (typeof value === "string" && !parsedJsonString(value)) {
       const text = value.trim();
-      if (!text || omitted.has(text)) continue;
-      strings.push({
-        key,
-        body: prose(text.length > MAX_STRING ? `${text.slice(0, MAX_STRING)}…` : text),
-      });
+      if (text && !alreadyShown(text)) pushString(key, text);
     } else if (value && (typeof value === "object" || typeof value === "string")) {
       // Objects, lists, and JSON text (a model's structured output as a string).
       const body = renderBlock(value);
@@ -437,7 +574,13 @@ export function renderIdleWork(
       // Structure too deep to read renders as JSON — worth showing only small.
       if (body.startsWith("```json") && body.length > MAX_JSON) continue;
       objects.push({ key, body: body.length > MAX_STRING ? cutAtLine(body, MAX_STRING) : body });
+      shownTexts.push(...textLeaves(value));
     }
+  }
+  // A log's reply only when it is the only readable text, and not a repeat.
+  for (const { key, text } of replies) {
+    if (shownTexts.some(isProse) || shownTexts.some((shown) => shown.includes(text))) continue;
+    if (!alreadyShown(text)) pushString(key, text);
   }
 
   const sections = [...strings, ...objects].slice(0, MAX_SECTIONS);

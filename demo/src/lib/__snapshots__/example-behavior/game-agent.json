@@ -6,7 +6,7 @@
       "trace": [
         "transition @xstate.init -> \"awaitingHumanThrow\""
       ],
-      "response": "First to 3 wins. Throw something.",
+      "response": "",
       "idle": {
         "prompt": "First to 3 wins. Throw something.",
         "events": [
@@ -158,7 +158,7 @@
       "trace": [
         "transition @xstate.init -> \"awaitingHumanThrow\""
       ],
-      "response": "First to 2 wins. Throw something.",
+      "response": "",
       "idle": {
         "prompt": "First to 2 wins. Throw something.",
         "events": [
@@ -263,7 +263,7 @@
       "trace": [
         "transition @xstate.init -> \"awaitingHumanThrow\""
       ],
-      "response": "First to 5 wins. Throw something.",
+      "response": "",
       "idle": {
         "prompt": "First to 5 wins. Throw something.",
         "events": [

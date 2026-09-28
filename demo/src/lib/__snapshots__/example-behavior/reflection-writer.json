@@ -10,7 +10,7 @@
         "transition xstate.done.actor -> \"done\"",
         "emitted CRITIQUED -> \"done\""
       ],
-      "response": "The critic signed off after 1 round.\n\nOriginal draft  \nMock reply to: Write an essay on the following topic:  \nWhy cities should ban\n\nFinal draft (after 1 critique round)  \nMock reply to: Write an essay on the following topic:  \nWhy cities should ban\n\nRevision log  \n1. satisfied. mock critique\n\n- Revisions: 0\n- Satisfied: true\n- Message count: 3\n\n**Details**\n\n**First draft**\n\nMock reply to: Write an essay on the following topic:  \nWhy cities should ban\n\n**Essay**\n\nMock reply to: Write an essay on the following topic:  \nWhy cities should ban"
+      "response": "The critic signed off on the original draft.\n\nOriginal draft  \nMock reply to: Write an essay on the following topic:  \nWhy cities should ban\n\nCritiques (1)  \nOriginal: satisfied. mock critique\n\n- Rewrites: 0\n- Satisfied: yes"
     }
   ],
   "The case for a four-day work week": [
@@ -24,7 +24,7 @@
         "transition xstate.done.actor -> \"done\"",
         "emitted CRITIQUED -> \"done\""
       ],
-      "response": "The critic signed off after 1 round.\n\nOriginal draft  \nMock reply to: Write an essay on the following topic:  \nThe case for a four-d\n\nFinal draft (after 1 critique round)  \nMock reply to: Write an essay on the following topic:  \nThe case for a four-d\n\nRevision log  \n1. satisfied. mock critique\n\n- Revisions: 0\n- Satisfied: true\n- Message count: 3\n\n**Details**\n\n**First draft**\n\nMock reply to: Write an essay on the following topic:  \nThe case for a four-d\n\n**Essay**\n\nMock reply to: Write an essay on the following topic:  \nThe case for a four-d"
+      "response": "The critic signed off on the original draft.\n\nOriginal draft  \nMock reply to: Write an essay on the following topic:  \nThe case for a four-d\n\nCritiques (1)  \nOriginal: satisfied. mock critique\n\n- Rewrites: 0\n- Satisfied: yes"
     }
   ],
   "Whether AI tutors help or hurt students": [
@@ -38,7 +38,7 @@
         "transition xstate.done.actor -> \"done\"",
         "emitted CRITIQUED -> \"done\""
       ],
-      "response": "The critic signed off after 1 round.\n\nOriginal draft  \nMock reply to: Write an essay on the following topic:  \nWhether AI tutors hel\n\nFinal draft (after 1 critique round)  \nMock reply to: Write an essay on the following topic:  \nWhether AI tutors hel\n\nRevision log  \n1. satisfied. mock critique\n\n- Revisions: 0\n- Satisfied: true\n- Message count: 3\n\n**Details**\n\n**First draft**\n\nMock reply to: Write an essay on the following topic:  \nWhether AI tutors hel\n\n**Essay**\n\nMock reply to: Write an essay on the following topic:  \nWhether AI tutors hel"
+      "response": "The critic signed off on the original draft.\n\nOriginal draft  \nMock reply to: Write an essay on the following topic:  \nWhether AI tutors hel\n\nCritiques (1)  \nOriginal: satisfied. mock critique\n\n- Rewrites: 0\n- Satisfied: yes"
     }
   ],
   "Hard topic, strict rubric (expect a revision round)": [
@@ -52,7 +52,7 @@
         "transition xstate.done.actor -> \"done\"",
         "emitted CRITIQUED -> \"done\""
       ],
-      "response": "The critic signed off after 1 round.\n\nOriginal draft  \nMock reply to: Write an essay on the following topic:  \nWhether a carbon tax \n\nFinal draft (after 1 critique round)  \nMock reply to: Write an essay on the following topic:  \nWhether a carbon tax \n\nRevision log  \n1. satisfied. mock critique\n\n- Revisions: 0\n- Satisfied: true\n- Message count: 3\n\n**Details**\n\n**First draft**\n\nMock reply to: Write an essay on the following topic:  \nWhether a carbon tax\n\n**Essay**\n\nMock reply to: Write an essay on the following topic:  \nWhether a carbon tax"
+      "response": "The critic signed off on the original draft.\n\nOriginal draft  \nMock reply to: Write an essay on the following topic:  \nWhether a carbon tax \n\nCritiques (1)  \nOriginal: satisfied. mock critique\n\n- Rewrites: 0\n- Satisfied: yes"
     }
   ]
 }

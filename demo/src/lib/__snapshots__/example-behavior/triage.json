@@ -8,7 +8,7 @@
         "transition xstate.done.actor -> \"replying\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: false"
+      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: no"
     }
   ],
   "How do I upgrade to the annual plan?": [
@@ -20,7 +20,7 @@
         "transition xstate.done.actor -> \"replying\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: false"
+      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: no"
     }
   ],
   "You charged my card twice this month. Fix it.": [
@@ -32,7 +32,7 @@
         "transition xstate.done.actor -> \"replying\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: false"
+      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: no"
     }
   ],
   "Your invoice PDF link returns a 500 error so I can't download my receipt.": [
@@ -44,7 +44,7 @@
         "transition xstate.done.actor -> \"replying\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: false"
+      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: no"
     }
   ]
 }

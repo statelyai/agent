@@ -11,7 +11,7 @@
         "rejected RETRIEVE -> \"deciding\"",
         "transition ANSWER -> \"done\""
       ],
-      "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: false"
+      "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: Unverified (no relevant passages found): mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: no"
     }
   ],
   "Off-corpus — search finds nothing, so the question is rewritten": [
@@ -26,7 +26,7 @@
         "rejected RETRIEVE -> \"deciding\"",
         "transition ANSWER -> \"done\""
       ],
-      "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: false"
+      "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: Unverified (no relevant passages found): mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: no"
     }
   ],
   "Trivial — a good model answers directly, no retrieval": [
@@ -41,7 +41,7 @@
         "rejected RETRIEVE -> \"deciding\"",
         "transition ANSWER -> \"done\""
       ],
-      "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: false"
+      "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: Unverified (no relevant passages found): mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: no"
     }
   ]
 }

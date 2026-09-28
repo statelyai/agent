@@ -6,7 +6,7 @@
       "trace": [
         "transition @xstate.init -> \"prompting\""
       ],
-      "response": "What email should I write? Who is it to, and what should it say?",
+      "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
         "events": [
@@ -24,7 +24,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [
@@ -59,7 +59,7 @@
         "transition @xstate.init -> \"sent\"",
         "transition ANOTHER -> \"prompting\""
       ],
-      "response": "What email should I write? Who is it to, and what should it say?",
+      "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
         "events": [
@@ -77,7 +77,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [
@@ -112,7 +112,7 @@
         "transition @xstate.init -> \"sent\"",
         "transition ANOTHER -> \"prompting\""
       ],
-      "response": "What email should I write? Who is it to, and what should it say?",
+      "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
         "events": [
@@ -130,7 +130,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [
@@ -148,7 +148,7 @@
       "trace": [
         "transition @xstate.init -> \"prompting\""
       ],
-      "response": "What email should I write? Who is it to, and what should it say?",
+      "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
         "events": [
@@ -166,7 +166,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [
@@ -201,7 +201,7 @@
         "transition @xstate.init -> \"sent\"",
         "transition ANOTHER -> \"prompting\""
       ],
-      "response": "What email should I write? Who is it to, and what should it say?",
+      "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
         "events": [
@@ -219,7 +219,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [
@@ -254,7 +254,7 @@
         "transition @xstate.init -> \"sent\"",
         "transition ANOTHER -> \"prompting\""
       ],
-      "response": "What email should I write? Who is it to, and what should it say?",
+      "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
         "events": [
@@ -272,7 +272,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [

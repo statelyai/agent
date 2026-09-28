@@ -24,7 +24,7 @@
         "transition @xstate.init -> \"reviewing\"",
         "transition APPROVE -> \"published\""
       ],
-      "response": "Mock reply to: Write a short announcement about: the new deploy pipeline\n\n- Published: true"
+      "response": "Mock reply to: Write a short announcement about: the new deploy pipeline\n\n- Published: yes"
     }
   ],
   "our move to a four-day work week": [
@@ -52,7 +52,7 @@
         "transition @xstate.init -> \"reviewing\"",
         "transition APPROVE -> \"published\""
       ],
-      "response": "Mock reply to: Write a short announcement about: our move to a four-day wor\n\n- Published: true"
+      "response": "Mock reply to: Write a short announcement about: our move to a four-day wor\n\n- Published: yes"
     }
   ]
 }

@@ -137,8 +137,8 @@ const startExampleInput = machineRef.extend({
 
 const resumeExampleInput = machineRef.extend({
   snapshot: z.custom<Snapshot<unknown>>((value) => value != null && typeof value === "object"),
-  // A typed event, or free chat text the server reads as one of the offered
-  // events (a state with no `textEvent`) — see `interpret-text.server.ts`.
+  // A typed event (a host timer firing included), or free chat text the server
+  // reads as one of the offered events — see `interpret-text.server.ts`.
   event: z.union([
     z.object({ kind: z.literal("interpret"), text: z.string().trim().min(1) }).strict(),
     z.object({ type: z.string().min(1) }).passthrough(),

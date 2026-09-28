@@ -11,7 +11,7 @@
         "transition xstate.done.actor -> \"writing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Mock reply to: Question: What are the leading approaches to long-context LL\n\n- Rounds: 1\n- Source ledger: \n\n**Findings**\n\n**Research 1 0**: mock finding  \n**Research 1 1**: mock finding"
+      "response": "Mock reply to: Question: What are the leading approaches to long-context LL\n\n- Rounds: 1\n- Source ledger: \n\n**Findings**\n\n**Research 1 0**: mock finding"
     }
   ],
   "How do carbon-capture startups actually remove CO2?": [
@@ -26,7 +26,7 @@
         "transition xstate.done.actor -> \"writing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Mock reply to: Question: How do carbon-capture startups actually remove CO2\n\n- Rounds: 1\n- Source ledger: \n\n**Findings**\n\n**Research 1 0**: mock finding  \n**Research 1 1**: mock finding"
+      "response": "Mock reply to: Question: How do carbon-capture startups actually remove CO2\n\n- Rounds: 1\n- Source ledger: \n\n**Findings**\n\n**Research 1 0**: mock finding"
     }
   ],
   "What is the state of solid-state batteries for EVs?": [
@@ -41,7 +41,7 @@
         "transition xstate.done.actor -> \"writing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Mock reply to: Question: What is the state of solid-state batteries for EVs\n\n- Rounds: 1\n- Source ledger: \n\n**Findings**\n\n**Research 1 0**: mock finding  \n**Research 1 1**: mock finding"
+      "response": "Mock reply to: Question: What is the state of solid-state batteries for EVs\n\n- Rounds: 1\n- Source ledger: \n\n**Findings**\n\n**Research 1 0**: mock finding"
     }
   ]
 }

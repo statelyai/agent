@@ -8,9 +8,9 @@
         "transition xstate.done.actor -> \"deciding\"",
         "transition LOOKUP -> \"lookingUp\"",
         "transition xstate.done.actor -> \"deciding\"",
-        "transition REFUND -> \"refunded\""
+        "transition ESCALATE -> \"escalated\""
       ],
-      "response": "Refunded $1: mock reason\n\n- Refunded: true\n- Escalated: false"
+      "response": "Escalated: mock reason\n\n- Refunded: no\n- Escalated: yes"
     }
   ],
   "I was charged twice for order ORD-1234 — please fix this.": [
@@ -24,7 +24,7 @@
         "transition xstate.done.actor -> \"deciding\"",
         "transition REFUND -> \"refunded\""
       ],
-      "response": "Refunded $1: mock reason\n\n- Refunded: true\n- Escalated: false"
+      "response": "Refunded $1: mock reason\n\n- Refunded: yes\n- Escalated: no"
     }
   ]
 }

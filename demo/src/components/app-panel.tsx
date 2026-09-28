@@ -1,4 +1,4 @@
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   AssistantRuntimeProvider,
   type AppendMessage,
@@ -30,10 +30,15 @@ export type Turn = {
   status: "loading" | "ready" | "error" | "ignored" | "cancelled";
   result?: ChatTurnResult;
   error?: string;
+  /** What a cancelled run showed before the stop: its live transitions and streamed text. */
+  partial?: TurnPartial;
 };
 
 /** One streaming request's text so far, while its turn is in flight. */
 export type LiveText = { key: string; call: number; label: string; text: string };
+
+/** The live feed of a turn that did not settle, kept so a Cancel does not erase it. */
+export type TurnPartial = { steps: TraceStep[]; text: LiveText[] };
 
 export type TextPolicy = {
   visible: boolean;
@@ -95,7 +100,7 @@ function liveTextParts(lanes: LiveText[]) {
   }));
 }
 
-function messagesFromTurns(
+export function messagesFromTurns(
   turns: Turn[],
   liveSteps: TraceStep[],
   liveText: LiveText[],
@@ -139,12 +144,19 @@ function messagesFromTurns(
     }
 
     if (turn.status === "cancelled") {
+      // The work gathered before the stop stays: the transitions it made and
+      // what it streamed, then the note.
+      const partial = turn.partial ?? { steps: [], text: [] };
       return [
         userMessage,
         {
           id: `turn-${turn.id}-assistant`,
           role: "assistant",
-          content: "Run cancelled.",
+          content: [
+            ...transitionPartsFor(turn.id, partial.steps, "cancelled"),
+            ...liveTextParts(partial.text),
+            { type: "text", text: "Run cancelled." },
+          ],
           status: { type: "incomplete", reason: "cancelled" },
         },
       ];
@@ -175,21 +187,39 @@ function messagesFromTurns(
       traceSteps(turn.result.trace),
       "transition",
     );
+    // An idle turn with nothing new to say leaves the words to the waiting box.
     const response =
       turn.result.response ||
-      (turn.result.status === "done" ? "The machine reached its final state." : "Ready.");
+      (turn.result.status === "done"
+        ? "The machine reached its final state."
+        : turn.result.status === "idle"
+          ? ""
+          : "Ready.");
+    const textParts = response ? [{ type: "text" as const, text: response }] : [];
+    if (transitionParts.length === 0 && textParts.length === 0) return [userMessage];
 
     return [
       userMessage,
       {
         id: `turn-${turn.id}-assistant`,
         role: "assistant",
-        content: [...transitionParts, { type: "text", text: response }],
+        content: [...transitionParts, ...textParts],
         status: { type: "complete", reason: "stop" },
         metadata: { custom: { state: resultState(turn.result) } },
       },
     ];
   });
+}
+
+/** Seconds until a pending host timer fires, ticking once a second. */
+function TimerNote({ dueAt }: { dueAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const handle = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(handle);
+  }, []);
+  const seconds = Math.max(0, Math.ceil((dueAt - now) / 1000));
+  return <span className="chat-waiting__state">Deadline in {seconds}s</span>;
 }
 
 // SSR paints the welcome chips seconds before React hydrates in dev; clicks
@@ -237,6 +267,12 @@ export function AppPanel({
   );
   const messages = messagesFromTurns(turns, liveSteps, liveText);
   const hydrated = useHydrated();
+  // When the soonest pending host timer fires, fixed once per idle result.
+  const [timerDueAt, setTimerDueAt] = useState<number | null>(null);
+  useEffect(() => {
+    const delays = (pendingIdle?.timers ?? []).map((timer) => timer.delay);
+    setTimerDueAt(delays.length ? Date.now() + Math.min(...delays) : null);
+  }, [pendingIdle]);
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -293,6 +329,7 @@ export function AppPanel({
                 {pendingIdle.component ? (
                   <span className="chat-waiting__state">{pendingIdle.component}</span>
                 ) : null}
+                {timerDueAt !== null ? <TimerNote dueAt={timerDueAt} /> : null}
               </div>
               {pendingIdle.prompt ? (
                 <p className="chat-waiting__prompt">{pendingIdle.prompt}</p>

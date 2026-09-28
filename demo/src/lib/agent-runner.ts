@@ -31,6 +31,7 @@ import {
   type Snapshot,
 } from "xstate";
 import { maybeCreateRunInspection } from "./inspection.server";
+import { interpretIdleText, unclearTextReply } from "./interpret-text.server";
 import {
   createTraceRecorder,
   describeIdle,
@@ -402,6 +403,38 @@ export async function resumeScenario(
   observers?: RunObservers,
 ): Promise<ScenarioResult> {
   const { model, executors } = await resolveExecutors(scenarioId);
+
+  // Free text on any other scenario: Jev reads it as one of the offered
+  // events (the state's text event among them), as example runs do.
+  if (isInterpretEvent(event) && scenarioId !== "approval") {
+    const machine = machineFor(scenarioId);
+    const idle = describeIdle(
+      machine,
+      machine.resolveState(
+        snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
+      ) as AnyMachineSnapshot,
+    );
+    const chosen = await interpretIdleText(event.text, idle, { signal, judge });
+    if (!chosen) {
+      return {
+        model,
+        status: "idle",
+        trace: [],
+        response: unclearTextReply(idle),
+        idle: { ...idle, snapshot: snapshot as unknown as Json },
+      };
+    }
+    return resumeScenarioRun(
+      scenarioId,
+      snapshot,
+      chosen,
+      model,
+      executors,
+      signal,
+      judge,
+      observers,
+    );
+  }
 
   // Free-text review ("looks good") → map to a typed event before delivering.
   if (isInterpretEvent(event)) {

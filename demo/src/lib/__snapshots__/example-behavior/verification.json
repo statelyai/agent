@@ -7,7 +7,7 @@
         "transition @xstate.init -> \"classifying\"",
         "transition ISSUE -> \"issued\""
       ],
-      "response": "Issued $40 automatically (at or under the $100 limit).\n\n- Outcome: issued\n- Amount: 40\n- Approved: false"
+      "response": "Issued $40 automatically (at or under the $100 limit).\n\n- Outcome: issued\n- Amount: 40\n- Approved: no"
     }
   ],
   "Large refund ($500)": [
@@ -19,7 +19,7 @@
         "rejected ISSUE -> \"classifying\"",
         "transition ESCALATE -> \"approving\""
       ],
-      "response": "This refund is over the auto-issue limit. Approve or reject it.",
+      "response": "",
       "idle": {
         "prompt": "This refund is over the auto-issue limit. Approve or reject it.",
         "events": [
@@ -36,7 +36,7 @@
         "transition @xstate.init -> \"approving\"",
         "transition APPROVE -> \"issued\""
       ],
-      "response": "Issued $500 after human approval.\n\n- Outcome: issued\n- Amount: 500\n- Approved: true"
+      "response": "Issued $500 after human approval.\n\n- Outcome: issued\n- Amount: 500\n- Approved: yes"
     }
   ],
   "Right at the limit ($100)": [
@@ -47,7 +47,7 @@
         "transition @xstate.init -> \"classifying\"",
         "transition ISSUE -> \"issued\""
       ],
-      "response": "Issued $100 automatically (at or under the $100 limit).\n\n- Outcome: issued\n- Amount: 100\n- Approved: false"
+      "response": "Issued $100 automatically (at or under the $100 limit).\n\n- Outcome: issued\n- Amount: 100\n- Approved: no"
     }
   ]
 }
