@@ -2397,8 +2397,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     for (const child of Object.values(
       (snapshot?.children ?? {}) as Record<string, AnyActorRef | undefined>,
     )) {
+      // `stop()` refuses a child (it throws for any actor with a parent);
+      // `_stop()` is what XState's own `stopChild` calls, and it aborts the
+      // child's signal — which is what cancels an in-flight model call.
       try {
-        (child as unknown as { stop?: () => void } | undefined)?.stop?.();
+        (child as unknown as { _stop?: () => void } | undefined)?._stop?.();
       } catch {
         // Already stopped.
       }
@@ -2412,11 +2415,19 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // Stops the loop early: a cancel, a journal failure, an effect that threw.
   // In-flight children are stopped (which aborts their requests' signals) and
   // a parked `nextEvent` returns.
+  let persistedAtStop: Snapshot<unknown> | undefined;
   const stopRun = (reason: StopReason): void => {
     if (finished || stopReason !== undefined) {
       return;
     }
     stopReason = reason;
+    // Persisted before the children stop, so a resume restarts the work
+    // this stop cut off instead of finding it stopped.
+    try {
+      persistedAtStop = current && boundMachine.getPersistedSnapshot(current as never);
+    } catch {
+      // `finish` persists (and reports the failure) itself.
+    }
     stopChildren(current);
     recheck();
   };
@@ -3017,11 +3028,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         outcome = { status: "idle", snapshot: snapshot as SnapshotFrom<TMachine> };
       }
 
-      // Persisted BEFORE anything is stopped: a stopped child would persist
-      // as stopped, and the snapshot must resume with its children running.
-      let persistedSnapshot: Snapshot<unknown> | undefined;
+      // Persisted BEFORE anything is stopped (for an early stop, by
+      // `stopRun`): a stopped child would persist as stopped, and the
+      // snapshot must resume with its children running.
+      let persistedSnapshot: Snapshot<unknown> | undefined = persistedAtStop;
       let persistenceError: unknown;
-      if (outcome.status !== "done") {
+      if (outcome.status !== "done" && persistedSnapshot === undefined) {
         try {
           persistedSnapshot = boundMachine.getPersistedSnapshot(
             snapshot as never,
