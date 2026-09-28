@@ -248,6 +248,68 @@ describe("createAgentRuntime", () => {
     expect(settledResult.snapshot.value).toEqual({ ask: "waiting", work: "ready" });
   });
 
+  test("an event sent to a child machine starts its work before the run settles", async () => {
+    const gate = deferred();
+    const child = setupAgent({
+      context: z.object({ answer: z.string().nullable() }),
+      events: { ASK: z.object({}) },
+      requests: { research: text("research") },
+    }).createMachine({
+      context: { answer: null },
+      initial: "idle",
+      states: {
+        idle: { on: { ASK: { target: "working" } } },
+        working: {
+          invoke: {
+            src: "research",
+            input: {},
+            onDone: ({ event, parent }, enq) => {
+              if (parent) enq.sendTo(parent, { type: "ANSWERED", answer: event.output.result });
+              return { target: "idle" };
+            },
+          },
+        },
+      },
+    });
+    const machine = setupAgent({
+      context: z.object({ answer: z.string().nullable() }),
+      events: { GO: z.object({}), ANSWERED: z.object({ answer: z.string() }) },
+      actors: { child },
+    }).createMachine({
+      context: { answer: null },
+      invoke: { id: "child", src: "child" },
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            GO: ({ children }, enq) => {
+              enq.sendTo(children.child, { type: "ASK" });
+              return { target: "asked" };
+            },
+          },
+        },
+        asked: {
+          on: {
+            ANSWERED: ({ event }) => ({ target: "answered", context: { answer: event.answer } }),
+          },
+        },
+        answered: {},
+      },
+    });
+
+    const { executors } = gatedExecutors({ research: gate.promise });
+    const first = await runToQuiescence(createAgentRuntime(machine, { executors }));
+    expect(first.status).toBe("idle");
+    const run = runToQuiescence(createAgentRuntime(machine, { executors }), {
+      snapshot: first.persist(),
+      event: { type: "GO" },
+    });
+    setTimeout(() => gate.resolve(), 20);
+    const result = await run;
+    // The run waited for the child's request instead of settling in `asked`.
+    expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("answered");
+  });
+
   const timed = setupAgent({
     context: z.object({}),
     output: z.object({ expired: z.boolean() }),

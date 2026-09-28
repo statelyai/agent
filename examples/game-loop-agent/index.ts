@@ -140,6 +140,10 @@ export const playerAgentMachine = playerAgentSetup.createMachine({
             "Choose ROLL or BANK.",
           ].join("\n"),
           maxRetries: 2,
+          // OBSERVE is accepted in every state (root-level handler), so without
+          // this the model could "choose" it: handled in place, the decision
+          // would end with the player still owing a move.
+          allowedEvents: ["ROLL", "BANK"],
         }),
         // A dead decision loop should not stall the game: fall back to banking.
         onError: ({ parent }, enq) => {

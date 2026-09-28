@@ -215,3 +215,22 @@ describe("game-loop-agent", () => {
     expect(output).toMatchObject({ reason: "round-limit", rounds: 2 });
   });
 });
+
+test("the player's decision offers only ROLL and BANK, never the always-accepted OBSERVE", async () => {
+  const offered = new Set<string>();
+  await runGameLoopExample({
+    input: { seed: 3, target: 20, maxRounds: 1 },
+    decide: async (request) => {
+      for (const event of request.events) offered.add(event.type);
+      return {
+        event: (request.prompt ?? "").includes("Turn total: 0")
+          ? { type: "ROLL" }
+          : { type: "BANK" },
+      };
+    },
+    judge: createMockReferee([]).judge,
+    nextHumanEvent: createMockHuman([]).nextHumanEvent,
+  });
+  // Choosing OBSERVE would be handled in place, leaving the agent's move owed.
+  expect([...offered].sort()).toEqual(["BANK", "ROLL"]);
+});
