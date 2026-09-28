@@ -263,7 +263,11 @@ export const mapReduceMachine = agentSetup.createMachine({
         input: ({ context }) => ({ topic: context.topic }),
         onDone: ({ output }) => ({
           target: "checkingSubjects",
-          context: { subjects: output.result.subjects },
+          context: {
+            subjects: output.result.subjects
+              .map((subject) => subject.trim())
+              .filter((subject) => subject !== ""),
+          },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -302,7 +306,9 @@ export const mapReduceMachine = agentSetup.createMachine({
           if (!actorId.startsWith(BRANCH_PREFIX)) return undefined;
           const branch = branchIndex(actorId);
           const subject = context.subjects[branch] ?? actorId;
-          return landJoke(context, { branch, subject, joke: output.result.joke });
+          // Trimmed: a trailing newline from the model would render as a blank
+          // line inside the joke's list item.
+          return landJoke(context, { branch, subject, joke: output.result.joke.trim() });
         },
         "xstate.error.actor": ({ context, event }) => {
           const { actorId } = event as unknown as { actorId: string };

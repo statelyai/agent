@@ -436,12 +436,12 @@ const toolCallingSetup = setupAgent({
     turns: z.number().int(),
   }),
   input: z.object({ question: z.string() }),
-  // The output is what the human reads: the final answer. The transcript stays
-  // in context, where the next turn needs it; repeating it here would show the
-  // answer twice, once as the answer and once buried in raw messages.
+  // The output is the outcome only. Every answer was already shown at its idle
+  // turn (it is `context.answer`), and the transcript stays in context where
+  // the next turn needs it; repeating either here would show the answer again.
   output: z.object({
     status: z.enum(["answered", "failed"]),
-    answer: z.string().nullable(),
+    turns: z.number().int(),
   }),
   events: {
     /** The human's next question, appended to the retained transcript. */
@@ -529,11 +529,11 @@ export const toolCallingMachine = toolCallingSetup.createMachine({
     },
     done: {
       type: "final",
-      output: ({ context }) => ({ status: "answered" as const, answer: context.answer }),
+      output: ({ context }) => ({ status: "answered" as const, turns: context.turns }),
     },
     failed: {
       type: "final",
-      output: () => ({ status: "failed" as const, answer: null }),
+      output: ({ context }) => ({ status: "failed" as const, turns: context.turns }),
     },
   },
 });
@@ -561,9 +561,10 @@ export async function runToolCallingExample(
     },
   );
   // A failed request ends the run in `failed` with nothing to follow up on.
-  // The transcript is read off the final snapshot's context, not the output.
+  // The answer and transcript are read off the final snapshot's context, not the output.
   if (result.status === "done") {
-    return { ...result.output, messages: result.snapshot.context.messages, answers };
+    const { answer, messages } = result.snapshot.context;
+    return { ...result.output, answer, messages, answers };
   }
   for (const followUp of options.followUps ?? []) {
     if (result.status !== "idle") break;
@@ -594,7 +595,8 @@ export async function runToolCallingExample(
     },
   );
   if (ended.status !== "done") throw new Error(`Tool call ended with '${ended.status}'.`);
-  return { ...ended.output, messages: ended.snapshot.context.messages, answers };
+  const { answer, messages } = ended.snapshot.context;
+  return { ...ended.output, answer, messages, answers };
 }
 
 // Direct run: propose a refund, then let the human APPROVE / EDIT / REJECT at the

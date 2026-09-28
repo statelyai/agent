@@ -102,9 +102,14 @@ export const PERSONAS = [
   },
 ] as const satisfies readonly Persona[];
 
+/**
+ * A clue-giver's draft: the clue word and nothing else. No `reasoning` field —
+ * any reasoning about a clue names the secret, and the request's output
+ * travels in its done event, which a host may render (a transition log) while
+ * the guesser is still thinking.
+ */
 const clueDraftSchema = z.object({
-  clue: z.string(),
-  reasoning: z.string(),
+  clue: z.string().describe("Your one-word clue, and nothing else."),
 });
 type ClueDraft = z.infer<typeof clueDraftSchema>;
 
@@ -150,11 +155,13 @@ export const justOneSchemas = createAgentSchemas({
     deck: z.array(z.string()).optional(),
   }),
   output: z.object({
-    /** Headline: a readable round-by-round narration of the game. */
+    /**
+     * Headline: a readable round-by-round narration of the game — the score,
+     * then one log line per line. The log is not repeated as its own field.
+     */
     summary: z.string(),
     score: z.number(),
     rounds: z.number(),
-    log: z.array(z.string()),
   }),
   events: {
     /** The guesser's answer, sent by a host as free text. */
@@ -294,7 +301,7 @@ const CLUE_SYSTEM_PROMPT = [
   "A cancelled clue is struck out and never shown, so it helps the guesser exactly as much as writing nothing.",
   "Therefore the best clue is accurate but NOT the single most obvious word: predict what the other two are most likely to write, and approach the secret from an angle they probably will not take. Do not be so obscure that the guesser cannot use it.",
   "Rules the referee enforces mechanically: exactly one word, no spaces or hyphens; never the secret word itself or an inflection of it; matching clues cancel.",
-  "Reason briefly about what the others will write, then commit to your clue word.",
+  "Decide privately what the others will likely write, then return only your clue word — no explanation.",
 ].join(" ");
 
 const agentSetup = setupAgent({
@@ -338,7 +345,6 @@ export const justOneMachine = agentSetup.createMachine({
     summary: narrate(context),
     score: context.score,
     rounds: context.rounds,
-    log: context.log,
   }),
   initial: "pickingWord",
   states: {
@@ -418,9 +424,9 @@ export const justOneMachine = agentSetup.createMachine({
     // guesser is never shown anything — the round is skipped, as in the real
     // game — so `guessing` is not even entered.
     //
-    // The drafts are cleared here (their reasoning names the secret) and the
-    // struck clues are kept face down, so the idle guessing snapshot holds
-    // nothing that gives the word away.
+    // The drafts are cleared here (a struck draft may be the secret itself)
+    // and the struck clues are kept face down, so the idle guessing snapshot
+    // holds nothing that gives the word away.
     judging: {
       always: ({ context }) => {
         const clues = faceDown(

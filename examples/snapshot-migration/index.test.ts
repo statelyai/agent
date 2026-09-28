@@ -5,6 +5,7 @@ import {
   migrateOrderSnapshot,
   orderApprovalMachine,
   orderApprovalMachineV1,
+  pauseOnV1,
   persistSnapshot,
   runSnapshotMigrationExample,
   V1,
@@ -20,22 +21,22 @@ async function persistedV1Snapshot(orderId = "ORD-1", total = 812.5) {
 }
 
 test("XState's persisted snapshot carries the machine version", async () => {
-  const persisted = await persistedV1Snapshot();
+  const persisted = await pauseOnV1({ orderId: "ORD-1", total: 812.5 });
   expect((persisted as { version?: string }).version).toBe(V1);
   expect((persisted as { value?: unknown }).value).toBe("reviewing");
 });
 
 test("the machine-owned migrate callback resumes v1 state on v2", async () => {
   const result = await runSnapshotMigrationExample({ orderId: "ORD-4417", total: 812.5 });
-  expect((result.persisted as { version?: string }).version).toBe(V1);
   expect(result.output).toEqual({
     orderId: "ORD-4417",
     approved: true,
-    amountCents: 81250,
-    currency: "USD",
+    amount: "$812.50",
     riskLevel: "high",
   });
-  // The result reads as an explanation; the snapshot is attached, not the headline.
+  // The result reads as an explanation; the raw persisted snapshot stays out of it.
+  expect(Object.keys(result).sort()).toEqual(["output", "summary"]);
+  expect(JSON.stringify(result)).not.toContain('"version"');
   expect(result.summary).toContain(`on v${V1}, waiting in \`reviewing\``);
   expect(result.summary).toContain(
     `ran the v${V2} machine's \`migrate\`: \`reviewing\` → \`awaitingApproval\`, ` +
@@ -93,11 +94,11 @@ test("a current snapshot resumes without migration", async () => {
   });
   expect(resumed.status).toBe("done");
   if (resumed.status !== "done") return;
+  // People read the amount formatted, not as raw cents.
   expect(resumed.output).toEqual({
     orderId: "ORD-2",
     approved: false,
-    amountCents: 2500,
-    currency: "USD",
+    amount: "$25.00",
     riskLevel: "low",
   });
 });

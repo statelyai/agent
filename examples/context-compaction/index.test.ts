@@ -124,6 +124,24 @@ describe("context-compaction", () => {
     expect(recent).toContain("assistant: Here: const m = createMachine()");
   });
 
+  test("the summarizer is told to write in plain English", async () => {
+    const systems: string[] = [];
+    const generateText: AgentRequestExecutor = async (request) => {
+      if (request.name === "summarize") {
+        systems.push(request.system ?? "");
+        return { result: { summary: "S" } };
+      }
+      return { result: "ok" };
+    };
+    await runContextCompactionExample({
+      input: { maxMessages: 4, keepRecent: 2 },
+      generateText,
+      userMessages: ["q1", "q2", "q3"],
+    });
+    expect(systems).toHaveLength(1);
+    expect(systems[0]).toContain("in English and plain words");
+  });
+
   test("output includes a readable transcript string", async () => {
     const { generateText } = createModel();
     const result = await runContextCompactionExample({

@@ -13,10 +13,12 @@
   },
   "starters": [
     {
-      "requestId": "proposal-1",
-      "task": "Schedule maintenance",
-      "windowMs": 60000
+      "label": "Schedule maintenance — 30s to approve",
+      "input": {
+        "requestId": "proposal-1",
+        "task": "Schedule maintenance",
+        "windowMs": 30000
+      }
     }
-  ],
-  "manual": true
+  ]
 }

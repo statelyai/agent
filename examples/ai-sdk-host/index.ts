@@ -152,10 +152,15 @@ function enemyCounter(
       playerHp,
       log: [
         ...context.log,
-        `The goblin hits back for ${damage} (you ${context.playerHp} → ${playerHp}).`,
+        `The goblin hits back for ${damage} (your HP ${context.playerHp} → ${playerHp}).`,
       ],
     },
   };
+}
+
+/** Both sides' HP as a sentence for the combat log. */
+export function hpLine(playerHp: number, enemyHp: number): string {
+  return `You have ${playerHp} HP; the goblin has ${enemyHp} HP.`;
 }
 
 /** Renders the combat log plus how the encounter ended, as readable text. */
@@ -203,7 +208,7 @@ export const gameMachine = gameAgentSetup.createMachine({
     playerHp: input.playerHp,
     enemyHp: input.enemyHp,
     lastSummary: null,
-    log: [`You face a goblin. You ${input.playerHp} HP, goblin ${input.enemyHp} HP.`],
+    log: [`You face a goblin. ${hpLine(input.playerHp, input.enemyHp)}`],
   }),
   initial: "choosingMove",
   states: {
@@ -222,7 +227,7 @@ export const gameMachine = gameAgentSetup.createMachine({
               enemyHp,
               log: [
                 ...context.log,
-                `You attack the ${event.target} for ${PLAYER_DAMAGE} (goblin ${context.enemyHp} → ${enemyHp}).`,
+                `You attack the ${event.target} for ${PLAYER_DAMAGE} (goblin HP ${context.enemyHp} → ${enemyHp}).`,
               ],
             },
           };
@@ -241,7 +246,7 @@ export const gameMachine = gameAgentSetup.createMachine({
               playerHp,
               log: [
                 ...context.log,
-                `You heal ${event.amount} (you ${context.playerHp} → ${playerHp}).`,
+                `You heal ${event.amount} (your HP ${context.playerHp} → ${playerHp}).`,
               ],
             },
           };
@@ -283,7 +288,7 @@ export const gameMachine = gameAgentSetup.createMachine({
             log: [
               ...context.log,
               output.result.summary,
-              `End of turn: you ${context.playerHp} HP, goblin ${context.enemyHp} HP.`,
+              `End of turn: ${hpLine(context.playerHp, context.enemyHp)}`,
             ],
           },
         }),

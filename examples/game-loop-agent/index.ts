@@ -218,7 +218,6 @@ const gameSetup = setupAgent({
     target: z.number(),
     maxRounds: z.number(),
     round: z.number(),
-    starter: z.enum(["human", "agent"]),
     humanScore: z.number(),
     agentScore: z.number(),
     turnTotal: z.number(),
@@ -258,7 +257,6 @@ interface GameContext {
   target: number;
   maxRounds: number;
   round: number;
-  starter: "human" | "agent";
   humanScore: number;
   agentScore: number;
   turnTotal: number;
@@ -314,18 +312,23 @@ function humanPrompt(context: GameContext) {
   ].join("\n");
 }
 
+/** Who opens a round: the human on odd rounds, the agent on even ones. Derived
+ * from `round`, so no separate context field changes (or shows) per round. */
+export function starterOf(round: number): "human" | "agent" {
+  return round % 2 === 1 ? "human" : "agent";
+}
+
 /** Reset the board for the next round. Wins were tallied by `roundOver`. */
 function freshRound(context: GameContext): GameContext {
-  const starter = context.starter === "human" ? "agent" : "human";
+  const round = context.round + 1;
   return {
     ...context,
-    round: context.round + 1,
-    starter,
+    round,
     humanScore: 0,
     agentScore: 0,
     turnTotal: 0,
     pendingReply: "",
-    notice: `New round. ${starter} starts.`,
+    notice: `Round ${round}. ${starterOf(round) === "human" ? "You start." : "The agent starts."}`,
   };
 }
 
@@ -340,7 +343,6 @@ export const gameMachine = gameSetup.createMachine({
     target: input.target,
     maxRounds: input.maxRounds,
     round: 1,
-    starter: "human" as const,
     humanScore: 0,
     agentScore: 0,
     turnTotal: 0,
@@ -490,7 +492,7 @@ export const gameMachine = gameSetup.createMachine({
               return next.round > context.maxRounds
                 ? { target: "#pig-game.roundLimit", context: { round: context.round } }
                 : {
-                    target: next.starter === "human" ? "humanTurn" : "agentTurn",
+                    target: starterOf(next.round) === "human" ? "humanTurn" : "agentTurn",
                     context: next,
                   };
             },

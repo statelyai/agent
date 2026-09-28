@@ -136,15 +136,20 @@ const agent = setupAgent({
     source: z.enum(["trusted", "external"]),
     votes: z.array(vote.extend({ reviewer })),
     abstentions: z.array(reviewer),
+    /** Why the human rejected the patch; null unless they did. */
+    rejectionReason: z.string().nullable(),
   }),
   output: z.object({
     approved: z.boolean(),
     humanReviewed: z.boolean(),
     votes: z.array(vote.extend({ reviewer })),
     abstentions: z.array(reviewer),
+    rejectionReason: z.string().nullable(),
   }),
   meta: interactionMetaSchema,
-  events: { APPROVE: z.object({}), REJECT: z.object({}) },
+  // A rejection says why: typed text ("reject it, no tests") reads as REJECT
+  // and fills its one string field, so the reason is recorded with it.
+  events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
   actors: {
     // Each reviewer's vote: a Jev choice (see createReview).
     review: createReview(),
@@ -158,6 +163,7 @@ export const consensusReviewMachine = agent.createMachine({
     source: input.source,
     votes: [],
     abstentions: [],
+    rejectionReason: null,
   }),
   initial: "reviewing",
   states: {
@@ -239,11 +245,17 @@ export const consensusReviewMachine = agent.createMachine({
       meta: {
         interaction: {
           label:
-            "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved.",
+            "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved. To reject it, say why.",
           events: { APPROVE: { label: "Accept patch" }, REJECT: { label: "Reject patch" } },
         },
       },
-      on: { APPROVE: { target: "overridden" }, REJECT: { target: "rejected" } },
+      on: {
+        APPROVE: { target: "overridden" },
+        REJECT: ({ event }) => ({
+          target: "rejected",
+          context: { rejectionReason: event.reason.trim() || null },
+        }),
+      },
     },
     accepted: {
       type: "final",
@@ -252,6 +264,7 @@ export const consensusReviewMachine = agent.createMachine({
         humanReviewed: false,
         votes: context.votes,
         abstentions: context.abstentions,
+        rejectionReason: context.rejectionReason,
       }),
     },
     overridden: {
@@ -261,6 +274,7 @@ export const consensusReviewMachine = agent.createMachine({
         humanReviewed: true,
         votes: context.votes,
         abstentions: context.abstentions,
+        rejectionReason: context.rejectionReason,
       }),
     },
     rejected: {
@@ -270,6 +284,7 @@ export const consensusReviewMachine = agent.createMachine({
         humanReviewed: true,
         votes: context.votes,
         abstentions: context.abstentions,
+        rejectionReason: context.rejectionReason,
       }),
     },
   },

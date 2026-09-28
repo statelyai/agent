@@ -180,6 +180,11 @@ const feynmanContextSchema = z.object({
 
 type FeynmanContext = z.infer<typeof feynmanContextSchema>;
 
+/** "1. Closures" / "Step 2: Closures" → "Closures": the machine numbers checkpoints itself. */
+export function stripNumbering(title: string): string {
+  return title.replace(/^\s*(?:(?:step|checkpoint)\s*)?\d+\s*[.):]\s+/i, "").trim() || title.trim();
+}
+
 function currentCheckpoint(context: FeynmanContext) {
   return context.checkpoints[context.checkpointIndex] ?? { title: "", keyIdea: "" };
 }
@@ -260,8 +265,8 @@ const agentSetup = setupAgent({
       model: "tutor",
       system:
         "You design Feynman-technique study sessions. Split the topic into a short, " +
-        "ordered list of checkpoints, simplest first. Each has a title and the one key " +
-        "idea a learner must be able to explain in plain words.",
+        "ordered list of checkpoints, simplest first. Each has a short, unnumbered title " +
+        "and the one key idea a learner must be able to explain in plain words.",
       prompt: ({ input }) => `Topic: ${input.topic}\nAt most ${input.max} checkpoints.`,
     },
     // context_builder: set the scene for one checkpoint.
@@ -332,7 +337,11 @@ export const feynmanTutorMachine = agentSetup.createMachine({
         input: ({ context }) => ({ topic: context.topic, max: MAX_CHECKPOINTS }),
         onDone: ({ output }) => ({
           target: "checkingPlan",
-          context: { checkpoints: output.result.checkpoints.slice(0, MAX_CHECKPOINTS) },
+          context: {
+            checkpoints: output.result.checkpoints
+              .slice(0, MAX_CHECKPOINTS)
+              .map((checkpoint) => ({ ...checkpoint, title: stripNumbering(checkpoint.title) })),
+          },
         }),
         onError: ({ event }) => ({
           target: "failed",

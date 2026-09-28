@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import {
+  RELEASE_NOTE_SYSTEM,
   releaseNoteMachine,
   runFileSnapshotStoreDemo,
   runFileSnapshotStoreExample,
@@ -79,4 +80,26 @@ test("the demo reads as its own story: its own machine, the right topic, no host
   // A logical file name, never the OS temp directory.
   expect(result.snapshotFile).toBe("release-42.json (in a temp directory, removed after the run)");
   expect(JSON.stringify(result)).not.toContain(tmpdir());
+  // Both halves are headed sections of one report.
+  expect(result.report).toMatch(
+    /^### Storage owned by the application\n[\s\S]*A release note\.\n\n### Lifetime owned by the application\n[\s\S]*A release note\.$/,
+  );
+});
+
+test("the draft request asks for the note only, with no chatbot offers", async () => {
+  const systems: string[] = [];
+  await runFileSnapshotStoreDemo({
+    executors: {
+      generateText: async (request) => {
+        systems.push(String(request.system ?? ""));
+        return { result: "A release note." };
+      },
+    },
+  });
+  expect(systems).toHaveLength(2);
+  for (const system of systems) {
+    expect(system).toBe(RELEASE_NOTE_SYSTEM);
+    expect(system).toMatch(/no offers of further help/);
+    expect(system).toMatch(/no follow-up questions/);
+  }
 });

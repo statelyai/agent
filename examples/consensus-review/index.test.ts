@@ -70,13 +70,31 @@ test("review failures abstain; human rejection survives a JSON snapshot round tr
   ]);
   const result = await runConsensusReviewExample({
     snapshot: JSON.parse(JSON.stringify(pending.persist())),
-    event: { type: "REJECT" },
+    event: { type: "REJECT", reason: "" },
     judge: approving(),
   });
   expect(result.status).toBe("done");
   if (result.status !== "done") return;
   expect(result.output).toMatchObject({ approved: false, humanReviewed: true });
   expect(result.output.abstentions).toHaveLength(2);
+  expect(result.output.rejectionReason).toBeNull();
+});
+
+test("a rejection records the human's reason", async () => {
+  const pending = await runConsensusReviewExample({ patch: "external patch", judge: approving() });
+  expect(pending.status).toBe("idle");
+  const result = await runConsensusReviewExample({
+    snapshot: pending.persist(),
+    event: { type: "REJECT", reason: "reject it, no tests" },
+    judge: approving(),
+  });
+  expect(result.status).toBe("done");
+  if (result.status !== "done") return;
+  expect(result.output).toMatchObject({
+    approved: false,
+    humanReviewed: true,
+    rejectionReason: "reject it, no tests",
+  });
 });
 
 test("same machine runs in a native XState host with identical output", async () => {

@@ -108,7 +108,9 @@ const SUMMARIZE_SYSTEM =
   "summarize them, but use them to judge what is still open. An offer, request " +
   "or question they follow up on is resolved, not pending or declined. " +
   "Drop pleasantries and redundant phrasing. Write it as terse notes, not " +
-  "prose. Return only the summary text.";
+  "prose, in English and plain words: no words from other languages or " +
+  "scripts, even where the conversation uses a technical term. Return only " +
+  "the summary text.";
 
 /** `role: text` lines — the shape both the summarizer and the transcript read. */
 function renderMessages(messages: AgentMessage[], separator = "\n"): string {

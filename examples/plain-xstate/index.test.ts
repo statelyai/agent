@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
+import { createActor, waitFor } from "xstate";
 import { createAgentRuntime, getStatePath, runToQuiescence } from "@statelyai/agent";
 import { createMockModelExecutors } from "../mock-model.js";
-import { plainWriterAgentMachine, plainWriterMachine, runPlainXstateExample } from "./index.js";
+import {
+  CANNED_DRAFT_NOTE,
+  plainWriterAgentMachine,
+  plainWriterMachine,
+  runPlainXstateExample,
+} from "./index.js";
 
 describe("plain-xstate", () => {
   test("drives the plain machine to completion when the model approves", async () => {
@@ -73,6 +79,22 @@ describe("plain-xstate", () => {
     expect(result.drafts).toBe(3);
     // Exactly `maxRevisions` REVISEs were accepted — no off-by-one third one.
     expect(result.revisions).toBe(2);
+  });
+
+  test("the bare plain machine labels its placeholder drafts as canned", async () => {
+    const actor = createActor(plainWriterMachine, { input: { topic: "a solar weather station" } });
+    actor.start();
+    await waitFor(actor, (snapshot) => snapshot.matches("judging"));
+    expect(actor.getSnapshot().context.draft).toBe(
+      `${CANNED_DRAFT_NOTE} a solar weather station: first draft.`,
+    );
+    actor.send({ type: "REVISE" });
+    await waitFor(
+      actor,
+      (snapshot) => snapshot.matches("judging") && snapshot.context.drafts === 2,
+    );
+    expect(actor.getSnapshot().context.draft).toContain("revised draft #1");
+    expect(actor.getSnapshot().context.draft.startsWith(CANNED_DRAFT_NOTE)).toBe(true);
   });
 
   test("the guard — not the model — bounds the revision loop", () => {

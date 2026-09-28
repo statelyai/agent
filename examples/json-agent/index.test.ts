@@ -50,10 +50,9 @@ test("REPLY path: the draft settles idle, and APPROVE reaches the replied final 
   );
 
   assert(second.status === "done");
-  expect(second.output).toEqual({
-    resolution: "replied",
-    reply: "Sorry about that — refund issued.",
-  });
+  // The draft was shown at approval; the output is the outcome, not a repeat.
+  expect(second.output).toEqual({ resolution: "replied" });
+  expect(second.snapshot.context.reply).toBe("Sorry about that — refund issued.");
 });
 
 test("REJECT path: rejecting the draft escalates and keeps the drafted reply", async () => {

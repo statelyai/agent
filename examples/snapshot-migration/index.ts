@@ -121,8 +121,8 @@ const v2 = setupAgent({
   output: z.object({
     orderId: z.string(),
     approved: z.boolean(),
-    amountCents: z.number().int(),
-    currency: z.string(),
+    /** Formatted for people ("$812.50"); integer cents stay in context. */
+    amount: z.string(),
     riskLevel: z.enum(["low", "high"]),
   }),
   events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
@@ -151,8 +151,7 @@ export const orderApprovalMachine = v2.createMachine({
       output: ({ context }) => ({
         orderId: context.orderId,
         approved: true,
-        amountCents: context.amountCents,
-        currency: context.currency,
+        amount: context.amountDisplay,
         riskLevel: context.riskLevel,
       }),
     },
@@ -161,8 +160,7 @@ export const orderApprovalMachine = v2.createMachine({
       output: ({ context }) => ({
         orderId: context.orderId,
         approved: false,
-        amountCents: context.amountCents,
-        currency: context.currency,
+        amount: context.amountDisplay,
         riskLevel: context.riskLevel,
       }),
     },
@@ -170,12 +168,11 @@ export const orderApprovalMachine = v2.createMachine({
 });
 
 /**
- * The whole story in one call: pause on the deployed machine, ship a new
- * version, resume the paused snapshot on it. The migration happens BETWEEN the
- * two runs, so a host that drives only one machine cannot show it — see
- * {@link ExampleRunOptions}, whose observers are threaded into both legs.
+ * Leg one: run the deployed v1 machine until it waits for a reviewer, and
+ * persist that snapshot as a host would. Exported for callers that want the
+ * raw persisted snapshot; the story runner below keeps it out of its result.
  */
-export async function runSnapshotMigrationExample(
+export async function pauseOnV1(
   options: { orderId?: string; total?: number } & ExampleRunOptions = {},
 ) {
   const { orderId = "ORD-4417", total = 812.5, ...observers } = options;
@@ -189,7 +186,22 @@ export async function runSnapshotMigrationExample(
     },
   );
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
-  const persisted = persistSnapshot(paused.persist());
+  return persistSnapshot(paused.persist());
+}
+
+/**
+ * The whole story in one call: pause on the deployed machine, ship a new
+ * version, resume the paused snapshot on it. The migration happens BETWEEN the
+ * two runs, so a host that drives only one machine cannot show it — see
+ * {@link ExampleRunOptions}, whose observers are threaded into both legs.
+ * Returns the readable summary and the v2 output; the raw persisted snapshot
+ * is evidence for programmatic callers ({@link pauseOnV1}), not the result.
+ */
+export async function runSnapshotMigrationExample(
+  options: { orderId?: string; total?: number } & ExampleRunOptions = {},
+) {
+  const { orderId = "ORD-4417", total = 812.5, ...observers } = options;
+  const persisted = await pauseOnV1({ orderId, total, ...observers });
   // The version bump: the paused snapshot is resumed on a machine that has
   // shipped since, through XState's own `version` + `migrate` contract.
   const resumed = await runToQuiescence(
@@ -204,18 +216,17 @@ export async function runSnapshotMigrationExample(
   );
   if (resumed.status !== "done") throw new Error(`Expected done, got '${resumed.status}'.`);
   const { output } = resumed;
+  const { amountCents } = resumed.snapshot.context;
   const pausedIn = String((persisted as { value?: unknown }).value);
-  // The readable story leads; the raw persisted snapshot stays attached as the
-  // evidence, not the headline.
   const summary = [
     `Paused order ${orderId} (total ${total}) on v${V1}, waiting in \`${pausedIn}\`.`,
     `Shipped v${V2}: the waiting state is now \`awaitingApproval\`, and amounts are integer cents with a currency and a risk level.`,
     `On resume, XState read the snapshot's version (${V1}) and ran the v${V2} machine's \`migrate\`: ` +
-      `\`${pausedIn}\` → \`awaitingApproval\`, total ${total} → ${output.amountCents} cents ` +
-      `(${formatMoney(output.amountCents, output.currency)}), risk ${output.riskLevel}.`,
+      `\`${pausedIn}\` → \`awaitingApproval\`, total ${total} → ${amountCents} cents ` +
+      `(${output.amount}), risk ${output.riskLevel}.`,
     `APPROVE then landed on v${V2}: order ${output.orderId} ${output.approved ? "approved" : "rejected"}.`,
   ].join("\n\n");
-  return { summary, output, persisted };
+  return { summary, output };
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {

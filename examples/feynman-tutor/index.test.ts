@@ -17,6 +17,7 @@ import {
   createVerifyExplanation,
   feynmanTutorMachine,
   runFeynmanTutorExample,
+  stripNumbering,
   type FeynmanHumanEvent,
 } from "./index.js";
 
@@ -209,6 +210,33 @@ test("planner caps checkpoints at MAX_CHECKPOINTS; zero checkpoints ends in fail
   });
   expect(empty.outcome).toBe("failed");
   expect(empty.summary).toContain("no checkpoints");
+});
+
+test("numbered planner titles are stripped; the machine numbers checkpoints itself", async () => {
+  expect(stripNumbering("1. Two keys")).toBe("Two keys");
+  expect(stripNumbering("Step 2: Signatures")).toBe("Signatures");
+  expect(stripNumbering("3) Hashes")).toBe("Hashes");
+  expect(stripNumbering("RSA in 3 steps")).toBe("RSA in 3 steps");
+  expect(stripNumbering("2048-bit keys")).toBe("2048-bit keys");
+
+  const numbered = checkpoints.map((checkpoint, i) => ({
+    ...checkpoint,
+    title: `${i + 1}. ${checkpoint.title}`,
+  }));
+  const result = await runFeynmanTutorExample({
+    generateText: createMockModelExecutors({
+      text: {
+        planCheckpoints: [{ checkpoints: numbered }],
+        introduceCheckpoint: [{ context: "intro" }],
+      },
+    }).generateText,
+    judge: grader([pass]).model,
+    humanEvents: [explain("x"), explain("y")],
+  });
+  expect(result.checkpoints.map((checkpoint) => checkpoint.title)).toEqual([
+    "Two keys",
+    "Signatures",
+  ]);
 });
 
 test("a model error lands in failed with the checkpoints finished so far", async () => {

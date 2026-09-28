@@ -9,9 +9,11 @@ import {
   MAX_EDITORS,
   MAX_INTERVIEW_TURNS,
   MAX_SECTIONS,
+  onTopicSources,
   runStormWriterExample,
   searchSampleIndex,
   stormWriterMachine,
+  WRITE_SECTION_SYSTEM,
 } from "./index.js";
 
 const editors = [
@@ -146,6 +148,50 @@ test("assignSources gives each source to one heading, best match first", () => {
   ]);
   // More headings than sources: the extra heading gets none rather than a repeat.
   expect(assignSources(["A", "B"], ["[s] only"])).toEqual([["[s] only"], []]);
+});
+
+test("an off-topic source an interview surfaced is set aside, never handed to a section", async () => {
+  // The editor's question drags in neighboring passages (state machines, RAG).
+  const executors = scripted({
+    askQuestion: () => ({
+      question: "How do state machines and retrieval relate to prompt injection defenses?",
+      finished: false,
+    }),
+  });
+  const result = await runStormWriterExample({
+    topic: "prompt injection defenses",
+    generateText: executors.generateText,
+  });
+  const cited = executors.calls
+    .filter((call) => call.name === "writeSection")
+    .flatMap((call) => (call.input as { sources: string[] }).sources);
+  expect(cited.length).toBeGreaterThan(0);
+  expect(cited.every((source) => /injection/i.test(source))).toBe(true);
+  expect(result.trail).toMatch(/Sources: \d+ \(\d+ off-topic set aside\)\./);
+  expect(
+    onTopicSources("prompt injection defenses", [
+      "[sample source] Prompt injection hides instructions inside untrusted input.",
+      "[sample source] Retrieval-augmented generation fetches documents.",
+    ]),
+  ).toEqual(["[sample source] Prompt injection hides instructions inside untrusted input."]);
+});
+
+test("the writer prompts ask for full, on-topic sections and an on-topic lead", async () => {
+  const executors = scripted();
+  await runStormWriterExample({
+    topic: "state machines for AI agents",
+    generateText: executors.generateText,
+  });
+  const systemOf = (name: string) =>
+    String(executors.calls.find((call) => call.name === name)?.request.system ?? "");
+  const section = systemOf("writeSection");
+  expect(section).toBe(WRITE_SECTION_SYSTEM);
+  expect(section).toContain("2–4 sentences");
+  expect(section).toContain("Use EVERY listed source");
+  expect(section).toContain("Stay on the heading and the topic");
+  expect(section).toContain("Cover every part of the heading");
+  expect(systemOf("writeArticle")).toContain("leave out any detail that is not about the topic");
+  expect(systemOf("draftOutline")).toContain("Every heading is about the topic itself");
 });
 
 test("an editor that says it is finished ends its interview before the turn cap", async () => {

@@ -427,11 +427,19 @@ const agentSetup = setupAgent({
         output: gradeSchema.pick({ expected: true, explanation: true }),
       },
       model: "quiz",
+      // The label already shows the verdict, `expected`, and a quote of the
+      // passage with its page, so each piece is asked for once, not restated.
       system:
         "A quiz answer has been graded against the source passage. Explain the grade " +
         "from the passage ONLY. Be encouraging. " +
-        "Return `expected` as the answer the passage supports, in one line. " +
-        "In the explanation, quote or paraphrase the passage and name the page.",
+        "Return `expected` as the answer the passage supports: a short phrase, not the " +
+        "passage's full sentence. " +
+        "Return `explanation` as ONE sentence of at most 12 words about the learner's " +
+        "answer itself: what it got right, or exactly what it got wrong " +
+        '(e.g. "B swaps entry and exit." or "Nice — you named both handlers."). ' +
+        "The verdict, `expected`, and a quote of the passage with its page are shown next " +
+        'to it, so do NOT start with "Correct"/"Incorrect", do NOT restate `expected`, and ' +
+        "do NOT quote, paraphrase, or cite the passage.",
       prompt: ({ input }) =>
         [
           `Source passage (page ${input.pageNumber}):\n${input.sourceText}`,
@@ -467,7 +475,12 @@ function renderGrade(grade: z.infer<typeof gradeSchema>): string {
   // `expected` usually arrives as a full sentence, so joining it with the
   // sentence-ending period below renders "…set of states..".
   const expected = grade.expected.trim().replace(/[.!?]+$/, "");
-  return `${verdict} — the answer is ${expected}. ${grade.explanation}`;
+  // The verdict is rendered here; a model that opens with it anyway would say it twice.
+  const raw = grade.explanation.trim();
+  const stripped = raw.replace(/^(?:in)?correct\b[\s—–:;,.!-]*/i, "");
+  const explanation =
+    stripped === raw ? raw : stripped.replace(/^./, (first) => first.toUpperCase());
+  return `${verdict} — the answer is ${expected}.${explanation ? ` ${explanation}` : ""}`;
 }
 
 /**

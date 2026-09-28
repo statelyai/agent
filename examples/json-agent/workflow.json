@@ -186,8 +186,7 @@
     "replied": {
       "type": "final",
       "output": {
-        "resolution": "replied",
-        "reply": "{{ context.reply }}"
+        "resolution": "replied"
       }
     },
     "escalated": {

@@ -7,7 +7,7 @@
  * Self-Compose Reasoning Structures"): instead of one fixed prompting style
  * (chain of thought, step by step), the model first SELECTS the generic
  * reasoning modules that suit the task, ADAPTS them to the task's specifics,
- * turns them into a step-by-step reasoning STRUCTURE (a JSON plan with blanks),
+ * turns them into a step-by-step reasoning STRUCTURE (a plan with blanks),
  * and finally REASONS by filling that plan in to reach an answer.
  *
  * LangGraph shape (tutorials/self-discover/self-discover) — a straight line:
@@ -51,6 +51,12 @@
  *     in order, so the answer is written after (and from) the worked steps
  *     rather than guessed first and justified after. The reasoning is prose,
  *     one line per plan step, so the result reads as an explanation.
+ *   - The plan is a list of steps, not a JSON object. The paper's structure
+ *     is JSON with empty values; here the model returns one string per step
+ *     and the machine numbers them, so the plan reads as text wherever it is
+ *     shown. The worked reasoning is a list too, one entry per step, and every
+ *     entry is flattened to one plain line (`plainStep`) so no step can turn
+ *     into a markdown heading, quote, or rule when rendered.
  *   - Every invoke has an `onError` that lands in `failed` with whatever stages
  *     completed.
  *   - `REASONING_MODULES` is 16 of the paper's 39 modules, shortened, to keep
@@ -161,6 +167,32 @@ function pickModules(answers: Record<string, { probability: number } | undefined
     .map((scored) => scored.module);
 }
 
+/**
+ * One step as one plain line: whitespace flattened, and any leading numbering
+ * or markdown block marker (`#`, `>`, bullets, `Step 6:`) dropped — the
+ * machine numbers steps itself, and a stray `#` would render as a heading.
+ */
+export function plainStep(text: string): string {
+  return (
+    text
+      .replace(/\s+/g, " ")
+      .trim()
+      // "# of vertices" means "number of", not a heading.
+      .replace(/^#\s*of\b/i, "Number of")
+      .replace(/^(?:(?:#+|>+|[-*+](?=\s)|\d+[.)]|step\s*\d+\s*[:.)-]?)\s*)+/i, "")
+      .replace(/^[-=_*\s]+$/, "")
+  );
+}
+
+/** Numbered plain lines, one per step; empty steps are dropped. */
+function numberedSteps(steps: readonly string[]): string {
+  return steps
+    .map(plainStep)
+    .filter((step) => step.length > 0)
+    .map((step, index) => `${index + 1}. ${step}`)
+    .join("\n");
+}
+
 const selfDiscoverContextSchema = z.object({
   task: z.string(),
   // The modules that cleared the threshold (empty when none did).
@@ -223,16 +255,22 @@ const agentSetup = setupAgent({
           ...input.modules.map((m) => `- ${m}`),
         ].join("\n"),
     },
-    // structure: turn the adapted modules into a fill-in reasoning plan.
+    // structure: turn the adapted modules into a fill-in reasoning plan, one
+    // string per step (the machine numbers them).
     structurePlan: {
       schemas: {
         input: z.object({ task: z.string(), adapted: z.string() }),
-        output: z.object({ structure: z.string() }),
+        output: z.object({
+          steps: z
+            .array(z.string())
+            .describe("One entry per plan step: what to work out. Plain text, no numbering."),
+        }),
       },
       model: "reasoner",
       system:
-        "Operationalize the adapted reasoning modules into a step-by-step reasoning plan " +
-        "in JSON: keys describe each step, values are left empty to be filled in later. " +
+        "Operationalize the adapted reasoning modules into a step-by-step reasoning plan: " +
+        "one short instruction per step, each naming what to work out, with the result " +
+        "left to be filled in later. Plain sentences, no numbering, JSON, or markdown. " +
         "Do not solve the task.",
       prompt: ({ input }) =>
         [`Task: ${input.task}`, "", "Adapted modules:", input.adapted].join("\n"),
@@ -245,16 +283,16 @@ const agentSetup = setupAgent({
         input: z.object({ task: z.string(), structure: z.string() }),
         output: z.object({
           reasoning: z
-            .string()
-            .describe("Plain prose, one short numbered line per plan step. Not JSON."),
+            .array(z.string())
+            .describe("One entry per plan step, in order: a short plain sentence. No numbering."),
           answer: z.string().describe("The conclusion the reasoning reached, stated exactly."),
         }),
       },
       model: "reasoner",
       system:
         "Follow the reasoning structure step by step to solve the task. First write " +
-        "`reasoning`: work through each step of the structure in order, as plain prose " +
-        "(one short numbered line per step, not JSON), checking every constraint in the " +
+        "`reasoning`: work through each step of the structure in order, one short plain " +
+        "sentence per step (no numbering or markdown), checking every constraint in the " +
         "task. Then write `answer`: exactly the conclusion your reasoning reached, as a " +
         "full phrase. If the task lists options, give the chosen option's letter AND " +
         "its text. Never give an answer your reasoning did not arrive at.",
@@ -330,7 +368,7 @@ export const selfDiscoverMachine = agentSetup.createMachine({
         input: ({ context }) => ({ task: context.task, adapted: context.adaptedModules ?? "" }),
         onDone: ({ output }) => ({
           target: "reasoning",
-          context: { reasoningStructure: output.result.structure },
+          context: { reasoningStructure: numberedSteps(output.result.steps) },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -353,7 +391,7 @@ export const selfDiscoverMachine = agentSetup.createMachine({
                   adaptedModules: context.adaptedModules,
                   reasoningStructure: context.reasoningStructure,
                   answer: output.result.answer,
-                  reasoning: output.result.reasoning,
+                  reasoning: numberedSteps(output.result.reasoning),
                 },
               }
             : { target: "failed", context: { failure: "a stage finished without a result" } },

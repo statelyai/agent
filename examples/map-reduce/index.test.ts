@@ -97,6 +97,29 @@ test("happy path: fan out one joke per subject, judge picks one", async () => {
   expect(result.trail.at(-1)).toBe("The judge picked joke [1].");
 });
 
+test("jokes and subjects are trimmed, so no list item ends in a blank line", async () => {
+  // Models often end a joke with a newline; kept, it renders as an empty line
+  // inside that joke's list item and the jokes stop lining up.
+  const executors = scripted(
+    {
+      generateSubjects: [{ subjects: [" lions ", "penguins\n", "  "] }],
+      writeJoke: (request: AgentTextRequest) => ({
+        joke: `\nWhy did the ${(request.input as { subject: string }).subject} cross?\nTo get away.\n\n`,
+      }),
+    },
+    "joke1",
+  );
+  const result = await runMapReduceExample({ topic: "animals", ...executors });
+
+  expect(result.outcome).toBe("done");
+  expect(result.jokes.map((entry) => entry.subject)).toEqual(["lions", "penguins"]);
+  for (const entry of result.jokes) {
+    expect(entry.joke).toBe(`Why did the ${entry.subject} cross?\nTo get away.`);
+  }
+  expect(result.bestJoke).toBe("Why did the penguins cross?\nTo get away.");
+  expect(result.trail).toContain("[0] lions: Why did the lions cross?\nTo get away.");
+});
+
 test("more than MAX_SUBJECTS subjects are truncated", async () => {
   const executors = scripted({
     generateSubjects: [{ subjects: ["a", "b", "c", "d", "e", "f"] }],

@@ -274,7 +274,49 @@ test("starters behave as their labels advertise", async () => {
     expect(result.reselections, question).toBe(0);
     expect(result.selectedTools, question).toContain(tool);
     expect(result.calls, question).toBe(`${tool}(${JSON.stringify(arg)}) → ${toolResult}`);
+    // Every starter's output has the same layout: one response field with
+    // the answer first, then the calls as a list — never a separate `calls`
+    // field competing with `answer` to lead.
+    expect(result.response, question).toBe(
+      `done\n\nTool calls:\n\n- ${tool}(${JSON.stringify(arg)}) → ${toolResult}`,
+    );
+    expect(
+      Object.keys(result)
+        .filter((key) => typeof result[key as keyof typeof result] === "string")
+        .sort(),
+      question,
+    ).toEqual(["answer", "calls", "finalState", "response"]);
   }
+});
+
+test("the response layout does not depend on whether the answer or the calls are longer", async () => {
+  const run = (answer: string) =>
+    runToolRetrievalExample({
+      question: MARATHON,
+      judge: selector({ [MARATHON]: ["km_to_miles"] }).model,
+      decide: scripted([
+        { type: "CALL_TOOL", tool: "km_to_miles", arg: "42.195" },
+        { type: "ANSWER", answer },
+      ]),
+    });
+  const short = await run("26.22 miles.");
+  const long = await run(
+    "A marathon of 42.195 kilometres is about 26.22 miles, the distance every road marathon uses.",
+  );
+  for (const result of [short, long]) {
+    const [answer, blank, heading, blank2, call] = result.response.split("\n");
+    expect(answer).toBe(result.answer);
+    expect([blank, heading, blank2]).toEqual(["", "Tool calls:", ""]);
+    expect(call).toBe('- km_to_miles("42.195") → 26.22 miles');
+  }
+
+  // No calls: the same shape, with the list replaced by one line.
+  const direct = await runToolRetrievalExample({
+    question: MARATHON,
+    judge: selector({ [MARATHON]: ["km_to_miles"] }).model,
+    decide: scripted([{ type: "ANSWER", answer: "About 26.2 miles." }]),
+  });
+  expect(direct.response).toBe("About 26.2 miles.\n\nTool calls: none.");
 });
 
 test("selection asks Jev one boolean question per registry tool and keeps the top few above the threshold", async () => {

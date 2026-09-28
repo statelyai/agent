@@ -29,6 +29,9 @@ import {
   type AgentRunInit,
 } from "@statelyai/agent";
 
+/** The request this example's approval UI is rendered for. */
+export const REQUEST_ID = "proposal-1";
+
 const input = z.object({
   requestId: z.string(),
   task: z.string(),
@@ -78,7 +81,10 @@ export const deadlineEscalationMachine = agent.createMachine({
       meta: {
         interaction: {
           label: "Approve the proposal before the approval window closes.",
-          events: { APPROVE: { label: "Approve proposal" } },
+          // The approve button is rendered for one request: its id is fixed
+          // here, so a host sends a bare APPROVE and the id rides along. An
+          // approval carrying any other id is stale and fails the guard.
+          events: { APPROVE: { label: "Approve proposal", event: { requestId: REQUEST_ID } } },
         },
       },
       after: { approvalWindow: { target: "escalated" } },
@@ -121,7 +127,7 @@ export async function runDeadlineEscalationExample(
       executors,
     }),
     {
-      input: { requestId: "proposal-1", task: "Schedule a maintenance window", windowMs: 60_000 },
+      input: { requestId: REQUEST_ID, task: "Schedule a maintenance window", windowMs: 60_000 },
       ...runOptions,
     },
   );

@@ -32,6 +32,8 @@ interface PlayOptions {
   grade?: (answer: string) => boolean | number;
   /** The `expected` string the explanation returns. */
   expected?: string;
+  /** The `explanation` string the explanation returns. */
+  explanation?: string;
 }
 
 interface PlayResult {
@@ -48,6 +50,8 @@ interface PlayResult {
   passages: string[];
   /** Prompts `explainGrade` was given, in order. */
   gradePrompts: string[];
+  /** The system prompt of the last `explainGrade` request. */
+  explainSystem: string;
   /** Every Jev grading call, in order. */
   jevCalls: MockJudgeCall[];
   /** Every idle label the run settled on. */
@@ -61,6 +65,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
   const gradePrompts: string[] = [];
   const idleLabels: string[] = [];
   const idleViews: PlayResult["idleViews"] = [];
+  let explainSystem = "";
   let questionNumber = 0;
 
   // The verdict is a Jev judgment over the passage, question, and answer.
@@ -75,11 +80,12 @@ async function play(options: PlayOptions): Promise<PlayResult> {
   const generateText: AgentRequestExecutor = async (request) => {
     if (request.name === "explainGrade") {
       gradePrompts.push(request.prompt ?? "");
+      explainSystem = String(request.system ?? "");
       const answer = (request.prompt ?? "").match(/Learner's answer: (.*)/)?.[1] ?? "";
       return {
         result: {
           expected: options.expected ?? "the expected answer",
-          explanation: `graded "${answer}"`,
+          explanation: options.explanation ?? `graded "${answer}"`,
         },
       };
     }
@@ -129,6 +135,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
     output: result.status === "done" ? (result.output as PlayResult["output"]) : undefined,
     passages,
     gradePrompts,
+    explainSystem,
     jevCalls: jev.calls,
     idleLabels,
     idleViews,
@@ -301,6 +308,22 @@ describe("chat-with-pdf quiz mode", () => {
 
     // The first question has nothing to grade yet, so it stands alone.
     expect(wrong.idleLabels[0]).toMatch(/^Q1 about:/);
+  });
+
+  test("the feedback says the verdict once, even when the explanation opens with it", async () => {
+    const result = await play({
+      input: { documentId: "statecharts", maxQuestions: 2, refreshEvery: 2 },
+      learnerEvents: answers(2),
+      explanation: "Correct — nice work, that matches the passage.",
+    });
+
+    const second = result.idleLabels[1]!;
+    expect(second).toContain(
+      "Correct — the answer is the expected answer. Nice work, that matches the passage.",
+    );
+    expect(second.match(/Correct/g)).toHaveLength(1);
+    // The explanation request is told not to restate what the label already shows.
+    expect(result.explainSystem).toContain("do NOT quote, paraphrase, or cite the passage");
   });
 
   test("an expected answer that already ends in a period is not double-punctuated", async () => {

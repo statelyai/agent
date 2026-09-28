@@ -119,6 +119,10 @@ describe("chameleon", () => {
     expect(wordRequests[2]!.serialized.toLowerCase()).not.toContain("octopus");
     expect(wordRequests[2]!.prompt).toContain("You do not know the secret word.");
     expect(wordRequests[2]!.system).toContain("You are the CHAMELEON");
+    // It guesses from the category and the words, so it is steered off naming
+    // a candidate — above all the most obvious one, which is often the secret.
+    expect(wordRequests[2]!.system).toContain("Never say a member of the category itself");
+    expect(wordRequests[2]!.system).toContain("avoid the most obvious member of the category");
 
     // The public record grows by turn order: seat N sees exactly N words.
     for (const [seat, request] of wordRequests.entries()) {

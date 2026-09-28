@@ -275,7 +275,7 @@ test("a failing request ends in `failed` with the transcript so far", async () =
   expect(output.messages).toEqual([{ role: "user", content: "What is 6 times 7?" }]);
 });
 
-test("the machine's output is the readable answer, not a copy of the transcript", async () => {
+test("the machine's output is the outcome, not a repeat of the answer or the transcript", async () => {
   const executors = { generateText: toolLoop };
   const answered = await runToQuiescence(createAgentRuntime(toolCallingMachine, { executors }), {
     input: { question: "What is 6 times 7?" },
@@ -287,8 +287,9 @@ test("the machine's output is the readable answer, not a copy of the transcript"
   });
 
   if (ended.status !== "done") throw new Error(`Expected done, got ${ended.status}`);
-  // Hosts render the output; raw messages there would repeat the answer.
-  expect(ended.output).toEqual({ status: "answered", answer: "6 times 7 is 42." });
+  // Hosts render the output; the answer was already shown at the idle turn.
+  expect(ended.output).toEqual({ status: "answered", turns: 1 });
+  expect(ended.snapshot.context.answer).toBe("6 times 7 is 42.");
   // The transcript is still retained, in context.
   expect(ended.snapshot.context.messages).toHaveLength(4);
 });

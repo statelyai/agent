@@ -57,6 +57,26 @@ export const ORDERS: Record<string, { customer: string; total: number; item: str
   "ORD-1234": { customer: "Grace Hopper", total: 89, item: "Noise-cancelling headphones" },
 };
 
+/** Order ids the ticket mentions (`A1001`, `ORD-1234`, ...). */
+export function mentionedOrderIds(ticket: string): string[] {
+  return [...new Set(ticket.match(/\b[A-Z]{1,4}-?\d{3,}\b/g) ?? [])];
+}
+
+/**
+ * Whether LOOKUP is worth offering: the budget is not spent, and either
+ * nothing has been looked up yet or the ticket names an order that has not
+ * been. Once every mentioned order is in context, a lookup can only repeat one.
+ */
+export function canLookUp(context: {
+  ticket: string;
+  orders: Record<string, string>;
+  lookups: number;
+}) {
+  if (context.lookups >= MAX_LOOKUPS) return false;
+  if (context.lookups === 0) return true;
+  return mentionedOrderIds(context.ticket).some((id) => !(id in context.orders));
+}
+
 const models = {
   agent: openai("gpt-5.4-mini"),
 };
@@ -229,12 +249,12 @@ export const supportMachine = agentSetup.createMachine({
           ]
             .filter(Boolean)
             .join("\n"),
-          // Once the lookup budget is spent, LOOKUP is not even offered — the
-          // guard below is still the truth, this just saves a wasted retry.
-          allowedEvents:
-            context.lookups >= MAX_LOOKUPS
-              ? ["REFUND", "ESCALATE", "RESOLVE"]
-              : ["LOOKUP", "REFUND", "ESCALATE", "RESOLVE"],
+          // Once the budget is spent or every order the ticket names is looked
+          // up, LOOKUP is not even offered — the guard below is still the
+          // truth, this just keeps the model from spending a retry on a repeat.
+          allowedEvents: canLookUp(context)
+            ? ["LOOKUP", "REFUND", "ESCALATE", "RESOLVE"]
+            : ["REFUND", "ESCALATE", "RESOLVE"],
           maxRetries: 2,
         }),
         onError: ({ event }) => ({

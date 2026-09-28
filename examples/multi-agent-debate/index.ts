@@ -192,9 +192,33 @@ function turnInput(context: DebateContext) {
   };
 }
 
+/**
+ * How a turn reads. The earlier wording ("make one new point and rebut…")
+ * came back as labeled parts ("New point: …", "Rebuttal: …"), so the form is
+ * spelled out as one unlabeled paragraph.
+ */
+const TURN_FORM =
+  "Write one paragraph of plain, continuous prose, at most four sentences: answer the " +
+  "opponent's last point (if any), then add one argument not yet made. Do not label the " +
+  "parts — no 'New point:', 'Rebuttal:', headings, or lists.";
+
+/** Part labels a speaker may still prefix a sentence with; dropped from the turn. */
+const PART_LABEL =
+  /(^|[.!?]\s+)(?:new point|rebuttal|counterpoint|point|argument)\s*:\s*([a-z])?/gi;
+
+/** The turn as prose: any leftover part labels removed. */
+export function plainArgument(argument: string): string {
+  return argument
+    .trim()
+    .replace(
+      PART_LABEL,
+      (_match, lead: string, letter?: string) => lead + (letter?.toUpperCase() ?? ""),
+    );
+}
+
 /** The transcript with one more turn appended (the messages reducer, inline). */
 function addTurn(context: DebateContext, side: Turn["side"], argument: string): Turn[] {
-  return [...context.transcript, { side, round: context.round, argument }];
+  return [...context.transcript, { side, round: context.round, argument: plainArgument(argument) }];
 }
 
 const speakerInput = z.object({
@@ -244,17 +268,13 @@ const agentSetup = setupAgent({
     argueFor: {
       schemas: { input: speakerInput, output: z.object({ argument: z.string() }) },
       model: "debater",
-      system:
-        "You argue FOR the motion in a formal debate. Make one new point and answer the " +
-        "opponent's last point. At most four sentences.",
+      system: "You argue FOR the motion in a formal debate. " + TURN_FORM,
       prompt: speakerPrompt("FOR"),
     },
     argueAgainst: {
       schemas: { input: speakerInput, output: z.object({ argument: z.string() }) },
       model: "debater",
-      system:
-        "You argue AGAINST the motion in a formal debate. Make one new point and rebut the " +
-        "proposer's last point. At most four sentences.",
+      system: "You argue AGAINST the motion in a formal debate. " + TURN_FORM,
       prompt: speakerPrompt("AGAINST"),
     },
   },

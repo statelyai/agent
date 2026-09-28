@@ -3,7 +3,14 @@ import { expect, test } from "vitest";
 import { type AgentRequestExecutors, type ChosenEvent } from "@statelyai/agent";
 import { lintAgentMachine, simulateAgent } from "@statelyai/agent/testing";
 import { createMockJudge } from "../mock-judge.js";
-import { MAX_LOOKUPS, ORDERS, runRetrofitExample, supportMachine } from "./index.js";
+import {
+  MAX_LOOKUPS,
+  ORDERS,
+  canLookUp,
+  mentionedOrderIds,
+  runRetrofitExample,
+  supportMachine,
+} from "./index.js";
 
 /**
  * The triage judgment's output, scripted for `simulateAgent` (which runs no
@@ -116,7 +123,7 @@ test("an identical lookup is refused; the first result stays in the prompt", asy
   const ticket = starters.find((starter) => starter.includes("ORD-1234"))!;
   expect(ORDERS["ORD-1234"]).toBeDefined();
 
-  const requests: { prompt: string; attempts: number }[] = [];
+  const requests: { prompt: string; attempts: number; offered: string[] }[] = [];
   const queue: ChosenEvent[] = [
     { type: "LOOKUP", orderId: "ORD-1234" },
     { type: "LOOKUP", orderId: "ORD-1234" },
@@ -127,7 +134,11 @@ test("an identical lookup is refused; the first result stays in the prompt", asy
     judge: triageJev().model,
     executors: {
       decide: async (request) => {
-        requests.push({ prompt: request.prompt ?? "", attempts: request.attempts.length });
+        requests.push({
+          prompt: request.prompt ?? "",
+          attempts: request.attempts.length,
+          offered: request.events.map((descriptor) => descriptor.type),
+        });
         return { event: queue.shift()! };
       },
     },
@@ -137,8 +148,25 @@ test("an identical lookup is refused; the first result stays in the prompt", asy
   expect(result.progress.filter((state) => state === "lookingUp")).toHaveLength(1);
   expect(requests.map((request) => request.attempts)).toEqual([0, 0, 1]);
   expect(requests[1]!.prompt).toContain("Order ORD-1234: Noise-cancelling headphones, $89");
+  // Once the only order the ticket names is looked up, LOOKUP is not offered.
+  expect(requests[0]!.offered).toContain("LOOKUP");
+  expect(requests[1]!.offered).not.toContain("LOOKUP");
   expect(result.refunded).toBe(true);
   expect(result.resolution).toContain("Refunded $89");
+});
+
+test("LOOKUP stays on offer while the ticket names an order not yet looked up", () => {
+  const base = { ticket: "Where are orders A1001 and B2002?", orders: {}, lookups: 0 };
+  expect(mentionedOrderIds(base.ticket)).toEqual(["A1001", "B2002"]);
+  expect(canLookUp(base)).toBe(true);
+  expect(canLookUp({ ...base, lookups: 1, orders: { A1001: "found" } })).toBe(true);
+  expect(canLookUp({ ...base, lookups: 2, orders: { A1001: "found", B2002: "found" } })).toBe(
+    false,
+  );
+  // No id in the ticket: one exploratory lookup, then commit.
+  expect(canLookUp({ ticket: "Where is my desk?", orders: { X9: "not found" }, lookups: 1 })).toBe(
+    false,
+  );
 });
 
 test("mock run reaches the refunded final state", async () => {

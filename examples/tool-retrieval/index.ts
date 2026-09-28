@@ -283,6 +283,36 @@ function renderCalls(calls: ToolCall[]): string {
     .join("\n");
 }
 
+/**
+ * The run's answer: the model's, or — for `failed` — why there is none.
+ * Shared by the machine's output and the programmatic result.
+ */
+function answerText(context: RetrievalContext, failed: boolean): string {
+  return failed
+    ? `No answer: the agent stopped after ${context.calls.length} tool call(s) and ${context.reselections} reselection(s) without a legal final move.`
+    : (context.answer ?? "");
+}
+
+/**
+ * The one reader-facing string, the same shape for every run: the answer,
+ * then the tool calls behind it as a list. A single field (rather than
+ * `answer` and `calls` side by side) keeps the layout from flipping with
+ * whichever of the two happens to be longer.
+ */
+function renderResponse(context: RetrievalContext, failed: boolean): string {
+  const calls =
+    context.calls.length === 0
+      ? ["Tool calls: none."]
+      : [
+          "Tool calls:",
+          "",
+          ...renderCalls(context.calls)
+            .split("\n")
+            .map((line) => `- ${line}`),
+        ];
+  return [answerText(context, failed), "", ...calls].join("\n");
+}
+
 function decisionPrompt(context: RetrievalContext): string {
   const selected = TOOL_REGISTRY.filter((tool) => context.selectedTools.includes(tool.name));
   return [
@@ -330,8 +360,7 @@ const agentSetup = setupAgent({
   context: retrievalContextSchema,
   input: z.object({ question: z.string() }),
   output: z.object({
-    answer: z.string(),
-    calls: z.string(),
+    response: z.string(),
     selectedTools: z.array(z.string()),
     reselections: z.number(),
   }),
@@ -451,8 +480,7 @@ export const toolRetrievalMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        answer: context.answer ?? "",
-        calls: renderCalls(context.calls),
+        response: renderResponse(context, false),
         selectedTools: context.selectedTools,
         reselections: context.reselections,
       }),
@@ -460,8 +488,7 @@ export const toolRetrievalMachine = agentSetup.createMachine({
     failed: {
       type: "final",
       output: ({ context }) => ({
-        answer: `No answer: the agent stopped after ${context.calls.length} tool call(s) and ${context.reselections} reselection(s) without a legal final move.`,
-        calls: renderCalls(context.calls),
+        response: renderResponse(context, true),
         selectedTools: context.selectedTools,
         reselections: context.reselections,
       }),
@@ -479,7 +506,11 @@ export interface RunToolRetrievalOptions {
 }
 
 export interface ToolRetrievalResult {
+  /** The answer followed by its tool calls: what the machine outputs. */
+  response: string;
+  /** The answer alone (or why there is none). */
   answer: string;
+  /** The tool calls, one `tool("arg") → result` line each. */
   calls: string;
   selectedTools: string[];
   reselections: number;
@@ -517,7 +548,15 @@ export async function runToolRetrievalExample(
   if (result.status !== "done") {
     throw new Error(`Tool retrieval example did not complete: ${result.status}`);
   }
-  return { ...result.output, finalState: getStatePath(result.snapshot), progress };
+  const finalState = getStatePath(result.snapshot);
+  const context = result.snapshot.context;
+  return {
+    ...result.output,
+    answer: answerText(context, finalState === "failed"),
+    calls: renderCalls(context.calls),
+    finalState,
+    progress,
+  };
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
@@ -533,8 +572,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       onProgress: (state) => console.log(`  → ${state}`),
     });
     console.log(`\nSelected: ${result.selectedTools.join(", ")}`);
-    console.log(`Calls:\n${result.calls}`);
-    console.log(`\nAnswer (${result.finalState}): ${result.answer}`);
+    console.log(`\n(${result.finalState})\n${result.response}`);
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

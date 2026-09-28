@@ -100,6 +100,10 @@ const eventSchemas = {
   REVISE: z.object({}),
 };
 
+/** Prefix on the plain machine's placeholder drafts. */
+export const CANNED_DRAFT_NOTE =
+  "[canned draft — the plain machine has no model; plainWriterAgentMachine writes real drafts]";
+
 /** Prompt for one draft, plain data the actor turns into a model call. */
 function draftPrompt(input: { topic: string; revisions: number }): string {
   return input.revisions === 0
@@ -125,11 +129,11 @@ export const plainWriterMachine = setup({
     // A bog-standard promise-shaped actor. Standalone it returns a canned
     // draft; the driving code replaces it with a model-backed one via
     // `machine.provide(...)`. The machine never mentions an LLM.
+    // The canned text says so, so nobody mistakes it for a model's output.
     writeDraft: createAsyncLogic<string, { topic: string; revisions: number }>({
       run: async ({ input }) =>
-        input.revisions === 0
-          ? `${input.topic}: a first draft.`
-          : `${input.topic}: revised draft #${input.revisions}.`,
+        `${CANNED_DRAFT_NOTE} ${input.topic}: ` +
+        (input.revisions === 0 ? "first draft." : `revised draft #${input.revisions}.`),
     }),
   },
 }).createMachine({

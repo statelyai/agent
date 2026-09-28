@@ -8,6 +8,7 @@ import {
   CASE_LEVELS,
   MAX_ROUNDS,
   multiAgentDebateMachine,
+  plainArgument,
   runMultiAgentDebateExample,
 } from "./index.js";
 
@@ -194,6 +195,34 @@ test("each speaker's stance is restated in its prompt on every round", async () 
   for (const prompt of prompts("argueAgainst")) {
     expect(prompt.split("\n").at(-1)).toMatch(/^Your side: AGAINST the motion\./);
   }
+});
+
+test("turns read as unlabeled prose: the prompt asks for it, and leftover labels are dropped", async () => {
+  // A live speaker answered "Make one new point and rebut…" with labeled parts:
+  // "… New point: putting control flow in code …", "Rebuttal: the proposition …".
+  const executors = createMockModelExecutors({
+    text: {
+      argueFor: {
+        argument: "New point: code is testable. Rebuttal: flexibility is not precision.",
+      },
+      argueAgainst: { argument: "Prompts adapt faster. new point: they need no redeploy." },
+    },
+  });
+  const result = await runMultiAgentDebateExample({
+    rounds: 1,
+    generateText: executors.generateText,
+    judge: judge().model,
+  });
+
+  expect(result.transcript).toContain("PRO: Code is testable. Flexibility is not precision.");
+  expect(result.transcript).toContain("CON: Prompts adapt faster. They need no redeploy.");
+  expect(result.transcript).not.toMatch(/new point|rebuttal/i);
+  for (const call of executors.calls) {
+    expect(call.request.system).toMatch(/Do not label the parts/);
+    expect(call.request.system).not.toMatch(/Make one new point/);
+  }
+  // Ordinary colons and lower-case words after abbreviations are left alone.
+  expect(plainArgument("The point: e.g. prompts drift.")).toBe("The point: e.g. prompts drift.");
 });
 
 test("the judge asks Jev one score per side in one call over the transcript", async () => {

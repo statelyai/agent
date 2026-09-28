@@ -129,6 +129,35 @@ test("empty retrieval skips grading and goes straight to the rewrite", async () 
   expect(result.progress).not.toContain("grading");
   expect(result.answeredDirectly).toBe(false);
   expect(result.trail).toContain("chose to answer without them");
+  // No passage backs it, so it is labeled like the budget-forced answer.
+  expect(result.answer).toBe("Unverified (no relevant passages found): Unsure.");
+});
+
+test("a RETRIEVE with blank or stop-word-only keywords fails the schema and is re-asked", async () => {
+  const executors = createMockModelExecutors({
+    decisions: {
+      chooseAction: [retrieve(""), retrieve("what is the"), retrieve("agent memory types")],
+    },
+    text: { generateAnswer: ["Sensory, short-term, and long-term memory."] },
+  });
+  const result = await runAgenticRagExample({
+    question: "What does Lilian Weng say about the types of agent memory?",
+    generateText: executors.generateText,
+    decide: executors.decide,
+    judge: grader(true),
+  });
+
+  expect(result.finalState).toBe("done");
+  expect(result.retrievals).toBe(1);
+  expect(result.answer).toBe("Sensory, short-term, and long-term memory.");
+  // Both bad searches were fed back with the schema's reason, not a bare guard rejection.
+  const last = executors.calls.filter((call) => call.kind === "decide").at(-1)!;
+  const attempts = (last.request as AgentDecisionRequest).attempts;
+  expect(attempts.map((attempt) => attempt.failure)).toEqual([
+    "invalid-payload",
+    "invalid-payload",
+  ]);
+  expect(attempts[0]?.reason).toContain("at least one search word");
 });
 
 test("budget spent: the guard rejects RETRIEVE, the forced ANSWER lands in failed", async () => {

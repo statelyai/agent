@@ -38,6 +38,12 @@ import {
   type AgentRunInit,
 } from "@statelyai/agent";
 
+/** Instructions for the draft request: the note only, nothing addressed to the reader. */
+export const RELEASE_NOTE_SYSTEM =
+  "You write release notes. Return only the release note: a one-line title, then two to " +
+  "four short bullet points. No preamble, no closing remarks, no offers of further help, " +
+  'and no follow-up questions (never write "If you want, I can…" or "Let me know…").';
+
 const releaseNoteSetup = setupAgent({
   context: z.object({
     topic: z.string(),
@@ -51,6 +57,9 @@ const releaseNoteSetup = setupAgent({
     draft: {
       model: "writer",
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+      // The draft IS the deliverable a reviewer approves, so it ends where the
+      // note ends: no chat-style offers or follow-up questions after it.
+      system: RELEASE_NOTE_SYSTEM,
       prompt: ({ input }) => `Draft a release note about ${input.topic}.`,
     },
   },
@@ -249,8 +258,16 @@ export async function runFileSnapshotStoreDemo(options: ExampleRunOptions = {}) 
       observers,
     );
     return {
-      storageOwnedByTheApplication: stored.draft,
-      lifetimeOwnedByTheApplication: live.draft,
+      // One body with a heading per half, so both drafts read as labeled
+      // sections instead of one bare draft and one titled one.
+      report: [
+        "### Storage owned by the application",
+        "Persisted to a JSON file at the review pause, then resumed from that file.",
+        stored.draft.trim(),
+        "### Lifetime owned by the application",
+        "One live actor from draft to approval; nothing persisted.",
+        live.draft.trim(),
+      ].join("\n\n"),
       statesSeenByTheApplication: live.states,
       // The file's logical name, not the OS temp path: where the directory
       // lives is this host's business, and it is gone by the time anyone reads

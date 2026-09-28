@@ -57,7 +57,8 @@
  *     transition returns `undefined`, the decision is rejected, and the model
  *     is re-asked until it chooses `ANSWER`. That forced answer has no relevant
  *     evidence behind it, so it lands in `failed`, returned as unverified. An
- *     answer the model chose freely (before the budget ran out) lands in `done`.
+ *     answer the model chose freely (before the budget ran out) lands in `done`
+ *     — still labeled unverified when its searches found no relevant passage.
  *   - A model that keeps choosing RETRIEVE past the budget exhausts the
  *     decision's retries, and `onError` lands in `failed`.
  *   - Every retry is a NEW attempt. LangGraph's loop can re-run the same
@@ -302,6 +303,15 @@ function renderTrail(context: AgenticRagContext, verified: boolean): string {
   return parts.join(" ");
 }
 
+/**
+ * An answer the model chose after its searches found nothing relevant: the
+ * retriever ran, yet no passage backs the answer. It is general knowledge,
+ * so it is labeled unverified like the budget-forced answer in `failed`.
+ */
+function unsupportedAnswer(context: AgenticRagContext): boolean {
+  return context.retrievals > 0 && context.documents.length === 0;
+}
+
 const agentSetup = setupAgent({
   models,
   context: agenticRagContextSchema,
@@ -316,8 +326,19 @@ const agentSetup = setupAgent({
     answeredDirectly: z.boolean(),
   }),
   events: {
-    /** Model: call the retriever tool with these search keywords. */
-    RETRIEVE: z.object({ keywords: z.string() }),
+    /**
+     * Model: call the retriever tool with these search keywords. Blank or
+     * stop-word-only keywords would search for nothing, so they fail the
+     * schema and the reason is fed back to the model — before any guard runs.
+     */
+    RETRIEVE: z.object({
+      keywords: z
+        .string()
+        .describe("Search keywords: at least one content word, e.g. 'agent memory types'.")
+        .refine((keywords) => contentWords(keywords).size > 0, {
+          message: "keywords must contain at least one search word (not blank or only stop words)",
+        }),
+    }),
     /** Model: answer now, without (further) retrieval. */
     ANSWER: z.object({ answer: z.string() }),
     /** Model, after a failed search: the question, rewritten from a new angle. */
@@ -536,7 +557,9 @@ export const agenticRagMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        answer: context.answer,
+        answer: unsupportedAnswer(context)
+          ? `Unverified (no relevant passages found): ${context.answer}`
+          : context.answer,
         trail: renderTrail(context, true),
         retrievals: context.retrievals,
         rewrites: context.rewrittenQuestions.length,

@@ -192,6 +192,16 @@ export function searchSampleIndex(input: {
 }
 
 /**
+ * The gathered sources that share a search term with the topic. An interview
+ * search matches the editor's question too, so it can surface a passage about
+ * a neighboring subject; that passage is set aside rather than handed to a
+ * section, where it would pull the article off topic.
+ */
+export function onTopicSources(topic: string, sources: string[]): string[] {
+  return sources.filter((source) => overlap(topic, source) > 0);
+}
+
+/**
  * Give each gathered source to exactly one heading. Each heading, in order,
  * first takes its best-matching unclaimed source; any left over go to the
  * heading they match best. A heading can end up with none when there are more
@@ -454,6 +464,7 @@ type StormContext = z.infer<typeof contextSchema>;
  */
 function renderTrail(context: StormContext): string {
   const interviews = Object.keys(context.transcripts).length;
+  const offTopic = context.sources.length - onTopicSources(context.topic, context.sources).length;
   return [
     `Outline: ${context.outline.length} heading(s)` +
       (context.droppedHeadings ? ` (${context.droppedHeadings} dropped past ${MAX_SECTIONS})` : ""),
@@ -461,7 +472,7 @@ function renderTrail(context: StormContext): string {
       (context.droppedEditors ? ` (${context.droppedEditors} dropped past ${MAX_EDITORS})` : ""),
     `Interviews: ${interviews} (${context.exchanges} exchange(s)` +
       (context.failedInterviews.length ? `, ${context.failedInterviews.length} failed)` : ")"),
-    `Sources: ${context.sources.length}`,
+    `Sources: ${context.sources.length}` + (offTopic ? ` (${offTopic} off-topic set aside)` : ""),
     `Sections written: ${context.sections.length}`,
     ...(context.failure ? [`Stopped: ${context.failure.replace(/[.!?]+$/, "")}`] : []),
   ]
@@ -477,6 +488,27 @@ const outputSchema = z.object({
   trail: z.string(),
 });
 
+/**
+ * The section writer's instructions. Each source is one sentence, so a
+ * section built from them has to explain them — how they bear on the heading —
+ * rather than restate one and stop.
+ */
+export const WRITE_SECTION_SYSTEM = [
+  "Write one article section under the heading, in 2–4 sentences, using ONLY facts from " +
+    "the sources listed for it.",
+  "Use EVERY listed source that is about the topic, and cite each inline as [sample source]. " +
+    "Explain what each fact means for the heading: how it works, why it matters, how the " +
+    "facts connect. Do not add facts the sources do not state.",
+  "Stay on the heading and the topic. Leave out a source that is about a different subject " +
+    "entirely; never mention it.",
+  'Cover every part of the heading. When it names several things ("Advantages and ' +
+    'Limitations", "Risks and Defenses"), address each one; if the sources say nothing about ' +
+    "one part, say so in one sentence instead of skipping it.",
+  "The other sections cite other sources, so do not cover their headings.",
+  "If no sources are listed, or none is about the topic, write one sentence saying the " +
+    "sample sources do not cover this heading.",
+].join(" ");
+
 const agentSetup = setupAgent({
   models,
   context: contextSchema,
@@ -490,7 +522,10 @@ const agentSetup = setupAgent({
         output: z.object({ outline: z.array(z.string()) }),
       },
       model: "writer",
-      system: "Draft a Wikipedia-style outline for the topic: three to five section headings.",
+      system:
+        "Draft a Wikipedia-style outline for the topic: three to five section headings. " +
+        "Every heading is about the topic itself; no generic filler headings and no " +
+        "headings about neighboring subjects.",
       prompt: ({ input }) => `Topic: ${input.topic}`,
     },
     choosePerspectives: {
@@ -516,7 +551,9 @@ const agentSetup = setupAgent({
       model: "writer",
       system:
         "Refine the outline using what the interviews found. Keep headings the interviews can " +
-        "support; drop the rest. Return section headings only.",
+        "support; drop the rest. Stay on the topic: an interview detail about a different " +
+        'subject gets no heading. A heading that names two things ("Advantages and ' +
+        'Limitations") only stays if the interviews support both. Return section headings only.',
       prompt: ({ input }) =>
         [
           `Topic: ${input.topic}`,
@@ -536,11 +573,7 @@ const agentSetup = setupAgent({
         output: z.object({ section: z.string() }),
       },
       model: "writer",
-      system:
-        "Write one article section under the heading, using ONLY facts from the sources listed " +
-        "for it. The other sections cite other sources, so do not cover their headings. Cite " +
-        "inline as [sample source]. At most one paragraph. If no sources are listed, write one " +
-        "sentence saying the sample sources do not cover this heading.",
+      system: WRITE_SECTION_SYSTEM,
       prompt: ({ input }) =>
         [
           `Topic: ${input.topic}`,
@@ -559,8 +592,10 @@ const agentSetup = setupAgent({
       },
       model: "writer",
       system:
-        "Assemble the sections into one article with a short lead paragraph. Keep each section's " +
-        "heading and citations. Add no new facts.",
+        "Assemble the sections into one article with a short lead paragraph. The lead " +
+        "summarizes, in two or three sentences, what the sections say about the topic, and " +
+        "nothing else: leave out any detail that is not about the topic. Keep each section's " +
+        "heading, text, and citations. Add no new facts.",
       prompt: ({ input }) =>
         [
           `Topic: ${input.topic}`,
@@ -726,7 +761,10 @@ export const stormWriterMachine = agentSetup.createMachine({
               context: {
                 sectionIndex: 0,
                 sections: [],
-                sectionSources: assignSources(context.outline, context.sources),
+                sectionSources: assignSources(
+                  context.outline,
+                  onTopicSources(context.topic, context.sources),
+                ),
               },
             },
     },
