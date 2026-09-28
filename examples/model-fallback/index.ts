@@ -31,9 +31,10 @@
  *     error on the strong rung is `failed`.
  *
  * Stand-ins: `getWeather` returns canned `[sample weather]` strings (no
- * network); `validateToolCall` plays the tool raising on bad input (an empty
- * city list, or a city outside `KNOWN_CITIES`). `runModelFallbackExample`
- * takes an injectable `generateText` (tests: no API key).
+ * network); `validateToolCall` plays the tool raising on bad input (a city
+ * outside `KNOWN_CITIES`; the schema already rules out an empty list).
+ * `runModelFallbackExample` takes an injectable `generateText` (tests: no API
+ * key).
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/model-fallback/index.ts
  */
@@ -68,7 +69,16 @@ export const SAMPLE_WEATHER: Record<string, string> = {
 
 export const KNOWN_CITIES = Object.keys(SAMPLE_WEATHER);
 
-const toolCallSchema = z.object({ tool: z.literal("get_weather"), cities: z.array(z.string()) });
+// `min(1)` puts "at least one city" in the JSON schema the model sees, so an
+// empty `get_weather()` is a malformed call (the request errors) rather than a
+// call the tool has to reject.
+const toolCallSchema = z.object({
+  tool: z.literal("get_weather"),
+  cities: z
+    .array(z.string())
+    .min(1)
+    .describe("Every city the user asked about, at least one. Never empty."),
+});
 
 type ToolCall = z.infer<typeof toolCallSchema>;
 
@@ -78,7 +88,9 @@ const draftRequest = {
   system:
     "Turn the user's request into one get_weather tool call. `cities` must use the " +
     `tool's exact city names, one of: ${KNOWN_CITIES.join(", ")}. Expand nicknames ` +
-    "and abbreviations to those names.",
+    "and abbreviations to those names. Name every place the user asked about; a " +
+    "place not on that list goes in as written (the tool rejects it). Never swap " +
+    "in a different city.",
   prompt: ({ input }: { input: { request: string } }) => input.request,
 };
 
@@ -130,10 +142,14 @@ const agentSetup = setupAgent({
   requests: {
     draftToolCall: { ...draftRequest, model: "quick" },
     draftToolCallStrong: { ...draftRequest, model: "strong" },
+    // One line per city, joined in code (see `answering`): a model's own line
+    // breaks are single newlines, which Markdown collapses into one run-on line.
     answerFromWeather: {
       schemas: {
         input: z.object({ request: z.string(), results: z.array(z.string()) }),
-        output: z.object({ answer: z.string() }),
+        output: z.object({
+          lines: z.array(z.string()).min(1).describe("One short line per city."),
+        }),
       },
       model: "quick",
       system: "Answer the user's request from the tool results only. Be brief.",
@@ -159,7 +175,7 @@ function finalOutput(context: ModelFallbackContext, answer: string) {
     fallbacks: context.fallbacks,
     toolCalls: context.attempts
       .map((a) => `${a.model}: ${a.call} ${a.rejection ? `rejected (${a.rejection})` : "accepted"}`)
-      .join("\n"),
+      .join("\n\n"),
   };
 }
 
@@ -243,7 +259,11 @@ export const modelFallbackMachine = agentSetup.createMachine({
       invoke: {
         src: "answerFromWeather",
         input: ({ context }) => ({ request: context.request, results: context.toolResults }),
-        onDone: ({ output }) => ({ target: "done", context: { answer: output.result.answer } }),
+        // A blank line between lines keeps them apart when rendered as Markdown.
+        onDone: ({ output }) => ({
+          target: "done",
+          context: { answer: output.result.lines.join("\n\n") },
+        }),
         onError: failWith("answerFromWeather"),
       },
     },

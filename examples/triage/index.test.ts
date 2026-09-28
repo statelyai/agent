@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
@@ -305,6 +306,37 @@ describe("ticket-triage", () => {
     expect(under.status).toBe("idle");
     if (under.status !== "idle") throw new Error("expected idle");
     expect(under.snapshot.value).toBe("escalating");
+  });
+
+  test("one starter demonstrates escalation: a ticket that fits two queues", async () => {
+    // QA regression: the old vague starter landed in `other` at confidence 1
+    // (the criteria send vague tickets there on purpose), so no starter showed
+    // the human-in-the-loop path. A ticket that is both billing (invoice,
+    // receipt) and technical (a 500 error) splits Jev's category probability;
+    // against the real model it scored 0.31–0.42 over 11 runs.
+    const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
+      .starters as string[];
+    const twoQueues = starters.find(
+      (starter) => /invoice/i.test(starter) && /500 error/.test(starter),
+    );
+    expect(twoQueues).toBeDefined();
+
+    const { generateText } = scriptedExecutor();
+    const { actors } = classifier({ sentiment: "neutral", category: "billing" }, 0.35);
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors,
+      }),
+      {
+        input: { ticket: twoQueues! },
+      },
+    );
+
+    expect(result.status).toBe("idle");
+    if (result.status !== "idle") throw new Error("expected idle");
+    expect(result.snapshot.value).toBe("escalating");
+    expect(escalationLabel(result.snapshot)).toContain('Low confidence (0.35) on "billing"');
   });
 
   test("the simulated SLA tightens for negative tickets", () => {

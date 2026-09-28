@@ -31,8 +31,9 @@
  *                              dependencies are the `$N` references in its
  *                              args — parsed, not declared
  *   - (implicit) plan parse  → `validatingPlan`, a choice state: the plan is
- *                              non-empty, at most `MAX_TASKS` long, and every
- *                              `$N` names an EARLIER position
+ *                              non-empty, at most `MAX_TASKS` long, every
+ *                              `$N` names an EARLIER position, and the plan
+ *                              USES its results (see below)
  *   - task fetching unit     → `dispatching` + `collecting`: `dispatching`
  *                              spawns every task whose dependencies have
  *                              landed as one `runTool` child (one "wave");
@@ -52,6 +53,14 @@
  *     scheduler waiting on it; here an invalid plan is a transition back to
  *     `planning` with the problem as feedback, and it spends the same replan
  *     budget as a joiner replan.
+ *   - A plan must wire its results through `$N`. A plan whose tasks never
+ *     reference each other runs as one wave, so a `math(1 - 2)` after two
+ *     searches computes on made-up numbers and a `finish(State the answer
+ *     using task 3)` closes with an instruction instead of an answer. Here a
+ *     `math` task after a search must reference a `$N`, and `finish` (last
+ *     task only) must state the answer with `$N` for the values it uses.
+ *     Either mistake is an invalid plan, replanned with the problem as
+ *     feedback.
  *   - Waves are recorded. Every spawned task carries the wave it started in
  *     (`schedule[].wave`), so "these two searches ran at the same time and
  *     the math waited for both" is data you can assert on, not a log line.
@@ -280,7 +289,12 @@ export function dependenciesOf(task: Task): number[] {
   return [...new Set([...task.args.matchAll(PLACEHOLDER)].map((match) => Number(match[1])))];
 }
 
-/** What is wrong with a plan, or `null` when it is a valid DAG. */
+/**
+ * What is wrong with a plan, or `null` when it is a valid DAG that uses its
+ * results: every `$N` points backward, a `math` task after a search computes
+ * on `$N` results rather than literal stand-ins, and `finish` (last only)
+ * states the answer with `$N` for the values it uses.
+ */
 export function planProblem(tasks: Task[]): string | null {
   if (tasks.length === 0) return "the plan is empty";
   if (tasks.length > MAX_TASKS) {
@@ -288,9 +302,30 @@ export function planProblem(tasks: Task[]): string | null {
   }
   for (const [index, task] of tasks.entries()) {
     const position = index + 1;
-    const bad = dependenciesOf(task).find((id) => id < 1 || id >= position);
+    const dependencies = dependenciesOf(task);
+    const bad = dependencies.find((id) => id < 1 || id >= position);
     if (bad !== undefined) {
       return `task ${position} references $${bad}, which is not an earlier task`;
+    }
+    const earlier = tasks.slice(0, index);
+    if (
+      task.tool === "math" &&
+      dependencies.length === 0 &&
+      earlier.some((other) => other.tool === "search")
+    ) {
+      return (
+        `task ${position} math(${task.args}) uses no $N result although it follows a search; ` +
+        "write $N for each searched value instead of a literal number"
+      );
+    }
+    if (task.tool === "finish") {
+      if (position !== tasks.length) return `task ${position} is finish, but finish must be last`;
+      if (earlier.length > 0 && (dependencies.length === 0 || /\btask\s*\d/i.test(task.args))) {
+        return (
+          `task ${position} finish(${task.args}) is an instruction, not an answer; state the ` +
+          "answer itself with $N for each result it uses"
+        );
+      }
     }
   }
   return null;
@@ -414,7 +449,11 @@ const agentSetup = setupAgent({
         "parentheses; finish(answer) closes the plan. Tasks are numbered by position: the " +
         "first is 1, the second 2, and so on. Write $N in a task's args to use task N's " +
         "result; a task may only reference earlier tasks. Tasks that reference nothing run " +
-        `in parallel, so keep independent lookups independent. At most ${MAX_TASKS} tasks.`,
+        "in parallel, so keep independent lookups independent. A math task over searched " +
+        "values must use $N for them (math($1 - $2)), never literal stand-ins. finish, if " +
+        "used, is the last task and its args are the final answer itself with $N for the " +
+        "values (finish(The difference is $3 trillion USD.)), never an instruction. " +
+        `At most ${MAX_TASKS} tasks.`,
       prompt: ({ input }) =>
         [
           `Question: ${input.question}`,

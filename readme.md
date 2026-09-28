@@ -171,7 +171,7 @@ The core concepts (machines owning control flow, bounded model decisions, typed 
 - [Chameleon](examples/chameleon) combines hidden information, sequential turns, and a human vote.
 - [Snapshot migration](examples/snapshot-migration) uses XState's native `version` and `migrate` contract.
 - [Portable XState loop](examples/portable-xstate-loop) runs the artifact through native transitions and effects.
-- [Framework-owned storage](examples/file-snapshot-store) persists native XState snapshots in application code.
+- [Application-owned storage](examples/file-snapshot-store) persists native XState snapshots in application code.
 - [Tool calling](examples/review-tool-calls) keeps tools and message history in the AI SDK's native format.
 - [Ticket triage](examples/triage) returns structured data from a model request.
 - [JSON agent](examples/json-agent) runs a machine defined as data.

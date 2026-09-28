@@ -114,8 +114,8 @@ describe("just-one", () => {
     expect(prompts).toEqual(["Clues: eruption. What is the secret word?"]);
     expect(result.output.score).toBe(1);
     expect(result.output.log).toEqual([
-      'Round 1 — secret "volcano". Clues: lava [duplicate — cancelled], ' +
-        "lava [duplicate — cancelled], eruption (Nadia).",
+      'Round 1 — secret "volcano". Clues: [Iris: duplicate — cancelled], ' +
+        "[Milo: duplicate — cancelled], eruption (Nadia).",
       'Guessed "volcano" — correct.',
     ]);
   });
@@ -155,10 +155,46 @@ describe("just-one", () => {
 
     expect(prompts).toEqual(["Clues: keys. What is the secret word?"]);
     expect(result.output.log[0]).toBe(
-      'Round 1 — secret "piano". Clues: Piano [gives away the secret word], ' +
-        "pianos [gives away the secret word], keys (Nadia).",
+      'Round 1 — secret "piano". Clues: [Iris: gives away the secret word], ' +
+        "[Milo: gives away the secret word], keys (Nadia).",
     );
     expect(result.output.score).toBe(1);
+  });
+
+  test("nothing a host can render while the guesser thinks gives the word away", async () => {
+    // Iris's clue IS the secret, and every draft's reasoning names it — the
+    // worst case for a leak. Each idle snapshot is checked the way a host would
+    // read it: the interaction label and every context field except the deck
+    // (the unchanging input the word is dealt from).
+    const deck = ["piano", "volcano"];
+    const { executor } = createClueGivers({
+      Iris: ["piano", "lava"],
+      Milo: ["keys", "crater"],
+      Nadia: ["Mozart", "Vesuvius"],
+    });
+    const shared = { executors: { generateText: executor } };
+
+    let result = await runToQuiescence(createAgentRuntime(justOneMachine, shared), {
+      input: { rounds: 2, deck },
+      ...shared,
+    });
+    for (const secret of deck) {
+      expect(result.status).toBe("idle");
+      if (result.status !== "idle") throw new Error("expected idle");
+      const { deck: _deck, ...visible } = result.snapshot.context;
+      const shown = JSON.stringify([idlePrompt(result.snapshot), visible]).toLowerCase();
+      expect(shown, `leaked "${secret}": ${shown}`).not.toContain(secret);
+
+      result = await runToQuiescence(createAgentRuntime(justOneMachine, shared), {
+        snapshot: result.persist(),
+        event: { type: "GUESS", guess: "no idea" },
+        ...shared,
+      });
+    }
+
+    // Revealed once the guess is in.
+    if (result.status !== "done") throw new Error("expected done");
+    expect(result.output.log).toContain('Guessed "no idea" — wrong, the word was "piano".');
   });
 
   test("PASS advances the round, and a mid-guess snapshot round-trips", async () => {

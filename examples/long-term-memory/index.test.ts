@@ -83,8 +83,10 @@ test("a fact told in turn 1 is recalled into the answer request in turn 3", asyn
   expect(result.memories).toEqual([DOG_FACT, "The user enjoys hiking in the Alps."]);
   expect(result.summary).toContain("Session ended by the user.");
   expect(result.summary).toContain("2 new memories saved");
-  // The idle label is the assistant's last reply.
-  expect(replies.slice(1)).toEqual([
+  // The last reply was shown at its idle turn; the summary does not repeat it.
+  expect(result.summary).not.toContain("Your dog is Biscuit.");
+  // One reply per answered message; the session opens with none.
+  expect(replies).toEqual([
     "Biscuit is a great name!",
     "The Alps are lovely.",
     "Your dog is Biscuit.",
@@ -189,6 +191,9 @@ test("idle → persist → JSON round-trip → resume keeps the store and transc
   expect(first.status).toBe("idle");
   if (first.status !== "idle") return;
   const interaction = getInteraction(first.snapshot);
+  expect(interaction?.label).toBe(
+    "The store holds 0 memories about you. Send a message, or end the session.",
+  );
   expect(interaction?.textEvent).toBe("MESSAGE");
   expect(interaction?.events.map(({ type }) => type)).toEqual(["MESSAGE", "END_SESSION"]);
 
@@ -203,7 +208,12 @@ test("idle → persist → JSON round-trip → resume keeps the store and transc
   );
   expect(second.status).toBe("idle");
   if (second.status !== "idle") return;
-  expect(getInteraction(second.snapshot)?.label).toBe("Hi Ana.");
+  // The reply is context (a host shows it once); the label is only the prompt,
+  // so the reply is never rendered twice.
+  expect(second.snapshot.context.reply).toBe("Hi Ana.");
+  expect(getInteraction(second.snapshot)?.label).toBe(
+    "The store holds 1 memory about you. Send a message, or end the session.",
+  );
   expect(second.snapshot.context.memories).toEqual(["The user's name is Ana."]);
 
   const third = await runToQuiescence(

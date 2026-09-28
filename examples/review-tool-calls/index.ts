@@ -119,8 +119,15 @@ const agentSetup = setupAgent({
   events: {
     APPROVE: z.object({}),
     // Partial override merged over the proposal: `override` carries any subset of
-    // the refund fields, validated before it can resume.
-    EDIT: z.object({ override: refundCallSchema.partial() }),
+    // the refund fields, validated before it can resume. The description is the
+    // format hint a generated form shows next to the field.
+    EDIT: z.object({
+      override: refundCallSchema
+        .partial()
+        .describe(
+          'JSON object with only the arguments to change, e.g. {"amountCents": 1500, "reason": "partial refund"}',
+        ),
+    }),
     REJECT: z.object({ feedback: z.string() }),
   },
   actors: {
@@ -429,10 +436,12 @@ const toolCallingSetup = setupAgent({
     turns: z.number().int(),
   }),
   input: z.object({ question: z.string() }),
+  // The output is what the human reads: the final answer. The transcript stays
+  // in context, where the next turn needs it; repeating it here would show the
+  // answer twice, once as the answer and once buried in raw messages.
   output: z.object({
     status: z.enum(["answered", "failed"]),
     answer: z.string().nullable(),
-    messages: messagesField,
   }),
   events: {
     /** The human's next question, appended to the retained transcript. */
@@ -520,19 +529,11 @@ export const toolCallingMachine = toolCallingSetup.createMachine({
     },
     done: {
       type: "final",
-      output: ({ context }) => ({
-        status: "answered" as const,
-        answer: context.answer,
-        messages: context.messages,
-      }),
+      output: ({ context }) => ({ status: "answered" as const, answer: context.answer }),
     },
     failed: {
       type: "final",
-      output: ({ context }) => ({
-        status: "failed" as const,
-        answer: null,
-        messages: context.messages,
-      }),
+      output: () => ({ status: "failed" as const, answer: null }),
     },
   },
 });
@@ -560,7 +561,10 @@ export async function runToolCallingExample(
     },
   );
   // A failed request ends the run in `failed` with nothing to follow up on.
-  if (result.status === "done") return { ...result.output, answers };
+  // The transcript is read off the final snapshot's context, not the output.
+  if (result.status === "done") {
+    return { ...result.output, messages: result.snapshot.context.messages, answers };
+  }
   for (const followUp of options.followUps ?? []) {
     if (result.status !== "idle") break;
     answers.push(result.snapshot.context.answer ?? "");
@@ -590,7 +594,7 @@ export async function runToolCallingExample(
     },
   );
   if (ended.status !== "done") throw new Error(`Tool call ended with '${ended.status}'.`);
-  return { ...ended.output, answers };
+  return { ...ended.output, messages: ended.snapshot.context.messages, answers };
 }
 
 // Direct run: propose a refund, then let the human APPROVE / EDIT / REJECT at the

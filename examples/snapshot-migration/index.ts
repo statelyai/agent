@@ -24,6 +24,11 @@ export const V1 = "1.0.0";
 export const V2 = "2.0.0";
 export const HIGH_RISK_CENTS = 50_000;
 
+/** Integer cents as a reviewer reads them: `2500, "USD"` → `"$25.00"`. */
+export function formatMoney(amountCents: number, currency: string): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amountCents / 100);
+}
+
 export function persistSnapshot<T>(snapshot: T): T {
   return JSON.parse(JSON.stringify(snapshot)) as T;
 }
@@ -88,6 +93,7 @@ export function migrateOrderSnapshot(
       orderId: old.context.orderId,
       amountCents,
       currency: "USD",
+      amountDisplay: formatMoney(amountCents, "USD"),
       riskLevel: amountCents >= HIGH_RISK_CENTS ? "high" : "low",
     },
   };
@@ -99,6 +105,12 @@ const v2 = setupAgent({
     orderId: z.string(),
     amountCents: z.number().int(),
     currency: z.string(),
+    /**
+     * `amountCents` formatted for people ("$25.00"). Stored, not derived at
+     * read time, because a state `description` can only interpolate context —
+     * and the amount never changes, so there is nothing to keep in sync.
+     */
+    amountDisplay: z.string(),
     riskLevel: z.enum(["low", "high"]),
   }),
   input: z.object({
@@ -124,14 +136,14 @@ export const orderApprovalMachine = v2.createMachine({
     orderId: input.orderId,
     amountCents: input.amountCents,
     currency: input.currency ?? "USD",
+    amountDisplay: formatMoney(input.amountCents, input.currency ?? "USD"),
     riskLevel: input.amountCents >= HIGH_RISK_CENTS ? "high" : "low",
   }),
   initial: "awaitingApproval",
   states: {
     awaitingApproval: {
       tags: ["awaiting-approval"],
-      description:
-        "Order {orderId} ({amountCents} {currency}, {riskLevel} risk) is waiting for a reviewer.",
+      description: "Order {orderId} ({amountDisplay}, {riskLevel} risk) is waiting for a reviewer.",
       on: { APPROVE: { target: "approved" }, REJECT: { target: "rejected" } },
     },
     approved: {
@@ -191,7 +203,19 @@ export async function runSnapshotMigrationExample(
     },
   );
   if (resumed.status !== "done") throw new Error(`Expected done, got '${resumed.status}'.`);
-  return { persisted, output: resumed.output };
+  const { output } = resumed;
+  const pausedIn = String((persisted as { value?: unknown }).value);
+  // The readable story leads; the raw persisted snapshot stays attached as the
+  // evidence, not the headline.
+  const summary = [
+    `Paused order ${orderId} (total ${total}) on v${V1}, waiting in \`${pausedIn}\`.`,
+    `Shipped v${V2}: the waiting state is now \`awaitingApproval\`, and amounts are integer cents with a currency and a risk level.`,
+    `On resume, XState read the snapshot's version (${V1}) and ran the v${V2} machine's \`migrate\`: ` +
+      `\`${pausedIn}\` → \`awaitingApproval\`, total ${total} → ${output.amountCents} cents ` +
+      `(${formatMoney(output.amountCents, output.currency)}), risk ${output.riskLevel}.`,
+    `APPROVE then landed on v${V2}: order ${output.orderId} ${output.approved ? "approved" : "rejected"}.`,
+  ].join("\n\n");
+  return { summary, output, persisted };
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {

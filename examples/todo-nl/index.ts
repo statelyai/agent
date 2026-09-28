@@ -85,7 +85,9 @@ export const todoSchemas = createAgentSchemas({
     pendingCommand: z.string().nullable(),
     // The events applied so far for the current command, in order — the trail
     // the next decide step sees so it does not repeat itself, and the step
-    // counter the loop bound is checked against.
+    // counter the loop bound is checked against. Toggle/delete entries name
+    // the todo's title, so a group command ("delete anything about
+    // groceries") sees which matches it already handled and which remain.
     applied: z.array(z.string()),
     // Human-readable trail of everything that happened, for output/logging.
     log: z.array(z.string()),
@@ -103,9 +105,20 @@ export const todoSchemas = createAgentSchemas({
     ADD_TODO: z.object({ title: z.string() }),
     TOGGLE_TODO: z.object({ id: z.number() }),
     DELETE_TODO: z.object({ id: z.number() }),
-    QUIT: z.object({}),
+    // QUIT vs DONE is the easiest pair to confuse ("I'm done" vs "done with
+    // this command"), so each payload schema carries a description the model
+    // sees on the event's tool.
+    QUIT: z
+      .object({})
+      .describe(
+        "End the whole session: the user is finished (quit, exit, bye, that's all, I'm done).",
+      ),
     // The explicit "nothing (more) to do" move that ends the loop.
-    DONE: z.object({}),
+    DONE: z
+      .object({})
+      .describe(
+        "This command is fully handled; wait for the user's next command. Not for 'mark X done' (TOGGLE_TODO) or the user leaving (QUIT).",
+      ),
   },
 });
 
@@ -180,14 +193,28 @@ export const todoMachine = agentSetup.createMachine({
         src: "agent.decide",
         input: ({ context }) => ({
           model: "quick",
-          system:
-            "You manage a todo list by translating a user's natural-language command " +
-            "into list operation events, ONE event per turn. One command may need " +
-            "several events (e.g. 'add X and Y' → two ADD_TODO), applied in order over " +
-            "successive turns. Prefer the most direct mapping. Only reference todo ids " +
-            "that appear in the current list. If the command asks to quit/exit, choose " +
-            "QUIT. When the command is fully handled — or maps to no action (small talk, " +
-            "already satisfied) — choose DONE.",
+          system: [
+            "You manage a todo list by translating a user's natural-language command into " +
+              "list events, ONE event per turn. After each event you are called again with " +
+              "the updated list, until you choose DONE or QUIT.",
+            "- One command may need several events, applied in order over successive turns: " +
+              "'add X and Y' → ADD_TODO X, then ADD_TODO Y.",
+            // Bulk/semantic commands: without this the model stops after the
+            // first match ("delete anything about groceries" deleted milk and
+            // kept eggs).
+            "- A command about a group ('delete anything about groceries', 'mark all done') " +
+              "applies to EVERY todo that matches by meaning, not just by exact words (milk " +
+              "and eggs are both groceries): one DELETE_TODO / TOGGLE_TODO per matching todo.",
+            "- Only reference todo ids that appear in the current list.",
+            "- DONE ends THIS command and waits for the next one. Before choosing it, re-read " +
+              "the command against the current list: choose DONE only when nothing it asks " +
+              "for is left, or when it maps to no action (small talk, already satisfied).",
+            // "I'm done" must not read as DONE, which would loop back and wait
+            // for another command.
+            "- QUIT ends the whole session. Choose it whenever the user signals they are " +
+              "finished: 'quit', 'exit', 'bye', 'that's all', 'I'm done'. " +
+              "'Mark X done' is TOGGLE_TODO, not DONE or QUIT.",
+          ].join("\n"),
           prompt: [
             "Current todo list:",
             renderTodoList(context.todos),
@@ -199,7 +226,9 @@ export const todoMachine = agentSetup.createMachine({
                   "",
                   "Events already applied for this command, in order:",
                   ...context.applied,
-                  "Continue from here; do not repeat applied events.",
+                  "Continue from here; do not repeat applied events. Check every todo " +
+                    "still in the list against the command: if one still matches, act on " +
+                    "it next; choose DONE only when none does.",
                 ]),
           ].join("\n"),
           name: "planStep",
@@ -248,7 +277,10 @@ export const todoMachine = agentSetup.createMachine({
             target: "applying" as const,
             context: {
               todos,
-              applied: [...context.applied, `TOGGLE_TODO ${JSON.stringify({ id: event.id })}`],
+              applied: [
+                ...context.applied,
+                `TOGGLE_TODO ${JSON.stringify({ id: event.id })} (${found.title})`,
+              ],
               log: [...context.log, `toggled #${event.id}`],
             },
           };
@@ -264,7 +296,10 @@ export const todoMachine = agentSetup.createMachine({
             target: "applying" as const,
             context: {
               todos,
-              applied: [...context.applied, `DELETE_TODO ${JSON.stringify({ id: event.id })}`],
+              applied: [
+                ...context.applied,
+                `DELETE_TODO ${JSON.stringify({ id: event.id })} (${found.title})`,
+              ],
               log: [...context.log, `deleted #${event.id}`],
             },
           };

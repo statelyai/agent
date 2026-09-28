@@ -30,7 +30,8 @@
  *   - agent → `deciding`: `agent.decide` (name `chooseTool`) over CALL_TOOL,
  *     RESELECT and ANSWER
  *   - binding only the selected tools → the CALL_TOOL guard: a tool outside
- *     the selected set is rejected and the decision retries
+ *     the selected set, or a repeat of a call already made, is rejected and
+ *     the decision retries
  *   - tools (ToolNode) → `runningTool`: a plain actor that runs the registry
  *     function and appends `{ tool, arg, result }` to `calls`
  *
@@ -49,8 +50,12 @@
  *     the rule holds whatever the host's tool-binding does.
  *   - Tool calls and reselections are budgets checked in guards
  *     (MAX_TOOL_CALLS, MAX_RESELECTIONS). LangGraph bounds the ReAct loop with
- *     recursion_limit, which raises. Here an over-budget choice is rejected and
- *     the model must ANSWER; if it will not, the decision fails into `failed`.
+ *     recursion_limit, which raises. Here a spent budget (or an empty
+ *     selection) takes the move off the decision's `allowedEvents`, so the
+ *     model is only offered what it can still do: with no tools selected it
+ *     can RESELECT or ANSWER without tools; with nothing left, only ANSWER.
+ *     The guards still enforce the budgets; if the model will not make a legal
+ *     move, the decision fails into `failed`.
  *   - Like bigtool, reselection ADDS to the selected set rather than replacing it.
  *   - The agent answers with an ANSWER event instead of a final assistant
  *     message; one tool call per turn, no parallel tool calls.
@@ -224,11 +229,15 @@ export function createSelectTools(model: Experimental_EvaluationModel = judgeMod
           tools: TOOL_REGISTRY.map(({ name, description }) => ({ name, description })),
         },
         questions: Object.fromEntries(
-          TOOL_REGISTRY.map((tool, index) => [
+          TOOL_REGISTRY.map((tool) => [
             tool.name,
             {
               type: "boolean" as const,
-              instructions: `Could the tool \`tools[${index}]\` be used to answer \`question\`?`,
+              // Name the tool and quote its description in the question itself:
+              // a bare `tools[i]` index is easy to misalign across twelve rows.
+              instructions:
+                `Could the tool \`${tool.name}\` (${tool.description}) be used to answer ` +
+                "`question`?",
               criteria: {
                 true: "Calling this tool with some argument produces a result the answer needs.",
                 false: "The tool does something else, or only shares vocabulary with the question.",
@@ -281,10 +290,39 @@ function decisionPrompt(context: RetrievalContext): string {
     `Available tools: ${context.selectedTools.join(", ") || "(none matched)"}`,
     ...selected.map((tool) => `- ${tool.name}: ${tool.description}`),
     `Question: ${context.question}`,
-    "Tool calls so far:",
+    "Results you already have (never repeat these calls):",
     renderCalls(context.calls),
     `Tool calls left: ${MAX_TOOL_CALLS - context.calls.length}. Reselections left: ${MAX_RESELECTIONS - context.reselections}.`,
+    // Last, so it is the freshest instruction: a model that sees a result it
+    // needs otherwise tends to call the same tool again rather than answer.
+    ...(context.calls.length > 0
+      ? [
+          "If the results above answer the question, your move is ANSWER, using them. " +
+            "Calling a tool again with the same argument is refused.",
+        ]
+      : []),
   ].join("\n");
+}
+
+/** Whether this exact call (same tool, same argument) already ran. */
+function alreadyCalled(context: RetrievalContext, tool: string, arg: string): boolean {
+  return context.calls.some((call) => call.tool === tool && call.arg.trim() === arg.trim());
+}
+
+/**
+ * The moves the decision is offered: CALL_TOOL only with a tool selected and
+ * calls left, RESELECT only with reselections left, ANSWER always. An empty
+ * selection therefore offers RESELECT or ANSWER, never a CALL_TOOL the guard
+ * would have to refuse.
+ */
+function allowedMoves(context: RetrievalContext): Array<"CALL_TOOL" | "RESELECT" | "ANSWER"> {
+  return [
+    ...(context.selectedTools.length > 0 && context.calls.length < MAX_TOOL_CALLS
+      ? (["CALL_TOOL"] as const)
+      : []),
+    ...(context.reselections < MAX_RESELECTIONS ? (["RESELECT"] as const) : []),
+    "ANSWER",
+  ];
 }
 
 const agentSetup = setupAgent({
@@ -356,19 +394,24 @@ export const toolRetrievalMachine = agentSetup.createMachine({
           model: "agent",
           name: "chooseTool",
           system:
-            "Answer the question. You may call ONE of the available tools per turn (CALL_TOOL with " +
-            "its argument string), ask for a new tool search (RESELECT with a short query) if none " +
-            "fit, or give the final answer (ANSWER). Only the listed tools exist.",
+            "Answer the question. Each turn, make exactly one move: CALL_TOOL with one of the " +
+            "available tools and its argument string, only when you still need a result you do " +
+            "not have; RESELECT with a short query naming the kind of tool you need, when no " +
+            "available tool fits; or ANSWER, as soon as the results you already have answer the " +
+            "question (or from your own knowledge when no tool can). Only the listed tools exist.",
           prompt: decisionPrompt(context),
-          allowedEvents: ["CALL_TOOL", "RESELECT", "ANSWER"],
+          allowedEvents: allowedMoves(context),
         }),
         // Retries exhausted: the model kept choosing moves the machine refused.
         onError: { target: "failed" },
       },
       on: {
-        // The binding: only a selected tool, and only within the call budget.
+        // The binding: only a selected tool, only within the call budget, and
+        // never a call whose result is already in hand.
         CALL_TOOL: ({ context, event }) =>
-          context.selectedTools.includes(event.tool) && context.calls.length < MAX_TOOL_CALLS
+          context.selectedTools.includes(event.tool) &&
+          context.calls.length < MAX_TOOL_CALLS &&
+          !alreadyCalled(context, event.tool, event.arg)
             ? {
                 target: "runningTool",
                 context: { pendingCall: { tool: event.tool, arg: event.arg } },

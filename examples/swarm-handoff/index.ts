@@ -62,9 +62,11 @@ const agentSetup = setupAgent({
     message: z.string(),
     activeAgent: agentName.optional(),
   }),
+  // No `reply`: every reply was already delivered at an idle turn, so
+  // repeating the last one here would show it twice. The output is the
+  // conversation's final state: who held the mic, and for how many turns.
   output: z.object({
     activeAgent: agentName,
-    reply: z.string().nullable(),
     turns: z.number().int(),
   }),
   events: {
@@ -207,19 +209,11 @@ export const swarmHandoffMachine = agentSetup.createMachine({
     },
     finished: {
       type: "final",
-      output: ({ context }) => ({
-        activeAgent: context.activeAgent,
-        reply: context.reply,
-        turns: context.turns,
-      }),
+      output: ({ context }) => ({ activeAgent: context.activeAgent, turns: context.turns }),
     },
     failed: {
       type: "final",
-      output: ({ context }) => ({
-        activeAgent: context.activeAgent,
-        reply: null,
-        turns: context.turns,
-      }),
+      output: ({ context }) => ({ activeAgent: context.activeAgent, turns: context.turns }),
     },
   },
 });

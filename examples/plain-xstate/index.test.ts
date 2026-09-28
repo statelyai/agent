@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { plainWriterMachine, runPlainXstateExample } from "./index.js";
+import { createAgentRuntime, getStatePath, runToQuiescence } from "@statelyai/agent";
+import { createMockModelExecutors } from "../mock-model.js";
+import { plainWriterAgentMachine, plainWriterMachine, runPlainXstateExample } from "./index.js";
 
 describe("plain-xstate", () => {
   test("drives the plain machine to completion when the model approves", async () => {
@@ -107,5 +109,65 @@ describe("plain-xstate", () => {
     });
     expect(withinBudget.can({ type: "REVISE" })).toBe(true);
     expect(withinBudget.can({ type: "APPROVE" })).toBe(true);
+  });
+
+  test("under the agent runtime, the model writes every draft (no canned placeholder)", async () => {
+    const drafts = ["Model draft one.", "Model draft two."];
+    const executors = createMockModelExecutors({ text: { writeDraft: drafts } });
+
+    const first = await runToQuiescence(
+      createAgentRuntime(plainWriterAgentMachine, { executors }),
+      {
+        input: { topic: "a solar weather station" },
+      },
+    );
+    expect(first.status).toBe("idle");
+    if (first.status !== "idle") throw new Error("expected idle");
+    // Settles on the plain machine's own decision point, holding the model's text.
+    expect(getStatePath(first.snapshot)).toBe("judging");
+    expect(first.snapshot.context.draft).toBe("Model draft one.");
+
+    const second = await runToQuiescence(
+      createAgentRuntime(plainWriterAgentMachine, { executors }),
+      {
+        snapshot: first.persist(),
+        event: { type: "REVISE" },
+      },
+    );
+    if (second.status !== "idle") throw new Error("expected idle");
+    expect(second.snapshot.context.draft).toBe("Model draft two.");
+
+    const done = await runToQuiescence(createAgentRuntime(plainWriterAgentMachine, { executors }), {
+      snapshot: second.persist(),
+      event: { type: "APPROVE" },
+    });
+    if (done.status !== "done") throw new Error("expected done");
+    expect(done.output.draft).toBe("Model draft two.");
+    expect(done.output.revisions).toBe(1);
+    // The revision prompt reached the model on the second draft.
+    expect(executors.calls.map((call) => call.name)).toEqual(["writeDraft", "writeDraft"]);
+    expect(String(executors.calls[1]?.request.prompt)).toContain("revision #1");
+  });
+
+  test("under the agent runtime, a failed model call still takes the plain retry loop", async () => {
+    let calls = 0;
+    const executors = createMockModelExecutors({
+      text: {
+        writeDraft: () => {
+          calls += 1;
+          if (calls === 1) throw new Error("model unavailable");
+          return "Recovered draft.";
+        },
+      },
+    });
+    const result = await runToQuiescence(
+      createAgentRuntime(plainWriterAgentMachine, { executors }),
+      {
+        input: { topic: "x" },
+      },
+    );
+    if (result.status !== "idle") throw new Error(`expected idle, got ${result.status}`);
+    expect(result.snapshot.context.retries).toBe(1);
+    expect(result.snapshot.context.draft).toBe("Recovered draft.");
   });
 });

@@ -271,9 +271,13 @@ const agentSetup = setupAgent({
         output: z.object({ context: z.string() }),
       },
       model: "tutor",
+      // The intro is shown to the learner as-is, so it talks to them ("you"),
+      // not about them ("the learner should…").
       system:
-        "Introduce one checkpoint of a study session in 3-5 sentences: why it matters " +
-        "and what the learner should understand. Do not quiz; the learner will explain it back.",
+        "Introduce one checkpoint of a study session in 3-5 sentences, speaking directly " +
+        'to the learner as "you": why it matters and what you want them to understand. ' +
+        'Never refer to "the learner" or "the student" in the third person. ' +
+        "Do not quiz; they will explain it back to you next.",
       prompt: ({ input }) =>
         `Topic: ${input.topic}\nCheckpoint: ${input.title}\nKey idea: ${input.keyIdea}`,
     },
@@ -291,7 +295,8 @@ const agentSetup = setupAgent({
       model: "tutor",
       system:
         "Re-teach a concept the Feynman way: plain words, one everyday analogy, no jargon. " +
-        "Address the specific gap in the learner's attempt. Keep it under 120 words.",
+        'Speak directly to the learner as "you", never "the learner" in the third person. ' +
+        "Address the specific gap in their attempt. Keep it under 120 words.",
       prompt: ({ input }) =>
         [
           `Checkpoint: ${input.title}`,

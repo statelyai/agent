@@ -28,6 +28,8 @@
  *   - the page hint is read off the retrieved chunk, never generated
  *   - grading is grounded on the exact chunk that produced the question, and
  *     the verdict is a Jev judgment (see below), not the text model's say-so
+ *   - context keeps page numbers, not passages (`pageText` looks one up when a
+ *     request needs it), so an open question never sits next to its answer
  *   - `choosingDocument` is a real idle state, so an ambiguous corpus cannot be
  *     silently guessed past
  *
@@ -273,12 +275,16 @@ export function queryPdfContent(input: QueryPdfInput): Chunk[] {
   return stratify(candidates, input.limit);
 }
 
-const askedQuestionSchema = z.object({
-  pageNumber: z.number(),
-  prompt: z.string(),
-  /** The exact passage the question came from — grading is grounded on it. */
-  sourceText: z.string(),
-});
+/**
+ * A page's text, fetched by id — the "vector store" lookup. Context keeps page
+ * NUMBERS, never passages: a passage holds the answer to its question, so its
+ * text is looked up only when a request needs it, and nothing a host renders
+ * from context while the learner thinks can give the answer away.
+ */
+export function pageText(documentId: string | null, pageNumber: number): string {
+  const document = SAMPLE_LIBRARY.find((entry) => entry.id === documentId);
+  return document?.pages.find((page) => page.pageNumber === pageNumber)?.content ?? "";
+}
 
 /** A grade plus the passage it was grounded on: everything the label needs. */
 const gradedAnswerSchema = z.object({
@@ -320,13 +326,17 @@ export const chatWithPdfSchemas = createAgentSchemas({
     maxQuestions: z.number(),
     /** Refresh retrieval after this many questions. Was "after 3-4 questions". */
     refreshEvery: z.number(),
-    chunks: z.array(chunkSchema),
+    /** Pages retrieved in the current batch, in the order they are quizzed. */
+    batch: z.array(z.number()),
     chunkCursor: z.number(),
     /** Was "get fresh content from different pages". Now a query parameter. */
     pagesCovered: z.array(z.number()),
     questionsAsked: z.number(),
     sinceRefresh: z.number(),
-    pending: askedQuestionSchema.nullable(),
+    /** The question awaiting an answer, as the learner reads it ("" when none). */
+    question: z.string(),
+    /** The page `question` came from — grading is grounded on that page's text. */
+    questionPage: z.number().nullable(),
     results: z.array(resultSchema),
     /** What the learner typed for the pending question, awaiting grading. */
     answer: z.string(),
@@ -432,18 +442,18 @@ const agentSetup = setupAgent({
     },
   },
   states: {
-    // `asking` always sets `pending` before `awaitingAnswer` / `grading` read
-    // it, so those two states can be narrowed non-null.
+    // `asking` always sets `questionPage` before `awaitingAnswer` / `grading`
+    // read it, so those two states can be narrowed non-null.
     awaitingAnswer: {
-      schemas: { context: chatWithPdfSchemas.context.extend({ pending: askedQuestionSchema }) },
+      schemas: { context: chatWithPdfSchemas.context.extend({ questionPage: z.number() }) },
     },
     grading: {
-      schemas: { context: chatWithPdfSchemas.context.extend({ pending: askedQuestionSchema }) },
+      schemas: { context: chatWithPdfSchemas.context.extend({ questionPage: z.number() }) },
     },
     explaining: {
       schemas: {
         context: chatWithPdfSchemas.context.extend({
-          pending: askedQuestionSchema,
+          questionPage: z.number(),
           verdict: z.boolean(),
         }),
       },
@@ -493,12 +503,13 @@ export const chatWithPdfMachine = agentSetup.createMachine({
     pageEnd: input.pageEnd,
     maxQuestions: input.maxQuestions,
     refreshEvery: input.refreshEvery,
-    chunks: [],
+    batch: [],
     chunkCursor: 0,
     pagesCovered: [],
     questionsAsked: 0,
     sinceRefresh: 0,
-    pending: null,
+    question: "",
+    questionPage: null,
     results: [],
     answer: "",
     verdict: null,
@@ -576,7 +587,14 @@ export const chatWithPdfMachine = agentSetup.createMachine({
             ? // Nothing fresh left in range. Prose has no answer for this case;
               // a machine ends the session and says why.
               { target: "summary", context: { exhausted: true } }
-            : { target: "asking", context: { chunks: output, chunkCursor: 0, sinceRefresh: 0 } },
+            : {
+                target: "asking",
+                context: {
+                  batch: output.map((chunk) => chunk.pageNumber),
+                  chunkCursor: 0,
+                  sinceRefresh: 0,
+                },
+              },
         onError: { target: "summary", context: { exhausted: true } },
       },
     },
@@ -589,22 +607,23 @@ export const chatWithPdfMachine = agentSetup.createMachine({
       invoke: {
         src: "writeQuestion",
         input: ({ context }) => ({
-          passage: context.chunks[context.chunkCursor]?.content ?? "",
+          passage: pageText(context.documentId, context.batch[context.chunkCursor] ?? 0),
           questionNumber: context.questionsAsked + 1,
           askedSoFar: context.results.map((result) => result.prompt),
         }),
         onDone: ({ context, output }, enq) => {
-          const chunk = context.chunks[context.chunkCursor]!;
-          const prompt = renderQuestion(output.result, chunk.pageNumber);
-          enq.emit({ type: "QUESTION", prompt, pageNumber: chunk.pageNumber });
+          const pageNumber = context.batch[context.chunkCursor]!;
+          const prompt = renderQuestion(output.result, pageNumber);
+          enq.emit({ type: "QUESTION", prompt, pageNumber });
           return {
             target: "awaitingAnswer",
             context: {
-              pending: { pageNumber: chunk.pageNumber, prompt, sourceText: chunk.content },
+              question: prompt,
+              questionPage: pageNumber,
               chunkCursor: context.chunkCursor + 1,
               questionsAsked: context.questionsAsked + 1,
               sinceRefresh: context.sinceRefresh + 1,
-              pagesCovered: [...context.pagesCovered, chunk.pageNumber],
+              pagesCovered: [...context.pagesCovered, pageNumber],
             },
           };
         },
@@ -625,7 +644,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
               context.lastGrade
                 ? `${renderGrade(context.lastGrade)}\n${citeSource(context.lastGrade.pageNumber, context.lastGrade.sourceText)}`
                 : "",
-              context.pending?.prompt ?? "",
+              context.question,
             ]
               .filter(Boolean)
               .join("\n\n"),
@@ -651,16 +670,19 @@ export const chatWithPdfMachine = agentSetup.createMachine({
       invoke: {
         src: "gradeAnswer",
         input: ({ context }) => ({
-          prompt: context.pending.prompt,
+          prompt: context.question,
           answer: context.answer,
-          sourceText: context.pending.sourceText,
-          pageNumber: context.pending.pageNumber,
+          sourceText: pageText(context.documentId, context.questionPage),
+          pageNumber: context.questionPage,
         }),
         onDone: ({ output }) => ({
           target: "explaining",
           context: { verdict: output.answers.correct.probability >= CORRECT_THRESHOLD },
         }),
-        onError: { target: "continuing", context: { pending: null, lastGrade: null } },
+        onError: {
+          target: "continuing",
+          context: { question: "", questionPage: null, lastGrade: null },
+        },
       },
     },
 
@@ -670,10 +692,10 @@ export const chatWithPdfMachine = agentSetup.createMachine({
       invoke: {
         src: "explainGrade",
         input: ({ context }) => ({
-          prompt: context.pending.prompt,
+          prompt: context.question,
           answer: context.answer,
-          sourceText: context.pending.sourceText,
-          pageNumber: context.pending.pageNumber,
+          sourceText: pageText(context.documentId, context.questionPage),
+          pageNumber: context.questionPage,
           correct: context.verdict,
         }),
         onDone: ({ context, output }, enq) => {
@@ -682,8 +704,8 @@ export const chatWithPdfMachine = agentSetup.createMachine({
           const results = [
             ...context.results,
             {
-              pageNumber: context.pending.pageNumber,
-              prompt: context.pending.prompt,
+              pageNumber: context.questionPage,
+              prompt: context.question,
               answer: context.answer,
               correct: grade.correct,
               explanation: grade.explanation,
@@ -693,13 +715,14 @@ export const chatWithPdfMachine = agentSetup.createMachine({
             target: "continuing",
             context: {
               results,
-              pending: null,
+              question: "",
+              questionPage: null,
               answer: "",
               verdict: null,
               lastGrade: {
                 ...grade,
-                pageNumber: context.pending.pageNumber,
-                sourceText: context.pending.sourceText,
+                pageNumber: context.questionPage,
+                sourceText: pageText(context.documentId, context.questionPage),
               },
             },
           };
@@ -710,14 +733,15 @@ export const chatWithPdfMachine = agentSetup.createMachine({
             results: [
               ...context.results,
               {
-                pageNumber: context.pending.pageNumber,
-                prompt: context.pending.prompt,
+                pageNumber: context.questionPage,
+                prompt: context.question,
                 answer: context.answer,
                 correct: context.verdict,
                 explanation: "",
               },
             ],
-            pending: null,
+            question: "",
+            questionPage: null,
             answer: "",
             verdict: null,
             lastGrade: null,
@@ -736,7 +760,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
       choice: ({ context }) => {
         if (context.questionsAsked >= context.maxQuestions) return { target: "summary" };
         if (context.sinceRefresh >= context.refreshEvery) return { target: "retrieving" };
-        if (context.chunkCursor >= context.chunks.length) return { target: "retrieving" };
+        if (context.chunkCursor >= context.batch.length) return { target: "retrieving" };
         return { target: "asking" };
       },
     },

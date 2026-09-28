@@ -7,7 +7,7 @@
  * LangGraph: two nodes (`generate` ↔ `reflect`) cycle, and a `should_continue`
  * conditional edge ends the run when `len(state["messages"]) > 6` — i.e. after
  * ~3 round trips, counted by message-array length. Here the loop bound is a
- * TYPED guard on an explicit `checking` choice state (`revisions >=
+ * TYPED guard on an explicit `checking` choice state (`rewrites >=
  * maxRevisions`), not an implicit count of an accumulating list. Same shape,
  * but the stop condition is a named number you can point at, and the transcript
  * length is a consequence rather than the control signal.
@@ -72,7 +72,7 @@ const critiqueSchema = z.object({
   satisfied: z.boolean(),
 });
 
-/** Hard upper bound on revision rounds (the tutorial's loop bound). */
+/** Hard upper bound on rewrites after the first draft (the tutorial's loop bound). */
 const MAX_REVISIONS = 2;
 
 /** Collapses critique prose to a single short line for the revision log. */
@@ -104,6 +104,12 @@ const reflectionContextSchema = z.object({
 
 type ReflectionContext = z.infer<typeof reflectionContextSchema>;
 
+/** Rewrites so far: every draft after the first. Derived from the transcript. */
+function rewriteCount(context: ReflectionContext): number {
+  const drafts = context.messages.filter((message) => message.role === "assistant").length;
+  return Math.max(0, drafts - 1);
+}
+
 /** One line per completed round — derived from the recorded critiques. */
 function renderRevisionLog(critiques: ReflectionContext["critiques"]): string {
   return critiques
@@ -128,9 +134,10 @@ function renderStopReason(context: ReflectionContext): string {
       context.critiques.length === 1 ? "" : "s"
     }.`;
   }
+  const rewrites = rewriteCount(context);
   return (
-    `Best effort: the critic was still not satisfied after ${context.maxRevisions} ` +
-    `revision${context.maxRevisions === 1 ? "" : "s"}, which is the budget.`
+    `Best effort: the critic was still not satisfied after ${rewrites} ` +
+    `revision${rewrites === 1 ? "" : "s"}, which is the budget.`
   );
 }
 
@@ -161,6 +168,7 @@ const agentSetup = setupAgent({
   // raw drafts stay nested so neither essay becomes the lead.
   output: z.object({
     comparison: z.string(),
+    // Rewrites after the first draft (not critique rounds).
     revisions: z.number(),
     // Whether the critic signed off (vs. stopped at the revision bound).
     satisfied: z.boolean(),
@@ -309,11 +317,11 @@ export const reflectionWriterMachine = agentSetup.createMachine({
     },
     // The typed loop bound. LangGraph's `should_continue` counts messages
     // (`len > 6`); here the same decision is a named guard: stop when the critic
-    // is satisfied OR the revision budget is spent, else loop back to drafting.
+    // is satisfied OR the rewrite budget is spent, else loop back to drafting.
     checking: {
       type: "choice",
       choice: ({ context }) =>
-        context.critiques.at(-1)?.satisfied || context.critiques.length >= context.maxRevisions
+        context.critiques.at(-1)?.satisfied || rewriteCount(context) >= context.maxRevisions
           ? { target: "done" }
           : { target: "drafting" },
     },
@@ -321,7 +329,7 @@ export const reflectionWriterMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         comparison: renderComparison(context),
-        revisions: context.critiques.length,
+        revisions: rewriteCount(context),
         satisfied: context.critiques.at(-1)?.satisfied ?? false,
         messageCount: context.messages.length,
         failure: null,
@@ -334,7 +342,7 @@ export const reflectionWriterMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         comparison: renderComparison(context),
-        revisions: context.critiques.length,
+        revisions: rewriteCount(context),
         satisfied: false,
         messageCount: context.messages.length,
         failure: context.failure ?? "unknown failure",

@@ -128,6 +128,73 @@ test("dependencies are the $N references; planProblem rejects empty, oversized a
   );
 });
 
+test("a plan that never wires results through $N is rejected before it runs", async () => {
+  // The QA plan: two searches, math on literal placeholders, and a finish that
+  // is an instruction. It ran as one wave and computed 1 - 2 = -1.
+  const unwired: Task[] = [
+    { tool: "search", args: "Japan GDP" },
+    { tool: "search", args: "France GDP" },
+    { tool: "math", args: "1 - 2" },
+    { tool: "finish", args: "State how much larger Japan's GDP is using the result from task 3." },
+  ];
+  expect(planProblem(unwired)).toBe(
+    "task 3 math(1 - 2) uses no $N result although it follows a search; " +
+      "write $N for each searched value instead of a literal number",
+  );
+  // Math wired, finish still an instruction (no $N, or "task N" prose).
+  const wiredMath = unwired.map((task, index) =>
+    index === 2 ? { tool: "math" as const, args: "$1 - $2" } : task,
+  );
+  expect(planProblem(wiredMath)).toMatch(/^task 4 finish\(.*\) is an instruction, not an answer/);
+  expect(
+    planProblem([...wiredMath.slice(0, 3), { tool: "finish", args: "See task 3: $3" }]),
+  ).toMatch(/^task 4 finish.* is an instruction/);
+  // finish anywhere but last.
+  expect(
+    planProblem([
+      { tool: "search", args: "Japan GDP" },
+      { tool: "finish", args: "$1" },
+      { tool: "math", args: "$1 * 2" },
+    ]),
+  ).toBe("task 2 is finish, but finish must be last");
+  // Literal math with no search before it is fine (the question gave the numbers).
+  expect(planProblem([{ tool: "math", args: "15 / 100 * 80" }])).toBeNull();
+  expect(
+    planProblem([
+      ...wiredMath.slice(0, 3),
+      { tool: "finish", args: "Japan's is $3 trillion USD larger." },
+    ]),
+  ).toBeNull();
+
+  // End to end: the unwired plan never executes; the replan gets the problem.
+  const scripted = createMockModelExecutors({
+    text: {
+      plan: [
+        { tasks: unwired },
+        {
+          tasks: [
+            { tool: "search", args: "Japan GDP" },
+            { tool: "search", args: "France GDP" },
+            { tool: "math", args: "$1 - $2" },
+            { tool: "finish", args: "Japan's GDP is $3 trillion USD larger." },
+          ],
+        },
+      ],
+      join: [finish("Japan's GDP is 1.1 trillion USD larger.")],
+    },
+  });
+  const result = await runLlmCompilerExample({
+    question: "How much larger is Japan's GDP than France's GDP?",
+    generateText: scripted.generateText,
+  });
+  expect(result.progress.at(-1)).toBe("done");
+  expect(result.schedule.every((entry) => entry.plan === 2)).toBe(true);
+  expect(result.schedule.find((entry) => entry.taskId === 3)!.args).toBe("4.2 - 3.1");
+  expect(result.schedule.map((entry) => entry.wave)).toEqual([1, 1, 2, 3]);
+  const replanCall = scripted.calls.filter((call) => call.name === "plan")[1]!;
+  expect((replanCall.input as { feedback: string }).feedback).toContain("uses no $N result");
+});
+
 test("joiner replan loops back to the planner with feedback, then finishes", async () => {
   const scripted = createMockModelExecutors({
     text: {

@@ -235,7 +235,7 @@ function renderTrail(context: ReflexionContext): string {
     const dropped = attempt.dropped.length
       ? ` (dropped unretrieved: ${attempt.dropped.join(", ")})`
       : "";
-    lines.push(`${label}:${cites}${dropped}; missing: ${attempt.missing}`);
+    lines.push(`${label}${cites}${dropped} — missing: ${attempt.missing}`);
     lines.push(`  next queries: ${attempt.queries.join(" | ")}`);
     const search = context.searches[index];
     if (search)

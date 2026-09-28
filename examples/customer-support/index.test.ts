@@ -121,6 +121,31 @@ test("declining to answer ends the turn unresolved, not answered", async () => {
   expect(result.progress.at(-1)).toBe("unresolved");
 });
 
+test("the carry-on starter is a policy question: the prompt forbids asking inside an answer", async () => {
+  // With a real model, "on my ticket" drew "send me your confirmation code"
+  // even though baggage policy is the same on every ticket. The prompt now says
+  // so, and says an `answer` never asks the customer for anything.
+  const seen: { system?: string }[] = [];
+  const generateText = mockGenerateText({
+    answerTool: { name: "searchPolicies", input: { topic: "baggage" } },
+  });
+  const result = await runCustomerSupportExample({
+    query: "What's the carry-on baggage allowance on my ticket?",
+    generateText: async (request) => {
+      seen.push(request);
+      return generateText(request);
+    },
+    judge: classifier({ intent: "question" }).model,
+  });
+
+  expect(result.resolution).toBe("answered");
+  expect(result.message).toContain("One carry-on");
+  const system = seen[0]!.system!;
+  expect(system).toMatch(/same on every ticket/);
+  expect(system).toMatch(/never ask which booking/);
+  expect(system).toMatch(/never asks the customer for anything/);
+});
+
 test("the machine stops asking once its clarification budget is spent", async () => {
   const asks = Array.from({ length: MAX_CLARIFICATIONS + 1 }, (_, i) => `Question ${i + 1}?`);
   const result = await runCustomerSupportExample({

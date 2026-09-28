@@ -26,16 +26,17 @@
  *                 or `failed`)
  *   - adapt     → `adapting`
  *   - structure → `structuring`
- *   - reason    → `reasoning` (returns the answer and the filled-in trace)
+ *   - reason    → `reasoning` (returns the worked reasoning, THEN the answer)
  *
  * Differences from LangGraph worth calling out:
  *   - Selection is a JUDGMENT, not a generation. The tutorial asks a chat
  *     model to copy the chosen modules' text back. Here `selecting` asks the
  *     AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
  *     evaluation model, with the task and every module as state and one
- *     boolean question per module ("would `modules[i]` help solve `task`?"). The
- *     machine keeps the modules whose probability clears `MODULE_THRESHOLD`,
- *     most probable first, capped at `MAX_SELECTED_MODULES`. No module text
+ *     boolean question per module that quotes it ("would the reasoning module
+ *     '<module>' help solve `task`?"). The machine keeps the modules whose
+ *     probability clears `MODULE_THRESHOLD`, most probable first, capped at
+ *     `MAX_SELECTED_MODULES`. No module text
  *     is retyped, so a selection can only name modules that exist. The text
  *     model is reserved for adapt, structure, and reason.
  *   - The selection is checked. The tutorial trusts the select step and passes
@@ -45,6 +46,11 @@
  *     when no module clears `MODULE_THRESHOLD` the run lands in `failed` with
  *     a notice naming the threshold. There is no retry: asking Jev the same
  *     question over the same state would return the same answer.
+ *   - Reasoning comes before the answer. The reason step's structured output
+ *     lists `reasoning` first and `answer` second, and the model fills fields
+ *     in order, so the answer is written after (and from) the worked steps
+ *     rather than guessed first and justified after. The reasoning is prose,
+ *     one line per plan step, so the result reads as an explanation.
  *   - Every invoke has an `onError` that lands in `failed` with whatever stages
  *     completed.
  *   - `REASONING_MODULES` is 16 of the paper's 39 modules, shortened, to keep
@@ -118,11 +124,13 @@ export function createSelectModules(model: Experimental_EvaluationModel = judgeM
         model,
         state: { task: input.task, modules: [...REASONING_MODULES] },
         questions: Object.fromEntries(
-          REASONING_MODULES.map((_module, index) => [
+          REASONING_MODULES.map((module, index) => [
             `module${index}`,
             {
               type: "boolean" as const,
-              instructions: `Would the reasoning module \`modules[${index}]\` help solve \`task\`?`,
+              // Quote the module itself: a bare `modules[i]` index is easy to
+              // misalign across sixteen rows.
+              instructions: `Would the reasoning module "${module}" help solve \`task\`?`,
               criteria: {
                 true: "Applying this module moves this particular task toward its answer.",
                 false:
@@ -160,7 +168,8 @@ const selfDiscoverContextSchema = z.object({
   adaptedModules: z.string().nullable(),
   reasoningStructure: z.string().nullable(),
   answer: z.string().nullable(),
-  reasoningTrace: z.string().nullable(),
+  // The worked steps, as prose, written before the answer.
+  reasoning: z.string().nullable(),
   // Why the run stopped short; set only on the way into `failed`.
   failure: z.string().nullable(),
 });
@@ -186,7 +195,7 @@ const agentSetup = setupAgent({
           adaptedModules: z.string(),
           reasoningStructure: z.string(),
           answer: z.string(),
-          reasoningTrace: z.string(),
+          reasoning: z.string(),
         }),
       },
     },
@@ -228,16 +237,27 @@ const agentSetup = setupAgent({
       prompt: ({ input }) =>
         [`Task: ${input.task}`, "", "Adapted modules:", input.adapted].join("\n"),
     },
-    // reason: follow the plan, filling in each value, and answer.
+    // reason: follow the plan step by step, THEN answer. Field order matters:
+    // the model writes `reasoning` before `answer`, so the answer is the
+    // conclusion of the worked steps, not a guess the steps then contradict.
     solveTask: {
       schemas: {
         input: z.object({ task: z.string(), structure: z.string() }),
-        output: z.object({ answer: z.string(), reasoningTrace: z.string() }),
+        output: z.object({
+          reasoning: z
+            .string()
+            .describe("Plain prose, one short numbered line per plan step. Not JSON."),
+          answer: z.string().describe("The conclusion the reasoning reached, stated exactly."),
+        }),
       },
       model: "reasoner",
       system:
-        "Follow the reasoning structure step by step, filling in each value, to solve " +
-        "the task. Return the filled-in structure as reasoningTrace and the final answer.",
+        "Follow the reasoning structure step by step to solve the task. First write " +
+        "`reasoning`: work through each step of the structure in order, as plain prose " +
+        "(one short numbered line per step, not JSON), checking every constraint in the " +
+        "task. Then write `answer`: exactly the conclusion your reasoning reached, as a " +
+        "full phrase. If the task lists options, give the chosen option's letter AND " +
+        "its text. Never give an answer your reasoning did not arrive at.",
       prompt: ({ input }) =>
         [`Task: ${input.task}`, "", "Reasoning structure:", input.structure].join("\n"),
     },
@@ -254,7 +274,7 @@ export const selfDiscoverMachine = agentSetup.createMachine({
     adaptedModules: null,
     reasoningStructure: null,
     answer: null,
-    reasoningTrace: null,
+    reasoning: null,
     failure: null,
   }),
   initial: "selecting",
@@ -333,7 +353,7 @@ export const selfDiscoverMachine = agentSetup.createMachine({
                   adaptedModules: context.adaptedModules,
                   reasoningStructure: context.reasoningStructure,
                   answer: output.result.answer,
-                  reasoningTrace: output.result.reasoningTrace,
+                  reasoning: output.result.reasoning,
                 },
               }
             : { target: "failed", context: { failure: "a stage finished without a result" } },
@@ -346,9 +366,9 @@ export const selfDiscoverMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        // The answer leads; the filled-in plan follows so the reader sees how
-        // the model got there.
-        answer: `${context.answer}\n\nReasoning (the filled-in structure):\n${context.reasoningTrace}`,
+        // The answer leads; the worked steps follow so the reader sees how the
+        // model got there.
+        answer: `${context.answer}\n\nReasoning:\n${context.reasoning}`,
         reasoningStructure: context.reasoningStructure,
         selectedModules: context.selectedModules,
         adaptedModules: context.adaptedModules,

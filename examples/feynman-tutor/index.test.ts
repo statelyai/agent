@@ -278,6 +278,20 @@ test("verifying asks Jev one five-level score over the checkpoint, and PASS_SCOR
   expect(result.checkpoints[0]).toMatchObject({ status: "passed", score: 75, reteaches: 1 });
 });
 
+test('the intro and re-teach speak to the learner as "you", not in the third person', async () => {
+  const scripted = executors();
+  await runFeynmanTutorExample({
+    generateText: scripted.generateText,
+    judge: grader([weak, pass]).model,
+    humanEvents: [explain("private encrypts?"), explain("a"), explain("b")],
+  });
+  for (const name of ["introduceCheckpoint", "explainSimply"]) {
+    const system = scripted.calls.find((call) => call.name === name)!.request.system ?? "";
+    expect(system).toContain('as "you"');
+    expect(system).not.toMatch(/what the learner should/);
+  }
+});
+
 test("lintAgentMachine is clean", () => {
   expect(() => lintAgentMachine(feynmanTutorMachine, { throw: true })).not.toThrow();
 });

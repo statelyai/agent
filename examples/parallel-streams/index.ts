@@ -36,9 +36,17 @@ const models = {
   poet: openai("gpt-5.4-mini"),
 };
 
-/** Completion order, the part a final view usually drops. Rendered in `output`. */
+/**
+ * Completion order, the part a final view usually drops. Rendered in `output`
+ * as markdown: a lead line, a blank line, then one numbered item per line, so
+ * the list renders as a list even when a host prefixes it with a label.
+ */
 function renderLanes(lanes: string[]): string {
-  return lanes.map((lane, index) => `${index + 1}. ${lane}`).join("\n");
+  return [
+    "Finished in this order:",
+    "",
+    ...lanes.map((lane, index) => `${index + 1}. ${lane}`),
+  ].join("\n");
 }
 
 const agentSetup = setupAgent({

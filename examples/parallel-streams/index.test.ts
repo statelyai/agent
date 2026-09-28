@@ -34,7 +34,11 @@ test("parallel streaming requests are disambiguated by request.id in onChunk", a
   assert.equal(output.poem, "poem chunk");
   // Completion order survives to the final view: one line per lane, numbered
   // in the order the lanes finished. It is rendered in `output`, not stored.
-  const lanes = output.laneSummary.split("\n");
+  // A blank line precedes the list so markdown renders it as a list even after
+  // a "Lane summary:" label.
+  const [lead, blank, ...lanes] = output.laneSummary.split("\n");
+  assert.equal(lead, "Finished in this order:");
+  assert.equal(blank, "");
   assert.equal(lanes.length, 2);
   assert.match(lanes[0]!, /^1\. (analysis|poem)$/);
   assert.match(lanes[1]!, /^2\. (analysis|poem)$/);
@@ -63,7 +67,7 @@ test("a failing stream ends its region instead of hanging the parallel machine",
 
   assert.equal(output.analysis, "analysis only");
   assert.equal(output.poem, "");
-  assert.deepEqual(output.laneSummary, "1. analysis");
+  assert.deepEqual(output.laneSummary, "Finished in this order:\n\n1. analysis");
   assert.equal(output.failures.length, 1);
   assert.match(output.failures[0]!, /^poem: /);
 });

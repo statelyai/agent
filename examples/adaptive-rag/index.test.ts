@@ -4,6 +4,7 @@ import { lintAgentMachine } from "@statelyai/agent/testing";
 import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
+  ANSWER_SYSTEM_PROMPT,
   GROUNDED_THRESHOLD,
   MAX_REGENERATIONS,
   MAX_REWRITES,
@@ -88,6 +89,27 @@ test("websearch route: skips retrieval and grading, answers from the sample web 
   expect(result.progress).not.toContain("retrieving");
   expect(result.progress).not.toContain("grading");
   expect(result.progress.slice(0, 3)).toEqual(["routing", "searchingWeb", "generating"]);
+});
+
+test("the answer prompt keeps the model from commenting on the retrieved set", async () => {
+  // Web results are ungraded, so an off-topic one can reach `generateAnswer`.
+  // With numbered documents the model narrated them ("Document 2 is
+  // unrelated."); the prompt now lists sources unnumbered and forbids it.
+  const model = createMockModelExecutors({ text: { generateAnswer: "answer" } });
+  await runAdaptiveRagExample({
+    question: "What is the latest guidance on defending agents against prompt injection?",
+    generateText: model.generateText,
+    judge: jev({ datasource: toWebsearch, grounded: true, useful: true }).model,
+  });
+
+  const [answerCall] = model.calls.filter((call) => call.name === "generateAnswer");
+  expect(answerCall).toBeDefined();
+  expect(answerCall!.request.system).toBe(ANSWER_SYSTEM_PROMPT);
+  expect(answerCall!.request.system).toMatch(/never mention the notes/i);
+  expect(answerCall!.request.system).toMatch(/silently ignore/i);
+  const prompt = String(answerCall!.request.prompt);
+  expect(prompt).toContain("- [sample web result] Latest guidance on prompt injection");
+  expect(prompt).not.toMatch(/\[\d+\]|document \d/i);
 });
 
 test("nothing relevant → rewrite → retrieve again → answered", async () => {

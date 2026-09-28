@@ -30,8 +30,8 @@
  *                                  structured output `{ subjects: string[] }`
  *   - Send(...) per subject      → `generatingJokes` entry: `enq.spawn` of one
  *                                  `writeJoke` child per subject, N decided at runtime
- *   - operator.add reducer       → the `xstate.done.actor` handler, which appends
- *                                  `{ subject, joke }` to `context.jokes` as each lands,
+ *   - operator.add reducer       → the `xstate.done.actor` handler, which adds
+ *                                  `{ branch, subject, joke }` to `context.jokes` as each lands,
  *                                  and once all have settled routes to `judging`
  *                                  (two or more jokes) or straight to `done` (one)
  *   - best_joke                  → `judging`, ONE Jev `choice` over the jokes
@@ -49,7 +49,7 @@
  *   - Judging is a JUDGMENT, not a generation. LangGraph asks a chat model to
  *     write back an index. Here `judging` asks the AI SDK's
  *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model, with the topic and every `{ subject, joke }` as state and one
+ *     evaluation model, with the topic and every landed joke as state and one
  *     `choice` question whose labels are the jokes themselves (`joke0`,
  *     `joke1`, …, one per landed joke). `evaluate` rejects a label that was not
  *     offered, so an out-of-range or fractional index cannot happen by
@@ -60,8 +60,9 @@
  *     `MAX_JUDGE_RETRIES` time(s), then the run ends in `failed` with every
  *     joke still in the output.
  *
- * No stand-ins: every node here is a model call. The jokes land in arrival
- * order, which is the order the judge sees them.
+ * No stand-ins: every node here is a model call. Branches finish in any
+ * order, but each joke is kept in its branch's slot, so branch `joke-N`,
+ * `jokes[N]`, trail line `[N]` and judge label `jokeN` all name the same joke.
  *
  * Dual-mode: `runMapReduceExample(options?)` takes an injectable
  * `generateText` and `judge` (tests script both); the direct run uses real
@@ -117,7 +118,8 @@ export const writeJoke = createTextLogic({
   prompt: ({ input }) => `Subject: ${input.subject}`,
 });
 
-const jokeSchema = z.object({ subject: z.string(), joke: z.string() });
+/** `branch` is N of the `joke-N` branch that wrote it, and its index in `jokes`. */
+const jokeSchema = z.object({ branch: z.number(), subject: z.string(), joke: z.string() });
 type Joke = z.infer<typeof jokeSchema>;
 
 /** The label the judge answers with for the joke at `jokes[index]`. */
@@ -168,7 +170,7 @@ const contextSchema = z.object({
   topic: z.string(),
   subjects: z.array(z.string()),
   truncated: z.boolean(),
-  /** The reduce target: one entry per settled branch, in arrival order. */
+  /** The reduce target: one entry per settled branch, in branch order. */
   jokes: z.array(jokeSchema),
   judgeRetries: z.number().int(),
   bestIndex: z.number().nullable(),
@@ -182,8 +184,9 @@ type MapReduceContext = z.infer<typeof contextSchema>;
  * A lone joke is the best by default: a one-label `choice` is not a judgment,
  * so it skips `judging` and lands in `done` as index 0.
  */
-function landJoke(context: MapReduceContext, entry: { subject: string; joke: string }) {
-  const jokes = [...context.jokes, entry];
+function landJoke(context: MapReduceContext, entry: Joke) {
+  // Kept in branch order, not arrival order: `jokes[N]` is branch `joke-N`.
+  const jokes = [...context.jokes, entry].sort((left, right) => left.branch - right.branch);
   const next = {
     jokes,
     notice: `Wrote ${jokes.length} of ${context.subjects.length} jokes.`,
@@ -206,7 +209,7 @@ function branchIndex(actorId: string): number {
 function renderTrail(context: MapReduceContext): string[] {
   return [
     `Subjects: ${context.subjects.join(", ") || "(none)"}${context.truncated ? ` (truncated to ${MAX_SUBJECTS})` : ""}`,
-    ...context.jokes.map((entry, i) => `[${i}] ${entry.subject}: ${entry.joke}`),
+    ...context.jokes.map((entry) => `[${entry.branch}] ${entry.subject}: ${entry.joke}`),
     context.notice,
   ];
 }
@@ -297,14 +300,17 @@ export const mapReduceMachine = agentSetup.createMachine({
         "xstate.done.actor": ({ context, event }) => {
           const { actorId, output } = event as DoneActorEventOf<typeof writeJoke>;
           if (!actorId.startsWith(BRANCH_PREFIX)) return undefined;
-          const subject = context.subjects[branchIndex(actorId)] ?? actorId;
-          return landJoke(context, { subject, joke: output.result.joke });
+          const branch = branchIndex(actorId);
+          const subject = context.subjects[branch] ?? actorId;
+          return landJoke(context, { branch, subject, joke: output.result.joke });
         },
         "xstate.error.actor": ({ context, event }) => {
           const { actorId } = event as unknown as { actorId: string };
           if (!actorId.startsWith(BRANCH_PREFIX)) return undefined;
-          const subject = context.subjects[branchIndex(actorId)] ?? actorId;
+          const branch = branchIndex(actorId);
+          const subject = context.subjects[branch] ?? actorId;
           return landJoke(context, {
+            branch,
             subject,
             joke: `[no joke: the writer for "${subject}" failed]`,
           });

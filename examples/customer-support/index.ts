@@ -400,12 +400,18 @@ const agentSetup = setupAgent({
         "You are an airline support agent. Use lookupBooking to read a booking " +
         "by confirmation code, and searchPolicies for fees, baggage, " +
         "cancellation, or change rules.\n" +
+        "Baggage allowances, fees, and cancellation or change rules are the " +
+        'same on every ticket, so "my ticket" needs no booking: call ' +
+        "searchPolicies first and answer from it — never ask which booking.\n" +
         "Return { status: 'answered', answer } when you can answer, in one or " +
-        "two friendly sentences.\n" +
-        "Return { status: 'needsInfo', question } when a detail only the " +
-        "customer has is missing — which booking, which flight. Anything you " +
-        "would end by asking the customer for something belongs in this " +
-        "branch, never in `answer`. Never ask for what the tools can tell you.",
+        "two friendly sentences. An answer is complete on its own: it never " +
+        "asks the customer for anything (no confirmation code, no 'let me " +
+        "know'), because the turn ends there and they cannot reply.\n" +
+        "Return { status: 'needsInfo', question } only when the answer really " +
+        "depends on a detail only the customer has — which booking, which " +
+        "flight. Anything you would end by asking the customer for something " +
+        "belongs in this branch, never in `answer`. Never ask for what the " +
+        "tools can tell you.",
       prompt: ({ input }) =>
         [
           input.query,
@@ -423,7 +429,9 @@ const agentSetup = setupAgent({
           },
         }),
         searchPolicies: tool({
-          description: "Look up an airline policy by topic (cancellation, baggage, changes).",
+          description:
+            "Look up an airline policy by topic (cancellation, baggage, changes). " +
+            "Policies apply to every ticket; no booking is needed.",
           inputSchema: z.object({ topic: z.enum(["cancellation", "baggage", "changes"]) }),
           execute: async ({ topic }) => ({ topic, text: POLICIES[topic] }),
         }),

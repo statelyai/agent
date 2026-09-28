@@ -135,10 +135,39 @@ test("a failing branch records a placeholder joke and the run continues", async 
   expect(result.outcome).toBe("done");
   expect(result.jokes).toHaveLength(2);
   expect(result.jokes).toContainEqual({
+    branch: 1,
     subject: "penguins",
     joke: '[no joke: the writer for "penguins" failed]',
   });
-  expect(result.jokes).toContainEqual({ subject: "lions", joke: "A joke about lions." });
+  expect(result.jokes).toContainEqual({ branch: 0, subject: "lions", joke: "A joke about lions." });
+});
+
+test("branches that finish out of order keep their branch ids in the trail", async () => {
+  // The last subject's writer answers first: arrival order is the reverse of
+  // branch order, yet branch `joke-N`, `jokes[N]` and trail `[N]` agree.
+  const delays: Record<string, number> = { lions: 30, penguins: 15, reptiles: 0 };
+  const executors = scripted(
+    {
+      generateSubjects: [{ subjects: ["lions", "penguins", "reptiles"] }],
+      writeJoke: async (request: AgentTextRequest) => {
+        await new Promise((resolve) =>
+          setTimeout(resolve, delays[(request.input as { subject: string }).subject]),
+        );
+        return jokeAbout(request);
+      },
+    },
+    "joke2",
+  );
+  const result = await runMapReduceExample({ topic: "animals", ...executors });
+
+  expect(result.jokes.map((entry) => [entry.branch, entry.subject])).toEqual([
+    [0, "lions"],
+    [1, "penguins"],
+    [2, "reptiles"],
+  ]);
+  expect(result.trail).toContain("[2] reptiles: A joke about reptiles.");
+  // The judge label `joke2` names branch `joke-2`.
+  expect(result.subject).toBe("reptiles");
 });
 
 test("an out-of-range label is retried once", async () => {

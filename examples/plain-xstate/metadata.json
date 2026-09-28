@@ -2,6 +2,7 @@
   "name": "plain-xstate",
   "title": "Launch blurb writer (plain XState)",
   "kind": "agent-workflow",
+  "machine": "plainWriterAgentMachine",
   "origin": {
     "type": "stately-agent",
     "source": "New example for driving a library-unaware XState v6 machine",

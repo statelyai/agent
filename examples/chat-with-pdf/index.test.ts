@@ -52,12 +52,15 @@ interface PlayResult {
   jevCalls: MockJudgeCall[];
   /** Every idle label the run settled on. */
   idleLabels: string[];
+  /** At each idle settle: the context a host could render, and the passage being quizzed. */
+  idleViews: Array<{ context: Record<string, unknown>; passage: string | undefined }>;
 }
 
 async function play(options: PlayOptions): Promise<PlayResult> {
   const passages: string[] = [];
   const gradePrompts: string[] = [];
   const idleLabels: string[] = [];
+  const idleViews: PlayResult["idleViews"] = [];
   let questionNumber = 0;
 
   // The verdict is a Jev judgment over the passage, question, and answer.
@@ -106,6 +109,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
 
   while (result.status === "idle") {
     idleLabels.push(idlePrompt(result.snapshot));
+    idleViews.push({ context: result.snapshot.context, passage: passages.at(-1) });
     const event = queue.shift();
     if (!event) break;
     result = await runToQuiescence(
@@ -127,6 +131,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
     gradePrompts,
     jevCalls: jev.calls,
     idleLabels,
+    idleViews,
   };
 }
 
@@ -149,6 +154,23 @@ describe("chat-with-pdf quiz mode", () => {
     for (const label of result.idleLabels) {
       expect(label.match(/^Q\d+ about:/m)).not.toBeNull();
       expect(label.match(/Hint: see page \d+/g)).toHaveLength(1);
+    }
+  });
+
+  test("while a question is open, context holds the readable question but never its passage", async () => {
+    const result = await play({
+      input: { documentId: "statecharts", maxQuestions: 3, refreshEvery: 2 },
+      learnerEvents: answers(3),
+    });
+
+    expect(result.idleViews).toHaveLength(3);
+    for (const { context, passage } of result.idleViews) {
+      // The passage is the answer key: no context field — which a host may
+      // render while the learner thinks — carries it.
+      expect(passage).toBeTruthy();
+      expect(JSON.stringify(context)).not.toContain(passage!);
+      // The question is a plain string, ready to show as-is.
+      expect(context.question).toMatch(/^Q\d+ about: .*\n\(Hint: see page \d+\)$/);
     }
   });
 

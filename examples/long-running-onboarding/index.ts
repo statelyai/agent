@@ -121,12 +121,19 @@ const coordinatorSetup = setupAgent({
     ESCALATE: z.object({ note: z.string() }),
   },
   actors: {
+    // Each send is a new packet with its own id: a resend (`resend` > 0) must
+    // be distinguishable from the packet HR just sent back.
     sendWelcomePacket: createAsyncLogic({
       schemas: {
-        input: employeeSchema,
+        input: z.object({ employee: employeeSchema, resend: z.number() }),
         output: welcomePacketSchema,
       },
-      run: async ({ input }) => ({ packetId: `WELCOME-${input.id}` }),
+      run: async ({ input }) => ({
+        packetId:
+          input.resend > 0
+            ? `WELCOME-${input.employee.id}-R${input.resend}`
+            : `WELCOME-${input.employee.id}`,
+      }),
     }),
     provisionIt,
   },
@@ -217,7 +224,7 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
     sendingWelcomePacket: {
       invoke: {
         src: "sendWelcomePacket",
-        input: ({ context }) => context.employee,
+        input: ({ context }) => ({ employee: context.employee, resend: context.docsRejections }),
         onDone: ({ output }) => ({
           target: "waitingForSignedDocs",
           context: { welcomePacketId: output.packetId },
@@ -232,10 +239,16 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
       // `meta.interaction` tells a host what to ask the person here.
       meta: {
         interaction: {
-          // `{path}` fields resolve against context when `getInteraction` reads
-          // the label.
-          label:
-            "Waiting on {employee.name}'s signed onboarding documents. Mark them signed, send them back, or escalate.",
+          // Derived from context when `getInteraction` reads it, so after a
+          // resend the human sees the new packet id and how many resends it
+          // took, not a prompt identical to the first one.
+          label: ({ context }) =>
+            `Waiting on ${context.employee.name}'s signed onboarding documents ` +
+            `(packet ${context.welcomePacketId}` +
+            (context.docsRejections > 0
+              ? `, resend ${context.docsRejections} of ${MAX_DOCS_REJECTIONS - 1}`
+              : "") +
+            "). Mark them signed, send them back, or escalate.",
           events: {
             DOCS_SIGNED: { label: "Mark documents signed", style: "primary" },
             DOCS_REJECTED: { label: "Send the packet back" },

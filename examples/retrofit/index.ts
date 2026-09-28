@@ -10,7 +10,8 @@
  *   - the retry/backoff wrapper → a wrapper around the host's executors (unchanged)
  *   - the `refunded` / `escalated` booleans → gone: each final state declares
  *     its own `output`, so the outcome is the state, not a flag beside it
- *   - the unbounded tool loop → a `lookups` counter checked against MAX_LOOKUPS
+ *   - the unbounded tool loop → a `lookups` counter checked against MAX_LOOKUPS,
+ *     and a lookup already made is never made again (its result is in context)
  *
  * `step1/2/3.ts` walk this conversion one shippable step at a time. Dual-mode:
  * tests inject mock executors (no API key); a direct run uses real models.
@@ -52,6 +53,8 @@ export const MAX_LOOKUPS = 2;
 export const ORDERS: Record<string, { customer: string; total: number; item: string }> = {
   A1001: { customer: "Ada Lovelace", total: 240, item: "Standing desk" },
   B2002: { customer: "Alan Turing", total: 60, item: "Mechanical keyboard" },
+  // The order the "charged twice" starter quotes, so its lookup finds something.
+  "ORD-1234": { customer: "Grace Hopper", total: 89, item: "Noise-cancelling headphones" },
 };
 
 const models = {
@@ -120,7 +123,9 @@ const schemas = createAgentSchemas({
   context: z.object({
     ticket: z.string(),
     triage: triageSchema.nullable(),
-    order: z.string().nullable(),
+    /** Every lookup so far, order id → result. All of them reach the prompt,
+     * and an id already here is not looked up again. */
+    orders: z.record(z.string(), z.string()),
     /** The order id the last LOOKUP asked for; the invoke reads it from here
      * rather than reaching back into the triggering event. */
     lookupOrderId: z.string().nullable(),
@@ -181,7 +186,7 @@ export const supportMachine = agentSetup.createMachine({
   context: ({ input }) => ({
     ticket: input.ticket,
     triage: null,
-    order: null,
+    orders: {},
     lookupOrderId: null,
     lookups: 0,
     pendingRefund: null,
@@ -213,11 +218,14 @@ export const supportMachine = agentSetup.createMachine({
           model: "agent",
           system:
             "You are a support agent. Look up an order when useful, issue small " +
-            "refunds directly, escalate what you cannot resolve, or close with a reply.",
+            "refunds directly, escalate what you cannot resolve, or close with a reply. " +
+            "Lookups already made are listed under Orders; never repeat one.",
           prompt: [
             `Ticket: ${context.ticket}`,
             context.triage ? `Triage: ${JSON.stringify(context.triage)}` : "",
-            context.order ? `Order: ${context.order}` : "",
+            Object.keys(context.orders).length > 0
+              ? `Orders:\n${Object.values(context.orders).join("\n")}`
+              : "",
           ]
             .filter(Boolean)
             .join("\n"),
@@ -235,10 +243,12 @@ export const supportMachine = agentSetup.createMachine({
         }),
       },
       on: {
-        // Bounded: over the lookup budget the transition returns nothing, so
-        // LOOKUP is not an accepted event and the decision must commit.
+        // Bounded: over the lookup budget, or for an id already looked up (its
+        // result is in the prompt; asking again returns the same answer), the
+        // transition returns nothing, so LOOKUP is not accepted and the
+        // decision retries with that rejection as feedback.
         LOOKUP: ({ context, event }) =>
-          context.lookups >= MAX_LOOKUPS
+          context.lookups >= MAX_LOOKUPS || event.orderId in context.orders
             ? undefined
             : {
                 target: "lookingUp",
@@ -271,7 +281,10 @@ export const supportMachine = agentSetup.createMachine({
         // No cast: the id was written to context by the LOOKUP transition, and
         // `states.lookingUp` narrows it to a non-null string.
         input: ({ context }) => ({ orderId: context.lookupOrderId }),
-        onDone: ({ output }) => ({ target: "deciding", context: { order: output } }),
+        onDone: ({ context, output }) => ({
+          target: "deciding",
+          context: { orders: { ...context.orders, [context.lookupOrderId]: output } },
+        }),
         onError: ({ event }) => ({
           target: "escalated",
           context: { resolution: `Order lookup failed, escalated: ${String(event.error)}` },

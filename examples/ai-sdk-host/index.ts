@@ -119,8 +119,9 @@ export const summarizeTurn = createTextLogic({
   name: "summarizeTurn",
   model: "turnSummarizer",
   system:
-    "Narrate the turn in one or two sentences. Report no numbers of your own: " +
-    "the HP totals below are already final.",
+    "Narrate the turn in one or two sentences of color. The beats and HP totals " +
+    "below are already shown to the player, so do not restate them or report any " +
+    "numbers: describe how it felt, not what the log says.",
   prompt: ({ input }) =>
     [
       `What happened: ${input.beats.join(" ")}`,

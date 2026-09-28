@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import {
+  formatMoney,
   migrateOrderSnapshot,
   orderApprovalMachine,
   orderApprovalMachineV1,
@@ -34,6 +35,26 @@ test("the machine-owned migrate callback resumes v1 state on v2", async () => {
     currency: "USD",
     riskLevel: "high",
   });
+  // The result reads as an explanation; the snapshot is attached, not the headline.
+  expect(result.summary).toContain(`on v${V1}, waiting in \`reviewing\``);
+  expect(result.summary).toContain(
+    `ran the v${V2} machine's \`migrate\`: \`reviewing\` → \`awaitingApproval\`, ` +
+      "total 812.5 → 81250 cents ($812.50), risk high.",
+  );
+  expect(result.summary).toContain("order ORD-4417 approved.");
+});
+
+test("the reviewer sees money, not raw cents", async () => {
+  const paused = await runToQuiescence(createAgentRuntime(orderApprovalMachine), {
+    input: { orderId: "ORD-2", amountCents: 2500, currency: "USD" },
+  });
+  if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
+  const description = paused.snapshot.nodes.at(-1)!.description!;
+  const shown = description.replace(/\{(\w+)\}/g, (_, key: string) =>
+    String((paused.snapshot.context as Record<string, unknown>)[key]),
+  );
+  expect(shown).toBe("Order ORD-2 ($25.00, low risk) is waiting for a reviewer.");
+  expect(formatMoney(81250, "USD")).toBe("$812.50");
 });
 
 test("migration is pure and writes the current version", async () => {
@@ -51,6 +72,7 @@ test("migration is pure and writes the current version", async () => {
     orderId: "ORD-9",
     amountCents: 1234,
     currency: "USD",
+    amountDisplay: "$12.34",
     riskLevel: "low",
   });
 });

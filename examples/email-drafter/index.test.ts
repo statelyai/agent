@@ -70,6 +70,20 @@ test("the reviewing pause renders both choices and routes free text to REQUEST_C
   expect(interaction?.textEvent).toBe("REQUEST_CHANGES");
 });
 
+test("the draft message keeps To, Subject, and body on separate markdown paragraphs", async () => {
+  const result = await openAtReview();
+  if (result.status !== "idle") throw new Error(`Expected idle, got ${result.status}`);
+
+  // Chat hosts render messages as markdown, where a single "\n" collapses
+  // into a space; only blank lines keep the header lines apart.
+  const draftMessage = result.snapshot.context.messages.at(-1);
+  expect(draftMessage).toEqual({
+    role: "assistant",
+    content:
+      "To: team@example.com\n\nSubject: Deploy pipeline is faster\n\nHi team, deploys are twice as fast now.",
+  });
+});
+
 test("the revision budget stops rendering REQUEST_CHANGES once it is spent", async () => {
   let result = await openAtReview();
 

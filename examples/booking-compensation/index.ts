@@ -46,6 +46,7 @@ const agent = setupAgent({
     outcome: z.enum(["booked", "cancelled", "compensated", "manualRecovery", "failed"]),
     flightReference: z.string().nullable(),
     hotelReference: z.string().nullable(),
+    itinerary: z.string(),
   }),
   meta: interactionMetaSchema,
   events: { APPROVE: z.object({}), CANCEL: z.object({}) },
@@ -72,11 +73,42 @@ const agent = setupAgent({
     plan: {
       schemas: { input: z.object({ destination: z.string() }), output: itinerary },
       model: "planner",
-      prompt: ({ input }) =>
-        `Propose one flight and hotel in ${input.destination}. Do not book anything.`,
+      // The machine books only after approval, so the model just plans. Telling
+      // it "do not book" made it echo a disclaimer into the itinerary fields.
+      system:
+        "You plan trips for a booking workflow. Propose one flight and one hotel. " +
+        "Each field is a plain description of the choice (flight: airline, route, " +
+        "rough times; hotel: name, neighborhood, one reason). The workflow reserves " +
+        "them after a person approves, so never add disclaimers about booking, " +
+        "availability or prices, and never ask questions.",
+      prompt: ({ input }) => `Destination: ${input.destination}`,
     },
   },
 });
+
+/** A blank line between items: Markdown folds a lone "\n" into a space. */
+function renderItinerary(plan: z.infer<typeof itinerary>): string {
+  return `Flight: ${plan.flight}\n\nHotel: ${plan.hotel}`;
+}
+
+/** Every final state reports the same shape; only the outcome differs. */
+function bookingOutput(
+  context: {
+    bookingId: string;
+    flightReference: string | null;
+    hotelReference: string | null;
+    itinerary: z.infer<typeof itinerary> | null;
+  },
+  outcome: "booked" | "cancelled" | "compensated" | "manualRecovery" | "failed",
+) {
+  return {
+    bookingId: context.bookingId,
+    outcome,
+    flightReference: context.flightReference,
+    hotelReference: context.hotelReference,
+    itinerary: context.itinerary ? renderItinerary(context.itinerary) : "(no itinerary)",
+  };
+}
 
 function normalizeHotelStatus(output: HotelResult) {
   if (output.status === "reserved") return output.reference ? "reserved" : null;
@@ -99,7 +131,10 @@ export const bookingCompensationMachine = agent.createMachine({
       invoke: {
         src: "plan",
         input: ({ context }) => ({ destination: context.destination }),
-        onDone: ({ output }) => ({ target: "approval", context: { itinerary: output.result } }),
+        onDone: ({ output }) => ({
+          target: "approval",
+          context: { itinerary: output.result },
+        }),
         onError: { target: "failed" },
       },
     },
@@ -179,48 +214,23 @@ export const bookingCompensationMachine = agent.createMachine({
     },
     booked: {
       type: "final",
-      output: ({ context }) => ({
-        bookingId: context.bookingId,
-        outcome: "booked",
-        flightReference: context.flightReference,
-        hotelReference: context.hotelReference,
-      }),
+      output: ({ context }) => bookingOutput(context, "booked"),
     },
     cancelled: {
       type: "final",
-      output: ({ context }) => ({
-        bookingId: context.bookingId,
-        outcome: "cancelled",
-        flightReference: context.flightReference,
-        hotelReference: context.hotelReference,
-      }),
+      output: ({ context }) => bookingOutput(context, "cancelled"),
     },
     compensated: {
       type: "final",
-      output: ({ context }) => ({
-        bookingId: context.bookingId,
-        outcome: "compensated",
-        flightReference: context.flightReference,
-        hotelReference: context.hotelReference,
-      }),
+      output: ({ context }) => bookingOutput(context, "compensated"),
     },
     manualRecovery: {
       type: "final",
-      output: ({ context }) => ({
-        bookingId: context.bookingId,
-        outcome: "manualRecovery",
-        flightReference: context.flightReference,
-        hotelReference: context.hotelReference,
-      }),
+      output: ({ context }) => bookingOutput(context, "manualRecovery"),
     },
     failed: {
       type: "final",
-      output: ({ context }) => ({
-        bookingId: context.bookingId,
-        outcome: "failed",
-        flightReference: context.flightReference,
-        hotelReference: context.hotelReference,
-      }),
+      output: ({ context }) => bookingOutput(context, "failed"),
     },
   },
 });

@@ -181,9 +181,11 @@ const agentSetup = setupAgent({
     initialCode: z.string().default(""),
     maxAttempts: z.number().default(3),
   }),
+  // `summary` is Markdown: the prose trail, then the code in a fenced block. The
+  // code is not a separate output string: raw multi-line code rendered as prose
+  // collapses into one line. The helper still returns it raw (see below).
   output: z.object({
     summary: z.string(),
-    code: z.string(),
     attempts: z.number(),
     passed: z.boolean(),
     failures: z.array(z.string()),
@@ -241,6 +243,11 @@ const agentSetup = setupAgent({
 });
 
 export const codeAssistantSchemas = agentSetup.schemas;
+
+/** Code as a fenced Markdown block, so its line breaks survive rendering. */
+function fenced(code: string): string {
+  return code ? `\n\n\`\`\`js\n${code.trim()}\n\`\`\`` : "";
+}
 
 /** One line of prose for the host: what the checks said on this attempt. */
 function checkReportFor(attempt: number, total: number, result: ExecutionResult): string {
@@ -358,8 +365,9 @@ export const codeAssistantMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        summary: [context.repairSummary, context.rerunNote].filter(Boolean).join(" "),
-        code: context.code,
+        summary:
+          [context.repairSummary, context.rerunNote].filter(Boolean).join(" ") +
+          fenced(context.code),
         attempts: context.attempts,
         passed: true,
         failures: [],
@@ -370,8 +378,9 @@ export const codeAssistantMachine = agentSetup.createMachine({
     failed: {
       type: "final",
       output: ({ context }) => ({
-        summary: `Gave up after ${context.attempts} attempts. ${context.checkReport}`,
-        code: context.code,
+        summary:
+          `Gave up after ${context.attempts} attempts. ${context.checkReport}` +
+          fenced(context.code),
         attempts: context.attempts,
         passed: false,
         failures: context.failures,
@@ -394,7 +403,9 @@ export interface RunCodeAssistantOptions {
 }
 
 export interface CodeAssistantResult {
+  /** Markdown: what happened, then the final code in a ```js fence. */
   summary: string;
+  /** The final code, raw (read from context; the machine output fences it). */
   code: string;
   attempts: number;
   passed: boolean;
@@ -471,7 +482,7 @@ export async function runCodeAssistantExample(
   if (result.status !== "done") {
     throw new Error(`Code-assistant example did not complete: ${result.status}`);
   }
-  return { ...result.output, progress, notes };
+  return { ...result.output, code: result.snapshot.context.code, progress, notes };
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.

@@ -275,7 +275,24 @@ export const consensusReviewMachine = agent.createMachine({
   },
 });
 
-const BUILT_IN_PATCH = "Validate input before writing to the database.";
+/**
+ * The trusted, host-authored patch — and the one both demo starters send. It is
+ * a real diff on purpose: given only a one-line description ("Validate input
+ * before a database write."), every reviewer correctly chose `abstain` (there
+ * is nothing to judge), so the trusted starter could never auto-accept.
+ */
+export const BUILT_IN_PATCH = [
+  "Validate input before a database write.",
+  "",
+  "--- a/src/users.ts",
+  "+++ b/src/users.ts",
+  "@@ export async function createUser(db: Db, body: unknown) {",
+  '-  await db.insert("users", body);',
+  "+  const parsed = UserSchema.safeParse(body);",
+  "+  if (!parsed.success) throw new ValidationError(parsed.error.issues);",
+  '+  await db.insert("users", parsed.data);',
+  " }",
+].join("\n");
 
 /** The host's real judge, Jev, which reads `TYPESAFE_AI_API_KEY`. */
 function liveJudge() {

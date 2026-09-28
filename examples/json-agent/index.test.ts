@@ -1,5 +1,11 @@
+import { readFileSync } from "node:fs";
 import { assert, expect, test } from "vitest";
-import { getInteraction, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import {
+  getInteraction,
+  createAgentRuntime,
+  runToQuiescence,
+  type AgentDecisionRequest,
+} from "@statelyai/agent";
 import { jsonAgentMachine, workflowConfig } from "./index.js";
 
 /** A drafting executor that fails the test if the escalate path reaches it. */
@@ -81,6 +87,49 @@ test("REJECT path: rejecting the draft escalates and keeps the drafted reply", a
     escalationReason: "Reviewer rejected the drafted reply.",
     reply: "Here is a workaround.",
   });
+});
+
+test("the decision prompt splits the starters: login trouble drafts a reply, a duplicate charge escalates", async () => {
+  // QA regression: the old one-line prompt escalated both starters, so the
+  // demo never reached the draft → approve wait. The prompt now makes REPLY
+  // the default (a human approves every draft anyway) and reserves ESCALATE
+  // for money or account actions.
+  const starters = (
+    JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8")).starters as {
+      input: { ticket: string };
+    }[]
+  ).map((starter) => starter.input.ticket);
+  const login = starters.find((ticket) => /log in/.test(ticket));
+  const duplicate = starters.find((ticket) => /charged me twice/.test(ticket));
+  assert(login && duplicate);
+
+  const seen: AgentDecisionRequest[] = [];
+  // Stands in for the model reading the system prompt: it follows the rule
+  // the prompt states, keyed on the ticket.
+  const decide = async (request: AgentDecisionRequest) => {
+    seen.push(request);
+    return request.prompt?.includes("twice")
+      ? { event: { type: "ESCALATE" as const, reason: "duplicate charge needs a refund" } }
+      : { event: { type: "REPLY" as const } };
+  };
+  const generateText = async () => ({ result: { reply: "Check your spam folder." } });
+
+  const replied = await runToQuiescence(
+    createAgentRuntime(jsonAgentMachine, { executors: { generateText, decide } }),
+    { input: { ticket: login } },
+  );
+  assert(replied.status === "idle");
+  expect(replied.snapshot.matches("awaitingApproval")).toBe(true);
+
+  const escalated = await runToQuiescence(
+    createAgentRuntime(jsonAgentMachine, { executors: { generateText: noDraft, decide } }),
+    { input: { ticket: duplicate } },
+  );
+  assert(escalated.status === "done");
+  expect(escalated.output.resolution).toBe("escalated");
+
+  expect(seen[0]!.system).toContain("REPLY is the default");
+  expect(seen[0]!.system).toContain("duplicate or disputed charges");
 });
 
 test("ESCALATE path: the decision escalates directly, with no reply drafted", async () => {

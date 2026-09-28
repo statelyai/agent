@@ -233,12 +233,26 @@ function searchCorpus(
     .map((scored) => scored.text);
 }
 
-/** Numbered document list for prompts. */
-function renderDocuments(documents: string[]): string {
-  return documents.length
-    ? documents.map((doc, i) => `[${i + 1}] ${doc}`).join("\n")
-    : "(no documents)";
+/**
+ * Source list for the answer prompt. Unnumbered on purpose: numbered documents
+ * invite the answer to talk about them ("Document 2 is unrelated.").
+ */
+export function renderSources(documents: string[]): string {
+  return documents.length ? documents.map((doc) => `- ${doc}`).join("\n") : "(none)";
 }
+
+/**
+ * The answer is for the person who asked, not a report on retrieval: web
+ * results arrive ungraded, so some are off-topic, and the answer must ignore
+ * those silently rather than narrate them.
+ */
+export const ANSWER_SYSTEM_PROMPT = [
+  "Answer the question using ONLY the facts in the source notes.",
+  "Write the answer itself, addressed to the person who asked. Never mention the notes,",
+  "documents, sources, or search results, and never say which ones are relevant or",
+  "unrelated — silently ignore any that do not help.",
+  "If the notes do not contain the answer, say you don't know. Use three sentences at most.",
+].join(" ");
 
 const datasourceSchema = z.enum(["vectorstore", "websearch"]);
 
@@ -492,11 +506,9 @@ const agentSetup = setupAgent({
         output: z.string(),
       },
       model: "rag",
-      system:
-        "Answer the question using ONLY the provided documents. If they do not contain " +
-        "the answer, say so. Use three sentences at most.",
+      system: ANSWER_SYSTEM_PROMPT,
       prompt: ({ input }) =>
-        [`Question: ${input.question}`, "", "Documents:", renderDocuments(input.documents)].join(
+        [`Question: ${input.question}`, "", "Source notes:", renderSources(input.documents)].join(
           "\n",
         ),
     },

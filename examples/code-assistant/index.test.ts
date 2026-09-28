@@ -120,6 +120,29 @@ test("with no task supplied, the default task's seeded bug is verified first", a
   expect(prompts[0]).toContain("numbers.reduce((total, n) => total + n)");
 });
 
+test("the summary shows the code in a fenced block with its line breaks intact", async () => {
+  const multiLine = "function sumArray(xs) {\n  return xs.reduce((a, b) => a + b, 0);\n}";
+  const passed = await runCodeAssistantExample({
+    ...SUM_TASK,
+    generateText: scriptedGenerateText([multiLine]).generateText,
+  });
+  // Markdown collapses bare code into one line; a fence keeps it as written.
+  expect(passed.summary).toContain(`\n\n\`\`\`js\n${multiLine}\n\`\`\``);
+  expect(passed.summary.endsWith("```")).toBe(true);
+  // The helper still hands back the raw code, unfenced.
+  expect(passed.code).toBe(multiLine);
+
+  // A run that gives up shows its last code the same way.
+  const wrong = "function sumArray() {\n  return -1;\n}";
+  const gaveUp = await runCodeAssistantExample({
+    ...SUM_TASK,
+    maxAttempts: 1,
+    generateText: scriptedGenerateText([wrong]).generateText,
+  });
+  expect(gaveUp.passed).toBe(false);
+  expect(gaveUp.summary).toContain(`\`\`\`js\n${wrong}\n\`\`\``);
+});
+
 test("machine exports a runnable definition", () => {
   expect(codeAssistantMachine.id).toBe("code-assistant");
 });

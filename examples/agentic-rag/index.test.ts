@@ -24,6 +24,15 @@ function scripted(script: MockModelScript) {
 
 const retrieve = (keywords: string) => ({ type: "RETRIEVE" as const, keywords });
 const answer = (text: string) => ({ type: "ANSWER" as const, answer: text });
+const rewrite = (question: string) => ({ type: "REWRITE" as const, question });
+
+/** Distinct words, so each scripted search or rewrite is a genuinely new one. */
+const FRESH = ["diffusion", "video", "synthesis", "temporal", "frames", "motion", "clips"];
+/** A decision entry that answers with a new search (or rewrite) on every call. */
+function fresh<T>(make: (word: string) => T): () => T {
+  let n = 0;
+  return () => make(FRESH[n++ % FRESH.length]!);
+}
 /**
  * Every passage graded relevant (or not). Each `doc<i>` keeps its own cursor,
  * so `[false, true]` means "none on the first grading, all on the second".
@@ -31,11 +40,14 @@ const answer = (text: string) => ({ type: "ANSWER" as const, answer: text });
 const grader = (relevant: MockJudgeEntry | MockJudgeEntry[]) =>
   createMockJudge({ "*": relevant }).model;
 
-/** A model that obeys the guard: RETRIEVE until told it may not, then ANSWER. */
-const retrieveUntilRejected = (request: AgentDecisionRequest) =>
-  request.attempts.some((attempt) => attempt.failure === "rejected-by-guard")
-    ? answer("Best guess without sources.")
-    : retrieve("diffusion video");
+/** A model that obeys the guard: new searches until told it may not, then ANSWER. */
+function retrieveUntilRejected() {
+  const nextSearch = fresh((word) => retrieve(`agent ${word}`));
+  return (request: AgentDecisionRequest) =>
+    request.attempts.some((attempt) => attempt.failure === "rejected-by-guard")
+      ? answer("Best guess without sources.")
+      : nextSearch();
+}
 
 test("on-corpus: RETRIEVE → relevant → generate → done", async () => {
   const result = await runAgenticRagExample({
@@ -74,9 +86,9 @@ test("graded irrelevant → rewrite → the model retrieves again → done", asy
     ...scripted({
       decisions: {
         chooseAction: [retrieve("agent memory"), retrieve("long-term memory vector store")],
+        rewriteQuestion: [rewrite("How does long-term memory work in LLM agents?")],
       },
       text: {
-        rewriteQuestion: ["How does long-term memory work in LLM agents?"],
         generateAnswer: ["Long-term memory lives in an external vector store."],
       },
     }),
@@ -103,8 +115,10 @@ test("empty retrieval skips grading and goes straight to the rewrite", async () 
   const result = await runAgenticRagExample({
     question: "What does Lilian Weng's blog say about diffusion models for video generation?",
     ...scripted({
-      decisions: { chooseAction: [retrieve("diffusion video generation"), answer("Unsure.")] },
-      text: { rewriteQuestion: ["Video diffusion models explained"] },
+      decisions: {
+        chooseAction: [retrieve("diffusion video generation"), answer("Unsure.")],
+        rewriteQuestion: [rewrite("Video diffusion models explained")],
+      },
     }),
   });
 
@@ -119,8 +133,10 @@ test("empty retrieval skips grading and goes straight to the rewrite", async () 
 
 test("budget spent: the guard rejects RETRIEVE, the forced ANSWER lands in failed", async () => {
   const executors = createMockModelExecutors({
-    decisions: { chooseAction: [retrieveUntilRejected] },
-    text: { rewriteQuestion: ["agent memory, rephrased"] },
+    decisions: {
+      chooseAction: [retrieveUntilRejected()],
+      rewriteQuestion: [fresh((word) => rewrite(`agent memory and ${word}`))],
+    },
   });
   const result = await runAgenticRagExample({
     question: "What does Lilian Weng say about agent memory?",
@@ -145,8 +161,10 @@ test("a model that keeps choosing RETRIEVE past the budget exhausts the decision
   const result = await runAgenticRagExample({
     question: "What does Lilian Weng say about agent memory?",
     ...scripted({
-      decisions: { chooseAction: [retrieve("agent memory")] },
-      text: { rewriteQuestion: ["agent memory, rephrased"] },
+      decisions: {
+        chooseAction: [fresh((word) => retrieve(`agent ${word}`))],
+        rewriteQuestion: [fresh((word) => rewrite(`agent memory and ${word}`))],
+      },
     }),
     judge: grader(false),
   });
@@ -160,6 +178,55 @@ test("a model that keeps choosing RETRIEVE past the budget exhausts the decision
 type Starter = { label: string; input: { question: string } };
 const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
   .starters as Starter[];
+
+test("a repeated search or a repeated rewrite is rejected, so every retry tries something new", async () => {
+  const question = "What does Lilian Weng's blog say about diffusion models for video generation?";
+  const executors = createMockModelExecutors({
+    decisions: {
+      chooseAction: [
+        retrieve("Lilian Weng diffusion models video generation"),
+        // Same words again (reordered, punctuated): no new word → rejected.
+        retrieve("video generation, diffusion models — Lilian Weng"),
+        retrieve("temporal consistency frame synthesis"),
+        answer("Not covered by the posts."),
+      ],
+      rewriteQuestion: [
+        // The original question back, then a first real rewrite.
+        rewrite(question),
+        rewrite("How do generative models produce video?"),
+        // The first rewrite again, then a second real one.
+        rewrite("How do generative models produce video?"),
+        rewrite("What keeps generated video frames consistent over time?"),
+      ],
+    },
+  });
+  const result = await runAgenticRagExample({
+    question,
+    generateText: executors.generateText,
+    decide: executors.decide,
+  });
+
+  expect(result.retrievals).toBe(2);
+  expect(result.rewrites).toBe(2);
+  const decisions = executors.calls.filter((call) => call.kind === "decide");
+  const rejected = decisions.filter((call) =>
+    (call.request as AgentDecisionRequest).attempts.some(
+      (attempt) => attempt.failure === "rejected-by-guard",
+    ),
+  );
+  // One re-ask for the repeated search, one each for the two repeated rewrites.
+  expect(rejected.map((call) => call.name)).toEqual([
+    "rewriteQuestion",
+    "chooseAction",
+    "rewriteQuestion",
+  ]);
+  // Both prompts carry what was already tried.
+  const secondRewrite = decisions.filter((call) => call.name === "rewriteQuestion").at(-1)!;
+  expect(secondRewrite.request.prompt).toContain("How do generative models produce video?");
+  expect(secondRewrite.request.prompt).toContain("temporal consistency frame synthesis");
+  const secondChoice = decisions.filter((call) => call.name === "chooseAction")[1]!;
+  expect(secondChoice.request.prompt).toContain("Lilian Weng diffusion models video generation");
+});
 
 test("starters behave as their labels advertise", async () => {
   const [onCorpus, offCorpus, trivial] = starters;
@@ -186,8 +253,8 @@ test("starters behave as their labels advertise", async () => {
     ...scripted({
       decisions: {
         chooseAction: [retrieve(offCorpus!.input.question), answer("Not covered.")],
+        rewriteQuestion: [rewrite("How do video diffusion models generate frames?")],
       },
-      text: { rewriteQuestion: [offCorpus!.input.question] },
     }),
   });
   expect(miss.progress.slice(0, 3)).toEqual(["deciding", "retrieving", "rewriting"]);

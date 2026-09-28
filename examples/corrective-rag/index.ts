@@ -259,7 +259,12 @@ function renderRetrievalNotice(context: CragContext, options: { answered: boolea
       `The grader kept ${context.relevantCount} of ${context.retrievedCount} as relevant.`,
     );
   }
-  if (context.fallbackCount !== null) {
+  if (context.fallbackCount === 0) {
+    parts.push(
+      "Tried to correct: rewrote the question, but the fallback sample web index " +
+        "found no results either.",
+    );
+  } else if (context.fallbackCount !== null) {
     parts.push(
       "Corrected: rewrote the question and answered from the fallback sample web index " +
         `(${context.fallbackCount} result(s)).`,
@@ -296,14 +301,14 @@ const agentSetup = setupAgent({
       run: async ({ input }) => searchCorpus(SAMPLE_CORPUS, input.question, 3),
     }),
     // web_search: keyword search over the SEPARATE sample web index (canned,
-    // clearly-labeled stand-in for a live search API). Top 2 docs.
+    // clearly-labeled stand-in for a live search API). Top 2 docs. No hits is
+    // an empty list — never a placeholder "result" that would be counted, and
+    // handed to the model, as evidence.
     webSearch: createAsyncLogic<string[], { question: string }>({
-      run: async ({ input }) => {
-        const hits = searchCorpus(SAMPLE_WEB_INDEX, input.question, 2);
-        return hits.length > 0
-          ? hits.map((text) => `[sample web result] ${text}`)
-          : ["[sample web result] No external results found for this query."];
-      },
+      run: async ({ input }) =>
+        searchCorpus(SAMPLE_WEB_INDEX, input.question, 2).map(
+          (text) => `[sample web result] ${text}`,
+        ),
     }),
   },
   requests: {

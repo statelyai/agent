@@ -90,6 +90,13 @@ test("a rejected packet is resent, and the second rejection escalates", async ()
   // The first rejection went back through sendingWelcomePacket to the same
   // wait; the second one hit the bound.
   expect(result.idleStates).toEqual(["waitingForSignedDocs", "waitingForSignedDocs"]);
+  // The resend is visible: a new packet id and the resend count, so the second
+  // prompt is not a copy of the first.
+  expect(result.idlePrompts[0]).toContain("(packet WELCOME-E-100)");
+  expect(result.idlePrompts[1]).toContain(
+    `(packet WELCOME-E-100-R1, resend 1 of ${MAX_DOCS_REJECTIONS - 1})`,
+  );
+  expect(result.output.welcomePacketId).toBe("WELCOME-E-100-R1");
   expect(result.output.status).toBe("escalated");
   expect(result.output.escalation).toBe(
     `Onboarding documents rejected ${MAX_DOCS_REJECTIONS} times. Last reason: still wrong`,

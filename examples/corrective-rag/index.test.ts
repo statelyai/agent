@@ -137,7 +137,11 @@ test("starters behave as their labels advertise", async () => {
   const offCorpus = starters.filter((starter) => starter.label.includes("Off-corpus"));
   expect(offCorpus).toHaveLength(1);
   const miss = results.get(offCorpus[0]!.label)!;
-  expect(miss.documents).toEqual(["[sample web result] No external results found for this query."]);
+  // No placeholder counted as a result: nothing was found, and the notice says so.
+  expect(miss.documents).toEqual([]);
+  expect(miss.usedFallbackIndex).toBe(true);
+  expect(miss.retrievalNotice).toContain("found no results either");
+  expect(miss.retrievalNotice).not.toContain("result(s)");
 });
 
 test("the grader asks one boolean per document and keeps only those above the threshold", async () => {

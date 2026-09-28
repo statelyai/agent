@@ -356,7 +356,9 @@ export const emailDrafter = agentSetup.createMachine({
             draft,
             messages: [
               ...context.messages,
-              assistantMessage(`To: ${draft.to}\nSubject: ${draft.subject}\n\n${draft.body}`),
+              // Blank lines, not single newlines: chat hosts render messages
+              // as markdown, which folds a lone "\n" into a space.
+              assistantMessage(`To: ${draft.to}\n\nSubject: ${draft.subject}\n\n${draft.body}`),
             ],
           },
         }),

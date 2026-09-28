@@ -84,6 +84,34 @@ describe("rock-paper-scissors machine", () => {
     expect(seen).toEqual(["HUMAN_ROCK", "HUMAN_PAPER", "HUMAN_SCISSORS"]);
   });
 
+  test("the agent throws blind: its request for a round is the same whatever the human threw", async () => {
+    // Two tied rounds of history, then round 3 with each possible human throw.
+    // The model's view of round 3 must not depend on the throw it is answering.
+    const roundThreeRequest = async (human: HumanThrowEvent["type"]) => {
+      const requests: unknown[] = [];
+      await runRpsExample({
+        input: { targetWins: 1 },
+        decide: async ({ system, prompt, messages, events }) => {
+          requests.push({ system, prompt, messages, events: events.map(({ type }) => type) });
+          return { event: { type: "THROW_ROCK" } };
+        },
+        humanThrows: [
+          { type: "HUMAN_ROCK" },
+          { type: "HUMAN_ROCK" },
+          { type: human },
+          { type: "HUMAN_PAPER" },
+        ],
+      });
+      return requests[2];
+    };
+
+    const rock = await roundThreeRequest("HUMAN_ROCK");
+    expect(await roundThreeRequest("HUMAN_PAPER")).toEqual(rock);
+    expect(await roundThreeRequest("HUMAN_SCISSORS")).toEqual(rock);
+    expect(JSON.stringify(rock)).toContain("Round 2: human threw rock");
+    expect(JSON.stringify(rock)).not.toContain("Round 3");
+  });
+
   test("machine, helpers", () => {
     expect(rpsMachine.id).toBe("rps-event-log");
     expect(renderHistory([])).toBe("No rounds played yet.");

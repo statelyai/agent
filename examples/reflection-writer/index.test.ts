@@ -24,7 +24,7 @@ function scriptedGenerateText(scripts: {
 }
 
 test("reflection loop runs to the revision bound then stops (LangGraph should_continue analogue)", async () => {
-  // Critic never satisfied → the typed `revisions >= maxRevisions` guard is the
+  // Critic never satisfied → the typed `rewrites >= maxRevisions` guard is the
   // only thing that stops the loop, exactly like LangGraph's message-count edge.
   const result = await runReflectionWriterExample({
     topic: "The little prince",
@@ -33,20 +33,40 @@ test("reflection loop runs to the revision bound then stops (LangGraph should_co
       critic: [
         { critique: "Too short.", satisfied: false },
         { critique: "Needs depth.", satisfied: false },
+        { critique: "Still vague.", satisfied: false },
       ],
     }),
   });
 
-  // 2 revision rounds: drafting entered twice, critiquing twice.
-  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(2);
-  expect(result.progress.filter((s) => s === "critiquing")).toHaveLength(2);
+  // First draft + 2 rewrites: drafting entered 3 times, each draft critiqued.
+  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(3);
+  expect(result.progress.filter((s) => s === "critiquing")).toHaveLength(3);
   expect(result.revisions).toBe(2);
   expect(result.satisfied).toBe(false);
-  // Final draft is the 2nd (the 3rd is never requested — bound hit first).
-  expect(result.details.essay).toBe("draft 2");
+  expect(result.details.essay).toBe("draft 3");
   expect(result.progress.at(-1)).toBe("done");
-  // Transcript: 1 task + 2 drafts + 2 critiques = 5 messages.
-  expect(result.messageCount).toBe(5);
+  // Transcript: 1 task + 3 drafts + 3 critiques = 7 messages.
+  expect(result.messageCount).toBe(7);
+  // The stop reason counts the rewrites that actually happened.
+  expect(result.comparison).toMatch(/not satisfied after 2 revisions/);
+});
+
+test("the revision count is the number of rewrites, not critique rounds", async () => {
+  // Draft → critique → ONE rewrite → critique → signed off: 1 revision.
+  const result = await runReflectionWriterExample({
+    topic: "The little prince",
+    generateText: scriptedGenerateText({
+      writer: ["draft 1", "draft 2"],
+      critic: [
+        { critique: "Too short.", satisfied: false },
+        { critique: "Good.", satisfied: true },
+      ],
+    }),
+  });
+
+  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(2);
+  expect(result.revisions).toBe(1);
+  expect(result.comparison).toMatch(/^The critic signed off after 2 rounds\./);
 });
 
 test("the result shows the original next to the final draft, with a one-line revision log", async () => {
@@ -110,7 +130,7 @@ test("the critic grades against the strict rubric, so one draft is never enough"
 
   // The loop actually ran: draft → critique → revise → critique.
   expect(result.progress.filter((s) => s === "drafting")).toHaveLength(2);
-  expect(result.revisions).toBe(2);
+  expect(result.revisions).toBe(1);
   expect(result.satisfied).toBe(true);
   expect(result.details.essay).toBe("revised draft with evidence");
 });
@@ -127,8 +147,8 @@ test("early exit when the critic is satisfied (improves on the fixed-count tutor
   });
 
   expect(result.satisfied).toBe(true);
-  // Stopped at 1 round, under the bound of 2.
-  expect(result.revisions).toBe(1);
+  // Stopped after the first draft: no rewrite needed.
+  expect(result.revisions).toBe(0);
   expect(result.progress.filter((s) => s === "drafting")).toHaveLength(1);
   expect(result.details.essay).toBe("draft 1");
   expect(result.progress.at(-1)).toBe("done");
@@ -150,7 +170,7 @@ test("model failure ends in `failed`, still reporting the draft it had", async (
   });
 
   expect(result.details.essay).toBe("the only draft");
-  // Never reached a completed critique, so no revision counted and not satisfied.
+  // Only the first draft exists, so no revision counted and not satisfied.
   expect(result.revisions).toBe(0);
   expect(result.satisfied).toBe(false);
   expect(result.failure).toMatch(/^critiqueEssay failed: /);

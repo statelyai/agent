@@ -22,6 +22,13 @@
  *      `resolveDecision(...)`, gated by `snapshot.can(event)` so the guard —
  *      not the model — enforces the revision budget.
  *
+ * `plainWriterAgentMachine` is the same adoption for a host that runs machines
+ * through `createAgentRuntime` (the demo does): the canned `writeDraft` is
+ * swapped, again with `provide`, for a tiny adapter machine that invokes a
+ * `createTextLogic` request — which the runtime binds to its model — and
+ * outputs the draft string the plain machine expects. The decision points stay
+ * open for whoever is driving: here, a human.
+ *
  * No `setupAgent`, no `agent.decide`, no library-specific machine authoring.
  * The contract is minimal: invokes return values, states accept events, guards
  * decide legality. The library supplies the model; the machine supplies the
@@ -35,6 +42,7 @@ import { createActor, createAsyncLogic, setup, waitFor } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createDecisionRequest,
+  createTextLogic,
   getAcceptedEvents,
   isAgentIdle,
   resolveDecision,
@@ -292,6 +300,48 @@ export async function runPlainXstateExample(
   const output = actor.getSnapshot().output!;
   return { ...output, decisions };
 }
+
+// ─── The same adoption, for the agent runtime ───
+
+/** One draft as a text request. The runtime binds it to the `writer` model. */
+const draftText = createTextLogic({
+  name: "writeDraft",
+  schemas: { input: z.object({ topic: z.string(), revisions: z.number() }) },
+  model: "writer",
+  system: "You are a concise product copywriter.",
+  prompt: ({ input }) => draftPrompt(input),
+});
+
+/**
+ * The adapter: the plain machine's `writeDraft` resolves to a string, a text
+ * request to `{ result, messages }`. This child machine invokes the request and
+ * outputs just the string. A failed request fails the child, so the plain
+ * machine's `onError` retry loop still applies.
+ */
+const modelDraft = setup({ actors: { draftText } }).createMachine({
+  id: "model-draft",
+  context: ({ input }: { input: { topic: string; revisions: number } }) => ({ input, draft: "" }),
+  output: ({ context }) => context.draft,
+  initial: "writing",
+  states: {
+    writing: {
+      invoke: {
+        src: "draftText",
+        input: ({ context }) => context.input,
+        onDone: ({ output }) => ({ target: "written", context: { draft: output.result } }),
+      },
+    },
+    written: { type: "final" },
+  },
+});
+
+/**
+ * The plain machine with a model writing its drafts — what a
+ * `createAgentRuntime` host runs. The graph is `plainWriterMachine`'s, unchanged.
+ */
+export const plainWriterAgentMachine = plainWriterMachine.provide({
+  actors: { writeDraft: modelDraft },
+});
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {

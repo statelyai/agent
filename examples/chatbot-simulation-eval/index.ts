@@ -183,11 +183,15 @@ export function createJudgeConversation(model: Experimental_EvaluationModel = ju
   });
 }
 
-/** "Customer: …" / "Support: …" lines. */
+/**
+ * "Customer: …" / "Support: …" turns, one paragraph each. A blank line between
+ * turns keeps them apart when the transcript is rendered as Markdown, where a
+ * single newline collapses into a space.
+ */
 function renderTranscript(transcript: Turn[]): string {
   return transcript
     .map((turn) => `${turn.role === "user" ? "Customer" : "Support"}: ${turn.text}`)
-    .join("\n");
+    .join("\n\n");
 }
 
 const agentSetup = setupAgent({

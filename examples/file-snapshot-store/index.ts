@@ -1,8 +1,9 @@
 /**
  * Application-owned lifetime vs application-owned storage.
  *
- * Both halves below drive the SAME machine (`portable-xstate-loop`) to the same
- * result, and differ only in what the application chooses to own:
+ * Both halves below drive the SAME machine (`releaseNoteMachine`: draft, wait
+ * for approval, done) to the same result, and differ only in what the
+ * application chooses to own:
  *
  *   1. Storage. `runFileSnapshotStoreExample` runs the machine to its idle
  *      review pause, writes the native XState snapshot to a JSON file, and
@@ -24,22 +25,72 @@ import { mkdtempSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 import { createActor, waitFor, type AnyStateMachine, type Snapshot } from "xstate";
 import {
   getStatePath,
   provideExecutors,
   createAgentRuntime,
   runToQuiescence,
+  setupAgent,
   type AgentRequestExecutors,
   type AgentRuntimeOptions,
   type AgentRunInit,
 } from "@statelyai/agent";
-import { portableLoopMachine } from "../portable-xstate-loop/index.js";
 
-// The machine this example persists and resumes. Re-exported so the library
-// can render its statechart beside the run, rather than reporting that this
-// example has no machine to inspect.
-export { portableLoopMachine };
+const releaseNoteSetup = setupAgent({
+  context: z.object({
+    topic: z.string(),
+    draft: z.string(),
+    failure: z.string().nullable(),
+  }),
+  input: z.object({ topic: z.string() }),
+  output: z.object({ draft: z.string(), failure: z.string().nullable() }),
+  events: { APPROVE: z.object({}) },
+  requests: {
+    draft: {
+      model: "writer",
+      schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+      prompt: ({ input }) => `Draft a release note about ${input.topic}.`,
+    },
+  },
+});
+
+/**
+ * The machine both halves run: draft a release note, rest in `reviewing` until
+ * someone APPROVEs, done. Exported so a host can render its statechart beside
+ * the run.
+ */
+export const releaseNoteMachine = releaseNoteSetup.createMachine({
+  id: "file-snapshot-store",
+  context: ({ input }) => ({ topic: input.topic, draft: "", failure: null }),
+  initial: "drafting",
+  states: {
+    drafting: {
+      invoke: {
+        src: "draft",
+        input: ({ context }) => ({ topic: context.topic }),
+        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output.result } }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `draft failed: ${String(event.error)}` },
+        }),
+      },
+    },
+    reviewing: {
+      description: "Approve the drafted release note to finish.",
+      on: { APPROVE: { target: "done" } },
+    },
+    done: {
+      type: "final",
+      output: ({ context }) => ({ draft: context.draft, failure: null }),
+    },
+    failed: {
+      type: "final",
+      output: ({ context }) => ({ draft: context.draft, failure: context.failure }),
+    },
+  },
+});
 
 /**
  * The seams a host threads through every leg of a multi-run example: its
@@ -54,6 +105,11 @@ type ExampleRunOptions = Pick<
 
 // --- 1. Application-owned storage -------------------------------------------
 
+/** The file a run's snapshot lives in, relative to the store's directory. */
+export function snapshotFileName(id: string): string {
+  return `${id}.json`;
+}
+
 /** Ordinary application I/O; use the equivalent APIs from your framework. */
 export async function saveSnapshot(
   directory: string,
@@ -61,14 +117,14 @@ export async function saveSnapshot(
   snapshot: Snapshot<unknown>,
 ): Promise<void> {
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, `${id}.json`), JSON.stringify(snapshot), "utf8");
+  await writeFile(join(directory, snapshotFileName(id)), JSON.stringify(snapshot), "utf8");
 }
 
 export async function loadSnapshot(
   directory: string,
   id: string,
 ): Promise<Snapshot<unknown> | undefined> {
-  const path = join(directory, `${id}.json`);
+  const path = join(directory, snapshotFileName(id));
   try {
     return JSON.parse(await readFile(path, "utf8")) as Snapshot<unknown>;
   } catch (error) {
@@ -77,22 +133,25 @@ export async function loadSnapshot(
   }
 }
 
+/** The run id the storage half saves its snapshot under. */
+export const RUN_ID = "release-42";
+
 export async function runFileSnapshotStoreExample(
   directory: string,
   executors: AgentRequestExecutors,
   observers: Omit<ExampleRunOptions, "executors"> = {},
 ): Promise<{ draft: string }> {
-  const runId = "release-42";
+  const runId = RUN_ID;
 
   // Request/process one: run until the machine waits for approval.
   const paused = await runToQuiescence(
-    createAgentRuntime(portableLoopMachine, {
+    createAgentRuntime(releaseNoteMachine, {
       ...(observers as object),
       executors,
     }),
     {
       ...(observers as object),
-      input: { topic: "framework-owned storage" },
+      input: { topic: "application-owned storage" },
     },
   );
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
@@ -102,7 +161,7 @@ export async function runFileSnapshotStoreExample(
   const snapshot = await loadSnapshot(directory, runId);
   if (!snapshot) throw new Error(`No snapshot stored for '${runId}'.`);
   const resumed = await runToQuiescence(
-    createAgentRuntime(portableLoopMachine, {
+    createAgentRuntime(releaseNoteMachine, {
       ...(observers as object),
       executors,
     }),
@@ -130,7 +189,7 @@ export async function runLongLivedActor(
   observers: Omit<ExampleRunOptions, "executors"> = {},
 ): Promise<{ draft: string; states: string[] }> {
   const states: string[] = [];
-  const actor = createActor(provideExecutors(portableLoopMachine, executors), {
+  const actor = createActor(provideExecutors(releaseNoteMachine, executors), {
     input: { topic },
     ...(observers.inspect ? { inspect: observers.inspect } : {}),
   });
@@ -193,7 +252,10 @@ export async function runFileSnapshotStoreDemo(options: ExampleRunOptions = {}) 
       storageOwnedByTheApplication: stored.draft,
       lifetimeOwnedByTheApplication: live.draft,
       statesSeenByTheApplication: live.states,
-      snapshotDirectory: `${directory} (removed after the run)`,
+      // The file's logical name, not the OS temp path: where the directory
+      // lives is this host's business, and it is gone by the time anyone reads
+      // this.
+      snapshotFile: `${snapshotFileName(RUN_ID)} (in a temp directory, removed after the run)`,
     };
   } finally {
     // The snapshot has already been written, read back and resumed from by the
@@ -211,7 +273,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     {
       generateText: async (request) => {
         if (request.name !== "draft") throw new Error(`unexpected request: ${request.name}`);
-        return { result: "Stored the framework way." };
+        return { result: "Stored by the application, resumed from JSON." };
       },
     },
   );

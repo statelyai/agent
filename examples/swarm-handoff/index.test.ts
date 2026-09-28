@@ -1,6 +1,11 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { getInteraction, type AgentTextRequest } from "@statelyai/agent";
+import {
+  createAgentRuntime,
+  getInteraction,
+  runToQuiescence,
+  type AgentTextRequest,
+} from "@statelyai/agent";
 import { createMockModelExecutors } from "../mock-model.js";
 import { runSwarmHandoffExample, swarmHandoffMachine, MAX_TURNS } from "./index.js";
 
@@ -69,4 +74,24 @@ test("the spent turn budget is a state where only END is offered", async () => {
     interaction?.events.map((event) => event.type),
     ["END"],
   );
+});
+
+test("END's output does not repeat the last reply, which the idle turn already showed", async () => {
+  const executors = scripted("food");
+  const idle = await runToQuiescence(createAgentRuntime(swarmHandoffMachine, { executors }), {
+    input: { message: "I want a 3-day trip to Lisbon." },
+  });
+  assert.equal(idle.status, "idle");
+  if (idle.status !== "idle") return;
+  const lastReply = idle.snapshot.context.reply;
+  assert.equal(lastReply, "[travel] I want a 3-day trip to Lisbon.");
+
+  const done = await runToQuiescence(createAgentRuntime(swarmHandoffMachine, { executors }), {
+    snapshot: JSON.parse(JSON.stringify(idle.persist())),
+    event: { type: "END" },
+  });
+  assert.equal(done.status, "done");
+  if (done.status !== "done") return;
+  assert.deepEqual(done.output, { activeAgent: "travel", turns: 1 });
+  assert.ok(!JSON.stringify(done.output).includes(lastReply));
 });

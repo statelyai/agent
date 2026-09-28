@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
+import type { AgentTextRequest } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
 import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
@@ -34,8 +35,8 @@ const stages = {
   structurePlan: [{ structure: '{"Step 1: apply Alice\'s constraint": "", "Answer": ""}' }],
   solveTask: [
     {
+      reasoning: "1. Alice is allergic to fur, so she owns the fish.\n2. Bob gets the dog.",
       answer: "Alice: fish, Bob: dog, Carol: cat.",
-      reasoningTrace: '{"Step 1: apply Alice\'s constraint": "fish", "Answer": "…"}',
     },
   ],
 };
@@ -47,11 +48,37 @@ test("happy path: select → adapt → structure → reason → done", async () 
 
   expect(result.finalState).toBe("done");
   expect(result.answer).toMatch(/^Alice: fish, Bob: dog, Carol: cat\./);
-  expect(result.answer).toContain("Reasoning (the filled-in structure)");
+  // The worked steps follow the answer as prose, not a JSON trace.
+  expect(result.answer).toContain("Reasoning:\n1. Alice is allergic to fur");
   expect(result.selectedModules).toEqual(twoModules.modules);
   expect(result.adaptedModules).toContain("Split the pets");
   expect(result.reasoningStructure).toContain("Step 1");
   expect(result.progress).toEqual(["selecting", "adapting", "structuring", "reasoning", "done"]);
+});
+
+test("the reason step writes its reasoning BEFORE its answer, as prose", async () => {
+  // The provider fills structured fields in order: an answer listed first is
+  // committed before any reasoning, which is how the answer came to contradict
+  // the trace. Capture the JSON schema the model is actually asked for.
+  let schema: { properties?: Record<string, unknown> } | undefined;
+  const result = await runSelfDiscoverExample({
+    ...scripted({
+      ...stages,
+      solveTask: [
+        (_request: AgentTextRequest, options: { responseFormat?: unknown }) => {
+          const format = options.responseFormat as { schema?: typeof schema } | undefined;
+          schema = format?.schema;
+          return stages.solveTask[0]!;
+        },
+      ],
+    }),
+  });
+
+  expect(result.finalState).toBe("done");
+  const keys = JSON.stringify(schema);
+  expect(keys.indexOf('"reasoning"')).toBeGreaterThan(-1);
+  expect(keys.indexOf('"reasoning"')).toBeLessThan(keys.indexOf('"answer"'));
+  expect(keys).not.toContain("reasoningTrace");
 });
 
 test("no module above the threshold → failed with a notice naming it, never adapting", async () => {

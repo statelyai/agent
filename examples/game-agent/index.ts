@@ -237,6 +237,12 @@ export const rpsMachine = rpsSetup.createMachine({
             "You are playing rock-paper-scissors against a human.",
             "Study the round history for the human's habits, predict their next",
             "throw, and throw what beats it.",
+            // Without these, the model assumes "the human repeats" every round.
+            // Against a human who counters the model's last throw, that locks
+            // both sides into a tie every round.
+            "Check more than one habit: repeating their last throw, cycling,",
+            "and throwing what beats YOUR last throw. Many ties in a row mean",
+            "your prediction is wrong: change it.",
           ].join(" "),
           prompt: [
             renderHistory(context.history),

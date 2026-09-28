@@ -234,6 +234,25 @@ test("starters behave as their labels advertise", async () => {
   }
 });
 
+test("the first plan is an honest estimate: the planner is never told the deadline", async () => {
+  // Told the date, the model fits its first plan to it and the replan branch
+  // never runs (QA: the "tight deadline" starter came back with Replans: 0).
+  // The deadline enters only through the machine's check and the replanner.
+  const executors = scripted({ generateTasks: [slowPlan], replanTasks: [fastPlan] });
+  const result = await plan({
+    goal: "Ship a mobile app MVP for iOS and Android",
+    deadlineDays: 10,
+    generateText: executors.generateText,
+  });
+
+  const first = executors.calls.find((call) => call.name === "generateTasks")!;
+  expect(first.input).toEqual({ goal: "Ship a mobile app MVP for iOS and Android" });
+  expect(`${first.request.system}\n${first.request.prompt}`).not.toMatch(/deadline|\b10\b/i);
+  const replan = executors.calls.find((call) => call.name === "replanTasks")!;
+  expect(String(replan.request.prompt)).toContain("deadline is 10");
+  expect(result.replans).toBe(1);
+});
+
 test("assessingRisk asks Jev one choice over the computed schedule; the deadline, not the label, routes", async () => {
   const jev = createMockJudge({ risk: "high" });
   const executors = scripted({ generateTasks: [slowPlan] });

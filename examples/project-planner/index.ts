@@ -27,7 +27,11 @@
  *
  * What maps to what:
  *   - task_generation + task_dependencies → `generatingTasks` (request
- *     `generateTasks`: tasks with `days` and `dependsOn` in one call)
+ *     `generateTasks`: tasks with `days` and `dependsOn` in one call). It is
+ *     NOT told the deadline: the first plan is an honest estimate, and fitting
+ *     it to the date is the replanner's job, triggered by the machine's check.
+ *     A planner that sees the deadline quietly pads or squeezes its estimates
+ *     to match, and the check never fires.
  *   - (no LangGraph node)  → `validatingGraph` (actor: unique ids, known
  *     dependencies, acyclic) + `routingGraph` (choice) + `regeneratingTasks`
  *   - task_scheduler       → `scheduling` (actor `computeSchedule`: critical path)
@@ -270,15 +274,18 @@ const agentSetup = setupAgent({
     }),
   },
   requests: {
-    // task_generation + task_dependencies, in one structured call.
+    // task_generation + task_dependencies, in one structured call. No deadline
+    // in the input — see the header.
     generateTasks: {
       schemas: {
-        input: z.object({ goal: z.string(), deadlineDays: z.number() }),
+        input: z.object({ goal: z.string() }),
         output: tasksOutputSchema,
       },
       model: "planner",
-      system: `You are a project manager. Break the goal into tasks. ${TASK_RULES}`,
-      prompt: ({ input }) => `Goal: ${input.goal}\nDeadline: ${input.deadlineDays} days`,
+      system:
+        "You are a project manager. Break the goal into tasks and estimate how long each " +
+        `realistically takes a small team. ${TASK_RULES}`,
+      prompt: ({ input }) => `Goal: ${input.goal}`,
     },
     // Repair an invalid graph, told exactly what is wrong with it.
     regenerateTasks: {
@@ -400,7 +407,7 @@ export const projectPlannerMachine = agentSetup.createMachine({
     generatingTasks: {
       invoke: {
         src: "generateTasks",
-        input: ({ context }) => ({ goal: context.goal, deadlineDays: context.deadlineDays }),
+        input: ({ context }) => ({ goal: context.goal }),
         onDone: ({ output }) => ({
           target: "checkingTasks",
           context: { tasks: output.result.tasks.slice(0, MAX_TASKS) },
