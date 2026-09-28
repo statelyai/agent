@@ -1,0 +1,63 @@
+{
+  "name": "long-term-memory",
+  "title": "Chat that remembers you across sessions",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph memory-agent template and long-term memory how-tos",
+    "url": "https://github.com/langchain-ai/memory-agent"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "A chat assistant that has Jev judge which stored facts about the user bear on each message before answering, and saves new ones after it. The store is machine input and output rather than an ambient handle, recall and saving are their own states, the store is capped at MAX_MEMORIES with the oldest evicted, and the session is bounded at MAX_TURNS messages."
+  },
+  "starters": [
+    {
+      "label": "Empty store — every fact you tell it is new",
+      "input": {
+        "userId": "demo",
+        "memories": []
+      }
+    },
+    {
+      "label": "Returning user — already knows Priya's name and preferences",
+      "input": {
+        "userId": "demo",
+        "memories": [
+          "The user's name is Priya.",
+          "Priya prefers short answers.",
+          "Priya is vegetarian.",
+          "Priya is training for a half marathon in October."
+        ]
+      }
+    },
+    {
+      "label": "Store at the 20-fact cap — new facts evict the oldest",
+      "input": {
+        "userId": "demo",
+        "memories": [
+          "The user's name is Sam.",
+          "Sam lives in Lisbon.",
+          "Sam works as a nurse on night shifts.",
+          "Sam prefers answers in bullet points.",
+          "Sam is allergic to peanuts.",
+          "Sam has a cat named Miso.",
+          "Sam is learning Portuguese.",
+          "Sam runs on weekday mornings.",
+          "Sam's partner is called Alex.",
+          "Sam drives an electric car.",
+          "Sam dislikes horror movies.",
+          "Sam's birthday is in March.",
+          "Sam is saving for a trip to Japan.",
+          "Sam plays the guitar.",
+          "Sam drinks tea, not coffee.",
+          "Sam's sister lives in Porto.",
+          "Sam uses a Linux laptop.",
+          "Sam is vegetarian.",
+          "Sam volunteers at an animal shelter.",
+          "Sam wants reminders kept short."
+        ]
+      }
+    }
+  ]
+}

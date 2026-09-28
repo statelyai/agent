@@ -26,7 +26,7 @@
  * note on `POST` at the bottom. `pnpm dev` boots a plain Vite server that mounts
  * ./chat.tsx and serves this handler at `/api/chat`; see ./vite.config.ts.
  *
- * Run in the browser: pnpm --filter @statelyai/example-tanstack-ai-stream dev
+ * Run in the browser: OPENAI_API_KEY=... pnpm --filter @statelyai/example-tanstack-ai-stream dev
  * Run on the command line: OPENAI_API_KEY=... npx tsx examples/tanstack-ai-stream/index.ts
  */
 import { z } from "zod";
@@ -37,10 +37,8 @@ import {
   runAgent,
   setupAgent,
   type AgentRequestExecutors,
-  type AgentTextRequest,
   type RunAgentOptions,
 } from "@statelyai/agent";
-import { createScriptedExecutors } from "@statelyai/agent/testing";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { maybeCreateRunInspection } from "./inspect.js";
 import {
@@ -305,45 +303,12 @@ export async function* agentRunToAgUiStream<TMachine extends AnyStateMachine>(
 
 // ─── The route ───
 
-/** What the scripted stand-in answers, keyed by `setupAgent({ requests })` key. */
-const scriptedAnswers: Record<string, string> = {
-  streamOutline: "- what they are\n- why they help",
-  streamAnswer: "State machines make an agent's control flow explicit and replayable.",
-};
-
-/**
- * Scripted executors so the route runs with no API key:
- * `createScriptedExecutors` holds the answers keyed by request name, and
- * `streamText` is wrapped to replay them word by word — a single chunk per
- * message would be a valid stream but a dull one, and the client should see
- * real incremental deltas.
- */
-export function createScriptedChatExecutors(): AgentRequestExecutors {
-  const answer = (request: AgentTextRequest) => scriptedAnswers[request.name ?? ""] ?? "";
-  const scripted = createScriptedExecutors({
-    text: { streamOutline: answer, streamAnswer: answer },
-  });
-
-  return {
-    ...scripted,
-    streamText: async (request, info) => {
-      // Drawing from `generateText` takes the entry off the shared queue without
-      // the built-in whole-string chunk, leaving the deltas to this loop.
-      const result = await scripted.generateText(request);
-      for (const delta of String(result.result).split(/(?<=\s)/)) {
-        await new Promise((resolve) => setTimeout(resolve, 15));
-        info?.onChunk?.(delta);
-      }
-      return result;
-    },
-  };
-}
-
-/** Real models when `OPENAI_API_KEY` is set, scripted playback otherwise. */
+/** The real model executors; throws when `OPENAI_API_KEY` is not set. */
 export function resolveExecutors(): AgentRequestExecutors {
-  return process.env.OPENAI_API_KEY
-    ? createAiSdkExecutors({ models })
-    : createScriptedChatExecutors();
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY to run the tanstack-ai-stream example.");
+  }
+  return createAiSdkExecutors({ models });
 }
 
 /** Flattens a parsed AG-UI message to plain text, whichever shape it arrived in. */

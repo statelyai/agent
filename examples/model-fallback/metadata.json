@@ -1,0 +1,19 @@
+{
+  "name": "model-fallback",
+  "title": "Fall back to a stronger model when the tool rejects the call",
+  "kind": "pattern",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph how-to: handle tool calling errors (fallback to a better model)",
+    "url": "https://github.com/langchain-ai/langgraph/blob/main/examples/tool-calling.ipynb"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "A cheap model drafts a weather tool call; the tool validates the city names, and only a rejected call goes to a stronger model, which gets exactly one try before the run ends in failed. The fallback ladder is states and a choice guard, so which model answered is visible in the path."
+  },
+  "starters": [
+    "Get the weather for San Francisco, Boston and Tokyo",
+    "What's the weather like in London and New York?",
+    "What's the weather in Atlantis?"
+  ]
+}

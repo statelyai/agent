@@ -11,7 +11,7 @@
  */
 import type { AnyStateMachine } from "xstate";
 import ts from "typescript";
-import { describeMachineInput, hasLiveExecutors } from "./machine-chat.server";
+import { describeMachineInput } from "./machine-chat.server";
 import { humanizeFieldName, type JsonObject } from "./machine-ui";
 import { toVizConfig } from "./scenarios";
 
@@ -65,10 +65,6 @@ export type ExampleDetail = ExampleSummary & {
   machines: ExampleMachine[];
   /** Set when the example module could not be imported on the server. */
   importError: string | null;
-  /** Always true now: without a key the server runs placeholders (`mode: "walkthrough"`). */
-  runnable: boolean;
-  /** How this server will run the example: a real model, or schema-driven placeholders. */
-  mode: "live" | "walkthrough";
   /**
    * True for examples the demo cannot drive: `"manual": true` in metadata
    * (CLI-only scripts, host adapters) or a module that exports no machine.
@@ -360,8 +356,6 @@ async function loadDetail(id: string): Promise<ExampleDetail> {
     source,
     machines,
     importError,
-    runnable: true,
-    mode: hasLiveExecutors() ? "live" : "walkthrough",
     // No machine export means nothing to drive from chat, same as `manual`.
     manual: metadataById.get(id)?.manual === true || machines.length === 0,
   };

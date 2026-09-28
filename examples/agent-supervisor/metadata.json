@@ -1,0 +1,20 @@
+{
+  "name": "agent-supervisor",
+  "title": "A supervisor that routes work between a researcher and a coder",
+  "kind": "multi-agent",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph multi-agent supervisor tutorial",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/multi_agent/agent_supervisor/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "A supervisor model picks which worker runs next (a researcher looking up sample product notes, or a coder computing sums and averages over them) until it finishes with an answer. Guards cap each worker at two reports and reject FINISH before any worker has reported, and a turn budget replaces recursion_limit with a failed final state."
+  },
+  "machine": "agentSupervisorMachine",
+  "starters": [
+    "What was the Lumen lamp's average monthly revenue in Q2?",
+    "How did churn change across Q2?",
+    "Did support tickets fall after the Q2 firmware release?"
+  ]
+}

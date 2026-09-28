@@ -12,10 +12,11 @@
  *     { handle, interaction, draft }.
  *   - `resume_workflow` reloads that snapshot and delivers the human's event.
  *
- * Everything the host owns lives inside `createHost({ executors, store })`: the
- * executors it runs with, the snapshot store, the handle counter, and the two
- * tools. Nothing is module-level mutable state, so two hosts (scripted and live,
- * or one per request in a server) never share a run.
+ * Everything the host owns lives inside `createHost({ executors, judge,
+ * store })`: the executors and judge model it runs with (the drafter's prompt
+ * check is a Jev judgment), the snapshot store, the handle counter, and the two
+ * tools. Nothing is module-level mutable state, so two hosts (one per request
+ * in a server, or one per test) never share a run.
  *
  * The machine owns legality and state; the Mastra agent only converses. Nothing
  * here hardcodes a state name or an event payload shape: the host reads the
@@ -24,20 +25,15 @@
  * An event the state does not handle is ignored by the machine (`result.ignored`),
  * so no hand-rolled legality check lives in the tools.
  *
- * Run: npx tsx examples/mastra-host/index.ts
- *   No API key -> mock executors drive the machine end to end.
- *   OPENAI_API_KEY=... -> also runs the live Mastra agent over the same tools.
+ * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/mastra-host/index.ts
+ *   The live Mastra agent calls the two tools, and the machine runs against
+ *   real generations and a real Jev judgment.
  */
-import assert from "node:assert/strict";
 import { z } from "zod";
 import type { Snapshot } from "xstate";
+import type { Experimental_EvaluationModel } from "ai";
 import { Agent } from "@mastra/core/agent";
-import {
-  createTool,
-  isValidationError,
-  noopObserve,
-  type ValidationError,
-} from "@mastra/core/tools";
+import { createTool, isValidationError, type ValidationError } from "@mastra/core/tools";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getInteraction,
@@ -47,6 +43,7 @@ import {
   type RunAgentResult,
 } from "@statelyai/agent";
 import {
+  createEvaluatePrompt,
   emailDrafter,
   models,
   type DrafterEvent,
@@ -124,37 +121,16 @@ export function createInMemoryRunStore(): RunStore {
   };
 }
 
-// ─── Scripted executors ───
-
-/**
- * Mock executors so the example (and its test) run with no API key or network.
- * Routes on `request.name` (the `setupAgent({ requests })` key each request was
- * declared under) instead of sniffing prompt text or the model ref.
- */
-export const scriptedExecutors: AgentRequestExecutors = {
-  generateText: async (request) => {
-    switch (request.name) {
-      case "evaluatePrompt":
-        return { result: { satisfied: true, missing: [], questions: [] } };
-      case "draftEmail":
-        return {
-          result: {
-            to: "team@example.com",
-            subject: "Deploy pipeline is faster",
-            body: "Hi team,\n\nThe deploy pipeline is now roughly twice as fast.\n\nThanks!",
-          },
-        };
-      default:
-        throw new Error(`Unexpected request '${request.name}'.`);
-    }
-  },
-};
-
 // ─── The host ───
 
 export interface CreateHostOptions {
   /** Model executors every tool call runs with. */
   executors: AgentRequestExecutors;
+  /**
+   * The judge model for the drafter's prompt check. Omitted, the machine's own
+   * Jev judgment reads `TYPESAFE_AI_API_KEY` from the environment.
+   */
+  judge?: Experimental_EvaluationModel;
   /** Where paused runs are persisted. Defaults to a fresh in-memory store. */
   store?: RunStore;
 }
@@ -163,8 +139,16 @@ export interface CreateHostOptions {
  * Build one host: the two bridge functions, the two Mastra tools wrapping them,
  * and a Mastra agent that has been handed those tools.
  */
-export function createHost({ executors, store = createInMemoryRunStore() }: CreateHostOptions) {
+export function createHost({
+  executors,
+  judge,
+  store = createInMemoryRunStore(),
+}: CreateHostOptions) {
   let nextHandle = 0;
+  const run = {
+    executors,
+    ...(judge ? { actors: { evaluatePrompt: createEvaluatePrompt(judge) } } : {}),
+  };
 
   /**
    * Build the machine event for `eventType`, attaching `text` to the event the
@@ -211,7 +195,7 @@ export function createHost({ executors, store = createInMemoryRunStore() }: Crea
    */
   async function startDraft(prompt: string): Promise<ToolResult> {
     const handle = `draft-${++nextHandle}`;
-    const opened = await runAgent(emailDrafter, { executors, input: undefined });
+    const opened = await runAgent(emailDrafter, { ...run, input: undefined });
     const pending = toToolResult(opened, handle);
     if (pending.status !== "pending") return pending;
     if (!pending.interaction?.textEvent) {
@@ -236,7 +220,7 @@ export function createHost({ executors, store = createInMemoryRunStore() }: Crea
     }
 
     const result = await runAgent(emailDrafter, {
-      executors,
+      ...run,
       snapshot: stored.snapshot,
       event: buildEvent(stored.interaction, eventType, text),
     });
@@ -324,57 +308,11 @@ export function unwrapToolResult(value: ToolResult | ValidationError<unknown> | 
 
 // ─── Demo ───
 
-/**
- * Exercise the tool bridge exactly as Mastra's tool loop would: call each
- * tool's own `execute`. No API key, no network: the mock executors stand in
- * for the two model calls the machine makes.
- */
+/** Hand the two tools to the real Mastra agent loop. */
 export async function main() {
-  const { startWorkflow, resumeWorkflow } = createHost({ executors: scriptedExecutors });
-
-  const started = unwrapToolResult(
-    await startWorkflow.execute!(
-      { prompt: "Tell the team the deploy pipeline is twice as fast now." },
-      { observe: noopObserve },
-    ),
-  );
-  assert.equal(started.status, "pending");
-  if (started.status !== "pending") return;
-
-  console.log(
-    `\n--- Draft ---\nTo: ${started.draft?.to}\nSubject: ${started.draft?.subject}\n\n${started.draft?.body}\n-------------`,
-  );
-  console.log(`\n${started.interaction?.label}`);
-  console.log("\n[user sends it]\n");
-
-  const sent = unwrapToolResult(
-    await resumeWorkflow.execute!(
-      { handle: started.handle, eventType: "SEND", text: null },
-      { observe: noopObserve },
-    ),
-  );
-  assert.equal(sent.status, "pending");
-  if (sent.status !== "pending") return;
-  console.log(sent.interaction?.label);
-  console.log("\n[user is done]\n");
-
-  const finished = unwrapToolResult(
-    await resumeWorkflow.execute!(
-      { handle: started.handle, eventType: "END", text: null },
-      { observe: noopObserve },
-    ),
-  );
-  // The machine's `failed` state is also final, so "done" alone doesn't mean the
-  // run succeeded — it can finish with nothing sent. Assert on the output.
-  assert.ok(
-    finished.status === "done" && finished.sentEmails.length >= 1,
-    "run finished without sending an email (the machine reached `failed`)",
-  );
-  console.log("Result:", finished);
-}
-
-/** The live path: hand the same two tools to the real Mastra agent loop. */
-export async function mainLive() {
+  if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
+  }
   const { agent } = createHost({ executors: createAiSdkExecutors({ models }) });
   const result = await agent.generate(
     "Draft an email telling the team the deploy pipeline is twice as fast, then send it.",
@@ -384,8 +322,7 @@ export async function mainLive() {
 }
 
 if (import.meta.url === new URL(process.argv[1] ?? "", "file:").href) {
-  const run = process.env.OPENAI_API_KEY ? mainLive : main;
-  run().catch((error) => {
+  main().catch((error) => {
     console.error(error);
     process.exitCode = 1;
   });

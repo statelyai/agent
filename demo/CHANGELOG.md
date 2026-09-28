@@ -1,5 +1,17 @@
 # @statelyai/agent-demo
 
+## 0.0.1-alpha.14
+
+### Patch Changes
+
+- Updated dependencies [[`11854c6`](https://github.com/statelyai/agent/commit/11854c6b33c940b427fa58e94b5d460c7a69d408)]:
+  - @statelyai/agent@2.0.0-alpha.26
+
+## Unreleased
+
+- Removed: keyless walkthrough and scripted-executor modes; the demo now requires OPENAI_API_KEY.
+- Changed: the demo also requires TYPESAFE_AI_API_KEY. Intent routing, reflection's scoring, and the free-text review interpretation are judgments made with the AI SDK's `experimental_evaluate`, with Jev (`@ai-sdk/typesafe-ai`) as the evaluation model; drafting and revising stay text requests. Without either key the shell names the missing one.
+
 ## 0.0.1-alpha.13
 
 ### Patch Changes

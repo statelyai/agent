@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Persist an approval wait and resume with a correlated scheduler expiry; stale and late approvals cannot pass the machine guard. Requires a host clock and scheduler; run the offline CLI to simulate delivery."
+    "purpose": "Persist an approval wait and resume with a correlated scheduler expiry; stale and late approvals cannot pass the machine guard. Requires a host clock and scheduler; the CLI drafts with a real model (OPENAI_API_KEY) and simulates one expiry delivery."
   },
   "starters": [
     {

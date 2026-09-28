@@ -19,7 +19,10 @@ behavior pinned by tests the whole way.
   state; `runAgent` settles idle, you persist the snapshot and resume with an
   event.
 - **`index.ts`** — the final form (adds triage + an order-lookup tool), dual-mode
-  via the shared harness.
+  via the shared harness. Triage is a Jev judgment (the AI SDK's
+  `experimental_evaluate` with `@ai-sdk/typesafe-ai`): two
+  `choice` questions, `category` and `sentiment`, over the ticket, because a
+  label is a judgment, not a generation.
 
 Each step compiles, runs, and preserves the observable behavior.
 
@@ -31,7 +34,7 @@ Each step compiles, runs, and preserves the observable behavior.
 | `phase` string + boolean flags      | explicit states                                         |
 | nested `if/else` tool dispatch      | `agent.decide` + typed events                           |
 | `if (amount > 100)` refund limit    | a guard on the REFUND transition                        |
-| retry/backoff wrapper               | a custom `generateText` executor                        |
+| retry/backoff wrapper               | a wrapper around the host's executors                   |
 | `{ pending }` sentinel + `resume()` | an idle state + `result.persist()`/resume               |
 | duplicated transcript bookkeeping   | context, written once per transition                    |
 | `refunded` / `escalated` booleans   | one final state per outcome, each with its own `output` |
@@ -40,11 +43,12 @@ Each step compiles, runs, and preserves the observable behavior.
 ## Run
 
 ```bash
-OPENAI_API_KEY=... npx tsx examples/retrofit/index.ts   # the machine
+OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/retrofit/index.ts   # the machine
 OPENAI_API_KEY=... npx tsx examples/retrofit/before.ts  # the loop it replaces
 ```
 
-Tests (`index.test.ts`) run with no API key with mock executors:
+Tests (`index.test.ts`) run with no API key with mock executors and a scripted
+judge (a mock AI SDK evaluation model):
 
 ```bash
 pnpm vitest run examples/retrofit

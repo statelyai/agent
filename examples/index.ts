@@ -97,6 +97,54 @@ export {
   gameMachine as gameLoopMachine,
   runGameLoopExample,
 } from "./game-loop-agent/index.js";
+export {
+  adaptiveRagMachine,
+  adaptiveRagSchemas,
+  runAdaptiveRagExample,
+} from "./adaptive-rag/index.js";
+export { agenticRagMachine, agenticRagSchemas, runAgenticRagExample } from "./agentic-rag/index.js";
+export {
+  selfDiscoverMachine,
+  selfDiscoverSchemas,
+  REASONING_MODULES,
+  runSelfDiscoverExample,
+} from "./self-discover/index.js";
+export { reflexionMachine, reflexionSchemas, runReflexionExample } from "./reflexion/index.js";
+export {
+  treeOfThoughtsMachine,
+  treeOfThoughtsSchemas,
+  scoreSteps as scoreGameOf24Steps,
+  runTreeOfThoughtsExample,
+} from "./tree-of-thoughts/index.js";
+export {
+  promptChainingMachine,
+  promptChainingSchemas,
+  hasPunchline,
+  runPromptChainingExample,
+} from "./prompt-chaining/index.js";
+export {
+  dataEnrichmentMachine,
+  dataEnrichmentSchemas,
+  runDataEnrichmentExample,
+} from "./data-enrichment/index.js";
+export { tntLlmMachine, tntLlmSchemas, runTntLlmExample } from "./tnt-llm/index.js";
+export {
+  toolRetrievalMachine,
+  toolRetrievalSchemas,
+  runToolRetrievalExample,
+} from "./tool-retrieval/index.js";
+export {
+  modelFallbackMachine,
+  modelFallbackSchemas,
+  runModelFallbackExample,
+} from "./model-fallback/index.js";
+export {
+  projectPlannerMachine,
+  projectPlannerSchemas,
+  criticalPath,
+  graphProblems,
+  runProjectPlannerExample,
+} from "./project-planner/index.js";
 
 // --- Human in the loop ------------------------------------------------------
 
@@ -120,6 +168,22 @@ export {
   startTool,
   resumeTool,
 } from "./machine-as-tool/index.js";
+export {
+  infoGatheringMachine,
+  infoGatheringSchemas,
+  runInfoGatheringExample,
+} from "./info-gathering/index.js";
+export {
+  longTermMemoryMachine,
+  longTermMemorySchemas,
+  searchMemoryStore,
+  runLongTermMemoryExample,
+} from "./long-term-memory/index.js";
+export {
+  feynmanTutorMachine,
+  feynmanTutorSchemas,
+  runFeynmanTutorExample,
+} from "./feynman-tutor/index.js";
 
 // --- Parallel and multi-agent -----------------------------------------------
 
@@ -145,6 +209,36 @@ export {
   PLAYERS as CHAMELEON_PLAYERS,
   main as runChameleonExample,
 } from "./chameleon/index.js";
+export {
+  agentSupervisorMachine,
+  agentSupervisorSchemas,
+  // Flat supervisor workers; hierarchical-teams exports its own team machines.
+  researcherMachine as supervisedResearcherMachine,
+  coderMachine as supervisedCoderMachine,
+  runAgentSupervisorExample,
+} from "./agent-supervisor/index.js";
+export {
+  mapReduceMachine,
+  mapReduceSchemas,
+  writeJoke as mapReduceWriteJoke,
+  runMapReduceExample,
+} from "./map-reduce/index.js";
+export {
+  llmCompilerMachine,
+  llmCompilerSchemas,
+  runLlmCompilerExample,
+} from "./llm-compiler/index.js";
+export {
+  stormWriterMachine,
+  stormWriterSchemas,
+  interviewMachine as stormInterviewMachine,
+  runStormWriterExample,
+} from "./storm-writer/index.js";
+export {
+  multiAgentDebateMachine,
+  multiAgentDebateSchemas,
+  runMultiAgentDebateExample,
+} from "./multi-agent-debate/index.js";
 
 // --- Persistence and recovery -----------------------------------------------
 
@@ -206,6 +300,16 @@ export {
   parseGeneratedConfig,
   runGenerateAndRepairExample,
 } from "./generate-and-repair/index.js";
+export {
+  chatbotSimulationEvalMachine,
+  chatbotSimulationEvalSchemas,
+  runChatbotSimulationEvalExample,
+} from "./chatbot-simulation-eval/index.js";
+export {
+  essayGraderMachine,
+  essayGraderSchemas,
+  runEssayGraderExample,
+} from "./essay-grader/index.js";
 
 // --- Statechart policies ----------------------------------------------------
 

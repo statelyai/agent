@@ -340,3 +340,65 @@ describe("runSeam", () => {
     expect(strict.result.status).toBe("done");
   });
 });
+
+describe("runSeam script entries", () => {
+  /** One unconstrained request, so any entry shape reaches `seamOutput` as-is. */
+  const noteMachine = setupAgent({
+    context: z.object({ note: z.unknown() }),
+    output: z.object({ note: z.unknown() }),
+    requests: {
+      note: {
+        schemas: { input: z.object({ topic: z.string() }), output: z.unknown() },
+        model: "writer",
+        prompt: ({ input }) => `Note on ${input.topic}.`,
+      },
+    },
+  }).createMachine({
+    context: { note: null },
+    output: ({ context }) => ({ note: context.note }),
+    initial: "noting",
+    states: {
+      noting: {
+        invoke: {
+          src: "note",
+          input: () => ({ topic: "seams" }),
+          onDone: ({ output }) => ({ target: "done", context: { note: output.result } }),
+        },
+      },
+      done: { type: "final" },
+    },
+  });
+  const seam = { request: "note" };
+
+  test("a function entry is called with the request", async () => {
+    const run = await runSeam(noteMachine, {
+      scripts: { note: [(request) => `note for ${request.name}`] },
+      seam,
+    });
+
+    expect(run.result.status).toBe("done");
+    expect(run.seamOutput).toBe("note for note");
+  });
+
+  test("an entry owning only executor-result keys is the executor result; its usage is reported", async () => {
+    const usage = { inputTokens: 10, outputTokens: 4, totalTokens: 14 };
+    const run = await runSeam(noteMachine, {
+      scripts: { note: [{ result: "draft", usage }] },
+      seam,
+    });
+
+    expect(run.seamOutput).toBe("draft");
+    expect(run.seamUsage).toEqual(usage);
+    expect(run.result.usage).toMatchObject({ modelCalls: 1, totalTokens: 14 });
+  });
+
+  test("an output object with a sibling `result` key is the value itself", async () => {
+    const run = await runSeam(noteMachine, {
+      scripts: { note: [{ result: "draft", confidence: 0.9 }] },
+      seam,
+    });
+
+    expect(run.seamOutput).toEqual({ result: "draft", confidence: 0.9 });
+    expect(run.seamUsage).toBeUndefined();
+  });
+});

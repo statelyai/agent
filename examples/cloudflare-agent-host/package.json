@@ -1,6 +1,6 @@
 {
   "name": "@statelyai/example-cloudflare-agent-host",
-  "version": "0.0.1-alpha.13",
+  "version": "0.0.1-alpha.14",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,9 +11,10 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.0",
+    "@ai-sdk/typesafe-ai": "3.0.6",
     "@statelyai/agent": "workspace:*",
     "agents": "^0.21.0",
-    "ai": "^7.0.0",
+    "ai": "^7.0.113",
     "xstate": "6.0.0-alpha.57",
     "zod": "^4.4.3"
   },

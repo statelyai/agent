@@ -1,0 +1,15 @@
+{
+  "name": "prompt-chaining",
+  "title": "A joke chain gated on a punchline check",
+  "kind": "pattern",
+  "origin": {
+    "type": "langgraph",
+    "source": "LangGraph Workflows and Agents tutorial, prompt chaining",
+    "url": "https://langchain-ai.github.io/langgraph/tutorials/workflows/#prompt-chaining"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Writes a joke, checks in plain code that it has a punchline (a \"?\" or \"!\"), then improves and polishes it in two more model calls. A failed check regenerates at most twice before the run ends in failed with the last joke, where LangGraph just ends."
+  },
+  "starters": ["cats", "the office printer", "time zones"]
+}

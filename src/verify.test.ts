@@ -14,6 +14,11 @@ import { createDecisionLogic } from "./decision.js";
 import { initialAgentStep, rejectAgentStep } from "./steps.js";
 import { humanInTheLoopMachine, jokeMachine, twentyQuestionsMachine } from "../examples/index.js";
 
+/** What the joke machine's Jev critic resolves with: a `score` answer at `level`. */
+function jevRating(level: number) {
+  return { answers: { rating: { type: "score", score: level } } };
+}
+
 // A refund machine mirroring the README's no-API-key example: an `agent.decide`
 // that may AUTO_APPROVE (guarded to amount <= 100) or NEEDS_REVIEW, then a human
 // gate (APPROVE/DENY) into two final states.
@@ -205,11 +210,8 @@ describe("simulateAgent — deterministic playthrough", () => {
     const script = {
       text: {
         tellJoke: ["Why did the state cross the transition?", "The state crossed. Twice."],
-        rateJoke: [
-          { rating: 4, explanation: "Setup drags." },
-          { rating: 9, explanation: "Punchy." },
-        ],
       },
+      invokes: { rateJoke: [jevRating(1), jevRating(4)] },
       decisions: { "agent.decide": [{ type: "END" } as const] },
     };
 
@@ -219,7 +221,7 @@ describe("simulateAgent — deterministic playthrough", () => {
     // The same script object must still be usable: simulateAgent consumes
     // copies of every queue, never the caller's arrays.
     expect(script.text.tellJoke).toHaveLength(2);
-    expect(script.text.rateJoke).toHaveLength(2);
+    expect(script.invokes.rateJoke).toHaveLength(2);
     expect(script.decisions["agent.decide"]).toHaveLength(1);
 
     const second = await simulateAgent(jokeMachine, { input: { topic: "states" }, script });
@@ -725,10 +727,9 @@ describe("scripted key taxonomy — invokes", () => {
   test("explorePaths reads text requests from `text`", async () => {
     const report = await explorePaths(jokeMachine, {
       input: { topic: "state machines" },
-      text: {
-        tellJoke: "Why did the state cross the transition?",
-        rateJoke: { rating: 4, explanation: "Setup drags." },
-      },
+      text: { tellJoke: "Why did the state cross the transition?" },
+      // The critic is a Jev judgment actor, so its answer is an invoke output.
+      invokes: { rateJoke: jevRating(1) },
     });
     expect(report.terminals.some((terminal) => terminal.status === "needs-output")).toBe(false);
   });

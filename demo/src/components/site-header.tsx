@@ -39,10 +39,10 @@ function buildGroups(examples: ExampleSummary[], query: string): SwitcherGroup[]
     row.purpose.toLowerCase().includes(trimmed) ||
     (row.selection.type === "example" && row.selection.id.includes(trimmed));
 
-  // Scripted-fallback scenarios lead; library examples group by kind.
+  // Built-in scenarios lead; library examples group by kind.
   const groups: SwitcherGroup[] = [
     {
-      label: "Interactive · no key needed",
+      label: "Interactive",
       rows: scenarios.map((scenario) => ({
         selection: { type: "scenario", id: scenario.id } as const,
         title: scenario.name,
@@ -62,10 +62,8 @@ function buildGroups(examples: ExampleSummary[], query: string): SwitcherGroup[]
     rows.push(row);
     byKind.set(example.kind, rows);
   }
-  // Key requirement is uniform within a group, so it lives in the group
-  // label — a badge repeated on every row is noise.
   for (const [kind, rows] of [...byKind.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    groups.push({ label: `${kind.replace(/-/g, " ")} · API key`, rows });
+    groups.push({ label: kind.replace(/-/g, " "), rows });
   }
 
   return groups
@@ -91,7 +89,6 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
   const theme = useSelector(store, (s) => s.context.theme);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const noKeyNeeded = selection.type === "scenario";
   const groups = useMemo(() => buildGroups(examples, query), [examples, query]);
   const total = scenarios.length + examples.length;
 
@@ -136,7 +133,6 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
       >
         <Popover.Trigger className="switcher-trigger">
           <span className="switcher-trigger__title">{currentTitle}</span>
-          {noKeyNeeded && <span className="key-badge">no key needed</span>}
           <ChevronDown size={14} aria-hidden="true" />
         </Popover.Trigger>
         <Popover.Portal>

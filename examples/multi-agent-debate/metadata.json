@@ -1,0 +1,28 @@
+{
+  "name": "multi-agent-debate",
+  "title": "Debate a motion in fixed rounds, then judge it",
+  "kind": "multi-agent",
+  "origin": {
+    "type": "langgraph",
+    "source": "Multi-agent debate (community LangGraph tutorial pattern)",
+    "url": "https://langchain-ai.github.io/langgraph/concepts/multi_agent/"
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "A pro speaker and a con speaker take turns on a motion for a set number of rounds, then a Jev judge scores both sides and names a winner. Turn order and the round count are machine edges with a MAX_ROUNDS ceiling in the input schema, so no speaker can end the debate or speak out of turn, and nothing depends on a prompt telling the model how many rounds are left."
+  },
+  "starters": [
+    {
+      "label": "Two rounds, then the judge",
+      "input": { "motion": "Agent control flow belongs in code, not in prompts.", "rounds": 2 }
+    },
+    {
+      "label": "One round — a quick exchange",
+      "input": { "motion": "Remote work is better for software teams.", "rounds": 1 }
+    },
+    {
+      "label": "Three rounds — the MAX_ROUNDS ceiling",
+      "input": { "motion": "Cities should ban cars from their centers.", "rounds": 3 }
+    }
+  ]
+}

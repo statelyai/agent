@@ -1,18 +1,20 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor, ChosenEvent } from "@statelyai/agent";
-import { jokeMachine } from "./index.js";
+import { createMockJudge } from "../mock-judge.js";
+import { JOKE_LEVELS, createRateJoke, jokeMachine } from "./index.js";
 
 /**
  * Mock executors for one run, routed on `request.name` (the `createTextLogic`
- * name, so no prompt sniffing). `ratings` is the critic's score per rating
- * call; the revision prompt is recognised by `input.previousJoke` being set,
- * which is exactly the machine input that makes `telling` a revision pass.
+ * name, so no prompt sniffing). `levels` is the Jev critic's `JOKE_LEVELS`
+ * index per rating call (0-4 → ratings 1, 3, 6, 8, 10); the revision prompt is
+ * recognised by `input.previousJoke` being set, which is exactly the machine
+ * input that makes `telling` a revision pass.
  */
-function createJokeExecutors(options: { ratings: number[]; decision: ChosenEvent["type"] }) {
+function createJokeExecutors(options: { levels: number[]; decision: ChosenEvent["type"] }) {
   const revisionInputs: { topic: string; previousJoke: string; rating: number | null }[] = [];
   let decideCount = 0;
-  let ratingIndex = 0;
+  const judge = createMockJudge({ rating: options.levels });
 
   const streamText: AgentRequestExecutor = async (request) => {
     if (request.name !== "tellJoke") throw new Error(`unexpected stream request: ${request.name}`);
@@ -32,20 +34,15 @@ function createJokeExecutors(options: { ratings: number[]; decision: ChosenEvent
     return { result: `A joke about ${input.topic}.` };
   };
 
-  const generateText: AgentRequestExecutor = async (request) => {
-    if (request.name !== "rateJoke") throw new Error(`unexpected text request: ${request.name}`);
-    return {
-      result: { rating: options.ratings[ratingIndex++] ?? 8, explanation: "because" },
-    };
-  };
-
   const decide = async (): Promise<{ event: ChosenEvent }> => {
     decideCount += 1;
     return { event: { type: options.decision } };
   };
 
   return {
-    executors: { streamText, generateText, decide },
+    executors: { streamText, decide },
+    actors: { rateJoke: createRateJoke(judge.model) },
+    jevCalls: judge.calls,
     revisionInputs,
     get decideCount() {
       return decideCount;
@@ -55,19 +52,20 @@ function createJokeExecutors(options: { ratings: number[]; decision: ChosenEvent
 
 describe("joke-teller", () => {
   test("always takes one improvement pass, even when the first joke rates well", async () => {
-    const mock = createJokeExecutors({ ratings: [9, 10], decision: "END" });
+    const mock = createJokeExecutors({ levels: [3, 4], decision: "END" });
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "penguins" },
       executors: mock.executors,
+      actors: mock.actors,
     });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output.status).toBe("told");
-    // A 9/10 first joke still gets revised: the machine owns that rule.
+    // An 8/10 first joke still gets revised: the machine owns that rule.
     expect(mock.revisionInputs).toEqual([
-      { topic: "penguins", previousJoke: "A joke about penguins.", rating: 9 },
+      { topic: "penguins", previousJoke: "A joke about penguins.", rating: 8 },
     ]);
     // The decision only runs after the improvement pass.
     expect(mock.decideCount).toBe(1);
@@ -80,18 +78,21 @@ describe("joke-teller", () => {
     ]);
     // The notice is rendered from `firstRating`/`firstExplanation` in `output`,
     // not stored in context.
-    expect(result.output.revisionNotice).toContain("First attempt scored 9/10");
+    expect(result.output.revisionNotice).toContain("First attempt scored 8/10");
+    // The explanation is the matched rubric level, not model prose.
+    expect(result.output.revisionNotice).toContain(JOKE_LEVELS[3]);
     expect(result.output.revisionNotice).toContain("improvement pass");
     expect(result.output.lastRating).toBe(10);
     expect(result.output.error).toBeNull();
   });
 
   test("the decision event drives the loop: TELL_ANOTHER re-tells, then the joke cap stops it", async () => {
-    const mock = createJokeExecutors({ ratings: [3, 4, 8], decision: "TELL_ANOTHER" });
+    const mock = createJokeExecutors({ levels: [1, 1, 3], decision: "TELL_ANOTHER" });
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
       executors: mock.executors,
+      actors: mock.actors,
     });
 
     expect(result.status).toBe("done");
@@ -105,11 +106,12 @@ describe("joke-teller", () => {
   });
 
   test("the model can end the loop after the improvement pass", async () => {
-    const mock = createJokeExecutors({ ratings: [3, 8], decision: "END" });
+    const mock = createJokeExecutors({ levels: [1, 3], decision: "END" });
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
       executors: mock.executors,
+      actors: mock.actors,
     });
 
     expect(result.status).toBe("done");
@@ -125,13 +127,19 @@ describe("joke-teller", () => {
       input: { topic: "state machines" },
       executors: {
         streamText: async () => ({ result: "A joke about state machines." }),
-        generateText: async () => {
-          throw new Error("rater offline");
-        },
         // Bound because the machine declares a decision state; never reached here.
         decide: async () => {
           throw new Error("unreachable");
         },
+      },
+      actors: {
+        rateJoke: createRateJoke(
+          createMockJudge({
+            rating: () => {
+              throw new Error("rater offline");
+            },
+          }).model,
+        ),
       },
     });
 
@@ -141,5 +149,28 @@ describe("joke-teller", () => {
     expect(result.output.joke).toBeNull();
     expect(result.output.error).toContain("rateJoke failed");
     expect(result.output.jokes).toEqual(["A joke about state machines."]);
+  });
+
+  test("rateJoke asks Jev one five-level score over the joke and maps it to 1-10", async () => {
+    const mock = createJokeExecutors({ levels: [0, 2], decision: "END" });
+
+    const result = await runAgent(jokeMachine, {
+      input: { topic: "penguins" },
+      executors: mock.executors,
+      actors: mock.actors,
+    });
+
+    expect(mock.jevCalls.map((call) => call.state)).toEqual([
+      { joke: "A joke about penguins." },
+      { joke: "A better joke about penguins." },
+    ]);
+    const question = mock.jevCalls[0]!.questions.rating!;
+    expect(Object.keys(mock.jevCalls[0]!.questions)).toEqual(["rating"]);
+    expect(question.type).toBe("score");
+    expect(question.type === "score" && question.criteria).toEqual([...JOKE_LEVELS]);
+    if (result.status !== "done") throw new Error("expected done");
+    // Level 0 → 1/10, level 2 → 6/10.
+    expect(result.output.revisionNotice).toContain("First attempt scored 1/10");
+    expect(result.output.lastRating).toBe(6);
   });
 });

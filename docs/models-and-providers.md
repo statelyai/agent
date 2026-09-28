@@ -168,7 +168,7 @@ const executors = createAiSdkExecutors({
 });
 ```
 
-When the adapter is not what is under test, a plain function executor or `createScriptedExecutors` is lighter. See [Evals](evals.md#scripted-executors).
+When the adapter is not what is under test, a plain function executor that routes on `request.name` is lighter. See [Evals](evals.md#plain-function-executors).
 
 ## Support by path
 

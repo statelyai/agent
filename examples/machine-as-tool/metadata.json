@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": [],
-    "purpose": "Embed a whole agent machine inside one tool call of a host harness, with no framework and no run store: the handle IS the persisted snapshot, so start/resume are pure functions of a JSON blob. The policy check branches in a choice state, so a small refund auto-approves without ever pausing and only an over-limit one comes back with an interaction. See mastra-host for the same bridge inside a real framework, with a store-keyed handle."
+    "purpose": "Embed a whole agent machine inside one tool call of a host harness, with no framework and no run store: the handle IS the persisted snapshot, so start/resume are pure functions of a JSON blob. The policy check is a Jev judgment (one boolean question against a threshold) and branches in a choice state, so a small refund auto-approves without ever pausing and only an over-limit one comes back with an interaction. See mastra-host for the same bridge inside a real framework, with a store-keyed handle."
   },
   "starters": [
     {

@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
+import { createMockJudge, type MockJudgeCall } from "../mock-judge.js";
 import {
+  CORRECT_THRESHOLD,
   chatWithPdfMachine,
+  createGradeAnswer,
   idlePrompt,
   queryPdfContent,
   SAMPLE_LIBRARY,
@@ -22,9 +25,12 @@ interface PlayOptions {
   input?: MachineInput;
   /** Consumed in order on each idle settle. */
   learnerEvents: LearnerEvent[];
-  /** Grade every answer as correct unless this says otherwise. */
-  grade?: (answer: string) => boolean;
-  /** The `expected` string the grader returns. */
+  /**
+   * Jev's verdict per answer: a boolean, or the probability that it is
+   * correct. Every answer is correct unless this says otherwise.
+   */
+  grade?: (answer: string) => boolean | number;
+  /** The `expected` string the explanation returns. */
   expected?: string;
 }
 
@@ -40,8 +46,10 @@ interface PlayResult {
   };
   /** Passages `writeQuestion` was given, in order. */
   passages: string[];
-  /** Prompts `gradeAnswer` was given, in order. */
+  /** Prompts `explainGrade` was given, in order. */
   gradePrompts: string[];
+  /** Every Jev grading call, in order. */
+  jevCalls: MockJudgeCall[];
   /** Every idle label the run settled on. */
   idleLabels: string[];
 }
@@ -52,13 +60,21 @@ async function play(options: PlayOptions): Promise<PlayResult> {
   const idleLabels: string[] = [];
   let questionNumber = 0;
 
+  // The verdict is a Jev judgment over the passage, question, and answer.
+  const jev = createMockJudge({
+    correct: (state) => {
+      const { answer } = state as { answer: string };
+      return options.grade ? options.grade(answer) : true;
+    },
+  });
+  const actors = { gradeAnswer: createGradeAnswer(jev.model) };
+
   const generateText: AgentRequestExecutor = async (request) => {
-    if (request.name === "gradeAnswer") {
+    if (request.name === "explainGrade") {
       gradePrompts.push(request.prompt ?? "");
       const answer = (request.prompt ?? "").match(/Learner's answer: (.*)/)?.[1] ?? "";
       return {
         result: {
-          correct: options.grade ? options.grade(answer) : true,
           expected: options.expected ?? "the expected answer",
           explanation: `graded "${answer}"`,
         },
@@ -81,6 +97,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
   let result = await runAgent(chatWithPdfMachine, {
     input: options.input ?? {},
     executors: { generateText },
+    actors,
   });
 
   while (result.status === "idle") {
@@ -91,6 +108,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
       snapshot: result.persist(),
       event,
       executors: { generateText },
+      actors,
     });
   }
 
@@ -99,6 +117,7 @@ async function play(options: PlayOptions): Promise<PlayResult> {
     output: result.status === "done" ? (result.output as PlayResult["output"]) : undefined,
     passages,
     gradePrompts,
+    jevCalls: jev.calls,
     idleLabels,
   };
 }
@@ -166,6 +185,34 @@ describe("chat-with-pdf quiz mode", () => {
       expect(prompt).toContain(result.passages[index]!);
       expect(prompt).toMatch(/Source passage \(page \d+\)/);
     });
+    // The verdict itself is grounded on the same passage.
+    expect(result.jevCalls).toHaveLength(3);
+    result.jevCalls.forEach((call, index) => {
+      expect((call.state as { passage: { text: string } }).passage.text).toContain(
+        result.passages[index]!,
+      );
+    });
+  });
+
+  test("the verdict is one Jev boolean question over passage, question, and answer; the threshold decides", async () => {
+    const result = await play({
+      input: { documentId: "statecharts", maxQuestions: 2, refreshEvery: 2 },
+      learnerEvents: answers(2),
+      // Exactly at the threshold is correct; just under it is not.
+      grade: (answer) => (answer === "answer 1" ? CORRECT_THRESHOLD : CORRECT_THRESHOLD - 0.01),
+    });
+
+    const call = result.jevCalls[0]!;
+    expect(call.state).toMatchObject({
+      question: expect.stringMatching(/^Q1 about:/),
+      answer: "answer 1",
+    });
+    expect(Object.keys(call.questions)).toEqual(["correct"]);
+    expect(call.questions.correct!.type).toBe("boolean");
+    expect(result.output?.results.map((entry) => entry.correct)).toEqual([true, false]);
+    // The explanation is told the verdict, not asked for it.
+    expect(result.gradePrompts[0]).toContain("Grade: correct");
+    expect(result.gradePrompts[1]).toContain("Grade: incorrect");
   });
 
   test("an ambiguous library stops at the document picker, and an unknown choice does not advance", async () => {

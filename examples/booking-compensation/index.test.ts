@@ -1,7 +1,18 @@
+/**
+ * The runner defaults to real OpenAI executors. These tests script the planner
+ * at the provider with the repo's AI SDK mock, answering by request name
+ * (`plan`); booking actors are overridden through native XState `actors`.
+ */
 import { expect, test } from "vitest";
 import { createAsyncLogic } from "xstate";
 import { lintAgentMachine } from "@statelyai/agent/testing";
+import { createMockModelExecutors } from "../mock-model.js";
 import { bookingCompensationMachine, runBookingCompensationExample } from "./index.js";
+
+// One shared mock: the `plan` answer repeats for every run.
+const executors = createMockModelExecutors({
+  text: { plan: { flight: "Flight to Lisbon", hotel: "Lisbon hotel" } },
+});
 
 test("approval gates reservations and a confirmed unavailable hotel compensates the flight", async () => {
   const calls: string[] = [];
@@ -28,13 +39,14 @@ test("approval gates reservations and a confirmed unavailable hotel compensates 
       },
     }),
   };
-  const pending = await runBookingCompensationExample({ actors });
+  const pending = await runBookingCompensationExample({ actors, executors });
   expect(pending.status).toBe("idle");
   expect(calls).toEqual([]);
   const result = await runBookingCompensationExample({
     snapshot: JSON.parse(JSON.stringify(pending.persist())),
     event: { type: "APPROVE" },
     actors,
+    executors,
   });
   expect(calls).toEqual(["flight:trip-1", "hotel", "cancel:flight-42"]);
   expect(result.status).toBe("done");
@@ -47,10 +59,11 @@ test("approval gates reservations and a confirmed unavailable hotel compensates 
 });
 
 test("failed compensation preserves the reservation reference for manual recovery", async () => {
-  const pending = await runBookingCompensationExample();
+  const pending = await runBookingCompensationExample({ executors });
   const result = await runBookingCompensationExample({
     snapshot: pending.persist(),
     event: { type: "APPROVE" },
+    executors,
     actors: {
       reserveHotel: createAsyncLogic<
         { status: "unavailable" },
@@ -76,10 +89,11 @@ test("failed compensation preserves the reservation reference for manual recover
 
 test("uncertain hotel outcome requires reconciliation, not blind compensation", async () => {
   let compensations = 0;
-  const pending = await runBookingCompensationExample();
+  const pending = await runBookingCompensationExample({ executors });
   const result = await runBookingCompensationExample({
     snapshot: pending.persist(),
     event: { type: "APPROVE" },
+    executors,
     actors: {
       reserveHotel: createAsyncLogic<
         { status: "unavailable" },
@@ -108,10 +122,11 @@ test("uncertain hotel outcome requires reconciliation, not blind compensation", 
 test.each(["APPROVE", "CANCEL"] as const)(
   "%s completes the happy or cancellation path",
   async (type) => {
-    const pending = await runBookingCompensationExample();
+    const pending = await runBookingCompensationExample({ executors });
     const result = await runBookingCompensationExample({
       snapshot: pending.persist(),
       event: { type },
+      executors,
     });
     expect(result.status).toBe("done");
     if (result.status === "done")
@@ -123,10 +138,11 @@ test.each(["APPROVE", "CANCEL"] as const)(
 );
 
 test("uncertain flight outcome retains the booking identity even without provider references", async () => {
-  const pending = await runBookingCompensationExample();
+  const pending = await runBookingCompensationExample({ executors });
   const result = await runBookingCompensationExample({
     snapshot: pending.persist(),
     event: { type: "APPROVE" },
+    executors,
     actors: {
       reserveFlight: createAsyncLogic<string, { bookingId: string; item: string }>({
         run: async () => {
@@ -146,10 +162,11 @@ test("uncertain flight outcome retains the booking identity even without provide
 });
 
 test("a hotel reservation without a provider reference is not a booking", async () => {
-  const pending = await runBookingCompensationExample();
+  const pending = await runBookingCompensationExample({ executors });
   const result = await runBookingCompensationExample({
     snapshot: pending.persist(),
     event: { type: "APPROVE" },
+    executors,
     actors: {
       reserveHotel: createAsyncLogic<
         { status: "reserved"; reference: string },
@@ -166,10 +183,11 @@ test("a hotel reservation without a provider reference is not a booking", async 
 });
 
 test("an unconfirmed cancellation is reported as manual recovery, not compensated", async () => {
-  const pending = await runBookingCompensationExample();
+  const pending = await runBookingCompensationExample({ executors });
   const result = await runBookingCompensationExample({
     snapshot: pending.persist(),
     event: { type: "APPROVE" },
+    executors,
     actors: {
       reserveHotel: createAsyncLogic<
         { status: "unavailable" },
@@ -187,4 +205,14 @@ test("an unconfirmed cancellation is reported as manual recovery, not compensate
       outcome: "manualRecovery",
       flightReference: "simulated-flight:trip-1",
     });
+});
+
+test("without injected executors or a key, the runner rejects naming the env var", async () => {
+  const key = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    await expect(runBookingCompensationExample()).rejects.toThrow("OPENAI_API_KEY");
+  } finally {
+    if (key !== undefined) process.env.OPENAI_API_KEY = key;
+  }
 });

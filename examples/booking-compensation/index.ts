@@ -3,13 +3,16 @@
  * If hotel booking fails, compensate the flight reservation. Compensation can
  * fail too: preserve its reference and stop for manual recovery.
  * Pattern: https://learn.microsoft.com/en-us/azure/architecture/patterns/compensating-transaction
- * Run without credentials: pnpm tsx examples/booking-compensation/index.ts
- * All booking actors are explicitly simulated. A real host overrides them and
+ * Run: OPENAI_API_KEY=... pnpm tsx examples/booking-compensation/index.ts
+ * The planner is a real model call; pass `executors` to swap the model layer
+ * (tests script it by request name). All booking actors are explicitly simulated. A real host overrides them and
  * must make operations idempotent by bookingId; snapshots alone cannot provide
  * exactly-once external effects or resolve uncertain provider outcomes.
  */
 import { createAsyncLogic } from "xstate";
 import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   interactionMetaSchema,
   runAgent,
@@ -21,7 +24,11 @@ const itinerary = z.object({ flight: z.string(), hotel: z.string() });
 type HotelResult = { status: "reserved"; reference: string } | { status: "unavailable" };
 type CancelResult = { status: "cancelled" } | { status: "pending" };
 type BookingInput = { bookingId: string; item: string };
+const models = {
+  planner: openai("gpt-6-luna"),
+};
 const agent = setupAgent({
+  models,
   input: z.object({ bookingId: z.string(), destination: z.string() }),
   context: z.object({
     bookingId: z.string(),
@@ -216,19 +223,30 @@ export const bookingCompensationMachine = agent.createMachine({
   },
 });
 
-export function runBookingCompensationExample(
+/** The host's real executors: one OpenAI model behind the `planner` ref. */
+function liveExecutors() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY to run the booking-compensation example.");
+  }
+  return createAiSdkExecutors({ models });
+}
+
+export async function runBookingCompensationExample(
   options?: RunAgentOptions<typeof bookingCompensationMachine>,
 ) {
+  const { executors = liveExecutors(), ...runOptions } = options ?? {};
   return runAgent(bookingCompensationMachine, {
     input: { bookingId: "trip-1", destination: "Lisbon" },
-    executors: {
-      generateText: async () => ({ result: { flight: "Flight to Lisbon", hotel: "Lisbon hotel" } }),
-    },
-    ...options,
+    ...runOptions,
+    executors,
   });
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
   void (async () => {
     const pending = await runBookingCompensationExample();
     if (pending.status !== "idle") throw new Error(`Expected approval wait, got ${pending.status}`);

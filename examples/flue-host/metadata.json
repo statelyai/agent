@@ -5,12 +5,12 @@
   "manual": true,
   "origin": {
     "type": "platform-adapter",
-    "source": "Real @flue/runtime@2 (not a shim): the agent is the exported function returning its instructions, composed by hooks (useModel/useSkill/useTool/usePersistentState) with Valibot tool input/output and run({ data }); booted in-process with start() from @flue/runtime/node and driven via init()/dispatch()/read(), no API key needed through pi's fauxProvider",
+    "source": "Real @flue/runtime@2 (not a shim): the agent is the exported function returning its instructions, composed by hooks (useModel/useSkill/useTool/usePersistentState) with Valibot tool input/output and run({ data }); booted in-process with start() from @flue/runtime/node and driven via init()/dispatch()/read(); needs OPENAI_API_KEY, TYPESAFE_AI_API_KEY, and ANTHROPIC_API_KEY (drafting runs on an OpenAI model, the prompt check is a Jev judgment, review on an Anthropic one)",
     "url": "https://flueframework.com/docs/guide/agent-hooks"
   },
   "comparison": {
     "targets": ["Flue 2", "hooks-based agents", "durable agent frameworks"],
-    "purpose": "Two ways to pair Flue 2 with a state machine. machine-owned.ts: the email-drafter machine owns model calls, branches, pauses, and legality; the Flue agent is a conversational shell with start_workflow/resume_workflow bridge tools. flue-owned.ts: Flue's hooks own per-step model, skills, tools, and persistent state, and a ~10-line steps machine replaces the docs' usePersistentState('step', ...) string — transitions become declared, the step switch exhaustive, and events inferred via EventFromLogic."
+    "purpose": "Two ways to pair Flue 2 with a state machine. machine-owned.ts: the email-drafter machine owns model calls (a Jev judgment included), branches, pauses, and legality; the Flue agent is a conversational shell with start_workflow/resume_workflow bridge tools. flue-owned.ts: Flue's hooks own per-step model, skills, tools, and persistent state, and a ~10-line steps machine replaces the docs' usePersistentState('step', ...) string — transitions become declared, the step switch exhaustive, and events inferred via EventFromLogic."
   },
   "starters": [
     "Draft an email telling the team the deploy pipeline is twice as fast, then send it.",

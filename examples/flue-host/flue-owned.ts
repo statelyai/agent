@@ -23,6 +23,9 @@
  * database, so the persisted shape has to be plain JSON. It is revived with
  * `steps.resolveState`, which validates against the machine — a step renamed in
  * a redeploy fails loudly instead of resurrecting a ghost state.
+ *
+ * Run: OPENAI_API_KEY=... ANTHROPIC_API_KEY=... npx tsx examples/flue-host/index.ts
+ *   Drafting and sending use an OpenAI model; review uses an Anthropic one.
  */
 import assert from "node:assert/strict";
 import * as v from "valibot";
@@ -35,14 +38,6 @@ import {
 } from "xstate";
 import { defineSkill, init, useModel, usePersistentState, useSkill, useTool } from "@flue/runtime";
 import { start } from "@flue/runtime/node";
-import {
-  fauxAssistantMessage,
-  fauxProvider,
-  fauxToolCall,
-  type Context,
-  type FauxResponseFactory,
-  type Provider,
-} from "@earendil-works/pi-ai";
 
 // ─── The entire machine ───
 //
@@ -226,71 +221,15 @@ export function FlueOwnedAgent() {
   );
 }
 
-// ─── Scripted model: pi's faux provider, driven by what each render offers ───
-//
-// The demo has no API key, so it plays the model's part — but through the real
-// Flue runtime, not a stand-in for it. A faux response factory sees the very
-// `Context` the runtime built for the turn, so it can react to the tools this
-// step rendered instead of replaying a fixed script.
-
-/** Canned arguments for each workflow tool the agent might offer. */
-const CANNED_CALLS: Record<string, Record<string, unknown>> = {
-  submit_draft: {
-    to: "team@example.com",
-    subject: "Deploy pipeline is faster",
-    body: "Hi team,\n\nThe deploy pipeline is now roughly twice as fast.\n\nThanks!",
-  },
-  approve: {},
-  send_email: {},
-};
-
-/** Enough queued turns for the workflow to reach `done` and stop. */
-const MAX_TURNS = 12;
-
-/**
- * Faux providers for both models the agent uses, plus the trace of workflow
- * tools each render offered — which is the whole point of the pattern, so the
- * demo prints it and the test asserts on it.
- */
-export function scriptedModel(): { providers: Provider[]; trace: string[][] } {
-  const trace: string[][] = [];
-
-  const respond: FauxResponseFactory = (context: Context) => {
-    const offered = (context.tools ?? [])
-      .map((tool) => tool.name)
-      .filter((name) => name in CANNED_CALLS);
-    trace.push(offered);
-
-    const next = offered[0];
-    if (!next) return fauxAssistantMessage("The workflow is complete; the email was sent.");
-    return fauxAssistantMessage([fauxToolCall(next, CANNED_CALLS[next]!)], {
-      stopReason: "toolUse",
-    });
-  };
-
-  // One faux provider per provider id the agent names, so `useModel` resolves
-  // the same specifiers it would in production.
-  const providers = [
-    fauxProvider({ provider: "openai", models: [{ id: "gpt-6-luna" }] }),
-    fauxProvider({ provider: "anthropic", models: [{ id: "claude-sonnet-5" }] }),
-  ].map((faux) => {
-    faux.setResponses(Array.from({ length: MAX_TURNS }, () => respond));
-    return faux.provider;
-  });
-
-  return { providers, trace };
-}
-
 // ─── Demo ───
 
-export async function main({ live = false } = {}) {
+export async function main() {
+  for (const key of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) {
+    if (!process.env[key]) throw new Error(`Set ${key} to run this example.`);
+  }
   outbox.length = 0;
-  const scripted = live ? null : scriptedModel();
 
-  const flue = await start({
-    agents: [FlueOwnedAgent],
-    providers: scripted?.providers,
-  });
+  const flue = await start({ agents: [FlueOwnedAgent] });
   try {
     const agent = init(FlueOwnedAgent, { id: `flue-owned-${Date.now()}` });
     const reply = await agent.read(
@@ -299,9 +238,6 @@ export async function main({ live = false } = {}) {
       ),
     );
 
-    for (const offered of scripted?.trace ?? []) {
-      console.log(`[render] workflow tools: ${offered.join(", ") || "(none)"}`);
-    }
     console.log(`\n${reply.text}`);
     console.log(`\nSent ${outbox.length} email(s):`, outbox[0]?.subject);
 

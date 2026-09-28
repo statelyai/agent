@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { runAgent, setupAgent } from "./index.js";
-import { matchesTrajectory, createScriptedExecutors } from "./testing/index.js";
+import { matchesTrajectory } from "./testing/index.js";
 import { z } from "zod";
 
 const entry = (type: string, payload: Record<string, unknown> = {}) => ({
@@ -209,7 +209,7 @@ describe("matchesTrajectory: over a real run", () => {
 
     const result = await runAgent(jokeMachine, {
       input: { topic: "state machines" },
-      executors: createScriptedExecutors({ text: { tellJoke: "A joke." } }),
+      executors: { generateText: async () => ({ result: "A joke." }) },
       onTransition: (snapshot, event) => {
         statePath.push(snapshot.value);
         events.push(event);

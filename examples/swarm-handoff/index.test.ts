@@ -1,16 +1,16 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { getInteraction } from "@statelyai/agent";
-import { createScriptedExecutors } from "@statelyai/agent/testing";
+import { getInteraction, type AgentTextRequest } from "@statelyai/agent";
+import { createMockModelExecutors } from "../mock-model.js";
 import { runSwarmHandoffExample, swarmHandoffMachine, MAX_TURNS } from "./index.js";
 
 // Name-keyed script: `travelReply`/`foodReply` are request names, `route` is
 // the name the `agent.decide` invoke declares.
 function scripted(routeTo: "travel" | "food") {
-  return createScriptedExecutors({
+  return createMockModelExecutors({
     text: {
-      travelReply: [(request) => `[travel] ${request.prompt}`],
-      foodReply: [(request) => `[food] ${request.prompt}`],
+      travelReply: [(request: AgentTextRequest) => `[travel] ${request.prompt}`],
+      foodReply: [(request: AgentTextRequest) => `[food] ${request.prompt}`],
     },
     decisions: { route: [{ type: "HANDOFF", to: routeTo }] },
   });
@@ -31,10 +31,10 @@ test("the model's HANDOFF moves the mic, and it survives the JSON round-trip", a
 
 test("a HANDOFF to the agent already holding the mic is rejected and retried", async () => {
   const chosen: string[] = [];
-  const executors = createScriptedExecutors({
+  const executors = createMockModelExecutors({
     text: {
-      travelReply: [(request) => `[travel] ${request.prompt}`],
-      foodReply: [(request) => `[food] ${request.prompt}`],
+      travelReply: [(request: AgentTextRequest) => `[travel] ${request.prompt}`],
+      foodReply: [(request: AgentTextRequest) => `[food] ${request.prompt}`],
     },
     decisions: {
       // First attempt hands off to the active agent (illegal), second is legal.

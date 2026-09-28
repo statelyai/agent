@@ -9,18 +9,22 @@
  * again, under the same `info.callKey` the first attempt used, which is the
  * idempotency key a real host would send to the provider.
  *
- * No API key needed: executors are scripted. Run:
- * npx tsx examples/crash-recovery/index.ts
+ * The crash is staged, not the model: the example wraps the host's real
+ * executors so the `draft` call hangs and the process "dies" mid-flight.
+ *
+ * Run: OPENAI_API_KEY=... npx tsx examples/crash-recovery/index.ts
  */
+import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import {
   runAgent,
   setupAgent,
   type AgentEventLogStore,
+  type AgentRequestExecutors,
   type RunAgentOptions,
 } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { createInMemoryEventLogStore } from "@statelyai/agent/log";
-import { createScriptedExecutors } from "@statelyai/agent/testing";
 import type { AnyStateMachine } from "xstate";
 
 /**
@@ -42,8 +46,8 @@ const crashRecoverySetup = setupAgent({
   }),
   input: z.object({ topic: z.string() }),
   output: z.object({ topic: z.string(), outline: z.string(), article: z.string() }),
-  // Named requests: the scripted executors below route on these names, not on
-  // call order, so a replayed run cannot pick up the wrong answer.
+  // Named requests: the crash below is staged on the `draft` name, not on call
+  // order, so a replayed run cannot stage it on the wrong call.
   requests: {
     outline: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
@@ -107,6 +111,48 @@ export const crashRecoveryMachine = crashRecoverySetup.createMachine({
   },
 });
 
+/** The host's real executors: one OpenAI model behind the `writer` ref. */
+function liveExecutors(): Partial<AgentRequestExecutors> {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY to run the crash-recovery example.");
+  }
+  return createAiSdkExecutors({ models: { writer: openai("gpt-6-luna") } });
+}
+
+/**
+ * Wraps a host's `generateText` so one process can count its model calls and
+ * see the `callKey` each `draft` call carried; `onDraft` may take the call
+ * over (the crash leg hangs it) instead of passing it through.
+ */
+function observeCalls(
+  executors: Partial<AgentRequestExecutors>,
+  onDraft?: () => Promise<never>,
+): {
+  executors: Partial<AgentRequestExecutors>;
+  calls: () => number;
+  draftCallKey: () => string | undefined;
+} {
+  const generateText = executors.generateText;
+  if (!generateText) throw new Error("crash-recovery needs a generateText executor.");
+  let calls = 0;
+  let draftCallKey: string | undefined;
+  return {
+    executors: {
+      ...executors,
+      generateText: (request, info) => {
+        calls += 1;
+        if (request.name === "draft") {
+          draftCallKey = info?.callKey;
+          if (onDraft) return onDraft();
+        }
+        return generateText(request, info);
+      },
+    },
+    calls: () => calls,
+    draftCallKey: () => draftCallKey,
+  };
+}
+
 /**
  * First process: answers the outline call, hangs on the draft call, then
  * "crashes" — everything it journaled up to that point is in the store.
@@ -115,29 +161,24 @@ export async function runUntilCrash({
   store,
   topic = "state machines",
   threadId = crypto.randomUUID(),
+  executors = liveExecutors(),
+  signal,
   ...observers
 }: {
   store: AgentEventLogStore;
   topic?: string;
   threadId?: string;
-  // Executors are the example's own: the script is what stages the crash.
-} & Omit<ExampleRunOptions, "executors" | "signal">) {
+} & ExampleRunOptions) {
+  // The staged crash has its own controller; the host's cancellation rides
+  // alongside it, so a cancel stops the in-flight model call too.
   const abort = new AbortController();
-  let inFlightCallKey: string | undefined;
+  const runSignal = signal ? AbortSignal.any([abort.signal, signal]) : abort.signal;
 
-  const executors = createScriptedExecutors({
-    text: {
-      outline: [() => `1. Intro to ${topic} 2. Body on ${topic} 3. Outro`],
-      draft: [
-        (_request, info) => {
-          inFlightCallKey = info?.callKey;
-          // The draft call never resolves; the process dies while it is in flight,
-          // so no completion for it is ever journaled.
-          setTimeout(() => abort.abort(new Error("process crashed")), 10);
-          return new Promise<string>(() => {});
-        },
-      ],
-    },
+  // The draft call never resolves; the process dies while it is in flight, so
+  // no completion for it is ever journaled.
+  const observed = observeCalls(executors, () => {
+    setTimeout(() => abort.abort(new Error("process crashed")), 10);
+    return new Promise<never>(() => {});
   });
 
   // Write-ahead: each entry reaches the store as it is appended, and the outline
@@ -147,14 +188,14 @@ export async function runUntilCrash({
     input: { topic },
     store,
     threadId,
-    executors,
-    signal: abort.signal,
+    executors: observed.executors,
+    signal: runSignal,
   });
 
   console.log(`crashed with status '${crashed.status}'`);
-  console.log(`model calls before the crash: ${executors.calls.length}`); // 2 — one completed
+  console.log(`model calls before the crash: ${observed.calls()}`); // 2 — one completed
   console.log(`journaled entries: ${crashed.events.length}`);
-  return { threadId, inFlightCallKey, calls: executors.calls.length };
+  return { threadId, inFlightCallKey: observed.draftCallKey(), calls: observed.calls() };
 }
 
 /**
@@ -164,25 +205,16 @@ export async function runUntilCrash({
 export async function recover({
   store,
   threadId,
+  executors = liveExecutors(),
+  signal,
   ...observers
 }: {
   store: AgentEventLogStore;
   threadId: string;
-} & Omit<ExampleRunOptions, "executors" | "signal">) {
-  let replayedCallKey: string | undefined;
-
-  // Only the `draft` request is scripted: if the recovered run re-executed the
-  // journaled `outline` call, the script would have no route for it and throw.
-  const executors = createScriptedExecutors({
-    text: {
-      draft: [
-        (request, info) => {
-          replayedCallKey = info?.callKey;
-          return `Draft based on: ${request.prompt}`;
-        },
-      ],
-    },
-  });
+} & ExampleRunOptions) {
+  // The journaled `outline` call is replayed from the log, so only `draft`
+  // reaches the model here.
+  const observed = observeCalls(executors);
 
   // No `events`, no snapshot: the store's thread IS the resume, and the run
   // keeps appending to it, so the thread stays replayable end to end.
@@ -190,17 +222,18 @@ export async function recover({
     ...(observers as object),
     store,
     threadId,
-    executors,
+    executors: observed.executors,
+    ...(signal ? { signal } : {}),
   });
 
   console.log(`recovered with status '${recovered.status}'`);
-  console.log(`model calls during recovery: ${executors.calls.length}`); // 1 — only the draft
+  console.log(`model calls during recovery: ${observed.calls()}`); // 1 — only the draft
   console.log(`full log length: ${recovered.events.length}`);
   if (recovered.status === "done") {
     console.log(`topic: ${recovered.output.topic}`);
     console.log(`article: ${recovered.output.article}`);
   }
-  return { recovered, replayedCallKey, calls: executors.calls.length };
+  return { recovered, replayedCallKey: observed.draftCallKey(), calls: observed.calls() };
 }
 
 /**
@@ -209,7 +242,7 @@ export async function recover({
  * single machine cannot show it — see {@link ExampleRunOptions}.
  */
 export async function runCrashRecoveryExample(options: ExampleRunOptions = {}) {
-  const { executors: _executors, signal: _signal, ...observers } = options;
+  const { signal, ...observers } = options;
   // Stands in for the host's database: an append-only log per thread.
   const store = createInMemoryEventLogStore();
   const {
@@ -218,8 +251,11 @@ export async function runCrashRecoveryExample(options: ExampleRunOptions = {}) {
     calls: callsBeforeCrash,
   } = await runUntilCrash({
     store,
+    ...(signal ? { signal } : {}),
     ...observers,
   });
+  // A host cancel is not the staged crash: stop here instead of recovering.
+  signal?.throwIfAborted();
   const {
     recovered,
     replayedCallKey,
@@ -227,6 +263,7 @@ export async function runCrashRecoveryExample(options: ExampleRunOptions = {}) {
   } = await recover({
     store,
     threadId,
+    ...(signal ? { signal } : {}),
     ...observers,
   });
   return {

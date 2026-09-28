@@ -13,7 +13,26 @@ import {
   toAnthropicTools,
   toDecisionMessages,
 } from "./index.js";
-import { triageMachine, triageSchema } from "../triage/index.js";
+import { createMockJudge } from "../mock-judge.js";
+import { createClassifyTicket, triageMachine, triageSchema } from "../triage/index.js";
+
+/**
+ * Triage's classifier is a Jev judgment; script it so only the reply hits the
+ * stub. Triage reads Jev's `category` confidence from TypeSafe's provider
+ * metadata, so the scripted judge reports one above the threshold.
+ */
+const judgeActors = () => {
+  const { model } = createMockJudge({ category: "billing", sentiment: "negative" });
+  return {
+    classifyTicket: createClassifyTicket({
+      ...model,
+      doEvaluate: async (options) => ({
+        ...(await model.doEvaluate(options)),
+        providerMetadata: { typesafe: { confidence: { category: 0.9 } } },
+      }),
+    }),
+  };
+};
 import { twentyQuestionsMachine } from "../twenty-questions/index.js";
 
 // A minimal Standard Schema fixture exposing the optional
@@ -330,14 +349,16 @@ describe("createAnthropicExecutors + runAgent", () => {
     const result = await runAgent(triageMachine, {
       input: { ticket: "My invoice is wrong and I am furious." },
       executors: { generateText },
+      actors: judgeActors(),
     });
 
-    // The stub reports 1 input + 1 output token per call, and triage makes two.
+    // The stub reports 1 input + 1 output token per call, and triage makes one
+    // text call (the reply); the classification is a Jev judgment, not a model call.
     expect(result.usage).toMatchObject({
-      modelCalls: 2,
-      inputTokens: 2,
-      outputTokens: 2,
-      totalTokens: 4,
+      modelCalls: 1,
+      inputTokens: 1,
+      outputTokens: 1,
+      totalTokens: 2,
     });
   });
 
@@ -359,6 +380,7 @@ describe("createAnthropicExecutors + runAgent", () => {
     const result = await runAgent(triageMachine, {
       input: { ticket: "My invoice is wrong and I am furious." },
       executors: { generateText },
+      actors: judgeActors(),
     });
 
     expect(result.status).toBe("done");

@@ -5,9 +5,14 @@
  * serializes deliveries (or uses compare-and-swap) and retries early deliveries;
  * independent resumes of the same snapshot do not provide mutual exclusion.
  * Inspired by https://docs.langchain.com/oss/javascript/langgraph/interrupts
- * Run: pnpm tsx examples/deadline-escalation/index.ts
+ * The draft is a real model call; the clock and scheduler stay host-owned
+ * (the CLI simulates one expiry delivery). Pass `executors` to swap the model
+ * layer; tests script it by request name.
+ * Run: OPENAI_API_KEY=... pnpm tsx examples/deadline-escalation/index.ts
  */
 import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   interactionMetaSchema,
   runAgent,
@@ -17,7 +22,11 @@ import {
 
 const input = z.object({ requestId: z.string(), task: z.string(), deadline: z.number().finite() });
 const delivery = z.object({ requestId: z.string(), observedAt: z.number().finite() });
+const models = {
+  writer: openai("gpt-6-luna"),
+};
 const agent = setupAgent({
+  models,
   input,
   context: input.extend({ proposal: z.string().nullable() }),
   output: z.object({
@@ -89,19 +98,30 @@ export const deadlineEscalationMachine = agent.createMachine({
   },
 });
 
-export function runDeadlineEscalationExample(
+/** The host's real executors: one OpenAI model behind the `writer` ref. */
+function liveExecutors() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY to run the deadline-escalation example.");
+  }
+  return createAiSdkExecutors({ models });
+}
+
+export async function runDeadlineEscalationExample(
   options?: RunAgentOptions<typeof deadlineEscalationMachine>,
 ) {
+  const { executors = liveExecutors(), ...runOptions } = options ?? {};
   return runAgent(deadlineEscalationMachine, {
     input: { requestId: "proposal-1", task: "Schedule a maintenance window", deadline: 1000 },
-    executors: {
-      generateText: async () => ({ result: "Proposed maintenance: Saturday, 09:00 UTC." }),
-    },
-    ...options,
+    ...runOptions,
+    executors,
   });
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("Set OPENAI_API_KEY to run this example.");
+    process.exit(1);
+  }
   void (async () => {
     const pending = await runDeadlineEscalationExample();
     if (pending.status !== "idle") throw new Error(`Expected approval wait, got ${pending.status}`);

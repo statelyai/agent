@@ -1,6 +1,6 @@
 {
   "name": "@statelyai/agent",
-  "version": "2.0.0-alpha.25",
+  "version": "2.0.0-alpha.26",
   "description": "Make invalid agent actions impossible. Agent logic as state machines: deterministic, inspectable, resumable, runs anywhere.",
   "keywords": [
     "agent",
@@ -139,6 +139,7 @@
   },
   "devDependencies": {
     "@ai-sdk/openai": "^4.0.0",
+    "@ai-sdk/typesafe-ai": "3.0.6",
     "@anthropic-ai/sdk": "^0.120.0",
     "@changesets/changelog-github": "^0.5.2",
     "@changesets/cli": "^2.31.1",
@@ -152,7 +153,7 @@
     "@opentelemetry/sdk-trace-base": "^2.10.0",
     "@types/node": "^20.19.43",
     "@types/react": "^19.2.18",
-    "ai": "^7.0.0",
+    "ai": "^7.0.113",
     "ajv": "^8.20.0",
     "braintrust": "^3.28.0",
     "dotenv": "^16.6.1",

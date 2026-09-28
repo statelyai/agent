@@ -1,9 +1,22 @@
 import { expect, test } from "vitest";
 import { type AgentRequestExecutors, type ChosenEvent } from "@statelyai/agent";
 import { lintAgentMachine, simulateAgent } from "@statelyai/agent/testing";
+import { createMockJudge } from "../mock-judge.js";
 import { MAX_LOOKUPS, runRetrofitExample, supportMachine } from "./index.js";
 
-const TRIAGE = { category: "refund", sentiment: "neutral", summary: "Damaged item refund" };
+/**
+ * The triage judgment's output, scripted for `simulateAgent` (which runs no
+ * live actors): Jev's two `choice` answers.
+ */
+const TRIAGE = {
+  answers: {
+    category: { type: "choice", choice: "refund" },
+    sentiment: { type: "choice", choice: "neutral" },
+  },
+};
+
+/** The same triage through a mock evaluation model, for `runRetrofitExample`. */
+const triageJev = () => createMockJudge({ category: "refund", sentiment: "neutral" });
 
 // ─── (a) the final machine is structurally sound ───
 
@@ -17,7 +30,6 @@ test("preserves behavior: happy path — lookup then a small refund settles", as
   const result = await simulateAgent(supportMachine, {
     input: { ticket: "Refund order A1001, arrived damaged." },
     script: {
-      text: { triageTicket: [TRIAGE] },
       // Same two moves the loop's tool dispatch would take: look up, then refund.
       decisions: {
         "agent.decide": [
@@ -26,7 +38,10 @@ test("preserves behavior: happy path — lookup then a small refund settles", as
         ],
       },
       // The lookupOrder actor's output, scripted (no live actor in simulation).
-      invokes: { lookupOrder: ["Order A1001: Standing desk, $240, Ada Lovelace"] },
+      invokes: {
+        triageTicket: [TRIAGE],
+        lookupOrder: ["Order A1001: Standing desk, $240, Ada Lovelace"],
+      },
     },
   });
 
@@ -40,10 +55,10 @@ test("preserves behavior: escalation path — a large refund pauses for approval
   const result = await simulateAgent(supportMachine, {
     input: { ticket: "Refund order A1001 for $5000." },
     script: {
-      text: { triageTicket: [TRIAGE] },
       // The old `if (amount > 100)` branch: the guard routes this to the pause,
       // not a direct refund — enforced by construction, not by prompt.
       decisions: { "agent.decide": [{ type: "REFUND", amount: 5000, reason: "big" }] },
+      invokes: { triageTicket: [TRIAGE] },
     },
   });
 
@@ -54,17 +69,11 @@ test("preserves behavior: escalation path — a large refund pauses for approval
 
 // ─── (c) a mock-executor run reaches the expected final state ───
 
-// Mock host: `generateText` answers the triage request; `decide` plays scripted
-// chosen events. Only the model calls are mocked; the machine is real.
-function mockExecutors(
-  events: ChosenEvent[],
-): Pick<AgentRequestExecutors, "generateText" | "decide"> {
+// Mock host: `decide` plays scripted chosen events (triage is the Jev mock).
+// Only the model calls are mocked; the machine is real.
+function mockExecutors(events: ChosenEvent[]): Pick<AgentRequestExecutors, "decide"> {
   const queue = [...events];
   return {
-    generateText: async (request: { name?: string }) => {
-      if (request.name === "triageTicket") return { result: TRIAGE };
-      throw new Error(`unexpected generateText request: ${request.name}`);
-    },
     decide: async () => ({ event: queue.shift()! }),
   };
 }
@@ -73,7 +82,6 @@ test("the lookup loop is bounded by MAX_LOOKUPS", async () => {
   const result = await simulateAgent(supportMachine, {
     input: { ticket: "Where is order A1001?" },
     script: {
-      text: { triageTicket: [TRIAGE] },
       // The model keeps asking for lookups; after MAX_LOOKUPS the transition is
       // no longer taken, so the decision has to commit to an outcome.
       decisions: {
@@ -84,6 +92,7 @@ test("the lookup loop is bounded by MAX_LOOKUPS", async () => {
         ],
       },
       invokes: {
+        triageTicket: [TRIAGE],
         lookupOrder: [
           "Order A1001: Standing desk, $240, Ada Lovelace",
           "Order A1001: Standing desk, $240, Ada Lovelace",
@@ -101,6 +110,7 @@ test("mock run reaches the refunded final state", async () => {
   const result = await runRetrofitExample({
     ticket: "Refund order B2002, $60.",
     executors: mockExecutors([{ type: "REFUND", amount: 60, reason: "defective" }]),
+    judge: triageJev().model,
   });
 
   expect(result.settledIdle).toBe(false);
@@ -114,6 +124,7 @@ test("mock run: large refund settles idle, then APPROVE resumes to refunded", as
     ticket: "Refund order A1001, $5000.",
     approve: true,
     executors: mockExecutors([{ type: "REFUND", amount: 5000, reason: "damaged" }]),
+    judge: triageJev().model,
   });
 
   expect(result.settledIdle).toBe(true);
@@ -123,4 +134,30 @@ test("mock run: large refund settles idle, then APPROVE resumes to refunded", as
   expect(result.refunded).toBe(true);
   expect(result.resolution).toContain("after approval");
   expect(result.progress.at(-1)).toBe("refunded");
+});
+
+test("triage asks Jev two choices over the ticket, and the decision reads the labels", async () => {
+  const jev = createMockJudge({ category: "complaint", sentiment: "negative" });
+  const prompts: string[] = [];
+  const result = await runRetrofitExample({
+    ticket: "The keyboard from order B2002 double-types. Very annoying.",
+    judge: jev.model,
+    executors: {
+      decide: async (request) => {
+        prompts.push(request.prompt ?? "");
+        return { event: { type: "RESOLVE", message: "Sending a replacement." } };
+      },
+    },
+  });
+
+  expect(jev.calls).toHaveLength(1);
+  const call = jev.calls[0]!;
+  expect(call.state).toEqual({
+    ticket: "The keyboard from order B2002 double-types. Very annoying.",
+  });
+  expect(Object.keys(call.questions)).toEqual(["category", "sentiment"]);
+  expect(Object.values(call.questions).every((question) => question.type === "choice")).toBe(true);
+  expect(prompts[0]).toContain('"category":"complaint"');
+  expect(prompts[0]).toContain('"sentiment":"negative"');
+  expect(result.progress.at(-1)).toBe("resolved");
 });

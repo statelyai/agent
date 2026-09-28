@@ -1,20 +1,60 @@
 import { expect, test } from "vitest";
+import type { AgentRequestExecutors } from "@statelyai/agent";
 import type { Snapshot } from "xstate";
 import { resumeScenarioRun, startScenarioRun } from "./agent-runner";
 import { cases, runCase, runComparison } from "./email-drafter-compare";
-import { scriptedExecutorsFor } from "./scripted-executors";
-import { emailDrafterV1Machine } from "@/agents/email-drafter-v1";
+import { createTestJudge } from "./test-judge";
+import {
+  ASSESSMENT_THRESHOLD,
+  REQUIRED_DETAILS,
+  emailDrafterV1Machine,
+} from "@/agents/email-drafter-v1";
 import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
 
-// The scripted executors the UI runs without a key; same for both versions.
-const executors = scriptedExecutorsFor("email-drafter-v1");
+const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
+
+// v1's prompt check is a Jev judgment, scripted by rule: a detail is stated
+// when the request has an address / the word "subject"; the body always is.
+function createJudge(overrides: Parameters<typeof createTestJudge>[0] = {}) {
+  const hasTo = (state: { request: string }) => EMAIL.test(state.request);
+  const namesSubject = (state: { request: string }) => /subject/i.test(state.request);
+  return createTestJudge({
+    satisfied: (state) => (hasTo(state) && namesSubject(state) ? 0.9 : 0.1),
+    recipient: (state) => (hasTo(state) ? 0.9 : 0.1),
+    subject: (state) => (namesSubject(state) ? 0.9 : 0.1),
+    body: 0.9,
+    ...overrides,
+  });
+}
+const judge = createJudge();
+
+// A rule-based stand-in model, the same for both versions: the follow-up
+// writer asks one question per missing detail; the drafter copies the request
+// into the body and leaves the subject blank when asked for none.
+const executors: Partial<AgentRequestExecutors> = {
+  generateText: async (request) => {
+    const text = request.prompt ?? "";
+    if (request.name === "writeFollowUps") {
+      const missing = text.match(/^Missing: (.*)$/m)?.[1]?.split(", ") ?? [];
+      return { result: { questions: missing.map((field) => `What is the ${field}?`) } };
+    }
+    const to = text.match(EMAIL)?.[0] ?? "";
+    const namesSubject = /subject/i.test(text);
+    const subject = /\bno subject\b/i.test(text) ? "" : "Re: your request";
+    const openQuestions = [
+      ...(to ? [] : ["Who should this go to?"]),
+      ...(subject && namesSubject ? [] : ["What subject line do you want?"]),
+    ];
+    return { result: { to, subject, body: text, openQuestions } };
+  },
+};
 
 const optionalCase = cases.find((entry) => entry.id === "optional-1")!;
 const recipientCase = cases.find((entry) => entry.id === "recipient-1")!;
 
 test("v1 asks before drafting when only optional details are missing; v2 drafts first", async () => {
-  const v1 = await runCase(emailDrafterV1Machine, optionalCase, executors);
-  const v2 = await runCase(emailDrafterV2Machine, optionalCase, executors);
+  const v1 = await runCase(emailDrafterV1Machine, optionalCase, executors, judge.model);
+  const v2 = await runCase(emailDrafterV2Machine, optionalCase, executors, judge.model);
 
   expect(v1.clarificationTurns).toBeGreaterThan(0);
   expect(v1.path).toContain("needsMoreInfo");
@@ -28,13 +68,12 @@ test("v1 asks before drafting when only optional details are missing; v2 drafts 
 
 test("v2 moves the recipient check to the send boundary and never sends without one", async () => {
   const start = (id: "email-drafter-v2", prompt: string) =>
-    startScenarioRun(id, prompt, "script", undefined, executors);
+    startScenarioRun(id, prompt, undefined, executors);
   const resume = (snapshot: unknown, event: { type: string; [key: string]: unknown }) =>
     resumeScenarioRun(
       "email-drafter-v2",
       snapshot as Snapshot<unknown>,
       event,
-      "script",
       undefined,
       executors,
     );
@@ -79,16 +118,18 @@ test("v1 'draft anyway' cannot send without a recipient; SEND asks instead", asy
       "email-drafter-v1",
       snapshot as Snapshot<unknown>,
       event,
-      "script",
       undefined,
       executors,
+      undefined,
+      judge.model,
     );
   const asked = await startScenarioRun(
     "email-drafter-v1",
     recipientCase.prompt,
-    "script",
     undefined,
     executors,
+    undefined,
+    judge.model,
   );
   const reviewing = await resume(asked.idle!.snapshot, { type: "DRAFT_ANYWAY" });
   expect(reviewing.status).toBe("idle");
@@ -99,7 +140,7 @@ test("v1 'draft anyway' cannot send without a recipient; SEND asks instead", asy
   expect(askedAgain.idle?.prompt).toContain("Who should this go to?");
   expect(askedAgain.idle?.events.map((event) => event.type)).toEqual(["MORE_INFO", "DRAFT_ANYWAY"]);
 
-  // MORE_INFO re-evaluates and re-drafts; the scripted drafter picks the address up.
+  // MORE_INFO re-evaluates and re-drafts; the stub drafter picks the address up.
   const redrafted = await resume(askedAgain.idle!.snapshot, {
     type: "MORE_INFO",
     text: "Recipient: alex@example.com. Subject: Coffee on Thursday.",
@@ -108,27 +149,6 @@ test("v1 'draft anyway' cannot send without a recipient; SEND asks instead", asy
   const done = await resume(redrafted.idle!.snapshot, { type: "SEND" });
   expect(done.status).toBe("done");
   expect(done.response).toContain("alex@example.com");
-});
-
-test("scripted mode reads an angle-bracketed address, so v2 sends without asking", async () => {
-  const reviewing = await startScenarioRun(
-    "email-drafter-v2",
-    "Email <priya@example.com>, subject 'Hi', saying the deck is ready.",
-    "script",
-    undefined,
-    executors,
-  );
-  expect(reviewing.status).toBe("idle");
-  expect(reviewing.response).toContain("**To:** priya@example.com");
-  const sent = await resumeScenarioRun(
-    "email-drafter-v2",
-    reviewing.idle!.snapshot as unknown as Snapshot<unknown>,
-    { type: "SEND" },
-    "script",
-    undefined,
-    executors,
-  );
-  expect(sent.status).toBe("done");
 });
 
 test("a request that errors still counts as a model call, with no token total", async () => {
@@ -157,9 +177,10 @@ test("v1 idle label surfaces the evaluator's questions", async () => {
   const first = await startScenarioRun(
     "email-drafter-v1",
     recipientCase.prompt,
-    "script",
     undefined,
     executors,
+    undefined,
+    judge.model,
   );
   expect(first.status).toBe("idle");
   expect(first.idle?.prompt).toContain("What is the recipient?");
@@ -167,12 +188,12 @@ test("v1 idle label surfaces the evaluator's questions", async () => {
 });
 
 test("the comparison holds the send rule for both versions and v2 asks less", async () => {
-  const [v1, v2] = await runComparison(executors);
+  const [v1, v2] = await runComparison(executors, cases, judge.model);
   expect(v1?.machine).toBe("v1");
   expect(v2?.machine).toBe("v2");
 
   for (const summary of [v1!, v2!]) {
-    // Scripted executors report no usage, so no total is claimed.
+    // The stub reports no usage, so no total is claimed.
     expect(summary.totals.totalTokens).toBeNull();
     expect(summary.totals.sendRuleViolations).toBe(0);
     expect(summary.totals.sent).toBe(cases.length);
@@ -180,6 +201,9 @@ test("the comparison holds the send rule for both versions and v2 asks less", as
   }
   expect(v2!.totals.clarificationTurns).toBeLessThan(v1!.totals.clarificationTurns);
   expect(v2!.totals.modelCalls).toBeLessThan(v1!.totals.modelCalls);
+  // v1's completeness check is a Jev judgment on every pass; v2 has none.
+  expect(v1!.totals.jevCalls).toBeGreaterThanOrEqual(cases.length);
+  expect(v2!.totals.jevCalls).toBe(0);
 
   // The weighted graph: v1's clarification loop shows up as traversed edges;
   // v2 has no such edges to traverse.
@@ -196,7 +220,6 @@ test("v2 offers 'Add subject' in SEND's place, and sending stays a separate deci
       "email-drafter-v2",
       snapshot as Snapshot<unknown>,
       event,
-      "script",
       undefined,
       executors,
     );
@@ -204,7 +227,6 @@ test("v2 offers 'Add subject' in SEND's place, and sending stays a separate deci
   const reviewing = await startScenarioRun(
     "email-drafter-v2",
     "Email jenny@example.com about coffee after my talk on Thursday, no subject line.",
-    "script",
     undefined,
     executors,
   );
@@ -242,7 +264,6 @@ test("a sent email drops the open questions; a draft still shows them", async ()
   const reviewing = await startScenarioRun(
     "email-drafter-v2",
     optionalCase.prompt,
-    "script",
     undefined,
     executors,
   );
@@ -252,7 +273,6 @@ test("a sent email drops the open questions; a draft still shows them", async ()
     "email-drafter-v2",
     reviewing.idle!.snapshot as unknown as Snapshot<unknown>,
     { type: "SEND" },
-    "script",
     undefined,
     executors,
   );
@@ -268,21 +288,53 @@ test("v1 SEND with no subject asks, the same way it asks for a recipient", async
       "email-drafter-v1",
       snapshot as Snapshot<unknown>,
       event,
-      "script",
       undefined,
       executors,
+      undefined,
+      judge.model,
     );
   const reviewing = await startScenarioRun(
     "email-drafter-v1",
     "Email jenny@example.com about coffee after my talk on Thursday, no subject line.",
-    "script",
     undefined,
     executors,
+    undefined,
+    judge.model,
   );
   expect(reviewing.status).toBe("idle");
   expect(reviewing.response).toContain("(no subject yet)");
 
   const asked = await resume(reviewing.idle!.snapshot, { type: "SEND" });
   expect(asked.idle?.prompt).toContain("What should the subject line be?");
+  expect(asked.idle?.events.map((event) => event.type)).toEqual(["MORE_INFO", "DRAFT_ANYWAY"]);
+});
+
+test("v1's prompt check is one Jev call, and ASSESSMENT_THRESHOLD decides the branch", async () => {
+  const prompt = cases.find((entry) => entry.id === "complete-1")!.prompt;
+  const start = (scripted: ReturnType<typeof createJudge>) =>
+    startScenarioRun("email-drafter-v1", prompt, undefined, executors, undefined, scripted.model);
+
+  // At the threshold a detail counts as stated: straight to review.
+  const sure = createJudge({ recipient: ASSESSMENT_THRESHOLD });
+  const reviewing = await start(sure);
+  expect(reviewing.idle?.events.map((event) => event.type)).toEqual(["REQUEST_CHANGES", "SEND"]);
+
+  // The evidence is named state; the questions are four boolean questions in one call.
+  expect(sure.calls).toHaveLength(1);
+  expect(sure.calls[0]!.state).toEqual({ request: prompt, requiredDetails: REQUIRED_DETAILS });
+  expect(
+    Object.entries(sure.calls[0]!.questions).map(([name, question]) => [name, question.type]),
+  ).toEqual([
+    ["satisfied", "boolean"],
+    ["recipient", "boolean"],
+    ["subject", "boolean"],
+    ["body", "boolean"],
+  ]);
+
+  // Just under it, the same request asks about that one detail.
+  const unsure = createJudge({ recipient: ASSESSMENT_THRESHOLD - 0.01 });
+  const asked = await start(unsure);
+  expect(asked.idle?.prompt).toContain("What is the recipient?");
+  expect(asked.idle?.prompt).not.toContain("What is the subject?");
   expect(asked.idle?.events.map((event) => event.type)).toEqual(["MORE_INFO", "DRAFT_ANYWAY"]);
 });

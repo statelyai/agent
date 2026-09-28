@@ -229,23 +229,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-.key-badge {
-  flex: none;
-  padding: 2px 7px;
-  color: var(--primary-ink);
-  border-radius: 99px;
-  background: var(--primary-soft);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.key-badge--needs {
-  color: var(--quiet);
-  border: 1px solid var(--line);
-  background: transparent;
-}
-
 .site-header__spacer {
   flex: 1;
 }

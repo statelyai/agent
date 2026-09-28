@@ -2,18 +2,12 @@
  * Host wiring shared by both route handlers: the executors a run uses, and
  * (env-gated) live inspection.
  *
- * Executors are key-gated by `resolveExecutors()`: a real model when
- * `OPENAI_API_KEY` is set, and otherwise `createScriptedExecutors` replaying
- * canned answers, so `pnpm dev` boots and the whole approve/reject flow works
- * with no API key and no network.
- *
- * A fresh script per request is deliberate: the queues are consumed FIFO, so a
- * module-level singleton would run dry on the second run.
+ * Executors are the real model: set `OPENAI_API_KEY` before `pnpm dev`.
+ * Without it, `resolveExecutors()` throws naming the missing variable, so a
+ * run fails loudly instead of answering with something that is not a model.
  */
 import { openai } from "@ai-sdk/openai";
 import { type AgentRequestExecutors } from "@statelyai/agent";
-import { createScriptedExecutors } from "@statelyai/agent/testing";
-import type { AgentTextRequest } from "@statelyai/agent";
 import { type AiSdkModelMap, createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import type { Inspector } from "@statelyai/sdk/inspect";
 
@@ -22,24 +16,12 @@ export const models: AiSdkModelMap<"writer"> = {
   writer: openai("gpt-6-luna"),
 };
 
-/** The scripted stand-in for the `writeDraft` request, as a function of it. */
-const writeDraft = (request: AgentTextRequest): string => {
-  const topic = (request.input as { topic: string }).topic;
-  return `Big news: ${topic.split("\n")[0]} just shipped.`;
-};
-
-/**
- * Scripted executors for one request, keyed by request NAME. The last entry for
- * a name repeats, so the same function answers every redraft a REJECT triggers
- * — the machine's own rejection budget bounds the loop.
- */
-export function createExecutors(): Partial<AgentRequestExecutors> {
-  return createScriptedExecutors({ text: { writeDraft } });
-}
-
-/** Real models when `OPENAI_API_KEY` is set, scripted playback otherwise. */
+/** The real model executors; throws when `OPENAI_API_KEY` is not set. */
 export function resolveExecutors(): Partial<AgentRequestExecutors> {
-  return process.env.OPENAI_API_KEY ? createAiSdkExecutors({ models }) : createExecutors();
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Set OPENAI_API_KEY to run the next-host example.");
+  }
+  return createAiSdkExecutors({ models });
 }
 
 // ─── Live inspection (opt-in) ───
