@@ -182,7 +182,7 @@ export interface SeamSlice {
 
 /** Options for {@link runSeam}. */
 export interface RunSeamOptions<TMachine extends AnyStateMachine> {
-  /** Machine input, passed straight through to `runAgent`. */
+  /** Machine input, passed straight through to `runToQuiescence`. */
   input?: InputFrom<TMachine>;
   /**
    * The call plan: scripted answers per key, consumed in order. A key is a
@@ -225,14 +225,14 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
    * Text slots are always owned by the routing.
    */
   executors?: Partial<AgentRequestExecutors>;
-  /** Passed through to `runAgent`: actor implementations merged onto the machine. */
+  /** Passed through to `createAgentRuntime`: actor implementations merged onto the machine. */
   actors?: (AgentRuntimeOptions<TMachine> & AgentRunInit<TMachine>)["actors"];
 }
 
 /** What {@link runSeam} returns: the seam's own answer, plus the run it caused. */
 export interface RunSeamResult<TMachine extends AnyStateMachine> {
   /**
-   * The final `runAgent` result. `usage` accounts for the last leg.
+   * The final `runToQuiescence` result. `usage` accounts for the last leg.
    */
   result: AgentRunResult<TMachine>;
   /** What the seam call returned, or `undefined` when the run never reached it. */

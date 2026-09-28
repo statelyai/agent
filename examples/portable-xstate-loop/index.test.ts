@@ -1,8 +1,7 @@
 import { expect, test } from "vitest";
-import { isAgentIdle, provideExecutors } from "@statelyai/agent";
-import { portableLoopMachine, runPortableXstateLoop } from "./index.js";
+import { handleTurn, runPortableXstateLoop } from "./index.js";
 
-test("runs one artifact through XState's transition/effect loop, across a persistence boundary", async () => {
+test("runs one artifact across a persistence boundary, one stateless turn at a time", async () => {
   const prompts: string[] = [];
   const result = await runPortableXstateLoop("snapshots", {
     generateText: async (request) => {
@@ -15,28 +14,23 @@ test("runs one artifact through XState's transition/effect loop, across a persis
   expect(result).toEqual({
     draft: "Snapshots make continuation explicit.",
     failure: null,
-    // The APPROVE was delivered to a second durable execution, rehydrated from
-    // the JSON snapshot — not to the one that produced the draft.
+    // The APPROVE was delivered to a second runtime, rehydrated from the JSON
+    // snapshot — not to the one that produced the draft.
     resumedFromSnapshot: true,
   });
 });
 
-test("the loop's stop condition is `isAgentIdle`, and `reviewing` satisfies it", () => {
-  const machine = provideExecutors(portableLoopMachine, {
-    generateText: async () => ({ result: "draft" }),
-  });
-  const reviewing = machine.resolveState({
-    value: "reviewing",
-    context: { topic: "snapshots", draft: "a draft", failure: null },
-  });
-  const drafting = machine.resolveState({
-    value: "drafting",
-    context: { topic: "snapshots", draft: "", failure: null },
-  });
+test("a turn returns once nothing is in flight, with a JSON blob to store", async () => {
+  const turn = await handleTurn(
+    { input: { topic: "snapshots" } },
+    { generateText: async () => ({ result: "a draft" }) },
+  );
 
-  expect(isAgentIdle(reviewing)).toBe(true);
-  // `drafting` accepts no external event: it is working, not waiting.
-  expect(isAgentIdle(drafting)).toBe(false);
+  expect(turn.status).toBe("paused");
+  if (turn.status !== "paused") throw new Error("expected a pause");
+  const stored = JSON.parse(turn.stored) as { value: unknown; context: { draft: string } };
+  expect(stored.value).toBe("reviewing");
+  expect(stored.context.draft).toBe("a draft");
 });
 
 test("a failing request ends in `failed` instead of hanging the loop", async () => {

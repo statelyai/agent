@@ -125,7 +125,7 @@ export interface AgentEventDescriptor {
 /** Registered schemas, as attached to a machine by `setupAgent`/`createAgentSchemas`. */
 export interface AgentSchemas {
   events?: Record<string, StandardSchemaV1>;
-  /** Machine input schema; `runAgent` validates `options.input` against it. */
+  /** Machine input schema; the runtime validates the run's `input` against it. */
   input?: StandardSchemaV1;
 }
 
@@ -151,7 +151,7 @@ export type ParsedAgentEvent<TSource> = TSource extends AnyStateMachine
 /**
  * Parses a wire payload (a request body, a socket frame) into an
  * event typed as the machine's event union, so it can go straight to
- * `runAgent({ event })` / `actor.send(...)` without a cast. Pass the machine
+ * `runToQuiescence(runtime, { event })` / `actor.send(...)` without a cast. Pass the machine
  * itself, or any snapshot of it.
  *
  * It checks exactly what a schema can check: the payload is an object with a
@@ -168,7 +168,8 @@ export type ParsedAgentEvent<TSource> = TSource extends AnyStateMachine
  * @example
  * ```ts
  * const event = parseAgentEvent(machine, await request.json());
- * const result = await runAgent(machine, { store, threadId, event, executors });
+ * const runtime = createAgentRuntime(machine, { store, threadId, executors });
+ * const result = await runToQuiescence(runtime, { event });
  * ```
  */
 export function parseAgentEvent<TSource extends AnyStateMachine | AnyMachineSnapshot>(

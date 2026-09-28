@@ -3,7 +3,7 @@
  * external inputs a machine consumed, the pure `replay` fold that rebuilds a
  * snapshot from it, and the store contract a host implements to persist it.
  *
- * `runAgent({ store, threadId })` drives all of this for you. Import from
+ * `createAgentRuntime(machine, { store, threadId })` drives all of this for you. Import from
  * here when you build log entries by hand, replay a log outside a run, fork
  * a thread, or test a store implementation.
  * @module

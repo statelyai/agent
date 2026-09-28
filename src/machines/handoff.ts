@@ -87,10 +87,9 @@ export function transferEventType(agent: string): string {
  *   },
  * });
  *
- * const next = await runAgent(machine, {
+ * const next = await runToQuiescence(createAgentRuntime(machine, { executors }), {
  *   snapshot,
  *   event: { type: "transfer_to_food", message: "What should I eat there?" },
- *   executors,
  * });
  * ```
  */
@@ -125,7 +124,7 @@ export function createHandoffMachine<const TAgents extends Record<string, Preset
           : turnState(defaultActiveAgent),
       }),
     },
-    // No invoke: `runAgent` settles idle here until the host sends the next
+    // No invoke: the run goes quiescent (`idle`) here until the host sends the next
     // `transfer_to_*` event.
     waiting: {
       on: Object.fromEntries(
@@ -157,7 +156,7 @@ export function createHandoffMachine<const TAgents extends Record<string, Preset
 
   const machineConfig = {
     id: "handoff",
-    // Stamped by runAgent onto snapshots/logs instead of the structural hash;
+    // Stamped by the runtime onto snapshots/logs instead of the structural hash;
     // bumped only on a topology change a snapshot could not resume into.
     version: "1",
     context: ({ input }: { input: { message: string; activeAgent?: string } }) => ({

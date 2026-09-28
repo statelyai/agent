@@ -926,7 +926,7 @@ export function setupAgentFromConfig(
     ),
     ...(options.actions ? { actions: options.actions } : {}),
     // createMachineFromConfig embeds `sources.actors[src]` as the
-    // invoke's src DIRECTLY — but runAgent's executor rebinding needs srcs to
+    // invoke's src DIRECTLY — but the runtime's executor rebinding needs srcs to
     // stay string keys resolved through the machine's sources. Mapping
     // each key to itself satisfies the JSON layer's every-src-implemented
     // assertion while keeping `src` a string; the real logic is then bound via
@@ -937,7 +937,7 @@ export function setupAgentFromConfig(
     },
   }).provide({ actors });
 
-  // What setupAgent's wrapped createMachine registers for runAgent: the
+  // What setupAgent's wrapped createMachine registers for the runtime: the
   // schemas/actors this machine executes with.
   setAgentExecutionOptions(machine, { schemas, actors, models: {} });
   return { machine, schemas };
@@ -957,7 +957,7 @@ export function setupAgentFromConfig(
  */
 export interface FromConfigResult {
   machine: AnyStateMachine;
-  /** Compiled `context`/`events`/`input`/`output`/`meta`/`emitted` schemas — the same pack `runAgent` executes this machine with. */
+  /** Compiled `context`/`events`/`input`/`output`/`meta`/`emitted` schemas — the same pack `createAgentRuntime` executes this machine with. */
   schemas: AgentSchemaPack<
     StandardSchemaV1<Record<string, unknown>>,
     Record<string, StandardSchemaV1>,

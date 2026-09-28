@@ -7,7 +7,7 @@ export type AgentExecutionOptions = Pick<AgentRequestOptions, "schemas" | "actor
  * Registered execution options, keyed on BOTH the machine object and its root
  * `config` object. `config` is shared by reference across `machine.provide(...)`
  * (unlike the machine itself), so the `config` key is what lets a machine
- * rebound by `runAgent` — or by any host `.provide(...)` — still resolve the
+ * rebound by `createAgentRuntime` — or by any host `.provide(...)` — still resolve the
  * schemas/actors `setupAgent` registered. Always write through
  * {@link setAgentExecutionOptions} and read through
  * {@link getAgentExecutionOptions}.
@@ -30,7 +30,7 @@ export function setAgentExecutionOptions(machine: unknown, options: AgentExecuti
 
 /**
  * Reads the options registered for `machine`, falling back to the root `config`
- * key so a `.provide(...)`-rebound machine (e.g. the one behind a `runAgent`
+ * key so a `.provide(...)`-rebound machine (e.g. the one behind a `runToQuiescence`
  * result snapshot) resolves the same pack.
  */
 export function getAgentExecutionOptions(machine: unknown): AgentExecutionOptions | undefined {
@@ -42,11 +42,11 @@ export function getAgentExecutionOptions(machine: unknown): AgentExecutionOption
 }
 
 // Actor logic objects that are unbound placeholders (no host execution) and
-// carry no `kind` marker of their own — workflow-config actor stubs. runAgent's bind-time walk (§3.2) checks membership here to
+// carry no `kind` marker of their own — workflow-config actor stubs. createAgentRuntime's bind-time walk (§3.2) checks membership here to
 // fail fast on invokes that reach one of these unimplemented.
 export const unboundPlaceholderLogics = new WeakSet<object>();
 /** Text/decision logics created WITH their own executor (withExecutor or the
- * factory's second arg) — these are runnable as-is, so runAgent's bind check
+ * factory's second arg) — these are runnable as-is, so the runtime's bind check
  * must not reject them as direct-object invoke srcs. */
 export const executorBoundLogics = new WeakSet<object>();
 

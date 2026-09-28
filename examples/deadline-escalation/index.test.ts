@@ -1,7 +1,7 @@
 /**
  * The runner defaults to real OpenAI executors. These tests script the draft
  * at the provider with the repo's AI SDK mock, answering by request name
- * (`propose`). The test itself plays the host clock and scheduler.
+ * (`propose`). The test itself plays the host's durable timer scheduler.
  */
 import { expect, test } from "vitest";
 import { getInteraction } from "@statelyai/agent";
@@ -14,45 +14,85 @@ const executors = createMockModelExecutors({
   text: { propose: "Proposed maintenance: Saturday, 09:00 UTC." },
 });
 
-test.each([
-  ["APPROVE", "proposal-1", 999, "done", "approved"],
-  ["APPROVE", "proposal-1", 1000, "idle", undefined],
-  ["EXPIRE", "proposal-1", 999, "idle", undefined],
-  ["EXPIRE", "proposal-1", 1000, "done", "escalated"],
-  ["EXPIRE", "stale-proposal", 1001, "idle", undefined],
-  ["APPROVE", "stale-proposal", 999, "idle", undefined],
-] as const)("%s correlation=%s at %i", async (type, requestId, observedAt, status, outcome) => {
-  const pending = await runDeadlineEscalationExample({ executors });
+/** The test's durable scheduler: it records what to fire and fires nothing itself. */
+function hostTimers() {
+  const scheduled = new Map<string, number>();
+  return {
+    scheduled,
+    timers: {
+      schedule: ({ id, delay }: { id: string; delay: number }) => scheduled.set(id, delay),
+      cancel: (id: string) => scheduled.delete(id),
+    },
+  };
+}
+
+test("with host-owned timers, the run settles at the wait and hands the deadline to the host", async () => {
+  const host = hostTimers();
+  const pending = await runDeadlineEscalationExample({ executors, timers: host.timers });
   expect(pending.status).toBe("idle");
-  const result = await runDeadlineEscalationExample({
-    snapshot: JSON.parse(JSON.stringify(pending.persist())),
-    event: { type, requestId, observedAt },
+  expect([...host.scheduled.values()]).toEqual([60_000]);
+
+  // The scheduler fires into a fresh-process restore.
+  const [id] = [...host.scheduled.keys()];
+  const expired = await runDeadlineEscalationExample({
     executors,
+    timers: host.timers,
+    snapshot: JSON.parse(JSON.stringify(pending.persist())),
+    event: { type: "xstate.timer", id: id! },
+  });
+  expect(expired.status).toBe("done");
+  if (expired.status === "done") expect(expired.output.outcome).toBe("escalated");
+});
+
+test.each([
+  ["proposal-1", "done", "approved"],
+  ["stale-proposal", "idle", undefined],
+] as const)("approval for %s before the deadline", async (requestId, status, outcome) => {
+  const host = hostTimers();
+  const pending = await runDeadlineEscalationExample({ executors, timers: host.timers });
+  const result = await runDeadlineEscalationExample({
+    executors,
+    timers: host.timers,
+    snapshot: JSON.parse(JSON.stringify(pending.persist())),
+    event: { type: "APPROVE", requestId },
   });
   expect(result.status).toBe(status);
   if (result.status === "done") expect(result.output.outcome).toBe(outcome);
-  else expect(result.ignored).toEqual({ type, requestId, observedAt });
+  else expect(result.ignored).toEqual({ type: "APPROVE", requestId });
+});
+
+test("in-process timers: a script host just waits, and the deadline fires on its own", async () => {
+  const result = await runDeadlineEscalationExample({
+    executors,
+    input: { requestId: "proposal-1", task: "Schedule maintenance", windowMs: 20 },
+  });
+  expect(result.status).toBe("done");
+  if (result.status === "done") expect(result.output.outcome).toBe("escalated");
 });
 
 test("the approval wait is host-discoverable through interaction metadata", async () => {
-  const pending = await runDeadlineEscalationExample({ executors });
+  const pending = await runDeadlineEscalationExample({ executors, timers: hostTimers().timers });
   expect(pending.status).toBe("idle");
   const interaction = getInteraction(pending.snapshot);
-  expect(interaction?.label).toContain("deadline");
-  expect(interaction?.events.map((event) => event.type)).toEqual(["APPROVE", "EXPIRE"]);
+  expect(interaction?.label).toContain("approval window");
+  expect(interaction?.events.map((event) => event.type)).toEqual(["APPROVE"]);
 });
 
-test("expiry wins once applied; delayed approval cannot reopen a completed run", async () => {
-  const pending = await runDeadlineEscalationExample({ executors });
+test("expiry wins once applied; a late approval cannot reopen a completed run", async () => {
+  const host = hostTimers();
+  const pending = await runDeadlineEscalationExample({ executors, timers: host.timers });
+  const [id] = [...host.scheduled.keys()];
   const expired = await runDeadlineEscalationExample({
-    snapshot: pending.persist(),
-    event: { type: "EXPIRE", requestId: "proposal-1", observedAt: 1000 },
     executors,
+    timers: host.timers,
+    snapshot: pending.persist(),
+    event: { type: "xstate.timer", id: id! },
   });
   const late = await runDeadlineEscalationExample({
-    snapshot: expired.persist(),
-    event: { type: "APPROVE", requestId: "proposal-1", observedAt: 999 },
     executors,
+    timers: host.timers,
+    snapshot: expired.persist(),
+    event: { type: "APPROVE", requestId: "proposal-1" },
   });
   expect(late.status).toBe("done");
   if (late.status === "done") expect(late.output.outcome).toBe("escalated");

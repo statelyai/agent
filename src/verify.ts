@@ -771,7 +771,7 @@ async function applyScriptedDecision(
     return { event: dequeued[dequeued.length - 1] as ChosenEvent };
   };
 
-  // Mirror bindDecisionLogic (the runAgent path): the attempt budget is the
+  // Mirror bindDecisionLogic (the runtime path): the attempt budget is the
   // decision logic's maxRetries. The invoke's own logic wins (covers
   // direct-object srcs), then the registered actors, then `sources.actors`
   // (which survives `machine.provide(...)`, whose product the registry may

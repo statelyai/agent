@@ -114,6 +114,7 @@ export type {
   AgentRunStart,
   AgentRuntime,
   AgentRuntimeOptions,
+  AgentTimerEvent,
   AgentTimerScheduler,
 } from "./run-agent.js";
 export type {

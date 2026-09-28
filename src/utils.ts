@@ -112,7 +112,7 @@ export function findNonSerializableContextPaths(context: unknown, limit = 5): st
  * their prompts or executors hash identically; adding/removing/retargeting a
  * state or transition changes the hash.
  *
- * Used by {@link runAgent} to stamp settled snapshots with a `version` and to
+ * Used by {@link createAgentRuntime} to stamp settled snapshots with a `version` and to
  * detect a structurally-edited machine on resume. It is a change detector, not
  * a cryptographic digest — collisions are possible but unlikely for real
  * configs. Declare `createMachine({ version })` to pin an explicit version instead.
@@ -124,7 +124,7 @@ export function getMachineStructuralHash(machine: AnyStateMachine): string {
 /**
  * The version a machine is stamped with everywhere: an explicitly declared
  * `createMachine({ version })` when present, else its
- * {@link getMachineStructuralHash}. Single source of truth so `runAgent`,
+ * {@link getMachineStructuralHash}. Single source of truth so `createAgentRuntime`,
  * `provideExecutors`/`traceTransitions` trace envelopes agree.
  * @internal
  */

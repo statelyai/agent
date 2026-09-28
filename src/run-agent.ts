@@ -91,7 +91,7 @@ type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string
 // mailbox. The host writes the loop; `runToQuiescence` is the blocking one.
 
 /**
- * Thrown by {@link runAgent} when a resume is given BOTH an `events` log and a
+ * Thrown by {@link AgentRuntime.start} when a resume is given BOTH an `events` log and a
  * `snapshot` that claims a position in that log (`agentMeta.logIndex`), and the
  * two disagree about the state at that position. The log is the source of
  * truth, so this is a host bug (a snapshot cached from a different lineage, or
@@ -150,7 +150,7 @@ function readAgentMeta(snapshot: unknown): Partial<AgentRunMeta> | undefined {
   return meta !== null && typeof meta === "object" ? (meta as Partial<AgentRunMeta>) : undefined;
 }
 
-/** Typed root-machine transition observer accepted by {@link runAgent}. */
+/** Typed root-machine transition observer accepted by {@link createAgentRuntime}. */
 export type AgentTransitionHandler<TMachine extends AnyStateMachine> = (
   snapshot: SnapshotFrom<TMachine>,
   event: EventFromLogic<TMachine>,
@@ -160,7 +160,7 @@ export type AgentTransitionHandler<TMachine extends AnyStateMachine> = (
  * The version of the {@link AgentTraceEvent} envelope every trace event carries
  * as `schemaVersion`. Bumped only on a breaking change to the envelope or any
  * payload shape, so a consumer can gate on it. Emitted identically by
- * {@link runAgent}, {@link provideExecutors}' `onTrace`, and
+ * {@link createAgentRuntime}, {@link provideExecutors}' `onTrace`, and
  * {@link traceTransitions}.
  */
 export const AGENT_TRACE_SCHEMA_VERSION = 1;
@@ -417,10 +417,12 @@ type AgentTraceEventPayload<TMachine extends AnyStateMachine = AnyStateMachine> 
     : never;
 
 /**
- * Options for {@link runAgent}.
+ * Options for {@link createAgentRuntime}: what the runtime binds and observes.
+ * The run's `input`/`snapshot`/`events` go to {@link AgentRuntime.start} (or
+ * {@link runToQuiescence}) instead.
  *
  * Host executors are passed as a single {@link AgentRequestExecutors}-shaped
- * set under `executors` (the same shape the step path takes). Each executor
+ * set under `executors`. Each executor
  * kind is required only if the machine actually reaches a request of that kind
  * — checked at bind time, before any actor runs. The whole `executors` field is
  * optional: a machine whose agent sources all carry their own executor
@@ -431,7 +433,7 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * The host executor set backing the machine's agent actors — build it with
    * `createAiSdkExecutors({ models })` from '@statelyai/agent/ai-sdk', or supply
    * `{ generateText?, streamText?, decide? }` by hand. Every slot is optional
-   * here (unlike the step path's {@link AgentRequestExecutors}): each kind is
+   * here: each kind is
    * bind-time-checked only when the machine actually reaches a request of that
    * kind, so e.g. a stream-only machine may pass `{ streamText }` alone.
    */
@@ -541,12 +543,13 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
 }
 
 /**
- * The outcome of a {@link runAgent} call — always exactly one of three
- * variants, never a throw for a waiting or failed machine (programmer
- * errors like a missing executor still throw, at bind time before any actor
- * runs). `done`: a final state was reached (`output` is the machine's
- * `OutputFrom`). `idle`: the run settled with no in-flight work — resume by
- * calling `runAgent` again with `{ snapshot, event }`. `error`: a run-level
+ * The outcome of a run ({@link AgentRuntime.finish} / {@link runToQuiescence})
+ * — always exactly one of three variants, never a throw for a waiting or
+ * failed machine (programmer errors like a missing executor still throw,
+ * synchronously from {@link createAgentRuntime} before any actor runs).
+ * `done`: a final state was reached (`output` is the machine's `OutputFrom`).
+ * `idle`: the run went quiescent (no child, request or in-process timer in
+ * flight) — resume with a new runtime and `{ snapshot, event }`. `error`: a run-level
  * failure, discriminated by `cause` (`'aborted'`, `'max-model-calls'`,
  * `'decision-exhausted'`, `'machine'` for any other machine error state, or
  * `'stopped'` for an external stop — see {@link AgentRunErrorCause}). Every
@@ -749,12 +752,12 @@ export function isStateMachineLogic(logic: unknown): logic is AnyStateMachine {
 
 /**
  * Fails fast (throws) at bind time — before any actor runs — when the
- * machine invokes an agent actor `runAgent` cannot execute. See §3.2 point 2.
+ * machine invokes an agent actor the runtime cannot execute. See §3.2 point 2.
  *
  * Recurses into invoked child state machines (arbitrarily deep). A child
  * machine's agent requests reached through string-keyed invoke srcs DO inherit
- * the parent runAgent's `generateText`/`streamText`/`decide` executors —
- * runAgent rebinds them with the same host-backed wrappers (see
+ * the parent run's `generateText`/`streamText`/`decide` executors —
+ * the runtime rebinds them with the same host-backed wrappers (see
  * {@link rebindChildMachine}) — so the only remaining bind-time errors are: a
  * required executor kind missing entirely (naming the invoke chain and src),
  * and an unbound request reached through a direct-object invoke src that can't
@@ -778,7 +781,7 @@ function assertBindable(
 /** Recursion frame for {@link assertBindable}. `isChild` flips the error
  * messages to name the child invoke chain; `childPath` names that chain
  * (`parent > child`); `rebindable` is true while every link back to the root
- * is a string-keyed source (so runAgent can rebind the request with its own
+ * is a string-keyed source (so the runtime can rebind the request with its own
  * executors) and false once a direct-object invoke src is crossed (those
  * cannot be swapped via `.provide`, so an unbound request under one must
  * carry its own executor); `visited` guards against a machine invoking itself
@@ -808,7 +811,7 @@ function assertMachineBindable(
         assertChildMachineBindable(src, src, stateName, executors, ctx);
         continue;
       }
-      // string-keyed sources can be rebound by runAgent; direct objects
+      // string-keyed sources can be rebound by the runtime; direct objects
       // cannot. Only a problem if it's an agent logic that still needs
       // execution (no executor of its own).
       if ((isTextLogic(src) || isDecisionLogic(src)) && !executorBoundLogics.has(src as object)) {
@@ -859,7 +862,7 @@ function assertMachineBindable(
 
     if (isTextLogic(logic)) {
       // A text source with its own bound executor (`.withExecutor(...)`) needs
-      // no runAgent executor — it runs itself.
+      // no host executor — it runs itself.
       if (executorBoundLogics.has(logic as object)) {
         continue;
       }
@@ -923,7 +926,7 @@ function assertChildMachineBindable(
 
   // A child is rebindable only when it is reached through string-keyed invoke
   // srcs all the way from the root: those can be swapped via `.provide`, so
-  // runAgent rebinds the child's unbound requests with its own executors. A
+  // the runtime rebinds the child's unbound requests with its own executors. A
   // direct-object invoke src (typeof childSrc !== "string") can't be swapped,
   // so nothing under it inherits.
   const rebindable = ctx.rebindable && typeof childSrc === "string";
@@ -937,11 +940,11 @@ function assertChildMachineBindable(
 }
 
 /** The loud bind-time error for an unbound agent request reached under a
- * direct-object invoke src, which runAgent cannot rebind (only string-keyed
+ * direct-object invoke src, which the runtime cannot rebind (only string-keyed
  * sources can be swapped via `.provide`). Names the invoke chain AND the
  * request src, and spells out the `.withExecutor`/string-keyed remedy. Note:
  * requests reachable through string-keyed srcs at any depth DO inherit
- * runAgent's executors — this error is only for the unrebindable direct-object
+ * the runtime's executors — this error is only for the unrebindable direct-object
  * case. */
 function unrebindableChildRequestError(
   childPath: string,
@@ -964,7 +967,7 @@ function unrebindableChildRequestError(
 /** Attribution a call site attaches to the reserved `@agent.usage` event it reports — everything on {@link AgentUsageEvent} except the type and the tokens. @internal */
 type AgentUsageEventSource = Omit<AgentUsageEvent, "type" | "usage">;
 
-// Shared state closed over by every wrapped actor source in one runAgent call: executors, observation callbacks, and the shared model-call budget/actor ref.
+// Shared state closed over by every wrapped actor source in one run: executors, observation callbacks, and the shared model-call budget/actor ref.
 /** @internal */
 interface RunAgentBindContext {
   generateText?: AgentRequestExecutor;
@@ -975,7 +978,7 @@ interface RunAgentBindContext {
    * the shared emission helpers hand it a bare {@link AgentTraceEventPayload}
    * plus the emitting actor's `self` (the invoked async leaf), and it fans out
    * to the trace sink and to the sugar callbacks derived from that payload.
-   * `runAgent` ignores `self` and stamps a run-scoped envelope;
+   * `createAgentRuntime` ignores `self` and stamps a run-scoped envelope;
    * `provideExecutors` uses it to mint a per-root-actor envelope (see
    * `provideTraceSink`). Undefined when nothing observes.
    */
@@ -989,7 +992,7 @@ interface RunAgentBindContext {
    *
    * `self` is the settling request's own actor ref; the `provideExecutors`
    * path reads the invoking machine actor off it (`self._parent`) because it
-   * has no run-scoped root actor. `runAgent` ignores it and delivers to the
+   * has no run-scoped root actor. `createAgentRuntime` ignores it and delivers to the
    * run's root.
    */
   recordUsage?: (
@@ -997,7 +1000,7 @@ interface RunAgentBindContext {
     source?: AgentUsageEventSource,
     self?: BoundActorSelf,
   ) => void;
-  /** The owning run's id (`run_<n>`), threaded to executors as `info.runId`. Unset off the runAgent path. */
+  /** The owning run's id (`run_<n>`), threaded to executors as `info.runId`. Unset off the runtime path. */
   runId?: string;
   /**
    * Mints the per-call idempotency key threaded to executors as
@@ -1005,7 +1008,7 @@ interface RunAgentBindContext {
    * leaf actor (`self`), so every attempt of one decision invoke shares this
    * invoke-level key; the decision wrap appends the attempt ordinal
    * (`…#${n}.${attempts.length}`) so retries do not collide in a cache.
-   * Unset off the runAgent path, and when the log has no `executionId`.
+   * Unset off the runtime path, and when the log has no `executionId`.
    */
   callKey?: (siteId: string, self?: object) => string | undefined;
   /**
@@ -1013,7 +1016,7 @@ interface RunAgentBindContext {
    * executor invocation, so no paid call is made against a log that is not yet
    * durable. Resolves immediately when the run has no
    * {@link AgentRuntimeOptions.store}; rejects with the journal's failure once a
-   * write has rejected. Unset off the runAgent path.
+   * write has rejected. Unset off the runtime path.
    */
   awaitJournal?: () => Promise<void>;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
@@ -1051,7 +1054,7 @@ type TraceDispatch = (payload: AgentTraceEventPayload, self?: BoundActorSelf) =>
 
 /** The observers a {@link TraceDispatch} fans one trace payload out to. @internal */
 interface TraceSinks {
-  /** Envelope-stamping trace sink (run-scoped on the runAgent path, per-root-actor on the provide path). */
+  /** Envelope-stamping trace sink (run-scoped on the runtime path, per-root-actor on the provide path). */
   onTrace?: (payload: AgentTraceEventPayload, self?: BoundActorSelf) => void;
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
   onResult?: (request: AgentStepRequest, result: { result: unknown; raw: unknown }) => void;
@@ -1130,7 +1133,7 @@ function invokingActorOf(
  * The shared text/stream emission helper: binds a {@link TextLogic} to
  * `runCtx`'s executor and constructs the `request.start` / `stream.chunk` /
  * `request.end` (incl. the lifted `reasoning`) / `request.error` trace payloads.
- * Used by both `runAgent` and `provideExecutors` so the two paths produce
+ * Used by both `createAgentRuntime` and `provideExecutors` so the two paths produce
  * identical event shapes by construction. @internal
  */
 function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic {
@@ -1304,11 +1307,11 @@ function createCountingDecide(
 }
 
 /**
- * Builds the decision actor logic runAgent installs in place of a
+ * Builds the decision actor logic the runtime installs in place of a
  * `DecisionLogic`/`agent.decide` source. `DecisionLogic.withExecutor(...)`
  * can only swap the innermost per-attempt executor — the `resolveDecision(...)`
  * call (and its `canTake`) is hardwired inside the original logic's `run`.
- * To supply `canTake` (mode-3, §2.6), runAgent instead builds a fresh async
+ * To supply `canTake` (mode-3, §2.6), the runtime instead builds a fresh async
  * logic here that calls `resolveDecision` itself, reusing `logic.request(...)`
  * to build the request the same way the original logic would have.
  *
@@ -1447,7 +1450,7 @@ function rootActorOf(self: BoundActorSelf | undefined): AnyActorRef | undefined 
   return ref;
 }
 
-/** The per-root envelope state, minted on first use (runId `run_<n>`, matching runAgent). */
+/** The per-root envelope state, minted on first use (runId `run_<n>`, matching the runtime). */
 function rootTraceState(root: AnyActorRef): RootTraceState {
   let state = rootTraceRegistry.get(root as object);
   if (!state) {
@@ -1496,7 +1499,7 @@ export interface ProvideBindOptions {
 
 /**
  * A minimal {@link RunAgentBindContext} for `provideExecutors` (uncontrolled
- * `createActor`): the same wrappers runAgent installs, MINUS the run-scoped
+ * `createActor`): the same wrappers the runtime installs, MINUS the run-scoped
  * model-call counter. `consumeModelCall` is a no-op (no budget), and
  * `actorHolder.actorRef` is left undefined — the wrappers read the invoking
  * actor off `self._parent`, always present under a live `createActor` tree.
@@ -1505,7 +1508,7 @@ export interface ProvideBindOptions {
  *
  * `recordUsage` has no run-level aggregate to fold into here (there is no
  * run), so it does one thing: deliver the reserved `@agent.usage` event, gated
- * exactly like runAgent's — see {@link deliverUsageEvent}.
+ * exactly like the runtime's — see {@link deliverUsageEvent}.
  */
 function provideBindContext(
   machine: AnyStateMachine,
@@ -1538,7 +1541,7 @@ function provideBindContext(
 /**
  * The single reserved-`@agent.usage` DELIVERY seam, shared by both bind paths:
  * after a bound call settles with reported usage, send the prebuilt `event` to
- * the machine actor `resolveActorRef` names — the run's root actor on the `runAgent` path,
+ * the machine actor `resolveActorRef` names — the run's root actor on the `createAgentRuntime` path,
  * the settling request actor's `self._parent` (always the invoking machine
  * under a live `createActor` tree) on the `provideExecutors` path.
  *
@@ -1581,7 +1584,7 @@ function deliverUsageEvent(
 
 /**
  * Host-binds one text/stream source for {@link provideExecutors} using the SAME
- * emission helper as `runAgent` ({@link bindTextLogic}), so a bound
+ * emission helper as `createAgentRuntime` ({@link bindTextLogic}), so a bound
  * text request emits request.start/stream.chunk/request.end/request.error with
  * identical shapes. @internal
  */
@@ -1596,9 +1599,9 @@ export function bindTextForProvide(
 
 /**
  * Host-binds one `DecisionLogic`/`agent.decide` source for
- * {@link provideExecutors}: runAgent's decision wrapper (snapshot-driven
+ * {@link provideExecutors}: the runtime's decision wrapper (snapshot-driven
  * candidate events, `canTake`, auto-delivery of the chosen event) with the same
- * request-level tracing runAgent emits, minus run-scoped counting. @internal
+ * request-level tracing the runtime emits, minus run-scoped counting. @internal
  */
 export function bindDecisionForProvide(
   machine: AnyStateMachine,
@@ -1611,7 +1614,7 @@ export function bindDecisionForProvide(
 
 /**
  * Recursively binds an invoked child state machine for {@link provideExecutors},
- * with the same semantics `runAgent` applies ({@link rebindChildMachine}):
+ * with the same semantics `createAgentRuntime` applies ({@link rebindChildMachine}):
  * string-keyed text/decision sources at any depth inherit the host executors,
  * a source that carries its own executor is left alone, and a cycle is
  * returned as-is. Each machine in the tree is bound with its own registered
@@ -1681,8 +1684,8 @@ function resolveMachineInput(machine: AnyStateMachine, input: unknown): unknown 
 
 /**
  * Recursively rebinds an invoked child machine's own agent sources with the
- * SAME host-backed wrappers runAgent applies to the top-level machine, so a
- * child's text/stream/decision requests inherit runAgent's executors and
+ * SAME host-backed wrappers the runtime applies to the top-level machine, so a
+ * child's text/stream/decision requests inherit the runtime's executors and
  * participate in maxModelCalls counting, onTrace/onChunk/onResult exactly like
  * parent requests. Returns the child machine to invoke: a `.provide`-rebound
  * copy when any inner source needed wrapping, else the original untouched.
@@ -1698,7 +1701,7 @@ function rebindChildMachine(
   runCtx: RunAgentBindContext,
   visited: Set<AnyStateMachine>,
   /**
-   * Optional per-machine bind-context factory. `runAgent` shares ONE run-scoped
+   * Optional per-machine bind-context factory. `createAgentRuntime` shares ONE run-scoped
    * context at every depth (one budget, one trace envelope, one root actor), so
    * it omits this. `provideExecutors` passes it so each machine in the tree is
    * bound with its OWN registered `setupAgent` schemas — a child decision must
@@ -1743,41 +1746,6 @@ function rebindChildMachine(
 }
 
 /**
- * Runs an agent machine to completion or idle: a `createActor` host that
- * binds `options`' host executors onto the machine's `agent.*`/`TextLogic`/
- * `DecisionLogic` actor sources, starts (or resumes) the actor, and drives
- * it until it settles — {@link AgentRunResult} `done | idle | error`. Unlike
- * the step helpers ({@link initialAgentStep} etc — a pure
- * transition-at-a-time path for durable hosts), `runAgent` owns a live actor
- * internally; there is no continuation callback, so **idle always settles**
- * and the caller resumes explicitly by passing the settled `{ snapshot,
- * event }` back in. The actor is stopped on every settle path (`done`,
- * `idle`, and `error` alike) — resume is always by snapshot, never by
- * holding a reference to a live actor.
- *
- * Binding happens **before** the actor starts: every invoke the machine
- * could reach is walked and checked against the effective actor sources
- * (`options.actors` merged onto the machine), so a missing
- * `streamText`/`decide` executor or any other unbound actor source throws
- * immediately — a bind-time error, not a mid-run failure.
- *
- * @example
- * ```ts
- * const executors = createAiSdkExecutors({ models });
- * let r = await runAgent(machine, { input, executors });
- * while (r.status === 'idle') {
- *   const event = await promptUser(getAcceptedEvents(r.snapshot));
- *   r = await runAgent(machine, { snapshot: r.snapshot, event, executors });
- * }
- * if (r.status !== 'done') throw new Error(`Run did not complete: ${r.status}`);
- * console.log(r.output);
- * ```
- *
- * Each executor is a plain function returning `{ result }` (plus optional `messages`/`usage`), or
- * an adapter's set: `createAiSdkExecutors` from '@statelyai/agent/ai-sdk' or
- * `createOpenAiExecutors` from '@statelyai/agent/openai' supply all three.
- */
-/**
  * The durable effects one transition produced. Hand them to
  * {@link AgentRuntime.execute}; nothing in them has run yet.
  */
@@ -1798,6 +1766,16 @@ export type AgentTimerScheduler =
       schedule(timer: { id: string; delay: number }): void;
       cancel(id: string): void;
     };
+
+/**
+ * A host-owned timer firing: what a host with its own durable timers (see
+ * {@link AgentTimerScheduler}) delivers when the `id` it was asked to
+ * schedule comes due.
+ */
+export interface AgentTimerEvent {
+  type: "xstate.timer";
+  id: string;
+}
 
 /** How {@link AgentRuntime.start} opens a run. */
 export interface AgentRunStart<TMachine extends AnyStateMachine> {
@@ -1857,7 +1835,7 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
   /** Applies one event: journals it, traces it, and returns the next state plus its effects. */
   transition(
     state: SnapshotFrom<TMachine>,
-    event: EventFromLogic<TMachine>,
+    event: EventFromLogic<TMachine> | AgentTimerEvent,
   ): [SnapshotFrom<TMachine>, AgentEffects];
   /** Starts the effects' work and returns once it is accepted, not once it finishes. */
   execute(effects: AgentEffects): Promise<void>;
@@ -1875,9 +1853,10 @@ export interface AgentRunInit<TMachine extends AnyStateMachine> extends AgentRun
    * union. If the resumed state has no transition for it, the machine ignores
    * it — the run settles normally and the result carries
    * {@link AgentRunResult.ignored}. For a payload off the wire, parse it first
-   * with `parseAgentEvent(machine, payload)`.
+   * with `parseAgentEvent(machine, payload)`. A host-owned timer that came
+   * due is delivered the same way, as an {@link AgentTimerEvent}.
    */
-  event?: EventFromLogic<TMachine>;
+  event?: EventFromLogic<TMachine> | AgentTimerEvent;
 }
 
 /**
@@ -1950,7 +1929,35 @@ const QUIESCENT = Symbol("quiescent");
  * requests, the write-ahead log, traces, the budget, and a mailbox over
  * XState's durable transition loop (`xstate/durable`). See
  * {@link AgentRuntime} for the loop a host writes around it, and
- * {@link runToQuiescence} for the blocking host.
+ * {@link runToQuiescence} for the blocking host. {@link AgentRuntime.finish}
+ * stops whatever is still running on every settle path (`done`, `idle`, and
+ * `error` alike) — resume is always by snapshot (or log), never by holding a
+ * reference to a live actor.
+ *
+ * Binding happens **before** any actor starts: every invoke the machine
+ * could reach is walked and checked against the effective actor sources
+ * (`options.actors` merged onto the machine), so a missing
+ * `streamText`/`decide` executor or any other unbound actor source throws
+ * synchronously from this call — a bind-time error, not a mid-run failure.
+ *
+ * @example
+ * ```ts
+ * const executors = createAiSdkExecutors({ models });
+ * let r = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+ * while (r.status === 'idle') {
+ *   const event = await promptUser(getAcceptedEvents(r.snapshot));
+ *   r = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+ *     snapshot: r.snapshot,
+ *     event,
+ *   });
+ * }
+ * if (r.status !== 'done') throw new Error(`Run did not complete: ${r.status}`);
+ * console.log(r.output);
+ * ```
+ *
+ * Each executor is a plain function returning `{ result }` (plus optional `messages`/`usage`), or
+ * an adapter's set: `createAiSdkExecutors` from '@statelyai/agent/ai-sdk' or
+ * `createOpenAiExecutors` from '@statelyai/agent/openai' supply all three.
  */
 export function createAgentRuntime<TMachine extends AnyStateMachine>(
   machine: TMachine,
@@ -2856,7 +2863,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
 
       seedInitEntry?.();
 
-      const resumeEvent = (init as AgentRunInit<TMachine>).event;
+      const resumeEvent = (init as AgentRunInit<TMachine>).event as
+        | EventFromLogic<TMachine>
+        | undefined;
       onTrace({
         type: "run.start",
         ...(resolvedInput !== undefined ? { input: resolvedInput as InputFrom<TMachine> } : {}),
@@ -2930,7 +2939,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       if (stopReason !== undefined) {
         return [state, []];
       }
-      const [next, effects] = execution.transition(state, event) as [
+      const [next, effects] = execution.transition(state, event as EventFromLogic<TMachine>) as [
         AnyMachineSnapshot,
         AgentEffects,
       ];
@@ -3136,12 +3145,12 @@ export function inspectTransitions(
  * const actor = createActor(bound, { inspect: traceTransitions(onTrace) });
  * ```
  *
- * Only ROOT-actor transitions are traced (matching `runAgent`'s
+ * Only ROOT-actor transitions are traced (matching the runtime's
  * `machine.transition`); child-actor transitions are ignored. Attribute the
  * event via its envelope `runId`.
  *
  * By design this path has NO `run.start`/`run.end` events: `createActor` has no
- * run boundary the way `runAgent` does, so the stream starts at the actor's
+ * run boundary the way `createAgentRuntime` does, so the stream starts at the actor's
  * first transition. It also does NOT emit `emit` trace events: in this xstate
  * build emitted events are delivered through `actor.on(...)`, not the inspection
  * protocol, so they are not observable from an `inspect` handler — subscribe
@@ -3155,7 +3164,7 @@ export function traceTransitions<TMachine extends AnyStateMachine = AnyStateMach
       return;
     }
     const actorRef = inspectionEvent.actorRef as unknown as { _parent?: unknown };
-    // Root actor only (no parent) — matches runAgent's root-transition filter.
+    // Root actor only (no parent) — matches the runtime's root-transition filter.
     if (actorRef?._parent) {
       return;
     }

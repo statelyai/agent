@@ -1,32 +1,27 @@
 /**
- * The portable XState loop, with no Stately Agent runner.
+ * The agent loop in a stateless host: a request handler that runs the machine
+ * until nothing is in flight, persists, and returns.
  *
- * `portableLoopMachine` is the artifact. The host binds its model executor,
- * then runs XState's canonical transition/effect loop. A durable framework can
- * replace the in-memory adapter below with its own XState durable adapter
- * without changing the machine.
+ * `portableLoopMachine` is the artifact. `handleTurn` is the whole host — the
+ * same five-call loop a script, a queue worker, or an HTTP route writes:
+ *
+ *   start → execute → (nextEvent → transition → execute)* → finish
  *
  * Two things make this a durability demo rather than a plain loop:
  *
- *   - The loop stops on `isAgentIdle(snapshot)` — the library's definition of
- *     "resting on an external event, not on work in flight" — instead of
- *     naming the `reviewing` state. Add another wait state to the machine and
- *     the host needs no change.
- *   - The pause is then PERSISTED (`getPersistedSnapshot` → JSON → back) and
- *     the run is re-entered in a SECOND durable execution, which is what proves
+ *   - The loop stops on QUIESCENCE — `nextEvent()` returning `undefined`
+ *     because no request, child, or timer is still working — not on a state
+ *     name. The machine resting in `reviewing` is simply what is left when the
+ *     draft is done. Add a wait state, or a parallel region still working
+ *     while the person reads, and the host needs no change.
+ *   - The pause is PERSISTED (`result.persist()` → JSON) and the next turn is
+ *     a brand-new runtime, rehydrated from that blob — which is what proves
  *     the wait survives a process boundary. Nothing but the snapshot crosses it.
  *
  * Run: npx tsx examples/portable-xstate-loop/index.ts
  */
 import { z } from "zod";
-import type { AnyEventObject } from "xstate";
-import { createDurable, type DurableExecution, type DurableSnapshot } from "xstate/durable";
-import {
-  isAgentIdle,
-  provideExecutors,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { createAgentRuntime, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const portableLoopSetup = setupAgent({
   context: z.object({
@@ -80,50 +75,39 @@ export const portableLoopMachine = portableLoopSetup.createMachine({
   },
 });
 
-type LoopMachine = typeof portableLoopMachine;
-// `DurableSnapshot` is the machine's own snapshot intersected with the base
-// `Snapshot` union, so the `status`/`output`/`error` discriminant stays visible
-// — no casting a snapshot back to `Snapshot<unknown>` just to read `.status`.
-type LoopSnapshot = DurableSnapshot<LoopMachine>;
+/** What a turn hands back: finished, or paused with the blob to store. */
+export type TurnResult =
+  | { status: "done"; draft: string; failure: string | null }
+  | { status: "paused"; stored: string };
 
 /**
- * One durable execution plus the in-memory mailbox its adapter parks on. A
- * real host swaps this for its own queue; nothing above it changes.
+ * One turn of a stateless host: start fresh (`input`) or from the stored blob
+ * plus the event that ended the wait, run until nothing is in flight, then
+ * persist and return. This is the whole host.
  */
-function createExecution(machine: LoopMachine): DurableExecution<LoopMachine> {
-  const mailbox: AnyEventObject[] = [];
-  let wake: ((event: AnyEventObject) => void) | undefined;
-  const enqueue = (event: AnyEventObject) => {
-    const waiting = wake;
-    wake = undefined;
-    if (waiting) waiting(event);
-    else mailbox.push(event);
-  };
-  return createDurable(machine, {
-    startActor: (actor) => {
-      actor.start();
-    },
-    enqueueRootEvent: (_source, event) => enqueue(event),
-    executeAction: (action, _metadata, runtime) => action.exec(runtime),
-    waitForEvent: () => mailbox.shift() ?? new Promise((resolve) => (wake = resolve)),
-  });
-}
-
-/** Runs one execution forward until it finishes or comes to rest on an event. */
-async function advance(
-  execution: DurableExecution<LoopMachine>,
-  start: [LoopSnapshot, Parameters<DurableExecution<LoopMachine>["executeEffects"]>[0]],
-): Promise<LoopSnapshot> {
-  let [state, effects] = start;
-  await execution.executeEffects(effects);
-  // `isAgentIdle` is the stop condition, not a state name: an active snapshot
-  // that accepts an external event is resting on the host, not on work.
-  while (state.status === "active" && !isAgentIdle(state)) {
-    const event = await execution.waitForEvent();
-    [state, effects] = execution.transition(state, event);
-    await execution.executeEffects(effects);
+export async function handleTurn(
+  turn: { input: { topic: string } } | { stored: string; event: { type: "APPROVE" } },
+  executors: AgentRequestExecutors,
+): Promise<TurnResult> {
+  const runtime = createAgentRuntime(portableLoopMachine, { executors });
+  let [state, effects] = await runtime.start(
+    "input" in turn ? { input: turn.input } : { snapshot: JSON.parse(turn.stored) },
+  );
+  await runtime.execute(effects);
+  if ("event" in turn) {
+    [state, effects] = runtime.transition(state, turn.event);
+    await runtime.execute(effects);
   }
-  return state;
+  // `undefined` means quiescent: only the outside world can move it now.
+  for (let event; (event = await runtime.nextEvent()); ) {
+    [state, effects] = runtime.transition(state, event);
+    await runtime.execute(effects);
+  }
+
+  const result = await runtime.finish();
+  if (result.status === "done") return { status: "done", ...result.output };
+  if (result.status === "error") throw result.error;
+  return { status: "paused", stored: JSON.stringify(result.persist()) };
 }
 
 export interface PortableLoopResult {
@@ -134,47 +118,25 @@ export interface PortableLoopResult {
 }
 
 /**
- * Runs the artifact using XState's transition/effect protocol, across a
- * persistence boundary. Stately Agent only binds request actors; XState and
- * the host own execution.
+ * Drives `handleTurn` the way a host would across requests: the first turn
+ * pauses on review, only the stored blob survives, and the next turn delivers
+ * the approval to a fresh runtime.
  */
 export async function runPortableXstateLoop(
   topic: string,
   executors: AgentRequestExecutors,
   externalEvents: Array<{ type: "APPROVE" }> = [{ type: "APPROVE" }],
 ): Promise<PortableLoopResult> {
-  const machine = provideExecutors(portableLoopMachine, executors);
-
-  // ── Pass 1: run to the first pause (or to a terminal state). ──
-  const first = createExecution(machine);
-  let state = await advance(first, first.initialTransition({ topic }));
-
-  if (state.status !== "active") {
-    return { ...settle(state), resumedFromSnapshot: false };
-  }
-
-  // ── The process boundary: everything but this blob is thrown away. ──
-  const stored = JSON.stringify(machine.getPersistedSnapshot(state));
-
-  // ── Pass 2: a brand new execution, rehydrated from the stored snapshot. ──
-  const second = createExecution(machine);
-  let resumed = machine.restoreSnapshot(JSON.parse(stored));
-  while (resumed.status === "active") {
+  let turn = await handleTurn({ input: { topic } }, executors);
+  let resumedFromSnapshot = false;
+  while (turn.status === "paused") {
     const event = externalEvents.shift();
     if (!event) throw new Error("The host has no external event to deliver.");
-    resumed = await advance(second, second.transition(resumed, event));
-    if (isAgentIdle(resumed)) continue;
-    break;
+    // ── The process boundary: everything but `turn.stored` is thrown away. ──
+    turn = await handleTurn({ stored: turn.stored, event }, executors);
+    resumedFromSnapshot = true;
   }
-
-  return { ...settle(resumed), resumedFromSnapshot: true };
-}
-
-/** Reads the terminal snapshot's outcome, or refuses to invent one. */
-function settle(state: LoopSnapshot): { draft: string; failure: string | null } {
-  if (state.status === "done") return state.output;
-  if (state.status === "error") throw state.error;
-  throw new Error(`Portable loop stopped with '${state.status}'.`);
+  return { draft: turn.draft, failure: turn.failure, resumedFromSnapshot };
 }
 
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {

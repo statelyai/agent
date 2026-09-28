@@ -1,6 +1,6 @@
 /**
  * The raw `openai` package adapter: builds the `{ generateText, streamText,
- * decide }` executor set consumed by `runAgent`/`executeAgentRequest`, mapped
+ * decide }` executor set consumed by `createAgentRuntime`/`executeAgentRequest`, mapped
  * onto the Chat Completions API (not `responses` — `chat.completions` is the
  * canonical/stable surface) with no Vercel AI SDK in between.
  *
@@ -411,7 +411,7 @@ function callSettings(
  * Raw result shape from {@link OpenAiExecutors.generateText} — `result` (the
  * validated structured object for structured-output requests, or the model's
  * text otherwise) plus the call metadata. Core reads `result` and `usage`;
- * everything else flows verbatim to `runAgent`'s `onResult(request, { raw })`.
+ * everything else flows verbatim to `createAgentRuntime`'s `onResult(request, { raw })`.
  */
 export type OpenAiGenerateResult = {
   result: unknown;
@@ -419,7 +419,7 @@ export type OpenAiGenerateResult = {
    * `includeReasoning` and the model produced it. Never enters machine
    * context/output. */
   reasoning?: string;
-  /** The call's token usage, on the flat field names `runAgent` folds into the
+  /** The call's token usage, on the flat field names the runtime folds into the
    * run result's aggregated `AgentUsage`. Absent when OpenAI reported none. */
   usage?: AgentCallUsage;
   /** Why the call stopped, normalized to the portable {@link AgentFinishReason}. OpenAI's own value stays on `raw`. */
@@ -549,7 +549,7 @@ function toToolContent(output: unknown): string {
  *   client: new OpenAI(),
  *   resolveModel: () => 'gpt-5.4-mini',
  * });
- * const result = await runAgent(machine, { input, executors });
+ * const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
  * ```
  */
 export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): OpenAiExecutors {

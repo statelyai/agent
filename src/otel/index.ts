@@ -141,7 +141,7 @@ function toException(error: unknown): Error | { name: string; message: string } 
  * GenAI spans: one `invoke_agent` span per run, one child span per model call,
  * transitions and emissions as span events.
  *
- * Works on both paths. On the controlled path (`runAgent`) the run span opens
+ * Works on both paths. On the controlled path (`createAgentRuntime`) the run span opens
  * on `run.start` and closes on `run.end`. On the uncontrolled path
  * (`provideExecutors` + `traceTransitions`) there is no run boundary, so the
  * run span opens lazily on the first event of a `runId` and stays open until
@@ -154,7 +154,7 @@ function toException(error: unknown): Error | { name: string; message: string } 
  *
  * const onTrace = createOtelTraceHandler({ tracer: trace.getTracer('my-app') });
  * try {
- *   await runAgent(machine, { input, executors, onTrace });
+ *   await runToQuiescence(createAgentRuntime(machine, { executors, onTrace }), { input });
  * } finally {
  *   onTrace.dispose();
  * }

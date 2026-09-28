@@ -179,7 +179,7 @@ export interface DecisionLogicConfig<
 
 /**
  * Actor logic for a decision: an async effect that resolves to exactly one
- * currently-legal {@link ChosenEvent} (never a plain value). Under `runAgent`
+ * currently-legal {@link ChosenEvent} (never a plain value). Under `createAgentRuntime`
  * the chosen event is delivered to the invoking actor automatically — the
  * transition it triggers usually exits the invoking state and ends the invoke.
  * Built by {@link createDecisionLogic}. Register it under `actors:` to reuse/export/
@@ -214,7 +214,7 @@ function resolveAllowedEventTypes(
  * run, resolves to exactly one currently-legal {@link ChosenEvent} by
  * calling the host `decide` executor (passed here as `execute`, or supplied
  * later via {@link DecisionLogic.withExecutor}, `machine.provide(...)`, or
- * `runAgent`'s `decide` option). Register the result under `actors:` and
+ * `createAgentRuntime`'s `executors.decide`). Register the result under `actors:` and
  * invoke it by name; for a one-off, state-local decision, prefer the
  * `agent.decide` builtin invoke instead — it needs no separate declaration
  * and types `allowedEvents` against the machine's own event schemas.
@@ -388,10 +388,10 @@ export interface AgentDecisionRequest {
   stopSequences?: string[];
   metadata?: Record<string, unknown>;
   /**
-   * The `runAgent` run this decision belongs to (`run_<n>`, matching trace
-   * events), injected by runAgent like `signal` (symmetric with the text
+   * The run this decision belongs to (`run_<n>`, matching trace
+   * events), injected by the runtime like `signal` (symmetric with the text
    * executors' `info.runId`). Runtime-only correlation for executor
-   * middleware; unset off the runAgent path. Per-attempt context is already
+   * middleware; unset off the runtime path. Per-attempt context is already
    * on the request: `id` is the durable invoke id and `attempts.length` is
    * the current attempt index.
    */
@@ -543,7 +543,7 @@ export function renderDecisionAttempts(
  * `onResult`/event-sourcing but never affects validation. Like text
  * executors' `{ result, ...extras }`, any extra keys (finish reason,
  * …) flow untouched to `onResult`'s `raw`; `usage` is the one core reads —
- * report this attempt's tokens there and `runAgent` folds them into the run's
+ * report this attempt's tokens there and the runtime folds them into the run's
  * aggregated {@link AgentUsage}.
  */
 export type AgentDecisionExecutor = (
