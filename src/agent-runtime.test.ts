@@ -350,6 +350,42 @@ describe("createAgentRuntime", () => {
     expect(resumed.status === "done" ? resumed.output : undefined).toEqual({ expired: true });
   });
 
+  test("a pending timer resumes with what is left of its delay, not the whole delay", async () => {
+    const scheduled: Array<{ id: string; delay: number }> = [];
+    const host = {
+      schedule: (timer: { id: string; delay: number }) => scheduled.push(timer),
+      cancel: () => {},
+    };
+    const machine = setupAgent({
+      context: z.object({}),
+      events: { PING: z.object({}) },
+    }).createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: {
+          after: { 1000: { target: "expired" } },
+          on: { PING: {} },
+        },
+        expired: { type: "final" },
+      },
+    });
+
+    const first = await runToQuiescence(createAgentRuntime(machine, { timers: host }));
+    expect(scheduled[0]!.delay).toBe(1000);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // Resumed for an unrelated event: the deadline is re-armed for what is left.
+    await runToQuiescence(createAgentRuntime(machine, { timers: host }), {
+      snapshot: JSON.parse(JSON.stringify(first.persist())),
+      event: { type: "PING" },
+    });
+    const rearmed = scheduled.at(-1)!;
+    expect(rearmed.id).toBe(scheduled[0]!.id);
+    expect(rearmed.delay).toBeLessThanOrEqual(750);
+    expect(rearmed.delay).toBeGreaterThan(500);
+  });
+
   test("a decision's completion after its chosen event moved the machine on is ignored", async () => {
     const machine = setupAgent({
       context: z.object({}),
