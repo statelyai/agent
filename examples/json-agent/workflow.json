@@ -77,7 +77,7 @@
   },
   "requests": {
     "draftReply": {
-      "model": "openai/gpt-5.4-mini",
+      "model": "openai/gpt-6-luna",
       "system": "Draft a short, courteous support reply to the customer's ticket.",
       "prompt": "{{ input.ticket }}",
       "input": {
@@ -107,7 +107,7 @@
         "id": "triageDecision",
         "src": "agent.decide",
         "input": {
-          "model": "openai/gpt-5.4-mini",
+          "model": "openai/gpt-6-luna",
           "system": "Decide whether this support ticket needs human escalation or a drafted reply.",
           "prompt": "{{ context.ticket }}",
           "allowedEvents": ["ESCALATE", "REPLY"],

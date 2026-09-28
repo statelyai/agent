@@ -81,8 +81,8 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
-  supervisor: openai("gpt-5.4-mini"),
-  worker: openai("gpt-5.4-mini"),
+  supervisor: openai("gpt-6-luna"),
+  worker: openai("gpt-6-luna"),
 };
 
 /** Successful reports a single worker may contribute before it can't be picked again. */

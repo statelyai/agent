@@ -89,7 +89,7 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  compiler: openai("gpt-5.4-mini"),
+  compiler: openai("gpt-6-luna"),
 };
 
 /** Replans allowed after the first plan (invalid plans and joiner replans both count). */

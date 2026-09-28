@@ -76,7 +76,7 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
-  planner: openai("gpt-5.4-mini"),
+  planner: openai("gpt-6-luna"),
 };
 
 /**

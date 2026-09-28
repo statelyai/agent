@@ -463,7 +463,7 @@ async function main() {
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
-  const model = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+  const model = process.env.OPENAI_MODEL || "gpt-6-luna";
   const executors = createAiSdkExecutors({
     models: { fast: openai(model), writer: openai(model) },
   });

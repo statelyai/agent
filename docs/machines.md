@@ -121,7 +121,7 @@ import { openai } from "@ai-sdk/openai";
 import { } from "@statelyai/agent/ai-sdk";
 
 const models = {
-  quick: openai("gpt-5.4-mini"),
+  quick: openai("gpt-6-luna"),
   careful: openai("gpt-5.4"),
 };
 
@@ -140,7 +140,7 @@ const agentSetup = setupAgent({
 });
 ```
 
-Aliases are optional. A request can carry any `model:` string, such as `'openai/gpt-5.4-mini'`, that the host resolves at run time. See [Authoring forms](#authoring-forms).
+Aliases are optional. A request can carry any `model:` string, such as `'openai/gpt-6-luna'`, that the host resolves at run time. See [Authoring forms](#authoring-forms).
 
 ### Requests
 
@@ -227,7 +227,7 @@ Each alternate form handles one specific need:
 | Form                                                                                                             | Use it when                                                                                                                                                                                                                                                                                  |
 | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `createAgentSchemas` pack, passed as `setupAgent({ schemas })`                                                   | You share one schema set across several machines or the [step helpers](steps.md).                                                                                                                                                                                                            |
-| String model refs with `resolveModel` (`model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`) | The machine must not name concrete models, for portability or for refs loaded from JSON [config](machines-as-data.md).                                                                                                                                                                       |
+| String model refs with `resolveModel` (`model: 'openai/gpt-6-luna'`, `createAiSdkExecutors({ resolveModel })`) | The machine must not name concrete models, for portability or for refs loaded from JSON [config](machines-as-data.md).                                                                                                                                                                       |
 | `createTextLogic`, a standalone request value                                                                    | A request is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).                                                                                                                       |
 | `logic.withExecutor(...)`                                                                                        | You bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runAgent`](hosts.md#writing-your-own-executors)'s executor slots. Registered dynamic spawns inherit through `actors`. See [Multi-agent composition](multi-agent.md#dynamic-binding). |
 
@@ -394,7 +394,7 @@ generating: {
     id: "draft",
     src: "agent.generateText",
     input: ({ context }) => ({
-      model: "openai/gpt-5.4-mini",
+      model: "openai/gpt-6-luna",
       prompt: context.prompt,
       outputSchema: resultSchema,
     }),

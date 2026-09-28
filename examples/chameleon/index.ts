@@ -126,7 +126,7 @@ export const chameleonSchemas = createAgentSchemas({
   },
 });
 
-const models = { player: openai("gpt-5.4-mini") };
+const models = { player: openai("gpt-6-luna") };
 
 // ─── Rules (pure functions — the machine's, not the prompt's) ───
 

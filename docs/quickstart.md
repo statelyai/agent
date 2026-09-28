@@ -96,7 +96,7 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const executors = createAiSdkExecutors({
-  models: { fast: openai("gpt-5.4-mini") },
+  models: { fast: openai("gpt-6-luna") },
 });
 
 const liveResult = await runAgent(machine, {

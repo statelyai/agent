@@ -153,7 +153,7 @@ export const justOneSchemas = createAgentSchemas({
   },
 });
 
-const models = { clueGiver: openai("gpt-5.4-mini") };
+const models = { clueGiver: openai("gpt-6-luna") };
 
 // ─── Rules (pure functions — the machine's, not the prompt's) ───
 

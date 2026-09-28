@@ -81,8 +81,8 @@ export const gameSchemas = createAgentSchemas({
 type GameEventType = keyof typeof gameSchemas.events;
 
 export const models: AiSdkModelMap<"moveChooser" | "turnSummarizer"> = {
-  moveChooser: openai("gpt-5.4-mini"),
-  turnSummarizer: openai("gpt-5.4-mini"),
+  moveChooser: openai("gpt-6-luna"),
+  turnSummarizer: openai("gpt-6-luna"),
 };
 
 const defaultMoveEvents = ["ATTACK", "DEFEND", "FLEE"] satisfies GameEventType[];

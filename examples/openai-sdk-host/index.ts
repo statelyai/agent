@@ -46,10 +46,14 @@ async function promptAnswer(question: string): Promise<string> {
 
 // The demo machines (triage, twenty-questions) carry model refs that both map
 // to one real OpenAI id — a raw-SDK host resolves them itself.
-const resolveDemoModel = () => "gpt-5.4-mini";
+const resolveDemoModel = () => "gpt-6-luna";
 
 export async function runTriageDemo(client: OpenAI, ticket: string) {
-  const { generateText } = createOpenAiExecutors({ client, resolveModel: resolveDemoModel });
+  const { generateText } = createOpenAiExecutors({
+    client,
+    resolveModel: resolveDemoModel,
+    settings: () => ({ reasoning_effort: "none" }),
+  });
   const result = await runAgent(triageMachine, {
     input: { ticket },
     executors: { generateText },
@@ -62,12 +66,15 @@ export async function runTriageDemo(client: OpenAI, ticket: string) {
 }
 
 export async function runStreamingDemo(client: OpenAI) {
-  const { streamText } = createOpenAiExecutors({ client });
+  const { streamText } = createOpenAiExecutors({
+    client,
+    settings: () => ({ reasoning_effort: "none" }),
+  });
   let text = "";
   await streamText(
     {
       name: "streamingDemo",
-      model: "gpt-5.4-mini",
+      model: "gpt-6-luna",
       system: "You tell short, punchy jokes.",
       prompt: "Tell a joke about state machines.",
       tools: {},
@@ -85,6 +92,7 @@ export async function runTwentyQuestionsDemo(client: OpenAI) {
   const { generateText, decide } = createOpenAiExecutors({
     client,
     resolveModel: resolveDemoModel,
+    settings: () => ({ reasoning_effort: "none" }),
   });
 
   const executors = { generateText, decide };

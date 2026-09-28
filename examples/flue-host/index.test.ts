@@ -103,7 +103,7 @@ function machineOwnedFauxModel(): Provider {
     );
   };
 
-  const faux = fauxProvider({ provider: "openai", models: [{ id: "gpt-5.4-mini" }] });
+  const faux = fauxProvider({ provider: "openai", models: [{ id: "gpt-6-luna" }] });
   faux.setResponses(Array.from({ length: 10 }, () => respond));
   return faux.provider;
 }
@@ -144,7 +144,7 @@ function flueOwnedFauxModels(): { providers: Provider[]; trace: string[][] } {
   // One faux provider per provider id the agent names, so `useModel` resolves
   // the same specifiers it would in production.
   const providers = [
-    fauxProvider({ provider: "openai", models: [{ id: "gpt-5.4-mini" }] }),
+    fauxProvider({ provider: "openai", models: [{ id: "gpt-6-luna" }] }),
     fauxProvider({ provider: "anthropic", models: [{ id: "claude-sonnet-5" }] }),
   ].map((faux) => {
     faux.setResponses(Array.from({ length: 12 }, () => respond));

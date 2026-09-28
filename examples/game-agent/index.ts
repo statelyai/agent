@@ -92,7 +92,7 @@ export const rpsSchemas = createAgentSchemas({
 });
 
 const rpsModels = {
-  movePicker: openai("gpt-5.4-mini"),
+  movePicker: openai("gpt-6-luna"),
 };
 
 const BEATS: Record<Move, Move> = {

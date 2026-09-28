@@ -284,7 +284,7 @@ export function createHost({
       "in plain language; once the user picks one, call resume_workflow with the same " +
       "handle, that choice's type, and any text it asked for. When a result is " +
       "'done', summarise the emails that were sent.",
-    model: "openai/gpt-5.4-mini",
+    model: "openai/gpt-6-luna",
     tools: { start_workflow: startWorkflow, resume_workflow: resumeWorkflow },
   });
 

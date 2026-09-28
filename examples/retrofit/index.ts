@@ -54,7 +54,7 @@ export const ORDERS: Record<string, { customer: string; total: number; item: str
 };
 
 const models = {
-  agent: openai("gpt-5.4-mini"),
+  agent: openai("gpt-6-luna"),
 };
 
 /**

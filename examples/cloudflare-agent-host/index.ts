@@ -114,8 +114,8 @@ export class EmailDrafter extends Agent<Env> {
     const openai = createOpenAI({ apiKey: this.env.OPENAI_API_KEY });
     return createAiSdkExecutors({
       models: {
-        followUpWriter: openai("gpt-5.4-mini"),
-        emailDrafter: openai("gpt-5.4-mini"),
+        followUpWriter: openai("gpt-6-luna"),
+        emailDrafter: openai("gpt-6-luna"),
       },
     });
   }

@@ -53,7 +53,7 @@ import {
 export * from "./executors.js";
 export * from "./bridge.js";
 
-const LIVE_MODEL = "gpt-5.4-mini";
+const LIVE_MODEL = "gpt-6-luna";
 
 // ─── Direction A: LangChain model as the machine's executors ───
 
@@ -135,7 +135,10 @@ export async function main() {
       "Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run the langchain-host example.",
     );
   }
-  const model = new ChatOpenAI({ model: LIVE_MODEL });
+  const model = new ChatOpenAI({
+    model: LIVE_MODEL,
+    modelKwargs: { reasoning_effort: "none" },
+  });
 
   console.log("— Direction A: LangChain model as executor —");
   const jokeOutput = await runJokeDemo(model, (chunk) => process.stdout.write(chunk));

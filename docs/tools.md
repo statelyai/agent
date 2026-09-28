@@ -66,7 +66,7 @@ import { setupAgent } from "@statelyai/agent";
 import { } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
-const models = { assistant: openai("gpt-5.4-mini") };
+const models = { assistant: openai("gpt-6-luna") };
 
 const agentSetup = setupAgent({
   models,

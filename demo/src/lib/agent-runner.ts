@@ -132,7 +132,7 @@ async function resolveExecutors(
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
-  const primary = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+  const primary = process.env.OPENAI_MODEL || "gpt-6-luna";
   const fallback = process.env.OPENAI_FALLBACK_MODEL || primary;
   const models = {
     fast: openai(primary),

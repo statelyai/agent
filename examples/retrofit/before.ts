@@ -105,7 +105,7 @@ type SupportToolCall =
  */
 export async function runSupportAgent(ticket: string, deps: Deps = {}): Promise<RunOutcome> {
   const gen = deps.generateText ?? generateText;
-  const model = deps.model ?? "gpt-5.4-mini";
+  const model = deps.model ?? "gpt-6-luna";
 
   // Duplicated bookkeeping: everything that happens gets pushed to BOTH the
   // model `messages` and the human-readable `transcript`, by hand, everywhere.

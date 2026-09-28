@@ -25,7 +25,7 @@ type HotelResult = { status: "reserved"; reference: string } | { status: "unavai
 type CancelResult = { status: "cancelled" } | { status: "pending" };
 type BookingInput = { bookingId: string; item: string };
 const models = {
-  planner: openai("gpt-5.4-mini"),
+  planner: openai("gpt-6-luna"),
 };
 const agent = setupAgent({
   models,

@@ -65,7 +65,7 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
 const models = {
-  coder: openai("gpt-5.4-mini"),
+  coder: openai("gpt-6-luna"),
 };
 
 /** One unit check: call the generated function with `args`, expect `expected`. */

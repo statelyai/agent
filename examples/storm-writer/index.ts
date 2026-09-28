@@ -73,9 +73,9 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  writer: openai("gpt-5.4-mini"),
-  editor: openai("gpt-5.4-mini"),
-  expert: openai("gpt-5.4-mini"),
+  writer: openai("gpt-6-luna"),
+  editor: openai("gpt-6-luna"),
+  expert: openai("gpt-6-luna"),
 };
 
 /** Perspectives interviewed; extra editors the model proposes are dropped. */

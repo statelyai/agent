@@ -48,9 +48,9 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 const queriesSchema = z.array(z.string()).min(2).max(4);
 
 const models = {
-  planner: openai("gpt-5.4-mini"),
-  researcher: openai("gpt-5.4-mini"),
-  writer: openai("gpt-5.4-mini"),
+  planner: openai("gpt-6-luna"),
+  researcher: openai("gpt-6-luna"),
+  writer: openai("gpt-6-luna"),
 };
 
 /**

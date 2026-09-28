@@ -44,9 +44,9 @@ const stepSchema = z.object({ id: z.string(), question: z.string() });
 const planSchema = z.object({ steps: z.array(stepSchema) });
 
 const models = {
-  planner: openai("gpt-5.4-mini"),
-  worker: openai("gpt-5.4-mini"),
-  solver: openai("gpt-5.4-mini"),
+  planner: openai("gpt-6-luna"),
+  worker: openai("gpt-6-luna"),
+  solver: openai("gpt-6-luna"),
 };
 
 /** Hard cap on plan steps the loop will run, whatever the planner returns. */

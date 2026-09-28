@@ -44,7 +44,7 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
 
-const models = { writer: openai("gpt-5.4-mini") };
+const models = { writer: openai("gpt-6-luna") };
 
 /** Extra generation attempts after a failed punchline check, before `failed`. */
 export const MAX_REGENERATIONS = 2;

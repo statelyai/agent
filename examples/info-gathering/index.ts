@@ -76,7 +76,7 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  gatherer: openai("gpt-5.4-mini"),
+  gatherer: openai("gpt-6-luna"),
 };
 
 /** Human answers allowed before an incomplete run ends in `failed`. */

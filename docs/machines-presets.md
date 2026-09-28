@@ -22,7 +22,7 @@ import { createToolLoopMachine } from "@statelyai/agent/machines";
 import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
 
 // Model IDs here are illustrative; substitute your provider's current models.
-const models = { quick: openai("gpt-5.4-mini") };
+const models = { quick: openai("gpt-6-luna") };
 
 const calculate = tool({
   description: "Evaluate an arithmetic expression.",

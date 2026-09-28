@@ -23,7 +23,7 @@ import {
 const input = z.object({ requestId: z.string(), task: z.string(), deadline: z.number().finite() });
 const delivery = z.object({ requestId: z.string(), observedAt: z.number().finite() });
 const models = {
-  writer: openai("gpt-5.4-mini"),
+  writer: openai("gpt-6-luna"),
 };
 const agent = setupAgent({
   models,

@@ -56,7 +56,7 @@ async function runSupportAgent(request: string, approve: (draft: unknown) => Pro
 
     const { toolCalls, text } = await generateText({
       // Model IDs here are illustrative; substitute your provider's current models.
-      model: openai("gpt-5.4-mini"),
+      model: openai("gpt-6-luna"),
       messages,
       tools: { search, sendEmail },
     });
@@ -92,7 +92,7 @@ import { setupAgent } from "@statelyai/agent";
 import { } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
-const models = { quick: openai("gpt-5.4-mini") };
+const models = { quick: openai("gpt-6-luna") };
 
 const emailSchema = z.object({ to: z.string(), subject: z.string(), body: z.string() });
 

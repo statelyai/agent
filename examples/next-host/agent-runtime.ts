@@ -13,7 +13,7 @@ import type { Inspector } from "@statelyai/sdk/inspect";
 
 /** The machine's `writeDraft` request asks for model `"writer"`; map it here. */
 export const models: AiSdkModelMap<"writer"> = {
-  writer: openai("gpt-5.4-mini"),
+  writer: openai("gpt-6-luna"),
 };
 
 /** The real model executors; throws when `OPENAI_API_KEY` is not set. */

@@ -85,7 +85,7 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  tutor: openai("gpt-5.4-mini"),
+  tutor: openai("gpt-6-luna"),
 };
 
 /**

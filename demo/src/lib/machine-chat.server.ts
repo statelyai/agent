@@ -755,7 +755,7 @@ async function resolveExecutors(): Promise<{
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
-  const model = process.env.OPENAI_MODEL || "gpt-5.4-mini";
+  const model = process.env.OPENAI_MODEL || "gpt-6-luna";
   return {
     model,
     executors: createAiSdkExecutors({ resolveModel: () => openai(model) }),

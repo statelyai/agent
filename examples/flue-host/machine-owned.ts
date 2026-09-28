@@ -318,7 +318,7 @@ export const resumeWorkflow = defineTool({
  * agent needs no file or shell tools. Its whole world is the two bridge tools.
  */
 export function MachineOwnedAgent() {
-  useModel("openai/gpt-5.4-mini");
+  useModel("openai/gpt-6-luna");
   useTool(startWorkflow);
   useTool(resumeWorkflow);
 

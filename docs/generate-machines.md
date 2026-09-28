@@ -89,7 +89,7 @@ Generated machines have these constraints.
 - Named guards and actions are resolved by the host. A config cannot carry functions. A model can emit `guard: "isReady"`, but the implementation lives in the `guards` option passed to `fromConfig(...)`, and an unresolved name throws at build time. List the names your host implements in the prompt, or forbid named references entirely.
 - Schema validity is not semantic validity. The schema constrains shape, not meaning. A config can validate and still reference a request that does not exist, or route to a state that does not make progress. The lint and simulate gates cover those cases.
 - A dry run covers one path. The simulation follows the script you gave it. Use `explorePaths` when the generated branch structure matters.
-- Model refs and tool names are unchecked strings. They resolve at run time, in the host. Generated machines carry string refs, so pass `createAiSdkExecutors({ resolveModel })`. See [Models and providers](models-and-providers.md). The ref `"openai/gpt-5.4-mini"` used on this page is illustrative. Substitute your provider's current models.
+- Model refs and tool names are unchecked strings. They resolve at run time, in the host. Generated machines carry string refs, so pass `createAiSdkExecutors({ resolveModel })`. See [Models and providers](models-and-providers.md). The ref `"openai/gpt-6-luna"` used on this page is illustrative. Substitute your provider's current models.
 
 ## Related
 

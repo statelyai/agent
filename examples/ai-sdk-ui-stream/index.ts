@@ -47,7 +47,7 @@ import {
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const models = {
-  writer: openai("gpt-5.4-mini"),
+  writer: openai("gpt-6-luna"),
 };
 
 /** The data-part type carrying each machine state the run enters. */

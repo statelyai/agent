@@ -85,7 +85,7 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  jokes: openai("gpt-5.4-mini"),
+  jokes: openai("gpt-6-luna"),
 };
 
 /**

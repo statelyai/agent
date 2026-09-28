@@ -116,7 +116,7 @@ function liveExecutors(): Partial<AgentRequestExecutors> {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("Set OPENAI_API_KEY to run the crash-recovery example.");
   }
-  return createAiSdkExecutors({ models: { writer: openai("gpt-5.4-mini") } });
+  return createAiSdkExecutors({ models: { writer: openai("gpt-6-luna") } });
 }
 
 /**

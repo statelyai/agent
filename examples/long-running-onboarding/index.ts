@@ -41,7 +41,7 @@ import {
 export const MAX_DOCS_REJECTIONS = 2;
 
 const models = {
-  scheduler: openai("gpt-5.4-mini"),
+  scheduler: openai("gpt-6-luna"),
 };
 
 const employeeSchema = z.object({

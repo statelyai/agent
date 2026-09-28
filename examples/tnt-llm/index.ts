@@ -67,7 +67,7 @@ import {
   type DoneActorEventOf,
 } from "@statelyai/agent";
 
-const models = { taxonomist: openai("gpt-5.4-mini") };
+const models = { taxonomist: openai("gpt-6-luna") };
 
 /** The taxonomy is truncated to this many categories after every step. */
 export const MAX_CATEGORIES = 8;
