@@ -5,10 +5,10 @@
       "status": "done",
       "trace": [
         "transition @xstate.init -> \"translating\"",
-        "emitted TRANSLATED -> \"translating\"",
         "transition xstate.done.actor -> \"evaluating\"",
-        "emitted EVALUATED -> \"evaluating\"",
-        "transition xstate.done.actor -> \"done\""
+        "emitted TRANSLATED -> \"evaluating\"",
+        "transition xstate.done.actor -> \"done\"",
+        "emitted EVALUATED -> \"done\""
       ],
       "response": "**Final translation (Japanese)**\n\nMock reply to: Translate this text to Japanese:\nThe early bird catches the \n\n**First draft**\n\nMock reply to: Translate this text to Japanese:\nThe early bird catches the \n\n**Reviewer**\n\nScore 10/10 — reads naturally\n\n- Quality score: 10\n- Iterations: 1\n\n**Detail**\n\n```json\n{\n  \"firstDraft\": \"Mock reply to: Translate this text to Japanese:\\nThe early bird catches the \",\n  \"translation\": \"Mock reply to: Translate this text to Japanese:\\nThe early bird catches the \",\n  \"evaluation\": {\n    \"qualityScore\": 10,\n    \"preservesTone\": true,\n    \"preservesNuance\": true,\n    \"culturallyAccurate\": true,\n    \"specificIssues\": [],\n    \"improvementSuggestions\": []\n  }\n}\n```"
     }
@@ -19,10 +19,10 @@
       "status": "done",
       "trace": [
         "transition @xstate.init -> \"translating\"",
-        "emitted TRANSLATED -> \"translating\"",
         "transition xstate.done.actor -> \"evaluating\"",
-        "emitted EVALUATED -> \"evaluating\"",
-        "transition xstate.done.actor -> \"done\""
+        "emitted TRANSLATED -> \"evaluating\"",
+        "transition xstate.done.actor -> \"done\"",
+        "emitted EVALUATED -> \"done\""
       ],
       "response": "**Final translation (French)**\n\nMock reply to: Translate this text to French:\nBreak a leg out there tonight\n\n**First draft**\n\nMock reply to: Translate this text to French:\nBreak a leg out there tonight\n\n**Reviewer**\n\nScore 10/10 — reads naturally\n\n- Quality score: 10\n- Iterations: 1\n\n**Detail**\n\n```json\n{\n  \"firstDraft\": \"Mock reply to: Translate this text to French:\\nBreak a leg out there tonight\",\n  \"translation\": \"Mock reply to: Translate this text to French:\\nBreak a leg out there tonight\",\n  \"evaluation\": {\n    \"qualityScore\": 10,\n    \"preservesTone\": true,\n    \"preservesNuance\": true,\n    \"culturallyAccurate\": true,\n    \"specificIssues\": [],\n    \"improvementSuggestions\": []\n  }\n}\n```"
     }
@@ -33,10 +33,10 @@
       "status": "done",
       "trace": [
         "transition @xstate.init -> \"translating\"",
-        "emitted TRANSLATED -> \"translating\"",
         "transition xstate.done.actor -> \"evaluating\"",
-        "emitted EVALUATED -> \"evaluating\"",
-        "transition xstate.done.actor -> \"done\""
+        "emitted TRANSLATED -> \"evaluating\"",
+        "transition xstate.done.actor -> \"done\"",
+        "emitted EVALUATED -> \"done\""
       ],
       "response": "**Final translation (Spanish)**\n\nMock reply to: Translate this text to Spanish:\nShip it before the coffee ge\n\n**First draft**\n\nMock reply to: Translate this text to Spanish:\nShip it before the coffee ge\n\n**Reviewer**\n\nScore 10/10 — reads naturally\n\n- Quality score: 10\n- Iterations: 1\n\n**Detail**\n\n```json\n{\n  \"firstDraft\": \"Mock reply to: Translate this text to Spanish:\\nShip it before the coffee ge\",\n  \"translation\": \"Mock reply to: Translate this text to Spanish:\\nShip it before the coffee ge\",\n  \"evaluation\": {\n    \"qualityScore\": 10,\n    \"preservesTone\": true,\n    \"preservesNuance\": true,\n    \"culturallyAccurate\": true,\n    \"specificIssues\": [],\n    \"improvementSuggestions\": []\n  }\n}\n```"
     }

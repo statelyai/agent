@@ -108,11 +108,21 @@ export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentMaxModelCallsExceededError,
   AgentSnapshotDivergedError,
+  createAgentRuntime,
   inspectTransitions,
   isAgentIdle,
   runAgent,
+  runToQuiescence,
   serializeTraceEvent,
   traceTransitions,
+} from "./run-agent.js";
+export type {
+  AgentEffects,
+  AgentRunInit,
+  AgentRunStart,
+  AgentRuntime,
+  AgentRuntimeOptions,
+  AgentTimerScheduler,
 } from "./run-agent.js";
 export { runAgentStream } from "./agent-run.js";
 export type { AgentStreamEvent } from "./agent-run.js";

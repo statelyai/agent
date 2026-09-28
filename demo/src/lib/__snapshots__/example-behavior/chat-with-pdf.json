@@ -6,8 +6,8 @@
       "trace": [
         "transition @xstate.init -> \"retrieving\"",
         "transition xstate.done.actor -> \"asking\"",
-        "emitted QUESTION -> \"asking\"",
-        "transition xstate.done.actor -> \"awaitingAnswer\""
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
       ],
       "response": "**Pages covered**\n\n```json\n[\n  1\n]\n```\n\n**Pending**\n\n```json\n{\n  \"pageNumber\": 1,\n  \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 1)\",\n  \"sourceText\": \"A state machine is in exactly one of a finite set of states at a time. Events cause transitions between those states.\"\n}\n```\n\n**Chunks**\n\n```json\n[\n  {\n    \"documentId\": \"statecharts\",\n    \"pageNumber\": 1,\n    \"content\": \"A state machine is in exactly one of a finite set of states at a time. Events cause transitions between those states.\"\n  },\n  {\n    \"documentId\": \"statecharts\",\n    \"pageNumber\": 4,\n    \"content\": \"Invoking an actor starts it when a state is entered and stops it when the state is exited. onDone and onError handle its result.\"\n  },\n  {\n    \"documentId\": \"statecharts\",\n    \"pageNumber\": 7,\n    \"content\": \"A final state signals that a machine or region is done. A top-level final state produces the machine's output.\"\n  }\n]\n```",
       "idle": {
@@ -27,10 +27,10 @@
         "transition @xstate.init -> \"awaitingAnswer\"",
         "transition ANSWER -> \"grading\"",
         "transition xstate.done.actor -> \"explaining\"",
-        "emitted GRADED -> \"explaining\"",
         "transition xstate.done.actor -> \"asking\"",
-        "emitted QUESTION -> \"asking\"",
-        "transition xstate.done.actor -> \"awaitingAnswer\""
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
       ],
       "response": "**Pending**\n\n```json\n{\n  \"pageNumber\": 4,\n  \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 4)\",\n  \"sourceText\": \"Invoking an actor starts it when a state is entered and stops it when the state is exited. onDone and onError handle its result.\"\n}\n```\n\n**Pages covered**\n\n```json\n[\n  1,\n  4\n]\n```\n\n**Results**\n\n```json\n[\n  {\n    \"pageNumber\": 1,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 1)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  }\n]\n```",
       "idle": {
@@ -50,10 +50,10 @@
         "transition @xstate.init -> \"awaitingAnswer\"",
         "transition ANSWER -> \"grading\"",
         "transition xstate.done.actor -> \"explaining\"",
-        "emitted GRADED -> \"explaining\"",
         "transition xstate.done.actor -> \"asking\"",
-        "emitted QUESTION -> \"asking\"",
-        "transition xstate.done.actor -> \"awaitingAnswer\""
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
       ],
       "response": "**Pending**\n\n```json\n{\n  \"pageNumber\": 7,\n  \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 7)\",\n  \"sourceText\": \"A final state signals that a machine or region is done. A top-level final state produces the machine's output.\"\n}\n```\n\n**Pages covered**\n\n```json\n[\n  1,\n  4,\n  7\n]\n```\n\n**Results**\n\n```json\n[\n  {\n    \"pageNumber\": 1,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 1)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 4,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 4)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  }\n]\n```",
       "idle": {
@@ -73,11 +73,11 @@
         "transition @xstate.init -> \"awaitingAnswer\"",
         "transition ANSWER -> \"grading\"",
         "transition xstate.done.actor -> \"explaining\"",
-        "emitted GRADED -> \"explaining\"",
         "transition xstate.done.actor -> \"retrieving\"",
+        "emitted GRADED -> \"retrieving\"",
         "transition xstate.done.actor -> \"asking\"",
-        "emitted QUESTION -> \"asking\"",
-        "transition xstate.done.actor -> \"awaitingAnswer\""
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
       ],
       "response": "**Pending**\n\n```json\n{\n  \"pageNumber\": 2,\n  \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 2)\",\n  \"sourceText\": \"Context is the extended state of a machine: arbitrary data stored alongside the finite state and updated during transitions.\"\n}\n```\n\n**Pages covered**\n\n```json\n[\n  1,\n  4,\n  7,\n  2\n]\n```\n\n**Chunks**\n\n```json\n[\n  {\n    \"documentId\": \"statecharts\",\n    \"pageNumber\": 2,\n    \"content\": \"Context is the extended state of a machine: arbitrary data stored alongside the finite state and updated during transitions.\"\n  },\n  {\n    \"documentId\": \"statecharts\",\n    \"pageNumber\": 5,\n    \"content\": \"Hierarchical states nest: a parent state's transitions apply to every child, so shared handling is written once.\"\n  },\n  {\n    \"documentId\": \"statecharts\",\n    \"pageNumber\": 8,\n    \"content\": \"History states remember which child was active when a parent was last exited, so re-entry resumes where it left off.\"\n  }\n]\n```",
       "idle": {
@@ -97,10 +97,10 @@
         "transition @xstate.init -> \"awaitingAnswer\"",
         "transition ANSWER -> \"grading\"",
         "transition xstate.done.actor -> \"explaining\"",
-        "emitted GRADED -> \"explaining\"",
         "transition xstate.done.actor -> \"asking\"",
-        "emitted QUESTION -> \"asking\"",
-        "transition xstate.done.actor -> \"awaitingAnswer\""
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
       ],
       "response": "**Pending**\n\n```json\n{\n  \"pageNumber\": 5,\n  \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 5)\",\n  \"sourceText\": \"Hierarchical states nest: a parent state's transitions apply to every child, so shared handling is written once.\"\n}\n```\n\n**Pages covered**\n\n```json\n[\n  1,\n  4,\n  7,\n  2,\n  5\n]\n```\n\n**Results**\n\n```json\n[\n  {\n    \"pageNumber\": 1,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 1)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 4,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 4)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 7,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 7)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 2,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 2)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  }\n]\n```",
       "idle": {
@@ -120,10 +120,10 @@
         "transition @xstate.init -> \"awaitingAnswer\"",
         "transition ANSWER -> \"grading\"",
         "transition xstate.done.actor -> \"explaining\"",
-        "emitted GRADED -> \"explaining\"",
         "transition xstate.done.actor -> \"asking\"",
-        "emitted QUESTION -> \"asking\"",
-        "transition xstate.done.actor -> \"awaitingAnswer\""
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
       ],
       "response": "**Pending**\n\n```json\n{\n  \"pageNumber\": 8,\n  \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 8)\",\n  \"sourceText\": \"History states remember which child was active when a parent was last exited, so re-entry resumes where it left off.\"\n}\n```\n\n**Pages covered**\n\n```json\n[\n  1,\n  4,\n  7,\n  2,\n  5,\n  8\n]\n```\n\n**Results**\n\n```json\n[\n  {\n    \"pageNumber\": 1,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 1)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 4,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 4)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 7,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 7)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 2,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 2)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 5,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 5)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  }\n]\n```",
       "idle": {
@@ -143,8 +143,8 @@
         "transition @xstate.init -> \"awaitingAnswer\"",
         "transition ANSWER -> \"grading\"",
         "transition xstate.done.actor -> \"explaining\"",
-        "emitted GRADED -> \"explaining\"",
-        "transition xstate.done.actor -> \"summary\""
+        "transition xstate.done.actor -> \"summary\"",
+        "emitted GRADED -> \"summary\""
       ],
       "response": "- Document id: statecharts\n- Correct: 6\n- Answered: 6\n- Exhausted: false\n\n**Pages covered**\n\n```json\n[\n  1,\n  4,\n  7,\n  2,\n  5,\n  8\n]\n```\n\n**Results**\n\n```json\n[\n  {\n    \"pageNumber\": 1,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 1)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 4,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 4)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 7,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 7)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 2,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 2)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 5,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 5)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 8,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 8)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  }\n]\n```"
     }
@@ -156,8 +156,8 @@
       "trace": [
         "transition @xstate.init -> \"retrieving\"",
         "transition xstate.done.actor -> \"asking\"",
-        "emitted QUESTION -> \"asking\"",
-        "transition xstate.done.actor -> \"awaitingAnswer\""
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
       ],
       "response": "**Pages covered**\n\n```json\n[\n  1\n]\n```\n\n**Pending**\n\n```json\n{\n  \"pageNumber\": 1,\n  \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 1)\",\n  \"sourceText\": \"Chunking splits a document into passages small enough to embed but large enough to stand alone when read.\"\n}\n```\n\n**Chunks**\n\n```json\n[\n  {\n    \"documentId\": \"retrieval\",\n    \"pageNumber\": 1,\n    \"content\": \"Chunking splits a document into passages small enough to embed but large enough to stand alone when read.\"\n  },\n  {\n    \"documentId\": \"retrieval\",\n    \"pageNumber\": 3,\n    \"content\": \"Top-k retrieval returns the k nearest chunks to a query vector. Larger k trades precision for recall.\"\n  }\n]\n```",
       "idle": {
@@ -177,10 +177,10 @@
         "transition @xstate.init -> \"awaitingAnswer\"",
         "transition ANSWER -> \"grading\"",
         "transition xstate.done.actor -> \"explaining\"",
-        "emitted GRADED -> \"explaining\"",
         "transition xstate.done.actor -> \"asking\"",
-        "emitted QUESTION -> \"asking\"",
-        "transition xstate.done.actor -> \"awaitingAnswer\""
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
       ],
       "response": "**Pending**\n\n```json\n{\n  \"pageNumber\": 3,\n  \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 3)\",\n  \"sourceText\": \"Top-k retrieval returns the k nearest chunks to a query vector. Larger k trades precision for recall.\"\n}\n```\n\n**Pages covered**\n\n```json\n[\n  1,\n  3\n]\n```\n\n**Results**\n\n```json\n[\n  {\n    \"pageNumber\": 1,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 1)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  }\n]\n```",
       "idle": {
@@ -200,11 +200,11 @@
         "transition @xstate.init -> \"awaitingAnswer\"",
         "transition ANSWER -> \"grading\"",
         "transition xstate.done.actor -> \"explaining\"",
-        "emitted GRADED -> \"explaining\"",
         "transition xstate.done.actor -> \"retrieving\"",
+        "emitted GRADED -> \"retrieving\"",
         "transition xstate.done.actor -> \"asking\"",
-        "emitted QUESTION -> \"asking\"",
-        "transition xstate.done.actor -> \"awaitingAnswer\""
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
       ],
       "response": "**Pending**\n\n```json\n{\n  \"pageNumber\": 2,\n  \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 2)\",\n  \"sourceText\": \"An embedding maps text to a vector so that semantically similar passages land near each other.\"\n}\n```\n\n**Pages covered**\n\n```json\n[\n  1,\n  3,\n  2\n]\n```\n\n**Chunks**\n\n```json\n[\n  {\n    \"documentId\": \"retrieval\",\n    \"pageNumber\": 2,\n    \"content\": \"An embedding maps text to a vector so that semantically similar passages land near each other.\"\n  },\n  {\n    \"documentId\": \"retrieval\",\n    \"pageNumber\": 4,\n    \"content\": \"Stratified sampling draws from early, middle, and late sections instead of clustering on whichever section scores highest.\"\n  }\n]\n```",
       "idle": {
@@ -224,10 +224,10 @@
         "transition @xstate.init -> \"awaitingAnswer\"",
         "transition ANSWER -> \"grading\"",
         "transition xstate.done.actor -> \"explaining\"",
-        "emitted GRADED -> \"explaining\"",
         "transition xstate.done.actor -> \"asking\"",
-        "emitted QUESTION -> \"asking\"",
-        "transition xstate.done.actor -> \"awaitingAnswer\""
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
       ],
       "response": "**Pending**\n\n```json\n{\n  \"pageNumber\": 4,\n  \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 4)\",\n  \"sourceText\": \"Stratified sampling draws from early, middle, and late sections instead of clustering on whichever section scores highest.\"\n}\n```\n\n**Pages covered**\n\n```json\n[\n  1,\n  3,\n  2,\n  4\n]\n```\n\n**Results**\n\n```json\n[\n  {\n    \"pageNumber\": 1,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 1)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 3,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 3)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 2,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 2)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  }\n]\n```",
       "idle": {
@@ -247,8 +247,8 @@
         "transition @xstate.init -> \"awaitingAnswer\"",
         "transition ANSWER -> \"grading\"",
         "transition xstate.done.actor -> \"explaining\"",
-        "emitted GRADED -> \"explaining\"",
-        "transition xstate.done.actor -> \"summary\""
+        "transition xstate.done.actor -> \"summary\"",
+        "emitted GRADED -> \"summary\""
       ],
       "response": "- Document id: retrieval\n- Correct: 4\n- Answered: 4\n- Exhausted: false\n\n**Pages covered**\n\n```json\n[\n  1,\n  3,\n  2,\n  4\n]\n```\n\n**Results**\n\n```json\n[\n  {\n    \"pageNumber\": 1,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 1)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 3,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 3)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 2,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 2)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  },\n  {\n    \"pageNumber\": 4,\n    \"prompt\": \"mock question\\nA) mock choices0\\n(Hint: see page 4)\",\n    \"answer\": \"Yes, that works. Please continue.\",\n    \"correct\": true,\n    \"explanation\": \"mock explanation\"\n  }\n]\n```"
     }
