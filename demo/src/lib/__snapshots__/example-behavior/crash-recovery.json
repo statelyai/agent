@@ -1,0 +1,52 @@
+{
+  "state machines": [
+    {
+      "sent": "start {\"topic\":\"state machines\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"outlining\"",
+        "transition xstate.done.actor -> \"drafting\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Write the article about state machines for this outline: Moc\n\n- Topic: state machines\n- Outline: Mock reply to: Outline a short article about state machines."
+    }
+  ],
+  "the history of the fax machine": [
+    {
+      "sent": "start {\"topic\":\"the history of the fax machine\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"outlining\"",
+        "transition xstate.done.actor -> \"drafting\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Outline a short article about the history of the fax machine\n\n- Topic: the history of the fax machine\n- Article: Mock reply to: Write the article about the history of the fax machine for t"
+    }
+  ],
+  "why builds are slow": [
+    {
+      "sent": "start {\"topic\":\"why builds are slow\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"outlining\"",
+        "transition xstate.done.actor -> \"drafting\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Write the article about why builds are slow for this outline\n\n- Topic: why builds are slow\n- Outline: Mock reply to: Outline a short article about why builds are slow."
+    }
+  ],
+  "Crash mid-draft, then recover from the log": [
+    {
+      "sent": "runner runCrashRecoveryExample",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"outlining\"",
+        "transition xstate.done.actor -> \"drafting\"",
+        "leg run.resumed -> \"drafting\"",
+        "transition @xstate.init -> \"drafting\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Write the article about state machines for this outline: Moc\n\n- Call key matched: true\n- Status: done\n- Calls before crash: 2\n- Calls during recovery: 1\n- Journal entries: 5"
+    }
+  ]
+}

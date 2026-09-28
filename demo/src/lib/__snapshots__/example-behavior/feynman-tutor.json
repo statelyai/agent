@@ -1,0 +1,92 @@
+{
+  "How public-key cryptography works": [
+    {
+      "sent": "start {\"topic\":\"How public-key cryptography works\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"planningCheckpoints\"",
+        "transition xstate.done.actor -> \"presenting\"",
+        "transition xstate.done.actor -> \"awaitingExplanation\""
+      ],
+      "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"keyIdea\": \"mock keyIdea\"\n  }\n]\n```",
+      "idle": {
+        "prompt": "Checkpoint 1/1: mock title mock context Explain this back in your own words.",
+        "events": [
+          "EXPLAIN",
+          "SKIP"
+        ],
+        "textEvent": "EXPLAIN.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"EXPLAIN\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingExplanation\"",
+        "transition EXPLAIN -> \"verifying\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Feynman session on \"How public-key cryptography works\": 1 of 1 checkpoint(s) passed.\n1. mock title: passed (score 100/100)\n\n- Passed: 1\n- Failed: 0\n- Skipped: 0\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"status\": \"passed\",\n    \"score\": 100,\n    \"reteaches\": 0\n  }\n]\n```"
+    }
+  ],
+  "Why the sky is blue": [
+    {
+      "sent": "start {\"topic\":\"Why the sky is blue\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"planningCheckpoints\"",
+        "transition xstate.done.actor -> \"presenting\"",
+        "transition xstate.done.actor -> \"awaitingExplanation\""
+      ],
+      "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"keyIdea\": \"mock keyIdea\"\n  }\n]\n```",
+      "idle": {
+        "prompt": "Checkpoint 1/1: mock title mock context Explain this back in your own words.",
+        "events": [
+          "EXPLAIN",
+          "SKIP"
+        ],
+        "textEvent": "EXPLAIN.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"EXPLAIN\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingExplanation\"",
+        "transition EXPLAIN -> \"verifying\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Feynman session on \"Why the sky is blue\": 1 of 1 checkpoint(s) passed.\n1. mock title: passed (score 100/100)\n\n- Passed: 1\n- Failed: 0\n- Skipped: 0\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"status\": \"passed\",\n    \"score\": 100,\n    \"reteaches\": 0\n  }\n]\n```"
+    }
+  ],
+  "How a hash table finds a key": [
+    {
+      "sent": "start {\"topic\":\"How a hash table finds a key\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"planningCheckpoints\"",
+        "transition xstate.done.actor -> \"presenting\"",
+        "transition xstate.done.actor -> \"awaitingExplanation\""
+      ],
+      "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"keyIdea\": \"mock keyIdea\"\n  }\n]\n```",
+      "idle": {
+        "prompt": "Checkpoint 1/1: mock title mock context Explain this back in your own words.",
+        "events": [
+          "EXPLAIN",
+          "SKIP"
+        ],
+        "textEvent": "EXPLAIN.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"EXPLAIN\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingExplanation\"",
+        "transition EXPLAIN -> \"verifying\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Feynman session on \"How a hash table finds a key\": 1 of 1 checkpoint(s) passed.\n1. mock title: passed (score 100/100)\n\n- Passed: 1\n- Failed: 0\n- Skipped: 0\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"status\": \"passed\",\n    \"score\": 100,\n    \"reteaches\": 0\n  }\n]\n```"
+    }
+  ]
+}

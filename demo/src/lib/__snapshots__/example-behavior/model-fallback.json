@@ -1,0 +1,44 @@
+{
+  "Get the weather for San Francisco, Boston and Tokyo": [
+    {
+      "sent": "start {\"request\":\"Get the weather for San Francisco, Boston and Tokyo\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"draftingQuick\"",
+        "transition xstate.done.actor -> \"validating\"",
+        "transition xstate.done.actor -> \"draftingStrong\"",
+        "transition xstate.done.actor -> \"validating\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "quick: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\nstrong: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\n- Answer: Could not answer: Both models' calls were rejected.\n- Model used: strong\n- Fallbacks: 1"
+    }
+  ],
+  "What's the weather like in London and New York?": [
+    {
+      "sent": "start {\"request\":\"What's the weather like in London and New York?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"draftingQuick\"",
+        "transition xstate.done.actor -> \"validating\"",
+        "transition xstate.done.actor -> \"draftingStrong\"",
+        "transition xstate.done.actor -> \"validating\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "quick: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\nstrong: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\n- Answer: Could not answer: Both models' calls were rejected.\n- Model used: strong\n- Fallbacks: 1"
+    }
+  ],
+  "What's the weather in Atlantis?": [
+    {
+      "sent": "start {\"request\":\"What's the weather in Atlantis?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"draftingQuick\"",
+        "transition xstate.done.actor -> \"validating\"",
+        "transition xstate.done.actor -> \"draftingStrong\"",
+        "transition xstate.done.actor -> \"validating\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "quick: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\nstrong: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\n- Answer: Could not answer: Both models' calls were rejected.\n- Model used: strong\n- Fallbacks: 1"
+    }
+  ]
+}

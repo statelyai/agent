@@ -1,0 +1,28 @@
+{
+  "Deliver the parcel": [
+    {
+      "sent": "start {\"parcel\":\"a birthday cake\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "emitted PLANNED -> \"planning\"",
+        "transition xstate.done.actor -> \"driving\"",
+        "emitted ARRIVED -> \"driving\"",
+        "transition xstate.done.actor -> \"driving\"",
+        "emitted ARRIVED -> \"driving\"",
+        "transition xstate.done.actor -> \"driving\"",
+        "emitted BLOCKED -> \"driving\"",
+        "transition xstate.done.actor -> \"blocked\"",
+        "transition REROUTE -> \"planning\"",
+        "emitted REPLANNED -> \"planning\"",
+        "transition xstate.done.actor -> \"driving\"",
+        "emitted ARRIVED -> \"driving\"",
+        "transition xstate.done.actor -> \"driving\"",
+        "emitted ARRIVED -> \"driving\"",
+        "transition xstate.done.actor -> \"reporting\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Delivered: true\nLegs travelled:\n1. depot → eastGate\n2. eastG\n\n- Delivered: true\n- Legs: 4\n- Replans: 1\n\n**Travelled**\n\n```json\n[\n  \"depot → eastGate\",\n  \"eastGate → bridge\",\n  \"bridge → riverside\",\n  \"riverside → market\"\n]\n```"
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "What is the combined population of France and Germany?": [
+    {
+      "sent": "start {\"question\":\"What is the combined population of France and Germany?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"collecting\"",
+        "transition xstate.done.actor -> \"joining\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Plan 1:\n  wave 1: $1 search(mock args) → [sample search] No sample fact matches \"mock args\".\n\n- Answer: mock answer\n- Plans: 1\n- Tasks run: 1\n- Waves: 1"
+    }
+  ],
+  "How much larger is Japan's GDP than France's GDP?": [
+    {
+      "sent": "start {\"question\":\"How much larger is Japan's GDP than France's GDP?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"collecting\"",
+        "transition xstate.done.actor -> \"joining\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Plan 1:\n  wave 1: $1 search(mock args) → [sample search] No sample fact matches \"mock args\".\n\n- Answer: mock answer\n- Plans: 1\n- Tasks run: 1\n- Waves: 1"
+    }
+  ],
+  "What percentage of Japan's population lives in Tokyo?": [
+    {
+      "sent": "start {\"question\":\"What percentage of Japan's population lives in Tokyo?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"collecting\"",
+        "transition xstate.done.actor -> \"joining\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Plan 1:\n  wave 1: $1 search(mock args) → [sample search] No sample fact matches \"mock args\".\n\n- Answer: mock answer\n- Plans: 1\n- Tasks run: 1\n- Waves: 1"
+    }
+  ]
+}

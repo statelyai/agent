@@ -1,0 +1,16 @@
+{
+  "Persist to disk, resume, then keep one actor alive": [
+    {
+      "sent": "runner runFileSnapshotStoreDemo",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"drafting\"",
+        "transition xstate.done.actor -> \"reviewing\"",
+        "leg run.resumed -> \"reviewing\"",
+        "transition @xstate.init -> \"reviewing\"",
+        "transition APPROVE -> \"done\""
+      ],
+      "response": "<tmpdir> (removed after the run)\n\n- Storage owned by the application: Mock reply to: Draft a release note about framework-owned storage.\n- Lifetime owned by the application: Mock reply to: Draft a release note about application-owned actors.\n\n**States seen by the application**\n\n```json\n[\n  \"drafting\",\n  \"reviewing\",\n  \"done\"\n]\n```"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "Small refund ($40)": [
+    {
+      "sent": "start {\"amount\":40,\"reason\":\"Late delivery credit\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition ISSUE -> \"issued\""
+      ],
+      "response": "Issued $40 automatically (at or under the $100 limit).\n\n- Outcome: issued\n- Amount: 40\n- Approved: false"
+    }
+  ],
+  "Large refund ($500)": [
+    {
+      "sent": "start {\"amount\":500,\"reason\":\"Duplicate annual charge\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "rejected ISSUE -> \"classifying\"",
+        "transition ESCALATE -> \"approving\""
+      ],
+      "response": "This refund is over the auto-issue limit. Approve or reject it.",
+      "idle": {
+        "prompt": "This refund is over the auto-issue limit. Approve or reject it.",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": "REJECT.reason"
+      }
+    },
+    {
+      "sent": "{\"approver\":\"mock approver\",\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"approving\"",
+        "transition APPROVE -> \"issued\""
+      ],
+      "response": "Issued $500 after human approval.\n\n- Outcome: issued\n- Amount: 500\n- Approved: true"
+    }
+  ],
+  "Right at the limit ($100)": [
+    {
+      "sent": "start {\"amount\":100,\"reason\":\"Damaged item\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition ISSUE -> \"issued\""
+      ],
+      "response": "Issued $100 automatically (at or under the $100 limit).\n\n- Outcome: issued\n- Amount: 100\n- Approved: false"
+    }
+  ]
+}

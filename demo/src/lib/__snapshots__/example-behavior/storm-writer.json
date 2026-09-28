@@ -1,0 +1,66 @@
+{
+  "state machines for AI agents": [
+    {
+      "sent": "start {\"topic\":\"state machines for AI agents\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"outlining\"",
+        "transition xstate.done.actor -> \"choosingPerspectives\"",
+        "transition xstate.done.actor -> \"collectingInterviews\"",
+        "transition xstate.done.actor -> \"refiningOutline\"",
+        "transition xstate.done.actor -> \"writingSection\"",
+        "transition xstate.done.actor -> \"writingArticle\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Outline: 1 heading(s)\nEditors: 1\nInterviews: 1 (0 exchange(s))\nSections written: 1\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n```json\n[\n  \"mock outline0\"\n]\n```"
+    }
+  ],
+  "retrieval-augmented generation": [
+    {
+      "sent": "start {\"topic\":\"retrieval-augmented generation\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"outlining\"",
+        "transition xstate.done.actor -> \"choosingPerspectives\"",
+        "transition xstate.done.actor -> \"collectingInterviews\"",
+        "transition xstate.done.actor -> \"refiningOutline\"",
+        "transition xstate.done.actor -> \"writingSection\"",
+        "transition xstate.done.actor -> \"writingArticle\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Outline: 1 heading(s)\nEditors: 1\nInterviews: 1 (0 exchange(s))\nSections written: 1\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n```json\n[\n  \"mock outline0\"\n]\n```"
+    }
+  ],
+  "prompt injection defenses": [
+    {
+      "sent": "start {\"topic\":\"prompt injection defenses\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"outlining\"",
+        "transition xstate.done.actor -> \"choosingPerspectives\"",
+        "transition xstate.done.actor -> \"collectingInterviews\"",
+        "transition xstate.done.actor -> \"refiningOutline\"",
+        "transition xstate.done.actor -> \"writingSection\"",
+        "transition xstate.done.actor -> \"writingArticle\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Outline: 1 heading(s)\nEditors: 1\nInterviews: 1 (0 exchange(s))\nSections written: 1\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n```json\n[\n  \"mock outline0\"\n]\n```"
+    }
+  ],
+  "the history of the Byzantine Empire (off-index: interviews find no sample sources)": [
+    {
+      "sent": "start {\"topic\":\"the history of the Byzantine Empire (off-index: interviews find no sample sources)\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"outlining\"",
+        "transition xstate.done.actor -> \"choosingPerspectives\"",
+        "transition xstate.done.actor -> \"collectingInterviews\"",
+        "transition xstate.done.actor -> \"refiningOutline\"",
+        "transition xstate.done.actor -> \"writingSection\"",
+        "transition xstate.done.actor -> \"writingArticle\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Outline: 1 heading(s)\nEditors: 1\nInterviews: 1 (0 exchange(s))\nSections written: 1\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n```json\n[\n  \"mock outline0\"\n]\n```"
+    }
+  ]
+}

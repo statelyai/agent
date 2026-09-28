@@ -1,0 +1,44 @@
+{
+  "This SVG path element <path d=\"M 55.57,80.69 L 57.38,65.80 M 57.38,65.80 L 48.90,57.46 M 48.90,57.46 L 45.58,47.78 M 45.58,47.78 L 53.25,36.07 L 66.29,48.90 L 78.69,61.09 L 55.57,80.69\"/> draws a: (A) circle (B) heptagon (C) hexagon (D) kite (E) line (F) octagon (G) pentagon (H) rectangle (I) sector (J) triangle": [
+    {
+      "sent": "start {\"task\":\"This SVG path element <path d=\\\"M 55.57,80.69 L 57.38,65.80 M 57.38,65.80 L 48.90,57.46 M 48.90,57.46 L 45.58,47.78 M 45.58,47.78 L 53.25,36.07 L 66.29,48.90 L 78.69,61.09 L 55.57,80.69\\\"/> draws a: (A) circle (B) heptagon (C) hexagon (D) kite (E) line (F) octagon (G) pentagon (H) rectangle (I) sector (J) triangle\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"selecting\"",
+        "transition xstate.done.actor -> \"adapting\"",
+        "transition xstate.done.actor -> \"structuring\"",
+        "transition xstate.done.actor -> \"reasoning\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "mock answer\n\nReasoning (the filled-in structure):\nmock reasoningTrace\n\n- Reasoning structure: mock structure\n- Adapted modules: mock adapted\n\n**Selected modules**\n\n```json\n[\n  \"How could I devise an experiment to help solve the problem?\",\n  \"Make a list of ideas for solving the problem, and apply them one by one to see if any makes progress.\",\n  \"How can I simplify the problem so that it is easier to solve?\",\n  \"What are the key assumptions underlying the problem?\",\n  \"How can I break the problem down into smaller, more manageable parts?\"\n]\n```"
+    }
+  ],
+  "Alice, Bob, and Carol each own one pet: a cat, a dog, or a fish. Alice is allergic to fur. Bob's pet cannot live in water. Carol does not own the dog. Who owns which pet?": [
+    {
+      "sent": "start {\"task\":\"Alice, Bob, and Carol each own one pet: a cat, a dog, or a fish. Alice is allergic to fur. Bob's pet cannot live in water. Carol does not own the dog. Who owns which pet?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"selecting\"",
+        "transition xstate.done.actor -> \"adapting\"",
+        "transition xstate.done.actor -> \"structuring\"",
+        "transition xstate.done.actor -> \"reasoning\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "mock answer\n\nReasoning (the filled-in structure):\nmock reasoningTrace\n\n- Reasoning structure: mock structure\n- Adapted modules: mock adapted\n\n**Selected modules**\n\n```json\n[\n  \"How could I devise an experiment to help solve the problem?\",\n  \"Make a list of ideas for solving the problem, and apply them one by one to see if any makes progress.\",\n  \"How can I simplify the problem so that it is easier to solve?\",\n  \"What are the key assumptions underlying the problem?\",\n  \"How can I break the problem down into smaller, more manageable parts?\"\n]\n```"
+    }
+  ],
+  "Plan a one-day offsite for 8 people starting at 9am: a 2-hour workshop, lunch, a 90-minute hike that must end before 4pm, and dinner at 7pm.": [
+    {
+      "sent": "start {\"task\":\"Plan a one-day offsite for 8 people starting at 9am: a 2-hour workshop, lunch, a 90-minute hike that must end before 4pm, and dinner at 7pm.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"selecting\"",
+        "transition xstate.done.actor -> \"adapting\"",
+        "transition xstate.done.actor -> \"structuring\"",
+        "transition xstate.done.actor -> \"reasoning\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "mock answer\n\nReasoning (the filled-in structure):\nmock reasoningTrace\n\n- Reasoning structure: mock structure\n- Adapted modules: mock adapted\n\n**Selected modules**\n\n```json\n[\n  \"How could I devise an experiment to help solve the problem?\",\n  \"Make a list of ideas for solving the problem, and apply them one by one to see if any makes progress.\",\n  \"How can I simplify the problem so that it is easier to solve?\",\n  \"What are the key assumptions underlying the problem?\",\n  \"How can I break the problem down into smaller, more manageable parts?\"\n]\n```"
+    }
+  ]
+}

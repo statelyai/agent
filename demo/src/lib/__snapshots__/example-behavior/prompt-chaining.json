@@ -1,0 +1,41 @@
+{
+  "cats": [
+    {
+      "sent": "start {\"topic\":\"cats\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generating\"",
+        "transition xstate.done.actor -> \"regenerating\"",
+        "transition xstate.done.actor -> \"regenerating\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "mock joke\n\n- Stage: generated\n- Regenerations: 2\n\n**Trail**\n\n```json\n[\n  \"Stage reached: generated.\",\n  \"Regenerations: 2 of 2.\",\n  \"No punchline after 2 regenerations; kept the last joke.\"\n]\n```"
+    }
+  ],
+  "the office printer": [
+    {
+      "sent": "start {\"topic\":\"the office printer\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generating\"",
+        "transition xstate.done.actor -> \"regenerating\"",
+        "transition xstate.done.actor -> \"regenerating\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "mock joke\n\n- Stage: generated\n- Regenerations: 2\n\n**Trail**\n\n```json\n[\n  \"Stage reached: generated.\",\n  \"Regenerations: 2 of 2.\",\n  \"No punchline after 2 regenerations; kept the last joke.\"\n]\n```"
+    }
+  ],
+  "time zones": [
+    {
+      "sent": "start {\"topic\":\"time zones\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generating\"",
+        "transition xstate.done.actor -> \"regenerating\"",
+        "transition xstate.done.actor -> \"regenerating\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "mock joke\n\n- Stage: generated\n- Regenerations: 2\n\n**Trail**\n\n```json\n[\n  \"Stage reached: generated.\",\n  \"Regenerations: 2 of 2.\",\n  \"No punchline after 2 regenerations; kept the last joke.\"\n]\n```"
+    }
+  ]
+}

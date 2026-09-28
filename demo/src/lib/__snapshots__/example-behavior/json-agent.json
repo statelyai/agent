@@ -1,0 +1,24 @@
+{
+  "Login issue ticket": [
+    {
+      "sent": "start {\"ticket\":\"I can't log in - password reset emails never arrive.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"triaging\"",
+        "transition ESCALATE -> \"escalated\""
+      ],
+      "response": "mock reason\n\n- Resolution: escalated"
+    }
+  ],
+  "Duplicate invoice ticket": [
+    {
+      "sent": "start {\"ticket\":\"My invoice charged me twice this month. Please fix it.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"triaging\"",
+        "transition ESCALATE -> \"escalated\""
+      ],
+      "response": "mock reason\n\n- Resolution: escalated"
+    }
+  ]
+}

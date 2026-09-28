@@ -1,0 +1,47 @@
+{
+  "Two rounds, then the judge": [
+    {
+      "sent": "start {\"motion\":\"Agent control flow belongs in code, not in prompts.\",\"rounds\":2}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"proSpeaking\"",
+        "transition xstate.done.actor -> \"conSpeaking\"",
+        "transition xstate.done.actor -> \"proSpeaking\"",
+        "transition xstate.done.actor -> \"conSpeaking\"",
+        "transition xstate.done.actor -> \"judging\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Winner: pro — Judge 100% sure. Pro: Built a clear, well-evidenced case that answered every major opposing point. Con: Built a clear, well-evidenced case that answered every major opposing point.\n\n- Transcript: Round 1 — PRO: mock argument\n\nRound 1 — CON: mock argument\n\nRound 2 — PRO: mock argument\n\nRound 2 — CON: mock argument\n- Winner: pro\n- Rounds: 2\n\n**Scores**\n\n```json\n{\n  \"pro\": 10,\n  \"con\": 10\n}\n```"
+    }
+  ],
+  "One round — a quick exchange": [
+    {
+      "sent": "start {\"motion\":\"Remote work is better for software teams.\",\"rounds\":1}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"proSpeaking\"",
+        "transition xstate.done.actor -> \"conSpeaking\"",
+        "transition xstate.done.actor -> \"judging\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Winner: pro — Judge 100% sure. Pro: Built a clear, well-evidenced case that answered every major opposing point. Con: Built a clear, well-evidenced case that answered every major opposing point.\n\n- Transcript: Round 1 — PRO: mock argument\n\nRound 1 — CON: mock argument\n- Winner: pro\n- Rounds: 1\n\n**Scores**\n\n```json\n{\n  \"pro\": 10,\n  \"con\": 10\n}\n```"
+    }
+  ],
+  "Three rounds — the MAX_ROUNDS ceiling": [
+    {
+      "sent": "start {\"motion\":\"Cities should ban cars from their centers.\",\"rounds\":3}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"proSpeaking\"",
+        "transition xstate.done.actor -> \"conSpeaking\"",
+        "transition xstate.done.actor -> \"proSpeaking\"",
+        "transition xstate.done.actor -> \"conSpeaking\"",
+        "transition xstate.done.actor -> \"proSpeaking\"",
+        "transition xstate.done.actor -> \"conSpeaking\"",
+        "transition xstate.done.actor -> \"judging\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Winner: pro — Judge 100% sure. Pro: Built a clear, well-evidenced case that answered every major opposing point. Con: Built a clear, well-evidenced case that answered every major opposing point.\n\n- Transcript: Round 1 — PRO: mock argument\n\nRound 1 — CON: mock argument\n\nRound 2 — PRO: mock argument\n\nRound 2 — CON: mock argument\n\nRound 3 — PRO: mock argument\n\nRound 3 — CON: mock argument\n- Winner: pro\n- Rounds: 3\n\n**Scores**\n\n```json\n{\n  \"pro\": 10,\n  \"con\": 10\n}\n```"
+    }
+  ]
+}

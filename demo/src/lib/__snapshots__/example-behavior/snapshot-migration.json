@@ -1,0 +1,69 @@
+{
+  "Small order ($25.00)": [
+    {
+      "sent": "start {\"orderId\":\"ORD-2\",\"amountCents\":2500,\"currency\":\"USD\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\""
+      ],
+      "response": "Order ORD-2 (2500 USD, low risk) is waiting for a reviewer.",
+      "idle": {
+        "prompt": "Order ORD-2 (2500 USD, low risk) is waiting for a reviewer.",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": "REJECT.reason"
+      }
+    },
+    {
+      "sent": "{\"type\":\"REJECT\",\"reason\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition REJECT -> \"rejected\""
+      ],
+      "response": "- Order id: ORD-2\n- Approved: false\n- Amount cents: 2500\n- Currency: USD\n- Risk level: low"
+    }
+  ],
+  "High-risk order ($812.50)": [
+    {
+      "sent": "start {\"orderId\":\"ORD-4417\",\"amountCents\":81250,\"currency\":\"USD\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\""
+      ],
+      "response": "Order ORD-4417 (81250 USD, high risk) is waiting for a reviewer.",
+      "idle": {
+        "prompt": "Order ORD-4417 (81250 USD, high risk) is waiting for a reviewer.",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": "REJECT.reason"
+      }
+    },
+    {
+      "sent": "{\"type\":\"REJECT\",\"reason\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition REJECT -> \"rejected\""
+      ],
+      "response": "- Order id: ORD-4417\n- Approved: false\n- Amount cents: 81250\n- Currency: USD\n- Risk level: high"
+    }
+  ],
+  "Pause on v1, ship v2, resume the snapshot": [
+    {
+      "sent": "runner runSnapshotMigrationExample",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "leg run.resumed -> \"reviewing\"",
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"approved\""
+      ],
+      "response": "```json\n{\n  \"persisted\": {\n    \"status\": \"active\",\n    \"value\": \"reviewing\",\n    \"historyValue\": {},\n    \"_nextTimerId\": 0,\n    \"context\": {\n      \"orderId\": \"ORD-4417\",\n      \"total\": 812.5\n    },\n    \"children\": {},\n    \"timers\": {},\n    \"machine\": {\n      \"id\": \"order-approval\",\n      \"version\": \"1.0.0\"\n    },\n    \"version\": \"1.0.0\",\n    \"agentMeta\": {\n      \"machineId\": \"order-approval\",\n      \"version\": \"1.0.0\",\n      \"logId\": \"<uuid>\",\n      \"logIndex\": 1\n    }\n  },\n  \"output\": {\n    \"orderId\": \"ORD-4417\",\n    \"approved\": true,\n    \"amountCents\": 81250,\n    \"currency\": \"USD\",\n    \"riskLevel\": \"high\"\n  }\n}\n```"
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "Solve (max 12 moves)": [
+    {
+      "sent": "start {\"maxMoves\":12}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "rejected TAKE_WOLF -> \"deciding\"",
+        "transition TAKE_GOAT -> \"deciding\"",
+        "rejected TAKE_CABBAGE -> \"deciding\"",
+        "transition CROSS_ALONE -> \"deciding\"",
+        "transition REQUEST_PLAN -> \"planning\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition TAKE_WOLF -> \"deciding\"",
+        "transition TAKE_GOAT -> \"deciding\"",
+        "transition TAKE_CABBAGE -> \"deciding\"",
+        "transition CROSS_ALONE -> \"deciding\"",
+        "rejected REQUEST_PLAN -> \"deciding\"",
+        "rejected TAKE_WOLF -> \"deciding\"",
+        "transition TAKE_GOAT -> \"solved\""
+      ],
+      "response": "Solved the river crossing in 7 moves.\n\n1. Farmer crosses left → right with the goat. Left: wolf, cabbage | Right: farmer, goat\n2. Farmer crosses right → left alone. Left: farmer, wolf, cabbage | Right: goat\n3. Farmer crosses left → right with the wolf. Left: cabbage | Right: farmer, wolf, goat\n4. Farmer crosses right → left with the goat. Left: farmer, goat, cabbage | Right: wolf\n5. Farmer crosses left → right with the cabbage. Left: goat | Right: farmer, wolf, cabbage\n6. Farmer crosses right → left alone. Left: farmer, goat | Right: wolf, cabbage\n7. Farmer crosses left → right with the goat. Left: (empty) | Right: farmer, wolf, goat, cabbage\n\n- Solved: true\n- Moves: 7\n\n**Log**\n\n```json\n[\n  \"Farmer crosses left → right with the goat. Left: wolf, cabbage | Right: farmer, goat\",\n  \"Farmer crosses right → left alone. Left: farmer, wolf, cabbage | Right: goat\",\n  \"Farmer crosses left → right with the wolf. Left: cabbage | Right: farmer, wolf, goat\",\n  \"Farmer crosses right → left with the goat. Left: farmer, goat, cabbage | Right: wolf\",\n  \"Farmer crosses left → right with the cabbage. Left: goat | Right: farmer, wolf, cabbage\",\n  \"Farmer crosses right → left alone. Left: farmer, goat | Right: wolf, cabbage\",\n  \"Farmer crosses left → right with the goat. Left: (empty) | Right: farmer, wolf, goat, cabbage\"\n]\n```"
+    }
+  ],
+  "Tight budget (max 7 moves)": [
+    {
+      "sent": "start {\"maxMoves\":7}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "rejected TAKE_WOLF -> \"deciding\"",
+        "transition TAKE_GOAT -> \"deciding\"",
+        "rejected TAKE_CABBAGE -> \"deciding\"",
+        "transition CROSS_ALONE -> \"deciding\"",
+        "transition REQUEST_PLAN -> \"planning\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition TAKE_WOLF -> \"deciding\"",
+        "transition TAKE_GOAT -> \"deciding\"",
+        "transition TAKE_CABBAGE -> \"deciding\"",
+        "transition CROSS_ALONE -> \"deciding\"",
+        "rejected REQUEST_PLAN -> \"deciding\"",
+        "rejected TAKE_WOLF -> \"deciding\"",
+        "transition TAKE_GOAT -> \"solved\""
+      ],
+      "response": "Solved the river crossing in 7 moves.\n\n1. Farmer crosses left → right with the goat. Left: wolf, cabbage | Right: farmer, goat\n2. Farmer crosses right → left alone. Left: farmer, wolf, cabbage | Right: goat\n3. Farmer crosses left → right with the wolf. Left: cabbage | Right: farmer, wolf, goat\n4. Farmer crosses right → left with the goat. Left: farmer, goat, cabbage | Right: wolf\n5. Farmer crosses left → right with the cabbage. Left: goat | Right: farmer, wolf, cabbage\n6. Farmer crosses right → left alone. Left: farmer, goat | Right: wolf, cabbage\n7. Farmer crosses left → right with the goat. Left: (empty) | Right: farmer, wolf, goat, cabbage\n\n- Solved: true\n- Moves: 7\n\n**Log**\n\n```json\n[\n  \"Farmer crosses left → right with the goat. Left: wolf, cabbage | Right: farmer, goat\",\n  \"Farmer crosses right → left alone. Left: farmer, wolf, cabbage | Right: goat\",\n  \"Farmer crosses left → right with the wolf. Left: cabbage | Right: farmer, wolf, goat\",\n  \"Farmer crosses right → left with the goat. Left: farmer, goat, cabbage | Right: wolf\",\n  \"Farmer crosses left → right with the cabbage. Left: goat | Right: farmer, wolf, cabbage\",\n  \"Farmer crosses right → left alone. Left: farmer, goat | Right: wolf, cabbage\",\n  \"Farmer crosses left → right with the goat. Left: (empty) | Right: farmer, wolf, goat, cabbage\"\n]\n```"
+    }
+  ],
+  "Watch it fail (max 4 moves)": [
+    {
+      "sent": "start {\"maxMoves\":4}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "rejected TAKE_WOLF -> \"deciding\"",
+        "transition TAKE_GOAT -> \"deciding\"",
+        "rejected TAKE_CABBAGE -> \"deciding\"",
+        "transition CROSS_ALONE -> \"deciding\"",
+        "transition REQUEST_PLAN -> \"planning\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition TAKE_WOLF -> \"deciding\"",
+        "transition TAKE_GOAT -> \"failed\""
+      ],
+      "response": "Not solved — stopped after 4 of 4 allowed moves.\n\n1. Farmer crosses left → right with the goat. Left: wolf, cabbage | Right: farmer, goat\n2. Farmer crosses right → left alone. Left: farmer, wolf, cabbage | Right: goat\n3. Farmer crosses left → right with the wolf. Left: cabbage | Right: farmer, wolf, goat\n4. Farmer crosses right → left with the goat. Left: farmer, goat, cabbage | Right: wolf\n\n- Solved: false\n- Moves: 4\n\n**Log**\n\n```json\n[\n  \"Farmer crosses left → right with the goat. Left: wolf, cabbage | Right: farmer, goat\",\n  \"Farmer crosses right → left alone. Left: farmer, wolf, cabbage | Right: goat\",\n  \"Farmer crosses left → right with the wolf. Left: cabbage | Right: farmer, wolf, goat\",\n  \"Farmer crosses right → left with the goat. Left: farmer, goat, cabbage | Right: wolf\"\n]\n```"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "On-corpus — retrieves, grades relevant, answers from the posts": [
+    {
+      "sent": "start {\"question\":\"What does Lilian Weng say about the types of agent memory?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition RETRIEVE -> \"retrieving\"",
+        "transition xstate.done.actor -> \"rewriting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition ANSWER -> \"done\""
+      ],
+      "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: false"
+    }
+  ],
+  "Off-corpus — search finds nothing, so the question is rewritten": [
+    {
+      "sent": "start {\"question\":\"What does Lilian Weng's blog say about diffusion models for video generation?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition RETRIEVE -> \"retrieving\"",
+        "transition xstate.done.actor -> \"rewriting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition ANSWER -> \"done\""
+      ],
+      "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: false"
+    }
+  ],
+  "Trivial — a good model answers directly, no retrieval": [
+    {
+      "sent": "start {\"question\":\"What is 2+2?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition RETRIEVE -> \"retrieving\"",
+        "transition xstate.done.actor -> \"rewriting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition ANSWER -> \"done\""
+      ],
+      "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: false"
+    }
+  ]
+}

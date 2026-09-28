@@ -1,0 +1,38 @@
+{
+  "animals": [
+    {
+      "sent": "start {\"topic\":\"animals\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generatingSubjects\"",
+        "transition xstate.done.actor -> \"generatingJokes\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "mock subjects0\n\n- Best joke: mock joke\n\n**Jokes**\n\n```json\n[\n  {\n    \"subject\": \"mock subjects0\",\n    \"joke\": \"mock joke\"\n  }\n]\n```\n\n**Trail**\n\n```json\n[\n  \"Subjects: mock subjects0\",\n  \"[0] mock subjects0: mock joke\",\n  \"Only one joke; no judging needed.\"\n]\n```"
+    }
+  ],
+  "office life": [
+    {
+      "sent": "start {\"topic\":\"office life\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generatingSubjects\"",
+        "transition xstate.done.actor -> \"generatingJokes\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "mock subjects0\n\n- Best joke: mock joke\n\n**Jokes**\n\n```json\n[\n  {\n    \"subject\": \"mock subjects0\",\n    \"joke\": \"mock joke\"\n  }\n]\n```\n\n**Trail**\n\n```json\n[\n  \"Subjects: mock subjects0\",\n  \"[0] mock subjects0: mock joke\",\n  \"Only one joke; no judging needed.\"\n]\n```"
+    }
+  ],
+  "space travel": [
+    {
+      "sent": "start {\"topic\":\"space travel\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generatingSubjects\"",
+        "transition xstate.done.actor -> \"generatingJokes\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "mock subjects0\n\n- Best joke: mock joke\n\n**Jokes**\n\n```json\n[\n  {\n    \"subject\": \"mock subjects0\",\n    \"joke\": \"mock joke\"\n  }\n]\n```\n\n**Trail**\n\n```json\n[\n  \"Subjects: mock subjects0\",\n  \"[0] mock subjects0: mock joke\",\n  \"Only one joke; no judging needed.\"\n]\n```"
+    }
+  ]
+}

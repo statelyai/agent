@@ -1,0 +1,38 @@
+{
+  "A keyboard-first task manager for developers.": [
+    {
+      "sent": "start {\"product\":\"A keyboard-first task manager for developers.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"tagline\"",
+        "transition xstate.done.actor -> \"pitch\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Product: A keyboard-first task manager for developers.\nTagli\n\n- Tagline: Mock reply to: Write a tagline for: A keyboard-first task manager for devel\n- Stream summary: tagline 13 words · pitch 11 words"
+    }
+  ],
+  "Noise-cancelling earbuds that translate 40 languages live.": [
+    {
+      "sent": "start {\"product\":\"Noise-cancelling earbuds that translate 40 languages live.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"tagline\"",
+        "transition xstate.done.actor -> \"pitch\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Product: Noise-cancelling earbuds that translate 40 language\n\n- Tagline: Mock reply to: Write a tagline for: Noise-cancelling earbuds that translate\n- Stream summary: tagline 11 words · pitch 10 words"
+    }
+  ],
+  "A coffee subscription that learns your taste from one rating a week.": [
+    {
+      "sent": "start {\"product\":\"A coffee subscription that learns your taste from one rating a week.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"tagline\"",
+        "transition xstate.done.actor -> \"pitch\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Product: A coffee subscription that learns your taste from o\n\n- Tagline: Mock reply to: Write a tagline for: A coffee subscription that learns your \n- Stream summary: tagline 13 words · pitch 13 words"
+    }
+  ]
+}

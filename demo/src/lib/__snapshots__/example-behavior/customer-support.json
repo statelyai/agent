@@ -1,0 +1,26 @@
+{
+  "Cancel my flight, confirmation code 7QX2P.": [
+    {
+      "sent": "start {\"query\":\"Cancel my flight, confirmation code 7QX2P.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.error.actor -> \"failed\""
+      ],
+      "response": "Could not answer this question.\n\n- Resolution: failed"
+    }
+  ],
+  "What's the carry-on baggage allowance on my ticket?": [
+    {
+      "sent": "start {\"query\":\"What's the carry-on baggage allowance on my ticket?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.error.actor -> \"failed\""
+      ],
+      "response": "Could not answer this question.\n\n- Resolution: failed"
+    }
+  ]
+}

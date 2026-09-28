@@ -1,0 +1,50 @@
+{
+  "I cannot log in and my password reset email never arrives.": [
+    {
+      "sent": "start {\"ticket\":\"I cannot log in and my password reset email never arrives.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition xstate.done.actor -> \"replying\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: false"
+    }
+  ],
+  "How do I upgrade to the annual plan?": [
+    {
+      "sent": "start {\"ticket\":\"How do I upgrade to the annual plan?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition xstate.done.actor -> \"replying\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: false"
+    }
+  ],
+  "You charged my card twice this month. Fix it.": [
+    {
+      "sent": "start {\"ticket\":\"You charged my card twice this month. Fix it.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition xstate.done.actor -> \"replying\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: false"
+    }
+  ],
+  "hey quick question about the thing from yesterday, can you sort it?": [
+    {
+      "sent": "start {\"ticket\":\"hey quick question about the thing from yesterday, can you sort it?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition xstate.done.actor -> \"replying\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: false"
+    }
+  ]
+}

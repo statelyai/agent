@@ -1,0 +1,41 @@
+{
+  "Plan a 3-day food tour of Tokyo on a $200 budget.": [
+    {
+      "sent": "start {\"goal\":\"Plan a 3-day food tour of Tokyo on a $200 budget.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"gathering\"",
+        "transition xstate.done.actor -> \"solving\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Plan\nmock id. mock question\n\nProgress\nmock id. done. Mock reply to: mock question\n\nAnswer\nMock reply to: Goal: Plan a 3-day food tour of Tokyo on a $200 budget.\n\nEvi\n\n**Details**\n\n```json\n{\n  \"answer\": \"Mock reply to: Goal: Plan a 3-day food tour of Tokyo on a $200 budget.\\n\\nEvi\",\n  \"steps\": [\n    {\n      \"id\": \"mock id\",\n      \"question\": \"mock question\"\n    }\n  ],\n  \"evidence\": {\n    \"mock id\": \"Mock reply to: mock question\"\n  }\n}\n```"
+    }
+  ],
+  "Figure out how many tennis balls fit inside a school bus.": [
+    {
+      "sent": "start {\"goal\":\"Figure out how many tennis balls fit inside a school bus.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"gathering\"",
+        "transition xstate.done.actor -> \"solving\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Plan\nmock id. mock question\n\nProgress\nmock id. done. Mock reply to: mock question\n\nAnswer\nMock reply to: Goal: Figure out how many tennis balls fit inside a school b\n\n**Details**\n\n```json\n{\n  \"answer\": \"Mock reply to: Goal: Figure out how many tennis balls fit inside a school b\",\n  \"steps\": [\n    {\n      \"id\": \"mock id\",\n      \"question\": \"mock question\"\n    }\n  ],\n  \"evidence\": {\n    \"mock id\": \"Mock reply to: mock question\"\n  }\n}\n```"
+    }
+  ],
+  "Work out whether a heat pump makes sense for a 1920s house.": [
+    {
+      "sent": "start {\"goal\":\"Work out whether a heat pump makes sense for a 1920s house.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"gathering\"",
+        "transition xstate.done.actor -> \"solving\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Plan\nmock id. mock question\n\nProgress\nmock id. done. Mock reply to: mock question\n\nAnswer\nMock reply to: Goal: Work out whether a heat pump makes sense for a 1920s h\n\n**Details**\n\n```json\n{\n  \"answer\": \"Mock reply to: Goal: Work out whether a heat pump makes sense for a 1920s h\",\n  \"steps\": [\n    {\n      \"id\": \"mock id\",\n      \"question\": \"mock question\"\n    }\n  ],\n  \"evidence\": {\n    \"mock id\": \"Mock reply to: mock question\"\n  }\n}\n```"
+    }
+  ]
+}

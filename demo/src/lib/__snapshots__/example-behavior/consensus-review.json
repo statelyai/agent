@@ -1,0 +1,45 @@
+{
+  "Trusted patch (host-authored)": [
+    {
+      "sent": "start {\"patch\":\"Validate input before a database write.\",\"source\":\"trusted\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> {\"reviewing\":{\"security\":\"working\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"done\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> \"accepted\""
+      ],
+      "response": "```json\n{\n  \"approved\": true,\n  \"humanReviewed\": false,\n  \"votes\": [\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"security\"\n    },\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"reliability\"\n    },\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"maintainability\"\n    }\n  ],\n  \"abstentions\": []\n}\n```"
+    }
+  ],
+  "External patch (needs human review)": [
+    {
+      "sent": "start {\"patch\":\"Validate input before a database write.\",\"source\":\"external\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> {\"reviewing\":{\"security\":\"working\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"done\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> \"humanReview\""
+      ],
+      "response": "**Votes**\n\n```json\n[\n  {\n    \"approve\": true,\n    \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n    \"reviewer\": \"security\"\n  },\n  {\n    \"approve\": true,\n    \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n    \"reviewer\": \"reliability\"\n  },\n  {\n    \"approve\": true,\n    \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n    \"reviewer\": \"maintainability\"\n  }\n]\n```",
+      "idle": {
+        "prompt": "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved.",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"humanReview\"",
+        "transition APPROVE -> \"overridden\""
+      ],
+      "response": "```json\n{\n  \"approved\": true,\n  \"humanReviewed\": true,\n  \"votes\": [\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"security\"\n    },\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"reliability\"\n    },\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"maintainability\"\n    }\n  ],\n  \"abstentions\": []\n}\n```"
+    }
+  ]
+}

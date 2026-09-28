@@ -1,0 +1,56 @@
+{
+  "Corpus miss — corrected via the sample index": [
+    {
+      "sent": "start {\"question\":\"What is prompt injection and how do you defend against it?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"retrieving\"",
+        "transition xstate.done.actor -> \"transformingQuery\"",
+        "transition xstate.done.actor -> \"webSearching\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Primary index returned no matching documents. Corrected: rewrote the question and answered from the fallback sample web index (1 result(s)).\n\n- Answer: Mock reply to: Documents:\n[1] [sample web result] Prompt injection is an at\n- Used fallback index: true\n- Rewritten question: Mock reply to: What is prompt injection and how do you defend against it?\n\n**Documents**\n\n```json\n[\n  \"[sample web result] Prompt injection is an attack where crafted input overrides an agent's instructions; defenses include input sanitization, privilege separation, and output filtering.\"\n]\n```"
+    }
+  ],
+  "Near-miss doc — graded away, then corrected": [
+    {
+      "sent": "start {\"question\":\"What is a vector database and why does RAG need one?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"retrieving\"",
+        "transition xstate.done.actor -> \"grading\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Primary index returned 1 candidate document(s). The grader kept 1 of 1 as relevant. Answered from the primary index, no correction needed.\n\n- Answer: Mock reply to: Documents:\n[1] Task decomposition breaks a hard goal into or\n- Used fallback index: false\n\n**Documents**\n\n```json\n[\n  \"Task decomposition breaks a hard goal into ordered subgoals the agent tackles one at a time, a core part of agent planning.\"\n]\n```"
+    }
+  ],
+  "Corpus hit — answers without correcting": [
+    {
+      "sent": "start {\"question\":\"How does long-term memory work for LLM agents?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"retrieving\"",
+        "transition xstate.done.actor -> \"grading\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Primary index returned 2 candidate document(s). The grader kept 2 of 2 as relevant. Answered from the primary index, no correction needed.\n\n- Answer: Mock reply to: Documents:\n[1] LLM agent memory splits into short-term (the \n- Used fallback index: false\n\n**Documents**\n\n```json\n[\n  \"LLM agent memory splits into short-term (the working context window of the current run) and long-term memory (facts persisted across sessions in an external store).\",\n  \"Agents read and write long-term memory through tools: a retrieval tool fetches relevant past facts, and a write tool saves new observations for later runs.\"\n]\n```"
+    }
+  ],
+  "Off-corpus question (expect no evidence, even in the fallback index)": [
+    {
+      "sent": "start {\"question\":\"How much rainfall did the Amazon basin get last month?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"retrieving\"",
+        "transition xstate.done.actor -> \"transformingQuery\"",
+        "transition xstate.done.actor -> \"webSearching\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Primary index returned no matching documents. Corrected: rewrote the question and answered from the fallback sample web index (1 result(s)).\n\n- Answer: Mock reply to: Documents:\n[1] [sample web result] No external results found\n- Used fallback index: true\n- Rewritten question: Mock reply to: How much rainfall did the Amazon basin get last month?\n\n**Documents**\n\n```json\n[\n  \"[sample web result] No external results found for this query.\"\n]\n```"
+    }
+  ]
+}

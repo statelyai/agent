@@ -1,0 +1,44 @@
+{
+  "Partially covered — a second, targeted search fills the gap": [
+    {
+      "sent": "start {\"company\":\"Bluefin Analytics\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planningSearch\"",
+        "transition xstate.done.actor -> \"searching\"",
+        "transition xstate.done.actor -> \"extracting\"",
+        "transition xstate.done.actor -> \"reflecting\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Bluefin Analytics\nFounded: mock founded\nHeadquarters: mock headquarters\nCEO: mock ceo\nEmployees: mock employees\n\n- Loops: 1\n\n**Record**\n\n```json\n{\n  \"founded\": \"mock founded\",\n  \"headquarters\": \"mock headquarters\",\n  \"ceo\": \"mock ceo\",\n  \"employees\": \"mock employees\"\n}\n```\n\n**Missing fields**\n\n```json\n[]\n```"
+    }
+  ],
+  "Fully covered — complete after one search pass": [
+    {
+      "sent": "start {\"company\":\"Northwind Robotics\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planningSearch\"",
+        "transition xstate.done.actor -> \"searching\"",
+        "transition xstate.done.actor -> \"extracting\"",
+        "transition xstate.done.actor -> \"reflecting\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Northwind Robotics\nFounded: mock founded\nHeadquarters: mock headquarters\nCEO: mock ceo\nEmployees: mock employees\n\n- Loops: 1\n\n**Record**\n\n```json\n{\n  \"founded\": \"mock founded\",\n  \"headquarters\": \"mock headquarters\",\n  \"ceo\": \"mock ceo\",\n  \"employees\": \"mock employees\"\n}\n```\n\n**Missing fields**\n\n```json\n[]\n```"
+    }
+  ],
+  "Headcount missing everywhere — exhausts the search budget → failed": [
+    {
+      "sent": "start {\"company\":\"Cedar Grid Energy\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planningSearch\"",
+        "transition xstate.done.actor -> \"searching\"",
+        "transition xstate.done.actor -> \"extracting\"",
+        "transition xstate.done.actor -> \"reflecting\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Cedar Grid Energy\nFounded: mock founded\nHeadquarters: mock headquarters\nCEO: mock ceo\nEmployees: mock employees\n\n- Loops: 1\n\n**Record**\n\n```json\n{\n  \"founded\": \"mock founded\",\n  \"headquarters\": \"mock headquarters\",\n  \"ceo\": \"mock ceo\",\n  \"employees\": \"mock employees\"\n}\n```\n\n**Missing fields**\n\n```json\n[]\n```"
+    }
+  ]
+}

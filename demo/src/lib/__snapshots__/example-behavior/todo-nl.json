@@ -1,0 +1,143 @@
+{
+  "add milk and eggs": [
+    {
+      "sent": "start {}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\""
+      ],
+      "response": "What should I do with your list? (list is empty)",
+      "idle": {
+        "prompt": "What should I do with your list? (list is empty)",
+        "events": [
+          "COMMAND"
+        ],
+        "textEvent": "COMMAND.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"COMMAND\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\"",
+        "transition COMMAND -> \"planning\"",
+        "transition ADD_TODO -> \"planning\"",
+        "transition TOGGLE_TODO -> \"planning\"",
+        "transition DELETE_TODO -> \"planning\"",
+        "transition DONE -> \"awaitingCommand\""
+      ],
+      "response": "**Log**\n\n```json\n[\n  \"added #1: mock title\",\n  \"toggled #1\",\n  \"deleted #1\"\n]\n```",
+      "idle": {
+        "prompt": "What should I do with your list? (list is empty)",
+        "events": [
+          "COMMAND"
+        ],
+        "textEvent": "COMMAND.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"COMMAND\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\"",
+        "transition COMMAND -> \"planning\"",
+        "transition QUIT -> \"done\""
+      ],
+      "response": "```json\n{\n  \"todos\": [],\n  \"log\": [\n    \"added #1: mock title\",\n    \"toggled #1\",\n    \"deleted #1\"\n  ]\n}\n```"
+    }
+  ],
+  "mark the first one done": [
+    {
+      "sent": "start {}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\""
+      ],
+      "response": "What should I do with your list? (list is empty)",
+      "idle": {
+        "prompt": "What should I do with your list? (list is empty)",
+        "events": [
+          "COMMAND"
+        ],
+        "textEvent": "COMMAND.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"COMMAND\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\"",
+        "transition COMMAND -> \"planning\"",
+        "transition ADD_TODO -> \"planning\"",
+        "transition TOGGLE_TODO -> \"planning\"",
+        "transition DELETE_TODO -> \"planning\"",
+        "transition DONE -> \"awaitingCommand\""
+      ],
+      "response": "**Log**\n\n```json\n[\n  \"added #1: mock title\",\n  \"toggled #1\",\n  \"deleted #1\"\n]\n```",
+      "idle": {
+        "prompt": "What should I do with your list? (list is empty)",
+        "events": [
+          "COMMAND"
+        ],
+        "textEvent": "COMMAND.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"COMMAND\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\"",
+        "transition COMMAND -> \"planning\"",
+        "transition QUIT -> \"done\""
+      ],
+      "response": "```json\n{\n  \"todos\": [],\n  \"log\": [\n    \"added #1: mock title\",\n    \"toggled #1\",\n    \"deleted #1\"\n  ]\n}\n```"
+    }
+  ],
+  "delete anything about groceries": [
+    {
+      "sent": "start {}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\""
+      ],
+      "response": "What should I do with your list? (list is empty)",
+      "idle": {
+        "prompt": "What should I do with your list? (list is empty)",
+        "events": [
+          "COMMAND"
+        ],
+        "textEvent": "COMMAND.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"COMMAND\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\"",
+        "transition COMMAND -> \"planning\"",
+        "transition ADD_TODO -> \"planning\"",
+        "transition TOGGLE_TODO -> \"planning\"",
+        "transition DELETE_TODO -> \"planning\"",
+        "transition DONE -> \"awaitingCommand\""
+      ],
+      "response": "**Log**\n\n```json\n[\n  \"added #1: mock title\",\n  \"toggled #1\",\n  \"deleted #1\"\n]\n```",
+      "idle": {
+        "prompt": "What should I do with your list? (list is empty)",
+        "events": [
+          "COMMAND"
+        ],
+        "textEvent": "COMMAND.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"COMMAND\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\"",
+        "transition COMMAND -> \"planning\"",
+        "transition QUIT -> \"done\""
+      ],
+      "response": "```json\n{\n  \"todos\": [],\n  \"log\": [\n    \"added #1: mock title\",\n    \"toggled #1\",\n    \"deleted #1\"\n  ]\n}\n```"
+    }
+  ]
+}

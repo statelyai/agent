@@ -1,0 +1,30 @@
+{
+  "My order arrived smashed and I want a refund for the $45 mug.": [
+    {
+      "sent": "start {\"ticket\":\"My order arrived smashed and I want a refund for the $45 mug.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"triaging\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition LOOKUP -> \"lookingUp\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition REFUND -> \"refunded\""
+      ],
+      "response": "Refunded $1: mock reason\n\n- Refunded: true\n- Escalated: false"
+    }
+  ],
+  "I was charged twice for order ORD-1234 — please fix this.": [
+    {
+      "sent": "start {\"ticket\":\"I was charged twice for order ORD-1234 — please fix this.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"triaging\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition LOOKUP -> \"lookingUp\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition REFUND -> \"refunded\""
+      ],
+      "response": "Refunded $1: mock reason\n\n- Refunded: true\n- Escalated: false"
+    }
+  ]
+}

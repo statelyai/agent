@@ -1,0 +1,38 @@
+{
+  "Solvable — 4, 9, 10, 13 (the tutorial's puzzle)": [
+    {
+      "sent": "start {\"numbers\":[4,9,10,13]}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"expanding\"",
+        "transition xstate.done.actor -> \"scoring\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "No solution for 4, 9, 10, 13: every proposed step at depth 1 was illegal.\n\n- Depth: 1\n- Candidates considered: 1\n\n**Rejected steps**\n\n```json\n[\n  \"depth 1: \\\"mock operation\\\" — not of the form 'a op b = c'\"\n]\n```"
+    }
+  ],
+  "Solvable — 1, 2, 3, 4": [
+    {
+      "sent": "start {\"numbers\":[1,2,3,4]}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"expanding\"",
+        "transition xstate.done.actor -> \"scoring\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "No solution for 1, 2, 3, 4: every proposed step at depth 1 was illegal.\n\n- Depth: 1\n- Candidates considered: 1\n\n**Rejected steps**\n\n```json\n[\n  \"depth 1: \\\"mock operation\\\" — not of the form 'a op b = c'\"\n]\n```"
+    }
+  ],
+  "Unsolvable — 1, 1, 1, 1 (every line dies, ends in failed)": [
+    {
+      "sent": "start {\"numbers\":[1,1,1,1]}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"expanding\"",
+        "transition xstate.done.actor -> \"scoring\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "No solution for 1, 1, 1, 1: every proposed step at depth 1 was illegal.\n\n- Depth: 1\n- Candidates considered: 1\n\n**Rejected steps**\n\n```json\n[\n  \"depth 1: \\\"mock operation\\\" — not of the form 'a op b = c'\"\n]\n```"
+    }
+  ]
+}

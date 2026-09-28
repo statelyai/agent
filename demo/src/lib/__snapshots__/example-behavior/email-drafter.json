@@ -1,0 +1,286 @@
+{
+  "Email Priya to reschedule Thursday's design review to Friday at 10am.": [
+    {
+      "sent": "start {}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"prompting\""
+      ],
+      "response": "What email should I write? Who is it to, and what should it say?",
+      "idle": {
+        "prompt": "What email should I write? Who is it to, and what should it say?",
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
+        "textEvent": "PROMPT_SUBMITTED.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PROMPT_SUBMITTED\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"prompting\"",
+        "transition PROMPT_SUBMITTED -> \"evaluating\"",
+        "transition xstate.done.actor -> \"drafting\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "idle": {
+        "prompt": "Send the draft, or type the changes you want.",
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
+        "textEvent": "REQUEST_CHANGES.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SEND\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition SEND -> \"sending\"",
+        "transition xstate.done.actor -> \"sent\""
+      ],
+      "response": "**Sent emails**\n\n```json\n[\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  }\n]\n```",
+      "idle": {
+        "prompt": "Email sent. Draft another one?",
+        "events": [
+          "ANOTHER",
+          "END"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANOTHER\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"sent\"",
+        "transition ANOTHER -> \"prompting\""
+      ],
+      "response": "What email should I write? Who is it to, and what should it say?",
+      "idle": {
+        "prompt": "What email should I write? Who is it to, and what should it say?",
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
+        "textEvent": "PROMPT_SUBMITTED.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PROMPT_SUBMITTED\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"prompting\"",
+        "transition PROMPT_SUBMITTED -> \"evaluating\"",
+        "transition xstate.done.actor -> \"drafting\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "idle": {
+        "prompt": "Send the draft, or type the changes you want.",
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
+        "textEvent": "REQUEST_CHANGES.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SEND\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition SEND -> \"sending\"",
+        "transition xstate.done.actor -> \"sent\""
+      ],
+      "response": "**Sent emails**\n\n```json\n[\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  },\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  }\n]\n```",
+      "idle": {
+        "prompt": "Email sent. Draft another one?",
+        "events": [
+          "ANOTHER",
+          "END"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANOTHER\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"sent\"",
+        "transition ANOTHER -> \"prompting\""
+      ],
+      "response": "What email should I write? Who is it to, and what should it say?",
+      "idle": {
+        "prompt": "What email should I write? Who is it to, and what should it say?",
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
+        "textEvent": "PROMPT_SUBMITTED.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PROMPT_SUBMITTED\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"prompting\"",
+        "transition PROMPT_SUBMITTED -> \"evaluating\"",
+        "transition xstate.done.actor -> \"drafting\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "idle": {
+        "prompt": "Send the draft, or type the changes you want.",
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
+        "textEvent": "REQUEST_CHANGES.text"
+      }
+    }
+  ],
+  "Write a short note to the team announcing that the API migration is done.": [
+    {
+      "sent": "start {}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"prompting\""
+      ],
+      "response": "What email should I write? Who is it to, and what should it say?",
+      "idle": {
+        "prompt": "What email should I write? Who is it to, and what should it say?",
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
+        "textEvent": "PROMPT_SUBMITTED.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PROMPT_SUBMITTED\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"prompting\"",
+        "transition PROMPT_SUBMITTED -> \"evaluating\"",
+        "transition xstate.done.actor -> \"drafting\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "idle": {
+        "prompt": "Send the draft, or type the changes you want.",
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
+        "textEvent": "REQUEST_CHANGES.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SEND\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition SEND -> \"sending\"",
+        "transition xstate.done.actor -> \"sent\""
+      ],
+      "response": "**Sent emails**\n\n```json\n[\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  }\n]\n```",
+      "idle": {
+        "prompt": "Email sent. Draft another one?",
+        "events": [
+          "ANOTHER",
+          "END"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANOTHER\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"sent\"",
+        "transition ANOTHER -> \"prompting\""
+      ],
+      "response": "What email should I write? Who is it to, and what should it say?",
+      "idle": {
+        "prompt": "What email should I write? Who is it to, and what should it say?",
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
+        "textEvent": "PROMPT_SUBMITTED.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PROMPT_SUBMITTED\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"prompting\"",
+        "transition PROMPT_SUBMITTED -> \"evaluating\"",
+        "transition xstate.done.actor -> \"drafting\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "idle": {
+        "prompt": "Send the draft, or type the changes you want.",
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
+        "textEvent": "REQUEST_CHANGES.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SEND\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition SEND -> \"sending\"",
+        "transition xstate.done.actor -> \"sent\""
+      ],
+      "response": "**Sent emails**\n\n```json\n[\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  },\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  }\n]\n```",
+      "idle": {
+        "prompt": "Email sent. Draft another one?",
+        "events": [
+          "ANOTHER",
+          "END"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANOTHER\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"sent\"",
+        "transition ANOTHER -> \"prompting\""
+      ],
+      "response": "What email should I write? Who is it to, and what should it say?",
+      "idle": {
+        "prompt": "What email should I write? Who is it to, and what should it say?",
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
+        "textEvent": "PROMPT_SUBMITTED.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PROMPT_SUBMITTED\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"prompting\"",
+        "transition PROMPT_SUBMITTED -> \"evaluating\"",
+        "transition xstate.done.actor -> \"drafting\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "idle": {
+        "prompt": "Send the draft, or type the changes you want.",
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
+        "textEvent": "REQUEST_CHANGES.text"
+      }
+    }
+  ]
+}
