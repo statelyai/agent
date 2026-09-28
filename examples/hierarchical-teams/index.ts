@@ -44,7 +44,13 @@
  */
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const models = {
@@ -503,11 +509,15 @@ export async function runHierarchicalTeamsExample(options: RunHierarchicalTeamsO
       ? { ...(generateText ? { generateText } : {}), ...(decide ? { decide } : {}) }
       : createAiSdkExecutors({ models });
 
-  const result = await runAgent(hierarchicalTeamsMachine, {
-    input: { topic },
-    executors,
-    ...(onProgress ? { onTransition: (snapshot) => onProgress(getStatePath(snapshot)) } : {}),
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(hierarchicalTeamsMachine, {
+      executors,
+      ...(onProgress ? { onTransition: (snapshot) => onProgress(getStatePath(snapshot)) } : {}),
+    }),
+    {
+      input: { topic },
+    },
+  );
 
   if (result.status !== "done") {
     throw new Error(`Hierarchical teams did not complete: ${result.status}`);

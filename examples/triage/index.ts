@@ -43,7 +43,8 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
 } from "@statelyai/agent";
 
@@ -428,17 +429,30 @@ export async function main() {
     onTransition: (snapshot: TriageSnapshot) => console.log("[state]", getStatePath(snapshot)),
   };
 
-  let result = await runAgent(triageMachine, { input: { ticket }, ...shared });
+  let result = await runToQuiescence(
+    createAgentRuntime(triageMachine, {
+      ...shared,
+    }),
+    {
+      input: { ticket },
+      ...shared,
+    },
+  );
 
   // A low-confidence classification settles the run idle; resume it with the
   // human's decision.
   while (result.status === "idle") {
     const answer = await promptLine(`${escalationLabel(result.snapshot)}\n> `);
-    result = await runAgent(triageMachine, {
-      snapshot: result.persist(),
-      event: answer === "" ? { type: "CONFIRM" } : { type: "RECLASSIFY", category: answer },
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event: answer === "" ? { type: "CONFIRM" } : { type: "RECLASSIFY", category: answer },
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

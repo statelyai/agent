@@ -7,7 +7,8 @@ import {
   createAgentSchemas,
   createTextLogic,
   provideExecutors,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   traceTransitions,
   type AgentTraceEvent,
@@ -278,11 +279,15 @@ describe("provideExecutors onTrace / traceTransitions", () => {
     const machine = buildStreamMachine();
 
     const runTrace: AgentTraceEvent[] = [];
-    await runAgent(machine, {
-      input: { topic: "cats" },
-      executors: streamExecutors(),
-      onTrace: (event) => runTrace.push(event as AgentTraceEvent),
-    });
+    await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: streamExecutors(),
+        onTrace: (event) => runTrace.push(event as AgentTraceEvent),
+      }),
+      {
+        input: { topic: "cats" },
+      },
+    );
 
     const provideTrace: AgentTraceEvent[] = [];
     const bound = provideExecutors(machine, streamExecutors(), {

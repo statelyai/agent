@@ -103,16 +103,16 @@ function decideActorWithExecutor(
       if (resolvedEventTypes === undefined) {
         throw new Error(
           `'${DECIDE_ACTOR}' input has omitted \`allowedEvents\`, which means "all ` +
-            'currently-legal events" — but that requires a snapshot-aware host (runAgent ' +
-            "or the step path) to resolve. Under a bare createActor(...), declare " +
+            'currently-legal events" — but that requires a snapshot-aware host (createAgentRuntime) ' +
+            "to resolve. Under a bare createActor(...), declare " +
             "`allowedEvents` explicitly to use this actor here.",
         );
       }
       if (resolvedEventTypes.some(isEventPattern)) {
         throw new Error(
           `'${DECIDE_ACTOR}' input uses wildcard \`allowedEvents\` patterns, which expand ` +
-            "against the live snapshot — that requires a snapshot-aware host (runAgent " +
-            "or the step path). Under a bare createActor(...), list event types explicitly.",
+            "against the live snapshot — that requires a snapshot-aware host (createAgentRuntime). " +
+            "Under a bare createActor(...), list event types explicitly.",
         );
       }
 
@@ -289,7 +289,7 @@ export function createDecisionLogic<
         throw new Error(
           "Decision logic has no host execution. Pass an executor as the second " +
             "argument to createDecisionLogic(...), provide a runtime adapter, or " +
-            "bind it through runAgent/provideExecutors, or call resolveDecision from your host.",
+            "bind it through createAgentRuntime/provideExecutors, or call resolveDecision from your host.",
         );
       }
 
@@ -306,16 +306,16 @@ export function createDecisionLogic<
       if (allowedEventTypes === undefined) {
         throw new Error(
           'Decision logic has omitted `allowedEvents`, which means "all currently-legal ' +
-            'events" — but that requires a snapshot-aware host (runAgent or the step ' +
-            "path) to resolve. Under a bare createActor(...), declare `allowedEvents` " +
+            'events" — but that requires a snapshot-aware host (createAgentRuntime) to ' +
+            "resolve. Under a bare createActor(...), declare `allowedEvents` " +
             "explicitly on this logic to use it here.",
         );
       }
       if (allowedEventTypes.some(isEventPattern)) {
         throw new Error(
           "Decision logic uses wildcard `allowedEvents` patterns, which expand against " +
-            "the live snapshot — that requires a snapshot-aware host (runAgent or the " +
-            "step path). Under a bare createActor(...), list event types explicitly.",
+            "the live snapshot — that requires a snapshot-aware host (createAgentRuntime). " +
+            "Under a bare createActor(...), list event types explicitly.",
         );
       }
 

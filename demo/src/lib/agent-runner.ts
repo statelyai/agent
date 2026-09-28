@@ -13,7 +13,12 @@
  * evaluation model. Tests import the `*Run` functions directly and inject
  * their own executors and a mock evaluation model as the `judge`.
  */
-import { runAgent, type AgentRequestExecutors, type RunAgentResult } from "@statelyai/agent";
+import {
+  createAgentRuntime,
+  runToQuiescence,
+  type AgentRequestExecutors,
+  type AgentRunResult,
+} from "@statelyai/agent";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
@@ -193,7 +198,7 @@ function judgeActors(
 
 // ─── result shaping ───
 
-function describeResult(scenarioId: ScenarioId, result: RunAgentResult<AnyStateMachine>): string {
+function describeResult(scenarioId: ScenarioId, result: AgentRunResult<AnyStateMachine>): string {
   if (result.ignored) {
     return `"${result.ignored.type}" isn't an accepted event in this state, so nothing happened.`;
   }
@@ -267,7 +272,7 @@ function describeEmailOutcome(output: Record<string, unknown>): string {
 function toResult(
   scenarioId: ScenarioId,
   model: string | undefined,
-  result: RunAgentResult<AnyStateMachine>,
+  result: AgentRunResult<AnyStateMachine>,
   trace: TraceEntry[],
 ): ScenarioResult {
   const base: ScenarioResult = {
@@ -300,17 +305,22 @@ export async function startScenarioRun(
 ): Promise<ScenarioResult> {
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
   const machine = machineFor(scenarioId);
-  const result = await runAgent(machine, {
-    input: inputFor(scenarioId, prompt),
-    executors,
-    ...judgeActors(scenarioId, judge),
-    ...(signal ? { signal } : {}),
-    onTransition,
-    on: { "*": onEmitted },
-    onTrace,
-    inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "start"),
-  });
-  return toResult(scenarioId, model, result as RunAgentResult<AnyStateMachine>, trace);
+  const result = await runToQuiescence(
+    createAgentRuntime(machine, {
+      executors,
+      ...judgeActors(scenarioId, judge),
+      ...(signal ? { signal } : {}),
+      onTransition,
+      on: { "*": onEmitted },
+      onTrace,
+      inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "start"),
+    }),
+    {
+      input: inputFor(scenarioId, prompt),
+      ...judgeActors(scenarioId, judge),
+    },
+  );
+  return toResult(scenarioId, model, result as AgentRunResult<AnyStateMachine>, trace);
 }
 
 /** Resumes a persisted idle snapshot with a typed event. Pure — used by tests. */
@@ -327,18 +337,23 @@ export async function resumeScenarioRun(
   const machine = machineFor(scenarioId);
   // An event the restored state has no transition for is ignored, not an
   // error: the run settles unchanged and reports `result.ignored`.
-  const result = await runAgent(machine, {
-    snapshot,
-    event,
-    executors,
-    ...judgeActors(scenarioId, judge),
-    ...(signal ? { signal } : {}),
-    onTransition,
-    on: { "*": onEmitted },
-    onTrace,
-    inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "resume"),
-  });
-  return toResult(scenarioId, model, result as RunAgentResult<AnyStateMachine>, trace);
+  const result = await runToQuiescence(
+    createAgentRuntime(machine, {
+      executors,
+      ...judgeActors(scenarioId, judge),
+      ...(signal ? { signal } : {}),
+      onTransition,
+      on: { "*": onEmitted },
+      onTrace,
+      inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "resume"),
+    }),
+    {
+      snapshot,
+      event,
+      ...judgeActors(scenarioId, judge),
+    },
+  );
+  return toResult(scenarioId, model, result as AgentRunResult<AnyStateMachine>, trace);
 }
 
 // ─── env-resolving wrappers (used by the server functions) ───

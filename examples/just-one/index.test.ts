@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
+import {
+  getInteraction,
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+} from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import { type GuesserEvent, idlePrompt, justOneMachine, PERSONAS } from "./index.js";
 
@@ -60,7 +65,15 @@ async function play(options: PlayOptions) {
   const { executor } = createClueGivers(options.script, options.captured);
   const shared = { executors: { generateText: executor } };
 
-  let result = await runAgent(justOneMachine, { input: options.input, ...shared });
+  let result = await runToQuiescence(
+    createAgentRuntime(justOneMachine, {
+      ...shared,
+    }),
+    {
+      input: options.input,
+      ...shared,
+    },
+  );
 
   while (result.status === "idle") {
     // Every idle state must advertise how a host can unblock it.
@@ -73,11 +86,16 @@ async function play(options: PlayOptions) {
     if (!event) throw new Error(`ran out of guesser events at: ${prompts.at(-1)}`);
     expect(result.snapshot.can(event)).toBe(true);
 
-    result = await runAgent(justOneMachine, {
-      snapshot: result.persist(),
-      event,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(justOneMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") throw new Error(`expected done, got ${result.status}`);
@@ -109,10 +127,14 @@ describe("just-one", () => {
       captured,
     );
 
-    const result = await runAgent(justOneMachine, {
-      input: { rounds: 1, deck: ["volcano"] },
-      executors: { generateText: executor },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(justOneMachine, {
+        executors: { generateText: executor },
+      }),
+      {
+        input: { rounds: 1, deck: ["volcano"] },
+      },
+    );
 
     // The run never settles idle: `judging` goes straight to `roundEnd`.
     expect(result.status).toBe("done");
@@ -147,10 +169,15 @@ describe("just-one", () => {
     });
     const shared = { executors: { generateText: executor } };
 
-    const firstIdle = await runAgent(justOneMachine, {
-      input: { rounds: 2, deck: ["volcano", "honey"] },
-      ...shared,
-    });
+    const firstIdle = await runToQuiescence(
+      createAgentRuntime(justOneMachine, {
+        ...shared,
+      }),
+      {
+        input: { rounds: 2, deck: ["volcano", "honey"] },
+        ...shared,
+      },
+    );
     expect(firstIdle.status).toBe("idle");
     if (firstIdle.status !== "idle") throw new Error("expected idle");
     expect(idlePrompt(firstIdle.snapshot)).toBe(
@@ -158,11 +185,16 @@ describe("just-one", () => {
     );
 
     // Pass on round 1: no score, and the round advances.
-    const secondIdle = await runAgent(justOneMachine, {
-      snapshot: firstIdle.persist(),
-      event: { type: "PASS" },
-      ...shared,
-    });
+    const secondIdle = await runToQuiescence(
+      createAgentRuntime(justOneMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: firstIdle.persist(),
+        event: { type: "PASS" },
+        ...shared,
+      },
+    );
     expect(secondIdle.status).toBe("idle");
     if (secondIdle.status !== "idle") throw new Error("expected idle");
     expect(secondIdle.snapshot.context.score).toBe(0);
@@ -172,11 +204,16 @@ describe("just-one", () => {
 
     // Persist mid-guess as JSON, then resume a fresh run from it.
     const serialized = JSON.stringify(secondIdle.persist());
-    const resumed = await runAgent(justOneMachine, {
-      snapshot: JSON.parse(serialized),
-      event: { type: "GUESS", guess: "Honey!" },
-      ...shared,
-    });
+    const resumed = await runToQuiescence(
+      createAgentRuntime(justOneMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: JSON.parse(serialized),
+        event: { type: "GUESS", guess: "Honey!" },
+        ...shared,
+      },
+    );
 
     expect(resumed.status).toBe("done");
     if (resumed.status !== "done") throw new Error("expected done");

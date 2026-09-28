@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { runAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { assertAgentMachine, canReach, matchesTrajectory } from "@statelyai/agent/testing";
 import { createMockModelExecutors } from "../mock-model.js";
 import type { StateValue } from "xstate";
@@ -56,10 +56,14 @@ test("the first valid candidate wins, with no repair", async () => {
     text: { generateConfig: [VALID, BAD_JSON, NO_BLOCK] },
   });
 
-  const result = await runAgent(generateAndRepairMachine, {
-    input: { prompt: "a turnstile" },
-    executors: scripted,
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(generateAndRepairMachine, {
+      executors: scripted,
+    }),
+    {
+      input: { prompt: "a turnstile" },
+    },
+  );
 
   expect(result.status).toBe("done");
   expect(result.status === "done" && result.output.repairs).toBe(0);
@@ -81,12 +85,16 @@ test("every candidate rejected, then one repair fixes it", async () => {
   const { statePath, onTransition } = collectStates();
   const rejections: string[] = [];
 
-  const result = await runAgent(generateAndRepairMachine, {
-    input: { prompt: "a turnstile" },
-    executors: scripted,
-    onTransition,
-    on: { CANDIDATE_REJECTED: (event) => rejections.push(event.error) },
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(generateAndRepairMachine, {
+      executors: scripted,
+      onTransition,
+      on: { CANDIDATE_REJECTED: (event) => rejections.push(event.error) },
+    }),
+    {
+      input: { prompt: "a turnstile" },
+    },
+  );
 
   expect(result.status).toBe("done");
   expect(result.status === "done" && result.output.repairs).toBe(1);
@@ -128,10 +136,14 @@ test("repairs that never parse fail after the cap, having made 1 + maxRepairs ca
     },
   });
 
-  const result = await runAgent(generateAndRepairMachine, {
-    input: { prompt: "a turnstile" },
-    executors: scripted,
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(generateAndRepairMachine, {
+      executors: scripted,
+    }),
+    {
+      input: { prompt: "a turnstile" },
+    },
+  );
 
   expect(result.status).toBe("done");
   expect(result.status === "done" && result.output.config).toBe(null);

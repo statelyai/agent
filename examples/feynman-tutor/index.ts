@@ -79,7 +79,8 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -504,18 +505,31 @@ export async function runFeynmanTutorExample(
     },
   };
 
-  let result = await runAgent(feynmanTutorMachine, { input: { topic }, ...shared });
+  let result = await runToQuiescence(
+    createAgentRuntime(feynmanTutorMachine, {
+      ...shared,
+    }),
+    {
+      input: { topic },
+      ...shared,
+    },
+  );
   while (result.status === "idle") {
     const label =
       getInteraction(result.snapshot, { preserveWhitespace: true })?.label ??
       result.snapshot.context.notice;
     onPrompt?.(label);
     const event = queued.shift() ?? toHumanEvent(await promptLine(`${label}\n(or "skip")\n> `));
-    result = await runAgent(feynmanTutorMachine, {
-      snapshot: result.persist(),
-      event,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(feynmanTutorMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

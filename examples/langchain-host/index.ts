@@ -39,7 +39,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { HumanMessage } from "@langchain/core/messages";
 import type { Experimental_EvaluationModel } from "ai";
 import { ChatOpenAI } from "@langchain/openai";
-import { runAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { createRateJoke, jokeMachine } from "../joke/index.js";
 import { createLangChainExecutors } from "./executors.js";
 import {
@@ -69,12 +69,16 @@ export async function runJokeDemo(
   onChunk?: (chunk: string) => void,
   judge?: Experimental_EvaluationModel,
 ) {
-  const result = await runAgent(jokeMachine, {
-    input: { topic: "state machines" },
-    executors: createLangChainExecutors({ model }),
-    ...(judge ? { actors: { rateJoke: createRateJoke(judge) } } : {}),
-    ...(onChunk ? { onChunk } : {}),
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(jokeMachine, {
+      executors: createLangChainExecutors({ model }),
+      ...(judge ? { actors: { rateJoke: createRateJoke(judge) } } : {}),
+      ...(onChunk ? { onChunk } : {}),
+    }),
+    {
+      input: { topic: "state machines" },
+    },
+  );
   if (result.status !== "done") {
     throw new Error(`Joke agent did not complete: ${result.status}`);
   }

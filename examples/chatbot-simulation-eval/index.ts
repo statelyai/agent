@@ -76,7 +76,13 @@ import { openai } from "@ai-sdk/openai";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = {
   customer: openai("gpt-5.4-mini"),
@@ -433,16 +439,20 @@ export async function runChatbotSimulationEvalExample(
     onProgress,
   } = options;
   const progress: string[] = [];
-  const result = await runAgent(chatbotSimulationEvalMachine, {
-    input: { persona, instructions, botSystem },
-    executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
-    ...(judge ? { actors: { judgeConversation: createJudgeConversation(judge) } } : {}),
-    onTransition: (snapshot: ChatbotSimulationEvalSnapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(chatbotSimulationEvalMachine, {
+      executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+      ...(judge ? { actors: { judgeConversation: createJudgeConversation(judge) } } : {}),
+      onTransition: (snapshot: ChatbotSimulationEvalSnapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { persona, instructions, botSystem },
     },
-  });
+  );
   if (result.status !== "done") {
     throw new Error(`Chatbot-simulation-eval example did not complete: ${result.status}`);
   }

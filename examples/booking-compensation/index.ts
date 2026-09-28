@@ -15,9 +15,11 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
 
 const itinerary = z.object({ flight: z.string(), hotel: z.string() });
@@ -232,14 +234,20 @@ function liveExecutors() {
 }
 
 export async function runBookingCompensationExample(
-  options?: RunAgentOptions<typeof bookingCompensationMachine>,
+  options?: AgentRuntimeOptions<typeof bookingCompensationMachine> &
+    AgentRunInit<typeof bookingCompensationMachine>,
 ) {
   const { executors = liveExecutors(), ...runOptions } = options ?? {};
-  return runAgent(bookingCompensationMachine, {
-    input: { bookingId: "trip-1", destination: "Lisbon" },
-    ...runOptions,
-    executors,
-  });
+  return runToQuiescence(
+    createAgentRuntime(bookingCompensationMachine, {
+      ...runOptions,
+      executors,
+    }),
+    {
+      input: { bookingId: "trip-1", destination: "Lisbon" },
+      ...runOptions,
+    },
+  );
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {

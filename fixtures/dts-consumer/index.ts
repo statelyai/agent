@@ -9,7 +9,7 @@
  * Run with a built dist present: `pnpm build && pnpm check:dts`.
  */
 import { z } from "zod";
-import { runAgent, setupAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence, setupAgent } from "@statelyai/agent";
 
 // Something from every entry — proves each entry's public types resolve
 // from the shipped package, not just source. The root block also asserts the
@@ -85,5 +85,7 @@ export const machine = setup.createMachine({
 });
 
 export async function run() {
-  return runAgent(machine, { input: { topic: "state machines" } });
+  return runToQuiescence(createAgentRuntime(machine), {
+    input: { topic: "state machines" },
+  });
 }

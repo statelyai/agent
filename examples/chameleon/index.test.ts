@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { getInteraction, runAgent } from "@statelyai/agent";
+import { getInteraction, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import {
   type AccuseEvent,
@@ -59,7 +59,15 @@ async function play(options: PlayOptions) {
   const { executor } = createPlayers(options.script, options.captured);
   const shared = { executors: { generateText: executor } };
 
-  const idle = await runAgent(chameleonMachine, { input: options.input ?? {}, ...shared });
+  const idle = await runToQuiescence(
+    createAgentRuntime(chameleonMachine, {
+      ...shared,
+    }),
+    {
+      input: options.input ?? {},
+      ...shared,
+    },
+  );
   expect(idle.status).toBe("idle");
   if (idle.status !== "idle") throw new Error(`expected idle, got ${idle.status}`);
 
@@ -68,11 +76,16 @@ async function play(options: PlayOptions) {
   expect(idle.snapshot.can(options.accuse)).toBe(true);
   const prompt = idlePrompt(idle.snapshot);
 
-  const result = await runAgent(chameleonMachine, {
-    snapshot: idle.persist(),
-    event: options.accuse,
-    ...shared,
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(chameleonMachine, {
+      ...shared,
+    }),
+    {
+      snapshot: idle.persist(),
+      event: options.accuse,
+      ...shared,
+    },
+  );
   if (result.status !== "done") throw new Error(`expected done, got ${result.status}`);
   return { result, prompt, idle };
 }
@@ -186,10 +199,15 @@ describe("chameleon", () => {
     });
     const shared = { executors: { generateText: executor } };
 
-    const idle = await runAgent(chameleonMachine, {
-      input: { category: "Big cats", secretWord: "Lion", chameleonIndex: 0 },
-      ...shared,
-    });
+    const idle = await runToQuiescence(
+      createAgentRuntime(chameleonMachine, {
+        ...shared,
+      }),
+      {
+        input: { category: "Big cats", secretWord: "Lion", chameleonIndex: 0 },
+        ...shared,
+      },
+    );
     expect(idle.status).toBe("idle");
     if (idle.status !== "idle") throw new Error("expected idle");
     expect(idlePrompt(idle.snapshot)).toBe(
@@ -198,11 +216,16 @@ describe("chameleon", () => {
     );
 
     // Persist mid-vote as JSON, then resume a fresh run from it.
-    const resumed = await runAgent(chameleonMachine, {
-      snapshot: JSON.parse(JSON.stringify(idle.persist())),
-      event: { type: "ACCUSE", seat: 0 },
-      ...shared,
-    });
+    const resumed = await runToQuiescence(
+      createAgentRuntime(chameleonMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: JSON.parse(JSON.stringify(idle.persist())),
+        event: { type: "ACCUSE", seat: 0 },
+        ...shared,
+      },
+    );
 
     expect(resumed.status).toBe("done");
     if (resumed.status !== "done") throw new Error("expected done");

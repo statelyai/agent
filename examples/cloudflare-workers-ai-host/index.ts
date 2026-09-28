@@ -25,7 +25,8 @@
 import {
   getAgentOutputMode,
   renderDecisionAttempts,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   type AgentCallUsage,
   type AgentDecisionRequest,
   type AgentTextRequest,
@@ -282,10 +283,14 @@ export function createWorkersAiExecutors(env: Env) {
 }
 
 export async function runCloudflareGameTurn(env: Env, input = { playerHp: 20, enemyHp: 15 }) {
-  const result = await runAgent(gameMachine, {
-    input,
-    executors: createWorkersAiExecutors(env),
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(gameMachine, {
+      executors: createWorkersAiExecutors(env),
+    }),
+    {
+      input,
+    },
+  );
   if (result.status !== "done") {
     throw new Error(`Game turn ended with ${result.status}.`);
   }

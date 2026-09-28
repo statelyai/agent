@@ -41,7 +41,13 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = {
   quick: openai("gpt-5.4-mini"),
@@ -265,15 +271,19 @@ export async function runModelFallbackExample(
 ) {
   const { request = "Get the weather for San Francisco, Boston and Tokyo", generateText } = options;
   const progress: string[] = [];
-  const result = await runAgent(modelFallbackMachine, {
-    input: { request },
-    executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      options.onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(modelFallbackMachine, {
+      executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        options.onProgress?.(state);
+      },
+    }),
+    {
+      input: { request },
     },
-  });
+  );
   if (result.status !== "done") {
     throw new Error(`Model-fallback example did not complete: ${result.status}`);
   }

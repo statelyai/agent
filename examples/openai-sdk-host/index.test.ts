@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { createOpenAiExecutors } from "@statelyai/agent/openai";
 import { createMockJudge } from "../mock-judge.js";
 import { createClassifyTicket, triageMachine } from "../triage/index.js";
@@ -57,12 +57,16 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     };
 
     const { generateText } = createOpenAiExecutors({ client: stubClient as never });
-    const result = await runAgent(triageMachine, {
-      input: { ticket: "My invoice is wrong." },
-      executors: { generateText },
-      // The classifier is a Jev judgment; only the reply reaches the stub.
-      actors: { classifyTicket: createClassifyTicket(confidentJudge()) },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        // The classifier is a Jev judgment; only the reply reaches the stub.
+        actors: { classifyTicket: createClassifyTicket(confidentJudge()) },
+      }),
+      {
+        input: { ticket: "My invoice is wrong." },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -131,20 +135,28 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
 
     // The decide round-trip (tool_choice required → machine event) leaves the
     // run idle on a player turn; scripted button events resume it to done.
-    let result = await runAgent(twentyQuestionsMachine, {
-      input: { questionsRemaining: 1 },
-      executors,
-    });
+    let result = await runToQuiescence(
+      createAgentRuntime(twentyQuestionsMachine, {
+        executors,
+      }),
+      {
+        input: { questionsRemaining: 1 },
+      },
+    );
     expect(result.status).toBe("idle");
 
     const playerEvents = [{ type: "GUESS_RIGHT" }, { type: "PLAY_AGAIN_NO" }] as const;
     for (const event of playerEvents) {
       if (result.status !== "idle") throw new Error(`expected idle, got ${result.status}`);
-      result = await runAgent(twentyQuestionsMachine, {
-        snapshot: result.persist(),
-        event,
-        executors,
-      });
+      result = await runToQuiescence(
+        createAgentRuntime(twentyQuestionsMachine, {
+          executors,
+        }),
+        {
+          snapshot: result.persist(),
+          event,
+        },
+      );
     }
 
     expect(result.status).toBe("done");
@@ -178,19 +190,23 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
     // pass, so the writer streams twice.
     const passes: string[][] = [];
 
-    const result = await runAgent(jokeMachine, {
-      input: { topic: "state machines" },
-      // The critic is a Jev score; level 4 of the rubric is a 10/10.
-      actors: { rateJoke: createRateJoke(createMockJudge({ rating: 4 }).model) },
-      executors: {
-        streamText: async (request, info) => {
-          const seen: string[] = [];
-          passes.push(seen);
-          return streamText(request, { ...info, onChunk: (chunk) => seen.push(chunk) });
+    const result = await runToQuiescence(
+      createAgentRuntime(jokeMachine, {
+        // The critic is a Jev score; level 4 of the rubric is a 10/10.
+        actors: { rateJoke: createRateJoke(createMockJudge({ rating: 4 }).model) },
+        executors: {
+          streamText: async (request, info) => {
+            const seen: string[] = [];
+            passes.push(seen);
+            return streamText(request, { ...info, onChunk: (chunk) => seen.push(chunk) });
+          },
+          decide: async () => ({ event: { type: "END" } }),
         },
-        decide: async () => ({ event: { type: "END" } }),
+      }),
+      {
+        input: { topic: "state machines" },
       },
-    });
+    );
 
     expect(passes).toHaveLength(2);
     for (const seen of passes) {

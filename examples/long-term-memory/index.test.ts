@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import { getInteraction, runAgent } from "@statelyai/agent";
+import { getInteraction, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
 import { createMockJudge } from "../mock-judge.js";
 import { createMockModelExecutors, type MockModelExecutors } from "../mock-model.js";
@@ -178,31 +178,43 @@ test("idle → persist → JSON round-trip → resume keeps the store and transc
   const executors = createMockModelExecutors({
     text: { answer: [{ reply: "Hi Ana.", newMemories: ["The user's name is Ana."] }] },
   });
-  const first = await runAgent(longTermMemoryMachine, {
-    input: { userId: "u1", memories: [] },
-    executors,
-  });
+  const first = await runToQuiescence(
+    createAgentRuntime(longTermMemoryMachine, {
+      executors,
+    }),
+    {
+      input: { userId: "u1", memories: [] },
+    },
+  );
   expect(first.status).toBe("idle");
   if (first.status !== "idle") return;
   const interaction = getInteraction(first.snapshot);
   expect(interaction?.textEvent).toBe("MESSAGE");
   expect(interaction?.events.map(({ type }) => type)).toEqual(["MESSAGE", "END_SESSION"]);
 
-  const second = await runAgent(longTermMemoryMachine, {
-    snapshot: JSON.parse(JSON.stringify(first.persist())),
-    event: say("I'm Ana."),
-    executors,
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(longTermMemoryMachine, {
+      executors,
+    }),
+    {
+      snapshot: JSON.parse(JSON.stringify(first.persist())),
+      event: say("I'm Ana."),
+    },
+  );
   expect(second.status).toBe("idle");
   if (second.status !== "idle") return;
   expect(getInteraction(second.snapshot)?.label).toBe("Hi Ana.");
   expect(second.snapshot.context.memories).toEqual(["The user's name is Ana."]);
 
-  const third = await runAgent(longTermMemoryMachine, {
-    snapshot: JSON.parse(JSON.stringify(second.persist())),
-    event: end,
-    executors,
-  });
+  const third = await runToQuiescence(
+    createAgentRuntime(longTermMemoryMachine, {
+      executors,
+    }),
+    {
+      snapshot: JSON.parse(JSON.stringify(second.persist())),
+      event: end,
+    },
+  );
   expect(third.status).toBe("done");
   if (third.status !== "done") return;
   expect(third.output.memories).toEqual(["The user's name is Ana."]);

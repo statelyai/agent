@@ -1,5 +1,10 @@
 import { expect, test } from "vitest";
-import { getInteraction, runAgent, type AgentTextRequest } from "@statelyai/agent";
+import {
+  getInteraction,
+  createAgentRuntime,
+  runToQuiescence,
+  type AgentTextRequest,
+} from "@statelyai/agent";
 import {
   MAX_DOCS_REJECTIONS,
   longRunningOnboardingMachine,
@@ -34,26 +39,34 @@ test("pauses twice and resumes from JSON snapshots", async () => {
 });
 
 test("the hardware pause labels the stub-provisioned accounts as simulated", async () => {
-  const first = await runAgent(longRunningOnboardingMachine, {
-    input: {
-      employee: {
-        id: "E-100",
-        name: "Ann Lee",
-        role: "Product Engineer",
-        startDate: "2026-08-03",
-        equipment: "MacBook Pro",
+  const first = await runToQuiescence(
+    createAgentRuntime(longRunningOnboardingMachine, {
+      executors: { generateText },
+    }),
+    {
+      input: {
+        employee: {
+          id: "E-100",
+          name: "Ann Lee",
+          role: "Product Engineer",
+          startDate: "2026-08-03",
+          equipment: "MacBook Pro",
+        },
       },
     },
-    executors: { generateText },
-  });
+  );
   expect(first.status).toBe("idle");
   if (first.status !== "idle") return;
 
-  const second = await runAgent(longRunningOnboardingMachine, {
-    snapshot: first.persist(),
-    event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
-    executors: { generateText },
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(longRunningOnboardingMachine, {
+      executors: { generateText },
+    }),
+    {
+      snapshot: first.persist(),
+      event: { type: "DOCS_SIGNED", signedAt: "2026-07-20" },
+    },
+  );
   expect(second.status).toBe("idle");
   if (second.status !== "idle") return;
 
@@ -124,18 +137,22 @@ test("a delivered laptop is never written up as still scheduled", async () => {
 });
 
 test("does not provision IT before documents are signed", async () => {
-  const first = await runAgent(longRunningOnboardingMachine, {
-    input: {
-      employee: {
-        id: "E-200",
-        name: "Sam Chen",
-        role: "Designer",
-        startDate: "2026-09-01",
-        equipment: "MacBook Air",
+  const first = await runToQuiescence(
+    createAgentRuntime(longRunningOnboardingMachine, {
+      executors: { generateText },
+    }),
+    {
+      input: {
+        employee: {
+          id: "E-200",
+          name: "Sam Chen",
+          role: "Designer",
+          startDate: "2026-09-01",
+          equipment: "MacBook Air",
+        },
       },
     },
-    executors: { generateText },
-  });
+  );
 
   expect(first.status).toBe("idle");
   if (first.status !== "idle") return;

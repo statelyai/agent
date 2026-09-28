@@ -62,7 +62,13 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = {
   responder: openai("gpt-5.4-mini"),
@@ -460,17 +466,21 @@ export async function runReflexionExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runAgent(reflexionMachine, {
-    input: { question },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(reflexionMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { question },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Reflexion example did not complete: ${result.status}`);

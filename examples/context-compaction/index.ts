@@ -47,7 +47,8 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   systemMessage,
   userMessage,
@@ -306,13 +307,18 @@ export async function runContextCompactionExample(options?: {
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
   };
 
-  let result = await runAgent(contextCompactionMachine, {
-    input: {
-      maxMessages: options?.input?.maxMessages ?? 8,
-      keepRecent: options?.input?.keepRecent ?? 4,
+  let result = await runToQuiescence(
+    createAgentRuntime(contextCompactionMachine, {
+      ...shared,
+    }),
+    {
+      input: {
+        maxMessages: options?.input?.maxMessages ?? 8,
+        keepRecent: options?.input?.keepRecent ?? 4,
+      },
+      ...shared,
     },
-    ...shared,
-  });
+  );
 
   // Each chat turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
@@ -321,11 +327,16 @@ export async function runContextCompactionExample(options?: {
       : options?.userMessages
         ? "exit"
         : await promptLine(`${idlePrompt(result.snapshot)}\n> `);
-    result = await runAgent(contextCompactionMachine, {
-      snapshot: result.persist(),
-      event: { type: "USER_MESSAGE", text },
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(contextCompactionMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event: { type: "USER_MESSAGE", text },
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

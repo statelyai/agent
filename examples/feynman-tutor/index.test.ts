@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
+import {
+  getInteraction,
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+} from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
 import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
@@ -149,11 +154,15 @@ test("SKIP records the checkpoint as skipped without scoring it", async () => {
 test("idle → persist() → resume round-trips through JSON", async () => {
   const scripted = executors();
   const actors = { verifyExplanation: createVerifyExplanation(grader([pass]).model) };
-  const first = await runAgent(feynmanTutorMachine, {
-    input: { topic: "RSA" },
-    executors: scripted,
-    actors,
-  });
+  const first = await runToQuiescence(
+    createAgentRuntime(feynmanTutorMachine, {
+      executors: scripted,
+      actors,
+    }),
+    {
+      input: { topic: "RSA" },
+    },
+  );
   expect(first.status).toBe("idle");
   if (first.status !== "idle") return;
   expect(getStatePath(first.snapshot)).toBe("awaitingExplanation");
@@ -161,12 +170,16 @@ test("idle → persist() → resume round-trips through JSON", async () => {
   expect(interaction?.textEvent).toBe("EXPLAIN");
   expect(interaction?.events.map((choice) => choice.type)).toEqual(["EXPLAIN", "SKIP"]);
 
-  const second = await runAgent(feynmanTutorMachine, {
-    snapshot: JSON.parse(JSON.stringify(first.persist())),
-    event: explain("public encrypts, private decrypts"),
-    executors: scripted,
-    actors,
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(feynmanTutorMachine, {
+      executors: scripted,
+      actors,
+    }),
+    {
+      snapshot: JSON.parse(JSON.stringify(first.persist())),
+      event: explain("public encrypts, private decrypts"),
+    },
+  );
   expect(second.status).toBe("idle");
   if (second.status !== "idle") return;
   expect(second.snapshot.context.checkpointIndex).toBe(1);

@@ -31,9 +31,11 @@ import { createAgent } from "langchain";
 import {
   getInteraction,
   parseAgentEvent,
-  runAgent,
-  type RunAgentOptions,
-  type RunAgentResult,
+  createAgentRuntime,
+  runToQuiescence,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
+  type AgentRunResult,
 } from "@statelyai/agent";
 import {
   createEvaluatePrompt,
@@ -100,7 +102,7 @@ const runs = new Map<string, StoredRun>();
 export function langChainRunOptions(
   model: BaseChatModel,
   judge?: Experimental_EvaluationModel,
-): RunAgentOptions<typeof emailDrafter> {
+): AgentRuntimeOptions<typeof emailDrafter> & AgentRunInit<typeof emailDrafter> {
   return {
     executors: createLangChainExecutors({ model }),
     ...(judge ? { actors: { evaluatePrompt: createEvaluatePrompt(judge) } } : {}),
@@ -111,14 +113,17 @@ export function langChainRunOptions(
  * What the tools run with. Defaults to nothing so importing this module never
  * touches the network; `useModel(...)` installs one.
  */
-let toolRunOptions: RunAgentOptions<typeof emailDrafter> | null = null;
+let toolRunOptions:
+  | (AgentRuntimeOptions<typeof emailDrafter> & AgentRunInit<typeof emailDrafter>)
+  | null = null;
 
 /** Point the bridge tools at a LangChain model (and, optionally, a judge model). */
 export function useModel(model: BaseChatModel, judge?: Experimental_EvaluationModel) {
   toolRunOptions = langChainRunOptions(model, judge);
 }
 
-function currentRunOptions(): RunAgentOptions<typeof emailDrafter> {
+function currentRunOptions(): AgentRuntimeOptions<typeof emailDrafter> &
+  AgentRunInit<typeof emailDrafter> {
   if (!toolRunOptions) {
     throw new Error("langchain-host: call useModel(model) before running the bridge tools.");
   }
@@ -152,7 +157,7 @@ function buildEvent(
 let nextHandle = 0;
 
 /** Fold a run result into a JSON-safe tool result, persisting on every pause. */
-function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: string): ToolResult {
+function toToolResult(result: AgentRunResult<typeof emailDrafter>, handle: string): ToolResult {
   if (result.status === "error") throw result.error;
   if (result.status === "done") {
     runs.delete(handle);
@@ -178,10 +183,19 @@ function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: strin
  */
 export async function startDraft(
   prompt: string,
-  runOptions: RunAgentOptions<typeof emailDrafter> = currentRunOptions(),
+  runOptions: AgentRuntimeOptions<typeof emailDrafter> &
+    AgentRunInit<typeof emailDrafter> = currentRunOptions(),
 ): Promise<ToolResult> {
   const handle = `draft-${++nextHandle}`;
-  const opened = await runAgent(emailDrafter, { ...runOptions, input: undefined });
+  const opened = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      ...runOptions,
+    }),
+    {
+      ...runOptions,
+      input: undefined,
+    },
+  );
   const pending = toToolResult(opened, handle);
   if (pending.status === "done") return pending;
 
@@ -198,16 +212,22 @@ export async function resumeDraft(
   handle: string,
   eventType: string,
   text: string | null = null,
-  runOptions: RunAgentOptions<typeof emailDrafter> = currentRunOptions(),
+  runOptions: AgentRuntimeOptions<typeof emailDrafter> &
+    AgentRunInit<typeof emailDrafter> = currentRunOptions(),
 ): Promise<ToolResult> {
   const stored = runs.get(handle);
   if (!stored) throw new Error(`Unknown handle: ${handle}`);
 
-  const result = await runAgent(emailDrafter, {
-    ...runOptions,
-    snapshot: stored.snapshot,
-    event: buildEvent(stored.interaction, eventType, text),
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      ...runOptions,
+    }),
+    {
+      ...runOptions,
+      snapshot: stored.snapshot,
+      event: buildEvent(stored.interaction, eventType, text),
+    },
+  );
 
   // The state has no transition for the event, so the machine ignored it and
   // nothing happened. That is not a library error: `runAgent` settled

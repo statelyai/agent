@@ -42,7 +42,13 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = { writer: openai("gpt-5.4-mini") };
 
@@ -225,17 +231,21 @@ export interface RunPromptChainingOptions {
 export async function runPromptChainingExample(options: RunPromptChainingOptions = {}) {
   const { topic = "cats", generateText, onProgress } = options;
   const progress: string[] = [];
-  const result = await runAgent(promptChainingMachine, {
-    input: { topic },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(promptChainingMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { topic },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Prompt-chaining example did not complete: ${result.status}`);

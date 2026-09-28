@@ -49,7 +49,8 @@ import {
   type AgentMessage,
   assistantMessage,
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   userMessage,
   type AgentRequestExecutors,
@@ -373,19 +374,23 @@ export async function runReflectionWriterExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runAgent(reflectionWriterMachine, {
-    input: { topic },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    onTransition: (snapshot) => {
-      // `getStatePath` serializes nested and parallel state values properly;
-      // `String(snapshot.value)` would print "[object Object]" for either.
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(reflectionWriterMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      onTransition: (snapshot) => {
+        // `getStatePath` serializes nested and parallel state values properly;
+        // `String(snapshot.value)` would print "[object Object]" for either.
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { topic },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Reflection-writer example did not complete: ${result.status}`);

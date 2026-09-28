@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { runAgent, setupAgent } from "./index.js";
+import { createAgentRuntime, runToQuiescence, setupAgent } from "./index.js";
 import { matchesTrajectory } from "./testing/index.js";
 import { z } from "zod";
 
@@ -207,14 +207,18 @@ describe("matchesTrajectory: over a real run", () => {
     const statePath: unknown[] = [];
     const events: Array<{ type: string }> = [];
 
-    const result = await runAgent(jokeMachine, {
-      input: { topic: "state machines" },
-      executors: { generateText: async () => ({ result: "A joke." }) },
-      onTransition: (snapshot, event) => {
-        statePath.push(snapshot.value);
-        events.push(event);
+    const result = await runToQuiescence(
+      createAgentRuntime(jokeMachine, {
+        executors: { generateText: async () => ({ result: "A joke." }) },
+        onTransition: (snapshot, event) => {
+          statePath.push(snapshot.value);
+          events.push(event);
+        },
+      }),
+      {
+        input: { topic: "state machines" },
       },
-    });
+    );
 
     expect(matchesTrajectory(statePath, ["telling", "told"]).matched).toBe(true);
     expect(result.status).toBe("done");

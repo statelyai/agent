@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "../index.js";
+import { createAgentRuntime, runToQuiescence } from "../index.js";
 import { lintAgentMachine } from "../testing/index.js";
 import type { AgentRequestExecutors, AgentTextRequest } from "../text-logic.js";
 import type { AgentDecisionExecutor, AgentDecisionRequest } from "../decision.js";
@@ -82,10 +82,14 @@ describe("createToolLoopMachine", () => {
 
   test("runs one request and finishes with its output", async () => {
     const { generateText, requests } = mockGenerateText(() => "42 * 17 = 714");
-    const result = await runAgent(machine, {
-      input: { prompt: "What is 42 times 17?" },
-      executors: { generateText },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: { prompt: "What is 42 times 17?" },
+      },
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({ result: "42 * 17 = 714" });
@@ -102,7 +106,14 @@ describe("createToolLoopMachine", () => {
       maxSteps: 3,
     });
     const { generateText, requests } = mockGenerateText();
-    await runAgent(gated, { input: { prompt: "hi" }, executors: { generateText } });
+    await runToQuiescence(
+      createAgentRuntime(gated, {
+        executors: { generateText },
+      }),
+      {
+        input: { prompt: "hi" },
+      },
+    );
 
     expect(requests[0]?.maxSteps).toBe(3);
     expect(requests[0]?.metadata).toBeUndefined();
@@ -118,11 +129,15 @@ describe("createToolLoopMachine", () => {
   test("the run is stamped with the preset version automatically (no machineVersion option)", async () => {
     const { generateText } = mockGenerateText();
     const events: string[] = [];
-    const result = await runAgent(machine, {
-      input: { prompt: "hi" },
-      executors: { generateText },
-      onTrace: (event) => events.push(event.machineVersion),
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+        onTrace: (event) => events.push(event.machineVersion),
+      }),
+      {
+        input: { prompt: "hi" },
+      },
+    );
 
     expect(new Set(events)).toEqual(new Set(["1"]));
     expect(result.persist()).toEqual(expect.objectContaining({ version: "1" }));
@@ -131,11 +146,15 @@ describe("createToolLoopMachine", () => {
   test("the machine's own version is the single source (no machineVersion option)", async () => {
     const { generateText } = mockGenerateText();
     const events: string[] = [];
-    await runAgent(machine, {
-      input: { prompt: "hi" },
-      executors: { generateText },
-      onTrace: (event) => events.push(event.machineVersion),
-    });
+    await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+        onTrace: (event) => events.push(event.machineVersion),
+      }),
+      {
+        input: { prompt: "hi" },
+      },
+    );
     expect(new Set(events)).toEqual(new Set(["1"]));
   });
 });
@@ -156,10 +175,14 @@ describe("createSequentialMachine", () => {
 
   test("chains each step's output into the next", async () => {
     const { generateText, requests } = mockGenerateText((request) => `${request.name}-output`);
-    const result = await runAgent(machine, {
-      input: { prompt: "a post about statecharts" },
-      executors: { generateText },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: { prompt: "a post about statecharts" },
+      },
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({
@@ -208,10 +231,14 @@ describe("createRouterMachine", () => {
   test("one decision picks a declared route and runs it", async () => {
     const { generateText, requests } = mockGenerateText(() => "refund issued");
     const { decide, requests: decisions } = mockDecide(["ROUTE_billing"]);
-    const result = await runAgent(machine, {
-      input: { prompt: "Where is my invoice?" },
-      executors: { generateText, decide },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText, decide },
+      }),
+      {
+        input: { prompt: "Where is my invoice?" },
+      },
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({
@@ -230,10 +257,14 @@ describe("createRouterMachine", () => {
   test("an undeclared route is never taken — the run falls back", async () => {
     const { generateText, requests } = mockGenerateText(() => "handled");
     const { decide } = mockDecide(["ROUTE_refunds"]);
-    const result = await runAgent(machine, {
-      input: { prompt: "Where is my invoice?" },
-      executors: { generateText, decide },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText, decide },
+      }),
+      {
+        input: { prompt: "Where is my invoice?" },
+      },
+    );
 
     // 'refunds' has no event, no state, and no transition: the decision is
     // rejected (and retried) until it is exhausted, then `fallback` runs.
@@ -249,10 +280,14 @@ describe("createRouterMachine", () => {
     });
     const { generateText } = mockGenerateText();
     const { decide } = mockDecide(["ROUTE_refunds"]);
-    const result = await runAgent(strict, {
-      input: { prompt: "Where is my invoice?" },
-      executors: { generateText, decide },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(strict, {
+        executors: { generateText, decide },
+      }),
+      {
+        input: { prompt: "Where is my invoice?" },
+      },
+    );
 
     expect(result.status).toBe("error");
     expect(result.status === "error" && String(result.error)).toMatch(/decision exhausted/i);
@@ -269,10 +304,14 @@ describe("createRouterMachine", () => {
     });
     const { generateText } = mockGenerateText(() => "from child");
     const { decide } = mockDecide(["ROUTE_deep"]);
-    const result = await runAgent(withChild, {
-      input: { prompt: "hard one" },
-      executors: { generateText, decide },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(withChild, {
+        executors: { generateText, decide },
+      }),
+      {
+        input: { prompt: "hard one" },
+      },
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({
@@ -309,10 +348,14 @@ describe("createParallelMachine", () => {
 
   test("runs every branch and joins the results", async () => {
     const { generateText, requests } = mockGenerateText((request) => `${request.name}-review`);
-    const result = await runAgent(machine, {
-      input: { prompt: "review this diff" },
-      executors: { generateText },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: { prompt: "review this diff" },
+      },
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({
@@ -336,10 +379,14 @@ describe("createLoopMachine", () => {
       maxTurns: 10,
     });
     const { generateText } = mockGenerateText(() => "draft");
-    const result = await runAgent(machine, {
-      input: { prompt: "an essay" },
-      executors: { generateText },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: { prompt: "an essay" },
+      },
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({
@@ -357,10 +404,14 @@ describe("createLoopMachine", () => {
       maxTurns: 3,
     });
     const { generateText, requests } = mockGenerateText(() => "draft");
-    const result = await runAgent(machine, {
-      input: { prompt: "an essay" },
-      executors: { generateText },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: { prompt: "an essay" },
+      },
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output.iterations).toBe(3);
@@ -393,10 +444,14 @@ describe("createSupervisorMachine", () => {
       "DELEGATE_writer",
       "FINISH",
     ]);
-    const result = await runAgent(machine, {
-      input: { task: "Announce the release." },
-      executors: { generateText, decide },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText, decide },
+      }),
+      {
+        input: { task: "Announce the release." },
+      },
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({
@@ -425,10 +480,14 @@ describe("createSupervisorMachine", () => {
       };
     };
 
-    const result = await runAgent(bounded, {
-      input: { task: "one thing" },
-      executors: { generateText, decide },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(bounded, {
+        executors: { generateText, decide },
+      }),
+      {
+        input: { task: "one thing" },
+      },
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output.turns).toBe(1);
@@ -455,10 +514,14 @@ describe("createHandoffMachine", () => {
   test("transfers the mic and does not return", async () => {
     const { generateText, requests } = mockGenerateText((request) => `${request.name} says hi`);
 
-    const first = await runAgent(machine, {
-      input: { message: "3 days in Lisbon" },
-      executors: { generateText },
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: { message: "3 days in Lisbon" },
+      },
+    );
     expect(first.status).toBe("idle");
     if (first.status !== "idle") {
       throw new Error("unreachable");
@@ -466,11 +529,15 @@ describe("createHandoffMachine", () => {
     expect(first.snapshot.context.activeAgent).toBe("travel");
     expect(first.snapshot.context.reply).toBe("travel says hi");
 
-    const second = await runAgent(machine, {
-      snapshot: first.persist(),
-      event: { type: "transfer_to_food", message: "What should I eat?" },
-      executors: { generateText },
-    });
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "transfer_to_food", message: "What should I eat?" },
+      },
+    );
     expect(second.status).toBe("idle");
     if (second.status !== "idle") {
       throw new Error("unreachable");
@@ -504,11 +571,15 @@ describe("preset machine types", () => {
   test("machine input is typed, not `any`", async () => {
     const machine = createToolLoopMachine({ model: "quick" });
     await expect(
-      runAgent(machine, {
-        // @ts-expect-error `prompt` is a string on this machine's input
-        input: { prompt: 123 },
-        executors: { generateText },
-      }),
+      runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: { generateText },
+        }),
+        {
+          // @ts-expect-error `prompt` is a string on this machine's input
+          input: { prompt: 123 },
+        },
+      ),
     ).rejects.toThrow();
   });
 
@@ -519,10 +590,14 @@ describe("preset machine types", () => {
       until: ({ iterations }) => iterations >= 1,
       maxTurns: 1,
     });
-    const result = await runAgent(machine, {
-      input: { prompt: "go" },
-      executors: { generateText },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: { prompt: "go" },
+      },
+    );
     if (result.status === "done") {
       const iterations: number = result.output.iterations;
       expect(iterations).toBe(1);
@@ -537,16 +612,24 @@ describe("preset machine types", () => {
       defaultActiveAgent: "travel",
       agents: { travel: {}, food: {} },
     });
-    const first = await runAgent(handoff, {
-      input: { message: "hi" },
-      executors: { generateText },
-    });
-    const second = await runAgent(handoff, {
-      snapshot: first.persist(),
-      // @ts-expect-error 'transfer_to_nope' is not a declared agent transfer
-      event: { type: "transfer_to_nope" },
-      executors: { generateText },
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(handoff, {
+        executors: { generateText },
+      }),
+      {
+        input: { message: "hi" },
+      },
+    );
+    const second = await runToQuiescence(
+      createAgentRuntime(handoff, {
+        executors: { generateText },
+      }),
+      {
+        snapshot: first.persist(),
+        // @ts-expect-error 'transfer_to_nope' is not a declared agent transfer
+        event: { type: "transfer_to_nope" },
+      },
+    );
     // Not a declared transfer, so the machine has no transition for it and
     // simply ignores it.
     expect(second.ignored).toEqual({ type: "transfer_to_nope" });

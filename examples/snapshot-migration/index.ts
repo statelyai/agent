@@ -1,7 +1,13 @@
 /** Native XState snapshot versioning and migration through `runAgent`. */
 import { z } from "zod";
 import type { AnyStateMachine, ContextFrom, Snapshot } from "xstate";
-import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
+import {
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
+} from "@statelyai/agent";
 
 /**
  * The seams a host threads through every leg of a multi-run example: its
@@ -10,7 +16,7 @@ import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
  * stays a single self-contained file (see CONTRIBUTING).
  */
 type ExampleRunOptions = Pick<
-  RunAgentOptions<AnyStateMachine>,
+  AgentRuntimeOptions<AnyStateMachine> & AgentRunInit<AnyStateMachine>,
   "executors" | "signal" | "onTransition" | "on" | "onTrace" | "inspect"
 >;
 
@@ -161,19 +167,29 @@ export async function runSnapshotMigrationExample(
   options: { orderId?: string; total?: number } & ExampleRunOptions = {},
 ) {
   const { orderId = "ORD-4417", total = 812.5, ...observers } = options;
-  const paused = await runAgent(orderApprovalMachineV1, {
-    ...(observers as object),
-    input: { orderId, total },
-  });
+  const paused = await runToQuiescence(
+    createAgentRuntime(orderApprovalMachineV1, {
+      ...(observers as object),
+    }),
+    {
+      ...(observers as object),
+      input: { orderId, total },
+    },
+  );
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
   const persisted = persistSnapshot(paused.persist());
   // The version bump: the paused snapshot is resumed on a machine that has
   // shipped since, through XState's own `version` + `migrate` contract.
-  const resumed = await runAgent(orderApprovalMachine, {
-    ...(observers as object),
-    snapshot: persisted,
-    event: { type: "APPROVE" },
-  });
+  const resumed = await runToQuiescence(
+    createAgentRuntime(orderApprovalMachine, {
+      ...(observers as object),
+    }),
+    {
+      ...(observers as object),
+      snapshot: persisted,
+      event: { type: "APPROVE" },
+    },
+  );
   if (resumed.status !== "done") throw new Error(`Expected done, got '${resumed.status}'.`);
   return { persisted, output: resumed.output };
 }

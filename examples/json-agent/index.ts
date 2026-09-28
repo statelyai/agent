@@ -41,7 +41,8 @@ import { openai } from "@ai-sdk/openai";
 import Ajv from "ajv";
 import {
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentWorkflowConfig,
   type SchemaCompiler,
@@ -98,21 +99,29 @@ export async function runJsonAgentDemo(ticket: string) {
   const onTransition = (snapshot: { value: StateValue }) =>
     console.log("[state]", getStatePath(snapshot));
 
-  let result = await runAgent(jsonAgentMachine, {
-    input: { ticket },
-    executors: { generateText, decide },
-    onTransition,
-  });
+  let result = await runToQuiescence(
+    createAgentRuntime(jsonAgentMachine, {
+      executors: { generateText, decide },
+      onTransition,
+    }),
+    {
+      input: { ticket },
+    },
+  );
 
   if (result.status === "idle") {
     // A human approves the drafted reply — in a real host this is a
     // separate request/process; here we simulate immediate approval.
-    result = await runAgent(jsonAgentMachine, {
-      snapshot: result.snapshot,
-      event: { type: "APPROVE" },
-      executors: { generateText, decide },
-      onTransition,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(jsonAgentMachine, {
+        executors: { generateText, decide },
+        onTransition,
+      }),
+      {
+        snapshot: result.snapshot,
+        event: { type: "APPROVE" },
+      },
+    );
   }
 
   if (result.status !== "done") {

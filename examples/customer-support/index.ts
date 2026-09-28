@@ -74,7 +74,8 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -679,23 +680,34 @@ export async function runCustomerSupportExample(
   };
 
   // Phase 1: classify, then either answer (done) or settle idle.
-  let first = await runAgent(customerSupportMachine, {
-    input: { query },
-    ...executors,
-    onTransition: track,
-  });
+  let first = await runToQuiescence(
+    createAgentRuntime(customerSupportMachine, {
+      ...executors,
+      onTransition: track,
+    }),
+    {
+      input: { query },
+      ...executors,
+    },
+  );
 
   // Every question the bot asks is another leg. The machine decides when to
   // stop asking; the host only decides what to say.
   const pending = [...(options.replies ?? [])];
   while (first.status === "idle" && first.snapshot.hasTag("awaiting-info")) {
     const reply = pending.shift();
-    first = await runAgent(customerSupportMachine, {
-      snapshot: first.persist(),
-      event: reply === undefined ? { type: "STOP_ASKING" } : { type: "PROVIDE_INFO", text: reply },
-      ...executors,
-      onTransition: track,
-    });
+    first = await runToQuiescence(
+      createAgentRuntime(customerSupportMachine, {
+        ...executors,
+        onTransition: track,
+      }),
+      {
+        snapshot: first.persist(),
+        event:
+          reply === undefined ? { type: "STOP_ASKING" } : { type: "PROVIDE_INFO", text: reply },
+        ...executors,
+      },
+    );
   }
 
   if (first.status === "done") {
@@ -720,12 +732,17 @@ export async function runCustomerSupportExample(
   const event = approve
     ? ({ type: "APPROVE" } as const)
     : ({ type: "DENY", reason: denyReason } as const);
-  const second = await runAgent(customerSupportMachine, {
-    snapshot: first.persist(),
-    event,
-    ...executors,
-    onTransition: track,
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(customerSupportMachine, {
+      ...executors,
+      onTransition: track,
+    }),
+    {
+      snapshot: first.persist(),
+      event,
+      ...executors,
+    },
+  );
   if (second.status !== "done") {
     throw new Error(`Expected done after ${event.type}, got '${second.status}'.`);
   }
@@ -768,11 +785,15 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       (await promptLine("Ask the airline bot (blank = cancel AB1234) > ")) ||
       "Please cancel my booking AB1234.";
 
-    let result = await runAgent(customerSupportMachine, {
-      input: { query },
-      executors,
-      onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
-    });
+    let result = await runToQuiescence(
+      createAgentRuntime(customerSupportMachine, {
+        executors,
+        onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
+      }),
+      {
+        input: { query },
+      },
+    );
 
     // Two kinds of pause, so two kinds of prompt: `confirming` wants a
     // decision about a write, `awaitingInfo` wants a detail only the customer
@@ -802,12 +823,16 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
           : { type: "DENY", reason: await promptLine("Reason: ") };
       }
 
-      result = await runAgent(customerSupportMachine, {
-        snapshot: persisted,
-        event: event as never,
-        executors,
-        onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
-      });
+      result = await runToQuiescence(
+        createAgentRuntime(customerSupportMachine, {
+          executors,
+          onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
+        }),
+        {
+          snapshot: persisted,
+          event: event as never,
+        },
+      );
     }
 
     if (result.status !== "done") {

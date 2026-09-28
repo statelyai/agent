@@ -28,9 +28,11 @@ import { createActor, waitFor, type AnyStateMachine, type Snapshot } from "xstat
 import {
   getStatePath,
   provideExecutors,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   type AgentRequestExecutors,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
 import { portableLoopMachine } from "../portable-xstate-loop/index.js";
 
@@ -46,7 +48,7 @@ export { portableLoopMachine };
  * stays a single self-contained file (see CONTRIBUTING).
  */
 type ExampleRunOptions = Pick<
-  RunAgentOptions<AnyStateMachine>,
+  AgentRuntimeOptions<AnyStateMachine> & AgentRunInit<AnyStateMachine>,
   "executors" | "signal" | "onTransition" | "on" | "onTrace" | "inspect"
 >;
 
@@ -83,23 +85,33 @@ export async function runFileSnapshotStoreExample(
   const runId = "release-42";
 
   // Request/process one: run until the machine waits for approval.
-  const paused = await runAgent(portableLoopMachine, {
-    ...(observers as object),
-    input: { topic: "framework-owned storage" },
-    executors,
-  });
+  const paused = await runToQuiescence(
+    createAgentRuntime(portableLoopMachine, {
+      ...(observers as object),
+      executors,
+    }),
+    {
+      ...(observers as object),
+      input: { topic: "framework-owned storage" },
+    },
+  );
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
   await saveSnapshot(directory, runId, paused.persist());
 
   // Request/process two: load the native snapshot and deliver a normal event.
   const snapshot = await loadSnapshot(directory, runId);
   if (!snapshot) throw new Error(`No snapshot stored for '${runId}'.`);
-  const resumed = await runAgent(portableLoopMachine, {
-    ...(observers as object),
-    snapshot,
-    event: { type: "APPROVE" },
-    executors,
-  });
+  const resumed = await runToQuiescence(
+    createAgentRuntime(portableLoopMachine, {
+      ...(observers as object),
+      executors,
+    }),
+    {
+      ...(observers as object),
+      snapshot,
+      event: { type: "APPROVE" },
+    },
+  );
   if (resumed.status !== "done") throw new Error(`Expected done, got '${resumed.status}'.`);
   return resumed.output;
 }

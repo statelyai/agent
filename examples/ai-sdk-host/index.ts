@@ -12,7 +12,7 @@
  *
  * 2. The HOST (`runAiSdkGameTurn`) — the only part that knows about the AI SDK.
  *    It contributes `createAiSdkExecutors({ models })` and drives the run with
- *    `runAgentStream`, so it sees every transition as the turn plays out. The
+ *    the agent loop, so it sees every transition as the turn plays out. The
  *    same machine runs unchanged on Workers AI (examples/cloudflare-workers-ai-host).
  *
  * `decide` forces a tool call, one tool per candidate event, and reads the
@@ -30,7 +30,7 @@ import { type AiSdkModelMap, createAiSdkExecutors } from "@statelyai/agent/ai-sd
 import {
   createAgentSchemas,
   createTextLogic,
-  runAgentStream,
+  createAgentRuntime,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -363,23 +363,28 @@ export const gameMachine = gameAgentSetup.createMachine({
 const defaultExecutors = createAiSdkExecutors({ models });
 
 /**
- * Drives one combat turn with `runAgentStream`, reporting each state the
- * machine enters as it goes. Executors are injected so tests drive the turn
- * with mocks; the direct run uses the AI SDK set above.
+ * Drives one combat turn with the agent loop, reporting each state the machine
+ * enters as it goes. The loop is the host's own code: this is where a UI, a
+ * log line or a server-sent event would go. Executors are injected so tests
+ * drive the turn with mocks; the direct run uses the AI SDK set above.
  */
 export async function runAiSdkGameTurn(
   input: { playerHp: number; enemyHp: number } = { playerHp: 20, enemyHp: 15 },
   onStep?: (value: StateValue) => void,
   executors: AgentRequestExecutors = defaultExecutors,
 ) {
-  for await (const event of runAgentStream(gameMachine, { input, executors })) {
-    if (event.kind === "transition") onStep?.(event.value);
-    if (event.kind === "done") return event.result.output;
-    if (event.kind === "idle" || event.kind === "error") {
-      throw new Error(`Game turn ended with ${event.kind}.`);
-    }
+  const runtime = createAgentRuntime(gameMachine, { executors });
+  let [state, effects] = await runtime.start({ input });
+  onStep?.(state.value);
+  await runtime.execute(effects);
+  for (let event; (event = await runtime.nextEvent()); ) {
+    [state, effects] = runtime.transition(state, event);
+    onStep?.(state.value);
+    await runtime.execute(effects);
   }
-  throw new Error("Game turn ended without a result.");
+  const result = await runtime.finish();
+  if (result.status === "done") return result.output;
+  throw new Error(`Game turn ended with ${result.status}.`);
 }
 
 export interface RunAiSdkHostOptions {

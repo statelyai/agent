@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { runAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { createMockJudge } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
@@ -40,19 +40,23 @@ test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {
       improveTranslation: ["Spanish:Hello friend improved"],
     },
   });
-  const result = await runAgent(aiSdkEvaluatorOptimizerMachine, {
-    input: {
-      text: "Hello friend",
-      targetLanguage: "Spanish",
-      maxIterations: 3,
+  const result = await runToQuiescence(
+    createAgentRuntime(aiSdkEvaluatorOptimizerMachine, {
+      on: {
+        EVALUATED: (e) => evaluated.push(e.iteration),
+        IMPROVED: (e) => improved.push(e.translation),
+      },
+      executors,
+      actors: { gradeTranslation: createGradeTranslation(gradingJev().model) },
+    }),
+    {
+      input: {
+        text: "Hello friend",
+        targetLanguage: "Spanish",
+        maxIterations: 3,
+      },
     },
-    on: {
-      EVALUATED: (e) => evaluated.push(e.iteration),
-      IMPROVED: (e) => improved.push(e.translation),
-    },
-    executors,
-    actors: { gradeTranslation: createGradeTranslation(gradingJev().model) },
-  });
+  );
   assert.equal(result.status, "done");
   const output = result.status === "done" ? result.output : undefined;
   assert.deepEqual(output?.detail, {
@@ -90,10 +94,14 @@ test("a failed first translation lands in `failed`, not in `done` with an empty 
     },
   });
 
-  const result = await runAgent(aiSdkEvaluatorOptimizerMachine, {
-    input: { text: "Hello friend", targetLanguage: "Spanish", maxIterations: 3 },
-    executors,
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(aiSdkEvaluatorOptimizerMachine, {
+      executors,
+    }),
+    {
+      input: { text: "Hello friend", targetLanguage: "Spanish", maxIterations: 3 },
+    },
+  );
 
   assert.equal(result.status, "done");
   assert.equal(result.status === "done" ? result.snapshot.value : undefined, "failed");
@@ -120,17 +128,21 @@ test("the grade asks Jev one score and three boolean questions in one call; thre
       improveTranslation: ["revised"],
     },
   });
-  const result = await runAgent(aiSdkEvaluatorOptimizerMachine, {
-    input: { text: "Break a leg!", targetLanguage: "French", maxIterations: 3 },
-    executors: {
-      ...mock,
-      generateText: async (request, info) => {
-        requests.push(request.name ?? request.model);
-        return mock.generateText(request, info);
+  const result = await runToQuiescence(
+    createAgentRuntime(aiSdkEvaluatorOptimizerMachine, {
+      executors: {
+        ...mock,
+        generateText: async (request, info) => {
+          requests.push(request.name ?? request.model);
+          return mock.generateText(request, info);
+        },
       },
+      actors: { gradeTranslation: createGradeTranslation(jev.model) },
+    }),
+    {
+      input: { text: "Break a leg!", targetLanguage: "French", maxIterations: 3 },
     },
-    actors: { gradeTranslation: createGradeTranslation(jev.model) },
-  });
+  );
 
   assert.equal(jev.calls.length, 2);
   const call = jev.calls[0]!;

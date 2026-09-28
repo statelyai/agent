@@ -22,7 +22,13 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
+import {
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
+} from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const models = {
@@ -156,8 +162,10 @@ export const parallelStreamsMachine = agentSetup.createMachine({
 });
 
 export async function runParallelStreamsExample(
-  options?: RunAgentOptions<typeof parallelStreamsMachine>,
-  observe?: RunAgentOptions<typeof parallelStreamsMachine>["onTransition"],
+  options?: AgentRuntimeOptions<typeof parallelStreamsMachine> &
+    AgentRunInit<typeof parallelStreamsMachine>,
+  observe?: (AgentRuntimeOptions<typeof parallelStreamsMachine> &
+    AgentRunInit<typeof parallelStreamsMachine>)["onTransition"],
 ) {
   // Buffer chunks per stream, keyed by the invoke id — the disambiguator.
   const buffers: Record<string, string> = { thinker: "", poet: "" };
@@ -166,16 +174,21 @@ export async function runParallelStreamsExample(
   const startedAt = Date.now();
   const lastChunkAt: Record<string, number> = {};
 
-  const result = await runAgent(parallelStreamsMachine, {
-    input: { topic: "state machines" },
-    executors: createAiSdkExecutors({ models }),
-    ...options,
-    onChunk: (chunk, { request }) => {
-      buffers[request.id] = (buffers[request.id] ?? "") + chunk;
-      lastChunkAt[request.id] = Date.now() - startedAt;
+  const result = await runToQuiescence(
+    createAgentRuntime(parallelStreamsMachine, {
+      executors: createAiSdkExecutors({ models }),
+      ...options,
+      onChunk: (chunk, { request }) => {
+        buffers[request.id] = (buffers[request.id] ?? "") + chunk;
+        lastChunkAt[request.id] = Date.now() - startedAt;
+      },
+      onTransition: observe,
+    }),
+    {
+      input: { topic: "state machines" },
+      ...options,
     },
-    onTransition: observe,
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Parallel streams example did not complete: ${result.status}`);

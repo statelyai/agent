@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Message } from "@anthropic-ai/sdk/resources/messages.js";
-import { runAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { getJsonSchemaSync } from "@statelyai/agent";
 import type { AgentMessage } from "@statelyai/agent";
 import {
@@ -346,11 +346,15 @@ describe("createAnthropicExecutors + runAgent", () => {
     );
 
     const { generateText } = createAnthropicExecutors({ client });
-    const result = await runAgent(triageMachine, {
-      input: { ticket: "My invoice is wrong and I am furious." },
-      executors: { generateText },
-      actors: judgeActors(),
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors: judgeActors(),
+      }),
+      {
+        input: { ticket: "My invoice is wrong and I am furious." },
+      },
+    );
 
     // The stub reports 1 input + 1 output token per call, and triage makes one
     // text call (the reply); the classification is a Jev judgment, not a model call.
@@ -377,11 +381,15 @@ describe("createAnthropicExecutors + runAgent", () => {
     );
 
     const { generateText } = createAnthropicExecutors({ client });
-    const result = await runAgent(triageMachine, {
-      input: { ticket: "My invoice is wrong and I am furious." },
-      executors: { generateText },
-      actors: judgeActors(),
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors: judgeActors(),
+      }),
+      {
+        input: { ticket: "My invoice is wrong and I am furious." },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -412,20 +420,28 @@ describe("createAnthropicExecutors + runAgent", () => {
 
     // Player turns are idle states now: the decide round-trip settles the run
     // at `awaitingGuessFeedback`, and scripted button events resume it to done.
-    let result = await runAgent(twentyQuestionsMachine, {
-      input: { questionsRemaining: 1 },
-      executors,
-    });
+    let result = await runToQuiescence(
+      createAgentRuntime(twentyQuestionsMachine, {
+        executors,
+      }),
+      {
+        input: { questionsRemaining: 1 },
+      },
+    );
     expect(result.status).toBe("idle");
 
     const playerEvents = [{ type: "GUESS_RIGHT" }, { type: "PLAY_AGAIN_NO" }] as const;
     for (const event of playerEvents) {
       if (result.status !== "idle") throw new Error(`expected idle, got ${result.status}`);
-      result = await runAgent(twentyQuestionsMachine, {
-        snapshot: result.persist(),
-        event,
-        executors,
-      });
+      result = await runToQuiescence(
+        createAgentRuntime(twentyQuestionsMachine, {
+          executors,
+        }),
+        {
+          snapshot: result.persist(),
+          event,
+        },
+      );
     }
 
     expect(result.status).toBe("done");

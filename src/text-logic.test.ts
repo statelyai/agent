@@ -4,7 +4,8 @@ import { createActor, toPromise } from "xstate";
 import {
   createAgentSchemas,
   createTextLogic,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutor,
   type AgentTextRequest,
@@ -64,27 +65,31 @@ describe('createTextLogic({ mode: "stream" })', () => {
     const chunkRequests: AgentRequest[] = [];
     const parts = ["Why ", "did ", "the ", "actor ", "cross?"];
 
-    const result = await runAgent(machine, {
-      input: { topic: "state machines" },
-      onChunk: (chunk, info) => {
-        chunks.push(chunk);
-        chunkRequests.push(info.request);
-      },
-      executors: {
-        generateText: async () => {
-          throw new Error("generateText should not be used for stream requests");
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onChunk: (chunk, info) => {
+          chunks.push(chunk);
+          chunkRequests.push(info.request);
         },
-        streamText: async (
-          _request: AgentTextRequest & { tools: AgentTools },
-          info?: AgentRequestExecutorInfo,
-        ) => {
-          for (const part of parts) {
-            info?.onChunk?.(part);
-          }
-          return { result: parts.join("") };
+        executors: {
+          generateText: async () => {
+            throw new Error("generateText should not be used for stream requests");
+          },
+          streamText: async (
+            _request: AgentTextRequest & { tools: AgentTools },
+            info?: AgentRequestExecutorInfo,
+          ) => {
+            for (const part of parts) {
+              info?.onChunk?.(part);
+            }
+            return { result: parts.join("") };
+          },
         },
+      }),
+      {
+        input: { topic: "state machines" },
       },
-    });
+    );
 
     // chunk delivery order preserved
     expect(chunks).toEqual(parts);
@@ -125,14 +130,13 @@ describe('createTextLogic({ mode: "stream" })', () => {
       },
     });
 
-    await expect(
-      runAgent(machine, {
-        input: { topic: "x" },
+    expect(() =>
+      createAgentRuntime(machine, {
         executors: {
           generateText: async () => ({ result: "nope" }),
         },
       }),
-    ).rejects.toThrow(/streamText/);
+    ).toThrow(/streamText/);
   });
 
   test("executeAgentTextRequest: stream mode with no streamText executor throws naming the id", async () => {
@@ -300,26 +304,30 @@ describe('createTextLogic({ mode: "stream" })', () => {
 
     const chunksById: Record<string, string[]> = { streamA: [], streamB: [] };
 
-    const result = await runAgent(machine, {
-      input: {},
-      onChunk: (chunk, info) => {
-        if (info.request.kind === "text") {
-          chunksById[info.request.id]?.push(chunk);
-        }
-      },
-      executors: {
-        generateText: async () => {
-          throw new Error("generateText should not be used");
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onChunk: (chunk, info) => {
+          if (info.request.kind === "text") {
+            chunksById[info.request.id]?.push(chunk);
+          }
         },
-        streamText: async (request, info) => {
-          // emit two chunks tagged with which stream produced them
-          const tag = request.prompt === "a" ? "A" : "B";
-          info?.onChunk?.(tag);
-          info?.onChunk?.(tag);
-          return { result: `${tag}${tag}` };
+        executors: {
+          generateText: async () => {
+            throw new Error("generateText should not be used");
+          },
+          streamText: async (request, info) => {
+            // emit two chunks tagged with which stream produced them
+            const tag = request.prompt === "a" ? "A" : "B";
+            info?.onChunk?.(tag);
+            info?.onChunk?.(tag);
+            return { result: `${tag}${tag}` };
+          },
         },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -591,14 +599,16 @@ describe("createTextLogic schema defaults", () => {
       },
     });
 
-    const result = await runAgent(machine, {
-      executors: {
-        generateText: (request) =>
-          request.name === "randomTopic"
-            ? { result: "otters" }
-            : { result: `joke: ${request.prompt}` },
-      },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: (request) =>
+            request.name === "randomTopic"
+              ? { result: "otters" }
+              : { result: `joke: ${request.prompt}` },
+        },
+      }),
+    );
 
     expect(result.status === "done" && result.output).toEqual({
       joke: "joke: Joke about otters.",

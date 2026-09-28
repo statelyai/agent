@@ -82,7 +82,8 @@ import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type DoneActorEventOf,
@@ -665,17 +666,21 @@ export async function runLlmCompilerExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runAgent(llmCompilerMachine, {
-    input: { question },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(llmCompilerMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { question },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`LLMCompiler example did not complete: ${result.status}`);

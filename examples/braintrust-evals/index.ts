@@ -31,7 +31,7 @@
 import { Eval } from "braintrust";
 import type { EventFromLogic, Snapshot, SnapshotFrom } from "xstate";
 import type { Experimental_EvaluationModel } from "ai";
-import { getStatePath, runAgent } from "@statelyai/agent";
+import { getStatePath, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { matchesTrajectory } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -143,16 +143,20 @@ export async function runDrafterCase(
     if (!event) break;
     if (event.type === "MORE_INFO") detailsUsed = true;
 
-    const result = await runAgent(emailDrafter, {
-      ...(snapshot ? { snapshot, event } : { event }),
-      executors,
-      ...(actors ? { actors } : {}),
-      onTransition: (next, causedBy) => {
-        if (snapshot && (causedBy as { type: string }).type === "@xstate.init") return;
-        statePath.push(getStatePath(next));
-        eventTrajectory.push(causedBy.type);
+    const result = await runToQuiescence(
+      createAgentRuntime(emailDrafter, {
+        executors,
+        ...(actors ? { actors } : {}),
+        onTransition: (next, causedBy) => {
+          if (snapshot && (causedBy as { type: string }).type === "@xstate.init") return;
+          statePath.push(getStatePath(next));
+          eventTrajectory.push(causedBy.type);
+        },
+      }),
+      {
+        ...(snapshot ? { snapshot, event } : { event }),
       },
-    });
+    );
 
     liveSnapshot = result.snapshot;
     snapshot = result.persist();

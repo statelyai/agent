@@ -61,7 +61,8 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createTextLogic,
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type DoneActorEventOf,
@@ -409,17 +410,21 @@ export interface TntLlmResult {
 export async function runTntLlmExample(options: RunTntLlmOptions = {}): Promise<TntLlmResult> {
   const { documents, batchSize, generateText, onProgress } = options;
   const progress: string[] = [];
-  const result = await runAgent(tntLlmMachine, {
-    input: { documents, batchSize: batchSize ?? DEFAULT_BATCH_SIZE },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(tntLlmMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { documents, batchSize: batchSize ?? DEFAULT_BATCH_SIZE },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`TNT-LLM example did not complete: ${result.status}`);

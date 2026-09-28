@@ -18,9 +18,11 @@ import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } 
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
 
 /**
@@ -290,7 +292,11 @@ function liveJudge() {
  * to auto-acceptance by claiming it is trusted.
  */
 export async function runConsensusReviewExample(
-  options?: Omit<RunAgentOptions<typeof consensusReviewMachine>, "input"> & {
+  options?: Omit<
+    AgentRuntimeOptions<typeof consensusReviewMachine> &
+      AgentRunInit<typeof consensusReviewMachine>,
+    "input"
+  > & {
     patch?: string;
     /** The judge model; tests pass a mock, omitted the runner uses Jev (`TYPESAFE_AI_API_KEY`). */
     judge?: Experimental_EvaluationModel;
@@ -307,15 +313,20 @@ export async function runConsensusReviewExample(
   } = (options ?? {}) as typeof options & {
     input?: unknown;
   };
-  return runAgent(consensusReviewMachine, {
-    ...runOptions,
-    actors: { ...actors, review: actors?.review ?? createReview(judge ?? liveJudge()) },
-    // Last on purpose: the host-derived input wins over anything spread above.
-    input:
-      patch === undefined
-        ? { patch: BUILT_IN_PATCH, source: "trusted" }
-        : { patch, source: "external" },
-  });
+  return runToQuiescence(
+    createAgentRuntime(consensusReviewMachine, {
+      ...runOptions,
+      actors: { ...actors, review: actors?.review ?? createReview(judge ?? liveJudge()) },
+    }),
+    {
+      ...runOptions,
+      // Last on purpose: the host-derived input wins over anything spread above.
+      input:
+        patch === undefined
+          ? { patch: BUILT_IN_PATCH, source: "trusted" }
+          : { patch, source: "external" },
+    },
+  );
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {

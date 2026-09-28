@@ -31,10 +31,12 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
 
 /** Rejected document rounds allowed before the case is escalated to a human. */
@@ -414,17 +416,25 @@ export async function runLongRunningOnboardingExample(
 
   // One options object, built once: the mock replaces the real executors
   // rather than layering over them.
-  const shared: Partial<RunAgentOptions<typeof longRunningOnboardingMachine>> = {
+  const shared: Partial<
+    AgentRuntimeOptions<typeof longRunningOnboardingMachine> &
+      AgentRunInit<typeof longRunningOnboardingMachine>
+  > = {
     executors: options.generateText
       ? { generateText: options.generateText }
       : createAiSdkExecutors({ models }),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   };
 
-  let result = await runAgent(longRunningOnboardingMachine, {
-    input: { employee },
-    ...shared,
-  });
+  let result = await runToQuiescence(
+    createAgentRuntime(longRunningOnboardingMachine, {
+      ...shared,
+    }),
+    {
+      input: { employee },
+      ...shared,
+    },
+  );
 
   // Days pass between these calls in a real deployment. Each pause persists to
   // JSON and the next call resumes from it.
@@ -438,11 +448,16 @@ export async function runLongRunningOnboardingExample(
     if (!answer)
       throw new Error(`No answer scripted for pause at '${getStatePath(result.snapshot)}'.`);
 
-    result = await runAgent(longRunningOnboardingMachine, {
-      snapshot: JSON.parse(JSON.stringify(result.persist())) as Snapshot<unknown>,
-      event: answer,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(longRunningOnboardingMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: JSON.parse(JSON.stringify(result.persist())) as Snapshot<unknown>,
+        event: answer,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

@@ -62,7 +62,13 @@ import { createAsyncLogic } from "xstate";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = {
   reasoner: openai("gpt-5.4-mini"),
@@ -393,18 +399,22 @@ export async function runSelfDiscoverExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runAgent(selfDiscoverMachine, {
-    input: { task },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    ...(judge ? { actors: { selectModules: createSelectModules(judge) } } : {}),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(selfDiscoverMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      ...(judge ? { actors: { selectModules: createSelectModules(judge) } } : {}),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { task },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Self-Discover example did not complete: ${result.status}`);

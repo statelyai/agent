@@ -30,9 +30,11 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
@@ -262,18 +264,27 @@ export const sqlAgentMachine = agentSetup.createMachine({
 
 export async function runSqlAgentExample(
   question: string,
-  options: RunAgentOptions<typeof sqlAgentMachine> & {
+  options: (AgentRuntimeOptions<typeof sqlAgentMachine> & AgentRunInit<typeof sqlAgentMachine>) & {
     approval?: "APPROVE" | "REJECT";
   } = {},
 ) {
   const { approval = "APPROVE", ...runOptions } = options;
   // Spread-merge, so a caller passing only `onTransition` keeps the live executors.
-  const resolved: RunAgentOptions<typeof sqlAgentMachine> = {
+  const resolved: AgentRuntimeOptions<typeof sqlAgentMachine> &
+    AgentRunInit<typeof sqlAgentMachine> = {
     executors: createAiSdkExecutors({ models }),
     ...runOptions,
   };
 
-  const first = await runAgent(sqlAgentMachine, { input: { question }, ...resolved });
+  const first = await runToQuiescence(
+    createAgentRuntime(sqlAgentMachine, {
+      ...resolved,
+    }),
+    {
+      input: { question },
+      ...resolved,
+    },
+  );
   // Planning failed: the run is already in `failed`, with nothing to approve.
   if (first.status === "done") {
     return { interaction: undefined, output: first.output };
@@ -283,11 +294,16 @@ export async function runSqlAgentExample(
   }
   const interaction = getInteraction(first.snapshot);
 
-  const second = await runAgent(sqlAgentMachine, {
-    snapshot: first.persist(),
-    event: { type: approval },
-    ...resolved,
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(sqlAgentMachine, {
+      ...resolved,
+    }),
+    {
+      snapshot: first.persist(),
+      event: { type: approval },
+      ...resolved,
+    },
+  );
   if (second.status !== "done") {
     throw new Error(`SQL agent did not complete: ${second.status}`);
   }

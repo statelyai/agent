@@ -84,7 +84,8 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -468,16 +469,29 @@ export async function runLongTermMemoryExample(
     },
   };
 
-  let result = await runAgent(longTermMemoryMachine, { input: { userId, memories }, ...shared });
+  let result = await runToQuiescence(
+    createAgentRuntime(longTermMemoryMachine, {
+      ...shared,
+    }),
+    {
+      input: { userId, memories },
+      ...shared,
+    },
+  );
   while (result.status === "idle") {
     const reply = getInteraction(result.snapshot)?.label ?? result.snapshot.context.reply;
     onReply?.(reply);
     const event = queued.shift() ?? toHumanEvent(await promptLine(`${reply}\n> `));
-    result = await runAgent(longTermMemoryMachine, {
-      snapshot: result.persist(),
-      event,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(longTermMemoryMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

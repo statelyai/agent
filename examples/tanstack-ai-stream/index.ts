@@ -34,10 +34,12 @@ import { openai } from "@ai-sdk/openai";
 import type { AnyStateMachine } from "xstate";
 import {
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { maybeCreateRunInspection } from "./inspect.js";
@@ -203,7 +205,7 @@ function createChunkQueue<T>() {
 
 /** Options for {@link agentRunToAgUiStream}: the run inputs it forwards to `runAgent`. */
 export type AgentAgUiStreamOptions<TMachine extends AnyStateMachine> = Pick<
-  RunAgentOptions<TMachine>,
+  AgentRuntimeOptions<TMachine> & AgentRunInit<TMachine>,
   "input" | "executors" | "signal" | "inspect"
 > & {
   /** AG-UI conversation/run identifiers echoed on the run-level events. */
@@ -241,41 +243,46 @@ export async function* agentRunToAgUiStream<TMachine extends AnyStateMachine>(
 
   emit({ type: EventType.RUN_STARTED, threadId, runId });
 
-  const run = runAgent(machine, {
-    ...runOptions,
-    onChunk: (chunk, { request }) => {
-      if (!openMessages.has(request.id)) {
-        openMessages.add(request.id);
-        // `role` is required on TEXT_MESSAGE_START (the AG-UI schema defaults it
-        // to "assistant", so the parsed type has it non-optional).
+  const run = runToQuiescence(
+    createAgentRuntime(machine, {
+      ...runOptions,
+      onChunk: (chunk, { request }) => {
+        if (!openMessages.has(request.id)) {
+          openMessages.add(request.id);
+          // `role` is required on TEXT_MESSAGE_START (the AG-UI schema defaults it
+          // to "assistant", so the parsed type has it non-optional).
+          emit({
+            type: EventType.TEXT_MESSAGE_START,
+            messageId: request.id,
+            role: "assistant",
+          });
+        }
         emit({
-          type: EventType.TEXT_MESSAGE_START,
+          type: EventType.TEXT_MESSAGE_CONTENT,
           messageId: request.id,
-          role: "assistant",
+          delta: chunk,
         });
-      }
-      emit({
-        type: EventType.TEXT_MESSAGE_CONTENT,
-        messageId: request.id,
-        delta: chunk,
-      });
+      },
+      onResult: (request) => {
+        if (openMessages.delete(request.id)) {
+          emit({ type: EventType.TEXT_MESSAGE_END, messageId: request.id });
+        }
+      },
+      // Each machine state becomes an AG-UI step: close the previous, open the next.
+      onTransition: (snapshot) => {
+        // `getStatePath` renders nested and parallel state values; `String(value)`
+        // would collapse an object to "[object Object]".
+        const stepName = getStatePath(snapshot);
+        if (stepName === currentStep) return;
+        if (currentStep !== null) emit({ type: EventType.STEP_FINISHED, stepName: currentStep });
+        emit({ type: EventType.STEP_STARTED, stepName });
+        currentStep = stepName;
+      },
+    }),
+    {
+      ...runOptions,
     },
-    onResult: (request) => {
-      if (openMessages.delete(request.id)) {
-        emit({ type: EventType.TEXT_MESSAGE_END, messageId: request.id });
-      }
-    },
-    // Each machine state becomes an AG-UI step: close the previous, open the next.
-    onTransition: (snapshot) => {
-      // `getStatePath` renders nested and parallel state values; `String(value)`
-      // would collapse an object to "[object Object]".
-      const stepName = getStatePath(snapshot);
-      if (stepName === currentStep) return;
-      if (currentStep !== null) emit({ type: EventType.STEP_FINISHED, stepName: currentStep });
-      emit({ type: EventType.STEP_STARTED, stepName });
-      currentStep = stepName;
-    },
-  }).then(
+  ).then(
     (result) => {
       closeOpen();
       if (currentStep !== null) emit({ type: EventType.STEP_FINISHED, stepName: currentStep });

@@ -1,5 +1,5 @@
 import { assert, expect, test } from "vitest";
-import { getInteraction, runAgent } from "@statelyai/agent";
+import { getInteraction, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { jsonAgentMachine, workflowConfig } from "./index.js";
 
 /** A drafting executor that fails the test if the escalate path reaches it. */
@@ -16,10 +16,14 @@ test("REPLY path: the draft settles idle, and APPROVE reaches the replied final 
   const generateText = async () => ({ result: { reply: "Sorry about that — refund issued." } });
   const decide = async () => ({ event: { type: "REPLY" as const } });
 
-  const first = await runAgent(jsonAgentMachine, {
-    input: { ticket: "My invoice total looks wrong." },
-    executors: { generateText, decide },
-  });
+  const first = await runToQuiescence(
+    createAgentRuntime(jsonAgentMachine, {
+      executors: { generateText, decide },
+    }),
+    {
+      input: { ticket: "My invoice total looks wrong." },
+    },
+  );
 
   assert(first.status === "idle");
   expect(first.snapshot.matches("awaitingApproval")).toBe(true);
@@ -29,11 +33,15 @@ test("REPLY path: the draft settles idle, and APPROVE reaches the replied final 
     "REJECT",
   ]);
 
-  const second = await runAgent(jsonAgentMachine, {
-    snapshot: first.snapshot,
-    event: { type: "APPROVE" },
-    executors: { generateText, decide },
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(jsonAgentMachine, {
+      executors: { generateText, decide },
+    }),
+    {
+      snapshot: first.snapshot,
+      event: { type: "APPROVE" },
+    },
+  );
 
   assert(second.status === "done");
   expect(second.output).toEqual({
@@ -46,18 +54,26 @@ test("REJECT path: rejecting the draft escalates and keeps the drafted reply", a
   const generateText = async () => ({ result: { reply: "Here is a workaround." } });
   const decide = async () => ({ event: { type: "REPLY" as const } });
 
-  const first = await runAgent(jsonAgentMachine, {
-    input: { ticket: "Third time this has broken." },
-    executors: { generateText, decide },
-  });
+  const first = await runToQuiescence(
+    createAgentRuntime(jsonAgentMachine, {
+      executors: { generateText, decide },
+    }),
+    {
+      input: { ticket: "Third time this has broken." },
+    },
+  );
 
   assert(first.status === "idle");
 
-  const second = await runAgent(jsonAgentMachine, {
-    snapshot: first.snapshot,
-    event: { type: "REJECT" },
-    executors: { generateText, decide },
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(jsonAgentMachine, {
+      executors: { generateText, decide },
+    }),
+    {
+      snapshot: first.snapshot,
+      event: { type: "REJECT" },
+    },
+  );
 
   assert(second.status === "done");
   expect(second.output).toEqual({
@@ -70,10 +86,14 @@ test("REJECT path: rejecting the draft escalates and keeps the drafted reply", a
 test("ESCALATE path: the decision escalates directly, with no reply drafted", async () => {
   const decide = async () => ({ event: { type: "ESCALATE" as const, reason: "angry customer" } });
 
-  const result = await runAgent(jsonAgentMachine, {
-    input: { ticket: "This is unacceptable, get me a manager." },
-    executors: { generateText: noDraft, decide },
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(jsonAgentMachine, {
+      executors: { generateText: noDraft, decide },
+    }),
+    {
+      input: { ticket: "This is unacceptable, get me a manager." },
+    },
+  );
 
   assert(result.status === "done");
   // The decision's reason survives into the output — "escalated" alone tells
@@ -90,10 +110,14 @@ test("a failing decision lands in the failed final state instead of a fake resol
     throw new Error("model unavailable");
   };
 
-  const result = await runAgent(jsonAgentMachine, {
-    input: { ticket: "Where is my order?" },
-    executors: { generateText: noDraft, decide },
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(jsonAgentMachine, {
+      executors: { generateText: noDraft, decide },
+    }),
+    {
+      input: { ticket: "Where is my order?" },
+    },
+  );
 
   assert(result.status === "done");
   expect(result.output).toEqual({
@@ -108,10 +132,14 @@ test("a failing draft request lands in the failed final state", async () => {
   };
   const decide = async () => ({ event: { type: "REPLY" as const } });
 
-  const result = await runAgent(jsonAgentMachine, {
-    input: { ticket: "My invoice total looks wrong." },
-    executors: { generateText, decide },
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(jsonAgentMachine, {
+      executors: { generateText, decide },
+    }),
+    {
+      input: { ticket: "My invoice total looks wrong." },
+    },
+  );
 
   assert(result.status === "done");
   expect(result.output).toEqual({

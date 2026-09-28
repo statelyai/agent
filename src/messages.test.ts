@@ -1,6 +1,12 @@
 import { expect, test } from "vitest";
 import { z } from "zod";
-import { getMessageText, isAgentMessages, runAgent, setupAgent } from "./index.js";
+import {
+  getMessageText,
+  isAgentMessages,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+} from "./index.js";
 
 test("request actors resolve with the executor's framework-native messages on output.messages", async () => {
   const agent = setupAgent({
@@ -33,15 +39,19 @@ test("request actors resolve with the executor's framework-native messages on ou
     },
   });
 
-  const result = await runAgent(machine, {
-    input: {},
-    executors: {
-      generateText: async () => ({
-        result: "ok",
-        messages: [{ kind: "native", body: "framework response" }],
-      }),
+  const result = await runToQuiescence(
+    createAgentRuntime(machine, {
+      executors: {
+        generateText: async () => ({
+          result: "ok",
+          messages: [{ kind: "native", body: "framework response" }],
+        }),
+      },
+    }),
+    {
+      input: {},
     },
-  });
+  );
 
   expect(result.status).toBe("done");
   if (result.status !== "done") return;

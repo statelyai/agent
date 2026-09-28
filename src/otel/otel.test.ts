@@ -9,7 +9,13 @@ import {
 import { beforeEach, describe, expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
 import { z } from "zod";
-import { provideExecutors, runAgent, setupAgent, traceTransitions } from "../index.js";
+import {
+  provideExecutors,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  traceTransitions,
+} from "../index.js";
 import type { AgentRequestExecutors } from "../index.js";
 import { createOtelTraceHandler } from "./index.js";
 
@@ -97,11 +103,15 @@ describe("createOtelTraceHandler", () => {
   test("maps a full scripted run onto a GenAI span tree", async () => {
     const onTrace = createOtelTraceHandler({ tracer, providerName: "openai" });
 
-    const result = await runAgent(machine, {
-      input: { topic: "state machines" },
-      executors,
-      onTrace,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors,
+        onTrace,
+      }),
+      {
+        input: { topic: "state machines" },
+      },
+    );
     onTrace.dispose();
 
     expect(result.status).toBe("done");
@@ -167,11 +177,15 @@ describe("createOtelTraceHandler", () => {
 
   test("omits prompts and outputs unless captureContent is set", async () => {
     const onTrace = createOtelTraceHandler({ tracer });
-    await runAgent(machine, {
-      input: { topic: "privacy" },
-      executors,
-      onTrace,
-    });
+    await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors,
+        onTrace,
+      }),
+      {
+        input: { topic: "privacy" },
+      },
+    );
     onTrace.dispose();
 
     for (const span of named("chat quick")) {
@@ -184,11 +198,15 @@ describe("createOtelTraceHandler", () => {
     exporter.reset();
 
     const capturing = createOtelTraceHandler({ tracer, captureContent: true });
-    await runAgent(machine, {
-      input: { topic: "privacy" },
-      executors,
-      onTrace: capturing,
-    });
+    await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors,
+        onTrace: capturing,
+      }),
+      {
+        input: { topic: "privacy" },
+      },
+    );
     capturing.dispose();
 
     const textSpan = named("chat quick").at(-1)!;
@@ -200,16 +218,20 @@ describe("createOtelTraceHandler", () => {
     const onTrace = createOtelTraceHandler({ tracer });
     const boom = new Error("model exploded");
 
-    const result = await runAgent(machine, {
-      input: { topic: "failure" },
-      executors: {
-        ...executors,
-        decide: async () => {
-          throw boom;
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          ...executors,
+          decide: async () => {
+            throw boom;
+          },
         },
+        onTrace,
+      }),
+      {
+        input: { topic: "failure" },
       },
-      onTrace,
-    });
+    );
     onTrace.dispose();
 
     expect(result.status).toBe("error");
@@ -229,11 +251,15 @@ describe("createOtelTraceHandler", () => {
     const onTrace = createOtelTraceHandler({ tracer });
 
     await tracer.startActiveSpan("http.request", async (active) => {
-      await runAgent(machine, {
-        input: { topic: "nesting" },
-        executors,
-        onTrace,
-      });
+      await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors,
+          onTrace,
+        }),
+        {
+          input: { topic: "nesting" },
+        },
+      );
       active.end();
     });
     onTrace.dispose();

@@ -45,7 +45,8 @@ import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   getInteraction,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentDecisionExecutor,
 } from "@statelyai/agent";
@@ -568,14 +569,19 @@ export async function runGameLoopExample(options?: {
     },
   };
 
-  let result = await runAgent(gameMachine, {
-    input: {
-      seed: options?.input?.seed ?? 11,
-      target: options?.input?.target ?? DEFAULT_TARGET,
-      maxRounds: options?.input?.maxRounds ?? DEFAULT_MAX_ROUNDS,
+  let result = await runToQuiescence(
+    createAgentRuntime(gameMachine, {
+      ...shared,
+    }),
+    {
+      input: {
+        seed: options?.input?.seed ?? 11,
+        target: options?.input?.target ?? DEFAULT_TARGET,
+        maxRounds: options?.input?.maxRounds ?? DEFAULT_MAX_ROUNDS,
+      },
+      ...shared,
     },
-    ...shared,
-  });
+  );
 
   // Every human move settles the run idle. Resume from `result.persist()` —
   // it round-trips the invoked `player` child WITH its accumulated
@@ -585,11 +591,16 @@ export async function runGameLoopExample(options?: {
       options?.nextHumanEvent?.(result.snapshot) ??
       queued.shift() ??
       toHumanEvent(result.snapshot, await promptLine(`${idlePrompt(result.snapshot)}\n> `));
-    result = await runAgent(gameMachine, {
-      snapshot: result.persist(),
-      event,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(gameMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

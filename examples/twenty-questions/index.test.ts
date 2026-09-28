@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
+import {
+  getInteraction,
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+} from "@statelyai/agent";
 import type { AgentDecisionRequest, AgentRequestExecutor, ChosenEvent } from "@statelyai/agent";
 import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import {
@@ -81,10 +86,15 @@ async function play(options: PlayOptions) {
     ...(options.on ? { on: options.on } : {}),
   };
 
-  let result = await runAgent(twentyQuestionsMachine, {
-    input: options.input ?? { questionsRemaining: 20 },
-    ...shared,
-  });
+  let result = await runToQuiescence(
+    createAgentRuntime(twentyQuestionsMachine, {
+      ...shared,
+    }),
+    {
+      input: options.input ?? { questionsRemaining: 20 },
+      ...shared,
+    },
+  );
 
   while (result.status === "idle") {
     // Every idle state must advertise how a host can unblock it.
@@ -101,11 +111,16 @@ async function play(options: PlayOptions) {
     // Buttons and free text alike are ordinary machine events the state accepts.
     expect(result.snapshot.can(event)).toBe(true);
 
-    result = await runAgent(twentyQuestionsMachine, {
-      snapshot: result.persist(),
-      event,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(twentyQuestionsMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...shared,
+      },
+    );
   }
 
   return { result, prompts, interactions };
@@ -178,11 +193,15 @@ describe("twenty-questions", () => {
     });
 
     // First idle settle: the question has been asked, nothing answered yet.
-    const asked = await runAgent(twentyQuestionsMachine, {
-      input: { questionsRemaining: 20 },
-      executors: { generateText: createClassifier(), decide },
-      actors: createJev().actors,
-    });
+    const asked = await runToQuiescence(
+      createAgentRuntime(twentyQuestionsMachine, {
+        executors: { generateText: createClassifier(), decide },
+        actors: createJev().actors,
+      }),
+      {
+        input: { questionsRemaining: 20 },
+      },
+    );
 
     expect(asked.status).toBe("idle");
     if (asked.status !== "idle") throw new Error("expected idle");
@@ -190,12 +209,16 @@ describe("twenty-questions", () => {
     expect(asked.snapshot.context.transcript).toEqual([]);
 
     // The entry appears only once an answer event arrives.
-    const answered = await runAgent(twentyQuestionsMachine, {
-      snapshot: asked.persist(),
-      event: { type: "ANSWER_YES" },
-      executors: { generateText: createClassifier(), decide },
-      actors: createJev().actors,
-    });
+    const answered = await runToQuiescence(
+      createAgentRuntime(twentyQuestionsMachine, {
+        executors: { generateText: createClassifier(), decide },
+        actors: createJev().actors,
+      }),
+      {
+        snapshot: asked.persist(),
+        event: { type: "ANSWER_YES" },
+      },
+    );
 
     expect(answered.snapshot.context.transcript).toEqual([
       { question: "Is it an animal?", answer: "yes", rawAnswer: "yes" },
@@ -211,19 +234,27 @@ describe("twenty-questions", () => {
         : { event: { type: "GUESS", guess: "a cat" } };
     };
 
-    const asked = await runAgent(twentyQuestionsMachine, {
-      input: { questionsRemaining: 20 },
-      executors: { generateText: createClassifier(), decide },
-      actors: createJev().actors,
-    });
+    const asked = await runToQuiescence(
+      createAgentRuntime(twentyQuestionsMachine, {
+        executors: { generateText: createClassifier(), decide },
+        actors: createJev().actors,
+      }),
+      {
+        input: { questionsRemaining: 20 },
+      },
+    );
     if (asked.status !== "idle") throw new Error("expected idle");
 
-    const answered = await runAgent(twentyQuestionsMachine, {
-      snapshot: asked.persist(),
-      event: { type: "ANSWER", rawAnswer: "mhm" },
-      executors: { generateText: createClassifier(), decide },
-      actors: createJev().actors,
-    });
+    const answered = await runToQuiescence(
+      createAgentRuntime(twentyQuestionsMachine, {
+        executors: { generateText: createClassifier(), decide },
+        actors: createJev().actors,
+      }),
+      {
+        snapshot: asked.persist(),
+        event: { type: "ANSWER", rawAnswer: "mhm" },
+      },
+    );
 
     expect(answered.snapshot.context.transcript).toEqual([
       { question: "Is it an animal?", answer: "yes", rawAnswer: "mhm" },

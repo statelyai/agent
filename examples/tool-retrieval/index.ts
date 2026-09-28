@@ -67,7 +67,13 @@ import { createAsyncLogic } from "xstate";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = { agent: openai("gpt-5.4-mini") };
 
@@ -450,16 +456,20 @@ export async function runToolRetrievalExample(
     onProgress,
   } = options;
   const progress: string[] = [];
-  const result = await runAgent(toolRetrievalMachine, {
-    input: { question },
-    ...(decide ? { executors: { decide } } : { executors: createAiSdkExecutors({ models }) }),
-    ...(judge ? { actors: { selectTools: createSelectTools(judge) } } : {}),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(toolRetrievalMachine, {
+      ...(decide ? { executors: { decide } } : { executors: createAiSdkExecutors({ models }) }),
+      ...(judge ? { actors: { selectTools: createSelectTools(judge) } } : {}),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { question },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Tool retrieval example did not complete: ${result.status}`);

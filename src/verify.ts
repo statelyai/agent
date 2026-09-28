@@ -226,7 +226,7 @@ function checkDirectObjectSrc(ctx: LintContext): AgentLintDiagnostic[] {
         path: node.path,
         message:
           `State '${node.path}' invokes a direct-object agent logic. Direct-object invoke ` +
-          `srcs cannot be rebound by runAgent, so they inherit no host executors — call ` +
+          `srcs cannot be rebound by the agent runtime, so they inherit no host executors — call ` +
           `'.withExecutor(...)' on the logic, or register it as a string-keyed actor source ` +
           `(machine.provide({ actors: { name: logic } })) and invoke it by name.`,
       });

@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { createAsyncLogic } from "xstate";
-import { getStatePath, runAgent, type AgentTextRequest } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  type AgentTextRequest,
+} from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
 import { createMockJudge } from "../mock-judge.js";
 import { createMockModelExecutors, type MockModelScript } from "../mock-model.js";
@@ -44,12 +49,16 @@ async function runWithJudgeActor(
   judgeJokes: ReturnType<typeof offListJudge>["actor"],
 ) {
   const progress: string[] = [];
-  const result = await runAgent(mapReduceMachine, {
-    input: { topic: "animals" },
-    executors: { generateText: options.generateText },
-    actors: { judgeJokes },
-    onTransition: (snapshot) => progress.push(getStatePath(snapshot)),
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(mapReduceMachine, {
+      executors: { generateText: options.generateText },
+      actors: { judgeJokes },
+      onTransition: (snapshot) => progress.push(getStatePath(snapshot)),
+    }),
+    {
+      input: { topic: "animals" },
+    },
+  );
   if (result.status !== "done") throw new Error(`did not complete: ${result.status}`);
   return { outcome: getStatePath(result.snapshot), ...result.output, progress };
 }

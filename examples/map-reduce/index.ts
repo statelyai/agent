@@ -78,7 +78,8 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createTextLogic,
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type DoneActorEventOf,
@@ -397,18 +398,22 @@ export async function runMapReduceExample(options: RunMapReduceOptions = {}) {
   const { topic = "animals", generateText, judge, onProgress } = options;
 
   const progress: string[] = [];
-  const result = await runAgent(mapReduceMachine, {
-    input: { topic },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    ...(judge ? { actors: { judgeJokes: createJudgeJokes(judge) } } : {}),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(mapReduceMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      ...(judge ? { actors: { judgeJokes: createJudgeJokes(judge) } } : {}),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { topic },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Map-reduce example did not complete: ${result.status}`);

@@ -15,9 +15,10 @@ import {
   getAgentSchemas,
   getStateMeta,
   parseAgentEvent,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   type AgentRequestExecutors,
-  type RunAgentResult,
+  type AgentRunResult,
 } from "@statelyai/agent";
 import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
 import { z } from "zod";
@@ -675,7 +676,7 @@ export function renderIdleWork(
 function toChatResult(
   machine: AnyStateMachine,
   model: string | undefined,
-  result: RunAgentResult<AnyStateMachine>,
+  result: AgentRunResult<AnyStateMachine>,
   trace: TraceEntry[],
   changedKeys: string[],
   omitValues: string[],
@@ -823,19 +824,23 @@ export async function startMachineChat(
   const live = await resolveExecutors();
   const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
     createTraceRecorder();
-  const result = await runAgent(machine, {
-    input: input as never,
-    executors: live.executors,
-    signal: runSignal(limits),
-    onTransition,
-    on: { "*": onEmitted },
-    onTrace,
-    inspect: maybeCreateRunInspection(machine, limits.machineSource, "start"),
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(machine, {
+      executors: live.executors,
+      signal: runSignal(limits),
+      onTransition,
+      on: { "*": onEmitted },
+      onTrace,
+      inspect: maybeCreateRunInspection(machine, limits.machineSource, "start"),
+    }),
+    {
+      input: input as never,
+    },
+  );
   return toChatResult(
     machine,
     live.model,
-    result as RunAgentResult<AnyStateMachine>,
+    result as AgentRunResult<AnyStateMachine>,
     trace,
     changedKeys(),
     stringValuesOf(input),
@@ -875,20 +880,24 @@ export async function resumeMachineChat(
   } catch (error) {
     if (error instanceof Error && error.message.includes("parseAgentEvent")) throw error;
   }
-  const result = await runAgent(machine, {
-    snapshot,
-    event: parsed as never,
-    executors: live.executors,
-    signal: runSignal(limits),
-    onTransition,
-    on: { "*": onEmitted },
-    onTrace,
-    inspect: maybeCreateRunInspection(machine, limits.machineSource, "resume"),
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(machine, {
+      executors: live.executors,
+      signal: runSignal(limits),
+      onTransition,
+      on: { "*": onEmitted },
+      onTrace,
+      inspect: maybeCreateRunInspection(machine, limits.machineSource, "resume"),
+    }),
+    {
+      snapshot,
+      event: parsed as never,
+    },
+  );
   return toChatResult(
     machine,
     live.model,
-    result as RunAgentResult<AnyStateMachine>,
+    result as AgentRunResult<AnyStateMachine>,
     trace,
     changedKeys(),
     stringValuesOf(parsed),

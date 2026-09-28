@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
+import {
+  getInteraction,
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+} from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
@@ -94,10 +99,14 @@ test("one confirmation turn minimum: a complete opener still asks once", async (
     },
   });
 
-  const first = await runAgent(infoGatheringMachine, {
-    input: { opener: "everything at once" },
-    executors,
-  });
+  const first = await runToQuiescence(
+    createAgentRuntime(infoGatheringMachine, {
+      executors,
+    }),
+    {
+      input: { opener: "everything at once" },
+    },
+  );
   expect(first.status).toBe("idle");
   if (first.status !== "idle") return;
   expect(getStatePath(first.snapshot)).toBe("awaitingAnswer");
@@ -106,11 +115,15 @@ test("one confirmation turn minimum: a complete opener still asks once", async (
   expect(interaction?.textEvent).toBe("ANSWER");
 
   // Resume through a real JSON round-trip, as a stored row would.
-  const second = await runAgent(infoGatheringMachine, {
-    snapshot: JSON.parse(JSON.stringify(first.persist())),
-    event: answer("looks right"),
-    executors,
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(infoGatheringMachine, {
+      executors,
+    }),
+    {
+      snapshot: JSON.parse(JSON.stringify(first.persist())),
+      event: answer("looks right"),
+    },
+  );
   expect(second.status).toBe("done");
   if (second.status !== "done") return;
   expect(getStatePath(second.snapshot)).toBe("done");

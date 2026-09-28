@@ -54,7 +54,8 @@ import {
   getStatePath,
   interactionMetaSchema,
   messagesSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   userMessage,
   type EventOf,
@@ -691,19 +692,29 @@ export async function main() {
       console.log("[state]", getStatePath(snapshot)),
   };
 
-  let result = await runAgent(twentyQuestionsMachine, {
-    input: { questionsRemaining: 20 },
-    ...shared,
-  });
+  let result = await runToQuiescence(
+    createAgentRuntime(twentyQuestionsMachine, {
+      ...shared,
+    }),
+    {
+      input: { questionsRemaining: 20 },
+      ...shared,
+    },
+  );
 
   // Every player turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
-    result = await runAgent(twentyQuestionsMachine, {
-      snapshot: result.persist(),
-      event: toPlayerEvent(result.snapshot, text),
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(twentyQuestionsMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event: toPlayerEvent(result.snapshot, text),
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

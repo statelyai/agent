@@ -14,7 +14,8 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -165,15 +166,26 @@ export async function runSupportStep3(
   approve = true,
   executors = buildExecutors(),
 ): Promise<Step3Result> {
-  const first = await runAgent(supportMachineStep3, { input: { ticket }, executors });
+  const first = await runToQuiescence(
+    createAgentRuntime(supportMachineStep3, {
+      executors,
+    }),
+    {
+      input: { ticket },
+    },
+  );
   if (first.status === "done") return first.output;
   if (first.status !== "idle") throw new Error(`unexpected status ${first.status}`);
 
-  const second = await runAgent(supportMachineStep3, {
-    snapshot: first.persist(),
-    event: approve ? { type: "APPROVE" } : { type: "DENY", reason: "Outside policy." },
-    executors,
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(supportMachineStep3, {
+      executors,
+    }),
+    {
+      snapshot: first.persist(),
+      event: approve ? { type: "APPROVE" } : { type: "DENY", reason: "Outside policy." },
+    },
+  );
   if (second.status !== "done") throw new Error(`unexpected status ${second.status}`);
   return second.output;
 }

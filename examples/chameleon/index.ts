@@ -47,7 +47,8 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
 } from "@statelyai/agent";
 
@@ -509,10 +510,15 @@ export function toAccuseEvent(text: string): AccuseEvent | undefined {
 export async function main() {
   const shared = { executors: createAiSdkExecutors({ models }) };
 
-  let result = await runAgent(chameleonMachine, {
-    input: { category: "Ocean creatures", secretWord: "octopus", chameleonIndex: 2 },
-    ...shared,
-  });
+  let result = await runToQuiescence(
+    createAgentRuntime(chameleonMachine, {
+      ...shared,
+    }),
+    {
+      input: { category: "Ocean creatures", secretWord: "octopus", chameleonIndex: 2 },
+      ...shared,
+    },
+  );
 
   // The vote settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
@@ -522,11 +528,16 @@ export async function main() {
       console.log("Name a player or a seat number.");
       continue;
     }
-    result = await runAgent(chameleonMachine, {
-      snapshot: result.persist(),
-      event,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(chameleonMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") throw new Error(`Chameleon did not complete: ${result.status}`);

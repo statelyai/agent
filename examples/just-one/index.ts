@@ -48,7 +48,8 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
 } from "@statelyai/agent";
 
@@ -495,16 +496,29 @@ export function toGuesserEvent(text: string): GuesserEvent {
 export async function main() {
   const shared = { executors: createAiSdkExecutors({ models }) };
 
-  let result = await runAgent(justOneMachine, { input: { rounds: 3 }, ...shared });
+  let result = await runToQuiescence(
+    createAgentRuntime(justOneMachine, {
+      ...shared,
+    }),
+    {
+      input: { rounds: 3 },
+      ...shared,
+    },
+  );
 
   // Every guessing turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
-    result = await runAgent(justOneMachine, {
-      snapshot: result.persist(),
-      event: toGuesserEvent(text),
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(justOneMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event: toGuesserEvent(text),
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") throw new Error(`Just One did not complete: ${result.status}`);

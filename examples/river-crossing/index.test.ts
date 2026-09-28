@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import type { AgentDecisionRequest, ChosenEvent } from "@statelyai/agent";
 import { describeMachine, riverCrossingMachine, riverCrossingSchemas } from "./index.js";
 
@@ -24,10 +24,14 @@ const OPTIMAL: string[] = [
 
 describe("river-crossing", () => {
   test("scripted optimal 7-move solution reaches solved with correct output", async () => {
-    const result = await runAgent(riverCrossingMachine, {
-      input: { maxMoves: 12 },
-      executors: { generateText: async () => ({ result: "" }), decide: scriptedDecide(OPTIMAL) },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(riverCrossingMachine, {
+        executors: { generateText: async () => ({ result: "" }), decide: scriptedDecide(OPTIMAL) },
+      }),
+      {
+        input: { maxMoves: 12 },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -68,10 +72,14 @@ describe("river-crossing", () => {
       return { event: { type, reasoning: `scripted ${type}` } };
     };
 
-    const result = await runAgent(riverCrossingMachine, {
-      input: { maxMoves: 12 },
-      executors: { generateText: async () => ({ result: "" }), decide },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(riverCrossingMachine, {
+        executors: { generateText: async () => ({ result: "" }), decide },
+      }),
+      {
+        input: { maxMoves: 12 },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -88,10 +96,14 @@ describe("river-crossing", () => {
     // Ferry the goat back and forth: each crossing is legal but makes no
     // progress, so the move budget runs out before solving.
     const shuttle = ["TAKE_GOAT", "TAKE_GOAT", "TAKE_GOAT", "TAKE_GOAT"];
-    const result = await runAgent(riverCrossingMachine, {
-      input: { maxMoves: 3 },
-      executors: { generateText: async () => ({ result: "" }), decide: scriptedDecide(shuttle) },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(riverCrossingMachine, {
+        executors: { generateText: async () => ({ result: "" }), decide: scriptedDecide(shuttle) },
+      }),
+      {
+        input: { maxMoves: 3 },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -104,17 +116,21 @@ describe("river-crossing", () => {
 
   test("the machine description reaches the decide prompt", async () => {
     const requestsSeen: AgentDecisionRequest[] = [];
-    await runAgent(riverCrossingMachine, {
-      input: { maxMoves: 12 },
-      executors: {
-        generateText: async () => ({ result: "" }),
-        decide: async (request) => {
-          requestsSeen.push(request);
-          const type = OPTIMAL[requestsSeen.length - 1] ?? "CROSS_ALONE";
-          return { event: { type, reasoning: `scripted ${type}` } };
+    await runToQuiescence(
+      createAgentRuntime(riverCrossingMachine, {
+        executors: {
+          generateText: async () => ({ result: "" }),
+          decide: async (request) => {
+            requestsSeen.push(request);
+            const type = OPTIMAL[requestsSeen.length - 1] ?? "CROSS_ALONE";
+            return { event: { type, reasoning: `scripted ${type}` } };
+          },
         },
+      }),
+      {
+        input: { maxMoves: 12 },
       },
-    });
+    );
 
     // Rendered once from the machine itself, after it was defined.
     expect(requestsSeen[0]!.prompt).toContain("# River Crossing");
