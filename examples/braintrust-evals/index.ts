@@ -153,9 +153,7 @@ export async function runDrafterCase(
           eventTrajectory.push(causedBy.type);
         },
       }),
-      {
-        ...(snapshot ? { snapshot, event } : { event }),
-      },
+      snapshot ? { snapshot, event } : { event },
     );
 
     liveSnapshot = result.snapshot;
