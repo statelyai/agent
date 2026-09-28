@@ -39,7 +39,6 @@ function createRefundMachine() {
       APPROVE: z.object({}),
       DENY: z.object({}),
     },
-    isIdle: (snapshot) => snapshot.hasTag("awaiting-human"),
   });
 
   return agent.createMachine({
@@ -489,7 +488,6 @@ describe("canReach — predicate targets", () => {
         APPROVE: z.object({}),
         REJECT: z.object({}),
       },
-      isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
     });
     return agent.createMachine({
       context: ({ input }) => ({ amount: input.amount, approved: false }),

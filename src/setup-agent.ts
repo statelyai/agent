@@ -1,7 +1,6 @@
 import {
   setup,
   type AnyActorLogic,
-  type AnyMachineSnapshot,
   type AnyStateMachine,
   type AnySetupConfig,
   type AsyncActorLogic,
@@ -34,11 +33,7 @@ import {
 import { createDecideActor } from "./decision.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import type { AgentInteractionMeta } from "./interaction.js";
-import {
-  getAgentExecutionOptions,
-  machineIdlePredicates,
-  setAgentExecutionOptions,
-} from "./internal/registry.js";
+import { getAgentExecutionOptions, setAgentExecutionOptions } from "./internal/registry.js";
 import type { AgentSchemas } from "./events.js";
 import {
   setupAgentFromConfig,
@@ -547,17 +542,6 @@ type SetupAgentBaseConfig<
   actions?: NonNullable<AnySetupConfig["actions"]>;
   guards?: AgentGuardSources<TContextSchema, TEventSchemas>;
   delays?: AgentDelaySources<TContextSchema, TEventSchemas>;
-  /**
-   * Detects a snapshot that is an INTENTIONAL wait for an external event (a
-   * human approval, an inbound webhook, …) — the machine's own declaration of
-   * what "idle" means for it, so `runAgent` settles those snapshots idle
-   * deterministically instead of using its timing heuristic. Travels with the
-   * machine through `machine.provide(...)`. Without one, `runAgent` recognizes
-   * resting event-handling states and `meta.interaction` by structure. Use a
-   * predicate only for a more specialized machine-owned wait rule. Import and
-   * call `isAgentIdle(snapshot)` inside it when expanding the default rule.
-   */
-  isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 };
 
 // The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (schemas/models/requests, plus the wrapped createMachine) are added.
@@ -818,14 +802,6 @@ export function setupAgent<
       );
       const machine = createBaseMachine(withRootOutputFromSingleFinal(machineConfig) as never);
       setAgentExecutionOptions(machine, machineOptions);
-      // Carry the wait-state predicate on the machine's root `config` (shared by
-      // reference across `.provide`), so it survives provide/executor rebinding.
-      if (config.isIdle) {
-        const rootConfig = (machine as { config?: object }).config;
-        if (rootConfig) {
-          machineIdlePredicates.set(rootConfig, config.isIdle);
-        }
-      }
       return machine;
     },
     schemas,

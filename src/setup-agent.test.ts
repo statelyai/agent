@@ -44,7 +44,6 @@ import { resolveDecision, type AgentRequest } from "./index.js";
 import { executeAgentRequest } from "./steps.js";
 import { getAgentOutputMode, parseOutput } from "./index.js";
 import { isStructuredOutputSchema } from "./text-logic.js";
-import { getMachineIdlePredicate } from "./internal/registry.js";
 
 /**
  * ~15-line Ajv-to-StandardSchema adapter — the recipe for a real
@@ -2648,53 +2647,11 @@ describe("setupAgent", () => {
     },
   };
 
-  test("fromConfig lowers idleTags into a machine-carried hasTag predicate", () => {
-    const { machine } = setupAgent.fromConfig(
-      { id: "suspended-tags", idleTags: ["waiting"], ...suspensionConfig },
-      { compileSchema: ajvCompiler() },
-    );
-
-    const predicate = getMachineIdlePredicate(machine);
-    expect(predicate).toBeDefined();
-    // Keyed on the root config, so it survives further `.provide(...)` rebinding.
-    expect(getMachineIdlePredicate(machine.provide({}))).toBe(predicate);
-
-    const actor = createActor(machine).start();
-    expect(predicate!(actor.getSnapshot())).toBe(true);
-    actor.send({ type: "APPROVE" });
-    expect(predicate!(actor.getSnapshot())).toBe(false);
-  });
-
-  test("fromConfig registers options.isIdle, which wins over idleTags", () => {
-    const hostPredicate = () => false;
-    const { machine } = setupAgent.fromConfig(
-      { id: "issuspended-option", idleTags: ["waiting"], ...suspensionConfig },
-      { compileSchema: ajvCompiler(), isIdle: hostPredicate },
-    );
-    expect(getMachineIdlePredicate(machine)).toBe(hostPredicate);
-  });
-
-  test("fromConfig rejects a idleTags entry that no state declares", () => {
-    expect(() =>
-      setupAgent.fromConfig(
-        {
-          id: "bad-suspended-tags",
-          schemas: { context: { type: "object", properties: {} } },
-          context: {},
-          initial: "start",
-          idleTags: ["waiting"],
-          states: { start: { type: "final" } },
-        },
-        { compileSchema: ajvCompiler() },
-      ),
-    ).toThrow(/idleTags.*'waiting'.*no state declares/s);
-  });
-
-  test("fromConfig + runAgent: idleTags settles idle without the heuristic warning", async () => {
+  test("a fromConfig wait state settles idle, then resumes to done", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const { machine } = setupAgent.fromConfig(
-        { id: "suspended-tags-run", idleTags: ["waiting"], ...suspensionConfig },
+        { id: "suspended-tags-run", ...suspensionConfig },
         { compileSchema: ajvCompiler() },
       );
 

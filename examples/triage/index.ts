@@ -22,8 +22,7 @@
  *     metadata); below the
  *     threshold the run does NOT reply on its own — it settles idle in
  *     `escalating` and waits for a person to confirm the category or type the
- *     right one. `meta.interaction` tells a host how to render that, and the
- *     `waiting` tag plus `isIdle` make the idle settle deterministic.
+ *     right one. `meta.interaction` tells a host how to render that.
  *   - One retry on reply generation. A failed draft is not an exception: it
  *     routes through `replyFailed`, retries once, then degrades to a `failed`
  *     outcome carrying a fallback reply rather than throwing.

@@ -3159,15 +3159,13 @@ export function traceTransitions<TMachine extends AnyStateMachine = AnyStateMach
 }
 
 /**
- * Default machine-owned idle signal used by {@link runAgent}: an active
+ * Whether a snapshot is asking the outside world for something: an active
  * snapshot that accepts an external event anywhere in its active hierarchy,
  * or declares interaction metadata on an active state.
  *
- * Compose this in `setupAgent({ isIdle })` when the application has additional
- * wait states: `isIdle: (snapshot) => isAgentIdle(snapshot) || snapshot.hasTag('waiting')`.
- * Pending work and active invoked children are checked separately by the
- * runner, so this function only answers whether the state is an intentional
- * external wait.
+ * The runtime does not use this to stop; a run settles when nothing is in
+ * flight. Use it once the run is quiescent, to tell a human wait (render
+ * `getInteraction(snapshot)`) from a machine that is simply stuck.
  */
 export function isAgentIdle(snapshot: AnyMachineSnapshot): boolean {
   if (snapshot.status !== "active") {

@@ -50,11 +50,10 @@
  *   - Sensitive action: instead of an `interrupt_before` flag, the machine
  *     *transitions into an idle `confirming` state* — no invoke, tags
  *     `['awaiting-approval']`, a static `meta.interaction` label, and the pending
- *     action in `context.pendingAction`. `runAgent` settles `{ status: 'idle',
- *     snapshot }` deterministically (the machine declares its own wait signal via
- *     `isIdle`), so pausing is a first-class machine state, not a host-side
- *     `snapshot.next` check. The host persists the snapshot and resumes with an
- *     APPROVE or DENY event in a *second* `runAgent` call. (See
+ *     action in `context.pendingAction`. The run settles `{ status: 'idle',
+ *     snapshot }` once nothing is in flight, so pausing is a first-class machine
+ *     state, not a host-side `snapshot.next` check. The host persists the
+ *     snapshot and resumes with an APPROVE or DENY event in a *second* run. (See
  *     examples/human-in-the-loop.)
  *
  * Dual-mode: `runCustomerSupportExample(options?)` takes an injectable

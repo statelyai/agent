@@ -35,7 +35,6 @@ import {
   eventFromInteraction,
   getInteraction,
   interactionMetaSchema,
-  isAgentIdle,
   createAgentRuntime,
   runToQuiescence,
   setupAgent,
@@ -75,9 +74,6 @@ const agentSetup = setupAgent({
     // for a state's declared `textEvent`.
     REJECT: z.object({ text: z.string() }),
   },
-  // Most machines need no predicate: event-handling states are structurally
-  // idle. This deliberately demonstrates extending—not replacing—the default.
-  isIdle: (snapshot) => isAgentIdle(snapshot) || snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: {

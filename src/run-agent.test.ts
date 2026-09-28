@@ -2147,7 +2147,7 @@ describe("inspect passthrough (system-wide visibility)", () => {
   });
 });
 
-describe("Feature A: explicit suspension detection (isIdle)", () => {
+describe("Feature A: human waits settle idle once quiescent", () => {
   test("the exported default recognizes root handlers and composes with custom waits", async () => {
     const machine = setup({}).createMachine({
       on: { CONTINUE: { target: ".done" } },
@@ -2172,14 +2172,12 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     expect(result.status).toBe("idle");
   });
 
-  test("a machine-carried isIdle predicate settles idle and resumes to done", async () => {
+  test("a tagged wait state settles idle and resumes to done", async () => {
     const agent = setupAgent({
       context: z.object({}),
       input: z.object({}),
       output: z.object({ approved: z.boolean() }),
       events: { APPROVE: z.object({}) },
-      // The machine declares its own wait signal — a tag it chose.
-      isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
     });
     const machine = agent.createMachine({
       context: {},
@@ -2281,7 +2279,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
         CONTINUE: z.object({}),
       },
       actors: { child: childMachine },
-      isIdle: (snapshot) => snapshot.hasTag("waiting"),
     });
     const machine = agent.createMachine({
       context: { readies: 0 },
@@ -2406,7 +2403,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
         DONE: z.object({}),
       },
       actors: { child: childMachine },
-      isIdle: (snapshot) => snapshot.hasTag("waiting"),
     });
     const machine = agent.createMachine({
       context: {},
@@ -2464,7 +2460,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       input: z.object({}),
       output: z.object({ summary: z.string() }),
       events: { APPROVE: z.object({}) },
-      isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
       requests: {
         summarize: {
           schemas: { input: z.object({}), output: z.string() },
@@ -2558,7 +2553,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       input: z.object({}),
       output: z.object({}),
       events: { GO: z.object({}) },
-      isIdle: (snapshot) => snapshot.matches("paused"),
       requests: {
         noop: {
           schemas: { input: z.object({}), output: z.string() },
@@ -3098,7 +3092,6 @@ describe("machine version prop (createMachine({ version }))", () => {
       input: z.object({}),
       output: z.object({}),
       events: { GO: {} },
-      isIdle: (snapshot) => snapshot.hasTag("waiting"),
     });
     return agentSetup.createMachine({
       version,

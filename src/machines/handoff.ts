@@ -112,9 +112,6 @@ export function createHandoffMachine<const TAgents extends Record<string, Preset
     input: inputSchema,
     events: Object.fromEntries(names.map((name) => [transferEventType(name), transferPayload])),
     actors: machineActors(agents),
-    // A turn ends in `waiting`, which is an intentional wait for the next
-    // message — not a stall.
-    isIdle: (snapshot) => snapshot.matches("waiting"),
   });
 
   const turnState = (name: string) => `${name}Turn`;

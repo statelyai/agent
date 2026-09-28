@@ -15,11 +15,12 @@ import { createAgentRuntime, runToQuiescence, setupAgent } from "@statelyai/agen
 // from the shipped package, not just source. The root block also asserts the
 export {
   eventFromInteraction,
-  executeAgentRequest,
   getInteraction,
   getJsonSchema,
+  isAgentIdle,
   resolveDecision,
-  runAgentStream,
+  type AgentRuntime,
+  type AgentTimerScheduler,
   type AgentOutputMode,
   type AgentInteraction,
   type AgentTextResult,

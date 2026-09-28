@@ -229,7 +229,7 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
       },
     },
     waitingForSignedDocs: {
-      // `meta.interaction` is this machine's wait signal (see setupAgent above).
+      // `meta.interaction` tells a host what to ask the person here.
       meta: {
         interaction: {
           // `{path}` fields resolve against context when `getInteraction` reads

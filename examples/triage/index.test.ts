@@ -103,7 +103,7 @@ describe("ticket-triage", () => {
       },
     );
 
-    // The `waiting` tag + isIdle settles this deterministically.
+    // Nothing is in flight in `escalating`, so the run settles idle there.
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
     expect(first.snapshot.value).toBe("escalating");

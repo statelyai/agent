@@ -1,9 +1,8 @@
 /**
- * Registry-level guard for example idle semantics.
+ * Registry-level guard for example human waits.
  *
  * Human waits are ordinary resting XState states with accepted events and
- * interaction metadata. They should use `isAgentIdle` by default. Exactly one
- * example carries an explicit predicate to demonstrate additive composition.
+ * interaction metadata, which `isAgentIdle` recognizes by structure.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -12,10 +11,6 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { AnyStateMachine, AnyStateNode } from "xstate";
 import { isAgentIdle, setupAgent } from "../src/index.js";
-// Internal import on purpose: the public surface exposes `isAgentIdle` (the
-// default predicate) but no way to ask a machine which predicate it was
-// configured with, which is exactly what this test has to inspect.
-import { getMachineIdlePredicate } from "../src/internal/registry.js";
 
 const examplesDir = fileURLToPath(new URL(".", import.meta.url));
 
@@ -57,13 +52,9 @@ function runnableExampleIds(): string[] {
     .sort();
 }
 
-describe("example suspension predicates", () => {
-  it("uses structural idle by default and preserves it in custom predicates", async () => {
+describe("example human waits", () => {
+  it("are resting states that isAgentIdle recognizes by structure", async () => {
     const humanWaits: string[] = [];
-    const customPredicates: Array<{
-      key: string;
-      predicate: NonNullable<ReturnType<typeof getMachineIdlePredicate>>;
-    }> = [];
 
     for (const id of runnableExampleIds()) {
       const module = (await import(path.join(examplesDir, id, "index.ts"))) as Record<
@@ -72,10 +63,7 @@ describe("example suspension predicates", () => {
       >;
       for (const [exportName, value] of Object.entries(module)) {
         if (!isMachine(value) || !humanWaitStates(value).length) continue;
-        const key = `${id}#${exportName}`;
-        humanWaits.push(key);
-        const predicate = getMachineIdlePredicate(value);
-        if (predicate) customPredicates.push({ key, predicate });
+        humanWaits.push(`${id}#${exportName}`);
       }
     }
 
@@ -110,12 +98,6 @@ describe("example suspension predicates", () => {
       "twenty-questions#twentyQuestionsMachine",
       "verification#refundMachine",
     ]);
-    // "Exactly one example carries an explicit predicate", as the docstring
-    // above claims — asserted as one, not as "more than zero".
-    expect(customPredicates.map(({ key }) => key)).toEqual([
-      "human-in-the-loop#humanInTheLoopMachine",
-    ]);
-
     const idleFixture = setupAgent({
       context: z.object({}),
       events: { CONTINUE: z.object({}) },
@@ -145,9 +127,5 @@ describe("example suspension predicates", () => {
 
     expect(isAgentIdle(eventWait)).toBe(true);
     expect(isAgentIdle(interactionWait)).toBe(true);
-    for (const { key, predicate } of customPredicates) {
-      expect(predicate(eventWait), `${key} replaced event-based idle semantics`).toBe(true);
-      expect(predicate(interactionWait), `${key} replaced interaction idle semantics`).toBe(true);
-    }
   }, 60_000);
 });
