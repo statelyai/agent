@@ -8,7 +8,7 @@
         "transition xstate.done.actor -> \"pitch\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Mock reply to: Product: A keyboard-first task manager for developers.\nTagli\n\n- Tagline: Mock reply to: Write a tagline for: A keyboard-first task manager for devel\n- Stream summary: tagline 13 words · pitch 11 words"
+      "response": "Mock reply to: Product: A keyboard-first task manager for developers.  \nTagli\n\n- Tagline: Mock reply to: Write a tagline for: A keyboard-first task manager for devel\n- Stream summary: tagline 13 words · pitch 11 words"
     }
   ],
   "Noise-cancelling earbuds that translate 40 languages live.": [

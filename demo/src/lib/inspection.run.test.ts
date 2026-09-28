@@ -11,7 +11,7 @@ const inspectorMock = vi.hoisted(() => ({
 vi.mock("@statelyai/sdk/inspect", () => ({ createInspector: vi.fn(() => inspectorMock) }));
 
 import { resumeScenarioRun, startScenarioRun } from "./agent-runner";
-import { ensureInspectionRelay } from "./inspection.server";
+import { ensureInspectionRelay, openInspectionRoom } from "./inspection.server";
 import { scenarioSource } from "./scenarios";
 
 // The model's one move in this run: an over-limit refund that waits for approval.
@@ -32,12 +32,16 @@ describe("run inspection over a real scenario", () => {
     vi.stubEnv("DEMO_INSPECT_PORT", "");
     vi.stubEnv("STATELY_INSPECT_URL", "");
     await ensureInspectionRelay();
+    const observers = { inspectionRoom: openInspectionRoom() };
 
     const first = await startScenarioRun(
       "refund",
       "I need a $184 refund for a damaged delivery.",
       undefined,
       executors,
+      undefined,
+      undefined,
+      observers,
     );
     expect(first.status).toBe("idle");
 
@@ -68,6 +72,9 @@ describe("run inspection over a real scenario", () => {
       { type: "APPROVE" },
       undefined,
       executors,
+      undefined,
+      undefined,
+      observers,
     );
     expect(second.status).toBe("done");
 

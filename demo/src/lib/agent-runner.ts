@@ -35,6 +35,7 @@ import {
   createTraceRecorder,
   describeIdle,
   missingApiKeys,
+  type RunLimits,
   type TraceEntry,
 } from "./machine-chat.server";
 import { missingKeyMessage, type ChatIdle } from "./machine-ui";
@@ -78,6 +79,9 @@ export type ScenarioResult = {
 export type ResumeEvent =
   | { type: string; [key: string]: unknown }
   | { kind: "interpret"; text: string };
+
+/** What a streamed run watches as it goes, and the inspection room it lands in. */
+export type RunObservers = Pick<RunLimits, "onChunk" | "onStep" | "inspectionRoom">;
 
 /** The index signature on the typed-event variant defeats `in` narrowing, so guard explicitly. */
 function isInterpretEvent(event: ResumeEvent): event is { kind: "interpret"; text: string } {
@@ -302,18 +306,28 @@ export async function startScenarioRun(
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
   judge?: Experimental_EvaluationModel,
+  observers: RunObservers = {},
 ): Promise<ScenarioResult> {
-  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
+  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder(
+    undefined,
+    observers.onStep,
+  );
   const machine = machineFor(scenarioId);
   const result = await runToQuiescence(
     createAgentRuntime(machine, {
       executors,
       ...judgeActors(scenarioId, judge),
       ...(signal ? { signal } : {}),
+      ...(observers.onChunk ? { onChunk: observers.onChunk } : {}),
       onTransition,
       on: { "*": onEmitted },
       onTrace,
-      inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "start"),
+      inspect: maybeCreateRunInspection(
+        observers.inspectionRoom,
+        machine,
+        scenarioSource[scenarioId],
+        "start",
+      ),
     }),
     {
       input: inputFor(scenarioId, prompt),
@@ -332,8 +346,12 @@ export async function resumeScenarioRun(
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
   judge?: Experimental_EvaluationModel,
+  observers: RunObservers = {},
 ): Promise<ScenarioResult> {
-  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
+  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder(
+    undefined,
+    observers.onStep,
+  );
   const machine = machineFor(scenarioId);
   // An event the restored state has no transition for is ignored, not an
   // error: the run settles unchanged and reports `result.ignored`.
@@ -342,10 +360,16 @@ export async function resumeScenarioRun(
       executors,
       ...judgeActors(scenarioId, judge),
       ...(signal ? { signal } : {}),
+      ...(observers.onChunk ? { onChunk: observers.onChunk } : {}),
       onTransition,
       on: { "*": onEmitted },
       onTrace,
-      inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "resume"),
+      inspect: maybeCreateRunInspection(
+        observers.inspectionRoom,
+        machine,
+        scenarioSource[scenarioId],
+        "resume",
+      ),
     }),
     {
       snapshot,
@@ -362,9 +386,10 @@ export async function startScenario(
   scenarioId: ScenarioId,
   prompt: string,
   signal?: AbortSignal,
+  observers?: RunObservers,
 ): Promise<ScenarioResult> {
   const { model, executors } = await resolveExecutors(scenarioId);
-  return startScenarioRun(scenarioId, prompt, model, executors, signal);
+  return startScenarioRun(scenarioId, prompt, model, executors, signal, undefined, observers);
 }
 
 export async function resumeScenario(
@@ -374,6 +399,7 @@ export async function resumeScenario(
   signal?: AbortSignal,
   /** Injected by tests; omitted, Jev reads `TYPESAFE_AI_API_KEY`. */
   judge?: Experimental_EvaluationModel,
+  observers?: RunObservers,
 ): Promise<ScenarioResult> {
   const { model, executors } = await resolveExecutors(scenarioId);
 
@@ -386,10 +412,19 @@ export async function resumeScenario(
     }
     const typed =
       verdict === "REJECT" ? { type: "REJECT", reason: event.text } : { type: "APPROVE" };
-    return resumeScenarioRun(scenarioId, snapshot, typed, model, executors, signal, judge);
+    return resumeScenarioRun(
+      scenarioId,
+      snapshot,
+      typed,
+      model,
+      executors,
+      signal,
+      judge,
+      observers,
+    );
   }
 
-  return resumeScenarioRun(scenarioId, snapshot, event, model, executors, signal, judge);
+  return resumeScenarioRun(scenarioId, snapshot, event, model, executors, signal, judge, observers);
 }
 
 /** Below this confidence, a review reads as unclear and the run asks again. */

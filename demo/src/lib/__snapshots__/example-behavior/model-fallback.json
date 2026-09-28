@@ -10,7 +10,7 @@
         "transition xstate.done.actor -> \"validating\"",
         "transition xstate.done.actor -> \"failed\""
       ],
-      "response": "quick: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\nstrong: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\n- Answer: Could not answer: Both models' calls were rejected.\n- Model used: strong\n- Fallbacks: 1"
+      "response": "quick: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\nstrong: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\n- Answer: Could not answer: Both models' calls were rejected.\n- Model used: strong\n- Fallbacks: 1"
     }
   ],
   "What's the weather like in London and New York?": [
@@ -24,7 +24,7 @@
         "transition xstate.done.actor -> \"validating\"",
         "transition xstate.done.actor -> \"failed\""
       ],
-      "response": "quick: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\nstrong: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\n- Answer: Could not answer: Both models' calls were rejected.\n- Model used: strong\n- Fallbacks: 1"
+      "response": "quick: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\nstrong: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\n- Answer: Could not answer: Both models' calls were rejected.\n- Model used: strong\n- Fallbacks: 1"
     }
   ],
   "What's the weather in Atlantis?": [
@@ -38,7 +38,7 @@
         "transition xstate.done.actor -> \"validating\"",
         "transition xstate.done.actor -> \"failed\""
       ],
-      "response": "quick: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\nstrong: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\n- Answer: Could not answer: Both models' calls were rejected.\n- Model used: strong\n- Fallbacks: 1"
+      "response": "quick: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\nstrong: get_weather(mock cities0) rejected (get_weather rejects cities: mock cities0)\n\n- Answer: Could not answer: Both models' calls were rejected.\n- Model used: strong\n- Fallbacks: 1"
     }
   ]
 }

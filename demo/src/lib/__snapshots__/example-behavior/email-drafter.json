@@ -24,7 +24,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [
@@ -42,7 +42,7 @@
         "transition SEND -> \"sending\"",
         "transition xstate.done.actor -> \"sent\""
       ],
-      "response": "**Sent emails**\n\n```json\n[\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  }\n]\n```",
+      "response": "**Sent emails**\n\n- To: mock to · Subject: mock subject · Body: mock body",
       "idle": {
         "prompt": "Email sent. Draft another one?",
         "events": [
@@ -77,7 +77,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [
@@ -95,7 +95,7 @@
         "transition SEND -> \"sending\"",
         "transition xstate.done.actor -> \"sent\""
       ],
-      "response": "**Sent emails**\n\n```json\n[\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  },\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  }\n]\n```",
+      "response": "**Sent emails**\n\n| To | Subject | Body |\n| --- | --- | --- |\n| mock to | mock subject | mock body |\n| mock to | mock subject | mock body |",
       "idle": {
         "prompt": "Email sent. Draft another one?",
         "events": [
@@ -130,7 +130,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [
@@ -166,7 +166,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [
@@ -184,7 +184,7 @@
         "transition SEND -> \"sending\"",
         "transition xstate.done.actor -> \"sent\""
       ],
-      "response": "**Sent emails**\n\n```json\n[\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  }\n]\n```",
+      "response": "**Sent emails**\n\n- To: mock to · Subject: mock subject · Body: mock body",
       "idle": {
         "prompt": "Email sent. Draft another one?",
         "events": [
@@ -219,7 +219,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [
@@ -237,7 +237,7 @@
         "transition SEND -> \"sending\"",
         "transition xstate.done.actor -> \"sent\""
       ],
-      "response": "**Sent emails**\n\n```json\n[\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  },\n  {\n    \"to\": \"mock to\",\n    \"subject\": \"mock subject\",\n    \"body\": \"mock body\"\n  }\n]\n```",
+      "response": "**Sent emails**\n\n| To | Subject | Body |\n| --- | --- | --- |\n| mock to | mock subject | mock body |\n| mock to | mock subject | mock body |",
       "idle": {
         "prompt": "Email sent. Draft another one?",
         "events": [
@@ -272,7 +272,7 @@
         "transition xstate.done.actor -> \"drafting\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Messages**\n\nTo: mock to\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n```json\n{\n  \"to\": \"mock to\",\n  \"subject\": \"mock subject\",\n  \"body\": \"mock body\"\n}\n```\n\n**Assessment**\n\n```json\n{\n  \"satisfied\": true,\n  \"missing\": [],\n  \"questions\": []\n}\n```",
+      "response": "**Messages**\n\nTo: mock to\n\nSubject: mock subject\n\nmock body\n\n**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: true",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
         "events": [

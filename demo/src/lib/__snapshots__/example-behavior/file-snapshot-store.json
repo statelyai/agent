@@ -10,7 +10,7 @@
         "transition @xstate.init -> \"reviewing\"",
         "transition APPROVE -> \"done\""
       ],
-      "response": "<tmpdir> (removed after the run)\n\n- Storage owned by the application: Mock reply to: Draft a release note about framework-owned storage.\n- Lifetime owned by the application: Mock reply to: Draft a release note about application-owned actors.\n\n**States seen by the application**\n\n```json\n[\n  \"drafting\",\n  \"reviewing\",\n  \"done\"\n]\n```"
+      "response": "Mock reply to: Draft a release note about application-owned storage.\n\n- Lifetime owned by the application: Mock reply to: Draft a release note about application-owned actors.\n- Snapshot file: release-42.json (in a temp directory, removed after the run)\n\n**States seen by the application**\n\n- drafting\n- reviewing\n- done"
     }
   ]
 }

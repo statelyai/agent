@@ -10,7 +10,7 @@
         "transition xstate.done.actor -> \"generating\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Primary index returned no matching documents. Corrected: rewrote the question and answered from the fallback sample web index (1 result(s)).\n\n- Answer: Mock reply to: Documents:\n[1] [sample web result] Prompt injection is an at\n- Used fallback index: true\n- Rewritten question: Mock reply to: What is prompt injection and how do you defend against it?\n\n**Documents**\n\n```json\n[\n  \"[sample web result] Prompt injection is an attack where crafted input overrides an agent's instructions; defenses include input sanitization, privilege separation, and output filtering.\"\n]\n```"
+      "response": "Primary index returned no matching documents. Corrected: rewrote the question and answered from the fallback sample web index (1 result(s)).\n\n- Used fallback index: true\n- Rewritten question: Mock reply to: What is prompt injection and how do you defend against it?\n\n**Answer**\n\nMock reply to: Documents:  \n[1] [sample web result] Prompt injection is an at\n\n**Documents**\n\n- [sample web result] Prompt injection is an attack where crafted input overrides an agent's instructions; defenses include input sanitization, privilege separation, and output filtering."
     }
   ],
   "Near-miss doc — graded away, then corrected": [
@@ -23,7 +23,7 @@
         "transition xstate.done.actor -> \"generating\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Primary index returned 1 candidate document(s). The grader kept 1 of 1 as relevant. Answered from the primary index, no correction needed.\n\n- Answer: Mock reply to: Documents:\n[1] Task decomposition breaks a hard goal into or\n- Used fallback index: false\n\n**Documents**\n\n```json\n[\n  \"Task decomposition breaks a hard goal into ordered subgoals the agent tackles one at a time, a core part of agent planning.\"\n]\n```"
+      "response": "Primary index returned 1 candidate document(s). The grader kept 1 of 1 as relevant. Answered from the primary index, no correction needed.\n\n- Used fallback index: false\n\n**Answer**\n\nMock reply to: Documents:  \n[1] Task decomposition breaks a hard goal into or\n\n**Documents**\n\n- Task decomposition breaks a hard goal into ordered subgoals the agent tackles one at a time, a core part of agent planning."
     }
   ],
   "Corpus hit — answers without correcting": [
@@ -36,7 +36,7 @@
         "transition xstate.done.actor -> \"generating\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Primary index returned 2 candidate document(s). The grader kept 2 of 2 as relevant. Answered from the primary index, no correction needed.\n\n- Answer: Mock reply to: Documents:\n[1] LLM agent memory splits into short-term (the \n- Used fallback index: false\n\n**Documents**\n\n```json\n[\n  \"LLM agent memory splits into short-term (the working context window of the current run) and long-term memory (facts persisted across sessions in an external store).\",\n  \"Agents read and write long-term memory through tools: a retrieval tool fetches relevant past facts, and a write tool saves new observations for later runs.\"\n]\n```"
+      "response": "Primary index returned 2 candidate document(s). The grader kept 2 of 2 as relevant. Answered from the primary index, no correction needed.\n\n- Used fallback index: false\n\n**Answer**\n\nMock reply to: Documents:  \n[1] LLM agent memory splits into short-term (the\n\n**Documents**\n\n- LLM agent memory splits into short-term (the working context window of the current run) and long-term memory (facts persisted across sessions in an external store).\n- Agents read and write long-term memory through tools: a retrieval tool fetches relevant past facts, and a write tool saves new observations for later runs."
     }
   ],
   "Off-corpus question (expect no evidence, even in the fallback index)": [
@@ -50,7 +50,7 @@
         "transition xstate.done.actor -> \"generating\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Primary index returned no matching documents. Corrected: rewrote the question and answered from the fallback sample web index (1 result(s)).\n\n- Answer: Mock reply to: Documents:\n[1] [sample web result] No external results found\n- Used fallback index: true\n- Rewritten question: Mock reply to: How much rainfall did the Amazon basin get last month?\n\n**Documents**\n\n```json\n[\n  \"[sample web result] No external results found for this query.\"\n]\n```"
+      "response": "Primary index returned no matching documents. Tried to correct: rewrote the question, but the fallback sample web index found no results either.\n\n- Used fallback index: true\n- Rewritten question: Mock reply to: How much rainfall did the Amazon basin get last month?\n\n**Answer**\n\nMock reply to: Documents: (none available)\n\nQuestion: Mock reply to: How mu"
     }
   ]
 }

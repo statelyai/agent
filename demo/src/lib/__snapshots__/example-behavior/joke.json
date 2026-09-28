@@ -13,7 +13,7 @@
         "transition xstate.done.actor -> \"rating\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "First attempt scored 10/10 (A sharp joke whose punchline recasts the setup in an unexpected, specific way; it would get a real laugh.). Every run takes one improvement pass before deciding whether to stop.\n\n- Status: told\n- Joke: Mock reply to: Previous joke about penguins reviewing code:\nMock reply to: \n- First joke: Mock reply to: Tell a joke about penguins reviewing code.\n- Topic: penguins reviewing code\n- Last rating: 10\n\n**Jokes**\n\n```json\n[\n  \"Mock reply to: Tell a joke about penguins reviewing code.\",\n  \"Mock reply to: Previous joke about penguins reviewing code:\\nMock reply to: \",\n  \"Mock reply to: Previous joke about penguins reviewing code:\\nMock reply to: \"\n]\n```"
+      "response": "First attempt scored 10/10 (A sharp joke whose punchline recasts the setup in an unexpected, specific way; it would get a real laugh.). Every run takes one improvement pass before deciding whether to stop.\n\n- Status: told\n- First joke: Mock reply to: Tell a joke about penguins reviewing code.\n- Topic: penguins reviewing code\n- Last rating: 10\n\n**Joke**\n\nMock reply to: Previous joke about penguins reviewing code:  \nMock reply to:\n\n**Jokes**\n\n- Mock reply to: Tell a joke about penguins reviewing code.\n- Mock reply to: Previous joke about penguins reviewing code: Mock reply to:\n- Mock reply to: Previous joke about penguins reviewing code: Mock reply to:"
     }
   ],
   "a state machine that won't transition": [
@@ -30,7 +30,7 @@
         "transition xstate.done.actor -> \"rating\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "First attempt scored 10/10 (A sharp joke whose punchline recasts the setup in an unexpected, specific way; it would get a real laugh.). Every run takes one improvement pass before deciding whether to stop.\n\n- Status: told\n- Joke: Mock reply to: Previous joke about a state machine that won't transition:\nM\n- First joke: Mock reply to: Tell a joke about a state machine that won't transition.\n- Topic: a state machine that won't transition\n- Last rating: 10\n\n**Jokes**\n\n```json\n[\n  \"Mock reply to: Tell a joke about a state machine that won't transition.\",\n  \"Mock reply to: Previous joke about a state machine that won't transition:\\nM\",\n  \"Mock reply to: Previous joke about a state machine that won't transition:\\nM\"\n]\n```"
+      "response": "First attempt scored 10/10 (A sharp joke whose punchline recasts the setup in an unexpected, specific way; it would get a real laugh.). Every run takes one improvement pass before deciding whether to stop.\n\n- Status: told\n- First joke: Mock reply to: Tell a joke about a state machine that won't transition.\n- Topic: a state machine that won't transition\n- Last rating: 10\n\n**Joke**\n\nMock reply to: Previous joke about a state machine that won't transition:  \nM\n\n**Jokes**\n\n- Mock reply to: Tell a joke about a state machine that won't transition.\n- Mock reply to: Previous joke about a state machine that won't transition: M\n- Mock reply to: Previous joke about a state machine that won't transition: M"
     }
   ],
   "a database that trusts no one": [
@@ -47,7 +47,7 @@
         "transition xstate.done.actor -> \"rating\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "First attempt scored 10/10 (A sharp joke whose punchline recasts the setup in an unexpected, specific way; it would get a real laugh.). Every run takes one improvement pass before deciding whether to stop.\n\n- Status: told\n- Joke: Mock reply to: Previous joke about a database that trusts no one:\nMock repl\n- First joke: Mock reply to: Tell a joke about a database that trusts no one.\n- Topic: a database that trusts no one\n- Last rating: 10\n\n**Jokes**\n\n```json\n[\n  \"Mock reply to: Tell a joke about a database that trusts no one.\",\n  \"Mock reply to: Previous joke about a database that trusts no one:\\nMock repl\",\n  \"Mock reply to: Previous joke about a database that trusts no one:\\nMock repl\"\n]\n```"
+      "response": "First attempt scored 10/10 (A sharp joke whose punchline recasts the setup in an unexpected, specific way; it would get a real laugh.). Every run takes one improvement pass before deciding whether to stop.\n\n- Status: told\n- First joke: Mock reply to: Tell a joke about a database that trusts no one.\n- Topic: a database that trusts no one\n- Last rating: 10\n\n**Joke**\n\nMock reply to: Previous joke about a database that trusts no one:  \nMock repl\n\n**Jokes**\n\n- Mock reply to: Tell a joke about a database that trusts no one.\n- Mock reply to: Previous joke about a database that trusts no one: Mock repl\n- Mock reply to: Previous joke about a database that trusts no one: Mock repl"
     }
   ]
 }

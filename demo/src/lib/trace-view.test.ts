@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { liveTraceStep, summarizePayload, traceSteps } from "./trace-view";
+import { summarizePayload, traceSteps } from "./trace-view";
 
 describe("transition payload summaries", () => {
   it("drops the actor plumbing the row's own label already carries", () => {
@@ -206,11 +206,10 @@ describe("expandable step detail", () => {
 });
 
 describe("trace steps", () => {
-  it("summarizes both the server trace and the live inspection stream alike", () => {
+  it("summarizes a completion by the actor that finished", () => {
     const event = { type: "xstate.done.actor.0.plan", actorId: "plan", output: { steps: 2 } };
 
     const [fromTrace] = traceSteps([{ event, value: "acting", context: {}, at: 120 }]);
-    const live = liveTraceStep(event, "acting", 120);
 
     expect(fromTrace).toEqual({
       label: "plan",
@@ -221,6 +220,5 @@ describe("trace steps", () => {
       // The row cuts the output to one line; the disclosure keeps it whole.
       detail: { event, context: null },
     });
-    expect(live).toEqual(fromTrace);
   });
 });

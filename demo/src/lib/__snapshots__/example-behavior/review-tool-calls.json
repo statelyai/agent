@@ -7,7 +7,7 @@
         "transition @xstate.init -> \"proposing\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Proposal**\n\n```json\n{\n  \"orderId\": \"mock orderId\",\n  \"amountCents\": 1,\n  \"reason\": \"mock reason\"\n}\n```",
+      "response": "**Proposal**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason",
       "idle": {
         "prompt": "Review the proposed refund: run it as-is, edit its arguments first, or type feedback to get a revised proposal.",
         "events": [
@@ -26,7 +26,7 @@
         "transition APPROVE -> \"executing\"",
         "transition xstate.done.actor -> \"executed\""
       ],
-      "response": "```json\n{\n  \"executed\": true,\n  \"call\": {\n    \"orderId\": \"mock orderId\",\n    \"amountCents\": 1,\n    \"reason\": \"mock reason\"\n  },\n  \"edited\": false,\n  \"failure\": null\n}\n```"
+      "response": "- Executed: true\n- Edited: false\n\n**Call**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason"
     }
   ],
   "I want my money back for the subscription I never used.": [
@@ -37,7 +37,7 @@
         "transition @xstate.init -> \"proposing\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Proposal**\n\n```json\n{\n  \"orderId\": \"mock orderId\",\n  \"amountCents\": 1,\n  \"reason\": \"mock reason\"\n}\n```",
+      "response": "**Proposal**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason",
       "idle": {
         "prompt": "Review the proposed refund: run it as-is, edit its arguments first, or type feedback to get a revised proposal.",
         "events": [
@@ -56,7 +56,7 @@
         "transition APPROVE -> \"executing\"",
         "transition xstate.done.actor -> \"executed\""
       ],
-      "response": "```json\n{\n  \"executed\": true,\n  \"call\": {\n    \"orderId\": \"mock orderId\",\n    \"amountCents\": 1,\n    \"reason\": \"mock reason\"\n  },\n  \"edited\": false,\n  \"failure\": null\n}\n```"
+      "response": "- Executed: true\n- Edited: false\n\n**Call**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason"
     }
   ],
   "What is 6 times 7?": [
@@ -67,7 +67,7 @@
         "transition @xstate.init -> \"proposing\"",
         "transition xstate.done.actor -> \"reviewing\""
       ],
-      "response": "**Proposal**\n\n```json\n{\n  \"orderId\": \"mock orderId\",\n  \"amountCents\": 1,\n  \"reason\": \"mock reason\"\n}\n```",
+      "response": "**Proposal**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason",
       "idle": {
         "prompt": "Review the proposed refund: run it as-is, edit its arguments first, or type feedback to get a revised proposal.",
         "events": [
@@ -86,7 +86,7 @@
         "transition APPROVE -> \"executing\"",
         "transition xstate.done.actor -> \"executed\""
       ],
-      "response": "```json\n{\n  \"executed\": true,\n  \"call\": {\n    \"orderId\": \"mock orderId\",\n    \"amountCents\": 1,\n    \"reason\": \"mock reason\"\n  },\n  \"edited\": false,\n  \"failure\": null\n}\n```"
+      "response": "- Executed: true\n- Edited: false\n\n**Call**\n\n**Order id**: mock orderId  \n**Amount cents**: 1  \n**Reason**: mock reason"
     }
   ]
 }

@@ -86,6 +86,12 @@ export type ChatIdle = {
    */
   textEvent: { type: string; field: string } | null;
   /**
+   * The text event was inferred (the one single-string-field event), not
+   * declared. Where other actions are on offer too, an example run lets Jev
+   * choose among all of them instead, so "looks good" is not sent as feedback.
+   */
+  textEventInferred?: boolean;
+  /**
    * Optional custom composer renderer name from
    * `meta.interaction.component` (e.g. "rating", "cards"). Null when the
    * state declares none; unknown names fall back to the schema form.
@@ -196,4 +202,52 @@ export function singleStringField(schema: JsonObject | null): string | null {
   if (!fields || fields.length !== 1) return null;
   const [field] = fields;
   return field.kind.type === "string" ? field.name : null;
+}
+
+/**
+ * One reading of free chat text as an offered event, for a state that
+ * declares no `textEvent`: the server asks Jev which candidate the text
+ * means. `fill` names the string field that carries the text itself.
+ */
+export type TextCandidate = {
+  event: { type: string } & JsonObject;
+  /** What the choice means, in the words the buttons use. */
+  description: string;
+  fill: string | null;
+};
+
+/**
+ * The ways free text can map onto the accepted events without a form:
+ * a payload-free event is one candidate; an event whose payload is one enum
+ * field is one candidate per value (ACCUSE with player = Bruno); an event
+ * whose payload is one string field takes the whole text. Events that need
+ * more than that are left to their buttons.
+ */
+export function textCandidates(events: AcceptedEvent[]): TextCandidate[] {
+  return events.flatMap((event): TextCandidate[] => {
+    const action = `"${event.label}" (event ${event.type})`;
+    if (!event.needsPayload) {
+      return [{ event: { type: event.type }, description: `Asks for ${action}.`, fill: null }];
+    }
+    const fields = event.jsonSchema ? schemaFields(event.jsonSchema) : null;
+    if (!fields || fields.length !== 1) return [];
+    const [field] = fields;
+    if (field.kind.type === "enum") {
+      return field.kind.options.map((option) => ({
+        event: { type: event.type, [field.name]: option },
+        description: `Asks for ${action} with ${field.label.toLowerCase()} ${option}.`,
+        fill: null,
+      }));
+    }
+    if (field.kind.type === "string") {
+      return [
+        {
+          event: { type: event.type },
+          description: `Gives the ${field.label.toLowerCase()} for ${action}.`,
+          fill: field.name,
+        },
+      ];
+    }
+    return [];
+  });
 }

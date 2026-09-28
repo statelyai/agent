@@ -6,9 +6,9 @@
       "trace": [
         "transition @xstate.init -> \"awaitingMessage\""
       ],
-      "response": "Hi! I don't know anything about you yet. What's on your mind?",
+      "response": "The store holds 0 memories about you. Send a message, or end the session.",
       "idle": {
-        "prompt": "Hi! I don't know anything about you yet. What's on your mind?",
+        "prompt": "The store holds 0 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -25,9 +25,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Reply**\n\nmock reply\n\n**Memories**\n\n```json\n[\n  \"mock newMemories0\"\n]\n```\n\n**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Reply**\n\nmock reply\n\n**Memories**\n\n- mock newMemories0\n\n**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -44,9 +44,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```\n\n**Recalled**\n\n```json\n[\n  \"mock newMemories0\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n\n**Recalled**\n\n- mock newMemories0",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -63,9 +63,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -82,9 +82,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -101,9 +101,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -120,9 +120,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -139,9 +139,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -157,9 +157,9 @@
       "trace": [
         "transition @xstate.init -> \"awaitingMessage\""
       ],
-      "response": "Welcome back. I have 4 memories about you. What's on your mind?",
+      "response": "The store holds 4 memories about you. Send a message, or end the session.",
       "idle": {
-        "prompt": "Welcome back. I have 4 memories about you. What's on your mind?",
+        "prompt": "The store holds 4 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -176,9 +176,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Reply**\n\nmock reply\n\n**Memories**\n\n```json\n[\n  \"The user's name is Priya.\",\n  \"Priya prefers short answers.\",\n  \"Priya is vegetarian.\",\n  \"Priya is training for a half marathon in October.\",\n  \"mock newMemories0\"\n]\n```\n\n**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Reply**\n\nmock reply\n\n**Memories**\n\n- The user's name is Priya.\n- Priya prefers short answers.\n- Priya is vegetarian.\n- Priya is training for a half marathon in October.\n- mock newMemories0\n\n**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -195,9 +195,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```\n\n**Recalled**\n\n```json\n[\n  \"mock newMemories0\",\n  \"Priya is training for a half marathon in October.\",\n  \"Priya is vegetarian.\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n\n**Recalled**\n\n- mock newMemories0\n- Priya is training for a half marathon in October.\n- Priya is vegetarian.",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -214,9 +214,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -233,9 +233,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -252,9 +252,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -271,9 +271,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -290,9 +290,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -308,9 +308,9 @@
       "trace": [
         "transition @xstate.init -> \"awaitingMessage\""
       ],
-      "response": "Welcome back. I have 20 memories about you. What's on your mind?",
+      "response": "The store holds 20 memories about you. Send a message, or end the session.",
       "idle": {
-        "prompt": "Welcome back. I have 20 memories about you. What's on your mind?",
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -327,9 +327,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Reply**\n\nmock reply\n\n**Memories**\n\n```json\n[\n  \"Sam lives in Lisbon.\",\n  \"Sam works as a nurse on night shifts.\",\n  \"Sam prefers answers in bullet points.\",\n  \"Sam is allergic to peanuts.\",\n  \"Sam has a cat named Miso.\",\n  \"Sam is learning Portuguese.\",\n  \"Sam runs on weekday mornings.\",\n  \"Sam's partner is called Alex.\",\n  \"Sam drives an electric car.\",\n  \"Sam dislikes horror movies.\",\n  \"Sam's birthday is in March.\",\n  \"Sam is saving for a trip to Japan.\",\n  \"Sam plays the guitar.\",\n  \"Sam drinks tea, not coffee.\",\n  \"Sam's sister lives in Porto.\",\n  \"Sam uses a Linux laptop.\",\n  \"Sam is vegetarian.\",\n  \"Sam volunteers at an animal shelter.\",\n  \"Sam wants reminders kept short.\",\n  \"mock newMemories0\"\n]\n```\n\n**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Reply**\n\nmock reply\n\n**Memories**\n\n- Sam lives in Lisbon.\n- Sam works as a nurse on night shifts.\n- Sam prefers answers in bullet points.\n- Sam is allergic to peanuts.\n- Sam has a cat named Miso.\n- Sam is learning Portuguese.\n- Sam runs on weekday mornings.\n- Sam's partner is called Alex.\n- Sam drives an electric car.\n- Sam dislikes horror movies.\n- Sam's birthday is in March.\n- Sam is saving for a trip to Japan.\n- Sam plays the guitar.\n- Sam drinks tea, not coffee.\n- Sam's sister lives in Porto.\n- Sam uses a Linux laptop.\n- Sam is vegetarian.\n- Sam volunteers at an animal shelter.\n- Sam wants reminders kept short.\n- mock newMemories0\n\n**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -346,9 +346,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```\n\n**Recalled**\n\n```json\n[\n  \"mock newMemories0\",\n  \"Sam wants reminders kept short.\",\n  \"Sam volunteers at an animal shelter.\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n\n**Recalled**\n\n- mock newMemories0\n- Sam wants reminders kept short.\n- Sam volunteers at an animal shelter.",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -365,9 +365,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -384,9 +384,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -403,9 +403,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -422,9 +422,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"
@@ -441,9 +441,9 @@
         "transition xstate.done.actor -> \"answering\"",
         "transition xstate.done.actor -> \"awaitingMessage\""
       ],
-      "response": "**Transcript**\n\n```json\n[\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\",\n  \"User: Yes, that works. Please continue.\",\n  \"Assistant: mock reply\"\n]\n```",
+      "response": "**Transcript**\n\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply\n- User: Yes, that works. Please continue.\n- Assistant: mock reply",
       "idle": {
-        "prompt": "mock reply",
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
         "events": [
           "MESSAGE",
           "END_SESSION"

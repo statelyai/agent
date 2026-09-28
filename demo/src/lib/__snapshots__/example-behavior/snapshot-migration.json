@@ -6,9 +6,9 @@
       "trace": [
         "transition @xstate.init -> \"awaitingApproval\""
       ],
-      "response": "Order ORD-2 (2500 USD, low risk) is waiting for a reviewer.",
+      "response": "Order ORD-2 ($25.00, low risk) is waiting for a reviewer.",
       "idle": {
-        "prompt": "Order ORD-2 (2500 USD, low risk) is waiting for a reviewer.",
+        "prompt": "Order ORD-2 ($25.00, low risk) is waiting for a reviewer.",
         "events": [
           "APPROVE",
           "REJECT"
@@ -33,9 +33,9 @@
       "trace": [
         "transition @xstate.init -> \"awaitingApproval\""
       ],
-      "response": "Order ORD-4417 (81250 USD, high risk) is waiting for a reviewer.",
+      "response": "Order ORD-4417 ($812.50, high risk) is waiting for a reviewer.",
       "idle": {
-        "prompt": "Order ORD-4417 (81250 USD, high risk) is waiting for a reviewer.",
+        "prompt": "Order ORD-4417 ($812.50, high risk) is waiting for a reviewer.",
         "events": [
           "APPROVE",
           "REJECT"
@@ -63,7 +63,7 @@
         "transition @xstate.init -> \"awaitingApproval\"",
         "transition APPROVE -> \"approved\""
       ],
-      "response": "```json\n{\n  \"persisted\": {\n    \"status\": \"active\",\n    \"value\": \"reviewing\",\n    \"historyValue\": {},\n    \"_nextTimerId\": 0,\n    \"context\": {\n      \"orderId\": \"ORD-4417\",\n      \"total\": 812.5\n    },\n    \"children\": {},\n    \"timers\": {},\n    \"machine\": {\n      \"id\": \"order-approval\",\n      \"version\": \"1.0.0\"\n    },\n    \"version\": \"1.0.0\",\n    \"agentMeta\": {\n      \"machineId\": \"order-approval\",\n      \"version\": \"1.0.0\",\n      \"logId\": \"<uuid>\",\n      \"logIndex\": 1\n    }\n  },\n  \"output\": {\n    \"orderId\": \"ORD-4417\",\n    \"approved\": true,\n    \"amountCents\": 81250,\n    \"currency\": \"USD\",\n    \"riskLevel\": \"high\"\n  }\n}\n```"
+      "response": "Paused order ORD-4417 (total 812.5) on v1.0.0, waiting in `reviewing`.\n\nShipped v2.0.0: the waiting state is now `awaitingApproval`, and amounts are integer cents with a currency and a risk level.\n\nOn resume, XState read the snapshot's version (1.0.0) and ran the v2.0.0 machine's `migrate`: `reviewing` → `awaitingApproval`, total 812.5 → 81250 cents ($812.50), risk high.\n\nAPPROVE then landed on v2.0.0: order ORD-4417 approved.\n\n**Output**\n\n**Order id**: ORD-4417  \n**Approved**: true  \n**Amount cents**: 81250  \n**Currency**: USD  \n**Risk level**: high\n\n**Persisted**\n\n**Status**: active  \n**Value**: reviewing  \n**Next timer id**: 0\n\n**Context**\n\n**Order id**: ORD-4417  \n**Total**: 812.5\n\n**Machine**\n\n**Id**: order-approval  \n**Version**: 1.0.0\n\n**Version**: 1.0.0\n\n**Agent meta**\n\n**Machine id**: order-approval  \n**Version**: 1.0.0  \n**Log id**: <uuid>  \n**Log index**: 1"
     }
   ]
 }

@@ -1,9 +1,13 @@
 /**
- * A run as one stream: every streamed model chunk as it arrives, then the
- * settled result. Server functions return the stream (TanStack Start
- * serializes a `ReadableStream` incrementally), and the client reads chunks
- * into the pending message until the result lands.
+ * A run as one stream: every streamed model chunk and every trace entry as it
+ * arrives, then the settled result. Server functions return the stream
+ * (TanStack Start serializes a `ReadableStream` incrementally), and the client
+ * reads chunks and steps into the pending message until the result lands.
+ *
+ * Steps ride the run's own response, so a chat's live transition log only
+ * ever shows its own run — never another browser's on the same server.
  */
+import type { TraceEntry } from "./agent-runner";
 
 /**
  * One piece of a streaming request's text. `key` separates parallel streams;
@@ -13,6 +17,7 @@ export type RunChunk = { key: string; call: number; label: string; delta: string
 
 export type RunStreamEvent<TResult> =
   | { type: "chunk"; chunk: RunChunk }
+  | { type: "step"; entry: TraceEntry }
   | { type: "result"; result: TResult }
   | { type: "error"; message: string };
 
@@ -26,13 +31,15 @@ function chunkLabel(request: ChunkRequest): string {
 }
 
 /**
- * Server side: runs `run`, emitting its chunks and then its result. Cancelling
- * the stream (the client went away) aborts the run, as the request signal does.
+ * Server side: runs `run`, emitting its chunks and trace entries and then its
+ * result. Cancelling the stream (the client went away) aborts the run, as the
+ * request signal does.
  */
 export function streamRun<TResult>(
   run: (options: {
     signal: AbortSignal;
     onChunk: (delta: string, info: { request: ChunkRequest }) => void;
+    onStep: (entry: TraceEntry) => void;
   }) => Promise<TResult>,
   requestSignal: AbortSignal,
 ): ReadableStream<RunStreamEvent<TResult>> {
@@ -69,6 +76,7 @@ export function streamRun<TResult>(
                 delta,
               },
             }),
+          onStep: (entry) => send({ type: "step", entry }),
         });
         send({ type: "result", result });
       } catch (error) {
@@ -89,14 +97,16 @@ export function streamRun<TResult>(
 }
 
 /**
- * Client side: forwards each chunk to `onChunk` and resolves with the result.
- * Aborting `signal` stops reading at once — the decoded stream is not tied to
- * the request's signal — and rejects with an `AbortError`.
+ * Client side: forwards each chunk to `onChunk` and each trace entry to
+ * `onStep`, and resolves with the result. Aborting `signal` stops reading at
+ * once — the decoded stream is not tied to the request's signal — and rejects
+ * with an `AbortError`.
  */
 export async function readRunStream<TResult>(
   stream: ReadableStream<RunStreamEvent<TResult>>,
   onChunk: (chunk: RunChunk) => void,
   signal: AbortSignal,
+  onStep?: (entry: TraceEntry) => void,
 ): Promise<TResult> {
   const cancelled = () => new DOMException("Run cancelled.", "AbortError");
   const reader = stream.getReader();
@@ -114,6 +124,7 @@ export async function readRunStream<TResult>(
       const { value, done } = await Promise.race([reader.read(), aborted]);
       if (done) break;
       if (value.type === "chunk") onChunk(value.chunk);
+      else if (value.type === "step") onStep?.(value.entry);
       else if (value.type === "result") return value.result;
       else throw new Error(value.message);
     }

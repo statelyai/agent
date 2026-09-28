@@ -12,7 +12,7 @@
         "transition xstate.done.actor -> \"deciding\"",
         "transition ANSWER -> \"done\""
       ],
-      "response": "celsius_to_fahrenheit(\"mock arg\") → error: expected a number, got \"mock arg\"\n\n- Answer: mock answer\n- Reselections: 1\n\n**Selected tools**\n\n```json\n[\n  \"celsius_to_fahrenheit\",\n  \"fahrenheit_to_celsius\",\n  \"km_to_miles\"\n]\n```"
+      "response": "celsius_to_fahrenheit(\"mock arg\") → error: expected a number, got \"mock arg\"\n\n- Answer: mock answer\n- Reselections: 1\n\n**Selected tools**\n\n- celsius_to_fahrenheit\n- fahrenheit_to_celsius\n- km_to_miles"
     }
   ],
   "How many days are there between 2026-01-15 and 2026-03-01?": [
@@ -28,7 +28,7 @@
         "transition xstate.done.actor -> \"deciding\"",
         "transition ANSWER -> \"done\""
       ],
-      "response": "celsius_to_fahrenheit(\"mock arg\") → error: expected a number, got \"mock arg\"\n\n- Answer: mock answer\n- Reselections: 1\n\n**Selected tools**\n\n```json\n[\n  \"celsius_to_fahrenheit\",\n  \"fahrenheit_to_celsius\",\n  \"km_to_miles\"\n]\n```"
+      "response": "celsius_to_fahrenheit(\"mock arg\") → error: expected a number, got \"mock arg\"\n\n- Answer: mock answer\n- Reselections: 1\n\n**Selected tools**\n\n- celsius_to_fahrenheit\n- fahrenheit_to_celsius\n- km_to_miles"
     }
   ],
   "What is the capital of Australia?": [
@@ -44,7 +44,7 @@
         "transition xstate.done.actor -> \"deciding\"",
         "transition ANSWER -> \"done\""
       ],
-      "response": "celsius_to_fahrenheit(\"mock arg\") → error: expected a number, got \"mock arg\"\n\n- Answer: mock answer\n- Reselections: 1\n\n**Selected tools**\n\n```json\n[\n  \"celsius_to_fahrenheit\",\n  \"fahrenheit_to_celsius\",\n  \"km_to_miles\"\n]\n```"
+      "response": "celsius_to_fahrenheit(\"mock arg\") → error: expected a number, got \"mock arg\"\n\n- Answer: mock answer\n- Reselections: 1\n\n**Selected tools**\n\n- celsius_to_fahrenheit\n- fahrenheit_to_celsius\n- km_to_miles"
     }
   ]
 }

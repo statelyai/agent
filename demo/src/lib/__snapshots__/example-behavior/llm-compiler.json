@@ -9,7 +9,7 @@
         "transition xstate.done.actor -> \"joining\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Plan 1:\n  wave 1: $1 search(mock args) → [sample search] No sample fact matches \"mock args\".\n\n- Answer: mock answer\n- Plans: 1\n- Tasks run: 1\n- Waves: 1"
+      "response": "Plan 1:  \n  wave 1: $1 search(mock args) → [sample search] No sample fact matches \"mock args\".\n\n- Answer: mock answer\n- Plans: 1\n- Tasks run: 1\n- Waves: 1"
     }
   ],
   "How much larger is Japan's GDP than France's GDP?": [
@@ -22,7 +22,7 @@
         "transition xstate.done.actor -> \"joining\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Plan 1:\n  wave 1: $1 search(mock args) → [sample search] No sample fact matches \"mock args\".\n\n- Answer: mock answer\n- Plans: 1\n- Tasks run: 1\n- Waves: 1"
+      "response": "Plan 1:  \n  wave 1: $1 search(mock args) → [sample search] No sample fact matches \"mock args\".\n\n- Answer: mock answer\n- Plans: 1\n- Tasks run: 1\n- Waves: 1"
     }
   ],
   "What percentage of Japan's population lives in Tokyo?": [
@@ -35,7 +35,7 @@
         "transition xstate.done.actor -> \"joining\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Plan 1:\n  wave 1: $1 search(mock args) → [sample search] No sample fact matches \"mock args\".\n\n- Answer: mock answer\n- Plans: 1\n- Tasks run: 1\n- Waves: 1"
+      "response": "Plan 1:  \n  wave 1: $1 search(mock args) → [sample search] No sample fact matches \"mock args\".\n\n- Answer: mock answer\n- Plans: 1\n- Tasks run: 1\n- Waves: 1"
     }
   ]
 }

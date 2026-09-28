@@ -1,14 +1,17 @@
 /**
  * Run-lifecycle behavior the example sweep cannot reach: a user cancelling a
- * run mid-flight, the wall-clock budget cutting a run short, and an invoked
- * child machine keeping its state across chat turns. Driven through the same
+ * run mid-flight, the wall-clock budget cutting a run short, an invoked child
+ * machine keeping its state across chat turns, and a run's trace streaming to
+ * its own client as it is recorded. Driven through the same
  * demo server entry points as the sweep, with the provider layer replaced by
  * the test doubles plus one model call that can be made to hang.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Snapshot } from "xstate";
+import { startScenarioRun, type TraceEntry } from "./agent-runner";
 import { getExampleMachine } from "./example-library.server";
 import { resumeMachineChat, startMachineChat } from "./machine-chat.server";
+import { readRunStream, streamRun } from "./run-stream";
 import { resetGenericModels } from "./test-generic-models";
 
 // Controls the language model: `hangFromCall` makes that call (1-based) and
@@ -127,5 +130,53 @@ describe("resuming across chat turns", () => {
     expect(after.length).toBeGreaterThan(before.length);
     expect(after.slice(0, before.length)).toEqual(before);
     expect(after.at(-1)).toMatch(/^human rolled/);
+  });
+});
+
+describe("streamed steps", () => {
+  test("an example run streams every trace entry, in order, before its result", async () => {
+    const machine = await getExampleMachine("prompt-chaining", "promptChainingMachine");
+    const seen: string[] = [];
+    const steps: TraceEntry[] = [];
+    const stream = streamRun(
+      ({ signal, onChunk, onStep }) =>
+        startMachineChat(machine, { topic: "cats" }, { signal, onChunk, onStep }),
+      new AbortController().signal,
+    );
+
+    const result = await readRunStream(
+      stream,
+      () => {},
+      new AbortController().signal,
+      (entry) => {
+        seen.push("step");
+        steps.push(entry);
+      },
+    );
+    seen.push("result");
+
+    expect(result.status).toBe("done");
+    // The live log is the settled trace, entry for entry: nothing else feeds it.
+    expect(steps).toEqual(result.trace);
+    expect(steps.length).toBeGreaterThan(1);
+    expect(seen.at(-1)).toBe("result");
+    expect(seen.indexOf("result")).toBe(steps.length);
+  });
+
+  test("a scenario run streams its trace as it records it", async () => {
+    const steps: TraceEntry[] = [];
+    const result = await startScenarioRun(
+      "refund",
+      "I need a $184 refund for a damaged delivery.",
+      undefined,
+      { decide: async () => ({ event: { type: "AUTO_REFUND", amount: 184 } }) },
+      undefined,
+      undefined,
+      { onStep: (entry) => steps.push(entry) },
+    );
+
+    expect(result.status).toBe("idle");
+    expect(steps).toEqual(result.trace);
+    expect(steps.map((entry) => entry.value).at(-1)).toBe("awaitingApproval");
   });
 });

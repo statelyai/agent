@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useSelector } from "@xstate/store-react";
 import { AppPanel, type LiveText, type TextPolicy, type Turn } from "@/components/app-panel";
-import { liveTraceStep, type TraceStep } from "@/lib/trace-view";
+import { traceSteps, type TraceStep } from "@/lib/trace-view";
 import { ExampleIntro, ScenarioIntro, type StarterAction } from "@/components/chat-intros";
 import { SiteHeader } from "@/components/site-header";
-import { VizPanel, type SystemMessage } from "@/components/viz-panel";
+import { VizPanel } from "@/components/viz-panel";
 import {
   declareExampleMachine,
   getExample,
@@ -17,13 +17,19 @@ import {
   type ExampleSummary,
   type InspectionInfo,
 } from "@/lib/example-library";
-import { humanizeEventType, missingKeyMessage, type RequiredKey } from "@/lib/machine-ui";
+import {
+  humanizeEventType,
+  missingKeyMessage,
+  textCandidates,
+  type RequiredKey,
+} from "@/lib/machine-ui";
 import {
   declareScenarioMachine,
   getApiKeyStatus,
   resumeScenario,
   startScenario,
 } from "@/lib/run-demo-agent";
+import type { TraceEntry } from "@/lib/agent-runner";
 import { readRunStream, type RunChunk } from "@/lib/run-stream";
 import { getScenario, scenarios, scenarioVizConfig } from "@/lib/scenarios";
 import type { Selection } from "@/lib/selection";
@@ -101,11 +107,6 @@ export function DemoShell() {
     : null;
   const activeMachine = exampleDetail?.machines[machineIndex] ?? exampleDetail?.machines[0] ?? null;
 
-  // A resumed turn reuses the session's inspector, so no init/actorRegistered
-  // arrives for the root — remember its session id across turns;
-  // a reset or a new selection forgets it so replayed frames are not misread.
-  const lastRootSessionId = useRef<string | null>(null);
-
   // Apply the persisted theme attribute on mount (SSR renders light).
   useEffect(() => {
     persistTheme(store.getSnapshot().context.theme);
@@ -121,7 +122,6 @@ export function DemoShell() {
       const current = store.getSnapshot().context.selection;
       if (fromHash && (fromHash.type !== current.type || fromHash.id !== current.id)) {
         store.trigger.exampleSelected({ selection: fromHash });
-        lastRootSessionId.current = null;
       }
     }
     window.addEventListener("hashchange", onHashChange);
@@ -247,13 +247,12 @@ export function DemoShell() {
     // was showing, and the run's own inspection still lights the chart up.
     const ignore = () => {};
     if (inspectScenarioId) {
-      void declareScenarioMachine({ data: { scenarioId: inspectScenarioId } }).then(
-        onDeclared,
-        ignore,
-      );
+      void declareScenarioMachine({
+        data: { scenarioId: inspectScenarioId, room: inspection.roomId },
+      }).then(onDeclared, ignore);
     } else if (inspectExampleId && inspectExportName) {
       void declareExampleMachine({
-        data: { id: inspectExampleId, exportName: inspectExportName },
+        data: { id: inspectExampleId, exportName: inspectExportName, room: inspection.roomId },
       }).then(onDeclared, ignore);
     }
     return () => {
@@ -266,11 +265,15 @@ export function DemoShell() {
   // The controller's signal rides the server-fn request; aborting it (Cancel,
   // navigation) tears down the HTTP request, whose signal the server passes
   // into `runAgent` — so cancellation actually stops server-side model calls.
-  // The live feed mirrors the inspection relay (via VizPanel) into TraceSteps
-  // so the chat's transition log fills in while the run is still going.
+  // The live feed is the run's own stream: each trace entry the server records
+  // arrives as a step, so the chat's transition log fills in while the run is
+  // still going — and never with another session's run.
   const abortRef = useRef<AbortController | null>(null);
-  const liveRun = useRef<{ sessionId: string | null; startedAt: number } | null>(null);
   const [liveSteps, setLiveSteps] = useState<TraceStep[]>([]);
+  const appendStep = useCallback((entry: TraceEntry) => {
+    const [step] = traceSteps([entry]);
+    if (step) setLiveSteps((previous) => [...previous, step]);
+  }, []);
   // Streamed text of the turn in flight, one lane per streaming request.
   const [liveText, setLiveText] = useState<LiveText[]>([]);
   const appendChunk = useCallback((chunk: RunChunk) => {
@@ -291,71 +294,26 @@ export function DemoShell() {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    liveRun.current = { sessionId: lastRootSessionId.current, startedAt: Date.now() };
     setLiveSteps([]);
     setLiveText([]);
     return controller.signal;
   };
   const endRun = () => {
     abortRef.current = null;
-    liveRun.current = null;
     setLiveSteps([]);
     setLiveText([]);
   };
   const cancelRun = () => abortRef.current?.abort();
 
-  const handleSystemMessage = useCallback((message: SystemMessage) => {
-    const run = liveRun.current;
-    if (!run) return; // only observe while a turn is in flight
-    if (message.type === "@statelyai.system.init") {
-      const root = Array.isArray(message.actors)
-        ? [...message.actors].reverse().find((actor) => actor.parentSessionId == null)
-        : null;
-      // A fresh system means a fresh run — drop any replayed leftovers.
-      if (root) {
-        run.sessionId = root.sessionId;
-        lastRootSessionId.current = root.sessionId;
-        setLiveSteps([]);
-      }
-      return;
-    }
-    if (
-      message.type === "@statelyai.system.actorRegistered" &&
-      message.parentSessionId == null &&
-      typeof message.sessionId === "string"
-    ) {
-      run.sessionId = message.sessionId;
-      lastRootSessionId.current = message.sessionId;
-      setLiveSteps([]);
-      return;
-    }
-    if (message.type === "@statelyai.system.actorSnapshot" && message.sessionId === run.sessionId) {
-      const snapshot = message.snapshot as
-        | { value?: unknown; context?: unknown }
-        | null
-        | undefined;
-      const step = liveTraceStep(
-        message.event,
-        snapshot?.value,
-        Date.now() - run.startedAt,
-        snapshot?.context,
-      );
-      if (step) setLiveSteps((previous) => [...previous, step]);
-    }
-  }, []);
-
   const resetRun = () => {
-    lastRootSessionId.current = null;
     store.trigger.runReset();
   };
 
   const select = (next: Selection) => {
-    lastRootSessionId.current = null;
     store.trigger.exampleSelected({ selection: next });
   };
 
   const selectMachine = (index: number) => {
-    lastRootSessionId.current = null;
     store.trigger.machineSelected({ index });
   };
 
@@ -407,10 +365,11 @@ export function DemoShell() {
         id: selection.type === "example" ? selection.id : "",
         exportName: activeMachine.exportName,
         input: machineInput,
+        room: inspection?.roomId,
       },
       signal,
     })
-      .then((stream) => readRunStream(stream, appendChunk, signal))
+      .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
       .then(
         (result) => {
           settle(epoch, id, result);
@@ -433,12 +392,18 @@ export function DemoShell() {
     const signal = beginRun();
     const { id, epoch } = pushTurn(label, "user", "loading");
     void runExample({
-      data: { id: selection.type === "example" ? selection.id : "", exportName },
+      data: {
+        id: selection.type === "example" ? selection.id : "",
+        exportName,
+        room: inspection?.roomId,
+      },
       signal,
-    }).then(
-      (result) => settle(epoch, id, result),
-      (error) => fail(epoch, id, error),
-    );
+    })
+      .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+      .then(
+        (result) => settle(epoch, id, result),
+        (error) => fail(epoch, id, error),
+      );
   };
 
   /** Delivers a typed event to the idle machine (either run path). */
@@ -461,22 +426,28 @@ export function DemoShell() {
       spokenText ?? `${descriptor?.label ?? humanizeEventType(event.type)}${payloadNote}`;
     const signal = beginRun();
     const { id, epoch } = pushTurn(label, spokenText ? "user" : "action", "loading", event.type);
-    const deliver = isScenario
+    const deliver: Promise<AnyRunResult> = isScenario
       ? resumeScenario({
-          data: { scenarioId: scenario.id, snapshot: idleSnapshot as never, event },
+          data: {
+            scenarioId: scenario.id,
+            snapshot: idleSnapshot as never,
+            event,
+            room: inspection?.roomId,
+          },
           signal,
-        })
+        }).then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
       : resumeExample({
           data: {
             id: selection.type === "example" ? selection.id : "",
             exportName: activeMachine?.exportName ?? "",
             snapshot: idleSnapshot as never,
             event,
+            room: inspection?.roomId,
           },
           signal,
-        }).then((stream) => readRunStream(stream, appendChunk, signal));
+        }).then((stream) => readRunStream(stream, appendChunk, signal, appendStep));
     void deliver.then(
-      (result) => settle(epoch, id, result as AnyRunResult),
+      (result) => settle(epoch, id, result),
       (error) => fail(epoch, id, error),
     );
   };
@@ -496,18 +467,51 @@ export function DemoShell() {
           scenarioId: scenario.id,
           snapshot: idleSnapshot as never,
           event: { kind: "interpret", text },
+          room: inspection?.roomId,
         },
         signal,
-      }).then(
-        (result) => settle(epoch, id, result),
-        (error) => fail(epoch, id, error),
-      );
+      })
+        .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+        .then(
+          (result) => settle(epoch, id, result),
+          (error) => fail(epoch, id, error),
+        );
       return;
     }
 
+    // An example whose text event was only inferred, with other actions on
+    // offer too, lets Jev choose among all of them (see below).
+    const inferredAmongOthers =
+      !isScenario &&
+      pendingIdle?.textEventInferred === true &&
+      textCandidates(pendingIdle.events).length > 1;
+
     // Idle with a text-mapped event → typed event carrying the message.
-    if (pendingIdle?.textEvent && idleSnapshot) {
+    if (pendingIdle?.textEvent && idleSnapshot && !inferredAmongOthers) {
       sendEvent({ type: pendingIdle.textEvent.type, [pendingIdle.textEvent.field]: text });
+      return;
+    }
+
+    // Idle with no text event, but buttons the text could name → the server
+    // reads it (Jev) as one of the offered events, or says it couldn't.
+    if (!isScenario && pendingIdle && idleSnapshot && textCandidates(pendingIdle.events).length) {
+      const signal = beginRun();
+      const { id, epoch } = pushTurn(text, "user", "loading");
+      void resumeExample({
+        data: {
+          id: selection.type === "example" ? selection.id : "",
+          exportName: activeMachine?.exportName ?? "",
+          snapshot: idleSnapshot as never,
+          event: { kind: "interpret", text },
+          room: inspection?.roomId,
+        },
+        signal,
+      })
+        .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+        .then(
+          (result) => settle(epoch, id, result),
+          (error) => fail(epoch, id, error),
+        );
       return;
     }
 
@@ -516,10 +520,15 @@ export function DemoShell() {
       if (isScenario) {
         const signal = beginRun();
         const { id, epoch } = pushTurn(text, "user", "loading");
-        void startScenario({ data: { scenarioId: scenario.id, prompt: text }, signal }).then(
-          (result) => settle(epoch, id, result),
-          (error) => fail(epoch, id, error),
-        );
+        void startScenario({
+          data: { scenarioId: scenario.id, prompt: text, room: inspection?.roomId },
+          signal,
+        })
+          .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+          .then(
+            (result) => settle(epoch, id, result),
+            (error) => fail(epoch, id, error),
+          );
       } else if (activeMachine?.promptField) {
         startExampleRun(text, { [activeMachine.promptField]: text });
       }
@@ -568,11 +577,13 @@ export function DemoShell() {
     }
     return {
       visible: true,
-      placeholder: pendingIdle?.textEvent
-        ? `Message becomes ${pendingIdle.textEvent.type} (${pendingIdle.textEvent.field})`
-        : started
-          ? "Send a message…"
-          : `${activeMachine.promptField}…`,
+      placeholder:
+        pendingIdle?.textEvent &&
+        !(pendingIdle.textEventInferred && textCandidates(pendingIdle.events).length > 1)
+          ? `Message becomes ${pendingIdle.textEvent.type} (${pendingIdle.textEvent.field})`
+          : started
+            ? "Send a message…"
+            : `${activeMachine.promptField}…`,
       submitLabel: started ? "Send" : "Start run",
     };
   })();
@@ -700,7 +711,6 @@ export function DemoShell() {
       theme={theme}
       liveWs={liveWs}
       liveUrl={liveUrl}
-      onSystemMessage={handleSystemMessage}
     />
   );
 

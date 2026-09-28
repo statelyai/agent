@@ -12,7 +12,7 @@
         "transition xstate.done.actor -> \"writingArticle\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Outline: 1 heading(s)\nEditors: 1\nInterviews: 1 (0 exchange(s))\nSections written: 1\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n```json\n[\n  \"mock outline0\"\n]\n```"
+      "response": "Outline: 1 heading(s). Editors: 1. Interviews: 1 (0 exchange(s)). Sources: 0. Sections written: 1.\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n- mock outline0"
     }
   ],
   "retrieval-augmented generation": [
@@ -28,7 +28,7 @@
         "transition xstate.done.actor -> \"writingArticle\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Outline: 1 heading(s)\nEditors: 1\nInterviews: 1 (0 exchange(s))\nSections written: 1\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n```json\n[\n  \"mock outline0\"\n]\n```"
+      "response": "Outline: 1 heading(s). Editors: 1. Interviews: 1 (0 exchange(s)). Sources: 0. Sections written: 1.\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n- mock outline0"
     }
   ],
   "prompt injection defenses": [
@@ -44,7 +44,7 @@
         "transition xstate.done.actor -> \"writingArticle\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Outline: 1 heading(s)\nEditors: 1\nInterviews: 1 (0 exchange(s))\nSections written: 1\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n```json\n[\n  \"mock outline0\"\n]\n```"
+      "response": "Outline: 1 heading(s). Editors: 1. Interviews: 1 (0 exchange(s)). Sources: 0. Sections written: 1.\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n- mock outline0"
     }
   ],
   "the history of the Byzantine Empire (off-index: interviews find no sample sources)": [
@@ -60,7 +60,7 @@
         "transition xstate.done.actor -> \"writingArticle\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Outline: 1 heading(s)\nEditors: 1\nInterviews: 1 (0 exchange(s))\nSections written: 1\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n```json\n[\n  \"mock outline0\"\n]\n```"
+      "response": "Outline: 1 heading(s). Editors: 1. Interviews: 1 (0 exchange(s)). Sources: 0. Sections written: 1.\n\n- Article: mock article\n- Interviews: 1\n- Sections: 1\n\n**Outline**\n\n- mock outline0"
     }
   ]
 }

@@ -8,7 +8,7 @@
         "transition xstate.done.actor -> {\"thinking\":\"done\",\"versing\":\"active\"}",
         "transition xstate.done.actor -> {\"versing\":\"done\",\"thinking\":\"done\"}"
       ],
-      "response": "Two streams completed for \"The rise of state machines in AI agent design\": analysis (69 chars) and poem (75 chars).\n\n- Analysis: Mock reply to: Analyze: The rise of state machines in AI agent design\n- Poem: Mock reply to: Write a short poem about: The rise of state machines in AI a\n- Lane summary: 1. analysis\n2. poem\n\n**Failures**\n\n```json\n[]\n```"
+      "response": "Two streams completed for \"The rise of state machines in AI agent design\": analysis (69 chars) and poem (75 chars).\n\n- Analysis: Mock reply to: Analyze: The rise of state machines in AI agent design\n- Poem: Mock reply to: Write a short poem about: The rise of state machines in AI a\n\n**Lane summary**\n\nFinished in this order:\n\n1. analysis  \n2. poem"
     }
   ],
   "Why octopuses would make excellent distributed systems": [
@@ -20,7 +20,7 @@
         "transition xstate.done.actor -> {\"thinking\":\"done\",\"versing\":\"active\"}",
         "transition xstate.done.actor -> {\"versing\":\"done\",\"thinking\":\"done\"}"
       ],
-      "response": "Two streams completed for \"Why octopuses would make excellent distributed systems\": analysis (75 chars) and poem (75 chars).\n\n- Analysis: Mock reply to: Analyze: Why octopuses would make excellent distributed syst\n- Poem: Mock reply to: Write a short poem about: Why octopuses would make excellent\n- Lane summary: 1. analysis\n2. poem\n\n**Failures**\n\n```json\n[]\n```"
+      "response": "Two streams completed for \"Why octopuses would make excellent distributed systems\": analysis (75 chars) and poem (75 chars).\n\n- Analysis: Mock reply to: Analyze: Why octopuses would make excellent distributed syst\n- Poem: Mock reply to: Write a short poem about: Why octopuses would make excellent\n\n**Lane summary**\n\nFinished in this order:\n\n1. analysis  \n2. poem"
     }
   ],
   "What a city sounds like at 4am": [
@@ -32,7 +32,7 @@
         "transition xstate.done.actor -> {\"thinking\":\"done\",\"versing\":\"active\"}",
         "transition xstate.done.actor -> {\"versing\":\"done\",\"thinking\":\"done\"}"
       ],
-      "response": "Two streams completed for \"What a city sounds like at 4am\": analysis (54 chars) and poem (71 chars).\n\n- Analysis: Mock reply to: Analyze: What a city sounds like at 4am\n- Poem: Mock reply to: Write a short poem about: What a city sounds like at 4am\n- Lane summary: 1. analysis\n2. poem\n\n**Failures**\n\n```json\n[]\n```"
+      "response": "Two streams completed for \"What a city sounds like at 4am\": analysis (54 chars) and poem (71 chars).\n\n- Analysis: Mock reply to: Analyze: What a city sounds like at 4am\n- Poem: Mock reply to: Write a short poem about: What a city sounds like at 4am\n\n**Lane summary**\n\nFinished in this order:\n\n1. analysis  \n2. poem"
     }
   ]
 }

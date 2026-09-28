@@ -35,9 +35,9 @@
       "response": "Classified as billing (positive), confidence 0.9. SLA: first response due in 4h (billing, positive). Drafted reply: mock reply\n\n- Sentiment: positive\n- Category: billing\n- Reply: mock reply\n- Escalated: false"
     }
   ],
-  "hey quick question about the thing from yesterday, can you sort it?": [
+  "Your invoice PDF link returns a 500 error so I can't download my receipt.": [
     {
-      "sent": "start {\"ticket\":\"hey quick question about the thing from yesterday, can you sort it?\"}",
+      "sent": "start {\"ticket\":\"Your invoice PDF link returns a 500 error so I can't download my receipt.\"}",
       "status": "done",
       "trace": [
         "transition @xstate.init -> \"classifying\"",

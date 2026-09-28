@@ -8,7 +8,7 @@
         "transition ATTACK -> \"summarizing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "You face a goblin. You 20 HP, goblin 15 HP.\nYou attack the mock target for 6 (goblin 15 → 9).\nThe goblin hits back for 4 (you 20 → 16).\nmock summary\nEnd of turn: you 16 HP, goblin 9 HP.\nThe fight goes on.\n\n- Outcome: continue\n- Player hp: 16\n- Enemy hp: 9"
+      "response": "You face a goblin. You 20 HP, goblin 15 HP.  \nYou attack the mock target for 6 (goblin 15 → 9).  \nThe goblin hits back for 4 (you 20 → 16).  \nmock summary  \nEnd of turn: you 16 HP, goblin 9 HP.  \nThe fight goes on.\n\n- Outcome: continue\n- Player hp: 16\n- Enemy hp: 9"
     }
   ],
   "Nearly down (5 vs 15) — HEAL becomes legal": [
@@ -20,7 +20,7 @@
         "transition ATTACK -> \"summarizing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "You face a goblin. You 5 HP, goblin 15 HP.\nYou attack the mock target for 6 (goblin 15 → 9).\nThe goblin hits back for 4 (you 5 → 1).\nmock summary\nEnd of turn: you 1 HP, goblin 9 HP.\nThe fight goes on.\n\n- Outcome: continue\n- Player hp: 1\n- Enemy hp: 9"
+      "response": "You face a goblin. You 5 HP, goblin 15 HP.  \nYou attack the mock target for 6 (goblin 15 → 9).  \nThe goblin hits back for 4 (you 5 → 1).  \nmock summary  \nEnd of turn: you 1 HP, goblin 9 HP.  \nThe fight goes on.\n\n- Outcome: continue\n- Player hp: 1\n- Enemy hp: 9"
     }
   ],
   "Finishing blow (18 vs 4)": [
@@ -32,7 +32,7 @@
         "transition ATTACK -> \"summarizing\"",
         "transition xstate.done.actor -> \"won\""
       ],
-      "response": "You face a goblin. You 18 HP, goblin 4 HP.\nYou attack the mock target for 6 (goblin 4 → 0).\nmock summary\nEnd of turn: you 18 HP, goblin 0 HP.\nThe enemy falls. You win.\n\n- Outcome: won\n- Player hp: 18\n- Enemy hp: 0"
+      "response": "You face a goblin. You 18 HP, goblin 4 HP.  \nYou attack the mock target for 6 (goblin 4 → 0).  \nmock summary  \nEnd of turn: you 18 HP, goblin 0 HP.  \nThe enemy falls. You win.\n\n- Outcome: won\n- Player hp: 18\n- Enemy hp: 0"
     }
   ]
 }

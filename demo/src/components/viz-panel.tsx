@@ -5,24 +5,6 @@ import { MachineEmbed, type EmbedStep } from "@/components/machine-embed";
 
 export type LiveWs = { relayUrl: string; roomId: string };
 
-/** A message from the inspection relay's `@statelyai.system.*` stream. */
-export type SystemMessage = Record<string, unknown> & {
-  type: string;
-  actors?: Array<{
-    sessionId: string;
-    actorId: string;
-    parentSessionId: string | null;
-    machine?: unknown;
-    snapshot?: unknown;
-  }>;
-  actorId?: string;
-  sessionId?: string;
-  parentSessionId?: string | null;
-  machine?: unknown;
-  snapshot?: unknown;
-  event?: unknown;
-};
-
 type VizPanelProps = {
   /** Display name of the machine being inspected. */
   title: string;
@@ -45,9 +27,9 @@ type VizPanelProps = {
   step?: EmbedStep | null;
   theme?: "light" | "dark";
   /**
-   * Live inspection relay. The panel joins the room as a viewer purely to
-   * mirror the stream to `onSystemMessage` — the /inspect page connects to the
-   * relay itself for rendering.
+   * Live inspection relay. The panel joins the room as a viewer purely as a
+   * reachability canary — the /inspect page connects to the relay itself for
+   * rendering.
    */
   liveWs: LiveWs | null;
   /**
@@ -55,11 +37,6 @@ type VizPanelProps = {
    * Null until the selected machine has been published to that room.
    */
   liveUrl: string | null;
-  /**
-   * Mirror of the live `@statelyai.system.*` stream, so siblings (the chat's
-   * interleaved transition log) can observe the run without a second socket.
-   */
-  onSystemMessage?: (message: SystemMessage) => void;
 };
 
 export function VizPanel({
@@ -73,7 +50,6 @@ export function VizPanel({
   theme = "light",
   liveWs,
   liveUrl,
-  onSystemMessage,
 }: VizPanelProps) {
   // The server may reach the relay while this browser cannot (a corporate
   // proxy, an offline demo). The viewer socket below is the canary: if it is
@@ -84,8 +60,9 @@ export function VizPanel({
   const [embedUnavailable, setEmbedUnavailable] = useState(false);
   useEffect(() => setEmbedUnavailable(false), [machineKey]);
 
-  // The hosted /inspect page renders the system; this socket exists only so
-  // the chat's transition log can follow the same run.
+  // The hosted /inspect page renders the system; this socket only checks that
+  // this browser can reach the relay. (The chat's live transition log comes
+  // from the run's own response stream, not from here.)
   useEffect(() => {
     if (!liveWs) return;
     setSocketUnavailable(false);
@@ -102,22 +79,13 @@ export function VizPanel({
       setSocketUnavailable(false);
     });
     const unsubscribeError = transport.onError?.(() => setSocketUnavailable(true));
-    const unsubscribeMessage = transport.onMessage((protocolMessage) => {
-      const message = protocolMessage as SystemMessage;
-      if (message.type === "@statelyai.system.init") {
-        if (Array.isArray(message.actors)) onSystemMessage?.(message);
-      } else if (message.type.startsWith("@statelyai.system.")) {
-        onSystemMessage?.(message);
-      }
-    });
     return () => {
       window.clearTimeout(deadline);
       unsubscribeReady();
       unsubscribeError?.();
-      unsubscribeMessage();
       transport.destroy();
     };
-  }, [liveWs?.relayUrl, onSystemMessage]);
+  }, [liveWs?.relayUrl]);
 
   const inspectionDown = inspectionUnavailable || socketUnavailable;
   const showEmbed = inspectionDown && machineConfig != null && !embedUnavailable;

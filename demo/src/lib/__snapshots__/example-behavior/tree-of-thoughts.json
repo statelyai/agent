@@ -8,7 +8,7 @@
         "transition xstate.done.actor -> \"scoring\"",
         "transition xstate.done.actor -> \"failed\""
       ],
-      "response": "No solution for 4, 9, 10, 13: every proposed step at depth 1 was illegal.\n\n- Depth: 1\n- Candidates considered: 1\n\n**Rejected steps**\n\n```json\n[\n  \"depth 1: \\\"mock operation\\\" — not of the form 'a op b = c'\"\n]\n```"
+      "response": "No solution for 4, 9, 10, 13: every proposed step at depth 1 was illegal.\n\n- Depth: 1\n- Candidates considered: 1\n\n**Rejected steps**\n\n- depth 1: \"mock operation\" — not of the form 'a op b = c'"
     }
   ],
   "Solvable — 1, 2, 3, 4": [
@@ -20,7 +20,7 @@
         "transition xstate.done.actor -> \"scoring\"",
         "transition xstate.done.actor -> \"failed\""
       ],
-      "response": "No solution for 1, 2, 3, 4: every proposed step at depth 1 was illegal.\n\n- Depth: 1\n- Candidates considered: 1\n\n**Rejected steps**\n\n```json\n[\n  \"depth 1: \\\"mock operation\\\" — not of the form 'a op b = c'\"\n]\n```"
+      "response": "No solution for 1, 2, 3, 4: every proposed step at depth 1 was illegal.\n\n- Depth: 1\n- Candidates considered: 1\n\n**Rejected steps**\n\n- depth 1: \"mock operation\" — not of the form 'a op b = c'"
     }
   ],
   "Unsolvable — 1, 1, 1, 1 (every line dies, ends in failed)": [
@@ -32,7 +32,7 @@
         "transition xstate.done.actor -> \"scoring\"",
         "transition xstate.done.actor -> \"failed\""
       ],
-      "response": "No solution for 1, 1, 1, 1: every proposed step at depth 1 was illegal.\n\n- Depth: 1\n- Candidates considered: 1\n\n**Rejected steps**\n\n```json\n[\n  \"depth 1: \\\"mock operation\\\" — not of the form 'a op b = c'\"\n]\n```"
+      "response": "No solution for 1, 1, 1, 1: every proposed step at depth 1 was illegal.\n\n- Depth: 1\n- Candidates considered: 1\n\n**Rejected steps**\n\n- depth 1: \"mock operation\" — not of the form 'a op b = c'"
     }
   ]
 }

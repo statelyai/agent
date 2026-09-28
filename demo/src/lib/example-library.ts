@@ -10,7 +10,7 @@ import type { Snapshot } from "xstate";
 
 import { nextDeclaration } from "./declaration-ticket";
 import type { ExampleDetail } from "./example-library.server";
-import type { MachineChatResult } from "./machine-chat.server";
+import type { MachineChatResult, MachineChatResumeEvent } from "./machine-chat.server";
 import { streamRun, type RunStreamEvent } from "./run-stream";
 
 export type { ExampleDetail, ExampleMachine, ExampleSummary } from "./example-library.server";
@@ -23,21 +23,36 @@ export const listExamples = createServerFn({ method: "GET" }).handler(async () =
 
 export type InspectionInfo = { relayUrl: string; roomId: string };
 
-/** Returns hosted inspection info, starting a local relay only when opted in. */
+/** A run's streamed chunks and steps, then its result — see `run-stream.ts`. */
+export type MachineChatStream = ReadableStream<RunStreamEvent<MachineChatResult>>;
+
+/**
+ * Returns hosted inspection info, starting a local relay only when opted in.
+ * Every call opens a new room: the caller's browser session sends its id back
+ * with each declaration and run, so sessions never share a visualizer.
+ */
 export const getInspection = createServerFn({ method: "GET" }).handler(
   async (): Promise<InspectionInfo> => {
-    const { ensureInspectionRelay, inspectionRelayUrl, inspectionRoomId } =
+    const { ensureInspectionRelay, inspectionRelayUrl, openInspectionRoom } =
       await import("./inspection.server");
     await ensureInspectionRelay();
-    return { relayUrl: inspectionRelayUrl(), roomId: inspectionRoomId() };
+    const roomId = openInspectionRoom();
+    return { relayUrl: inspectionRelayUrl(roomId), roomId };
   },
 );
+
+/** The browser session's inspection room, from `getInspection`; absent without live inspection. */
+const room = z
+  .string()
+  .regex(/^[0-9a-f-]{36}$/)
+  .optional();
 
 const detailInput = z.object({ id: z.string().regex(/^[a-z0-9-]+$/) });
 
 const declareInput = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
   exportName: z.string().regex(/^\w+$/),
+  room,
 });
 
 /**
@@ -59,12 +74,17 @@ export const declareExampleMachine = createServerFn({ method: "POST" })
       { declareInspectionMachine, ensureInspectionRelay, rootMachinePayload },
     ] = await Promise.all([import("./example-library.server"), import("./inspection.server")]);
     await ensureInspectionRelay();
+    if (!data.room) return { declared: false };
     const [machine, source] = await Promise.all([
       getExampleMachine(data.id, data.exportName),
       getExampleMachineSource(data.id, data.exportName),
     ]);
     return {
-      declared: declareInspectionMachine(rootMachinePayload(machine, source), declaration),
+      declared: declareInspectionMachine(
+        data.room,
+        rootMachinePayload(machine, source),
+        declaration,
+      ),
     };
   });
 
@@ -76,7 +96,7 @@ export const declareExampleMachine = createServerFn({ method: "POST" })
  */
 export const runExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => declareInput.parse(input))
-  .handler(async ({ data }): Promise<MachineChatResult> => {
+  .handler(async ({ data }): Promise<MachineChatStream> => {
     const [{ getExampleRunner, exampleBudgetMs }, { runExampleRunner }, { getRequest }] =
       await Promise.all([
         import("./example-library.server"),
@@ -84,10 +104,17 @@ export const runExample = createServerFn({ method: "POST" })
         import("@tanstack/react-start/server"),
       ]);
     const runner = await getExampleRunner(data.id, data.exportName);
-    return runExampleRunner(runner, {
-      signal: getRequest().signal,
-      budgetMs: exampleBudgetMs(data.id),
-    });
+    return streamRun(
+      ({ signal, onChunk, onStep }) =>
+        runExampleRunner(runner, {
+          signal,
+          onChunk,
+          onStep,
+          budgetMs: exampleBudgetMs(data.id),
+          inspectionRoom: data.room,
+        }),
+      getRequest().signal,
+    );
   });
 
 export const getExample = createServerFn({ method: "GET" })
@@ -100,6 +127,7 @@ export const getExample = createServerFn({ method: "GET" })
 const machineRef = z.object({
   id: z.string().regex(/^[a-z0-9-]+$/),
   exportName: z.string().regex(/^\w+$/),
+  room,
 });
 
 const startExampleInput = machineRef.extend({
@@ -109,11 +137,13 @@ const startExampleInput = machineRef.extend({
 
 const resumeExampleInput = machineRef.extend({
   snapshot: z.custom<Snapshot<unknown>>((value) => value != null && typeof value === "object"),
-  event: z.object({ type: z.string().min(1) }).passthrough(),
+  // A typed event, or free chat text the server reads as one of the offered
+  // events (a state with no `textEvent`) — see `interpret-text.server.ts`.
+  event: z.union([
+    z.object({ kind: z.literal("interpret"), text: z.string().trim().min(1) }).strict(),
+    z.object({ type: z.string().min(1) }).passthrough(),
+  ]),
 });
-
-/** A run's streamed chunks, then its result — see `run-stream.ts`. */
-export type MachineChatStream = ReadableStream<RunStreamEvent<MachineChatResult>>;
 
 export const startExample = createServerFn({ method: "POST" })
   .validator((input: unknown) => startExampleInput.parse(input))
@@ -132,12 +162,14 @@ export const startExample = createServerFn({ method: "POST" })
       getExampleMachineSource(data.id, data.exportName),
     ]);
     return streamRun(
-      ({ signal, onChunk }) =>
+      ({ signal, onChunk, onStep }) =>
         startMachineChat(machine, data.input, {
           signal,
           onChunk,
+          onStep,
           budgetMs: exampleBudgetMs(data.id),
           machineSource,
+          inspectionRoom: data.room,
         }),
       getRequest().signal,
     );
@@ -160,13 +192,15 @@ export const resumeExample = createServerFn({ method: "POST" })
       getExampleMachineSource(data.id, data.exportName),
     ]);
     return streamRun(
-      ({ signal, onChunk }) =>
-        resumeMachineChat(
-          machine,
-          data.snapshot,
-          data.event as { type: string } & Record<string, unknown>,
-          { signal, onChunk, budgetMs: exampleBudgetMs(data.id), machineSource },
-        ),
+      ({ signal, onChunk, onStep }) =>
+        resumeMachineChat(machine, data.snapshot, data.event as MachineChatResumeEvent, {
+          signal,
+          onChunk,
+          onStep,
+          budgetMs: exampleBudgetMs(data.id),
+          machineSource,
+          inspectionRoom: data.room,
+        }),
       getRequest().signal,
     );
   });

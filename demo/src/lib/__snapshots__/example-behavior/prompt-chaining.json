@@ -9,7 +9,7 @@
         "transition xstate.done.actor -> \"regenerating\"",
         "transition xstate.done.actor -> \"failed\""
       ],
-      "response": "mock joke\n\n- Stage: generated\n- Regenerations: 2\n\n**Trail**\n\n```json\n[\n  \"Stage reached: generated.\",\n  \"Regenerations: 2 of 2.\",\n  \"No punchline after 2 regenerations; kept the last joke.\"\n]\n```"
+      "response": "mock joke\n\n- Stage: generated\n- Regenerations: 2\n\n**Trail**\n\n- Stage reached: generated.\n- Regenerations: 2 of 2.\n- No punchline after 2 regenerations; kept the last joke."
     }
   ],
   "the office printer": [
@@ -22,7 +22,7 @@
         "transition xstate.done.actor -> \"regenerating\"",
         "transition xstate.done.actor -> \"failed\""
       ],
-      "response": "mock joke\n\n- Stage: generated\n- Regenerations: 2\n\n**Trail**\n\n```json\n[\n  \"Stage reached: generated.\",\n  \"Regenerations: 2 of 2.\",\n  \"No punchline after 2 regenerations; kept the last joke.\"\n]\n```"
+      "response": "mock joke\n\n- Stage: generated\n- Regenerations: 2\n\n**Trail**\n\n- Stage reached: generated.\n- Regenerations: 2 of 2.\n- No punchline after 2 regenerations; kept the last joke."
     }
   ],
   "time zones": [
@@ -35,7 +35,7 @@
         "transition xstate.done.actor -> \"regenerating\"",
         "transition xstate.done.actor -> \"failed\""
       ],
-      "response": "mock joke\n\n- Stage: generated\n- Regenerations: 2\n\n**Trail**\n\n```json\n[\n  \"Stage reached: generated.\",\n  \"Regenerations: 2 of 2.\",\n  \"No punchline after 2 regenerations; kept the last joke.\"\n]\n```"
+      "response": "mock joke\n\n- Stage: generated\n- Regenerations: 2\n\n**Trail**\n\n- Stage reached: generated.\n- Regenerations: 2 of 2.\n- No punchline after 2 regenerations; kept the last joke."
     }
   ]
 }

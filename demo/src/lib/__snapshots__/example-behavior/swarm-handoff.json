@@ -83,7 +83,7 @@
         "transition @xstate.init -> \"budgetSpent\"",
         "transition END -> \"finished\""
       ],
-      "response": "Mock reply to: Yes, that works. Please continue.\n\n- Active agent: travel\n- Turns: 4"
+      "response": "- Active agent: travel\n- Turns: 4"
     }
   ],
   "Find flights and a hotel for next weekend": [
@@ -170,7 +170,7 @@
         "transition @xstate.init -> \"budgetSpent\"",
         "transition END -> \"finished\""
       ],
-      "response": "Mock reply to: Yes, that works. Please continue.\n\n- Active agent: travel\n- Turns: 4"
+      "response": "- Active agent: travel\n- Turns: 4"
     }
   ]
 }

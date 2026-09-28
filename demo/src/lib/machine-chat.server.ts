@@ -24,9 +24,10 @@ import {
 import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
 import { z } from "zod";
 import { maybeCreateRunInspection } from "./inspection.server";
+import { interpretIdleText, unclearTextReply } from "./interpret-text.server";
+import { renderIdleWork, renderOutput } from "./render-value";
 import {
   humanizeEventType,
-  humanizeFieldName,
   missingKeyMessage,
   missingKeys,
   schemaNeedsPayload,
@@ -80,8 +81,14 @@ export type TraceEntry = {
  * context keys the run actually changed (most recent first). Values present at
  * init — or in `baselineContext`, for resumed snapshots — don't count as
  * changes, so input echoes stay out of the "work produced" set.
+ *
+ * `onEntry` sees each entry as it is recorded, so a streamed run can show its
+ * transition log while it is still going.
  */
-export function createTraceRecorder(baselineContext?: unknown): {
+export function createTraceRecorder(
+  baselineContext?: unknown,
+  onEntry?: (entry: TraceEntry) => void,
+): {
   trace: TraceEntry[];
   onTransition: (snapshot: AnyMachineSnapshot, event: unknown) => void;
   /** `runAgent`'s `on` handler: records an `enq.emit(...)` the machine made. */
@@ -127,8 +134,12 @@ export function createTraceRecorder(baselineContext?: unknown): {
   // is a NEW invocation rather than more of the old one.
   const attemptsSeen = new Map<string, number>();
 
+  const record = (entry: TraceEntry) => {
+    trace.push(entry);
+    onEntry?.(entry);
+  };
   const push = (kind: TraceEntryKind, event: unknown) => {
-    trace.push({
+    record({
       at: Date.now() - startedAt,
       event: smallEvent(event),
       value: lastValue,
@@ -149,7 +160,7 @@ export function createTraceRecorder(baselineContext?: unknown): {
       observe(snapshot.context, !isInit);
       latest = snapshot.context;
       lastValue = snapshot.value as Json;
-      trace.push({
+      record({
         at: Date.now() - startedAt,
         event: smallEvent(event),
         value: snapshot.value as Json,
@@ -503,6 +514,7 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
     prompt: rawPrompt ? resolveLabel(rawPrompt, snapshot.context) : null,
     events,
     textEvent: chosen && field ? { type: chosen.type, field } : null,
+    ...(chosen && field && !declared ? { textEventInferred: true } : {}),
     component: typeof hints.component === "string" && hints.component ? hints.component : null,
   };
 }
@@ -532,6 +544,10 @@ export type RunLimits = {
   machineSource?: string;
   /** Each chunk of a streaming request, as it arrives. */
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
+  /** Each trace entry, as it is recorded. */
+  onStep?: (entry: TraceEntry) => void;
+  /** The browser session's inspection room (see `inspection.server.ts`). */
+  inspectionRoom?: string;
 };
 
 export const DEFAULT_RUN_BUDGET_MS = 120_000;
@@ -550,131 +566,6 @@ export type MachineChatResult = {
   output?: Json;
   idle?: ChatIdle & { snapshot: Json };
 };
-
-/**
- * Output → chat text. Strings pass through. Object outputs read as prose: the
- * longest string field becomes the body, remaining primitives a compact
- * "Key: value" list under it. The untouched value still ships as
- * `MachineChatResult.output` for anything that wants the raw JSON.
- */
-export function renderOutput(output: unknown): string {
-  if (typeof output === "string") return output;
-  if (output && typeof output === "object" && !Array.isArray(output)) {
-    const entries = Object.entries(output as Record<string, unknown>);
-    const strings = entries.filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== "",
-    );
-    if (strings.length) {
-      const longest = strings.reduce((best, entry) =>
-        entry[1].length > best[1].length ? entry : best,
-      );
-      // Only prose leads. An identifier-like longest string (a reference
-      // code, a slug) is one more "Key: value" line, not the body.
-      const [bodyKey, body] = /\s/.test(longest[1].trim()) ? longest : [null, null];
-      const rest = entries.filter(
-        ([key, value]) =>
-          key !== bodyKey &&
-          (typeof value === "string" || typeof value === "number" || typeof value === "boolean"),
-      );
-      // Bullets: a bare newline is not a line break in markdown.
-      const list = rest.map(([key, value]) => `- ${humanizeFieldName(key)}: ${String(value)}`);
-      // Nested values are still output — fenced JSON under their own heading,
-      // never dropped.
-      const nested = entries
-        .filter(([key, value]) => key !== bodyKey && value !== null && typeof value === "object")
-        .map(
-          ([key, value]) =>
-            `**${humanizeFieldName(key)}**\n\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``,
-        );
-      return [body, list.length ? list.join("\n") : null, ...nested]
-        .filter((section): section is string => section !== null)
-        .join("\n\n");
-    }
-  }
-  try {
-    return "```json\n" + JSON.stringify(output, null, 2) + "\n```";
-  } catch {
-    return String(output);
-  }
-}
-
-/**
- * What the run produced so far, read generically off an idle snapshot: the
- * context values the run changed (per the trace recorder), most recent first.
- * Strings render before objects so prose (drafts, answers, SQL) leads; small
- * non-string values render as fenced JSON. Echoes of what the user just sent
- * (`omitValues`) are plumbing, not work — skipped. A message-history array
- * renders only its newest assistant message: the reply a chat loop keeps in
- * `messages` instead of a dedicated field.
- * Null when the run changed nothing presentable — the idle prompt alone is
- * then the whole story.
- */
-export function renderIdleWork(
-  context: unknown,
-  changedKeys: string[],
-  omitValues: string[] = [],
-): string | null {
-  const MAX_SECTIONS = 3;
-  const MAX_STRING = 4000;
-  const MAX_JSON = 1500;
-  if (!context || typeof context !== "object") return null;
-  const source = context as Record<string, unknown>;
-  const omitted = new Set(omitValues.map((value) => value.trim()).filter(Boolean));
-  const isMessageHistory = (value: unknown): boolean =>
-    Array.isArray(value) &&
-    value.length > 0 &&
-    value.every((item) => item && typeof item === "object" && "role" in item && "content" in item);
-
-  const strings: Array<{ key: string; body: string }> = [];
-  const objects: Array<{ key: string; body: string }> = [];
-  const latestReply = (history: unknown[]): string | null => {
-    const last = history[history.length - 1] as { role: unknown; content: unknown };
-    if (last.role !== "assistant") return null;
-    const parts = Array.isArray(last.content) ? last.content : [last.content];
-    const text = parts
-      .map((part) =>
-        typeof part === "string"
-          ? part
-          : part &&
-              typeof part === "object" &&
-              typeof (part as { text?: unknown }).text === "string"
-            ? (part as { text: string }).text
-            : "",
-      )
-      .join("")
-      .trim();
-    return text || null;
-  };
-
-  for (const key of changedKeys) {
-    const rawValue = source[key];
-    const value = isMessageHistory(rawValue) ? latestReply(rawValue as unknown[]) : rawValue;
-    if (typeof value === "string") {
-      const text = value.trim();
-      if (!text || omitted.has(text)) continue;
-      strings.push({
-        key,
-        body: text.length > MAX_STRING ? `${text.slice(0, MAX_STRING)}…` : text,
-      });
-    } else if (value && typeof value === "object") {
-      let json: string;
-      try {
-        json = JSON.stringify(value, null, 2);
-      } catch {
-        continue;
-      }
-      if (!json || json === "{}" || json === "[]" || json.length > MAX_JSON) continue;
-      objects.push({ key, body: "```json\n" + json + "\n```" });
-    }
-  }
-
-  const sections = [...strings, ...objects].slice(0, MAX_SECTIONS);
-  if (!sections.length) return null;
-  if (sections.length === 1 && strings.length === 1) return sections[0].body;
-  return sections
-    .map((section) => `**${humanizeFieldName(section.key)}**\n\n${section.body}`)
-    .join("\n\n");
-}
 
 function toChatResult(
   machine: AnyStateMachine,
@@ -778,7 +669,7 @@ export async function runExampleRunner(
   limits: RunLimits = {},
 ): Promise<MachineChatResult> {
   const live = await resolveExecutors();
-  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
+  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder(undefined, limits.onStep);
   try {
     const output = await runner({
       executors: live.executors,
@@ -788,6 +679,7 @@ export async function runExampleRunner(
       on: { "*": onEmitted },
       onTrace,
       inspect: maybeCreateRunInspection(
+        limits.inspectionRoom,
         // Multi-run stories re-enter `runAgent` several times; the inspection
         // session spans all of them, so the root keeps one identity.
         { config: {} } as never,
@@ -827,7 +719,7 @@ export async function startMachineChat(
 ): Promise<MachineChatResult> {
   const live = await resolveExecutors();
   const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
-    createTraceRecorder();
+    createTraceRecorder(undefined, limits.onStep);
   const result = await runToQuiescence(
     createAgentRuntime(machine, {
       executors: live.executors,
@@ -836,7 +728,12 @@ export async function startMachineChat(
       onTransition,
       on: { "*": onEmitted },
       onTrace,
-      inspect: maybeCreateRunInspection(machine, limits.machineSource, "start"),
+      inspect: maybeCreateRunInspection(
+        limits.inspectionRoom,
+        machine,
+        limits.machineSource,
+        "start",
+      ),
     }),
     {
       input: input as never,
@@ -859,17 +756,57 @@ function stringValuesOf(source: Record<string, unknown>): string[] {
   return Object.values(source).filter((value): value is string => typeof value === "string");
 }
 
+/**
+ * What a resume delivers: a typed event, or free chat text for a state with
+ * no `textEvent`, which the server reads as one of the offered events.
+ */
+export type MachineChatResumeEvent =
+  | ({ type: string } & Record<string, unknown>)
+  | { kind: "interpret"; text: string };
+
+/** The index signature on the typed-event variant defeats `in` narrowing, so guard explicitly. */
+function isInterpretRequest(
+  event: MachineChatResumeEvent,
+): event is { kind: "interpret"; text: string } {
+  return !("type" in event) && (event as { kind?: unknown }).kind === "interpret";
+}
+
 export async function resumeMachineChat(
   machine: AnyStateMachine,
   snapshot: Snapshot<unknown>,
-  event: { type: string } & Record<string, unknown>,
+  resumeEvent: MachineChatResumeEvent,
   limits: RunLimits = {},
 ): Promise<MachineChatResult> {
   const live = await resolveExecutors();
+  let event: { type: string } & Record<string, unknown>;
+  if (isInterpretRequest(resumeEvent)) {
+    // Jev reads the text against the RESTORED state's offered events, so the
+    // run then resumes with the real typed event and the log shows it.
+    const idle = describeIdle(
+      machine,
+      machine.resolveState(
+        snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
+      ) as AnyMachineSnapshot,
+    );
+    const chosen = await interpretIdleText(resumeEvent.text, idle, { signal: limits.signal });
+    if (!chosen) {
+      // Nothing delivered: the machine is still waiting, unchanged.
+      return {
+        model: live.model,
+        status: "idle",
+        trace: [],
+        response: unclearTextReply(idle),
+        idle: { ...idle, snapshot: snapshot as unknown as Json },
+      };
+    }
+    event = chosen;
+  } else {
+    event = resumeEvent as { type: string } & Record<string, unknown>;
+  }
   // Baseline: context restored from the snapshot is prior turns' work, not
   // this turn's — only new changes should render as produced output.
   const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
-    createTraceRecorder((snapshot as { context?: unknown }).context);
+    createTraceRecorder((snapshot as { context?: unknown }).context, limits.onStep);
   // Validate the wire event against the restored snapshot's accepted events
   // (and payload schema, when registered) before delivering it. If the
   // snapshot can't be rehydrated for validation, runAgent still rejects an
@@ -893,7 +830,12 @@ export async function resumeMachineChat(
       onTransition,
       on: { "*": onEmitted },
       onTrace,
-      inspect: maybeCreateRunInspection(machine, limits.machineSource, "resume"),
+      inspect: maybeCreateRunInspection(
+        limits.inspectionRoom,
+        machine,
+        limits.machineSource,
+        "resume",
+      ),
     }),
     {
       snapshot,

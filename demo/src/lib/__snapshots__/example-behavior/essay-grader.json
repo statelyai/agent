@@ -10,7 +10,7 @@
         "transition xstate.done.actor -> \"evaluatingDepth\"",
         "transition xstate.done.actor -> \"scoring\""
       ],
-      "response": "Final score 1 (all four stages ran).\n- relevance 1.00 (weight 0.3): Every sentence serves one clearly stated topic.\n- grammar 1.00 (weight 0.2): No grammar, spelling or punctuation errors.\n- structure 1.00 (weight 0.2): A clear introduction, points that build on one another, and a conclusion that follows from them.\n- depth 1.00 (weight 0.3): Well-evidenced claims, answers counterarguments, and offers an original insight.\n\n- Final score: 1\n- Stage: all four stages ran\n\n**Scores**\n\n```json\n{\n  \"relevance\": 1,\n  \"grammar\": 1,\n  \"structure\": 1,\n  \"depth\": 1\n}\n```"
+      "response": "Final score 1 (all four stages ran).  \n- relevance 1.00 (weight 0.3): Every sentence serves one clearly stated topic.  \n- grammar 1.00 (weight 0.2): No grammar, spelling or punctuation errors.  \n- structure 1.00 (weight 0.2): A clear introduction, points that build on one another, and a conclusion that follows from them.  \n- depth 1.00 (weight 0.3): Well-evidenced claims, answers counterarguments, and offers an original insight.\n\n- Final score: 1\n- Stage: all four stages ran\n\n**Scores**\n\n**Relevance**: 1  \n**Grammar**: 1  \n**Structure**: 1  \n**Depth**: 1"
     }
   ],
   "My favorite pizza topping is mushrooms. Also I think the bus was late today.": [
@@ -24,7 +24,7 @@
         "transition xstate.done.actor -> \"evaluatingDepth\"",
         "transition xstate.done.actor -> \"scoring\""
       ],
-      "response": "Final score 1 (all four stages ran).\n- relevance 1.00 (weight 0.3): Every sentence serves one clearly stated topic.\n- grammar 1.00 (weight 0.2): No grammar, spelling or punctuation errors.\n- structure 1.00 (weight 0.2): A clear introduction, points that build on one another, and a conclusion that follows from them.\n- depth 1.00 (weight 0.3): Well-evidenced claims, answers counterarguments, and offers an original insight.\n\n- Final score: 1\n- Stage: all four stages ran\n\n**Scores**\n\n```json\n{\n  \"relevance\": 1,\n  \"grammar\": 1,\n  \"structure\": 1,\n  \"depth\": 1\n}\n```"
+      "response": "Final score 1 (all four stages ran).  \n- relevance 1.00 (weight 0.3): Every sentence serves one clearly stated topic.  \n- grammar 1.00 (weight 0.2): No grammar, spelling or punctuation errors.  \n- structure 1.00 (weight 0.2): A clear introduction, points that build on one another, and a conclusion that follows from them.  \n- depth 1.00 (weight 0.3): Well-evidenced claims, answers counterarguments, and offers an original insight.\n\n- Final score: 1\n- Stage: all four stages ran\n\n**Scores**\n\n**Relevance**: 1  \n**Grammar**: 1  \n**Structure**: 1  \n**Depth**: 1"
     }
   ],
   "social media is bad for teenager because they spends to much time on it and there sleep get worse. also the comparing to other peoples is making them sad and anxious alot, studies shows this. schools should teached kids about it more, and parents to.": [
@@ -38,7 +38,7 @@
         "transition xstate.done.actor -> \"evaluatingDepth\"",
         "transition xstate.done.actor -> \"scoring\""
       ],
-      "response": "Final score 1 (all four stages ran).\n- relevance 1.00 (weight 0.3): Every sentence serves one clearly stated topic.\n- grammar 1.00 (weight 0.2): No grammar, spelling or punctuation errors.\n- structure 1.00 (weight 0.2): A clear introduction, points that build on one another, and a conclusion that follows from them.\n- depth 1.00 (weight 0.3): Well-evidenced claims, answers counterarguments, and offers an original insight.\n\n- Final score: 1\n- Stage: all four stages ran\n\n**Scores**\n\n```json\n{\n  \"relevance\": 1,\n  \"grammar\": 1,\n  \"structure\": 1,\n  \"depth\": 1\n}\n```"
+      "response": "Final score 1 (all four stages ran).  \n- relevance 1.00 (weight 0.3): Every sentence serves one clearly stated topic.  \n- grammar 1.00 (weight 0.2): No grammar, spelling or punctuation errors.  \n- structure 1.00 (weight 0.2): A clear introduction, points that build on one another, and a conclusion that follows from them.  \n- depth 1.00 (weight 0.3): Well-evidenced claims, answers counterarguments, and offers an original insight.\n\n- Final score: 1\n- Stage: all four stages ran\n\n**Scores**\n\n**Relevance**: 1  \n**Grammar**: 1  \n**Structure**: 1  \n**Depth**: 1"
     }
   ]
 }

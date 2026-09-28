@@ -268,7 +268,11 @@ export function AppPanel({
               onClick={starter.onStart}
               className="aui-thread-welcome-suggestion text-foreground hover:bg-muted border-border/60 h-auto max-w-full gap-1.5 rounded-xl border px-3.5 py-1.5 text-center text-sm font-normal whitespace-normal transition-colors sm:rounded-full"
             >
-              {starter.label}
+              {/* A starter can be a whole essay: clamped, so every starter
+                  fits above the composer; the full text is its title. */}
+              <span className="line-clamp-3" title={starter.label}>
+                {starter.label}
+              </span>
             </Button>
           ))}
         </div>

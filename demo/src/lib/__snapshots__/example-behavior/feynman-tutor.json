@@ -8,7 +8,7 @@
         "transition xstate.done.actor -> \"presenting\"",
         "transition xstate.done.actor -> \"awaitingExplanation\""
       ],
-      "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"keyIdea\": \"mock keyIdea\"\n  }\n]\n```",
+      "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n- Title: mock title · Key idea: mock keyIdea",
       "idle": {
         "prompt": "Checkpoint 1/1: mock title mock context Explain this back in your own words.",
         "events": [
@@ -26,7 +26,7 @@
         "transition EXPLAIN -> \"verifying\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Feynman session on \"How public-key cryptography works\": 1 of 1 checkpoint(s) passed.\n1. mock title: passed (score 100/100)\n\n- Passed: 1\n- Failed: 0\n- Skipped: 0\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"status\": \"passed\",\n    \"score\": 100,\n    \"reteaches\": 0\n  }\n]\n```"
+      "response": "Feynman session on \"How public-key cryptography works\": 1 of 1 checkpoint(s) passed.  \n1. mock title: passed (score 100/100)\n\n- Passed: 1\n- Failed: 0\n- Skipped: 0\n\n**Checkpoints**\n\n- Title: mock title · Status: passed · Score: 100 · Reteaches: 0"
     }
   ],
   "Why the sky is blue": [
@@ -38,7 +38,7 @@
         "transition xstate.done.actor -> \"presenting\"",
         "transition xstate.done.actor -> \"awaitingExplanation\""
       ],
-      "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"keyIdea\": \"mock keyIdea\"\n  }\n]\n```",
+      "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n- Title: mock title · Key idea: mock keyIdea",
       "idle": {
         "prompt": "Checkpoint 1/1: mock title mock context Explain this back in your own words.",
         "events": [
@@ -56,7 +56,7 @@
         "transition EXPLAIN -> \"verifying\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Feynman session on \"Why the sky is blue\": 1 of 1 checkpoint(s) passed.\n1. mock title: passed (score 100/100)\n\n- Passed: 1\n- Failed: 0\n- Skipped: 0\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"status\": \"passed\",\n    \"score\": 100,\n    \"reteaches\": 0\n  }\n]\n```"
+      "response": "Feynman session on \"Why the sky is blue\": 1 of 1 checkpoint(s) passed.  \n1. mock title: passed (score 100/100)\n\n- Passed: 1\n- Failed: 0\n- Skipped: 0\n\n**Checkpoints**\n\n- Title: mock title · Status: passed · Score: 100 · Reteaches: 0"
     }
   ],
   "How a hash table finds a key": [
@@ -68,7 +68,7 @@
         "transition xstate.done.actor -> \"presenting\"",
         "transition xstate.done.actor -> \"awaitingExplanation\""
       ],
-      "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"keyIdea\": \"mock keyIdea\"\n  }\n]\n```",
+      "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n- Title: mock title · Key idea: mock keyIdea",
       "idle": {
         "prompt": "Checkpoint 1/1: mock title mock context Explain this back in your own words.",
         "events": [
@@ -86,7 +86,7 @@
         "transition EXPLAIN -> \"verifying\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Feynman session on \"How a hash table finds a key\": 1 of 1 checkpoint(s) passed.\n1. mock title: passed (score 100/100)\n\n- Passed: 1\n- Failed: 0\n- Skipped: 0\n\n**Checkpoints**\n\n```json\n[\n  {\n    \"title\": \"mock title\",\n    \"status\": \"passed\",\n    \"score\": 100,\n    \"reteaches\": 0\n  }\n]\n```"
+      "response": "Feynman session on \"How a hash table finds a key\": 1 of 1 checkpoint(s) passed.  \n1. mock title: passed (score 100/100)\n\n- Passed: 1\n- Failed: 0\n- Skipped: 0\n\n**Checkpoints**\n\n- Title: mock title · Status: passed · Score: 100 · Reteaches: 0"
     }
   ]
 }

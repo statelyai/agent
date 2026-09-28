@@ -7,7 +7,8 @@
         "transition @xstate.init -> \"deciding\"",
         "transition RETRIEVE -> \"retrieving\"",
         "transition xstate.done.actor -> \"rewriting\"",
-        "transition xstate.done.actor -> \"deciding\"",
+        "transition REWRITE -> \"deciding\"",
+        "rejected RETRIEVE -> \"deciding\"",
         "transition ANSWER -> \"done\""
       ],
       "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: false"
@@ -21,7 +22,8 @@
         "transition @xstate.init -> \"deciding\"",
         "transition RETRIEVE -> \"retrieving\"",
         "transition xstate.done.actor -> \"rewriting\"",
-        "transition xstate.done.actor -> \"deciding\"",
+        "transition REWRITE -> \"deciding\"",
+        "rejected RETRIEVE -> \"deciding\"",
         "transition ANSWER -> \"done\""
       ],
       "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: false"
@@ -35,7 +37,8 @@
         "transition @xstate.init -> \"deciding\"",
         "transition RETRIEVE -> \"retrieving\"",
         "transition xstate.done.actor -> \"rewriting\"",
-        "transition xstate.done.actor -> \"deciding\"",
+        "transition REWRITE -> \"deciding\"",
+        "rejected RETRIEVE -> \"deciding\"",
         "transition ANSWER -> \"done\""
       ],
       "response": "The model called the retriever 1 of 3 allowed time(s). Rewrote the question 1 time(s). No retrieved passage was graded relevant. The model then chose to answer without them.\n\n- Answer: mock answer\n- Retrievals: 1\n- Rewrites: 1\n- Answered directly: false"

@@ -1,7 +1,7 @@
 {
   "Trusted patch (host-authored)": [
     {
-      "sent": "start {\"patch\":\"Validate input before a database write.\",\"source\":\"trusted\"}",
+      "sent": "start {\"patch\":\"Validate input before a database write.\\n\\n--- a/src/users.ts\\n+++ b/src/users.ts\\n@@ export async function createUser(db: Db, body: unknown) {\\n-  await db.insert(\\\"users\\\", body);\\n+  const parsed = UserSchema.safeParse(body);\\n+  if (!parsed.success) throw new ValidationError(parsed.error.issues);\\n+  await db.insert(\\\"users\\\", parsed.data);\\n }\",\"source\":\"trusted\"}",
       "status": "done",
       "trace": [
         "transition @xstate.init -> {\"reviewing\":{\"security\":\"working\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
@@ -9,12 +9,12 @@
         "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"done\",\"maintainability\":\"working\"}}",
         "transition xstate.done.actor -> \"accepted\""
       ],
-      "response": "```json\n{\n  \"approved\": true,\n  \"humanReviewed\": false,\n  \"votes\": [\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"security\"\n    },\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"reliability\"\n    },\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"maintainability\"\n    }\n  ],\n  \"abstentions\": []\n}\n```"
+      "response": "- Approved: true\n- Human reviewed: false\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| true | approve (approve 100% · reject 0% · abstain 0%) | security |\n| true | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| true | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
     }
   ],
   "External patch (needs human review)": [
     {
-      "sent": "start {\"patch\":\"Validate input before a database write.\",\"source\":\"external\"}",
+      "sent": "start {\"patch\":\"Validate input before a database write.\\n\\n--- a/src/users.ts\\n+++ b/src/users.ts\\n@@ export async function createUser(db: Db, body: unknown) {\\n-  await db.insert(\\\"users\\\", body);\\n+  const parsed = UserSchema.safeParse(body);\\n+  if (!parsed.success) throw new ValidationError(parsed.error.issues);\\n+  await db.insert(\\\"users\\\", parsed.data);\\n }\",\"source\":\"external\"}",
       "status": "idle",
       "trace": [
         "transition @xstate.init -> {\"reviewing\":{\"security\":\"working\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
@@ -22,7 +22,7 @@
         "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"done\",\"maintainability\":\"working\"}}",
         "transition xstate.done.actor -> \"humanReview\""
       ],
-      "response": "**Votes**\n\n```json\n[\n  {\n    \"approve\": true,\n    \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n    \"reviewer\": \"security\"\n  },\n  {\n    \"approve\": true,\n    \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n    \"reviewer\": \"reliability\"\n  },\n  {\n    \"approve\": true,\n    \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n    \"reviewer\": \"maintainability\"\n  }\n]\n```",
+      "response": "**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| true | approve (approve 100% · reject 0% · abstain 0%) | security |\n| true | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| true | approve (approve 100% · reject 0% · abstain 0%) | maintainability |",
       "idle": {
         "prompt": "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved.",
         "events": [
@@ -39,7 +39,7 @@
         "transition @xstate.init -> \"humanReview\"",
         "transition APPROVE -> \"overridden\""
       ],
-      "response": "```json\n{\n  \"approved\": true,\n  \"humanReviewed\": true,\n  \"votes\": [\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"security\"\n    },\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"reliability\"\n    },\n    {\n      \"approve\": true,\n      \"reason\": \"approve (approve 100% · reject 0% · abstain 0%)\",\n      \"reviewer\": \"maintainability\"\n    }\n  ],\n  \"abstentions\": []\n}\n```"
+      "response": "- Approved: true\n- Human reviewed: true\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| true | approve (approve 100% · reject 0% · abstain 0%) | security |\n| true | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| true | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
     }
   ]
 }

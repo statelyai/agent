@@ -26,7 +26,7 @@
         "transition DELETE_TODO -> \"planning\"",
         "transition DONE -> \"awaitingCommand\""
       ],
-      "response": "**Log**\n\n```json\n[\n  \"added #1: mock title\",\n  \"toggled #1\",\n  \"deleted #1\"\n]\n```",
+      "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
         "events": [
@@ -43,7 +43,7 @@
         "transition COMMAND -> \"planning\"",
         "transition QUIT -> \"done\""
       ],
-      "response": "```json\n{\n  \"todos\": [],\n  \"log\": [\n    \"added #1: mock title\",\n    \"toggled #1\",\n    \"deleted #1\"\n  ]\n}\n```"
+      "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1"
     }
   ],
   "mark the first one done": [
@@ -73,7 +73,7 @@
         "transition DELETE_TODO -> \"planning\"",
         "transition DONE -> \"awaitingCommand\""
       ],
-      "response": "**Log**\n\n```json\n[\n  \"added #1: mock title\",\n  \"toggled #1\",\n  \"deleted #1\"\n]\n```",
+      "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
         "events": [
@@ -90,7 +90,7 @@
         "transition COMMAND -> \"planning\"",
         "transition QUIT -> \"done\""
       ],
-      "response": "```json\n{\n  \"todos\": [],\n  \"log\": [\n    \"added #1: mock title\",\n    \"toggled #1\",\n    \"deleted #1\"\n  ]\n}\n```"
+      "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1"
     }
   ],
   "delete anything about groceries": [
@@ -120,7 +120,7 @@
         "transition DELETE_TODO -> \"planning\"",
         "transition DONE -> \"awaitingCommand\""
       ],
-      "response": "**Log**\n\n```json\n[\n  \"added #1: mock title\",\n  \"toggled #1\",\n  \"deleted #1\"\n]\n```",
+      "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
         "events": [
@@ -137,7 +137,7 @@
         "transition COMMAND -> \"planning\"",
         "transition QUIT -> \"done\""
       ],
-      "response": "```json\n{\n  \"todos\": [],\n  \"log\": [\n    \"added #1: mock title\",\n    \"toggled #1\",\n    \"deleted #1\"\n  ]\n}\n```"
+      "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1"
     }
   ]
 }

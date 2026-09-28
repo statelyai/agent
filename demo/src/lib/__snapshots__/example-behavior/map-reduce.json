@@ -8,7 +8,7 @@
         "transition xstate.done.actor -> \"generatingJokes\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "mock subjects0\n\n- Best joke: mock joke\n\n**Jokes**\n\n```json\n[\n  {\n    \"subject\": \"mock subjects0\",\n    \"joke\": \"mock joke\"\n  }\n]\n```\n\n**Trail**\n\n```json\n[\n  \"Subjects: mock subjects0\",\n  \"[0] mock subjects0: mock joke\",\n  \"Only one joke; no judging needed.\"\n]\n```"
+      "response": "mock subjects0\n\n- Best joke: mock joke\n\n**Jokes**\n\n- Branch: 0 · Subject: mock subjects0 · Joke: mock joke\n\n**Trail**\n\n- Subjects: mock subjects0\n- [0] mock subjects0: mock joke\n- Only one joke; no judging needed."
     }
   ],
   "office life": [
@@ -20,7 +20,7 @@
         "transition xstate.done.actor -> \"generatingJokes\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "mock subjects0\n\n- Best joke: mock joke\n\n**Jokes**\n\n```json\n[\n  {\n    \"subject\": \"mock subjects0\",\n    \"joke\": \"mock joke\"\n  }\n]\n```\n\n**Trail**\n\n```json\n[\n  \"Subjects: mock subjects0\",\n  \"[0] mock subjects0: mock joke\",\n  \"Only one joke; no judging needed.\"\n]\n```"
+      "response": "mock subjects0\n\n- Best joke: mock joke\n\n**Jokes**\n\n- Branch: 0 · Subject: mock subjects0 · Joke: mock joke\n\n**Trail**\n\n- Subjects: mock subjects0\n- [0] mock subjects0: mock joke\n- Only one joke; no judging needed."
     }
   ],
   "space travel": [
@@ -32,7 +32,7 @@
         "transition xstate.done.actor -> \"generatingJokes\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "mock subjects0\n\n- Best joke: mock joke\n\n**Jokes**\n\n```json\n[\n  {\n    \"subject\": \"mock subjects0\",\n    \"joke\": \"mock joke\"\n  }\n]\n```\n\n**Trail**\n\n```json\n[\n  \"Subjects: mock subjects0\",\n  \"[0] mock subjects0: mock joke\",\n  \"Only one joke; no judging needed.\"\n]\n```"
+      "response": "mock subjects0\n\n- Best joke: mock joke\n\n**Jokes**\n\n- Branch: 0 · Subject: mock subjects0 · Joke: mock joke\n\n**Trail**\n\n- Subjects: mock subjects0\n- [0] mock subjects0: mock joke\n- Only one joke; no judging needed."
     }
   ]
 }

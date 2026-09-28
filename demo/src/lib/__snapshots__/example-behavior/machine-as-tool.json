@@ -8,7 +8,7 @@
         "transition xstate.done.actor -> \"executing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "```json\n{\n  \"refunded\": true,\n  \"reason\": null\n}\n```"
+      "response": "- Refunded: true"
     }
   ],
   "Large refund ($780) — over the approval limit": [
@@ -20,7 +20,7 @@
         "transition xstate.done.actor -> \"executing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "```json\n{\n  \"refunded\": true,\n  \"reason\": null\n}\n```"
+      "response": "- Refunded: true"
     }
   ]
 }

@@ -47,7 +47,7 @@ vi.mock("@ai-sdk/typesafe-ai", async () => {
 });
 
 import { getExampleMachine } from "./example-library.server";
-import { ensureInspectionRelay } from "./inspection.server";
+import { ensureInspectionRelay, openInspectionRoom } from "./inspection.server";
 import { resumeMachineChat, startMachineChat } from "./machine-chat.server";
 import { resetGenericModels } from "./test-generic-models";
 
@@ -73,6 +73,9 @@ beforeEach(() => {
   resetGenericModels();
   recorder.calls = [];
 });
+
+/** A browser session's room: runs only reach an inspector through one. */
+const inspected = () => ({ inspectionRoom: openInspectionRoom() });
 
 function actorCalls(calls: Call[]): ActorCall[] {
   return calls.flatMap((call, index) => {
@@ -127,7 +130,7 @@ function describeCalls(calls: Call[]): string {
 describe("a plain request machine", () => {
   test("prompt-chaining streams the root and its request children", async () => {
     const machine = await getExampleMachine("prompt-chaining", "promptChainingMachine");
-    const result = await startMachineChat(machine, { topic: "cats" });
+    const result = await startMachineChat(machine, { topic: "cats" }, inspected());
     expect(result.status).toBe("done");
     const calls = recorder.calls;
     const log = describeCalls(calls);
@@ -178,7 +181,8 @@ describe("a long-lived child machine across turns", () => {
     resetGenericModels();
     recorder.calls = [];
     const machine = await getExampleMachine("game-loop-agent", "gameMachine");
-    const first = await startMachineChat(machine, { seed: 11 });
+    const limits = inspected();
+    const first = await startMachineChat(machine, { seed: 11 }, limits);
     expect(first.status).toBe("idle");
     turn1 = recorder.calls;
     recorder.calls = [];
@@ -186,6 +190,7 @@ describe("a long-lived child machine across turns", () => {
       machine,
       first.idle!.snapshot as unknown as Snapshot<unknown>,
       { type: "HUMAN_ROLL" },
+      limits,
     );
     expect(second.status).toBe("idle");
     turn2 = recorder.calls;
@@ -257,7 +262,7 @@ describe("a long-lived child machine across turns", () => {
 describe("a parallel machine", () => {
   test("parallel-streams registers both regions' children under the root", async () => {
     const machine = await getExampleMachine("parallel-streams", "parallelStreamsMachine");
-    const result = await startMachineChat(machine, { topic: "cats" });
+    const result = await startMachineChat(machine, { topic: "cats" }, inspected());
     expect(result.status).toBe("done");
     const calls = recorder.calls;
     const log = describeCalls(calls);

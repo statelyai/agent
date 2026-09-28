@@ -7,7 +7,7 @@
         "transition @xstate.init -> \"planning\"",
         "transition xstate.done.actor -> \"awaitingApproval\""
       ],
-      "response": "**Plan**\n\n```json\n{\n  \"operation\": \"count\",\n  \"column\": \"amount\",\n  \"category\": \"mock category\"\n}\n```",
+      "response": "**Plan**\n\n**Operation**: count  \n**Column**: amount  \n**Category**: mock category",
       "idle": {
         "prompt": "Run this query against the orders table?",
         "events": [
@@ -26,7 +26,7 @@
         "transition xstate.done.actor -> \"summarizing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Mock reply to: Question: What is the total amount spent on electronics?\nPla\n\n- Status: answered\n- Result: 0\n\n**Plan**\n\n```json\n{\n  \"operation\": \"count\",\n  \"column\": \"amount\",\n  \"category\": \"mock category\"\n}\n```"
+      "response": "Mock reply to: Question: What is the total amount spent on electronics?  \nPla\n\n- Status: answered\n- Result: 0\n\n**Plan**\n\n**Operation**: count  \n**Column**: amount  \n**Category**: mock category"
     }
   ],
   "How many book orders are there?": [
@@ -37,7 +37,7 @@
         "transition @xstate.init -> \"planning\"",
         "transition xstate.done.actor -> \"awaitingApproval\""
       ],
-      "response": "**Plan**\n\n```json\n{\n  \"operation\": \"count\",\n  \"column\": \"amount\",\n  \"category\": \"mock category\"\n}\n```",
+      "response": "**Plan**\n\n**Operation**: count  \n**Column**: amount  \n**Category**: mock category",
       "idle": {
         "prompt": "Run this query against the orders table?",
         "events": [
@@ -56,7 +56,7 @@
         "transition xstate.done.actor -> \"summarizing\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Mock reply to: Question: How many book orders are there?\nPlan: {\"operation\"\n\n- Status: answered\n- Result: 0\n\n**Plan**\n\n```json\n{\n  \"operation\": \"count\",\n  \"column\": \"amount\",\n  \"category\": \"mock category\"\n}\n```"
+      "response": "Mock reply to: Question: How many book orders are there?  \nPlan: {\"operation\"\n\n- Status: answered\n- Result: 0\n\n**Plan**\n\n**Operation**: count  \n**Column**: amount  \n**Category**: mock category"
     }
   ]
 }

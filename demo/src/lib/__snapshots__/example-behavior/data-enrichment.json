@@ -10,7 +10,7 @@
         "transition xstate.done.actor -> \"reflecting\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Bluefin Analytics\nFounded: mock founded\nHeadquarters: mock headquarters\nCEO: mock ceo\nEmployees: mock employees\n\n- Loops: 1\n\n**Record**\n\n```json\n{\n  \"founded\": \"mock founded\",\n  \"headquarters\": \"mock headquarters\",\n  \"ceo\": \"mock ceo\",\n  \"employees\": \"mock employees\"\n}\n```\n\n**Missing fields**\n\n```json\n[]\n```"
+      "response": "Bluefin Analytics  \nFounded: mock founded  \nHeadquarters: mock headquarters  \nCEO: mock ceo  \nEmployees: mock employees\n\n- Loops: 1\n\n**Record**\n\n**Founded**: mock founded  \n**Headquarters**: mock headquarters  \n**Ceo**: mock ceo  \n**Employees**: mock employees"
     }
   ],
   "Fully covered — complete after one search pass": [
@@ -24,7 +24,7 @@
         "transition xstate.done.actor -> \"reflecting\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Northwind Robotics\nFounded: mock founded\nHeadquarters: mock headquarters\nCEO: mock ceo\nEmployees: mock employees\n\n- Loops: 1\n\n**Record**\n\n```json\n{\n  \"founded\": \"mock founded\",\n  \"headquarters\": \"mock headquarters\",\n  \"ceo\": \"mock ceo\",\n  \"employees\": \"mock employees\"\n}\n```\n\n**Missing fields**\n\n```json\n[]\n```"
+      "response": "Northwind Robotics  \nFounded: mock founded  \nHeadquarters: mock headquarters  \nCEO: mock ceo  \nEmployees: mock employees\n\n- Loops: 1\n\n**Record**\n\n**Founded**: mock founded  \n**Headquarters**: mock headquarters  \n**Ceo**: mock ceo  \n**Employees**: mock employees"
     }
   ],
   "Headcount missing everywhere — exhausts the search budget → failed": [
@@ -38,7 +38,7 @@
         "transition xstate.done.actor -> \"reflecting\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Cedar Grid Energy\nFounded: mock founded\nHeadquarters: mock headquarters\nCEO: mock ceo\nEmployees: mock employees\n\n- Loops: 1\n\n**Record**\n\n```json\n{\n  \"founded\": \"mock founded\",\n  \"headquarters\": \"mock headquarters\",\n  \"ceo\": \"mock ceo\",\n  \"employees\": \"mock employees\"\n}\n```\n\n**Missing fields**\n\n```json\n[]\n```"
+      "response": "Cedar Grid Energy  \nFounded: mock founded  \nHeadquarters: mock headquarters  \nCEO: mock ceo  \nEmployees: mock employees\n\n- Loops: 1\n\n**Record**\n\n**Founded**: mock founded  \n**Headquarters**: mock headquarters  \n**Ceo**: mock ceo  \n**Employees**: mock employees"
     }
   ]
 }

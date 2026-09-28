@@ -7,7 +7,7 @@
         "transition @xstate.init -> \"planning\"",
         "transition xstate.done.actor -> \"approval\""
       ],
-      "response": "**Itinerary**\n\n```json\n{\n  \"flight\": \"mock flight\",\n  \"hotel\": \"mock hotel\"\n}\n```",
+      "response": "**Itinerary**\n\n**Flight**: mock flight  \n**Hotel**: mock hotel",
       "idle": {
         "prompt": "Approve the itinerary before reserving anything.",
         "events": [
@@ -26,7 +26,7 @@
         "transition xstate.done.actor -> \"hotel\"",
         "transition xstate.done.actor -> \"booked\""
       ],
-      "response": "- Booking id: trip-1\n- Outcome: booked\n- Flight reference: simulated-flight:trip-1\n- Hotel reference: simulated-hotel:trip-1"
+      "response": "Flight: mock flight\n\nHotel: mock hotel\n\n- Booking id: trip-1\n- Outcome: booked\n- Flight reference: simulated-flight:trip-1\n- Hotel reference: simulated-hotel:trip-1"
     }
   ],
   "Lisbon, but the hotel is sold out — watch it compensate": [
@@ -37,7 +37,7 @@
         "transition @xstate.init -> \"planning\"",
         "transition xstate.done.actor -> \"approval\""
       ],
-      "response": "**Itinerary**\n\n```json\n{\n  \"flight\": \"mock flight\",\n  \"hotel\": \"mock hotel\"\n}\n```",
+      "response": "**Itinerary**\n\n**Flight**: mock flight  \n**Hotel**: mock hotel",
       "idle": {
         "prompt": "Approve the itinerary before reserving anything.",
         "events": [
@@ -57,7 +57,7 @@
         "transition xstate.done.actor -> \"compensating\"",
         "transition xstate.done.actor -> \"compensated\""
       ],
-      "response": "- Booking id: trip-2-sold-out\n- Outcome: compensated\n- Flight reference: simulated-flight:trip-2-sold-out"
+      "response": "Flight: mock flight\n\nHotel: mock hotel\n\n- Booking id: trip-2-sold-out\n- Outcome: compensated\n- Flight reference: simulated-flight:trip-2-sold-out"
     }
   ]
 }
