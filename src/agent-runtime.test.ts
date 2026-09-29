@@ -4,7 +4,7 @@
  * settles when nothing is in flight — not when the machine looks idle.
  */
 import { describe, expect, test, vi } from "vitest";
-import { createMachine, initialTransition } from "xstate";
+import { createMachine, initialTransition, type InspectionEvent } from "xstate";
 import { z } from "zod";
 import {
   createAgentRuntime,
@@ -47,6 +47,31 @@ function gatedExecutors(gates: Record<string, Promise<void>> = {}): {
 }
 
 describe("createAgentRuntime", () => {
+  test("restored child transitions still reach the inspector", async () => {
+    const child = createMachine({
+      initial: "waiting",
+      states: { waiting: { on: { PING: { target: "ready" } } }, ready: {} },
+    });
+    const machine = createMachine({ actors: { child }, invoke: { id: "child", src: "child" } });
+    const [initial] = initialTransition(machine);
+    const inspected: InspectionEvent[] = [];
+    const runtime = createAgentRuntime(machine, { inspect: (event) => inspected.push(event) });
+    const [snapshot, effects] = await runtime.start({
+      snapshot: JSON.parse(JSON.stringify(machine.getPersistedSnapshot(initial))),
+    });
+    await runtime.execute(effects);
+    const childRef = snapshot.children.child!;
+    childRef.send({ type: "PING" });
+    expect(
+      inspected.some(
+        (event) =>
+          event.type === "@xstate.transition" &&
+          event.actorRef === childRef &&
+          event.event.type === "PING",
+      ),
+    ).toBe(true);
+    await runtime.finish();
+  });
   test("restoration never probes a wildcard transition", async () => {
     const wildcard = vi.fn(() => ({ target: "wrong" as const }));
     const machine = createMachine({

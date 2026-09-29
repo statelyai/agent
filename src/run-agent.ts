@@ -2589,8 +2589,13 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         }
       },
     };
+    const wiredSystems = new Set<AnyActor["system"]>();
     const wire = (actor: AnyActor): void => {
-      actor.system.runtime = restoredRuntime;
+      if (!wiredSystems.has(actor.system)) {
+        wiredSystems.add(actor.system);
+        actor.system.runtime = restoredRuntime;
+        if (inspect) actor.system.inspect(inspect);
+      }
       for (const child of Object.values(
         (actor.getSnapshot() as AnyMachineSnapshot).children ?? {},
       )) {
