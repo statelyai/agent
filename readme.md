@@ -25,8 +25,10 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 <!-- install command matching the package prerelease channel and package.json peers -->
 
 ```sh
-pnpm add @statelyai/agent@alpha xstate@alpha zod
+pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.57 zod
 ```
+
+XState is pinned while its experimental durable restoration API evolves.
 
 For the optional Vercel AI SDK executor:
 

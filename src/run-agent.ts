@@ -1,7 +1,11 @@
 import {
   createAsyncLogic,
+  deliverEvent,
   getNextTransitions,
   isMachineSnapshot,
+  stopActor,
+  type AnyActor,
+  type ActorSystemRuntime,
   type AnyActorLogic,
   type AnyActorRef,
   type AnyMachineSnapshot,
@@ -2422,11 +2426,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     for (const child of Object.values(
       (snapshot?.children ?? {}) as Record<string, AnyActorRef | undefined>,
     )) {
-      // `stop()` refuses a child (it throws for any actor with a parent);
-      // `_stop()` is what XState's own `stopChild` calls, and it aborts the
-      // child's signal — which is what cancels an in-flight model call.
+      // The public runtime helper stops children and aborts their signals.
       try {
-        (child as unknown as { _stop?: () => void } | undefined)?._stop?.();
+        if (child) stopActor(child as AnyActor);
       } catch {
         // Already stopped.
       }
@@ -2481,80 +2483,79 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         };
 
   let execution!: DurableExecution<TMachine>;
-  execution = createDurable(
-    boundMachine,
-    {
-      startActor: (actor: AnyActorRef) => {
-        // Every actor the run starts is watched, so quiescence is noticed the
-        // moment it happens. The error handler also keeps XState from
-        // reporting a child error the machine already handles as unhandled.
-        actor.subscribe({ next: recheck, complete: recheck, error: recheck });
-        (actor as unknown as { start(): void }).start();
-      },
-      enqueueRootEvent: (_source: unknown, event: EventObject) => enqueue(event),
-      executeAction: (
-        action: { exec: (runtime: unknown) => unknown },
-        _metadata: unknown,
-        runtime: unknown,
-      ) => action.exec(runtime),
-      waitForEvent: () => {
-        const queued = mailbox.shift();
-        if (queued !== undefined) {
-          return queued;
+  let restoredWithoutApi = false;
+  const durableAdapter = {
+    startActor: (actor: AnyActorRef) => {
+      // Every actor the run starts is watched, so quiescence is noticed the
+      // moment it happens. The error handler also keeps XState from
+      // reporting a child error the machine already handles as unhandled.
+      actor.subscribe({ next: recheck, complete: recheck, error: recheck });
+      (actor as unknown as { start(): void }).start();
+    },
+    enqueueRootEvent: (_source: unknown, event: EventObject) => enqueue(event),
+    executeAction: (
+      action: { exec: (runtime: unknown) => unknown },
+      _metadata: unknown,
+      runtime: unknown,
+    ) => action.exec(runtime),
+    waitForEvent: () => {
+      const queued = mailbox.shift();
+      if (queued !== undefined) {
+        return queued;
+      }
+      if (stopReason !== undefined || finished || !workInFlight()) {
+        return QUIESCENT as unknown as EventObject;
+      }
+      return new Promise<EventObject>((resolve) => {
+        wake = resolve as (event: EventObject | typeof QUIESCENT) => void;
+      });
+    },
+    emitEvent: (
+      source: AnyActorRef & { _emit?: (event: EventObject) => void },
+      event: EventObject,
+    ) => {
+      if ((source as { address?: string }).address === execution.rootAddress) {
+        emitFromRoot(event);
+      } else {
+        source._emit?.(event);
+      }
+    },
+    scheduleTimer: (source: AnyActorRef, id: string, delay: number) => {
+      const isRoot = (source as AnyActor).address === execution.rootAddress;
+      const dueAt = isRoot ? restoredTimersDueAt?.[id] : undefined;
+      if (dueAt !== undefined) {
+        delete restoredTimersDueAt![id];
+      }
+      armTimer(source, isRoot, id, dueAt === undefined ? delay : Math.max(0, dueAt - Date.now()));
+    },
+    cancelTimer: (source: AnyActorRef, id: string) => {
+      const isRoot = (source as { address?: string }).address === execution.rootAddress;
+      if (isRoot) {
+        rootTimersDueAt.delete(id);
+      }
+      if (isRoot && !inProcessTimers) {
+        (options.timers as Exclude<AgentTimerScheduler, "in-process">).cancel(id);
+        return;
+      }
+      const key = timerKey(isRoot ? undefined : source, id);
+      clearTimeout(timerHandles.get(key));
+      timerHandles.delete(key);
+    },
+    cancelAllTimers: (source: AnyActorRef) => {
+      const isRoot = (source as { address?: string }).address === execution.rootAddress;
+      if (isRoot) {
+        rootTimersDueAt.clear();
+      }
+      const prefix = timerKey(isRoot ? undefined : source, "");
+      for (const [key, handle] of timerHandles) {
+        if (key.startsWith(prefix)) {
+          clearTimeout(handle);
+          timerHandles.delete(key);
         }
-        if (stopReason !== undefined || finished || !workInFlight()) {
-          return QUIESCENT as unknown as EventObject;
-        }
-        return new Promise<EventObject>((resolve) => {
-          wake = resolve as (event: EventObject | typeof QUIESCENT) => void;
-        });
-      },
-      emitEvent: (
-        source: AnyActorRef & { _emit?: (event: EventObject) => void },
-        event: EventObject,
-      ) => {
-        if ((source as { address?: string }).address === execution.rootAddress) {
-          emitFromRoot(event);
-        } else {
-          source._emit?.(event);
-        }
-      },
-      scheduleTimer: (source: AnyActorRef, id: string, delay: number) =>
-        armTimer(
-          source,
-          (source as { address?: string }).address === execution.rootAddress,
-          id,
-          delay,
-        ),
-      cancelTimer: (source: AnyActorRef, id: string) => {
-        const isRoot = (source as { address?: string }).address === execution.rootAddress;
-        if (isRoot) {
-          rootTimersDueAt.delete(id);
-        }
-        if (isRoot && !inProcessTimers) {
-          (options.timers as Exclude<AgentTimerScheduler, "in-process">).cancel(id);
-          return;
-        }
-        const key = timerKey(isRoot ? undefined : source, id);
-        clearTimeout(timerHandles.get(key));
-        timerHandles.delete(key);
-      },
-      cancelAllTimers: (source: AnyActorRef) => {
-        const isRoot = (source as { address?: string }).address === execution.rootAddress;
-        if (isRoot) {
-          rootTimersDueAt.clear();
-        }
-        const prefix = timerKey(isRoot ? undefined : source, "");
-        for (const [key, handle] of timerHandles) {
-          if (key.startsWith(prefix)) {
-            clearTimeout(handle);
-            timerHandles.delete(key);
-          }
-        }
-      },
-    } as unknown as Parameters<typeof createDurable<TMachine>>[1],
-    inspect ? { inspect } : undefined,
-  );
+      }
+    },
+  } as unknown as Parameters<typeof createDurable<TMachine>>[1];
+  execution = createDurable(boundMachine, durableAdapter, inspect ? { inspect } : undefined);
 
   // The run-level error cause ladder.
   const runErrorCause = (error: unknown): AgentRunErrorCause =>
@@ -2573,49 +2574,49 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     });
   };
 
-  // Restore work XState's durable loop does not restart on its own: children
-  // that were running when the snapshot was persisted (a long-lived child
-  // machine, an in-flight request) and root timers that were armed. The
-  // runtime is attached to the restored system by one probe transition whose
-  // result is discarded — `transition` is pure, so the machine never sees it.
+  // Compatibility for pinned XState alpha.57, before execution.restore().
+  // Bind runtime operations directly: a probe event can trigger wildcard
+  // transitions and advance effect IDs even when its result is discarded.
   const reviveRestored = (restored: AnyMachineSnapshot): void => {
-    try {
-      execution.transition(
-        restored as SnapshotFrom<TMachine>,
-        {
-          type: "xstate.agent.restore",
-        } as EventFromLogic<TMachine>,
-      );
-    } catch {
-      // A machine that throws on an unknown event: its children stay as they are.
-    }
+    restoredWithoutApi = true;
+    const restoredRuntime: Partial<ActorSystemRuntime> = {
+      ...durableAdapter,
+      sendEvent: (source, target, event) => {
+        if (target.address === execution.rootAddress) {
+          enqueue(event);
+        } else {
+          deliverEvent(source, target, event);
+        }
+      },
+    };
+    const wire = (actor: AnyActor): void => {
+      actor.system.runtime = restoredRuntime;
+      for (const child of Object.values(
+        (actor.getSnapshot() as AnyMachineSnapshot).children ?? {},
+      )) {
+        if (child) wire(child as AnyActor);
+      }
+    };
+    const root = execution.getActorRef(restored as SnapshotFrom<TMachine>);
+    if (!root) throw new Error("XState could not resolve the restored root actor");
+    wire(root);
     for (const child of Object.values(
       (restored.children ?? {}) as Record<string, AnyActorRef | undefined>,
     )) {
       if (isUnstartedActor(child)) {
-        (child as AnyActorRef).subscribe({ next: recheck, complete: recheck, error: recheck });
-        (child as unknown as { start(): void }).start();
+        void durableAdapter.startActor!(child as AnyActor);
       }
     }
-    const timers = (
-      restored as {
-        timers?: Record<
-          string,
-          { id?: string; delay?: number; dueAt?: number; startedAt?: number }
-        >;
-      }
-    ).timers;
-    for (const [id, timer] of Object.entries(timers ?? {})) {
+    for (const timer of Object.values(restored.timers)) {
       const dueAt =
-        typeof timer.dueAt === "number"
-          ? timer.dueAt
-          : typeof restoredTimersDueAt?.[timer.id ?? id] === "number"
-            ? restoredTimersDueAt[timer.id ?? id]
-            : typeof timer.startedAt === "number"
-              ? timer.startedAt + (timer.delay ?? 0)
-              : undefined;
-      const remaining = dueAt !== undefined ? Math.max(0, dueAt - Date.now()) : (timer.delay ?? 0);
-      armTimer(undefined, true, timer.id ?? id, remaining);
+        typeof restoredTimersDueAt?.[timer.id] === "number"
+          ? restoredTimersDueAt[timer.id]
+          : typeof timer.startedAt === "number"
+            ? timer.startedAt + timer.delay
+            : undefined;
+      const remaining =
+        dueAt !== undefined ? Math.min(timer.delay, Math.max(0, dueAt - Date.now())) : timer.delay;
+      armTimer(undefined, true, timer.id, remaining);
     }
   };
 
@@ -2924,11 +2925,27 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         ];
       } else {
         try {
-          snapshot = (
-            boundMachine as unknown as {
-              restoreSnapshot(persisted: Snapshot<unknown>): AnyMachineSnapshot;
+          const restore = (
+            execution as DurableExecution<TMachine> & {
+              restore?: (persisted: Snapshot<unknown>) => [SnapshotFrom<TMachine>, AgentEffects];
             }
-          ).restoreSnapshot(effectiveSnapshot);
+          ).restore;
+          if (restore) {
+            [snapshot, effects] = restore.call(execution, effectiveSnapshot) as [
+              AnyMachineSnapshot,
+              AgentEffects,
+            ];
+          } else {
+            snapshot = (
+              boundMachine as unknown as {
+                restoreSnapshot(persisted: Snapshot<unknown>): AnyMachineSnapshot;
+              }
+            ).restoreSnapshot(effectiveSnapshot);
+            current = snapshot;
+            if (snapshot.status === "active" && stopReason === undefined) {
+              reviveRestored(snapshot);
+            }
+          }
         } catch (error) {
           // A snapshot this machine cannot restore fails the run on its own
           // terms rather than throwing out of the host.
@@ -2947,9 +2964,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           return [current as SnapshotFrom<TMachine>, []];
         }
         current = snapshot;
-        if (snapshot.status === "active" && stopReason === undefined) {
-          reviveRestored(snapshot);
-        }
       }
       commit(snapshot, initEvent);
       return [snapshot as SnapshotFrom<TMachine>, effects];
@@ -3006,7 +3020,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         if (finished || stopReason !== undefined || current?.status !== "active") {
           return undefined;
         }
-        const event = (await execution.waitForEvent()) as EventObject | typeof QUIESCENT;
+        // alpha.57 cannot wait until a transition has run. A restored tree
+        // uses this host's mailbox directly until the first real event.
+        const event = (await (restoredWithoutApi && execution.nextTransitionIndex === 0
+          ? durableAdapter.waitForEvent({ id: "event:restore:0", transitionIndex: 0 })
+          : execution.waitForEvent())) as EventObject | typeof QUIESCENT;
         if ((event as unknown) === QUIESCENT || stopReason !== undefined) {
           return undefined;
         }

@@ -3,7 +3,8 @@
  * mailbox hands out the first arrival, one event per transition, and a run
  * settles when nothing is in flight — not when the machine looks idle.
  */
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { createMachine, initialTransition } from "xstate";
 import { z } from "zod";
 import {
   createAgentRuntime,
@@ -46,6 +47,24 @@ function gatedExecutors(gates: Record<string, Promise<void>> = {}): {
 }
 
 describe("createAgentRuntime", () => {
+  test("restoration never probes a wildcard transition", async () => {
+    const wildcard = vi.fn(() => ({ target: "wrong" as const }));
+    const machine = createMachine({
+      id: "wildcard-restore",
+      initial: "waiting",
+      states: {
+        waiting: { on: { "*": wildcard } },
+        wrong: { type: "final" },
+      },
+    });
+    const [snapshot] = initialTransition(machine);
+    const result = await runToQuiescence(createAgentRuntime(machine), {
+      snapshot: JSON.parse(JSON.stringify(machine.getPersistedSnapshot(snapshot))),
+    });
+    expect(result.status).toBe("idle");
+    expect(result.snapshot.value).toBe("waiting");
+    expect(wildcard).not.toHaveBeenCalled();
+  });
   const sequence = setupAgent({
     context: z.object({ a: z.string().nullable(), b: z.string().nullable() }),
     output: z.object({ a: z.string().nullable(), b: z.string().nullable() }),
