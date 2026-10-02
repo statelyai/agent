@@ -1781,7 +1781,7 @@ describe("emitted events (runAgent `on`)", () => {
       context: {},
       initial: "done",
       states: { done: { type: "final" } },
-    } as never);
+    });
 
     await runToQuiescence(
       createAgentRuntime(versioned, {
@@ -3644,13 +3644,12 @@ describe("runAgent event log", () => {
         },
         waiting: { on: { APPROVE: { target: "wrapping" } } },
         wrapping: {
-          entry: (_args: never, enqueue: { raise: (event: { type: string }) => void }) =>
-            enqueue.raise({ type: "CONTINUE" }),
+          entry: (_, enq) => enq.raise({ type: "CONTINUE" }),
           on: { CONTINUE: { target: "done" } },
         },
         done: { type: "final", output: () => ({ ok: true }) },
       },
-    } as never);
+    });
 
   const executors = () => ({
     generateText: async () => ({ result: "42", usage: { totalTokens: 7 } }),
@@ -3751,7 +3750,7 @@ describe("runAgent event log", () => {
         waiting: { on: { GO: { target: "done" } } },
         done: { type: "final" },
       },
-    } as never);
+    });
 
     const firstCalls: Array<{ requestId?: string; callKey?: string }> = [];
     // The crash is driven by the run itself, not by the clock: abort only once
@@ -4265,13 +4264,12 @@ describe("runAgent event log", () => {
       states: {
         waiting: { after: { 5: { target: "beeped" } } },
         beeped: {
-          entry: (_args: never, enqueue: { raise: (event: { type: string }) => void }) =>
-            enqueue.raise({ type: "CONTINUE" }),
+          entry: (_, enq) => enq.raise({ type: "CONTINUE" }),
           on: { CONTINUE: { target: "done" } },
         },
         done: { type: "final" },
       },
-    } as never);
+    });
 
     const result = await runToQuiescence(
       createAgentRuntime(timerMachine, {
@@ -4339,12 +4337,12 @@ describe("runAgent write-ahead store", () => {
       initial: "asking",
       states: {
         asking: {
-          invoke: { id: "ask", src: "answer", input: () => ({}), onDone: { target: "waiting" } },
+          invoke: { id: "ask", src: "answer", onDone: { target: "waiting" } },
         },
         waiting: { on: { APPROVE: { target: "done" } } },
         done: { type: "final" },
       },
-    } as never);
+    });
 
   const executors = () => ({ generateText: async () => ({ result: "42" }) });
 
@@ -4449,12 +4447,12 @@ describe("runAgent write-ahead store", () => {
       context: () => ({}),
       initial: "a",
       states: {
-        a: { invoke: { id: "a", src: "answer", input: () => ({}), onDone: { target: "b" } } },
-        b: { invoke: { id: "b", src: "answer", input: () => ({}), onDone: { target: "waiting" } } },
+        a: { invoke: { id: "a", src: "answer", onDone: { target: "b" } } },
+        b: { invoke: { id: "b", src: "answer", onDone: { target: "waiting" } } },
         waiting: { on: { GO: { target: "done" } } },
         done: { type: "final" },
       },
-    } as never);
+    });
 
     const store = createInMemoryEventLogStore();
     const firstCalls: Array<{ requestId?: string; callKey?: string }> = [];
@@ -4960,15 +4958,16 @@ describe("xstate contract: snapshot identity is NOT a usable `ignored` signal", 
     expect(Object.is(before, actor.getSnapshot())).toBe(true);
   });
 
-  // Known limitation of the identity heuristic: a transition that only runs an
-  // effect leaves the snapshot object untouched, so `runAgent` reports the
-  // event as `ignored` even though the machine acted on it.
-  test("an effect-only transition returns the SAME snapshot object", () => {
+  // Since xstate 6.0.0-alpha.61 a handled event always yields a new snapshot
+  // object, even when the transition only runs an effect. The runtime's
+  // `ignored` rule (same snapshot AND no effects) therefore does not report
+  // this event as ignored.
+  test("an effect-only transition returns a NEW snapshot object", () => {
     const actor = createActor(build()).start();
     const before = actor.getSnapshot();
     effects.length = 0;
     actor.send({ type: "EFFECT" } as never);
     expect(effects.length).toBeGreaterThan(0);
-    expect(Object.is(before, actor.getSnapshot())).toBe(true);
+    expect(Object.is(before, actor.getSnapshot())).toBe(false);
   });
 });

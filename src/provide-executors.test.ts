@@ -359,7 +359,7 @@ describe("provideExecutors onTrace / traceTransitions", () => {
         },
         done: { type: "final" },
       },
-    } as never);
+    });
 
     const trace: AgentTraceEvent[] = [];
     const push = (event: AgentTraceEvent) => trace.push(event);
@@ -603,10 +603,10 @@ describe("provideExecutors recursive child binding", () => {
         },
         done: {
           type: "final",
-          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line }),
+          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line! }),
         },
       },
-    } as never);
+    });
   };
 
   const buildParent = () => {
@@ -636,10 +636,10 @@ describe("provideExecutors recursive child binding", () => {
         },
         done: {
           type: "final",
-          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line }),
+          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line! }),
         },
       },
-    } as never);
+    });
 
     const parentSchemas = createAgentSchemas({
       context: z.object({ line: z.string().nullable() }),
@@ -663,10 +663,10 @@ describe("provideExecutors recursive child binding", () => {
         },
         done: {
           type: "final",
-          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line }),
+          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line! }),
         },
       },
-    } as never);
+    });
   };
 
   test("a request inside a nested child machine inherits the host executors", async () => {
@@ -736,10 +736,10 @@ describe("provideExecutors recursive child binding", () => {
         },
         done: {
           type: "final",
-          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line }),
+          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line! }),
         },
       },
-    } as never);
+    });
 
     const parentSchemas = createAgentSchemas({
       context: z.object({ line: z.string().nullable() }),
@@ -759,10 +759,10 @@ describe("provideExecutors recursive child binding", () => {
         },
         done: {
           type: "final",
-          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line }),
+          output: ({ context }: { context: { line: string | null } }) => ({ line: context.line! }),
         },
       },
-    } as never);
+    });
 
     // Passing generateText is not enough: the child needs streamText.
     expect(() =>

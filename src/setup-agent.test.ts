@@ -805,10 +805,8 @@ describe("setupAgent", () => {
       initial: "waiting",
       states: {
         waiting: {
-          always: {
-            guard: "hasPromptypo",
-            target: "done",
-          },
+          always: ({ context, guards }) =>
+            guards.hasPromptypo!({ context } as never) ? { target: "done" } : undefined,
         },
         done: { type: "final" },
       },
@@ -1837,6 +1835,7 @@ describe("setupAgent", () => {
   test("fromConfig + Ajv compileSchema: rejects a `pattern`/`minLength` violation", () => {
     // `context` is validated eagerly via `validateSchemaSync` when the machine
     // takes its initial transition, so this proves the supplied compiler is used.
+    // XState surfaces a throwing context factory as an `error` snapshot.
     const configWithPattern = {
       id: "ajv-teeth-proof",
       schemas: {
@@ -1856,7 +1855,9 @@ describe("setupAgent", () => {
     const { machine: ajvMachine } = setupAgent.fromConfig(configWithPattern, {
       compileSchema: ajvCompiler(),
     });
-    expect(() => initialAgentStep(ajvMachine, { email: "not-an-email" })).toThrow();
+    const { snapshot } = initialAgentStep(ajvMachine, { email: "not-an-email" });
+    expect(snapshot.status).toBe("error");
+    expect(String(snapshot.error)).toMatch(/context\/email must (match pattern|NOT have fewer)/);
   });
 
   test("fromConfig lowers static request workflows to agent machine steps", async () => {

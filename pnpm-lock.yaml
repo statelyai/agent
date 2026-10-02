@@ -99,8 +99,8 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@20.19.43)(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.12)(yaml@2.9.0))
       xstate:
-        specifier: 6.0.0-alpha.57
-        version: 6.0.0-alpha.57
+        specifier: 6.0.0-alpha.63
+        version: 6.0.0-alpha.63
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -180,8 +180,8 @@ importers:
         specifier: ^8.21.3
         version: 8.21.3
       xstate:
-        specifier: 6.0.0-alpha.57
-        version: 6.0.0-alpha.57
+        specifier: 6.0.0-alpha.63
+        version: 6.0.0-alpha.63
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -241,8 +241,8 @@ importers:
         specifier: ^7.0.113
         version: 7.0.113(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.57
-        version: 6.0.0-alpha.57
+        specifier: 6.0.0-alpha.63
+        version: 6.0.0-alpha.63
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -269,8 +269,8 @@ importers:
         specifier: ^7.0.113
         version: 7.0.113(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.57
-        version: 6.0.0-alpha.57
+        specifier: 6.0.0-alpha.63
+        version: 6.0.0-alpha.63
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -321,8 +321,8 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
       xstate:
-        specifier: 6.0.0-alpha.57
-        version: 6.0.0-alpha.57
+        specifier: 6.0.0-alpha.63
+        version: 6.0.0-alpha.63
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -351,8 +351,8 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
       xstate:
-        specifier: 6.0.0-alpha.57
-        version: 6.0.0-alpha.57
+        specifier: 6.0.0-alpha.63
+        version: 6.0.0-alpha.63
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -6386,10 +6386,6 @@ packages:
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==, tarball: https://registry.npmjs.org/safer-buffer/-/safer-buffer-2.1.2.tgz}
 
-  saxes@6.0.0:
-    resolution: {integrity: sha512-xAg7SOnEhrm5zI3puOOKyy1OMcMlIJZYNJY7xLBwSze0UjhPLnWfj2GF2EpT0jmzaJKIWKHLsaSSajf35bcYnA==, tarball: https://registry.npmjs.org/saxes/-/saxes-6.0.0.tgz}
-    engines: {node: '>=v12.22.7'}
-
   scheduler@0.27.0:
     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==, tarball: https://registry.npmjs.org/scheduler/-/scheduler-0.27.0.tgz}
 
@@ -7108,14 +7104,11 @@ packages:
     resolution: {integrity: sha512-bx8Q1STctnNaaDymWnkfQLKofs0mGNN7rLLapJlGuV3VlvegD7Ls4ggMjE3aUSWItCCzU0PEv45lI87iSigiCA==, tarball: https://registry.npmjs.org/xmlbuilder2/-/xmlbuilder2-4.0.3.tgz}
     engines: {node: '>=20.0'}
 
-  xmlchars@2.2.0:
-    resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==, tarball: https://registry.npmjs.org/xmlchars/-/xmlchars-2.2.0.tgz}
-
   xstate@5.32.5:
     resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.32.5.tgz}
 
-  xstate@6.0.0-alpha.57:
-    resolution: {integrity: sha512-Tg7zJ9uft+mihyB35Ups0lm8RmaVNjT8vbchz104WsK6d558GmY5cBabDiWoI6qQPCTddRTSPEEyNi5ICSrK5w==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.57.tgz}
+  xstate@6.0.0-alpha.63:
+    resolution: {integrity: sha512-Rotr6iQ1fuikVy7AGZ6dHQQ2hJTXFZ4o1HXSKp+EJKz7qERjIVDqvjW7P1qu1oSV7FmzE50QAM84zDfNKOsJ1g==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.63.tgz}
     hasBin: true
 
   xxhash-wasm@1.1.0:
@@ -13208,10 +13201,6 @@ snapshots:
 
   safer-buffer@2.1.2: {}
 
-  saxes@6.0.0:
-    dependencies:
-      xmlchars: 2.2.0
-
   scheduler@0.27.0: {}
 
   section-matter@1.0.0:
@@ -13907,13 +13896,9 @@ snapshots:
       '@oozcitak/util': 10.0.0
       js-yaml: 4.3.1
 
-  xmlchars@2.2.0: {}
-
   xstate@5.32.5: {}
 
-  xstate@6.0.0-alpha.57:
-    dependencies:
-      saxes: 6.0.0
+  xstate@6.0.0-alpha.63: {}
 
   xxhash-wasm@1.1.0: {}
 

@@ -1,11 +1,9 @@
 import {
   createAsyncLogic,
-  deliverEvent,
   getNextTransitions,
   isMachineSnapshot,
   stopActor,
   type AnyActor,
-  type ActorSystemRuntime,
   type AnyActorLogic,
   type AnyActorRef,
   type AnyMachineSnapshot,
@@ -1929,11 +1927,6 @@ function assertThreadMatchesEvents(
   }
 }
 
-/** A restored child that was never started (XState's `NotStarted` processing status). */
-function isUnstartedActor(actor: unknown): actor is AnyActorRef {
-  return (actor as { _processingStatus?: number } | undefined)?._processingStatus === 0;
-}
-
 /** Why a run stopped early, when it did (a cancel, or a journal that stopped being durable). */
 type StopReason = { cause: "aborted" | "journal" | "machine"; error: unknown };
 
@@ -2483,7 +2476,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         };
 
   let execution!: DurableExecution<TMachine>;
-  let restoredWithoutApi = false;
   const durableAdapter = {
     startActor: (actor: AnyActorRef) => {
       // Every actor the run starts is watched, so quiescence is noticed the
@@ -2567,62 +2559,16 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
 
   const commit = (snapshot: AnyMachineSnapshot, event: EventObject): void => {
     current = snapshot;
+    // The run handles a machine error itself (`finish` reports it). Without
+    // an observer, XState reports the durable root's error as unhandled.
+    if (snapshot.status === "error") {
+      execution.getActorRef(snapshot as SnapshotFrom<TMachine>)?.subscribe({ error: () => {} });
+    }
     onTrace({
       type: "machine.transition",
       snapshot: snapshot as SnapshotFrom<TMachine>,
       event: event as EventFromLogic<TMachine>,
     });
-  };
-
-  // Compatibility for pinned XState alpha.57, before execution.restore().
-  // Bind runtime operations directly: a probe event can trigger wildcard
-  // transitions and advance effect IDs even when its result is discarded.
-  const reviveRestored = (restored: AnyMachineSnapshot): void => {
-    restoredWithoutApi = true;
-    const restoredRuntime: Partial<ActorSystemRuntime> = {
-      ...durableAdapter,
-      sendEvent: (source, target, event) => {
-        if (target.address === execution.rootAddress) {
-          enqueue(event);
-        } else {
-          deliverEvent(source, target, event);
-        }
-      },
-    };
-    const wiredSystems = new Set<AnyActor["system"]>();
-    const wire = (actor: AnyActor): void => {
-      if (!wiredSystems.has(actor.system)) {
-        wiredSystems.add(actor.system);
-        actor.system.runtime = restoredRuntime;
-        if (inspect) actor.system.inspect(inspect);
-      }
-      for (const child of Object.values(
-        (actor.getSnapshot() as AnyMachineSnapshot).children ?? {},
-      )) {
-        if (child) wire(child as AnyActor);
-      }
-    };
-    const root = execution.getActorRef(restored as SnapshotFrom<TMachine>);
-    if (!root) throw new Error("XState could not resolve the restored root actor");
-    wire(root);
-    for (const child of Object.values(
-      (restored.children ?? {}) as Record<string, AnyActorRef | undefined>,
-    )) {
-      if (isUnstartedActor(child)) {
-        void durableAdapter.startActor!(child as AnyActor);
-      }
-    }
-    for (const timer of Object.values(restored.timers)) {
-      const dueAt =
-        typeof restoredTimersDueAt?.[timer.id] === "number"
-          ? restoredTimersDueAt[timer.id]
-          : typeof timer.startedAt === "number"
-            ? timer.startedAt + timer.delay
-            : undefined;
-      const remaining =
-        dueAt !== undefined ? Math.min(timer.delay, Math.max(0, dueAt - Date.now())) : timer.delay;
-      armTimer(undefined, true, timer.id, remaining);
-    }
   };
 
   /** True for a child completion/failure whose child is no longer running under the current state. */
@@ -2930,27 +2876,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         ];
       } else {
         try {
-          const restore = (
-            execution as DurableExecution<TMachine> & {
-              restore?: (persisted: Snapshot<unknown>) => [SnapshotFrom<TMachine>, AgentEffects];
-            }
-          ).restore;
-          if (restore) {
-            [snapshot, effects] = restore.call(execution, effectiveSnapshot) as [
-              AnyMachineSnapshot,
-              AgentEffects,
-            ];
-          } else {
-            snapshot = (
-              boundMachine as unknown as {
-                restoreSnapshot(persisted: Snapshot<unknown>): AnyMachineSnapshot;
-              }
-            ).restoreSnapshot(effectiveSnapshot);
-            current = snapshot;
-            if (snapshot.status === "active" && stopReason === undefined) {
-              reviveRestored(snapshot);
-            }
-          }
+          // Restores the checkpoint without sending the machine an event; its
+          // effects restart the children and timers that were in flight.
+          [snapshot, effects] = execution.restore(effectiveSnapshot) as [
+            AnyMachineSnapshot,
+            AgentEffects,
+          ];
         } catch (error) {
           // A snapshot this machine cannot restore fails the run on its own
           // terms rather than throwing out of the host.
@@ -3025,11 +2956,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         if (finished || stopReason !== undefined || current?.status !== "active") {
           return undefined;
         }
-        // alpha.57 cannot wait until a transition has run. A restored tree
-        // uses this host's mailbox directly until the first real event.
-        const event = (await (restoredWithoutApi && execution.nextTransitionIndex === 0
-          ? durableAdapter.waitForEvent({ id: "event:restore:0", transitionIndex: 0 })
-          : execution.waitForEvent())) as EventObject | typeof QUIESCENT;
+        const event = (await execution.waitForEvent()) as EventObject | typeof QUIESCENT;
         if ((event as unknown) === QUIESCENT || stopReason !== undefined) {
           return undefined;
         }
