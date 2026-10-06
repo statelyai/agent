@@ -1,5 +1,42 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.27
+
+### Minor Changes
+
+- [#142](https://github.com/statelyai/agent/pull/142) [`b65991b`](https://github.com/statelyai/agent/commit/b65991b505625283903a30fdd899a9d4f1a101bd) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Breaking: `runAgent` is replaced by a small loop you can run anywhere.**
+
+  `createAgentRuntime(machine, options)` returns the helpers for one run, built on XState's durable transition loop (`xstate/durable`):
+
+  ```ts
+  const runtime = createAgentRuntime(machine, { executors });
+  let [state, effects] = await runtime.start({ input });
+  await runtime.execute(effects);
+  for (let event; (event = await runtime.nextEvent()); ) {
+    [state, effects] = runtime.transition(state, event);
+    await runtime.execute(effects);
+  }
+  const result = await runtime.finish(); // done | idle | error
+  ```
+
+  `runToQuiescence(runtime, init)` is that loop as one call, for scripts and request handlers. Migrate `runAgent(machine, { executors, input, snapshot, event })` to `runToQuiescence(createAgentRuntime(machine, { executors }), { input, snapshot, event })`.
+
+  - `execute` only starts work. Every completion, child message and timer lands in one mailbox, and `nextEvent` hands out whichever arrived first, one event per transition.
+  - A run settles when nothing is in flight: no request, child or in-process timer still working. It no longer settles because a state looks idle.
+  - Root `after` timers run in-process by default. Pass `timers: { schedule, cancel }` to own them in a durable scheduler; the run then settles with the timer pending, and the host delivers `{ type: "xstate.timer", id }` (`AgentTimerEvent`) when it fires.
+  - Cancelling a run aborts its in-flight requests, and the persisted snapshot still resumes the work the cancel cut off.
+  - Bind-time errors (a missing executor, an unbound actor) throw from `createAgentRuntime` instead of rejecting a promise.
+  - Emitted events are reported after the transition that caused them.
+
+  Removed: `runAgent`, `runAgentStream`, `AgentStreamEvent`, the public step functions (`initialAgentStep`, `transitionAgentStep`, `resolveAgentStep`, `rejectAgentStep`, `executeAgentRequest`, `AgentStep`), `setupAgent({ isIdle })`, `fromConfig`'s `isIdle` option and the config's `idleTags`. `isAgentIdle` stays, to tell a human wait from a stuck machine once a run settles. Renamed: `RunAgentOptions` → `AgentRuntimeOptions` + `AgentRunInit`, `RunAgentResult` → `AgentRunResult`, `RunAgentErrorCause` → `AgentRunErrorCause`.
+
+- [#142](https://github.com/statelyai/agent/pull/142) [`a5edd87`](https://github.com/statelyai/agent/commit/a5edd870ec795f6d0c8b54cf6478e184415296e0) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Restore agent runs with XState's `execution.restore()` instead of sending a
+  synthetic machine event, so wildcard transitions are not triggered during
+  restoration and in-flight children and pending timers resume through the
+  durable adapter. Preserve timer deadlines and stop in-flight child requests
+  through XState's public runtime API. Require XState `6.0.0-alpha.64` (pinned
+  while its experimental durable APIs evolve).
+
 ## 2.0.0-alpha.26
 
 ### Minor Changes
