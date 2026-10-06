@@ -9,7 +9,7 @@ description: Author an agent machine as a JSON or YAML config and lower it into 
 
 This page covers authoring an agent machine as a JSON or YAML config instead of TypeScript.
 
-Describe the machine as a config and pass it to `setupAgent.fromConfig(...)`, imported from the same module as `setupAgent`. It produces the same runnable XState machine that `setupAgent(...)` builds by hand. Configs support states, choice routing, guard-expression transitions, emitted progress events, text requests, decisions, and idle steps. Only the authoring format changes.
+Describe the machine as a config and pass it to `setupAgent.fromConfig(...)`, imported from the same module as `setupAgent`. It produces the same runnable XState machine that `setupAgent(...)` builds by hand. Configs support states, choice routing, guard-expression transitions, emitted progress events, text requests, decisions, and human waits. Only the authoring format changes.
 
 ```ts
 import { setupAgent } from "@statelyai/agent";
@@ -23,7 +23,7 @@ const { machine, schemas } = setupAgent.fromConfig(config, {
 
 `fromConfig(...)` returns two values:
 
-- `machine`: the runnable XState machine, ready for `runAgent(...)`.
+- `machine`: the runnable XState machine, ready for `createAgentRuntime(...)`.
 - `schemas`: the compiled `AgentSchemaPack`. It exposes `context`, `events`, `emitted`, `input`, `output`, and `meta` as Standard Schema validators, for host-side validation and tooling.
 
 A config is portable. You can generate it from a model, store it in a database row, or edit it in a visual builder. It runs the same way as a hand-authored [machine](machines.md).
@@ -55,7 +55,9 @@ Validation covers shape only. It does not check that a named guard, action, or a
 
 Run `validateAgentConfig` first. `fromConfig(...)` does not validate the config against the JSON Schema, so a malformed config reaches lowering unchecked.
 
-`fromConfig(...)` throws plain `Error`s, and only for lowering problems: an unknown state target, a guard or action name with no implementation, an `onDone` on an `agent.decide` invoke, a reserved `'.'` in a key, a malformed `choice` branch, and an `idleTags` entry that no state declares.
+`fromConfig(...)` throws plain `Error`s for lowering problems such as an unknown
+state target, a missing guard/action implementation, an `onDone` on an
+`agent.decide` invoke, a reserved `'.'` in a key, or a malformed `choice` branch.
 
 ### Reserved key prefix
 
@@ -72,7 +74,6 @@ Two fields are exempt from template evaluation. State, invoke, and transition `m
 The config below drives the examples on the rest of this page. The model triages a ticket as escalate or reply, drafts a reply, then waits for a human to approve or reject. The equivalent JSON ships at [examples/json-agent/workflow.json](../examples/json-agent/workflow.json) and is run by [examples/json-agent/index.ts](../examples/json-agent/index.ts). Model IDs are illustrative. Substitute your provider's current models. The config is shown as YAML for readability.
 
 <!-- viz: support-ticket machine: triaging (agent.decide) -> resolved on ESCALATE, -> drafting on REPLY; drafting -> awaitingApproval on draft onDone; awaitingApproval -> resolved on APPROVE or REJECT; mark awaitingApproval as the idle state -->
-
 
 ```yaml
 id: support-ticket-json
@@ -211,11 +212,11 @@ const { machine } = setupAgent.fromConfig(config, { compileSchema: ajvCompileSch
 
 A `requests` entry can also declare these fields.
 
-| Field | Value | Effect |
-| --- | --- | --- |
-| `tools` | Map of tool name to `{ description?, inputSchema?, outputSchema? }`, where the schemas are JSON Schemas | Passes the tools to the model alongside the request. |
-| `toolChoice` | `"auto"`, `"none"`, `"required"`, or `{ type: "tool", name }` | Controls whether the model must call a tool. |
-| `includeReasoning` | `true` | Opts into the `reasoning` field of the provider's structured output. |
+| Field              | Value                                                                                                   | Effect                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `tools`            | Map of tool name to `{ description?, inputSchema?, outputSchema? }`, where the schemas are JSON Schemas | Passes the tools to the model alongside the request.                 |
+| `toolChoice`       | `"auto"`, `"none"`, `"required"`, or `{ type: "tool", name }`                                           | Controls whether the model must call a tool.                         |
+| `includeReasoning` | `true`                                                                                                  | Opts into the `reasoning` field of the provider's structured output. |
 
 ```yaml
 requests:
@@ -298,54 +299,46 @@ Use `actors` for work the host executes directly. Use `requests` for model calls
 
 ## Running configs
 
-A machine built by `fromConfig(...)` runs through `runAgent(...)` like any other agent machine. Pass the machine input, the host `executors`, and `on` handlers for emitted events.
+A machine built by `fromConfig(...)` runs through `createAgentRuntime` like any
+other agent machine. Pass executors and observation handlers when creating the
+runtime; pass machine input when starting it.
 
 ```ts no-check
-const result = await runAgent(machine, {
-  input: { ticket: "My download link 404s." },
-  executors: { decide, generateText },
-  on: { TRIAGED: (event) => console.log(event.route) },
-});
+const result = await runToQuiescence(
+  createAgentRuntime(machine, {
+    executors: { decide, generateText },
+    on: { TRIAGED: (event) => console.log(event.route) },
+  }),
+  { input: { ticket: "My download link 404s." } },
+);
 ```
 
 Executors return these shapes.
 
-| Executor | Returns | Notes |
-| --- | --- | --- |
-| `decide` | `{ event: { type, ...payload } }` | The chosen machine event. A bare `{ type }` throws a descriptive error. |
-| `generateText`, `streamText` | `{ result, messages? }` | `result` matches the request's `output` schema; `messages` are the provider's response messages. |
+| Executor                     | Returns                           | Notes                                                                                            |
+| ---------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `decide`                     | `{ event: { type, ...payload } }` | The chosen machine event. A bare `{ type }` throws a descriptive error.                          |
+| `generateText`, `streamText` | `{ result, messages? }`           | `result` matches the request's `output` schema; `messages` are the provider's response messages. |
 
 A run settles in one of two ways.
 
 - `{ status: 'done', output }`: the machine reached a final state.
 - `{ status: 'idle', snapshot }`: the machine paused at an idle state. Persist `snapshot`, then resume when the event arrives.
 
-<!-- viz: run lifecycle: runAgent -> running -> settles as { status: 'done', output } or { status: 'idle', snapshot }, with the idle branch looping back into runAgent({ snapshot, event }) -->
-
+<!-- viz: run lifecycle: createAgentRuntime -> runToQuiescence -> done or idle, with idle resuming through a fresh runtime plus snapshot and event -->
 
 ```ts no-check
-result = await runAgent(machine, { snapshot, event: { type: "APPROVE" }, executors });
+result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+  snapshot,
+  event: { type: "APPROVE" },
+});
 ```
 
-> **Note:** By default, an **idle state** is an active snapshot that accepts an external event anywhere in its active hierarchy, or has `meta.interaction`. `runAgent` also verifies that no invoked child, eventless transition, or delayed transition is still working.
+> **Note:** A run settles idle only after its mailbox is empty and no child,
+> request, or in-process timer remains active. `isAgentIdle(snapshot)` tells you
+> whether that settled snapshot is waiting for an external event or interaction.
 >
 > **Note:** Two `prompt`-shaped fields sit at different layers. A `requests` entry's `prompt` is the text sent to the model. An `invoke`'s `input` is the data passed to the invoked source. That is either a request's typed input, or an `agent.decide` inline input carrying its own `model`, `prompt`, and `allowedEvents`.
-
-## Idle declaration
-
-`runAgent` uses its exported `isAgentIdle(snapshot)` rule by default. A config can replace that predicate with `idleTags`; this is the declarative form of `setupAgent({ isIdle })`, because JSON cannot carry a function.
-
-```yaml
-idleTags: [awaiting-approval]
-states:
-  awaitingApproval:
-    tags: [awaiting-approval]
-    on:
-      APPROVE: { target: resolved }
-```
-
-- `fromConfig(...)` converts the list into a `snapshot.hasTag(...)` predicate. Every listed tag must appear in some state's `tags`. An unused entry is a build-time error.
-- For predicates that a tag list cannot express, pass a function instead: `setupAgent.fromConfig(config, { isIdle })`. The function takes precedence over `idleTags` and remains machine-owned. Import `isAgentIdle` and call it inside that predicate when expanding, rather than replacing, the default rule.
 
 ## Decisions from JSON
 
@@ -393,7 +386,9 @@ states:
     type: final
 ```
 
-Declare emitted event payloads under `schemas.emitted`. Hosts receive them through `runAgent(..., { on: { SCORED: handler } })`, the same as for hand-authored machines that use `enq.emit(...)`.
+Declare emitted event payloads under `schemas.emitted`. Hosts receive them through
+`createAgentRuntime(machine, { on: { SCORED: handler } })`, the same as for
+hand-authored machines that use `enq.emit(...)`.
 
 ## Limits of the data form
 

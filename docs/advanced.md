@@ -1,6 +1,6 @@
 # Advanced: bare XState actors and hand-written executors
 
-Most hosts call `runAgent`, or drive the [step API](steps.md) themselves. This page covers the two things underneath those: binding executors onto a machine so it runs as a plain XState actor, and writing an executor without an adapter.
+Most hosts call `runToQuiescence`, or drive the [runtime loop](steps.md) themselves. This page covers the two things underneath those: binding executors onto a machine so it runs as a plain XState actor, and writing an executor without an adapter.
 
 ## `provideExecutors`: the machine as a plain actor
 
@@ -21,7 +21,7 @@ Reach for this when:
 - **The agent machine is a child in a larger XState system.** Invoke or spawn the bound machine from a parent machine like any other actor logic; its decisions and requests run inside the parent's actor system.
 - **The actor is long-lived.** A chat session, a game loop, or a device controller keeps one actor running across many human turns instead of resuming from a snapshot per turn.
 
-What you give up compared with `runAgent`: there is no idle settling, no `maxModelCalls` cap, no event log or `snapshot`/`event` resume options, and no `run.start`/`run.end` trace boundary. The actor runs until you stop it. Usage events (`@agent.usage`) are still delivered to the machine, and `onTrace` still receives the request-level trace.
+What you give up compared with `runToQuiescence`: there is no idle settling, no `maxModelCalls` cap, no event log or `snapshot`/`event` resume options, and no `run.start`/`run.end` trace boundary. The actor runs until you stop it. Usage events (`@agent.usage`) are still delivered to the machine, and `onTrace` still receives the request-level trace.
 
 ```ts no-check
 const bound = provideExecutors(machine, executors, {
@@ -32,9 +32,9 @@ const bound = provideExecutors(machine, executors, {
 
 - `actors` merges extra actor sources before binding, the same shape as `machine.provide({ actors })`.
 - `onChunk` receives every chunk of every `mode: 'stream'` request.
-- `onTrace` receives `request.start`, `request.end`, `request.error`, and `stream.chunk` events with the same envelope `runAgent` emits, minted per root actor. Pair it with `traceTransitions` on the actor's `inspect` option to fold `machine.transition` events into the same stream.
+- `onTrace` receives `request.start`, `request.end`, `request.error`, and `stream.chunk` events with the same envelope `runToQuiescence` emits, minted per root actor. Pair it with `traceTransitions` on the actor's `inspect` option to fold `machine.transition` events into the same stream.
 
-`provideExecutors` does not descend into invoked child machines. A child with its own agent requests needs its own `provideExecutors(...)` call, or `bindRequestExecutor` on its request logic (below). `runAgent` rebinds children for you.
+`provideExecutors` does not descend into invoked child machines. A child with its own agent requests needs its own `provideExecutors(...)` call, or `bindRequestExecutor` on its request logic (below). `runToQuiescence` rebinds children for you.
 
 ## Writing an executor by hand
 
@@ -60,7 +60,7 @@ const executors = {
 
 - `result` is the value: the text, or the structured object the request's output schema describes. Core validates it against that schema.
 - `messages` are the provider's response messages for this call. They arrive on `output.messages` in `onDone`, so the machine decides what to keep.
-- `usage` is this call's token usage on the flat `inputTokens`/`outputTokens`/`totalTokens` names. `runAgent` folds it into the run's aggregate and the `@agent.usage` event.
+- `usage` is this call's token usage on the flat `inputTokens`/`outputTokens`/`totalTokens` names. `runToQuiescence` folds it into the run's aggregate and the `@agent.usage` event.
 - Anything else (`finishReason`, `toolCalls`, `raw`) rides along to `onResult(request, { raw })` and the `request.end` trace.
 
 `streamText` returns the same shape once the stream finishes and calls `info.onChunk` for each chunk on the way. `decide` returns `{ event }`, the machine event the model chose from `request.events`; see [Decisions](decisions.md).
@@ -73,7 +73,9 @@ A structured request carries `request.outputSchema`. Ask the provider for the sc
 import { getJsonSchema, parseProviderOutput, providerOutputSchema } from "@statelyai/agent";
 
 if (request.outputSchema) {
-  const schema = providerOutputSchema(request.outputSchema, { reasoning: request.includeReasoning });
+  const schema = providerOutputSchema(request.outputSchema, {
+    reasoning: request.includeReasoning,
+  });
   const jsonSchema = await getJsonSchema(schema);
   const raw = await mySdk.generateJson({ ...call, schema: jsonSchema });
   return parseProviderOutput(request, raw); // { result, reasoning? }

@@ -8,14 +8,11 @@ The [event log](event-log.md) is the durable artifact. A snapshot is a cache ove
 
 ## Persist the log
 
-Hand `runAgent` a [store](event-log.md#stores) and the thread it owns. Entries are written as they are accepted, and no model call runs against a log that is not yet durable.
+Hand `runToQuiescence` a [store](event-log.md#stores) and the thread it owns. Entries are written as they are accepted, and no model call runs against a log that is not yet durable.
 
 ```ts no-check
-const result = await runAgent(machine, {
+const result = await runToQuiescence(createAgentRuntime(machine, { store, threadId, executors }), {
   input,
-  store,
-  threadId,
-  executors
 });
 ```
 
@@ -31,11 +28,8 @@ const result = await runAgent(machine, {
 With a `store`, the thread's log is the resume: pass no `events` and no snapshot.
 
 ```ts no-check
-const resumed = await runAgent(machine, {
-  store,
-  threadId,
+const resumed = await runToQuiescence(createAgentRuntime(machine, { store, threadId, executors }), {
   event: { type: "APPROVE" },
-  executors
 });
 ```
 
@@ -53,12 +47,14 @@ try {
   return Response.json({ error: String(error) }, { status: 400 });
 }
 
-const result = await runAgent(machine, { store, threadId, event, executors });
+const result = await runToQuiescence(createAgentRuntime(machine, { store, threadId, executors }), {
+  event,
+});
 
 if (result.ignored) {
   return Response.json(
     { error: `'${result.ignored.type}' does not apply right now` },
-    { status: 409 }
+    { status: 409 },
   );
 }
 ```
@@ -66,7 +62,7 @@ if (result.ignored) {
 - `parseAgentEvent` takes `unknown`: hand over the parsed JSON body as-is. It accepts the machine itself (reading the event schemas `setupAgent` registered) or any snapshot of it, and returns the event typed as the machine's event union.
 - It throws `AgentInvalidEventPayloadError` (code `invalid-event-payload`) when the payload is not an object with a string `type`, when the type is a reserved `@agent.*` type, or when the fields fail the registered schema. Answer that with a 400.
 - On success the schema-parsed event is returned: defaults filled, transforms applied.
-- `parseAgentEvent` does not check whether the current state handles the event, and `runAgent` adds no validation of its own.
+- `parseAgentEvent` does not check whether the current state handles the event, and `runToQuiescence` adds no validation of its own.
 - An event the resumed state has no transition for is ignored. The run settles normally and `result.ignored` carries the event. It is journaled like any other external input, so replay ignores it again.
 
 - Recorded results are replayed, never re-executed.
@@ -81,11 +77,10 @@ if (result.ignored) {
 Pass `snapshot` alongside `events` to skip the fold:
 
 ```ts no-check
-const resumed = await runAgent(machine, {
+const resumed = await runToQuiescence(createAgentRuntime(machine, { executors }), {
   events: await store.read(threadId),
   snapshot: await snapshots.get(threadId),
   event: { type: "APPROVE" },
-  executors
 });
 ```
 
@@ -102,10 +97,9 @@ Resuming from a snapshot with no log also yields a self-contained log — the ne
 A log is truth within one `machine.version`. Across a version change, pass the old `events` together with a `snapshot`:
 
 ```ts no-check
-const migrated = await runAgent(machine, {
+const migrated = await runToQuiescence(createAgentRuntime(machine, { executors }), {
   events: oldEntries,
   snapshot: oldSnapshot,
-  executors
 });
 ```
 
@@ -131,14 +125,11 @@ const machine = setup.createMachine({
 
 Implement `AgentEventLogStore` against the host's database, or append through the framework's own mechanism: a Durable Object, workflow checkpoint, or server action store. See [Stores](event-log.md#stores) and [Hosts and executors](hosts.md).
 
-The recipe per turn is one call: `runAgent` reads the thread, runs, and writes back.
+The recipe per turn is one call: `runToQuiescence` reads the thread, runs, and writes back.
 
 ```ts no-check
-const result = await runAgent(machine, {
-  store,
-  threadId,
+const result = await runToQuiescence(createAgentRuntime(machine, { store, threadId, executors }), {
   event: incoming,
-  executors
 });
 ```
 

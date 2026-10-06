@@ -2,36 +2,36 @@
 
 The machine is the artifact. Runners only decide how one host executes its XState effects.
 
-| Need                        | Use                                                                                 |
-| --------------------------- | ----------------------------------------------------------------------------------- |
-| One request/response run    | `runAgent`                                                                          |
-| Several idle/resume turns   | `runAgent` in a `while` loop over `result.persist()`                                |
-| Async progress feed         | `runAgentStream`                                                                    |
-| A long-lived actor          | `provideExecutors` + XState `createActor`, see [Advanced](advanced.md)              |
-| A custom or durable runtime | The step API, or `createDurable` from `xstate/durable`                              |
+| Need                             | Use                                                                    |
+| -------------------------------- | ---------------------------------------------------------------------- |
+| One request/response run         | `runToQuiescence(createAgentRuntime(...), init)`                       |
+| Several idle/resume turns        | `runToQuiescence` in a loop over `result.persist()`                    |
+| Transition-by-transition control | The explicit `AgentRuntime` loop                                       |
+| A long-lived actor               | `provideExecutors` + XState `createActor`, see [Advanced](advanced.md) |
 
 ## Managed run
 
 ```ts no-check
-const result = await runAgent(machine, { input, executors });
+const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 
 if (result.status === "idle") {
   await storage.save(result.persist());
 }
 ```
 
-`runAgent` binds Agent request executors and runs an ordinary XState actor until it is done, idle, or errors. It does not own storage, retries, or a durable journal.
+`createAgentRuntime` binds request executors. `runToQuiescence` drives its durable
+transition loop until the run is done, idle, or errors. Storage remains host-owned.
 
 ## Idle/resume loop
 
 ```ts no-check
-let result = await runAgent(machine, { input, executors });
+let result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 
 while (result.status === "idle") {
   const snapshot = result.persist();
   await storage.save(snapshot);
   const event = await nextExternalEvent(result.snapshot);
-  result = await runAgent(machine, { snapshot, event, executors });
+  result = await runToQuiescence(createAgentRuntime(machine, { executors }), { snapshot, event });
 }
 ```
 
@@ -43,30 +43,13 @@ When your application owns the actor, or the agent machine is a child in a large
 
 ## The portable loop
 
-Any host can run the same artifact with the pure step API. A step is the snapshot plus the model requests the machine is waiting on. Nothing executes until the host decides how:
-
-```ts no-check
-let step = initialAgentStep(machine, input);
-
-while (!step.done) {
-  const [request] = step.requests;
-  if (!request) break; // idle: waiting on an external event
-  if (request.kind === "decision") {
-    const event = await resolveDecision(request, executors, { canTake: (e) => step.snapshot.can(e) });
-    step = transitionAgentStep(machine, step, event);
-  } else {
-    const { result, messages } = await executeAgentRequest(request, executors);
-    step = resolveAgentStep(machine, step, request, { result, messages });
-  }
-}
-
-return step.snapshot.output;
-```
-
-See [The step API](steps.md).
+Any host can drive `AgentRuntime` one transition at a time. Effects only start
+when the host calls `execute`; completions and child messages arrive through
+`nextEvent`. See [The runtime loop](steps.md).
 
 [`portable-xstate-loop`](../examples/portable-xstate-loop) expands this sketch
 into a runnable `createDurable` host. Its extra mailbox and wake-up plumbing is
 host implementation, while the Agent machine artifact stays unchanged.
 
-A durable host should use XState's `createDurable`. Its adapter owns persistence, retries, messaging, timers, and child execution. Stately Agent does not wrap those framework responsibilities.
+A durable host owns persistence, retries, messaging, timers, and child execution.
+Stately Agent does not wrap those framework responsibilities.

@@ -24,15 +24,14 @@ generate → validate (validateAgentConfig) → lower (fromConfig) → lint → 
 
 <!-- viz: generation pipeline: generate -> validate (validateAgentConfig) -> lower (fromConfig) -> lint -> simulate -> run, with each failing gate feeding back into generate as a repair prompt, capped at 3 attempts -->
 
-
-| Step     | API                                       | Fails on                                                          |
-| -------- | ----------------------------------------- | ----------------------------------------------------------------- |
-| Generate | your model call                           | nothing; the model returns unvalidated text                       |
-| Validate | `validateAgentConfig`                     | malformed config shape                                            |
-| Lower    | `setupAgent.fromConfig`                   | unresolved named guards/actions, `onDone` on a decision           |
-| Lint     | `lintAgentMachine(machine, { throw: true })` | decisions with no handled events; direct unbound request sources  |
-| Simulate | `simulateAgent`                           | the scripted path never settles, such as a machine that loops     |
-| Run      | `runAgent`                                | runtime only                                                      |
+| Step     | API                                          | Fails on                                                         |
+| -------- | -------------------------------------------- | ---------------------------------------------------------------- |
+| Generate | your model call                              | nothing; the model returns unvalidated text                      |
+| Validate | `validateAgentConfig`                        | malformed config shape                                           |
+| Lower    | `setupAgent.fromConfig`                      | unresolved named guards/actions, `onDone` on a decision          |
+| Lint     | `lintAgentMachine(machine, { throw: true })` | decisions with no handled events; direct unbound request sources |
+| Simulate | `simulateAgent`                              | the scripted path never settles, such as a machine that loops    |
+| Run      | `runToQuiescence`                            | runtime only                                                     |
 
 Each gate runs on the config the model returned, in order:
 

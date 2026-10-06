@@ -16,7 +16,7 @@ const result = await generateText({ model, prompt, tools });
 you end with this:
 
 ```ts
-const result = await runAgent(machine, { input, executors });
+const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 ```
 
 The `generateText` call still exists. It moves into the executors, and the loop around it becomes the machine. The result carries `result.output`, the live `result.snapshot`, native `result.persist()`, and aggregated `result.usage`.
@@ -89,7 +89,7 @@ A tool the machine must gate is not a tool any more. It becomes an actor the mac
 import { createAsyncLogic } from "xstate";
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
-import { } from "@statelyai/agent/ai-sdk";
+import {} from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
 const models = { quick: openai("gpt-5.4-mini") };
@@ -132,9 +132,9 @@ The phases become the states `assisting`, `deciding`, `awaitingApproval`, `sendi
 
 A converted loop splits its tools in two, and the split is the whole refactor:
 
-| In the loop                    | In the machine                                                          |
-| ------------------------------ | ----------------------------------------------------------------------- |
-| A tool with no side effect you gate | Stays a tool on a [text request](text-requests.md). The host runs the tool loop inside one state. |
+| In the loop                           | In the machine                                                                                       |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| A tool with no side effect you gate   | Stays a tool on a [text request](text-requests.md). The host runs the tool loop inside one state.    |
 | A tool a human or a rule must approve | Becomes an event the model proposes through `agent.decide`, plus a state that invokes the real work. |
 
 `search` is the first kind. It stays in `tools` on the `assist` request, and `maxSteps` carries the loop's step cap. The machine stays in `assisting` for every search turn and sees one `onDone`.
@@ -213,7 +213,7 @@ Rules that were `if` statements can move into the transition instead of a separa
 
 ## Step 3: the pause as an idle state
 
-The loop's `return { pending: true }` becomes a waiting state with no invoke. `runAgent` settles as `idle` in that state instead of discarding the run. The snapshot is plain JSON, so you can persist it anywhere.
+The loop's `return { pending: true }` becomes a waiting state with no invoke. `runToQuiescence` settles as `idle` in that state instead of discarding the run. The snapshot is plain JSON, so you can persist it anywhere.
 
 ```ts no-check
     // ...
@@ -250,49 +250,52 @@ The loop's `return { pending: true }` becomes a waiting state with no invoke. `r
 
 The `meta.interaction` block is what a host renders for the pause. `setupAgent` types it against the machine's events by default, so a choice naming an undeclared event does not compile. See [Human in the loop](human-in-the-loop.md).
 
-## Step 4: the run with `runAgent`
+## Step 4: the run with `runToQuiescence`
 
-The loop ran N turns. Its replacement is `runAgent` inside a `while`: each call runs until the machine is done or pauses on a human, and the next call resumes from the persisted snapshot with the event you supply. Your existing approval callback becomes the body of the loop.
+The loop ran N turns. Its replacement is `runToQuiescence` inside a `while`: each call runs until the machine is done or pauses on a human, and the next call resumes from the persisted snapshot with the event you supply. Your existing approval callback becomes the body of the loop.
 
 ```ts
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const executors = createAiSdkExecutors({ models });
 
-let result = await runAgent(machine, {
+let result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
   input: { request: "Refund my duplicate charge" },
-  executors,
 });
 
 while (result.status === "idle") {
   const event = (await approve(result.snapshot.context.draft))
     ? { type: "APPROVE" as const }
     : { type: "REJECT" as const };
-  result = await runAgent(machine, { snapshot: result.persist(), event, executors });
+  result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+    snapshot: result.persist(),
+    event,
+  });
 }
 
 if (result.status === "done") console.log(result.output); // { sent: true, reply: '...' }
 ```
 
-For a single leg that hands the pause back to a caller, use `runAgent` and resume it later. This is the form an HTTP handler wants, because the pause outlives the request.
+For a single leg that hands the pause back to a caller, use `runToQuiescence` and resume it later. This is the form an HTTP handler wants, because the pause outlives the request.
 
 ```ts
-const result = await runAgent(machine, { input: { request: "Refund my duplicate charge" }, executors });
+const result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+  input: { request: "Refund my duplicate charge" },
+});
 
 if (result.status === "idle") {
   const wire = JSON.stringify(result.persist()); // stored by your DB or queue
   const restored = JSON.parse(wire); // read in a fresh process, with no live objects
 
-  const resumed = await runAgent(machine, {
+  const resumed = await runToQuiescence(createAgentRuntime(machine, { executors }), {
     snapshot: restored,
     event: { type: "APPROVE" },
-    executors,
   });
   if (resumed.status === "done") console.log(resumed.output);
 }
 ```
 
-<!-- viz: resume flow: runAgent settles idle -> persisted snapshot -> JSON in a store -> new process parses -> runAgent(snapshot, event) -> done -->
+<!-- viz: resume flow: runToQuiescence settles idle -> persisted snapshot -> JSON in a store -> new process creates a runtime and supplies snapshot plus event -> done -->
 
 See [Choosing a run mode](choosing-a-run-mode.md) for the full set. The executors hold your existing model code:
 
@@ -304,7 +307,7 @@ Only the `while` loop is removed. See [Hosts](hosts.md).
 
 ## Existing server integration
 
-The machine is host-agnostic, so it runs wherever your loop ran. For a request handler that runs straight through and owns its own actor, bind the executors with `provideExecutors` and run a plain XState actor instead of `runAgent`.
+The machine is host-agnostic, so it runs wherever your loop ran. For a request handler that runs straight through and owns its own actor, bind the executors with `provideExecutors` and run a plain XState actor instead of `runToQuiescence`.
 
 ```ts no-check
 import { createActor } from "xstate";
@@ -321,11 +324,11 @@ app.post("/support", async (req, res) => {
 });
 ```
 
-To handle the human pause over HTTP, persist the snapshot with `runAgent` and resume it on a later request. [Use in any stack](any-stack.md) runs one machine in local, Express, and Cloudflare hosts without machine changes.
+To handle the human pause over HTTP, persist the snapshot with `runToQuiescence` and resume it on a later request. [Use in any stack](any-stack.md) runs one machine in local, Express, and Cloudflare hosts without machine changes.
 
 ## Behavior preservation
 
-Before you ship, pin the new machine's behavior with a deterministic playthrough that uses no model. `simulateAgent` scripts the decisions and traverses the same machine transitions as `runAgent`, with no API key and no network access.
+Before you ship, pin the new machine's behavior with a deterministic playthrough that uses no model. `simulateAgent` scripts the decisions and traverses the same machine transitions as `runToQuiescence`, with no API key and no network access.
 
 ```ts
 import { simulateAgent } from "@statelyai/agent/testing";
@@ -352,7 +355,7 @@ Script one entry per decision attempt, including attempts a transition rejects. 
 
 ## Make model work explicit
 
-If an existing machine does not invoke its model work, add an ordinary XState invoke. The state graph should remain the single artifact that says what runs and when; `runAgent` does not interpret descriptions or metadata as hidden requests.
+If an existing machine does not invoke its model work, add an ordinary XState invoke. The state graph should remain the single artifact that says what runs and when; `runToQuiescence` does not interpret descriptions or metadata as hidden requests.
 
 ```ts no-check
 const machine = existingMachine.provide({ actors: { writeDraft } });

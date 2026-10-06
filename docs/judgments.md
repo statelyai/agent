@@ -224,11 +224,11 @@ Return the confidence from the actor next to `answers`, such as `{ answers, conf
 
 ## Testing without a key
 
-An evaluation model is any object that implements the AI SDK's evaluation-model spec: `specificationVersion: "v4"`, `provider`, `modelId`, `supportedQuestionTypes`, and `doEvaluate`. An object that answers from a script runs `experimental_evaluate`'s own validation and result shaping, with no key and no network. Pass it to the actor factory and bind the actor through `runAgent({ actors })` to replace the registered default.
+An evaluation model is any object that implements the AI SDK's evaluation-model spec: `specificationVersion: "v4"`, `provider`, `modelId`, `supportedQuestionTypes`, and `doEvaluate`. An object that answers from a script runs `experimental_evaluate`'s own validation and result shaping, with no key and no network. Pass it to the actor factory and bind the actor through `createAgentRuntime(machine, { actors })` to replace the registered default.
 
 ```ts
 import type { Experimental_EvaluationModel } from "ai";
-import { runAgent } from "@statelyai/agent";
+import { runToQuiescence } from "@statelyai/agent";
 import { expect, test } from "vitest";
 
 const scripted: Experimental_EvaluationModel = {
@@ -246,10 +246,12 @@ const scripted: Experimental_EvaluationModel = {
 };
 
 test("routes a double charge to billing", async () => {
-  const result = await runAgent(triageMachine, {
-    input: { ticket: "I was charged twice this month.", plan: "pro" },
-    actors: { classifyTicket: createClassifyTicket(scripted) },
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(triageMachine, {
+      actors: { classifyTicket: createClassifyTicket(scripted) },
+    }),
+    { input: { ticket: "I was charged twice this month.", plan: "pro" } },
+  );
 
   expect(result.status === "done" && result.output).toEqual({ team: "billing", urgent: false });
 });

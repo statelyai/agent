@@ -40,11 +40,11 @@ skip checks by code.
 assertAgentMachine(machine, { warnings: true });
 ```
 
-| Code                       | Severity | Fires when                                                                                                                                                                                                                                                          |
-| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `decide-without-events`    | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                       |
-| `invoke-without-on-error`  | warning  | An invoke declares no `onError`, and neither its state nor any ancestor handles an actor error, so a rejected request or actor lands the machine in an error state with no modeled recovery. Add `onError` targeting a `failed` final state or a bounded retry.     |
-| `direct-object-src`        | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                                |
+| Code                      | Severity | Fires when                                                                                                                                                                                                                                                      |
+| ------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `decide-without-events`   | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                   |
+| `invoke-without-on-error` | warning  | An invoke declares no `onError`, and neither its state nor any ancestor handles an actor error, so a rejected request or actor lands the machine in an error state with no modeled recovery. Add `onError` targeting a `failed` final state or a bounded retry. |
+| `direct-object-src`       | warning  | An invoke `src` is a direct object or machine value that `runToQuiescence` cannot rebind, so it inherits no host executors.                                                                                                                                     |
 
 ## Test assertions
 
@@ -74,7 +74,7 @@ test("happy path settles done", async () => {
 });
 ```
 
-Guards stay in force throughout. `canReach` and `simulateAgent` traverse the same machine transitions as `runAgent`, so a graph path that a guard rejects never counts as reachable. These tests pin the machine's shape as prompts and models change.
+Guards stay in force throughout. `canReach` and `simulateAgent` traverse the same machine transitions as `runToQuiescence`, so a graph path that a guard rejects never counts as reachable. These tests pin the machine's shape as prompts and models change.
 
 ## Deterministic executors
 
@@ -92,13 +92,13 @@ const machine = emailDrafter.provide({
 
 [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts) drives a full run this way, with fixed values and no model call.
 
-Use deterministic executors when the test should exercise the real `runAgent` path with canned model output. Use [`simulateAgent`](#scripted-playthroughs) when a model-free transition playthrough is enough.
+Use deterministic executors when the test should exercise the real `runToQuiescence` path with canned model output. Use [`simulateAgent`](#scripted-playthroughs) when a model-free transition playthrough is enough.
 
 ## Scripted playthroughs
 
 `simulateAgent(machine, { input, script, maxSteps? })` runs a deterministic, model-free transition playthrough. The `script` supplies responses as FIFO queues, so runs are reproducible.
 
-This script keys by invoke **src**, not by request name. Executors that run the real `runAgent` path route by request name instead. See [Testing without a provider](evals.md#testing-without-a-provider).
+This script keys by invoke **src**, not by request name. Executors that run the real `runToQuiescence` path route by request name instead. See [Testing without a provider](evals.md#testing-without-a-provider).
 
 - `decisions` holds the `ChosenEvent` to apply per decision, keyed by decision src, usually `agent.decide`.
 - `text` holds output values for text requests, keyed by request src.
@@ -247,7 +247,7 @@ For machines authored as data, validate the config with `validateAgentConfig(con
 
 - [Debugging](debugging.md): scripted reproduction and the diagnostic codes in context.
 - [Evals](evals.md): scoring runs on output, trajectory, and budget.
-- [Quickstart](quickstart.md#define-and-run-one-artifact): a plain-function executor for `runAgent`.
+- [Quickstart](quickstart.md#define-and-run-one-artifact): a plain-function executor for `runToQuiescence`.
 - [Machines as data](machines-as-data.md): verifying a machine lowered from a config.
 - [Migrating from a hand-rolled loop](from-a-loop.md): pinning behavior across a refactor.
 - [examples/verification](../examples/verification/index.ts): every API on this page run over one refund-approval machine, with no API key, including `canReach` proving that an over-limit payout without human approval is unreachable.

@@ -15,7 +15,7 @@ key or model SDK.
 
 ```ts
 import { z } from "zod";
-import { runAgent, setupAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence, setupAgent } from "@statelyai/agent";
 
 const answerOutputSchema = z.object({ answer: z.string() });
 
@@ -53,12 +53,14 @@ const machine = agent.createMachine({
   },
 });
 
-const result = await runAgent(machine, {
-  input: { prompt: "Why state machines?" },
-  executors: {
-    generateText: async () => ({ result: "Because transitions constrain behavior." }),
-  },
-});
+const result = await runToQuiescence(
+  createAgentRuntime(machine, {
+    executors: {
+      generateText: async () => ({ result: "Because transitions constrain behavior." }),
+    },
+  }),
+  { input: { prompt: "Why state machines?" } },
+);
 
 if (result.status !== "done") {
   throw new Error(`Unexpected status: ${result.status}`);
@@ -99,9 +101,8 @@ const executors = createAiSdkExecutors({
   models: { fast: openai("gpt-5.4-mini") },
 });
 
-const liveResult = await runAgent(machine, {
+const liveResult = await runToQuiescence(createAgentRuntime(machine, { executors }), {
   input: { prompt: "Why state machines?" },
-  executors,
 });
 
 if (liveResult.status === "done") {

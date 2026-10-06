@@ -5,9 +5,8 @@ The machine is framework-independent. Adapters only supply executors and transpo
 ## Server request
 
 ```ts no-check
-const result = await runAgent(machine, {
+const result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
   input: await request.json(),
-  executors
 });
 
 if (result.status === "idle") {
@@ -28,17 +27,20 @@ try {
   return Response.json({ error: String(error) }, { status: 400 });
 }
 
-const result = await runAgent(machine, { snapshot, event, executors });
+const result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+  snapshot,
+  event,
+});
 
 if (result.ignored) {
   return Response.json(
     { error: `'${result.ignored.type}' does not apply right now` },
-    { status: 409 }
+    { status: 409 },
   );
 }
 ```
 
-Parse at the boundary; `runAgent` adds no validation of its own. An event the restored state does not handle is ignored, not an error.
+Parse at the boundary; `runToQuiescence` adds no validation of its own. An event the restored state does not handle is ignored, not an error.
 
 ## Long-lived UI actor
 

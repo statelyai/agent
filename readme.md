@@ -16,7 +16,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 
 ## Three starting points
 
-- **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runAgent`, test it with no API key, then use it in any framework or runtime with zero machine changes. See the [Quickstart](docs/quickstart.md) and [Use in any stack](docs/any-stack.md).
+- **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runToQuiescence`, test it with no API key, then use it in any framework or runtime with zero machine changes. See the [Quickstart](docs/quickstart.md) and [Use in any stack](docs/any-stack.md).
 - **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](docs/from-a-loop.md).
 - **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, and more, each a single runnable file you lift in 60 seconds. See [Agent patterns](docs/patterns.md).
 
@@ -52,12 +52,12 @@ Requirements:
 
 ## Quick start
 
-<!-- refund decision example using setupAgent, agent.decide, a machine guard, and the AI SDK runAgent host -->
+<!-- refund decision example using setupAgent, agent.decide, a machine guard, and the AI SDK runToQuiescence host -->
 
 This agent reviews refund requests. The model may propose an automatic refund, but the state machine owns the $100 limit.
 
 ```ts
-import { runAgent, setupAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence, setupAgent } from "@statelyai/agent";
 import { z } from "zod";
 
 const agentSetup = setupAgent({
@@ -108,15 +108,19 @@ const refundMachine = agentSetup.createMachine({
   },
 });
 
-const result = await runAgent(refundMachine, {
-  input: {
-    request: "I was charged twice for the same order.",
-    amount: 75,
+const result = await runToQuiescence(
+  createAgentRuntime(refundMachine, {
+    // An executor is a plain function, so this run needs no API key and no
+    // provider package.
+    executors: { decide: async () => ({ event: { type: "AUTO_REFUND" } }) },
+  }),
+  {
+    input: {
+      request: "I was charged twice for the same order.",
+      amount: 75,
+    },
   },
-  // An executor is a plain function, so this run needs no API key and no
-  // provider package.
-  executors: { decide: async () => ({ event: { type: "AUTO_REFUND" } }) },
-});
+);
 
 if (result.status === "done") {
   console.log(result.output);
@@ -137,10 +141,12 @@ To call a real model, leave the machine unchanged and swap the executors:
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-const liveResult = await runAgent(refundMachine, {
-  input: { request: "I was charged twice for the same order.", amount: 75 },
-  executors: createAiSdkExecutors({ models: { fast: openai("gpt-5.4-mini") } }),
-});
+const liveResult = await runToQuiescence(
+  createAgentRuntime(refundMachine, {
+    executors: createAiSdkExecutors({ models: { fast: openai("gpt-5.4-mini") } }),
+  }),
+  { input: { request: "I was charged twice for the same order.", amount: 75 } },
+);
 ```
 
 For a machine with several requests, the executor routes on `request.name`, or `MockLanguageModelV3` from `ai/test` stands in for the provider behind `createAiSdkExecutors`. See [Evals](docs/evals.md#testing-without-a-provider).
@@ -151,7 +157,7 @@ Passing the same `models` map to `setupAgent({ models })` types the machine's mo
 
 ```mermaid
 flowchart LR
-  M["Agent machine<br/>states · guards · requests"] -->|request| R["runAgent"]
+  M["Agent machine<br/>states · guards · requests"] -->|request| R["runToQuiescence"]
   R -->|executor call| E["Host executors<br/>generateText · streamText · decide"]
   E -->|API call| L["Model"]
   L -->|result| E

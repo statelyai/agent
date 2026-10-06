@@ -154,7 +154,7 @@ awaitingHuman: {
 },
 ```
 
-When no work is in flight, `runAgent` settles with `{ status: 'idle', snapshot }` instead of hanging. Persist the snapshot and show the person their options. [`getAcceptedEvents(snapshot)`](human-in-the-loop.md) lists the legal events. To resume later, in the same process or another one, pass the snapshot back with the event. See [Human in the loop](human-in-the-loop.md).
+When no work is in flight, `runToQuiescence` settles with `{ status: 'idle', snapshot }` instead of hanging. Persist the snapshot and show the person their options. [`getAcceptedEvents(snapshot)`](human-in-the-loop.md) lists the legal events. To resume later, in the same process or another one, pass the snapshot back with the event. See [Human in the loop](human-in-the-loop.md).
 
 ## The finished machine
 
@@ -163,8 +163,8 @@ The machine below makes the same four model calls and applies the same policy as
 ```ts
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createTextLogic, runAgent, setupAgent } from "@statelyai/agent";
-import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
+import { createTextLogic, runToQuiescence, setupAgent } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // Model IDs here are illustrative; substitute your provider's current models.
 const models = {
@@ -284,10 +284,10 @@ const triageMachine = agentSetup.createMachine({
   },
 });
 
-const result = await runAgent(triageMachine, {
-  input: { ticket: "I was charged twice for March." },
-  executors: createAiSdkExecutors({ models }),
-});
+const result = await runToQuiescence(
+  createAgentRuntime(triageMachine, { executors: createAiSdkExecutors({ models }) }),
+  { input: { ticket: "I was charged twice for March." } },
+);
 if (result.status === "done") console.log(result.output.reply);
 if (result.status === "idle") console.log("waiting on a human", result.snapshot);
 ```
@@ -314,7 +314,7 @@ The design work above assumes you are writing the machine. Existing machines can
 
 - The machine already exists and contains nothing agent-specific. Any machine whose invokes resolve to values and whose events you can enumerate can be driven. Use [`getAcceptedEvents(snapshot)`](human-in-the-loop.md) for the candidates and call `resolveDecision` gated by `snapshot.can(event)`. See [plain-xstate](../examples/plain-xstate/index.ts).
 
-Prompts do not have to live in the machine. Leave bare `src` strings and bind a separate prompt map through the `actors` option of `runAgent`, which is shorthand for `machine.provide({ actors })`. The explicit invokes remain part of the graph, which is what lets a machine round-trip through JSON with `setupAgent.fromConfig`. See [Machines as data](machines-as-data.md).
+Prompts do not have to live in the machine. Leave bare `src` strings and bind a separate prompt map through the `actors` option of `runToQuiescence`, which is shorthand for `machine.provide({ actors })`. The explicit invokes remain part of the graph, which is what lets a machine round-trip through JSON with `setupAgent.fromConfig`. See [Machines as data](machines-as-data.md).
 
 ## Related
 

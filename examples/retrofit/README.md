@@ -16,7 +16,7 @@ behavior pinned by tests the whole way.
 - **`step2.ts`** — the tool-choice `if/else` becomes `agent.decide` over typed
   events; the `$100` `if` becomes a guard.
 - **`step3.ts`** — the `{ pending }` sentinel becomes an idle `awaitingApproval`
-  state; `runAgent` settles idle, you persist the snapshot and resume with an
+  state; `runToQuiescence` settles idle, you persist the snapshot and resume with an
   event.
 - **`index.ts`** — the final form (adds triage + an order-lookup tool), dual-mode
   via the shared harness. Triage is a Jev judgment (the AI SDK's
@@ -30,7 +30,7 @@ Each step compiles, runs, and preserves the observable behavior.
 
 | In `before.ts` (the loop)           | In the machine                                                       |
 | ----------------------------------- | -------------------------------------------------------------------- |
-| `while (true)`                      | `runAgent` owns the loop                                             |
+| `while (true)`                      | `runToQuiescence` owns the loop                                      |
 | `phase` string + boolean flags      | explicit states                                                      |
 | nested `if/else` tool dispatch      | `agent.decide` + typed events                                        |
 | `if (amount > 100)` refund limit    | a guard on the REFUND transition                                     |

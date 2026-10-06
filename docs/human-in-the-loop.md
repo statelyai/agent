@@ -1,15 +1,9 @@
 # Human in the loop
 
-A human wait is an ordinary XState state with accepted events. A resting state with event handlers—or `meta.interaction`—settles `runAgent` as `idle`.
-
-`isAgentIdle(snapshot)` exposes that default rule. Compose it with application-specific waits when needed:
-
-```ts no-check
-setupAgent({
-  isIdle: (snapshot) =>
-    isAgentIdle(snapshot) || snapshot.hasTag("waiting-for-webhook")
-});
-```
+A human wait is an ordinary XState state with accepted events. Once no child,
+request, or in-process timer remains active, `runToQuiescence` settles as
+`idle`. Use `isAgentIdle(snapshot)` afterward to distinguish an intentional
+human wait from a stuck machine.
 
 ```ts no-check
 awaitingApproval: {
@@ -60,7 +54,7 @@ The descriptor is an optional `interaction` with a `label` (a string with `{cont
 ## Render and validate
 
 ```ts no-check
-const paused = await runAgent(machine, { input, executors });
+const paused = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 
 if (paused.status === "idle") {
   const interaction = getInteraction(paused.snapshot);
@@ -83,7 +77,10 @@ Both functions are typed off the snapshot, so `eventFromInteraction` returns the
 
 ```ts no-check
 const event = eventFromInteraction(paused.snapshot, { type: "APPROVE" });
-await runAgent(machine, { snapshot: paused.persist(), event, executors });
+await runToQuiescence(createAgentRuntime(machine, { executors }), {
+  snapshot: paused.persist(),
+  event,
+});
 ```
 
 When the answer arrives over the wire instead of from your own code, parse it at the boundary with `parseAgentEvent(machine, await request.json())` and pass the result as `event`. A bad payload throws, which is a 400; an event the paused state has no transition for is ignored and comes back as `result.ignored`. See [Persistence](persistence.md#resume-with-an-event-off-the-wire).
@@ -91,14 +88,16 @@ When the answer arrives over the wire instead of from your own code, parse it at
 ## Drive several turns
 
 ```ts no-check
-let result = await runAgent(machine, { input, executors });
+let result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 
 while (result.status === "idle") {
   const snapshot = result.persist();
   await storage.put(id, snapshot);
   const event = await promptUser(getInteraction(result.snapshot));
-  result = await runAgent(machine, { snapshot, event, executors });
+  result = await runToQuiescence(createAgentRuntime(machine, { executors }), { snapshot, event });
 }
 ```
 
-For HTTP or queue-based applications, persist `result.persist()` and resume in a later request with `runAgent({ snapshot, event })`. Storage remains framework-owned.
+For HTTP or queue-based applications, persist `result.persist()` and resume in
+a later request with a fresh runtime and `{ snapshot, event }`. Storage remains
+framework-owned.

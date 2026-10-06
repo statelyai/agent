@@ -18,15 +18,14 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 
 ## Core APIs
 
-| API                                         | Purpose                                                      |
-| ------------------------------------------- | ------------------------------------------------------------ |
-| `setupAgent`                                | Schema-first XState setup with Agent request actors          |
-| `runAgent`                                  | Run one in-process leg to done, idle, or error               |
-| `runAgentStream`                            | Observe requests, chunks, transitions, emissions, and settle |
-| `initialAgentStep` / `transitionAgentStep`  | The pure step API: `(state, event) => (state, requests)`     |
-| `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                       |
-| `isAgentIdle`                               | Default composable idle-state predicate                      |
-| `ContextOf` / `EventOf` / other `*Of` types | Extract setup and machine types                              |
+| API                                         | Purpose                                               |
+| ------------------------------------------- | ----------------------------------------------------- |
+| `setupAgent`                                | Schema-first XState setup with Agent request actors   |
+| `createAgentRuntime`                        | Bind executors and expose one durable transition loop |
+| `runToQuiescence`                           | Drive a runtime to done, idle, or error               |
+| `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                |
+| `isAgentIdle`                               | Distinguish a human wait from a stuck settled machine |
+| `ContextOf` / `EventOf` / other `*Of` types | Extract setup and machine types                       |
 
 ## Entry points
 
