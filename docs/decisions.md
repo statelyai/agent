@@ -52,7 +52,7 @@ deciding: {
 
 The `allowedEvents` list is typed against the machine's user-authored event schema, so a typo is a compile error. Framework events such as `@agent.usage` can be handled by the machine but are never model-facing candidates. Listing events explicitly also makes the candidate set visible in the machine.
 
-> **Note:** `agent.decide` needs a snapshot-aware host such as `runAgent` to know which events are currently legal. With a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), list `allowedEvents` explicitly. Wildcards and the omitted default cannot expand there.
+> **Note:** `agent.decide` needs a snapshot-aware host such as `runToQuiescence` to know which events are currently legal. With a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), list `allowedEvents` explicitly. Wildcards and the omitted default cannot expand there.
 
 ### `allowedEvents` patterns
 
@@ -100,7 +100,7 @@ Guards are transition functions that return `undefined`. See [Transitions](machi
 
 The candidate set is the `allowedEvents` list intersected with the events the state statically accepts. After the model picks one, `snapshot.can(event)` decides whether it is legal in the current snapshot. A chosen `ASK` on the final turn is rejected, and the model is asked again.
 
-`runAgent` performs this check for you. When you call `resolveDecision` directly with a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), pass the check through `canTake`:
+`runToQuiescence` performs this check for you. When you call `resolveDecision` directly with a [long-lived actor](choosing-a-run-mode.md#long-lived-actor), pass the check through `canTake`:
 
 ```ts
 import { resolveDecision } from "@statelyai/agent";
@@ -117,7 +117,7 @@ const request = createDecisionRequest({
   name: "judge",
   model: "reviewer",
   prompt: `Judge this draft.\n\n${snapshot.context.draft}`,
-  events: getAcceptedEvents(snapshot)
+  events: getAcceptedEvents(snapshot),
 });
 ```
 

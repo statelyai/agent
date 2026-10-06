@@ -18,7 +18,7 @@ const executors = createAiSdkExecutors({
   models: { quick: someLanguageModel, careful: anotherLanguageModel },
 });
 
-await runAgent(machine, { input, executors });
+await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 ```
 
 There are four integration paths. The first two both go through `createAiSdkExecutors`, so they appear as one row in the [support table](#support-by-path).
@@ -57,7 +57,7 @@ import { z } from "zod";
 import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { runAgent } from "@statelyai/agent";
+import { runToQuiescence } from "@statelyai/agent";
 
 const executors = createAiSdkExecutors({ models });
 
@@ -67,7 +67,9 @@ const startWorkflow = createTool({
   inputSchema: z.object({ prompt: z.string() }),
   outputSchema: z.object({ status: z.string() }),
   execute: async ({ prompt }) => {
-    const result = await runAgent(machine, { input: { prompt }, executors });
+    const result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+      input: { prompt },
+    });
     return { status: result.status };
   },
 });
@@ -105,12 +107,14 @@ export default {
   async fetch(request, env) {
     // Model IDs here are illustrative; substitute your provider's current models.
     const workersai = createWorkersAI({ binding: env.AI });
-    const result = await runAgent(machine, {
-      input: await request.json(),
-      executors: createAiSdkExecutors({
-        models: { quick: workersai("@cf/meta/llama-3.1-8b-instruct") },
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: createAiSdkExecutors({
+          models: { quick: workersai("@cf/meta/llama-3.1-8b-instruct") },
+        }),
       }),
-    });
+      { input: await request.json() },
+    );
     return Response.json(result);
   },
 };
@@ -129,12 +133,14 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 // Model IDs here are illustrative; substitute your provider's current models.
 const ollama = createOpenAI({ baseURL: "http://localhost:11434/v1", apiKey: "ollama" });
 
-await runAgent(machine, {
-  input,
-  executors: createAiSdkExecutors({
-    models: { quick: ollama("llama3.1") },
+await runToQuiescence(
+  createAgentRuntime(machine, {
+    executors: createAiSdkExecutors({
+      models: { quick: ollama("llama3.1") },
+    }),
   }),
-});
+  { input },
+);
 ```
 
 To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and use the endpoint's real `apiKey`. Nothing else changes.
@@ -149,7 +155,7 @@ To exercise the adapter path itself without a provider, put one of the AI SDK's 
 
 ```ts
 import { MockLanguageModelV3 } from "ai/test";
-import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const executors = createAiSdkExecutors({
   models: {
@@ -190,6 +196,6 @@ Each example is a runnable host for one provider stack.
 | [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | `createOpenAiExecutors` from `@statelyai/agent/openai`, over the raw `openai` package (Chat Completions)          |
 | [anthropic-sdk-host](../examples/anthropic-sdk-host/index.ts)                 | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }` |
 | [langchain-host](../examples/langchain-host/index.ts)                         | LangChain `BaseChatModel` (`@langchain/core`), wrapped into the executor contract                                 |
-| [mastra-host](../examples/mastra-host/index.ts)                               | Mastra `Agent` and `createTool`, bridging to `runAgent`                                                           |
+| [mastra-host](../examples/mastra-host/index.ts)                               | Mastra `Agent` and `createTool`, bridging to `runToQuiescence`                                                    |
 | [cloudflare-agent-host](../examples/cloudflare-agent-host/index.ts)           | Durable Object                                                                                                    |
 | [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host/index.ts) | Workers AI binding                                                                                                |

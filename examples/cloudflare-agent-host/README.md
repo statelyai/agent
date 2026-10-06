@@ -6,22 +6,24 @@ A runnable Worker that hosts the [email drafter](../email-drafter/agent-logic.ts
 
 ## The turn
 
-Every turn — the first request, each POST, each WebSocket message — is one `runAgent` call:
+Every turn — the first request, each POST, each WebSocket message — is one `runToQuiescence` call:
 
 ```ts
-const result = await runAgent(machine, {
-  store,
-  threadId,
-  input, // used only when the thread's log is empty
-  event,
-  executors,
-  onTransition: (snapshot) => broadcast(snapshot),
-});
+const result = await runToQuiescence(
+  createAgentRuntime(machine, {
+    store,
+    threadId, // used only when the thread's log is empty
+    event,
+    executors,
+    onTransition: (snapshot) => broadcast(snapshot),
+  }),
+  { input },
+);
 ```
 
-- `runAgent` reads the thread, runs, and writes back: the store is the whole durable state, and a fresh thread has none and starts from `input`.
+- `runToQuiescence` reads the thread, runs, and writes back: the store is the whole durable state, and a fresh thread has none and starts from `input`.
 - Writes are write-ahead — each entry is durable before the next model call — and each lands at its own index, so the append is optimistic: a concurrent writer conflicts instead of interleaving.
-- A rejected write settles `runAgent` with an error result. This host throws that result, and the cached turn is left where the journal is.
+- A rejected write settles `runToQuiescence` with an error result. This host throws that result, and the cached turn is left where the journal is.
 - Turns are serialized per Durable Object — one leg at a time.
 - A settled turn is cached in memory only. After an eviction it is gone, and the next request folds the log again.
 

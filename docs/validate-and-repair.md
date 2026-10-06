@@ -163,7 +163,10 @@ The machine's own cap is `checkingRepairBudget`. It is the one the app reasons a
 `maxModelCalls` is the second cap, and a different kind. It is the host's runaway backstop, it counts every model and decision call in the run, and the machine cannot read it. See [Usage and budgets](usage-and-budgets.md#the-global-backstop-maxmodelcalls).
 
 ```ts no-check
-const result = await runAgent(machine, { input, executors, maxModelCalls: 10 });
+const result = await runToQuiescence(
+  createAgentRuntime(machine, { executors, maxModelCalls: 10 }),
+  { input },
+);
 ```
 
 With three author calls and `maxRepairs: 2`, a worst-case run makes five calls, so `result.usage.modelCalls` is `5`.
@@ -179,15 +182,17 @@ const answers: Record<string, string[]> = {
 };
 const calls: string[] = [];
 
-const result = await runAgent(machine, {
-  input: { prompt: "a turnstile" },
-  executors: {
-    generateText: async (request) => {
-      calls.push(request.name);
-      return { result: answers[request.name].shift() };
+const result = await runToQuiescence(
+  createAgentRuntime(machine, {
+    executors: {
+      generateText: async (request) => {
+        calls.push(request.name);
+        return { result: answers[request.name].shift() };
+      },
     },
-  },
-});
+  }),
+  { input: { prompt: "a turnstile" } },
+);
 
 expect(result.output.repairs).toBe(1);
 expect(calls).toEqual(["generateConfig", "generateConfig", "generateConfig", "repairConfig"]);
@@ -197,7 +202,7 @@ One queued answer per invoke: the fan-out makes three `generateConfig` calls, so
 
 - **One candidate is valid.** The run finishes with `repairs === 0`, and no repair request was ever built.
 - **All candidates are rejected, and the repair fixes it.** `repairs === 1`, and `matchesTrajectory` pins the path through `repairing` and back into `parsing`.
-- **No repair ever parses.** The run ends in `failed` with `repairs === maxRepairs`, `config` is `null`, and `result.usage.modelCalls` is `3 + maxRepairs`, which is the assertion that the cap held. `repairs` counts rounds that produced a candidate to re-parse: a repair *call* that fails goes straight to `failed` through `repairing`'s `onError` without spending a round, so that path ends with `repairs` below `maxRepairs`.
+- **No repair ever parses.** The run ends in `failed` with `repairs === maxRepairs`, `config` is `null`, and `result.usage.modelCalls` is `3 + maxRepairs`, which is the assertion that the cap held. `repairs` counts rounds that produced a candidate to re-parse: a repair _call_ that fails goes straight to `failed` through `repairing`'s `onError` without spending a round, so that path ends with `repairs` below `maxRepairs`.
 
 `assertAgentMachine(machine)` covers the structure statically: a clean lint is the proof that `failed` is a target of some transition. [`canReach`](verify.md#reachability-checks) covers it dynamically. Exploration tracks every invoke a state is still waiting on, so it walks straight through the three-way fan-out, and a canned `parseConfig` failure drives the loop to the end of its repair budget.
 

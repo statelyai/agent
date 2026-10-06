@@ -39,7 +39,7 @@ const agentSetup = setupAgent({
 
 <!-- machine input validation from src/run-agent.ts and the input schema retained by src/setup-agent.ts -->
 
-`runAgent` validates supplied machine input before the
+`runToQuiescence` validates supplied machine input before the
 actor starts. Defaults and transforms from the input schema reach the context
 factory and trace; invalid input throws `AgentError` with code
 `invalid-machine-input`. Calling XState's `createActor` directly does not run
@@ -65,7 +65,7 @@ In a `HEAL` transition, `event.amount` is a `number`. Reading a field the event 
 
 ### Emitted event schemas
 
-Emitted event schemas type the progress events a machine emits with `enq.emit(...)`. Hosts receive them through `runAgent`'s `on` handlers. Declare them under `emitted`:
+Emitted event schemas type the progress events a machine emits with `enq.emit(...)`. Hosts receive them through `runToQuiescence`'s `on` handlers. Declare them under `emitted`:
 
 ```ts no-check
 // setupAgent({ ... })
@@ -118,7 +118,7 @@ The `models` map pairs a short alias with a resolved model. Request and decision
 
 ```ts
 import { openai } from "@ai-sdk/openai";
-import { } from "@statelyai/agent/ai-sdk";
+import {} from "@statelyai/agent/ai-sdk";
 
 const models = {
   quick: openai("gpt-5.4-mini"),
@@ -206,11 +206,11 @@ const agentSetup = setupAgent({
 
 `setupAgent` registers reserved `src` strings on every machine. Use them for ad-hoc model work that does not warrant a named request. The invoke's `input` shapes each call:
 
-| `src`                | Invoke `input`                                                              | `onDone` output                                        | Reference                                 |
-| -------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
-| `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | `{ result, messages }`: text or the value parsed from `outputSchema`, plus response messages | [Text requests](text-requests.md)         |
-| `agent.streamText`   | same as `agent.generateText`                                                | same, with chunks delivered to the host as they arrive | [Text requests](text-requests.md)         |
-| `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`                       | the one chosen event, applied to the machine           | [Decisions](decisions.md)                 |
+| `src`                | Invoke `input`                                                              | `onDone` output                                                                              | Reference                         |
+| -------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------- |
+| `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | `{ result, messages }`: text or the value parsed from `outputSchema`, plus response messages | [Text requests](text-requests.md) |
+| `agent.streamText`   | same as `agent.generateText`                                                | same, with chunks delivered to the host as they arrive                                       | [Text requests](text-requests.md) |
+| `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`                       | the one chosen event, applied to the machine                                                 | [Decisions](decisions.md)         |
 
 A human's turn is not a builtin: it is an idle state with accepted events. See [Human in the loop](human-in-the-loop.md).
 
@@ -224,16 +224,16 @@ The canonical form covers most machines: a `models` registry, flat schema fields
 
 Each alternate form handles one specific need:
 
-| Form                                                                                                             | Use it when                                                                                                                                                                                                                                                                                  |
-| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createAgentSchemas` pack, passed as `setupAgent({ schemas })`                                                   | You share one schema set across several machines or the [step helpers](steps.md).                                                                                                                                                                                                            |
-| String model refs with `resolveModel` (`model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`) | The machine must not name concrete models, for portability or for refs loaded from JSON [config](machines-as-data.md).                                                                                                                                                                       |
-| `createTextLogic`, a standalone request value                                                                    | A request is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).                                                                                                                       |
-| `logic.withExecutor(...)`                                                                                        | You bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runAgent`](hosts.md#writing-your-own-executors)'s executor slots. Registered dynamic spawns inherit through `actors`. See [Multi-agent composition](multi-agent.md#dynamic-binding). |
+| Form                                                                                                             | Use it when                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAgentSchemas` pack, passed as `setupAgent({ schemas })`                                                   | You share one schema set across several machines or the [step helpers](steps.md).                                                                                                                                                                                                                   |
+| String model refs with `resolveModel` (`model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`) | The machine must not name concrete models, for portability or for refs loaded from JSON [config](machines-as-data.md).                                                                                                                                                                              |
+| `createTextLogic`, a standalone request value                                                                    | A request is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).                                                                                                                              |
+| `logic.withExecutor(...)`                                                                                        | You bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runToQuiescence`](hosts.md#writing-your-own-executors)'s executor slots. Registered dynamic spawns inherit through `actors`. See [Multi-agent composition](multi-agent.md#dynamic-binding). |
 
 ## Machine creation
 
-`agentSetup.createMachine` is XState's `createMachine` with the agent's schemas and actors already bound. It registers the machine, so the step helpers and [`runAgent`](hosts.md) resolve its schemas and actors without you passing them again.
+`agentSetup.createMachine` is XState's `createMachine` with the agent's schemas and actors already bound. It registers the machine, so the step helpers and [`runToQuiescence`](hosts.md) resolve its schemas and actors without you passing them again.
 
 <!-- viz: state diagram for the answering machine below: initial state `answering` invoking the `answerQuestion` request, onDone -> final state `done` producing { answer } -->
 
@@ -381,12 +381,12 @@ The `onDone` handler receives the actor's `output`. For a text request that is `
 
 ### Inline text requests
 
-<!-- inline agent.generateText + runAgent, from src/setup-agent.ts and src/index.ts -->
+<!-- inline agent.generateText + runToQuiescence, from src/setup-agent.ts and src/index.ts -->
 
 For a one-off text call, invoke `agent.generateText` inline. Move it to a named [request](text-requests.md) once it is reused or worth testing:
 
 ```ts no-check
-import { parseOutput, runAgent } from "@statelyai/agent";
+import { createAgentRuntime, parseOutput, runToQuiescence } from "@statelyai/agent";
 
 // ...
 generating: {
@@ -406,7 +406,7 @@ generating: {
 },
 
 // ...
-await runAgent(machine, { input, executors: createAiSdkExecutors({ models }) });
+await runToQuiescence(createAgentRuntime(machine, { executors: createAiSdkExecutors({ models }) }), { input });
 ```
 
 Give an invoke an explicit `id` when the host needs a stable occurrence identity. XState owns invoke identity and snapshot restoration.
@@ -462,8 +462,8 @@ waiting: {
 
 How `after` runs depends on the host:
 
-- Under [`runAgent`](hosts.md), the timer runs live. A pending `after` does not count as idle, so `runAgent` waits for it and continues.
-- Under a custom or durable XState host, timers follow that framework's runtime adapter. See [the step API](steps.md).
+- Under [`runToQuiescence`](hosts.md), the timer runs live. A pending `after` does not count as idle, so `runToQuiescence` waits for it and continues.
+- Under a custom or durable XState host, timers follow that framework's runtime adapter. See [the runtime loop](steps.md).
 
 ## Related
 

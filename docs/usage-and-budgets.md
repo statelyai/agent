@@ -17,16 +17,16 @@ Usage is available at three layers, listed from coarsest to finest.
 
 The first two layers are observational. Only the third can change what the agent does.
 
-<!-- viz: usage flow: executor result -> runAgent aggregation into result.usage, -> onResult/onTrace on the host, -> @agent.usage event into machine context and guards -->
+<!-- viz: usage flow: executor result -> runToQuiescence aggregation into result.usage, -> onResult/onTrace on the host, -> @agent.usage event into machine context and guards -->
 
 ## The usage result
 
 <!-- AgentUsage from src/text-logic.ts; aggregation in src/run-agent.ts -->
 
-Every settled `RunAgentResult` carries `usage`, on all three variants: `done`, `idle`, and `error`.
+Every settled `AgentRunResult` carries `usage`, on all three variants: `done`, `idle`, and `error`.
 
 ```ts
-const result = await runAgent(machine, { input, executors });
+const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 
 result.usage.modelCalls; // number, always present
 result.usage.totalTokens; // number | undefined (only calls that reported it)
@@ -42,7 +42,7 @@ Four things affect how you read these numbers.
 - Token fields are partial sums. Each field sums only the calls that reported it, and is `undefined` only when no call reported it. A run that mixes a real SDK executor, which reports usage, with a scripted mock, which does not, yields a sum over the reporting subset only. Do not treat a token total as the whole run unless every executor reports usage.
 - `modelCalls` is always present, even when nothing reports tokens.
 - Usage is per run, not per conversation. A resumed run counts only its own calls, not the history behind `snapshot` or `events`. Add prior results' totals yourself for a conversation-wide figure.
-- Usage comes from your executor. `runAgent` reads `usage` from the raw executor result. That is the `usage` field alongside `result`, on the flat field names the AI SDK also uses, from an adapter or any custom executor following that shape. Non-finite values are dropped.
+- Usage comes from your executor. `runToQuiescence` reads `usage` from the raw executor result. That is the `usage` field alongside `result`, on the flat field names the AI SDK also uses, from an adapter or any custom executor following that shape. Non-finite values are dropped.
 
 ### Billing
 
@@ -78,21 +78,23 @@ Two callbacks report usage per call. Both are live and read-only.
 - `onTrace` on a `request.end` event: `usage?: AgentCallUsage` is normalized, and present only when the executor reported usage. See [Observability](observability.md#trace-one-run).
 
 ```ts
-await runAgent(machine, {
-  input,
-  executors,
-  onResult: (request, { raw }) => {
-    const usage = (raw as { usage?: AgentCallUsage }).usage;
-    if (usage) {
-      console.log(request.kind, request.id, usage);
-    }
-  },
-  onTrace: (event) => {
-    if (event.type === "request.end" && event.usage) {
-      console.log(event.request.id, event.usage.totalTokens);
-    }
-  },
-});
+await runToQuiescence(
+  createAgentRuntime(machine, {
+    executors,
+    onResult: (request, { raw }) => {
+      const usage = (raw as { usage?: AgentCallUsage }).usage;
+      if (usage) {
+        console.log(request.kind, request.id, usage);
+      }
+    },
+    onTrace: (event) => {
+      if (event.type === "request.end" && event.usage) {
+        console.log(event.request.id, event.usage.totalTokens);
+      }
+    },
+  }),
+  { input },
+);
 ```
 
 Use these for dashboards, per-tenant metering, and cost alerts. Neither can stop the run. To deliver usage to the machine, use [`@agent.usage`](#the-agentusage-event).
@@ -102,7 +104,10 @@ Use these for dashboards, per-tenant metering, and cost alerts. Neither can stop
 `maxModelCalls` caps the number of model and decision calls one run may make. The default is `100`. Decision retries count separately.
 
 ```ts
-const result = await runAgent(machine, { input, executors, maxModelCalls: 20 });
+const result = await runToQuiescence(
+  createAgentRuntime(machine, { executors, maxModelCalls: 20 }),
+  { input },
+);
 
 if (result.status === "error" && result.cause === "max-model-calls") {
   result.usage.modelCalls; // 20
@@ -150,7 +155,9 @@ function withBudget(base: AgentRequestExecutors, maxCalls: number): AgentRequest
   };
 }
 
-await runAgent(machine, { input, executors: withBudget(executors, 20) });
+await runToQuiescence(createAgentRuntime(machine, { executors: withBudget(executors, 20) }), {
+  input,
+});
 ```
 
 A wrapper is still host-side. The machine cannot read the remaining budget or react to it. For that, use `@agent.usage` and a guard.
@@ -187,17 +194,17 @@ Model-call results reach the machine with usage stripped out.
 - A text invoke's `onDone` receives `{ result, messages }` only: the validated result and the executor's response messages. The runner drops the rest of the executor result, including usage (`src/run-agent.ts`).
 - A decision delivers only the chosen event. `resolveDecision` returns the validated event and drops the executor's `usage` (`src/decision.ts`).
 
-`@agent.usage` carries the tokens instead. After every settled model call that reported usage, `runAgent` delivers the event to the machine, so `context` can fold it and guards can read it. You can then keep both counters in `context`: increment turns in `onDone`, and fold tokens in the `@agent.usage` handler.
+`@agent.usage` carries the tokens instead. After every settled model call that reported usage, `runToQuiescence` delivers the event to the machine, so `context` can fold it and guards can read it. You can then keep both counters in `context`: increment turns in `onDone`, and fold tokens in the `@agent.usage` handler.
 
 ### Rules
 
-| Area                 | Rule                                                                                                                                                                                                                                                  |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Not model-facing** | The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`. The event is never a decision candidate, even under `allowedEvents: ['*']`, and cannot be forged from a wire message.                                            |
-| **Durability**       | The event is folded into machine context, so a native snapshot from `result.persist()` retains the counters when a later `runAgent({ snapshot })` resumes.                                                                                            |
-| **Run scope**        | `result.usage` counts calls made during that run only. Persist cumulative counters in machine context when they must survive snapshot resume.                                                                                                         |
-| **Stragglers**       | A call that settles after a `runAgent` leg resolved still folds into `result.usage`, but its machine event is dropped. Watch `usage.dropped` on `onTrace` if a counter looks short.                                                                   |
-| **Coverage**         | Only usage your executor reports is delivered. No `usage` on the result means no event. [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation. Test budgets with `runAgent` and a usage-reporting mock. |
+| Area                 | Rule                                                                                                                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Not model-facing** | The `@agent.*` namespace is excluded from `getAcceptedEvents` and `parseAgentEvent`. The event is never a decision candidate, even under `allowedEvents: ['*']`, and cannot be forged from a wire message.                                                   |
+| **Durability**       | The event is folded into machine context, so a native snapshot from `result.persist()` retains the counters when a later runtime resumes with `{ snapshot }`.                                                                                                |
+| **Run scope**        | `result.usage` counts calls made during that run only. Persist cumulative counters in machine context when they must survive snapshot resume.                                                                                                                |
+| **Stragglers**       | A call that settles after a `runToQuiescence` leg resolved still folds into `result.usage`, but its machine event is dropped. Watch `usage.dropped` on `onTrace` if a counter looks short.                                                                   |
+| **Coverage**         | Only usage your executor reports is delivered. No `usage` on the result means no event. [`simulateAgent`](verify.md) scripts return no usage, so a token counter stays `0` under simulation. Test budgets with `runToQuiescence` and a usage-reporting mock. |
 
 Opt in with a transition.
 
@@ -239,7 +246,7 @@ import {
   AGENT_USAGE_EVENT_TYPE,
   createAgentSchemas,
   createTextLogic,
-  runAgent,
+  runToQuiescence,
   setupAgent,
 } from "@statelyai/agent";
 
@@ -329,11 +336,10 @@ const executors = {
   }),
 };
 
-const result = await runAgent(machine, {
-  input: { topic: "otter migration", maxTurns: 5, maxTokens: 1500 },
-  maxModelCalls: 20,
-  executors,
-});
+const result = await runToQuiescence(
+  createAgentRuntime(machine, { maxModelCalls: 20, executors }),
+  { input: { topic: "otter migration", maxTurns: 5, maxTokens: 1500 } },
+);
 
 if (result.status === "done") {
   result.output.stoppedBy; // 'tokens' (3 calls, 1560 >= 1500)
@@ -370,11 +376,11 @@ deciding: {
 }
 ```
 
-## Usage without runAgent
+## Usage without runToQuiescence
 
 ### Uncontrolled: `provideExecutors` + `createActor`
 
-Delivery is built in, but it follows the binding boundary. `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)` call. Until it has one, its calls report no usage anywhere. `runAgent` rebinds children and reports their usage to the root. A [long-lived actor](choosing-a-run-mode.md#long-lived-actor) has no run cycle, so no stragglers are dropped either.
+Delivery is built in, but it follows the binding boundary. `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)` call. Until it has one, its calls report no usage anywhere. `runToQuiescence` rebinds children and reports their usage to the root. A [long-lived actor](choosing-a-run-mode.md#long-lived-actor) has no run cycle, so no stragglers are dropped either.
 
 ```ts no-check
 import { createActor, toPromise } from "xstate";
@@ -454,19 +460,21 @@ estimateCost("openai/gpt-5.4-mini", result.usage);
 ```ts no-check
 let spentUsd = 0;
 
-await runAgent(machine, {
-  input,
-  executors,
-  onTrace: (event) => {
-    if (event.type !== "request.end" || !event.usage) {
-      return;
-    }
-    // A decision carries `model` directly; a text request carries it on `input`.
-    const model =
-      event.request.kind === "decision" ? event.request.model : event.request.input.model;
-    spentUsd += estimateCost(model, event.usage);
-  },
-});
+await runToQuiescence(
+  createAgentRuntime(machine, {
+    executors,
+    onTrace: (event) => {
+      if (event.type !== "request.end" || !event.usage) {
+        return;
+      }
+      // A decision carries `model` directly; a text request carries it on `input`.
+      const model =
+        event.request.kind === "decision" ? event.request.model : event.request.input.model;
+      spentUsd += estimateCost(model, event.usage);
+    },
+  }),
+  { input },
+);
 ```
 
 `@agent.usage` carries the same `model` attribution, so the machine can keep a per-model spend counter in `context` and guard on it, instead of only reporting one from the host.

@@ -4,7 +4,7 @@ Multi-agent systems are ordinary XState actor composition.
 
 ## Child machines
 
-Register a child machine under `actors`, invoke it from a state, and handle its typed output with `onDone`. `runAgent` recursively binds Agent request actors in registered child machines.
+Register a child machine under `actors`, invoke it from a state, and handle its typed output with `onDone`. `runToQuiescence` recursively binds Agent request actors in registered child machines.
 
 ## Long-lived actors
 

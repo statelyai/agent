@@ -63,7 +63,7 @@ Put `tools` on any [text request](text-requests.md), either inline in `setupAgen
 ```ts no-check
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
-import { } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
 const models = { assistant: openai("gpt-5.4-mini") };
@@ -105,13 +105,13 @@ export const toolCallingMachine = agentSetup.createMachine({
 Run the machine with any executor set. The machine is the same for scripted and real models.
 
 ```ts
-import { runAgent } from "@statelyai/agent";
+import { runToQuiescence } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-const result = await runAgent(toolCallingMachine, {
-  input: { query: "What is 42 times 17?" },
-  executors: createAiSdkExecutors({ models }),
-});
+const result = await runToQuiescence(
+  createAgentRuntime(toolCallingMachine, { executors: createAiSdkExecutors({ models }) }),
+  { input: { query: "What is 42 times 17?" } },
+);
 ```
 
 For approval and progress around real tools, see [review-tool-calls](../examples/review-tool-calls/index.ts).
@@ -135,7 +135,7 @@ Two consequences follow:
 - Tool-carrying requests do not retry. The AI SDK adapter retries invalid structured output only when the request has no tools, because a tool loop may already have caused side effects.
 - `metadata` is host-owned. A host that does not understand a key ignores it, so requests stay portable.
 
-The raw executor result, including tool calls and results, reaches host code through `runAgent`'s `onResult(request, { raw })` and the `request.end` trace event. See [Observability](observability.md).
+The raw executor result, including tool calls and results, reaches host code through `runToQuiescence`'s `onResult(request, { raw })` and the `request.end` trace event. See [Observability](observability.md).
 
 ## Tool results in messages
 

@@ -2,7 +2,7 @@
 
 The event log is an append-only journal of the external inputs a machine consumed. It is the source of truth for a run: `replay` folds it back into a snapshot without executing anything.
 
-`runAgent({ store, threadId })` writes and reads the log for you. The primitives on this page (`replay`, `forkEventLog`, `initEntry`, `createReplayEntry`, the stores, and the conformance suite) are in `@statelyai/agent/log`.
+`createAgentRuntime(machine, { store, threadId })` writes and reads the log for you. The primitives on this page (`replay`, `forkEventLog`, `initEntry`, `createReplayEntry`, the stores, and the conformance suite) are in `@statelyai/agent/log`.
 
 ## What is journaled
 
@@ -44,33 +44,31 @@ Entries are strict JSON. `createReplayEntry`, `initEntry`, and every store appen
 
 ## Record a log
 
-`runAgent` returns a complete, self-contained segment as `result.events`. Two ways to get it into storage:
+`runToQuiescence` returns a complete, self-contained segment as `result.events`. Two ways to get it into storage:
 
-| | `store` | `onEvent` |
-| --- | --- | --- |
-| When it writes | Write-ahead: every entry is appended to the store, and pending writes are awaited before each model call | Synchronously, as the entry is accepted |
-| Waits | The result resolves only after the run's writes land | Never awaited |
-| On failure | The run stops: `{ status: "error", cause: "journal" }` | Nothing; the host owns it |
-| Guarantee | Append-before-execute | At-least-once, if the host persists there |
+|                | `store`                                                                                                  | `onEvent`                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| When it writes | Write-ahead: every entry is appended to the store, and pending writes are awaited before each model call | Synchronously, as the entry is accepted   |
+| Waits          | The result resolves only after the run's writes land                                                     | Never awaited                             |
+| On failure     | The run stops: `{ status: "error", cause: "journal" }`                                                   | Nothing; the host owns it                 |
+| Guarantee      | Append-before-execute                                                                                    | At-least-once, if the host persists there |
 
 ### `store`: write-ahead
 
 Pass a [store](#stores) and the thread to write to. The run reads that thread as its resume log and appends to it.
 
 ```ts no-check
-const result = await runAgent(machine, {
-  input,
-  store,
-  threadId: "session-1",
-  executors
-});
+const result = await runToQuiescence(
+  createAgentRuntime(machine, { store, threadId: "session-1", executors }),
+  { input },
+);
 ```
 
 - Each entry is written at its own `index` as `expectedIndex`, so a concurrent writer conflicts instead of interleaving.
 - No model call starts until every entry before it is durable. Pure transitions never wait.
 - A rejected write (an `AgentEventLogConflictError`, or any storage failure) aborts in-flight work and settles the run `{ status: "error", cause: "journal" }`. No further calls run.
 - A `@agent.usage` entry that arrives after the run settled is still written, but the result does not wait for it. Await `result.drain()` before terminating the process if you care about those straggler entries; it resolves once every write issued so far has landed, and never rejects (a failed write already settled the run with `cause: "journal"`).
-- `threadId` is required with a `store`; without it `runAgent` throws `AgentError` with code `missing-thread-id`.
+- `threadId` is required with a `store`; without it `runToQuiescence` throws `AgentError` with code `missing-thread-id`.
 - Passing `events` as well makes that log the resume, and it must BE the thread's log: a different length throws `AgentEventLogConflictError`, and an entry-for-entry mismatch at the same length throws `AgentError` with code `event-log-conflict`.
 
 ### `onEvent`: observer
@@ -80,11 +78,10 @@ const result = await runAgent(machine, {
 ```ts no-check
 const appended: AgentLogEntry[] = [];
 
-const result = await runAgent(machine, {
-  input,
-  executors,
-  onEvent: (entry) => appended.push(entry)
-});
+const result = await runToQuiescence(
+  createAgentRuntime(machine, { executors, onEvent: (entry) => appended.push(entry) }),
+  { input },
+);
 ```
 
 To build entries yourself, use `initEntry` for index 0 and `createReplayEntry` for each subsequent external input.
@@ -105,11 +102,11 @@ const { snapshot, persistedSnapshot } = replay(machine, entries);
 
 Every entry carries `verification.stateHash` by default. `replay` checks it as it folds.
 
-| `verify` | Behavior |
-| --- | --- |
+| `verify`         | Behavior                                                    |
+| ---------------- | ----------------------------------------------------------- |
 | `true` (default) | Checks entries that carry a hash; entries without one pass. |
-| `'strict'` | Requires a hash on every entry. |
-| `false` | No checks. |
+| `'strict'`       | Requires a hash on every entry.                             |
+| `false`          | No checks.                                                  |
 
 ```ts no-check
 try {
@@ -135,8 +132,8 @@ Replayability rests on pure transitions.
 - Never mutate a journaled entry. There is no update and no delete. Rewriting an entry invalidates every hash after it; fork instead.
 - Journal external inputs only when building entries by hand.
 - Keep context JSON-serializable. Hold sessions, clients, and sockets in closures and store only their ids.
-- Replay against the machine `runAgent` folded. When actors come in through `runAgent({ actors })`, call `replay(machine.provide({ actors }), entries)`. The executor-bound machine is never needed; recorded results replace executors.
-- A run whose initial state cannot be serialized to JSON produces no log: `result.events` is empty, `onEvent` never fires, and nothing is written to a `store`. `replay` rejects a log without an init entry, so `runAgent` journals nothing rather than a suffix.
+- Replay against the machine the runtime folded. When actors come in through `createAgentRuntime(machine, { actors })`, call `replay(machine.provide({ actors }), entries)`. The executor-bound machine is never needed; recorded results replace executors.
+- A run whose initial state cannot be serialized to JSON produces no log: `result.events` is empty, `onEvent` never fires, and nothing is written to a `store`. `replay` rejects a log without an init entry, so `runToQuiescence` journals nothing rather than a suffix.
 - `onEvent` alone does not make a call append-before-execute. A crash between an entry and the host's flush loses it. Use `store` when that matters.
 
 ## Fork
@@ -160,14 +157,18 @@ const branch = forkEventLog(entries, 8);
 ```ts no-check
 const store = createInMemoryEventLogStore();
 
-await store.append({ threadId: "session-1", expectedIndex: 0, entries: [initEntry(machine, { input })] });
+await store.append({
+  threadId: "session-1",
+  expectedIndex: 0,
+  entries: [initEntry(machine, { input })],
+});
 
 const recent = await store.read("session-1", { from: 3 });
 const next = await store.length("session-1"); // the next expectedIndex
 ```
 
 - `append` is atomic. A stale writer fails with `AgentEventLogConflictError`, carrying `threadId`, `expectedIndex`, and `actualIndex`, so two hosts resuming one thread resolve to exactly one winner. Entry indices must be contiguous from `expectedIndex`, and ids unique within the thread.
-- `runAgent({ store, threadId })` drives all three: `read` to resume, `append` per entry, `read` again to check an explicit `events` log against the thread.
+- `createAgentRuntime(machine, { store, threadId })` drives all three: `read` to resume, `append` per entry, `read` again to check an explicit `events` log against the thread.
 - `read` and `length` are the only reads. Everything else about a thread is derived from its entries.
 - `fork` copies a prefix onto a fresh thread.
 

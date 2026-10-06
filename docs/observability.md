@@ -5,12 +5,14 @@ Use XState inspection for actor/runtime behavior and Agent traces for model-requ
 ## Trace one run
 
 ```ts no-check
-await runAgent(machine, {
-  input,
-  executors,
-  inspect: (event) => xstateInspector.next(event),
-  onTrace: (event) => exporter.write(serializeTraceEvent(event))
-});
+await runToQuiescence(
+  createAgentRuntime(machine, {
+    executors,
+    inspect: (event) => xstateInspector.next(event),
+    onTrace: (event) => exporter.write(serializeTraceEvent(event)),
+  }),
+  { input },
+);
 ```
 
 Agent trace kinds are `run.start`, `request.start`, `request.end`, `request.error`, `stream.chunk`, `machine.transition`, `emit`, `usage.dropped`, and `run.end`.
@@ -21,16 +23,11 @@ A `request.end` event carries the call's `output` and `raw`, plus what the execu
 
 `usage.dropped` means the `@agent.usage` event was not delivered to the machine, because no active state accepted it or the leg had already settled. The spend is still journaled and still counted: the entry is in the event log, and `getUsageFromEvents` folds it into the totals. Only the machine event is dropped.
 
-## Async stream
+## Live progress
 
-```ts no-check
-for await (const event of runAgentStream(machine, { input, executors })) {
-  if (event.kind === "chunk") process.stdout.write(event.delta);
-  if (event.kind === "transition") renderState(event.value);
-}
-```
-
-The terminal kind is `done`, `idle`, or `error`. There is no Agent-specific failure status; domain failure is represented by the machine's typed final output.
+Use `onTrace` for `stream.chunk` and `machine.transition` events while the run
+is active. The returned `AgentRunResult` supplies the terminal `done`, `idle`,
+or `error` status. Domain failure remains part of the machine's typed output.
 
 ## State paths in logs
 

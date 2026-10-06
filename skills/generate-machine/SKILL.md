@@ -144,9 +144,7 @@ function validateGeneratedConfig(candidate: unknown): AgentWorkflowConfig {
   const result = validateAgentConfig(candidate);
   if (result.valid) return candidate as AgentWorkflowConfig;
   throw new Error(
-    result.errors
-      .map((error) => `${error.path || "(root)"} ${error.message}`)
-      .join("\n"),
+    result.errors.map((error) => `${error.path || "(root)"} ${error.message}`).join("\n"),
   );
 }
 ```
@@ -243,13 +241,13 @@ Keep the cap at ~3. A config that fails three schema-shaped repairs is usually a
 Deliver the config JSON plus how to run it:
 
 ```ts
-import { runAgent } from "@statelyai/agent";
+import { runToQuiescence } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-const result = await runAgent(machine, {
-  input: { ticket: "Export downloads a 0-byte CSV on Safari." },
-  executors: createAiSdkExecutors({ resolveModel }),
-});
+const result = await runToQuiescence(
+  createAgentRuntime(machine, { executors: createAiSdkExecutors({ resolveModel }) }),
+  { input: { ticket: "Export downloads a 0-byte CSV on Safari." } },
+);
 ```
 
 Say which gates passed, list any warning-severity lint diagnostics, and report the dry-run status. Model refs are strings, so the host supplies `resolveModel`.

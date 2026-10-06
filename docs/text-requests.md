@@ -18,7 +18,7 @@ Pass a `requests` map to `setupAgent`. Each entry becomes an invokable actor und
 ```ts
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
-import { } from "@statelyai/agent/ai-sdk";
+import {} from "@statelyai/agent/ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
 // Model IDs here are illustrative; substitute your provider's current models.
@@ -128,16 +128,16 @@ export const triageTicket = createTextLogic({
 });
 ```
 
-The reasoning never enters machine context or output. It surfaces in three places: on the raw executor result as `result.reasoning` from the `generateText` executor of `createAiSdkExecutors`, on `runAgent`'s `onResult(request, { raw })`, and as a `reasoning` field on the `request.end` `onTrace` event. Text-mode requests ignore the option.
+The reasoning never enters machine context or output. It surfaces in three places: on the raw executor result as `result.reasoning` from the `generateText` executor of `createAiSdkExecutors`, on `runToQuiescence`'s `onResult(request, { raw })`, and as a `reasoning` field on the `request.end` `onTrace` event. Text-mode requests ignore the option.
 
 `includeReasoning` is not the provider's reasoning-effort setting. Effort is the host's business, because what it means differs per provider: an enum for one, a thinking-token budget for another, nothing at all for a third. A machine that named an effort level would stop being portable. Set it where the executors are built, with [`createAiSdkExecutors({ settings })`](models-and-providers.md#host-owned-model-settings).
 
 ## Streaming requests
 
 <!-- stream mode from src/text-logic.ts and examples/joke -->
-<!-- viz: sequence diagram of a streaming request: state invokes the request -> host streamText executor -> chunks delivered to runAgent onChunk while the invoke is pending -> final text resolves onDone -->
+<!-- viz: sequence diagram of a streaming request: state invokes the request -> host streamText executor -> chunks delivered to runToQuiescence onChunk while the invoke is pending -> final text resolves onDone -->
 
-A request streams when its `mode` is `'stream'`. Without `mode`, the request is single-shot, equivalent to `'generate'`. A streaming request resolves to the final text and delivers intermediate chunks to `runAgent`'s `onChunk`.
+A request streams when its `mode` is `'stream'`. Without `mode`, the request is single-shot, equivalent to `'generate'`. A streaming request resolves to the final text and delivers intermediate chunks to `runToQuiescence`'s `onChunk`.
 
 ```ts no-check
 export const tellJoke = createTextLogic({
@@ -148,16 +148,18 @@ export const tellJoke = createTextLogic({
   prompt: ({ input }) => `Tell a joke about ${input.topic}.`,
 });
 
-const result = await runAgent(machine, {
-  input: { topic: "state machines" },
-  executors: createAiSdkExecutors({ models }),
-  onChunk: (chunk) => process.stdout.write(chunk),
-});
+const result = await runToQuiescence(
+  createAgentRuntime(machine, {
+    executors: createAiSdkExecutors({ models }),
+    onChunk: (chunk) => process.stdout.write(chunk),
+  }),
+  { input: { topic: "state machines" } },
+);
 ```
 
 - `onChunk` fires once per chunk and receives the request that produced it, so parallel streams stay distinguishable.
 - `onChunk` is observational only. It cannot change the run.
-- A `mode: 'stream'` request needs a `streamText` executor. Without one, `runAgent` fails at bind time.
+- A `mode: 'stream'` request needs a `streamText` executor. Without one, `runToQuiescence` fails at bind time.
 
 See [parallel-streams](../examples/parallel-streams/index.ts).
 
@@ -167,7 +169,7 @@ See [parallel-streams](../examples/parallel-streams/index.ts).
 
 An executor result can report why the call stopped, as a normalized `finishReason`: `'stop'`, `'length'`, `'tool-calls'`, `'content-filter'`, or `'other'`. `createAiSdkExecutors` sets it on every text, structured, and streamed result, mapping the provider's own vocabulary onto those five; the provider's raw value stays on the result's `raw`.
 
-The reason reaches observability the way per-call usage does: `runAgent` lifts it onto the `request.end` [trace event](observability.md), next to `usage`.
+The reason reaches observability the way per-call usage does: `runToQuiescence` lifts it onto the `request.end` [trace event](observability.md), next to `usage`.
 
 `'length'` means the output token limit cut the call off. What that costs depends on the request:
 

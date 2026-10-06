@@ -10,16 +10,16 @@ description: Factories for proven agent shapes (tool loop, sequential, router, p
 `@statelyai/agent/machines` ships factories for common agent shapes. Each factory is a thin composition over `setupAgent(...).createMachine(...)`.
 
 - The result is an ordinary machine, with the same states, guards, snapshots, and `lintAgentMachine` support as a machine you write yourself.
-- Executors stay separate. Presets name no SDK, so the host passes `executors` to `runAgent`.
+- Executors stay separate. Presets name no SDK, so the host passes `executors` to `runToQuiescence`.
 - Each preset is around 100 lines of states that you can read, diagram, and copy into your own project.
 
 ```ts
 import { tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { runAgent } from "@statelyai/agent";
+import { runToQuiescence } from "@statelyai/agent";
 import { createToolLoopMachine } from "@statelyai/agent/machines";
-import { createAiSdkExecutors, } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // Model IDs here are illustrative; substitute your provider's current models.
 const models = { quick: openai("gpt-5.4-mini") };
@@ -37,10 +37,10 @@ const machine = createToolLoopMachine({
   maxSteps: 5,
 });
 
-const result = await runAgent(machine, {
-  input: { prompt: "What is 42 times 17?" },
-  executors: createAiSdkExecutors({ models }),
-});
+const result = await runToQuiescence(
+  createAgentRuntime(machine, { executors: createAiSdkExecutors({ models }) }),
+  { input: { prompt: "What is 42 times 17?" } },
+);
 ```
 
 Snapshots and log entries carry `machine.version` automatically. See [Versioning](#versioning).
@@ -53,32 +53,32 @@ Three questions separate the seven presets:
 - Who picks the next unit? The author in `sequential`, `parallel`, and `loop`. The model in `router`, `supervisor`, and `handoff`.
 - Does control come back? Delegation returns in `supervisor`. Routing ends the run in `router`. Handoff transfers control permanently in `handoff`.
 
-| Preset                    | Shape                                   | Model chooses                    | Control returns        |
-| ------------------------- | --------------------------------------- | -------------------------------- | ---------------------- |
-| `createToolLoopMachine`   | One request, host-run tool loop         | tools                            | n/a                    |
-| `createSequentialMachine` | Prompt chain, step by step              | nothing                          | n/a                    |
-| `createRouterMachine`     | One decision picks one destination      | the route                        | no, the run ends there |
-| `createParallelMachine`   | Static fan-out, joined                  | nothing                          | yes, at the join       |
-| `createLoopMachine`       | Bounded repeat                          | nothing                          | yes, each iteration    |
-| `createSupervisorMachine` | Delegate, accumulate, repeat            | the worker, or `FINISH`          | yes, every turn        |
+| Preset                    | Shape                                                        | Model chooses                    | Control returns        |
+| ------------------------- | ------------------------------------------------------------ | -------------------------------- | ---------------------- |
+| `createToolLoopMachine`   | One request, host-run tool loop                              | tools                            | n/a                    |
+| `createSequentialMachine` | Prompt chain, step by step                                   | nothing                          | n/a                    |
+| `createRouterMachine`     | One decision picks one destination                           | the route                        | no, the run ends there |
+| `createParallelMachine`   | Static fan-out, joined                                       | nothing                          | yes, at the join       |
+| `createLoopMachine`       | Bounded repeat                                               | nothing                          | yes, each iteration    |
+| `createSupervisorMachine` | Delegate, accumulate, repeat                                 | the worker, or `FINISH`          | yes, every turn        |
 | `createHandoffMachine`    | Peer swarm, `activeAgent` names the agent that runs the turn | n/a (host sends `transfer_to_*`) | no, transfer is final  |
 
 ## Config names
 
 Every preset uses the same vocabulary:
 
-| Option | Meaning |
-| ------ | ------- |
-| `model` | A model ref or a `models` alias. A `model` on an entry overrides the factory default. |
-| `instructions` | The system prompt. |
-| `tools` | Tools the host runs inside one request. |
-| `outputSchema` | Structured output. Omit it for plain text. |
-| `maxSteps` | The bound on a request's host-side tool loop. It lowers to the request's typed `maxSteps`. |
-| `maxTurns` | The bound on a machine loop or delegation count. It is enforced by a guard. |
+| Option         | Meaning                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| `model`        | A model ref or a `models` alias. A `model` on an entry overrides the factory default.      |
+| `instructions` | The system prompt.                                                                         |
+| `tools`        | Tools the host runs inside one request.                                                    |
+| `outputSchema` | Structured output. Omit it for plain text.                                                 |
+| `maxSteps`     | The bound on a request's host-side tool loop. It lowers to the request's typed `maxSteps`. |
+| `maxTurns`     | The bound on a machine loop or delegation count. It is enforced by a guard.                |
 
 Worker, route, branch, and agent entries are a record. The key is the entry's `name`, and each entry carries a `description` that the deciding model reads.
 
-An entry is either an inline request, written as `{ description, instructions, model, outputSchema, tools }`, or a child machine, written as `{ description, machine, input? }`. Child machines are registered as actor sources, so `runAgent` binds their executors too.
+An entry is either an inline request, written as `{ description, instructions, model, outputSchema, tools }`, or a child machine, written as `{ description, machine, input? }`. Child machines are registered as actor sources, so `runToQuiescence` binds their executors too.
 
 ## The presets
 
@@ -139,7 +139,7 @@ Examples to eject toward:
 Every preset machine carries `version: "1"`, using XState's standard `createMachine({ version })` prop. This is the machine's own topology version. It is unrelated to the `@statelyai/agent` package version. Native persisted snapshots and trace events carry that version:
 
 ```ts
-const result = await runAgent(machine, { input, executors });
+const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 // result.persist().version === "1"
 ```
 
@@ -148,7 +148,7 @@ The versioning policy:
 - The version identifies the machine's topology, not the release that built it. Prompt wording can change without a version bump.
 - A topology change that an old snapshot cannot restore bumps the version. Migrate it with XState's machine-level `migrate(snapshot, fromVersion)`.
 
-The same prop works for your own machines. Set `version` in `createMachine(...)` and `runAgent` stamps that value instead of the structural hash, which changes on any edit.
+The same prop works for your own machines. Set `version` in `createMachine(...)` and `runToQuiescence` stamps that value instead of the structural hash, which changes on any edit.
 
 ## Related
 

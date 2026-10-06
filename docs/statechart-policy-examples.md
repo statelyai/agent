@@ -1,6 +1,6 @@
 # Statechart policy examples
 
-Three examples put consequential decisions in visible machine states. Each exports its machine and a runner accepting `RunAgentOptions`. The consensus-review runner takes `patch` instead of `input`, because the host, not the caller, decides whether a patch is trusted. The booking-compensation and deadline-escalation runners default to real AI SDK executors (`openai("gpt-5.4-mini")`), which need `OPENAI_API_KEY`; pass `executors` to swap the model layer. The consensus-review runner uses no text model: each reviewer is a [judgment](judgments.md) actor built by `createReview(model)` that asks Jev one `choice` question through the AI SDK's `experimental_evaluate`, which needs `TYPESAFE_AI_API_KEY`; pass `judge` to swap the evaluation model. Override booking actors through native XState `actors` bindings.
+Three examples put consequential decisions in visible machine states. Each exports its machine and a runner accepting `AgentRuntimeOptions & AgentRunInit`. The consensus-review runner takes `patch` instead of `input`, because the host, not the caller, decides whether a patch is trusted. The booking-compensation and deadline-escalation runners default to real AI SDK executors (`openai("gpt-5.4-mini")`), which need `OPENAI_API_KEY`; pass `executors` to swap the model layer. The consensus-review runner uses no text model: each reviewer is a [judgment](judgments.md) actor built by `createReview(model)` that asks Jev one `choice` question through the AI SDK's `experimental_evaluate`, which needs `TYPESAFE_AI_API_KEY`; pass `judge` to swap the evaluation model. Override booking actors through native XState `actors` bindings.
 
 <!-- policy example catalog derived from examples/consensus-review, examples/booking-compensation, and examples/deadline-escalation -->
 
@@ -28,7 +28,7 @@ Trust is a machine rule, not a prompt instruction. The patch text is in all thre
 
 Each reviewer is a named parallel region invoking the same Jev judgment actor, `review`, with its own reviewer brief. No host `Promise.all` hides the topology. All regions reach a final state even when their call fails; the parent then counts votes. Human review persists both successful votes and abstentions.
 
-The tests execute the same artifact through both `runAgent` and `createActor(provideExecutors(...))`. This establishes those host modes' behavior for this example; it is not certification of every model SDK.
+The tests execute the same artifact through both `runToQuiescence` and `createActor(provideExecutors(...))`. This establishes those host modes' behavior for this example; it is not certification of every model SDK.
 
 ## Booking compensation
 
