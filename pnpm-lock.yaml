@@ -99,8 +99,8 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@20.19.43)(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(lightningcss@1.33.0)(tsx@4.23.12)(yaml@2.9.0))
       xstate:
-        specifier: 6.0.0-alpha.63
-        version: 6.0.0-alpha.63
+        specifier: 6.0.0-alpha.64
+        version: 6.0.0-alpha.64
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -180,8 +180,8 @@ importers:
         specifier: ^8.21.3
         version: 8.21.3
       xstate:
-        specifier: 6.0.0-alpha.63
-        version: 6.0.0-alpha.63
+        specifier: 6.0.0-alpha.64
+        version: 6.0.0-alpha.64
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -241,8 +241,8 @@ importers:
         specifier: ^7.0.113
         version: 7.0.113(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.63
-        version: 6.0.0-alpha.63
+        specifier: 6.0.0-alpha.64
+        version: 6.0.0-alpha.64
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -269,8 +269,8 @@ importers:
         specifier: ^7.0.113
         version: 7.0.113(zod@4.4.3)
       xstate:
-        specifier: 6.0.0-alpha.63
-        version: 6.0.0-alpha.63
+        specifier: 6.0.0-alpha.64
+        version: 6.0.0-alpha.64
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -321,8 +321,8 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
       xstate:
-        specifier: 6.0.0-alpha.63
-        version: 6.0.0-alpha.63
+        specifier: 6.0.0-alpha.64
+        version: 6.0.0-alpha.64
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -351,8 +351,8 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
       xstate:
-        specifier: 6.0.0-alpha.63
-        version: 6.0.0-alpha.63
+        specifier: 6.0.0-alpha.64
+        version: 6.0.0-alpha.64
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -7107,8 +7107,8 @@ packages:
   xstate@5.32.5:
     resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==, tarball: https://registry.npmjs.org/xstate/-/xstate-5.32.5.tgz}
 
-  xstate@6.0.0-alpha.63:
-    resolution: {integrity: sha512-Rotr6iQ1fuikVy7AGZ6dHQQ2hJTXFZ4o1HXSKp+EJKz7qERjIVDqvjW7P1qu1oSV7FmzE50QAM84zDfNKOsJ1g==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.63.tgz}
+  xstate@6.0.0-alpha.64:
+    resolution: {integrity: sha512-TJ3bMBeFq+Qhl+b0R747RdVLUx5D6P7j/JcSfqJMmPajAY+ZadGIQ+p3z8WEPdIsJ5xpzqy7P0Ou5fTDx/FOGw==, tarball: https://registry.npmjs.org/xstate/-/xstate-6.0.0-alpha.64.tgz}
     hasBin: true
 
   xxhash-wasm@1.1.0:
@@ -13898,7 +13898,7 @@ snapshots:
 
   xstate@5.32.5: {}
 
-  xstate@6.0.0-alpha.63: {}
+  xstate@6.0.0-alpha.64: {}
 
   xxhash-wasm@1.1.0: {}
 

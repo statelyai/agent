@@ -925,17 +925,13 @@ export function setupAgentFromConfig(
       ]),
     ),
     ...(options.actions ? { actions: options.actions } : {}),
-    // createMachineFromConfig embeds `sources.actors[src]` as the
-    // invoke's src DIRECTLY — but the runtime's executor rebinding needs srcs to
-    // stay string keys resolved through the machine's sources. Mapping
-    // each key to itself satisfies the JSON layer's every-src-implemented
-    // assertion while keeping `src` a string; the real logic is then bound via
-    // `.provide({ actors })` below (and remains host-rebindable).
-    actors: Object.fromEntries(Object.keys(actors).map((key) => [key, key])) as never,
+    // Invokes keep their string srcs, so the runtime (and a host's own
+    // `.provide({ actors })`) can still rebind them.
+    actors,
     evaluators: {
       [AGENT_EXPRESSION_LANG]: createWorkflowConfigEvaluator(schemas.context),
     },
-  }).provide({ actors });
+  });
 
   // What setupAgent's wrapped createMachine registers for the runtime: the
   // schemas/actors this machine executes with.

@@ -128,11 +128,6 @@ export interface AgentRunMeta {
   logId?: string;
   /** The log's length at the moment this snapshot was taken. */
   logIndex: number;
-  /**
-   * When each pending root `after` timer comes due (epoch ms), so a resume
-   * re-arms it for what is left of its delay instead of the whole delay.
-   */
-  timersDueAt?: Record<string, number>;
 }
 
 // The recorded `verification.stateHash` of a log entry is taken from a
@@ -2338,18 +2333,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     `${(source as { address?: string } | undefined)?.address ?? "(root)"}::${id}`;
   // Arms one timer. A root timer fires into the mailbox; a child's timer is
   // delivered to that child, which resolves it from its own snapshot.
-  // When each pending root timer comes due, stamped on the persisted snapshot.
-  const rootTimersDueAt = new Map<string, number>();
-  let restoredTimersDueAt: Record<string, number> | undefined;
   const armTimer = (
     source: AnyActorRef | undefined,
     isRoot: boolean,
     id: string,
     delay: number,
   ) => {
-    if (isRoot) {
-      rootTimersDueAt.set(id, Date.now() + delay);
-    }
     if (isRoot && !inProcessTimers) {
       (options.timers as Exclude<AgentTimerScheduler, "in-process">).schedule({ id, delay });
       return;
@@ -2362,7 +2351,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         timerHandles.delete(key);
         const timerEvent = { type: "xstate.timer", id } as EventObject;
         if (isRoot) {
-          rootTimersDueAt.delete(id);
           enqueue(timerEvent);
         } else {
           source?.send(timerEvent as never);
@@ -2513,18 +2501,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       }
     },
     scheduleTimer: (source: AnyActorRef, id: string, delay: number) => {
-      const isRoot = (source as AnyActor).address === execution.rootAddress;
-      const dueAt = isRoot ? restoredTimersDueAt?.[id] : undefined;
-      if (dueAt !== undefined) {
-        delete restoredTimersDueAt![id];
-      }
-      armTimer(source, isRoot, id, dueAt === undefined ? delay : Math.max(0, dueAt - Date.now()));
+      // A restored checkpoint's timers arrive here with what is left of
+      // their delay: XState keeps their deadlines across persistence.
+      armTimer(source, (source as AnyActor).address === execution.rootAddress, id, delay);
     },
     cancelTimer: (source: AnyActorRef, id: string) => {
       const isRoot = (source as { address?: string }).address === execution.rootAddress;
-      if (isRoot) {
-        rootTimersDueAt.delete(id);
-      }
       if (isRoot && !inProcessTimers) {
         (options.timers as Exclude<AgentTimerScheduler, "in-process">).cancel(id);
         return;
@@ -2535,9 +2517,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     },
     cancelAllTimers: (source: AnyActorRef) => {
       const isRoot = (source as { address?: string }).address === execution.rootAddress;
-      if (isRoot) {
-        rootTimersDueAt.clear();
-      }
       const prefix = timerKey(isRoot ? undefined : source, "");
       for (const [key, handle] of timerHandles) {
         if (key.startsWith(prefix)) {
@@ -2559,11 +2538,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
 
   const commit = (snapshot: AnyMachineSnapshot, event: EventObject): void => {
     current = snapshot;
-    // The run handles a machine error itself (`finish` reports it). Without
-    // an observer, XState reports the durable root's error as unhandled.
-    if (snapshot.status === "error") {
-      execution.getActorRef(snapshot as SnapshotFrom<TMachine>)?.subscribe({ error: () => {} });
-    }
     onTrace({
       type: "machine.transition",
       snapshot: snapshot as SnapshotFrom<TMachine>,
@@ -2624,7 +2598,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // the same post-defaults value, so a replay reproduces this run exactly.
       const resolvedInput = resolveMachineInput(machine, init.input);
       let effectiveSnapshot: Snapshot<unknown> | undefined = init.snapshot;
-      restoredTimersDueAt = readAgentMeta(init.snapshot)?.timersDueAt;
       let seedInitEntry: (() => void) | undefined;
 
       // The persisted form of `init.snapshot` AFTER XState has restored it
@@ -2916,10 +2889,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       if (stopReason !== undefined) {
         return [state, []];
       }
-      // A host-owned timer that came due is no longer pending.
-      if ((event as EventObject).type === "xstate.timer") {
-        rootTimersDueAt.delete((event as AgentTimerEvent).id);
-      }
       const [next, effects] = execution.transition(state, event as EventFromLogic<TMachine>) as [
         AnyMachineSnapshot,
         AgentEffects,
@@ -3035,8 +3004,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // The log position this snapshot caches, frozen here: a straggler
       // appended afterwards makes the cache stale, and the stamp says so.
       const logIndexAtSettle = logEntries.length;
-      const timersDueAtSettle =
-        rootTimersDueAt.size > 0 ? Object.fromEntries(rootTimersDueAt) : undefined;
       const persist = () => {
         if (persistenceError !== undefined) {
           throw persistenceError;
@@ -3051,7 +3018,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           version: machineVersion,
           ...(logExecutionId !== undefined ? { logId: logExecutionId } : {}),
           logIndex: logIndexAtSettle,
-          ...(timersDueAtSettle ? { timersDueAt: timersDueAtSettle } : {}),
         };
         return persistedSnapshot;
       };

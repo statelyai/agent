@@ -14,8 +14,8 @@
  *     evaluated as source text; the name only selects a function you passed.
  *   - Invoke input: v5 computes it in code (`input: ({ context }) => ...`),
  *     which JSON cannot hold, so `inputs` supplies it per `src`, the same way.
- *   - Actors: bound with `.provide({ actors })` by name, so the agent runtime
- *     can still bind its executors to the requests.
+ *   - Actors: passed by `src` name; the invokes keep those names, so the
+ *     agent runtime can still bind its executors to the requests.
  */
 import {
   createMachineFromConfig,
@@ -90,10 +90,9 @@ export function fromV5Config(config: object, impl: V5Implementations): AnyStateM
   });
 
   const actors = impl.actors ?? {};
-  const machine = createMachineFromConfig({ ...state(config), "@exprLang": LANG } as MachineJSON, {
-    // Each src maps to its own name, so invokes keep string srcs that
-    // `.provide` (and the agent runtime) can bind.
-    actors: Object.fromEntries(Object.keys(actors).map((key) => [key, key])) as never,
+  return createMachineFromConfig({ ...state(config), "@exprLang": LANG } as MachineJSON, {
+    // Invokes keep their string srcs, so the agent runtime can bind them.
+    actors,
     guards: impl.guards as never,
     actions: impl.actions,
     evaluators: {
@@ -103,5 +102,4 @@ export function fromV5Config(config: object, impl: V5Implementations): AnyStateM
           : { context: assigns[source]!(scope as Scope) },
     },
   });
-  return machine.provide({ actors } as never);
 }

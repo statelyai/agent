@@ -74,7 +74,7 @@ describe("meta.interaction.component (custom composer renderer)", () => {
         waiting: { meta: { interaction }, on: { RATE: "done" } },
         done: { type: "final" },
       },
-    } as never) as unknown as AnyStateMachine;
+    } as never) as AnyStateMachine;
 
   const idleOf = (machine: AnyStateMachine) =>
     describeIdle(machine, createActor(machine).start().getSnapshot() as never);
@@ -149,7 +149,7 @@ describe("idle prompt fallbacks", () => {
         waiting: { description: "Your move, {who}.", on: { GO: "done" } },
         done: { type: "final" },
       },
-    } as never) as unknown as AnyStateMachine;
+    } as never) as AnyStateMachine;
     const actor = createActor(machine).start();
     expect(describeIdle(machine, actor.getSnapshot() as never).prompt).toBe("Your move, Ada.");
   });
@@ -162,7 +162,7 @@ describe("idle prompt fallbacks", () => {
         waiting: { description: "Waiting on {employee.name}'s documents.", on: { GO: "done" } },
         done: { type: "final" },
       },
-    } as never) as unknown as AnyStateMachine;
+    } as never) as AnyStateMachine;
     const actor = createActor(machine).start();
     expect(describeIdle(machine, actor.getSnapshot() as never).prompt).toBe(
       "Waiting on Jordan's documents.",

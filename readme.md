@@ -25,7 +25,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 <!-- install command matching the package prerelease channel and package.json peers -->
 
 ```sh
-pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.63 zod
+pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.64 zod
 ```
 
 XState is pinned while its experimental durable restoration API evolves.
