@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
+import type { AgentTextRequest } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
 import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
@@ -31,11 +32,11 @@ const pickTwo = { module4: 0.9, module14: 0.8, "*": 0.1 };
 const pickNone = { "*": 0.1 };
 const stages = {
   adaptModules: [{ adapted: "Split the pets by constraint; check each owner in turn." }],
-  structurePlan: [{ structure: '{"Step 1: apply Alice\'s constraint": "", "Answer": ""}' }],
+  structurePlan: [{ steps: ["Apply Alice's constraint", "State the answer"] }],
   solveTask: [
     {
+      reasoning: ["Alice is allergic to fur, so she owns the fish.", "Bob gets the dog."],
       answer: "Alice: fish, Bob: dog, Carol: cat.",
-      reasoningTrace: '{"Step 1: apply Alice\'s constraint": "fish", "Answer": "…"}',
     },
   ],
 };
@@ -47,11 +48,92 @@ test("happy path: select → adapt → structure → reason → done", async () 
 
   expect(result.finalState).toBe("done");
   expect(result.answer).toMatch(/^Alice: fish, Bob: dog, Carol: cat\./);
-  expect(result.answer).toContain("Reasoning (the filled-in structure)");
+  // The worked steps follow the answer as prose, not a JSON trace.
+  expect(result.answer).toContain("Reasoning:\n1. Alice is allergic to fur");
   expect(result.selectedModules).toEqual(twoModules.modules);
   expect(result.adaptedModules).toContain("Split the pets");
-  expect(result.reasoningStructure).toContain("Step 1");
+  expect(result.reasoningStructure).toBe("1. Apply Alice's constraint\n2. State the answer");
   expect(result.progress).toEqual(["selecting", "adapting", "structuring", "reasoning", "done"]);
+});
+
+test("the reason step writes its reasoning BEFORE its answer, as prose", async () => {
+  // The provider fills structured fields in order: an answer listed first is
+  // committed before any reasoning, which is how the answer came to contradict
+  // the trace. Capture the JSON schema the model is actually asked for.
+  let schema: { properties?: Record<string, unknown> } | undefined;
+  const result = await runSelfDiscoverExample({
+    ...scripted({
+      ...stages,
+      solveTask: [
+        (_request: AgentTextRequest, options: { responseFormat?: unknown }) => {
+          const format = options.responseFormat as { schema?: typeof schema } | undefined;
+          schema = format?.schema;
+          return stages.solveTask[0]!;
+        },
+      ],
+    }),
+  });
+
+  expect(result.finalState).toBe("done");
+  const keys = JSON.stringify(schema);
+  expect(keys.indexOf('"reasoning"')).toBeGreaterThan(-1);
+  expect(keys.indexOf('"reasoning"')).toBeLessThan(keys.indexOf('"answer"'));
+  expect(keys).not.toContain("reasoningTrace");
+});
+
+test("plan and reasoning render as numbered plain lines: no JSON, no stray headings", async () => {
+  // A live model once returned a plan step and a reasoning step that started
+  // with markdown (`# of sides…`), which rendered as a heading mid-list.
+  const executors = scripted({
+    ...stages,
+    structurePlan: [
+      {
+        steps: [
+          "1. Identify all entities",
+          "## Count the segments",
+          "Step 3: Check\nclosure",
+          "---",
+          "> Name the shape",
+        ],
+      },
+    ],
+    solveTask: [
+      {
+        reasoning: [
+          "Identify points",
+          "# of distinct vertices: 7",
+          "- The path closes",
+          "Step 6: ### Seven sides make a heptagon",
+        ],
+        answer: "(B) heptagon",
+      },
+    ],
+  });
+  const result = await runSelfDiscoverExample({ ...executors });
+
+  expect(result.finalState).toBe("done");
+  expect(result.reasoningStructure).toBe(
+    [
+      "1. Identify all entities",
+      "2. Count the segments",
+      "3. Check closure",
+      "4. Name the shape",
+    ].join("\n"),
+  );
+  expect(result.answer).toBe(
+    [
+      "(B) heptagon",
+      "",
+      "Reasoning:",
+      "1. Identify points",
+      "2. Number of distinct vertices: 7",
+      "3. The path closes",
+      "4. Seven sides make a heptagon",
+    ].join("\n"),
+  );
+  // The plan is asked for as a list of steps, never as a JSON string.
+  const structureCall = executors.calls.find((call) => call.name === "structurePlan")!;
+  expect(structureCall.request.system).not.toMatch(/in JSON/);
 });
 
 test("no module above the threshold → failed with a notice naming it, never adapting", async () => {

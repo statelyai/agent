@@ -1,0 +1,69 @@
+{
+  "Small order ($25.00)": [
+    {
+      "sent": "start {\"orderId\":\"ORD-2\",\"amountCents\":2500,\"currency\":\"USD\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Order ORD-2 ($25.00, low risk) is waiting for a reviewer.",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": "REJECT.reason"
+      }
+    },
+    {
+      "sent": "{\"type\":\"REJECT\",\"reason\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition REJECT -> \"rejected\""
+      ],
+      "response": "- Order id: ORD-2\n- Approved: no\n- Amount: $25.00\n- Risk level: low"
+    }
+  ],
+  "High-risk order ($812.50)": [
+    {
+      "sent": "start {\"orderId\":\"ORD-4417\",\"amountCents\":81250,\"currency\":\"USD\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Order ORD-4417 ($812.50, high risk) is waiting for a reviewer.",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": "REJECT.reason"
+      }
+    },
+    {
+      "sent": "{\"type\":\"REJECT\",\"reason\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition REJECT -> \"rejected\""
+      ],
+      "response": "- Order id: ORD-4417\n- Approved: no\n- Amount: $812.50\n- Risk level: high"
+    }
+  ],
+  "Pause on v1, ship v2, resume the snapshot": [
+    {
+      "sent": "runner runSnapshotMigrationExample",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "leg run.resumed -> \"reviewing\"",
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"approved\""
+      ],
+      "response": "Paused order ORD-4417 (total 812.5) on v1.0.0, waiting in `reviewing`.\n\nShipped v2.0.0: the waiting state is now `awaitingApproval`, and amounts are integer cents with a currency and a risk level.\n\nOn resume, XState read the snapshot's version (1.0.0) and ran the v2.0.0 machine's `migrate`: `reviewing` → `awaitingApproval`, total 812.5 → 81250 cents ($812.50), risk high.\n\nAPPROVE then landed on v2.0.0: order ORD-4417 approved.\n\n**Output**\n\n**Order id**: ORD-4417  \n**Approved**: yes  \n**Amount**: $812.50  \n**Risk level**: high"
+    }
+  ]
+}

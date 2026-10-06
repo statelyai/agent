@@ -1,0 +1,176 @@
+{
+  "Plan a 3-day trip to Lisbon": [
+    {
+      "sent": "start {\"message\":\"I want a 3-day trip to Lisbon.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"travelTurn\"",
+        "transition xstate.done.actor -> \"waiting\""
+      ],
+      "response": "Mock reply to: I want a 3-day trip to Lisbon.",
+      "idle": {
+        "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
+        "events": [
+          "SAY",
+          "END"
+        ],
+        "textEvent": "SAY.message"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SAY\",\"message\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"waiting\"",
+        "transition SAY -> \"routing\"",
+        "rejected HANDOFF -> \"routing\"",
+        "transition KEEP -> \"travelTurn\"",
+        "transition xstate.done.actor -> \"waiting\""
+      ],
+      "response": "Mock reply to: Yes, that works. Please continue.",
+      "idle": {
+        "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
+        "events": [
+          "SAY",
+          "END"
+        ],
+        "textEvent": "SAY.message"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SAY\",\"message\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"waiting\"",
+        "transition SAY -> \"routing\"",
+        "rejected HANDOFF -> \"routing\"",
+        "transition KEEP -> \"travelTurn\"",
+        "transition xstate.done.actor -> \"waiting\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
+        "events": [
+          "SAY",
+          "END"
+        ],
+        "textEvent": "SAY.message"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SAY\",\"message\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"waiting\"",
+        "transition SAY -> \"routing\"",
+        "rejected HANDOFF -> \"routing\"",
+        "transition KEEP -> \"travelTurn\"",
+        "transition xstate.done.actor -> \"budgetSpent\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The travel concierge answered. That was the last turn; end here.",
+        "events": [
+          "END"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"END\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"budgetSpent\"",
+        "transition END -> \"finished\""
+      ],
+      "response": "- Active agent: travel\n- Turns: 4"
+    }
+  ],
+  "Find flights and a hotel for next weekend": [
+    {
+      "sent": "start {\"message\":\"Find me flights and a hotel for next weekend.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"travelTurn\"",
+        "transition xstate.done.actor -> \"waiting\""
+      ],
+      "response": "Mock reply to: Find me flights and a hotel for next weekend.",
+      "idle": {
+        "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
+        "events": [
+          "SAY",
+          "END"
+        ],
+        "textEvent": "SAY.message"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SAY\",\"message\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"waiting\"",
+        "transition SAY -> \"routing\"",
+        "rejected HANDOFF -> \"routing\"",
+        "transition KEEP -> \"travelTurn\"",
+        "transition xstate.done.actor -> \"waiting\""
+      ],
+      "response": "Mock reply to: Yes, that works. Please continue.",
+      "idle": {
+        "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
+        "events": [
+          "SAY",
+          "END"
+        ],
+        "textEvent": "SAY.message"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SAY\",\"message\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"waiting\"",
+        "transition SAY -> \"routing\"",
+        "rejected HANDOFF -> \"routing\"",
+        "transition KEEP -> \"travelTurn\"",
+        "transition xstate.done.actor -> \"waiting\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
+        "events": [
+          "SAY",
+          "END"
+        ],
+        "textEvent": "SAY.message"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SAY\",\"message\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"waiting\"",
+        "transition SAY -> \"routing\"",
+        "rejected HANDOFF -> \"routing\"",
+        "transition KEEP -> \"travelTurn\"",
+        "transition xstate.done.actor -> \"budgetSpent\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The travel concierge answered. That was the last turn; end here.",
+        "events": [
+          "END"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"END\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"budgetSpent\"",
+        "transition END -> \"finished\""
+      ],
+      "response": "- Active agent: travel\n- Turns: 4"
+    }
+  ]
+}

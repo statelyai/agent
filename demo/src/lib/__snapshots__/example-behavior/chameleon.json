@@ -1,0 +1,93 @@
+{
+  "Ocean creatures — octopus (Cleo is the chameleon)": [
+    {
+      "sent": "start {\"category\":\"Ocean creatures\",\"secretWord\":\"octopus\",\"chameleonIndex\":2}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> \"voting\""
+      ],
+      "response": "**Words**\n\n| Player | Word | Reasoning |\n| --- | --- | --- |\n| Ada | mock word | mock reasoning |\n| Bruno | mock word | mock reasoning |\n| Cleo | mock word | mock reasoning |\n| Dev | mock word | mock reasoning |\n\n**Log**\n\n- Category: Ocean creatures. One of Ada, Bruno, Cleo, Dev does not know the secret word.\n- Words — Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word.",
+      "idle": {
+        "prompt": "Category: Ocean creatures. Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word. Who is the chameleon? (0=Ada, 1=Bruno, 2=Cleo, 3=Dev)",
+        "events": [
+          "ACCUSE"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"seat\":3,\"type\":\"ACCUSE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"voting\"",
+        "transition ACCUSE -> \"chameleonEscapes\""
+      ],
+      "response": "Chameleon escapes. Cleo was the chameleon; you accused Dev.\n\nCategory: Ocean creatures. One of Ada, Bruno, Cleo, Dev does not know the secret word.  \nWords — Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word.  \nYou accused Dev.  \nWrong — Cleo was the chameleon and walks away with it. The secret word was \"octopus\".\n\n- Outcome: chameleon-escapes\n- Chameleon: Cleo\n- Secret word: octopus\n- Accused: Dev\n\n**Words**\n\n| Player | Word | Reasoning |\n| --- | --- | --- |\n| Ada | mock word | mock reasoning |\n| Bruno | mock word | mock reasoning |\n| Cleo | mock word | mock reasoning |\n| Dev | mock word | mock reasoning |"
+    }
+  ],
+  "Big cats — lion (Ada is the chameleon)": [
+    {
+      "sent": "start {\"category\":\"Big cats\",\"secretWord\":\"lion\",\"chameleonIndex\":0}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> \"voting\""
+      ],
+      "response": "**Words**\n\n| Player | Word | Reasoning |\n| --- | --- | --- |\n| Ada | mock word | mock reasoning |\n| Bruno | mock word | mock reasoning |\n| Cleo | mock word | mock reasoning |\n| Dev | mock word | mock reasoning |\n\n**Log**\n\n- Category: Big cats. One of Ada, Bruno, Cleo, Dev does not know the secret word.\n- Words — Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word.",
+      "idle": {
+        "prompt": "Category: Big cats. Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word. Who is the chameleon? (0=Ada, 1=Bruno, 2=Cleo, 3=Dev)",
+        "events": [
+          "ACCUSE"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"seat\":3,\"type\":\"ACCUSE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"voting\"",
+        "transition ACCUSE -> \"chameleonEscapes\""
+      ],
+      "response": "Chameleon escapes. Ada was the chameleon; you accused Dev.\n\nCategory: Big cats. One of Ada, Bruno, Cleo, Dev does not know the secret word.  \nWords — Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word.  \nYou accused Dev.  \nWrong — Ada was the chameleon and walks away with it. The secret word was \"lion\".\n\n- Outcome: chameleon-escapes\n- Chameleon: Ada\n- Secret word: lion\n- Accused: Dev\n\n**Words**\n\n| Player | Word | Reasoning |\n| --- | --- | --- |\n| Ada | mock word | mock reasoning |\n| Bruno | mock word | mock reasoning |\n| Cleo | mock word | mock reasoning |\n| Dev | mock word | mock reasoning |"
+    }
+  ],
+  "Musical instruments — violin (Dev is the chameleon)": [
+    {
+      "sent": "start {\"category\":\"Musical instruments\",\"secretWord\":\"violin\",\"chameleonIndex\":3}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> {\"clueRound\":\"turn\"}",
+        "transition xstate.done.actor -> \"voting\""
+      ],
+      "response": "**Words**\n\n| Player | Word | Reasoning |\n| --- | --- | --- |\n| Ada | mock word | mock reasoning |\n| Bruno | mock word | mock reasoning |\n| Cleo | mock word | mock reasoning |\n| Dev | mock word | mock reasoning |\n\n**Log**\n\n- Category: Musical instruments. One of Ada, Bruno, Cleo, Dev does not know the secret word.\n- Words — Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word.",
+      "idle": {
+        "prompt": "Category: Musical instruments. Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word. Who is the chameleon? (0=Ada, 1=Bruno, 2=Cleo, 3=Dev)",
+        "events": [
+          "ACCUSE"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"seat\":3,\"type\":\"ACCUSE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"voting\"",
+        "transition ACCUSE -> \"chameleonGuessing\"",
+        "transition xstate.done.actor -> \"detectivesWin\""
+      ],
+      "response": "Detectives win. Dev was the chameleon and could not name \"violin\".\n\nCategory: Musical instruments. One of Ada, Bruno, Cleo, Dev does not know the secret word.  \nWords — Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word.  \nYou accused Dev.  \nCaught — Dev was the chameleon, and gets one guess at the secret word.  \nDev guessed \"mock guess\" — wrong. The secret word was \"violin\".\n\n- Outcome: detectives-win\n- Chameleon: Dev\n- Secret word: violin\n\n**Words**\n\n| Player | Word | Reasoning |\n| --- | --- | --- |\n| Ada | mock word | mock reasoning |\n| Bruno | mock word | mock reasoning |\n| Cleo | mock word | mock reasoning |\n| Dev | mock word | mock reasoning |"
+    }
+  ]
+}

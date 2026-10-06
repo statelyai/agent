@@ -1,8 +1,9 @@
 import {
-  createActor,
   createAsyncLogic,
   getNextTransitions,
   isMachineSnapshot,
+  stopActor,
+  type AnyActor,
   type AnyActorLogic,
   type AnyActorRef,
   type AnyMachineSnapshot,
@@ -16,6 +17,7 @@ import {
   type Snapshot,
   type SnapshotFrom,
 } from "xstate";
+import { createDurable, type DurableExecution } from "xstate/durable";
 import type {
   AgentTools,
   ChosenEvent,
@@ -60,7 +62,6 @@ import {
 import type { AgentRequest, AgentStepRequest } from "./steps.js";
 import {
   executorBoundLogics,
-  getMachineIdlePredicate,
   getRegisteredAgentExecutionOptions,
   isUnboundPlaceholder,
 } from "./internal/registry.js";
@@ -84,17 +85,15 @@ import {
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
-// ─── runAgent (createActor wrapper) ───
+// ─── The agent loop ───
 //
-// See .scratch/p0-design.md §3. Unlike the step helpers above (a pure
-// transition-at-a-time path for durable hosts), `runAgent` owns a live
-// `createActor` actor: it binds host executors directly onto the machine's
-// agent actor sources, runs the actor to completion or idle, and reports a
-// `done | idle | error` result. There is no continuation callback — idle
-// always settles and the caller resumes by snapshot (§3.4).
+// `createAgentRuntime` binds host executors onto the machine's agent actor
+// sources and runs it on XState's durable transition loop: every transition
+// is pure, effects start work, and everything that finishes lands in one
+// mailbox. The host writes the loop; `runToQuiescence` is the blocking one.
 
 /**
- * Thrown by {@link runAgent} when a resume is given BOTH an `events` log and a
+ * Thrown by {@link AgentRuntime.start} when a resume is given BOTH an `events` log and a
  * `snapshot` that claims a position in that log (`agentMeta.logIndex`), and the
  * two disagree about the state at that position. The log is the source of
  * truth, so this is a host bug (a snapshot cached from a different lineage, or
@@ -109,7 +108,7 @@ export class AgentSnapshotDivergedError extends AgentError {
   ) {
     super(
       "snapshot-diverged",
-      `runAgent: the resume snapshot disagrees with the event log at index ${logIndex}: ` +
+      `createAgentRuntime: the resume snapshot disagrees with the event log at index ${logIndex}: ` +
         `the log replays to state hash '${expected}', the snapshot hashes '${actual}'.`,
     );
     this.name = "AgentSnapshotDivergedError";
@@ -117,10 +116,10 @@ export class AgentSnapshotDivergedError extends AgentError {
 }
 
 /**
- * The stamp {@link RunAgentResult.persist} writes onto the persisted snapshot:
+ * The stamp {@link AgentRunResult.persist} writes onto the persisted snapshot:
  * the machine identity that produced it plus the position in the event log it
  * caches. Read back by the next resume to decide whether the snapshot can be
- * trusted without replaying the log (see {@link RunAgentOptions.events}).
+ * trusted without replaying the log (see {@link AgentRunStart.events}).
  */
 export interface AgentRunMeta {
   machineId: string;
@@ -153,7 +152,7 @@ function readAgentMeta(snapshot: unknown): Partial<AgentRunMeta> | undefined {
   return meta !== null && typeof meta === "object" ? (meta as Partial<AgentRunMeta>) : undefined;
 }
 
-/** Typed root-machine transition observer accepted by {@link runAgent}. */
+/** Typed root-machine transition observer accepted by {@link createAgentRuntime}. */
 export type AgentTransitionHandler<TMachine extends AnyStateMachine> = (
   snapshot: SnapshotFrom<TMachine>,
   event: EventFromLogic<TMachine>,
@@ -163,7 +162,7 @@ export type AgentTransitionHandler<TMachine extends AnyStateMachine> = (
  * The version of the {@link AgentTraceEvent} envelope every trace event carries
  * as `schemaVersion`. Bumped only on a breaking change to the envelope or any
  * payload shape, so a consumer can gate on it. Emitted identically by
- * {@link runAgent}, {@link provideExecutors}' `onTrace`, and
+ * {@link createAgentRuntime}, {@link provideExecutors}' `onTrace`, and
  * {@link traceTransitions}.
  */
 export const AGENT_TRACE_SCHEMA_VERSION = 1;
@@ -196,7 +195,7 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
       reasoning?: string;
       /** This call's token usage, lifted off the raw executor result's `usage`.
        * Present only when the executor reported it. The run-level total is
-       * {@link RunAgentResult.usage}. */
+       * {@link AgentRunResult.usage}. */
       usage?: AgentCallUsage;
       /** Why the call stopped, lifted off the raw executor result's
        * `finishReason` and normalized. Present only when the executor reported
@@ -213,7 +212,7 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
   | { type: "emit"; event: EmittedFrom<TMachine> }
   | {
       /** A reserved `@agent.usage` event the run declined to deliver. The
-       * tokens still fold into {@link RunAgentResult.usage}; only the machine
+       * tokens still fold into {@link AgentRunResult.usage}; only the machine
        * event is dropped. */
       type: "usage.dropped";
       event: AgentUsageEvent;
@@ -235,7 +234,7 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
       | {
           type: "run.end";
           status: "error";
-          cause: RunAgentErrorCause;
+          cause: AgentRunErrorCause;
           error: unknown;
           snapshot: SnapshotFrom<TMachine>;
         }
@@ -420,66 +419,28 @@ type AgentTraceEventPayload<TMachine extends AnyStateMachine = AnyStateMachine> 
     : never;
 
 /**
- * Options for {@link runAgent}.
+ * Options for {@link createAgentRuntime}: what the runtime binds and observes.
+ * The run's `input`/`snapshot`/`events` go to {@link AgentRuntime.start} (or
+ * {@link runToQuiescence}) instead.
  *
  * Host executors are passed as a single {@link AgentRequestExecutors}-shaped
- * set under `executors` (the same shape the step path takes). Each executor
+ * set under `executors`. Each executor
  * kind is required only if the machine actually reaches a request of that kind
  * — checked at bind time, before any actor runs. The whole `executors` field is
  * optional: a machine whose agent sources all carry their own executor
  * (`.withExecutor(...)`) needs none.
  */
-export interface RunAgentOptions<TMachine extends AnyStateMachine> {
+export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
   /**
    * The host executor set backing the machine's agent actors — build it with
    * `createAiSdkExecutors({ models })` from '@statelyai/agent/ai-sdk', or supply
    * `{ generateText?, streamText?, decide? }` by hand. Every slot is optional
-   * here (unlike the step path's {@link AgentRequestExecutors}): each kind is
+   * here: each kind is
    * bind-time-checked only when the machine actually reaches a request of that
    * kind, so e.g. a stream-only machine may pass `{ streamText }` alone.
    */
   executors?: Partial<AgentRequestExecutors>;
 
-  /**
-   * Machine input. Validated against the machine's declared input schema —
-   * defaults filled, transforms applied — before it reaches
-   * `createActor(machine, { input })`; invalid
-   * input throws an {@link AgentError} with code `invalid-machine-input`.
-   * Typed as {@link AgentInputFrom}, so fields the schema defaults are optional
-   * here. Omit when resuming via `snapshot`.
-   */
-  input?: AgentInputFrom<TMachine>;
-
-  // resume
-  /** A previously-settled run's `result.persist()`, to resume from instead of starting fresh. Pair with `event` to deliver the event that unblocks the resumed idle state. */
-  snapshot?: Snapshot<unknown>;
-  /**
-   * An event to send immediately after starting/resuming the actor (e.g. the
-   * human's answer to an idle-state prompt), typed as the machine's event
-   * union. If the resumed state has no transition for it, the machine ignores
-   * it — the run settles normally and the result carries
-   * {@link RunAgentResult.ignored}. For a payload off the wire, parse it first
-   * with `parseAgentEvent(machine, payload)`.
-   */
-  event?: EventFromLogic<TMachine>;
-  /**
-   * A prior run's `result.events` — the replayable log to resume from and keep
-   * appending to. THE LOG IS THE SOURCE OF TRUTH: journaled model/tool results
-   * are folded back in rather than re-executed, so a crashed run resumes from
-   * its log alone.
-   *
-   * A `snapshot` passed alongside is a CACHE of that log: it is trusted only
-   * when it is stamped (see {@link AgentRunMeta}) at the log's current tail and
-   * hashes to what the tail entry recorded; otherwise the log is replayed and
-   * the cache is verified against the position it claims (a genuine
-   * disagreement throws {@link AgentSnapshotDivergedError}).
-   *
-   * When the log was written by a DIFFERENT machine version, a `snapshot` is
-   * required (XState's own `migrate` applies on restore) and the run starts a
-   * NEW log segment whose init entry records where it bridged from; without one
-   * it throws `AgentMachineVersionMismatchError`.
-   */
-  events?: readonly AgentLogEntry[];
   /**
    * Durable log storage, write-ahead. With a `store` the run reads the thread's
    * log to resume from (unless `events` is given, which wins) and writes every
@@ -489,15 +450,15 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
    * write (an {@link AgentEventLogConflictError} from a concurrent writer, or
    * any other failure) stops the run: `{ status: 'error', cause: 'journal' }`.
    *
-   * Requires {@link RunAgentOptions.threadId}.
+   * Requires {@link AgentRuntimeOptions.threadId}.
    */
   store?: AgentEventLogStore;
-  /** The {@link RunAgentOptions.store} thread this run reads and appends to. Required whenever `store` is given. */
+  /** The {@link AgentRuntimeOptions.store} thread this run reads and appends to. Required whenever `store` is given. */
   threadId?: string;
   /**
    * Called synchronously as each log entry is appended, init entry first. An
    * observer, never awaited: persisting here is at-least-once and the run does
-   * not wait for it. Use {@link RunAgentOptions.store} for write-ahead
+   * not wait for it. Use {@link AgentRuntimeOptions.store} for write-ahead
    * durability.
    */
   onEvent?: (entry: AgentLogEntry) => void;
@@ -579,39 +540,42 @@ export interface RunAgentOptions<TMachine extends AnyStateMachine> {
   maxModelCalls?: number; // default 100
   /** Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with `signal.reason` as the error. */
   signal?: AbortSignal;
+  /** Where root `after` timers live. Default `"in-process"`. See {@link AgentTimerScheduler}. */
+  timers?: AgentTimerScheduler;
 }
 
 /**
- * The outcome of a {@link runAgent} call — always exactly one of three
- * variants, never a throw for a waiting or failed machine (programmer
- * errors like a missing executor still throw, at bind time before any actor
- * runs). `done`: a final state was reached (`output` is the machine's
- * `OutputFrom`). `idle`: the run settled with no in-flight work — resume by
- * calling `runAgent` again with `{ snapshot, event }`. `error`: a run-level
+ * The outcome of a run ({@link AgentRuntime.finish} / {@link runToQuiescence})
+ * — always exactly one of three variants, never a throw for a waiting or
+ * failed machine (programmer errors like a missing executor still throw,
+ * synchronously from {@link createAgentRuntime} before any actor runs).
+ * `done`: a final state was reached (`output` is the machine's `OutputFrom`).
+ * `idle`: the run went quiescent (no child, request or in-process timer in
+ * flight) — resume with a new runtime and `{ snapshot, event }`. `error`: a run-level
  * failure, discriminated by `cause` (`'aborted'`, `'max-model-calls'`,
  * `'decision-exhausted'`, `'machine'` for any other machine error state, or
- * `'stopped'` for an external stop — see {@link RunAgentErrorCause}). Every
+ * `'stopped'` for an external stop — see {@link AgentRunErrorCause}). Every
  * variant carries the final `snapshot` and a native XState persistence
  * function. The
  * underlying actor is stopped on every settle path — there is no live actor to
  * resume; resume is always by snapshot.
  */
-type RunAgentOutcome<TMachine extends AnyStateMachine> =
+type AgentRunOutcome<TMachine extends AnyStateMachine> =
   | { status: "done"; output: OutputFrom<TMachine>; snapshot: SnapshotFrom<TMachine> }
   | { status: "idle"; snapshot: SnapshotFrom<TMachine> }
   | {
       status: "error";
-      cause: RunAgentErrorCause;
+      cause: AgentRunErrorCause;
       error: unknown;
       snapshot: SnapshotFrom<TMachine>;
     };
 
-export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<TMachine> & {
+export type AgentRunResult<TMachine extends AnyStateMachine> = AgentRunOutcome<TMachine> & {
   /**
    * The complete, self-contained replayable log for this run — the resumed
    * prefix (if any) plus every entry this run appended, starting with the
    * reserved `@agent.init` entry. Pass it back as
-   * {@link RunAgentOptions.events} to resume; fold it with
+   * {@link AgentRunStart.events} to resume; fold it with
    * `getUsageFromEvents` for cumulative spend; hand it to `replay` for
    * crash recovery or time travel.
    */
@@ -629,7 +593,7 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
    */
   persist(): Snapshot<unknown>;
   /**
-   * Resolves once every {@link RunAgentOptions.store} write issued so far has
+   * Resolves once every {@link AgentRuntimeOptions.store} write issued so far has
    * landed — including a straggler `@agent.usage` entry appended by a call
    * that settled after the run returned, which the result itself does not wait
    * for. Await it before terminating the process if those entries matter.
@@ -648,7 +612,7 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
    */
   usage: AgentUsage;
   /**
-   * The {@link RunAgentOptions.event} the machine did not handle: present only
+   * The {@link AgentRunInit.event} the machine did not handle: present only
    * when the resumed state had no transition for it, so sending it was a
    * no-op (no state change, no actions). The run settles normally — usually
    * back to `idle` at the same state — and the event is still journaled, so a
@@ -667,17 +631,17 @@ export type RunAgentResult<TMachine extends AnyStateMachine> = RunAgentOutcome<T
 };
 
 /**
- * Discriminates a {@link RunAgentResult} `error`:
+ * Discriminates a {@link AgentRunResult} `error`:
  * - `'aborted'` — the run's `signal` fired.
  * - `'max-model-calls'` — the `maxModelCalls` budget was exceeded.
  * - `'decision-exhausted'` — the machine reached an error state whose error is
  *   (or wraps) a {@link AgentDecisionExhaustedError} that no `onError` handled.
  * - `'machine'` — any other machine error state.
  * - `'stopped'` — the actor was stopped externally (`status === 'stopped'`).
- * - `'journal'` — a {@link RunAgentOptions.store} write rejected (a concurrent
+ * - `'journal'` — a {@link AgentRuntimeOptions.store} write rejected (a concurrent
  *   writer's {@link AgentEventLogConflictError}, or any other storage failure).
  */
-export type RunAgentErrorCause =
+export type AgentRunErrorCause =
   | "aborted"
   | "max-model-calls"
   | "decision-exhausted"
@@ -689,7 +653,7 @@ let nextRunAgentTraceId = 1;
 
 /**
  * Thrown into the invoke that would have made the call once
- * {@link RunAgentOptions.maxModelCalls} is spent. It reaches the machine
+ * {@link AgentRuntimeOptions.maxModelCalls} is spent. It reaches the machine
  * through the normal error channel, so an invoke's `onError` can branch on it
  * (`error.code === 'max-model-calls'`, the same string the settled result's
  * `cause` uses) and route to a degraded/finish state instead of failing the
@@ -708,7 +672,7 @@ export class AgentMaxModelCallsExceededError extends AgentError {
   constructor(maxModelCalls: number) {
     super(
       "max-model-calls",
-      `runAgent exceeded maxModelCalls (${maxModelCalls}). Raise the budget, or handle it ` +
+      `The run exceeded maxModelCalls (${maxModelCalls}). Raise the budget, or handle it ` +
         `in the invoke's onError (error.code === 'max-model-calls').`,
     );
     this.name = "AgentMaxModelCallsExceededError";
@@ -790,12 +754,12 @@ export function isStateMachineLogic(logic: unknown): logic is AnyStateMachine {
 
 /**
  * Fails fast (throws) at bind time — before any actor runs — when the
- * machine invokes an agent actor `runAgent` cannot execute. See §3.2 point 2.
+ * machine invokes an agent actor the runtime cannot execute. See §3.2 point 2.
  *
  * Recurses into invoked child state machines (arbitrarily deep). A child
  * machine's agent requests reached through string-keyed invoke srcs DO inherit
- * the parent runAgent's `generateText`/`streamText`/`decide` executors —
- * runAgent rebinds them with the same host-backed wrappers (see
+ * the parent run's `generateText`/`streamText`/`decide` executors —
+ * the runtime rebinds them with the same host-backed wrappers (see
  * {@link rebindChildMachine}) — so the only remaining bind-time errors are: a
  * required executor kind missing entirely (naming the invoke chain and src),
  * and an unbound request reached through a direct-object invoke src that can't
@@ -819,7 +783,7 @@ function assertBindable(
 /** Recursion frame for {@link assertBindable}. `isChild` flips the error
  * messages to name the child invoke chain; `childPath` names that chain
  * (`parent > child`); `rebindable` is true while every link back to the root
- * is a string-keyed source (so runAgent can rebind the request with its own
+ * is a string-keyed source (so the runtime can rebind the request with its own
  * executors) and false once a direct-object invoke src is crossed (those
  * cannot be swapped via `.provide`, so an unbound request under one must
  * carry its own executor); `visited` guards against a machine invoking itself
@@ -849,14 +813,14 @@ function assertMachineBindable(
         assertChildMachineBindable(src, src, stateName, executors, ctx);
         continue;
       }
-      // string-keyed sources can be rebound by runAgent; direct objects
+      // string-keyed sources can be rebound by the runtime; direct objects
       // cannot. Only a problem if it's an agent logic that still needs
       // execution (no executor of its own).
       if ((isTextLogic(src) || isDecisionLogic(src)) && !executorBoundLogics.has(src as object)) {
         throw new Error(
-          `runAgent: ${where} '${stateName}' invokes a direct-object actor logic ` +
+          `createAgentRuntime: ${where} '${stateName}' invokes a direct-object actor logic ` +
             `(kind: '${(src as TextLogic | DecisionLogic).kind}'). Direct-object invoke ` +
-            `srcs cannot be rebound by runAgent — either call '.withExecutor(...)' on ` +
+            `srcs cannot be rebound by the agent runtime — either call '.withExecutor(...)' on ` +
             `the logic before invoking it, or register it as a string-keyed actor ` +
             `source instead (machine.provide({ actors: { name: logic } })) and ` +
             `invoke it by name.`,
@@ -869,9 +833,9 @@ function assertMachineBindable(
 
     if (logic === undefined) {
       throw new Error(
-        `runAgent: ${where} '${stateName}' invokes unregistered actor source '${src}'. ` +
+        `createAgentRuntime: ${where} '${stateName}' invokes unregistered actor source '${src}'. ` +
           `Provide it via machine.provide({ actors: { '${src}': ... } }) or ` +
-          `runAgent(machine, { actors: { '${src}': ... } }).`,
+          `createAgentRuntime(machine, { actors: { '${src}': ... } }).`,
       );
     }
 
@@ -891,8 +855,8 @@ function assertMachineBindable(
       }
       if (!executors.decide) {
         throw new Error(
-          `runAgent: ${where} '${stateName}' invokes decision source '${src}' but no ` +
-            `'decide' executor was provided to runAgent(...).`,
+          `createAgentRuntime: ${where} '${stateName}' invokes decision source '${src}' but no ` +
+            `'decide' executor was provided to createAgentRuntime(...).`,
         );
       }
       continue;
@@ -900,7 +864,7 @@ function assertMachineBindable(
 
     if (isTextLogic(logic)) {
       // A text source with its own bound executor (`.withExecutor(...)`) needs
-      // no runAgent executor — it runs itself.
+      // no host executor — it runs itself.
       if (executorBoundLogics.has(logic as object)) {
         continue;
       }
@@ -915,14 +879,14 @@ function assertMachineBindable(
       }
       if (logic.mode === "stream" && !executors.streamText) {
         throw new Error(
-          `runAgent: ${where} '${stateName}' invokes streaming text source '${src}' but ` +
-            `no 'streamText' executor was provided to runAgent(...).`,
+          `createAgentRuntime: ${where} '${stateName}' invokes streaming text source '${src}' but ` +
+            `no 'streamText' executor was provided to createAgentRuntime(...).`,
         );
       }
       if (logic.mode !== "stream" && !executors.generateText) {
         throw new Error(
-          `runAgent: ${where} '${stateName}' invokes text source '${src}' but ` +
-            `no 'generateText' executor was provided to runAgent(...).`,
+          `createAgentRuntime: ${where} '${stateName}' invokes text source '${src}' but ` +
+            `no 'generateText' executor was provided to createAgentRuntime(...).`,
         );
       }
       continue;
@@ -930,9 +894,9 @@ function assertMachineBindable(
 
     if (isUnboundPlaceholder(logic)) {
       throw new Error(
-        `runAgent: ${where} '${stateName}' invokes actor source '${src}', which has no ` +
+        `createAgentRuntime: ${where} '${stateName}' invokes actor source '${src}', which has no ` +
           `host execution. Provide it via machine.provide({ actors: { '${src}': ... } }) ` +
-          `or runAgent(machine, { actors: { '${src}': ... } }).`,
+          `or createAgentRuntime(machine, { actors: { '${src}': ... } }).`,
       );
     }
 
@@ -964,7 +928,7 @@ function assertChildMachineBindable(
 
   // A child is rebindable only when it is reached through string-keyed invoke
   // srcs all the way from the root: those can be swapped via `.provide`, so
-  // runAgent rebinds the child's unbound requests with its own executors. A
+  // the runtime rebinds the child's unbound requests with its own executors. A
   // direct-object invoke src (typeof childSrc !== "string") can't be swapped,
   // so nothing under it inherits.
   const rebindable = ctx.rebindable && typeof childSrc === "string";
@@ -978,11 +942,11 @@ function assertChildMachineBindable(
 }
 
 /** The loud bind-time error for an unbound agent request reached under a
- * direct-object invoke src, which runAgent cannot rebind (only string-keyed
+ * direct-object invoke src, which the runtime cannot rebind (only string-keyed
  * sources can be swapped via `.provide`). Names the invoke chain AND the
  * request src, and spells out the `.withExecutor`/string-keyed remedy. Note:
  * requests reachable through string-keyed srcs at any depth DO inherit
- * runAgent's executors — this error is only for the unrebindable direct-object
+ * the runtime's executors — this error is only for the unrebindable direct-object
  * case. */
 function unrebindableChildRequestError(
   childPath: string,
@@ -991,10 +955,10 @@ function unrebindableChildRequestError(
   kind: "text" | "streaming text" | "decision",
 ): Error {
   return new Error(
-    `runAgent: child machine '${childPath}' (state '${stateName}') invokes ${kind} ` +
+    `createAgentRuntime: child machine '${childPath}' (state '${stateName}') invokes ${kind} ` +
       `source '${requestSrc}', which has no host execution and is reached through a ` +
-      `direct-object invoke src that runAgent cannot rebind. Requests reached through ` +
-      `string-keyed actor sources inherit runAgent's generateText/streamText/decide ` +
+      `direct-object invoke src that the agent runtime cannot rebind. Requests reached through ` +
+      `string-keyed actor sources inherit the agent runtime's generateText/streamText/decide ` +
       `executors automatically; a direct-object child machine does not. Either bind the ` +
       `request with its own executor (requestLogic.withExecutor(...)), or register the ` +
       `child as a string-keyed actor source (machine.provide({ actors: { <child>: ` +
@@ -1005,7 +969,7 @@ function unrebindableChildRequestError(
 /** Attribution a call site attaches to the reserved `@agent.usage` event it reports — everything on {@link AgentUsageEvent} except the type and the tokens. @internal */
 type AgentUsageEventSource = Omit<AgentUsageEvent, "type" | "usage">;
 
-// Shared state closed over by every wrapped actor source in one runAgent call: executors, observation callbacks, and the shared model-call budget/actor ref.
+// Shared state closed over by every wrapped actor source in one run: executors, observation callbacks, and the shared model-call budget/actor ref.
 /** @internal */
 interface RunAgentBindContext {
   generateText?: AgentRequestExecutor;
@@ -1016,7 +980,7 @@ interface RunAgentBindContext {
    * the shared emission helpers hand it a bare {@link AgentTraceEventPayload}
    * plus the emitting actor's `self` (the invoked async leaf), and it fans out
    * to the trace sink and to the sugar callbacks derived from that payload.
-   * `runAgent` ignores `self` and stamps a run-scoped envelope;
+   * `createAgentRuntime` ignores `self` and stamps a run-scoped envelope;
    * `provideExecutors` uses it to mint a per-root-actor envelope (see
    * `provideTraceSink`). Undefined when nothing observes.
    */
@@ -1030,7 +994,7 @@ interface RunAgentBindContext {
    *
    * `self` is the settling request's own actor ref; the `provideExecutors`
    * path reads the invoking machine actor off it (`self._parent`) because it
-   * has no run-scoped root actor. `runAgent` ignores it and delivers to the
+   * has no run-scoped root actor. `createAgentRuntime` ignores it and delivers to the
    * run's root.
    */
   recordUsage?: (
@@ -1038,7 +1002,7 @@ interface RunAgentBindContext {
     source?: AgentUsageEventSource,
     self?: BoundActorSelf,
   ) => void;
-  /** The owning run's id (`run_<n>`), threaded to executors as `info.runId`. Unset off the runAgent path. */
+  /** The owning run's id (`run_<n>`), threaded to executors as `info.runId`. Unset off the runtime path. */
   runId?: string;
   /**
    * Mints the per-call idempotency key threaded to executors as
@@ -1046,15 +1010,15 @@ interface RunAgentBindContext {
    * leaf actor (`self`), so every attempt of one decision invoke shares this
    * invoke-level key; the decision wrap appends the attempt ordinal
    * (`…#${n}.${attempts.length}`) so retries do not collide in a cache.
-   * Unset off the runAgent path, and when the log has no `executionId`.
+   * Unset off the runtime path, and when the log has no `executionId`.
    */
   callKey?: (siteId: string, self?: object) => string | undefined;
   /**
    * The write-ahead barrier: awaited immediately before every text/decision
    * executor invocation, so no paid call is made against a log that is not yet
    * durable. Resolves immediately when the run has no
-   * {@link RunAgentOptions.store}; rejects with the journal's failure once a
-   * write has rejected. Unset off the runAgent path.
+   * {@link AgentRuntimeOptions.store}; rejects with the journal's failure once a
+   * write has rejected. Unset off the runtime path.
    */
   awaitJournal?: () => Promise<void>;
   /** Assigned right after createActor (§2.6); read lazily by decision wraps. */
@@ -1092,7 +1056,7 @@ type TraceDispatch = (payload: AgentTraceEventPayload, self?: BoundActorSelf) =>
 
 /** The observers a {@link TraceDispatch} fans one trace payload out to. @internal */
 interface TraceSinks {
-  /** Envelope-stamping trace sink (run-scoped on the runAgent path, per-root-actor on the provide path). */
+  /** Envelope-stamping trace sink (run-scoped on the runtime path, per-root-actor on the provide path). */
   onTrace?: (payload: AgentTraceEventPayload, self?: BoundActorSelf) => void;
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
   onResult?: (request: AgentStepRequest, result: { result: unknown; raw: unknown }) => void;
@@ -1105,8 +1069,8 @@ interface TraceSinks {
 /**
  * Builds the ONE place a trace payload is emitted: it hands the payload to the
  * envelope-stamping trace sink and, from that same payload, invokes the sugar
- * callbacks that are projections of it — {@link RunAgentOptions.onChunk},
- * {@link RunAgentOptions.onResult}, {@link RunAgentOptions.onTransition}. Each
+ * callbacks that are projections of it — {@link AgentRuntimeOptions.onChunk},
+ * {@link AgentRuntimeOptions.onResult}, {@link AgentRuntimeOptions.onTransition}. Each
  * keeps its historical position relative to the trace: `onResult` fires just
  * BEFORE its `request.end`, `onChunk`/`onTransition` just AFTER their
  * `stream.chunk`/`machine.transition`. Sugar dispatch never depends on whether
@@ -1156,14 +1120,22 @@ function invokingActorOf(
   self: BoundActorSelf | undefined,
   runCtx: RunAgentBindContext,
 ): AnyActorRef | undefined {
-  return self?._parent ?? runCtx.actorHolder.actorRef;
+  const parent = self?._parent as (AnyActorRef & { _parent?: unknown }) | undefined;
+  // A request inside an invoked child machine reads and drives that child.
+  if (parent !== undefined && parent._parent !== undefined) {
+    return parent;
+  }
+  // A top-level request reads the run's root. Under the agent loop every root
+  // transition is pure, so `_parent` is the root AS OF the transition that
+  // spawned the request; the run's facade reads the root as it is now.
+  return runCtx.actorHolder.actorRef ?? parent;
 }
 
 /**
  * The shared text/stream emission helper: binds a {@link TextLogic} to
  * `runCtx`'s executor and constructs the `request.start` / `stream.chunk` /
  * `request.end` (incl. the lifted `reasoning`) / `request.error` trace payloads.
- * Used by both `runAgent` and `provideExecutors` so the two paths produce
+ * Used by both `createAgentRuntime` and `provideExecutors` so the two paths produce
  * identical event shapes by construction. @internal
  */
 function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic {
@@ -1337,11 +1309,11 @@ function createCountingDecide(
 }
 
 /**
- * Builds the decision actor logic runAgent installs in place of a
+ * Builds the decision actor logic the runtime installs in place of a
  * `DecisionLogic`/`agent.decide` source. `DecisionLogic.withExecutor(...)`
  * can only swap the innermost per-attempt executor — the `resolveDecision(...)`
  * call (and its `canTake`) is hardwired inside the original logic's `run`.
- * To supply `canTake` (mode-3, §2.6), runAgent instead builds a fresh async
+ * To supply `canTake` (mode-3, §2.6), the runtime instead builds a fresh async
  * logic here that calls `resolveDecision` itself, reusing `logic.request(...)`
  * to build the request the same way the original logic would have.
  *
@@ -1480,7 +1452,7 @@ function rootActorOf(self: BoundActorSelf | undefined): AnyActorRef | undefined 
   return ref;
 }
 
-/** The per-root envelope state, minted on first use (runId `run_<n>`, matching runAgent). */
+/** The per-root envelope state, minted on first use (runId `run_<n>`, matching the runtime). */
 function rootTraceState(root: AnyActorRef): RootTraceState {
   let state = rootTraceRegistry.get(root as object);
   if (!state) {
@@ -1529,7 +1501,7 @@ export interface ProvideBindOptions {
 
 /**
  * A minimal {@link RunAgentBindContext} for `provideExecutors` (uncontrolled
- * `createActor`): the same wrappers runAgent installs, MINUS the run-scoped
+ * `createActor`): the same wrappers the runtime installs, MINUS the run-scoped
  * model-call counter. `consumeModelCall` is a no-op (no budget), and
  * `actorHolder.actorRef` is left undefined — the wrappers read the invoking
  * actor off `self._parent`, always present under a live `createActor` tree.
@@ -1538,7 +1510,7 @@ export interface ProvideBindOptions {
  *
  * `recordUsage` has no run-level aggregate to fold into here (there is no
  * run), so it does one thing: deliver the reserved `@agent.usage` event, gated
- * exactly like runAgent's — see {@link deliverUsageEvent}.
+ * exactly like the runtime's — see {@link deliverUsageEvent}.
  */
 function provideBindContext(
   machine: AnyStateMachine,
@@ -1571,7 +1543,7 @@ function provideBindContext(
 /**
  * The single reserved-`@agent.usage` DELIVERY seam, shared by both bind paths:
  * after a bound call settles with reported usage, send the prebuilt `event` to
- * the machine actor `resolveActorRef` names — the run's root actor on the `runAgent` path,
+ * the machine actor `resolveActorRef` names — the run's root actor on the `createAgentRuntime` path,
  * the settling request actor's `self._parent` (always the invoking machine
  * under a live `createActor` tree) on the `provideExecutors` path.
  *
@@ -1614,7 +1586,7 @@ function deliverUsageEvent(
 
 /**
  * Host-binds one text/stream source for {@link provideExecutors} using the SAME
- * emission helper as `runAgent` ({@link bindTextLogic}), so a bound
+ * emission helper as `createAgentRuntime` ({@link bindTextLogic}), so a bound
  * text request emits request.start/stream.chunk/request.end/request.error with
  * identical shapes. @internal
  */
@@ -1629,9 +1601,9 @@ export function bindTextForProvide(
 
 /**
  * Host-binds one `DecisionLogic`/`agent.decide` source for
- * {@link provideExecutors}: runAgent's decision wrapper (snapshot-driven
+ * {@link provideExecutors}: the runtime's decision wrapper (snapshot-driven
  * candidate events, `canTake`, auto-delivery of the chosen event) with the same
- * request-level tracing runAgent emits, minus run-scoped counting. @internal
+ * request-level tracing the runtime emits, minus run-scoped counting. @internal
  */
 export function bindDecisionForProvide(
   machine: AnyStateMachine,
@@ -1644,7 +1616,7 @@ export function bindDecisionForProvide(
 
 /**
  * Recursively binds an invoked child state machine for {@link provideExecutors},
- * with the same semantics `runAgent` applies ({@link rebindChildMachine}):
+ * with the same semantics `createAgentRuntime` applies ({@link rebindChildMachine}):
  * string-keyed text/decision sources at any depth inherit the host executors,
  * a source that carries its own executor is left alone, and a cycle is
  * returned as-is. Each machine in the tree is bound with its own registered
@@ -1705,7 +1677,7 @@ function resolveMachineInput(machine: AnyStateMachine, input: unknown): unknown 
   } catch (error) {
     throw new AgentError(
       "invalid-machine-input",
-      `runAgent: machine input failed validation against the declared input ` +
+      `createAgentRuntime: machine input failed validation against the declared input ` +
         `schema: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
@@ -1714,8 +1686,8 @@ function resolveMachineInput(machine: AnyStateMachine, input: unknown): unknown 
 
 /**
  * Recursively rebinds an invoked child machine's own agent sources with the
- * SAME host-backed wrappers runAgent applies to the top-level machine, so a
- * child's text/stream/decision requests inherit runAgent's executors and
+ * SAME host-backed wrappers the runtime applies to the top-level machine, so a
+ * child's text/stream/decision requests inherit the runtime's executors and
  * participate in maxModelCalls counting, onTrace/onChunk/onResult exactly like
  * parent requests. Returns the child machine to invoke: a `.provide`-rebound
  * copy when any inner source needed wrapping, else the original untouched.
@@ -1731,7 +1703,7 @@ function rebindChildMachine(
   runCtx: RunAgentBindContext,
   visited: Set<AnyStateMachine>,
   /**
-   * Optional per-machine bind-context factory. `runAgent` shares ONE run-scoped
+   * Optional per-machine bind-context factory. `createAgentRuntime` shares ONE run-scoped
    * context at every depth (one budget, one trace envelope, one root actor), so
    * it omits this. `provideExecutors` passes it so each machine in the tree is
    * bound with its OWN registered `setupAgent` schemas — a child decision must
@@ -1776,76 +1748,146 @@ function rebindChildMachine(
 }
 
 /**
- * Runs an agent machine to completion or idle: a `createActor` host that
- * binds `options`' host executors onto the machine's `agent.*`/`TextLogic`/
- * `DecisionLogic` actor sources, starts (or resumes) the actor, and drives
- * it until it settles — {@link RunAgentResult} `done | idle | error`. Unlike
- * the step helpers ({@link initialAgentStep} etc — a pure
- * transition-at-a-time path for durable hosts), `runAgent` owns a live actor
- * internally; there is no continuation callback, so **idle always settles**
- * and the caller resumes explicitly by passing the settled `{ snapshot,
- * event }` back in. The actor is stopped on every settle path (`done`,
- * `idle`, and `error` alike) — resume is always by snapshot, never by
- * holding a reference to a live actor.
- *
- * Binding happens **before** the actor starts: every invoke the machine
- * could reach is walked and checked against the effective actor sources
- * (`options.actors` merged onto the machine), so a missing
- * `streamText`/`decide` executor or any other unbound actor source throws
- * immediately — a bind-time error, not a mid-run failure.
- *
- * @example
- * ```ts
- * const executors = createAiSdkExecutors({ models });
- * let r = await runAgent(machine, { input, executors });
- * while (r.status === 'idle') {
- *   const event = await promptUser(getAcceptedEvents(r.snapshot));
- *   r = await runAgent(machine, { snapshot: r.snapshot, event, executors });
- * }
- * if (r.status !== 'done') throw new Error(`Run did not complete: ${r.status}`);
- * console.log(r.output);
- * ```
- *
- * Each executor is a plain function returning `{ result }` (plus optional `messages`/`usage`), or
- * an adapter's set: `createAiSdkExecutors` from '@statelyai/agent/ai-sdk' or
- * `createOpenAiExecutors` from '@statelyai/agent/openai' supply all three.
+ * The durable effects one transition produced. Hand them to
+ * {@link AgentRuntime.execute}; nothing in them has run yet.
  */
-export async function runAgent<TMachine extends AnyStateMachine>(
-  machine: TMachine,
-  options: RunAgentOptions<TMachine>,
-): Promise<RunAgentResult<TMachine>> {
-  const store = options.store;
-  if (store === undefined) {
-    // No store: the run starts synchronously, exactly as it always has.
-    return createAgentSession(machine, options).settled();
-  }
-  const threadId = options.threadId;
-  if (threadId === undefined || threadId === "") {
-    throw new AgentError(
-      "missing-thread-id",
-      "runAgent: `threadId` is required when `store` is given — it names the log thread to read and append to.",
-    );
-  }
-  if (options.events !== undefined) {
-    // An explicit log wins as the resume, but it must BE the thread's log:
-    // appending onto a store that has moved on — or onto a same-length log
-    // that says something else — would interleave two lineages.
-    const storedThread = await store.read(threadId);
-    if (storedThread.length !== options.events.length) {
-      throw new AgentEventLogConflictError(threadId, options.events.length, storedThread.length);
-    }
-    assertThreadMatchesEvents(threadId, storedThread, options.events);
-    return createAgentSession(machine, options).settled();
-  }
-  const stored = await store.read(threadId);
-  return createAgentSession(
-    machine,
-    stored.length > 0 ? { ...options, events: stored } : options,
-  ).settled();
+export type AgentEffects = Parameters<DurableExecution<AnyStateMachine>["executeEffects"]>[0];
+
+/**
+ * Where a run's `after` timers live. The default (`"in-process"`) arms them
+ * with `setTimeout` and counts a pending timer as work in flight, so a loop
+ * keeps reading its mailbox until the timer fires. A host with its own
+ * durable timers (a Temporal timer, a Durable Object alarm, an Inngest sleep)
+ * passes `schedule`/`cancel`: the loop then treats a pending timer as the
+ * outside world's business, and the host delivers `{ type: "xstate.timer", id }`
+ * through {@link AgentRuntime.transition} when it fires.
+ */
+export type AgentTimerScheduler =
+  | "in-process"
+  | {
+      schedule(timer: { id: string; delay: number }): void;
+      cancel(id: string): void;
+    };
+
+/**
+ * A host-owned timer firing: what a host with its own durable timers (see
+ * {@link AgentTimerScheduler}) delivers when the `id` it was asked to
+ * schedule comes due.
+ */
+export interface AgentTimerEvent {
+  type: "xstate.timer";
+  id: string;
 }
 
-interface AgentRunSession<TMachine extends AnyStateMachine> {
-  settled(): Promise<RunAgentResult<TMachine>>;
+/** How {@link AgentRuntime.start} opens a run. */
+export interface AgentRunStart<TMachine extends AnyStateMachine> {
+  /**
+   * Machine input. Validated against the machine's declared input schema —
+   * defaults filled, transforms applied — before it reaches
+   * `createActor(machine, { input })`; invalid
+   * input throws an {@link AgentError} with code `invalid-machine-input`.
+   * Typed as {@link AgentInputFrom}, so fields the schema defaults are optional
+   * here. Omit when resuming via `snapshot`.
+   */
+  input?: AgentInputFrom<TMachine>;
+  /** A previously-settled run's `result.persist()`, to resume from instead of starting fresh. Pair with `event` to deliver the event that unblocks the resumed idle state. */
+  snapshot?: Snapshot<unknown>;
+  /**
+   * A prior run's `result.events` — the replayable log to resume from and keep
+   * appending to. THE LOG IS THE SOURCE OF TRUTH: journaled model/tool results
+   * are folded back in rather than re-executed, so a crashed run resumes from
+   * its log alone.
+   *
+   * A `snapshot` passed alongside is a CACHE of that log: it is trusted only
+   * when it is stamped (see {@link AgentRunMeta}) at the log's current tail and
+   * hashes to what the tail entry recorded; otherwise the log is replayed and
+   * the cache is verified against the position it claims (a genuine
+   * disagreement throws {@link AgentSnapshotDivergedError}).
+   *
+   * When the log was written by a DIFFERENT machine version, a `snapshot` is
+   * required (XState's own `migrate` applies on restore) and the run starts a
+   * NEW log segment whose init entry records where it bridged from; without one
+   * it throws `AgentMachineVersionMismatchError`.
+   */
+  events?: readonly AgentLogEntry[];
+}
+
+/**
+ * The agent loop's helpers for one run. The host owns the loop:
+ *
+ * ```ts
+ * let [state, effects] = await runtime.start({ input });
+ * await runtime.execute(effects);
+ * for (let event; (event = await runtime.nextEvent()); ) {
+ *   [state, effects] = runtime.transition(state, event);
+ *   await runtime.execute(effects);
+ * }
+ * const result = await runtime.finish();
+ * ```
+ *
+ * `execute` only starts work. Every completion, failure, child message and
+ * timer lands in one mailbox, and `nextEvent` hands out whichever arrived
+ * first. It resolves `undefined` once nothing but the outside world can move
+ * the machine: no effect, child or timer is in flight and the mailbox is
+ * empty (or the run finished, was cancelled, or lost its journal).
+ *
+ * "In flight" means any running child that is not a machine at rest: a model
+ * request, an async actor, a child machine whose own children are running.
+ * A callback or subscription child never finishes on its own, so while one
+ * is running the loop keeps reading until it stops; a host that invokes one
+ * for the life of a state should expect `nextEvent` to keep waiting there.
+ */
+export interface AgentRuntime<TMachine extends AnyStateMachine> {
+  /** Opens the run: a fresh start from `input`, a resume from `snapshot`, or recovery from a log. */
+  start(init?: AgentRunStart<TMachine>): Promise<[SnapshotFrom<TMachine>, AgentEffects]>;
+  /** Applies one event: journals it, traces it, and returns the next state plus its effects. */
+  transition(
+    state: SnapshotFrom<TMachine>,
+    event: EventFromLogic<TMachine> | AgentTimerEvent,
+  ): [SnapshotFrom<TMachine>, AgentEffects];
+  /** Starts the effects' work and returns once it is accepted, not once it finishes. */
+  execute(effects: AgentEffects): Promise<void>;
+  /** The next event that arrived, or `undefined` once the run is quiescent. */
+  nextEvent(): Promise<EventFromLogic<TMachine> | undefined>;
+  /** Settles the run: stops what is still running and returns the outcome. */
+  finish(): Promise<AgentRunResult<TMachine>>;
+}
+
+/** How {@link runToQuiescence} opens a run: {@link AgentRunStart} plus one event to deliver. */
+export interface AgentRunInit<TMachine extends AnyStateMachine> extends AgentRunStart<TMachine> {
+  /**
+   * An event to send immediately after starting/resuming the actor (e.g. the
+   * human's answer to an idle-state prompt), typed as the machine's event
+   * union. If the resumed state has no transition for it, the machine ignores
+   * it — the run settles normally and the result carries
+   * {@link AgentRunResult.ignored}. For a payload off the wire, parse it first
+   * with `parseAgentEvent(machine, payload)`. A host-owned timer that came
+   * due is delivered the same way, as an {@link AgentTimerEvent}.
+   */
+  event?: EventFromLogic<TMachine> | AgentTimerEvent;
+}
+
+/**
+ * The blocking host: opens the run, delivers `event` if given, then applies
+ * every event that arrives until the run is quiescent, and returns the
+ * outcome. A request handler or durable engine writes the same loop with its
+ * own stop policy; this one is for scripts and tests.
+ */
+export async function runToQuiescence<TMachine extends AnyStateMachine>(
+  runtime: AgentRuntime<TMachine>,
+  init: AgentRunInit<TMachine> = {},
+): Promise<AgentRunResult<TMachine>> {
+  let [state, effects] = await runtime.start(init);
+  await runtime.execute(effects);
+  if (init.event !== undefined && (state as AnyMachineSnapshot).status === "active") {
+    [state, effects] = runtime.transition(state, init.event);
+    await runtime.execute(effects);
+  }
+  for (let event; (event = await runtime.nextEvent()); ) {
+    [state, effects] = runtime.transition(state, event);
+    await runtime.execute(effects);
+  }
+  return runtime.finish();
 }
 
 /**
@@ -1872,7 +1914,7 @@ function assertThreadMatchesEvents(
     if (!same) {
       throw new AgentError(
         "event-log-conflict",
-        `runAgent: the given \`events\` diverge from thread "${threadId}" at index ${index} ` +
+        `createAgentRuntime: the given \`events\` diverge from thread "${threadId}" at index ${index} ` +
           `(stored entry '${storedEntry.id}', given '${givenEntry.id}') — ` +
           "the log passed in is not this thread's log.",
       );
@@ -1880,23 +1922,58 @@ function assertThreadMatchesEvents(
   }
 }
 
-function createAgentSession<TMachine extends AnyStateMachine>(
+/** Why a run stopped early, when it did (a cancel, or a journal that stopped being durable). */
+type StopReason = { cause: "aborted" | "journal" | "machine"; error: unknown };
+
+const QUIESCENT = Symbol("quiescent");
+
+/**
+ * Creates the helpers for one run of `machine`: executors bound to its
+ * requests, the write-ahead log, traces, the budget, and a mailbox over
+ * XState's durable transition loop (`xstate/durable`). See
+ * {@link AgentRuntime} for the loop a host writes around it, and
+ * {@link runToQuiescence} for the blocking host. {@link AgentRuntime.finish}
+ * stops whatever is still running on every settle path (`done`, `idle`, and
+ * `error` alike) — resume is always by snapshot (or log), never by holding a
+ * reference to a live actor.
+ *
+ * Binding happens **before** any actor starts: every invoke the machine
+ * could reach is walked and checked against the effective actor sources
+ * (`options.actors` merged onto the machine), so a missing
+ * `streamText`/`decide` executor or any other unbound actor source throws
+ * synchronously from this call — a bind-time error, not a mid-run failure.
+ *
+ * @example
+ * ```ts
+ * const executors = createAiSdkExecutors({ models });
+ * let r = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+ * while (r.status === 'idle') {
+ *   const event = await promptUser(getAcceptedEvents(r.snapshot));
+ *   r = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+ *     snapshot: r.snapshot,
+ *     event,
+ *   });
+ * }
+ * if (r.status !== 'done') throw new Error(`Run did not complete: ${r.status}`);
+ * console.log(r.output);
+ * ```
+ *
+ * Each executor is a plain function returning `{ result }` (plus optional `messages`/`usage`), or
+ * an adapter's set: `createAiSdkExecutors` from '@statelyai/agent/ai-sdk' or
+ * `createOpenAiExecutors` from '@statelyai/agent/openai' supply all three.
+ */
+export function createAgentRuntime<TMachine extends AnyStateMachine>(
   machine: TMachine,
-  options: RunAgentOptions<TMachine>,
-): AgentRunSession<TMachine> {
+  options: AgentRuntimeOptions<TMachine> = {},
+): AgentRuntime<TMachine> {
   const maxModelCalls = options.maxModelCalls ?? 100;
   let modelCallCount = 0;
   let budgetExceeded = false;
   // Dev-only serialization guard: warn at most once per run when idle context
-  // holds values that won't survive snapshot persist/resume (see settleIdle).
+  // holds values that won't survive snapshot persist/resume (see finish).
   let warnedNonSerializable = false;
   const runId = `run_${nextRunAgentTraceId++}`;
   let traceSeq = 0;
-  // Validated once, then used everywhere `options.input` would have been: the
-  // actor, the replayable init entry, and the `run.start` trace all see the
-  // same post-defaults value, so a replay reproduces this run exactly even if a
-  // schema default is computed rather than constant.
-  const resolvedInput = resolveMachineInput(machine, options.input);
 
   const machineId = (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
   // The machine's own `version` (XState's standard `createMachine({ version })`
@@ -1938,17 +2015,12 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     modelCallCount += 1;
   };
 
-  // Bridges the session closure's `settled` flag (declared further down, once
-  // the actor exists) to the usage delivery below, which is defined before it.
-  // Nothing has resolved before the run starts.
-  const cycleGate = { isResolved: () => false };
-
   // ─── The replayable event log ───
   //
   // `logEntries` is this run's complete log segment: the resumed prefix (if
-  // any) plus every external input the root actor consumed, appended in order
-  // by the inspect handler below. It is the value returned as `result.events`,
-  // and the value `options.onEvent` streams entry by entry.
+  // any) plus every event the loop applied, appended in delivery order. It is
+  // the value returned as `result.events`, and the value `options.onEvent`
+  // streams entry by entry.
   const logEntries: AgentLogEntry[] = [];
 
   // ─── Write-ahead journaling (`options.store`) ───
@@ -1956,7 +2028,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // Every appended entry is queued onto ONE chain, so writes reach the store in
   // log order and each carries its own index as `expectedIndex`. The chain is
   // awaited at two points only: before a model call (`awaitJournal`, the
-  // barrier the executors call) and at settle. Pure transitions never wait.
+  // barrier the executors call) and at finish. Pure transitions never wait.
   // The first rejection wins, stops the run (`cause: 'journal'`) and blocks
   // every later write and call.
   const store = options.store;
@@ -1964,7 +2036,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   if (store !== undefined && (threadId === undefined || threadId === "")) {
     throw new AgentError(
       "missing-thread-id",
-      "runAgent: `threadId` is required when `store` is given — it names the log thread to read and append to.",
+      "createAgentRuntime: `threadId` is required when `store` is given — it names the log thread to read and append to.",
     );
   }
   let journalChain: Promise<void> = Promise.resolve();
@@ -1989,7 +2061,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       })
       .catch((error: unknown) => {
         journalError ??= error;
-        failRunOnJournalError(error);
+        stopRun({ cause: "journal", error });
       })
       .finally(() => {
         journalPending--;
@@ -2029,35 +2101,17 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     }
   };
 
-  // A failed write means the log is no longer authoritative — abort the run.
-  // Settling stops the actor, which aborts every in-flight call's signal, and
-  // the barrier above rejects any call that has not started yet. Declared
-  // before `settle` exists; only ever called from a rejected write, i.e. after
-  // this function's synchronous body has run.
-  const failRunOnJournalError = (error: unknown): void => {
-    if (settled) {
-      return;
-    }
-    settle({
-      status: "error",
-      cause: "journal",
-      error,
-      snapshot: actor.getSnapshot() as SnapshotFrom<TMachine>,
-    });
-  };
-
   // Where THIS run's own entries begin — the fold boundary for `runUsage`.
   let resumedLogLength = 0;
   // The lineage id pinned in the log's init entry metadata; also the prefix of
   // every `callKey`.
   let logExecutionId: string | undefined;
   const verificationEnabled = options.verification !== false;
-  // The most recent ROOT snapshot this run observed, used to stamp an entry's
-  // verification hash in O(1) instead of re-folding the whole prefix.
-  let lastRootSnapshot: AnyMachineSnapshot | undefined;
+  // The most recent ROOT snapshot the loop committed: what decisions and usage
+  // delivery read, what verification hashes stamp, and what `finish` reports.
+  let current: AnyMachineSnapshot | undefined;
   // The machine the log is folded against: the authored machine with
-  // `options.actors` merged in, so every invoke src resolves. Assigned once
-  // `provided` exists, below; nothing folds before then. NOT the
+  // `options.actors` merged in, so every invoke src resolves. NOT the
   // executor-bound machine — the log must fold the same way for a caller who
   // calls `replay(machine, events)` with no host executors at all.
   let logMachine: AnyStateMachine = machine;
@@ -2079,7 +2133,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
       machineVersion,
       verification: verificationEnabled,
       // With no snapshot, `createReplayEntry` re-folds the whole prefix to get
-      // the hash. Every journaled transition has one to hand, so that fallback
+      // the hash. Every applied transition has one to hand, so that fallback
       // is reserved for the rare out-of-band append (see `usageEntrySnapshot`).
       ...(verificationEnabled && snapshot !== undefined ? { snapshot } : {}),
     });
@@ -2095,10 +2149,9 @@ function createAgentSession<TMachine extends AnyStateMachine>(
   // declares no `@agent.usage` transition (the common case) that transition is
   // a no-op and the current snapshot is exactly right. Otherwise the event was
   // withheld from a machine that would have reacted (a guard, or a straggler
-  // after settle), so the live snapshot is NOT what replay produces — fall back
-  // to `createReplayEntry`'s own fold, which is correct by construction.
+  // after finish), so the current snapshot is NOT what replay produces — fall
+  // back to `createReplayEntry`'s own fold, which is correct by construction.
   const usageEntrySnapshot = (): AnyMachineSnapshot | undefined => {
-    const current = lastRootSnapshot;
     if (current && (current.status !== "active" || !declaresUsageTransition(current))) {
       return current;
     }
@@ -2107,57 +2160,36 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
   // Reserved `@agent.usage` delivery — the seam that puts a settled call's
   // tokens in reach of the machine's own context and guards (see
-  // AGENT_USAGE_EVENT_TYPE). Opt-in BY CONSTRUCTION: sent only when the live
-  // root snapshot DECLARES a transition that receives the reserved type
-  // (machine-level `on` catches every call; a state-scoped one only catches
-  // calls made while that state is active). A catch-all `on: { '*': … }` DOES
-  // receive it, per plain XState wildcard semantics — see
-  // declaresUsageTransition. A machine that declares neither gets no extra
-  // transition, no `machine.transition` trace, and no extra event-log entry.
+  // AGENT_USAGE_EVENT_TYPE). Opt-in BY CONSTRUCTION: queued for the machine
+  // only when the current root snapshot DECLARES a transition that receives
+  // the reserved type. A machine that declares none gets no extra transition,
+  // no `machine.transition` trace, and the entry is journaled out of band.
   //
-  // Root actor only: it is the actor whose external inputs the run journals
-  // (see the inspect handler), so delivering here is what makes the folded
-  // tokens survive an events-only replay. Usage from a request inside an
-  // INVOKED CHILD machine is therefore reported to the root too, attributed by
-  // the event's `id`/`src`/`model`.
+  // Root only: usage from a request inside an INVOKED CHILD machine is
+  // reported to the root too, attributed by the event's `id`/`src`/`model`.
   //
-  // A call that settles AFTER the run has resolved is a
-  // straggler: its tokens still fold into the run-level aggregate, but the
-  // event is DROPPED rather than delivered, so a late arrival can never
-  // affect an already-returned result. Dropped stragglers are visible on
-  // `onTrace` as `usage.dropped`.
-  //
-  // Run-level usage aggregation: every executor-reported per-call usage folds
-  // in here (see AgentUsage). Token fields are partial sums — a field stays
-  // undefined until some call reports it. Scoped to THIS run only.
+  // A call that settles AFTER the run has finished is a straggler: its tokens
+  // still fold into the log, but the event is DROPPED rather than delivered,
+  // so a late arrival can never affect an already-returned result. Dropped
+  // stragglers are visible on `onTrace` as `usage.dropped`.
   const recordUsage = (usage: AgentCallUsage, source: AgentUsageEventSource = {}) => {
     const event: AgentUsageEvent = { type: AGENT_USAGE_EVENT_TYPE, ...source, usage };
-    // Set for the duration of the delivery attempt below: if the machine takes
-    // the event, the inspect handler journals it (with the post-transition
-    // snapshot) and records the entry here, so this function does not append a
-    // second one.
-    const journal: { event: AgentUsageEvent; entry?: AgentLogEntry } = { event };
-    pendingUsageJournal = journal;
-    try {
-      deliverUsageEvent(
-        event,
-        () => actorHolder.actorRef,
-        (dropped) => {
-          if (!cycleGate.isResolved()) {
-            return false;
-          }
-          onTrace({ type: "usage.dropped", event: dropped, reason: "settled" });
-          return true;
-        },
-      );
-    } finally {
-      pendingUsageJournal = undefined;
-    }
-    if (journal.entry === undefined) {
+    let delivered = false;
+    deliverUsageEvent(
+      event,
+      () => rootFacade(() => (delivered = true)),
+      (dropped) => {
+        if (!finished) {
+          return false;
+        }
+        onTrace({ type: "usage.dropped", event: dropped, reason: "settled" });
+        return true;
+      },
+    );
+    if (!delivered) {
       appendLogEntry(event, usageEntrySnapshot());
     }
   };
-  let pendingUsageJournal: { event: AgentUsageEvent; entry?: AgentLogEntry } | undefined;
   // Run-scoped, and a pure projection of the log: fold the `@agent.usage`
   // entries THIS run appended (everything past the resumed prefix). The prior
   // leg's entries are still in `result.events`, so a caller that wants the
@@ -2167,7 +2199,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     modelCalls: modelCallCount,
   });
 
-  // Dev-only: on idle settle, warn once if the snapshot's context holds values
+  // Dev-only: on idle finish, warn once if the snapshot's context holds values
   // that won't round-trip through JSON persistence. Skipped in production and
   // after the first warning. Guarded so a getter/exotic context can't throw.
   const warnNonSerializableContext = (snapshot: AnyMachineSnapshot) => {
@@ -2185,15 +2217,14 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     }
     warnedNonSerializable = true;
     console.warn(
-      `runAgent: context holds value(s) that will not survive snapshot ` +
+      `createAgentRuntime: context holds value(s) that will not survive snapshot ` +
         `persist/resume (JSON round-trip): ${offending.join(", ")}. Persist only ` +
         `JSON-serializable context, or convert these before the run settles.`,
     );
   };
 
-  // §3.2 step 1: bind sources. Conceptually `machine.provide({
-  // actors: options.actors })` first, then walk the EFFECTIVE
-  // (post-provide) sources (spike S4: chained provides merge).
+  // Bind sources: `machine.provide({ actors: options.actors })` first, then
+  // walk the EFFECTIVE (post-provide) sources (chained provides merge).
   const provided = machine.provide({
     actors: options.actors as never,
   }) as TMachine;
@@ -2206,7 +2237,18 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
   assertBindable(provided, effectiveSources, executors);
 
-  const actorHolder: { actorRef: AnyActorRef | undefined } = { actorRef: undefined };
+  // The root, as the bind wrappers see it: its current snapshot, and a `send`
+  // that queues onto the mailbox. The loop has no live root actor — every
+  // transition is pure — so this facade is the one place "the root" lives.
+  const rootFacade = (onSend?: () => void): AnyActorRef =>
+    ({
+      getSnapshot: () => current,
+      send: (event: EventObject) => {
+        onSend?.();
+        enqueue(event);
+      },
+    }) as unknown as AnyActorRef;
+  const actorHolder: { actorRef: AnyActorRef | undefined } = { actorRef: rootFacade() };
   const runCtx: RunAgentBindContext = {
     generateText: executors.generateText,
     streamText: executors.streamText,
@@ -2222,11 +2264,11 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
   const wrappedSources: Record<string, AnyActorLogic> = {};
 
-  // §3.2 step 2: wrap every effective TextLogic/DecisionLogic (and the
-  // agent.* builtins) with a host-backed executor. Invoked child machines are
-  // recursively rebound so their requests inherit the same executors at any
-  // depth (see rebindChildMachine). Every other source (plain actors,
-  // non-agent logic) passes through untouched.
+  // Wrap every effective TextLogic/DecisionLogic (and the agent.* builtins)
+  // with a host-backed executor. Invoked child machines are recursively
+  // rebound so their requests inherit the same executors at any depth (see
+  // rebindChildMachine). Every other source (plain actors, non-agent logic)
+  // passes through untouched.
   for (const [key, logic] of Object.entries(effectiveSources)) {
     if (isDecisionLogic(logic)) {
       wrappedSources[key] = bindDecisionLogic(logic, runCtx);
@@ -2235,8 +2277,7 @@ function createAgentSession<TMachine extends AnyStateMachine>(
 
     if (isTextLogic(logic)) {
       // A text logic that already carries its own executor (`.withExecutor`)
-      // runs itself — leave it untouched. Only unbound builtins/logics get a
-      // host-backed executor from runAgent's `generateText`/`streamText`.
+      // runs itself — leave it untouched.
       if (!executorBoundLogics.has(logic as object)) {
         wrappedSources[key] = bindTextLogic(logic, runCtx);
       }
@@ -2244,628 +2285,771 @@ function createAgentSession<TMachine extends AnyStateMachine>(
     }
 
     if (isStateMachineLogic(logic)) {
-      // An invoked child machine (string-keyed): recursively rebind its own
-      // agent sources with the same host-backed wrappers, so requests at any
-      // depth inherit runAgent's executors. Skipped if nothing needed wrapping.
       const rebound = rebindChildMachine(logic, runCtx, new Set<AnyStateMachine>([machine]));
       if (rebound !== logic) {
         wrappedSources[key] = rebound;
       }
       continue;
     }
-    // Non-agent actors and already-unreachable placeholders pass through
-    // untouched — assertBindable already rejected reachable placeholders.
   }
 
   const boundMachine = provided.provide({
     actors: wrappedSources as never,
   }) as TMachine;
 
-  // The machine owns its wait semantics. An explicit setupAgent predicate wins;
-  // otherwise a resting configuration with event handlers (or interaction
-  // metadata) is an intentional external wait.
-  const isIdle = getMachineIdlePredicate(machine) ?? isAgentIdle;
-  const isIntentionalIdle = (snapshot: AnyMachineSnapshot) => isIdle(snapshot);
-
-  // ─── Resume precedence: the log is truth, the snapshot is a cache ───
+  // ─── The mailbox ───
   //
-  // 1. `events` at THIS machine version — continue that log. A `snapshot`
-  //    stamped at the log's tail (same lineage, same length, matching hash) is
-  //    trusted as-is; anything else replays the log and, when the snapshot
-  //    claims a position in it, hash-checks the snapshot there.
-  // 2. `events` at ANOTHER machine version — a `snapshot` is required (XState's
-  //    `migrate` applies on restore) and the run opens a NEW log segment whose
-  //    init entry carries the post-migration snapshot and `migratedFrom`.
-  // 3. `snapshot` only — restore it and start a self-contained log from it.
-  // 4. Neither — a fresh start, logged from `input`.
-  const resumeEvents = options.events;
-  let effectiveSnapshot: Snapshot<unknown> | undefined = options.snapshot;
-  /** Deferred until after the illegal-resume check, so a rejected resume emits no entries. */
-  let seedInitEntry: (() => void) | undefined;
-
-  // The persisted form of `options.snapshot` AFTER XState has restored it
-  // (which is where `createMachine({ migrate })` runs), so an init entry
-  // records the snapshot the machine will actually resume from. Undefined when
-  // this machine cannot restore it — the raw snapshot is then recorded instead,
-  // and the run fails on its own terms a few lines later.
-  const restoredPersistedSnapshot = (): AgentPersistedSnapshot | undefined => {
-    try {
-      const restored = (
-        logMachine as unknown as {
-          restoreSnapshot(persisted: AgentPersistedSnapshot): AnyMachineSnapshot;
-        }
-      ).restoreSnapshot(options.snapshot as AgentPersistedSnapshot);
-      return logMachine.getPersistedSnapshot(restored) as AgentPersistedSnapshot;
-    } catch {
-      return undefined;
-    }
-  };
-
-  /**
-   * Appends the log's reserved first entry, trying each candidate `init` in
-   * turn and, for each, an unverified entry if the hash cannot be computed.
-   * A machine or snapshot that defeats every attempt leaves the run WITHOUT a
-   * log rather than failing it: `runAgent` predates the log, and an exotic
-   * machine that cannot be folded must still run.
-   */
-  const appendInitEntry = (
-    candidates: readonly AgentLogInit[],
-    metadata: Record<string, AgentLogJsonValue>,
-  ): void => {
-    for (const init of candidates) {
-      for (const verification of verificationEnabled ? [true, false] : [false]) {
-        try {
-          const entry = initEntry(logMachine, init, { machineVersion, verification, metadata });
-          logEntries.push(entry);
-          journalEntry(entry);
-          options.onEvent?.(entry);
-          return;
-        } catch {
-          // Try the next (less exact) form.
-        }
-      }
-    }
-    loggingEnabled = false;
-  };
-
-  /** Init forms for a snapshot resume, most faithful first. */
-  const snapshotInitCandidates = (): AgentLogInit[] => {
-    const restored = restoredPersistedSnapshot();
-    return [
-      ...(restored !== undefined ? [{ snapshot: restored } as AgentLogInit] : []),
-      { snapshot: options.snapshot as AgentPersistedSnapshot } as AgentLogInit,
-    ];
-  };
-
-  if (resumeEvents !== undefined && resumeEvents.length > 0) {
-    validateReplayEntries(resumeEvents);
-    const tail = resumeEvents[resumeEvents.length - 1]!;
-    const inheritedExecutionId = getLogExecutionId(resumeEvents);
-    // A log written by a DIFFERENT machine is never a resume for this one: its
-    // entries fold against states this machine does not have, and its snapshot
-    // caches another artifact's state. Only a version change is bridgeable.
-    if (resumeEvents[0]!.machineId !== machineId) {
-      throw new AgentMachineVersionMismatchError(
-        tail.id,
-        tail.index,
-        { machineId, machineVersion },
-        { machineId: resumeEvents[0]!.machineId, machineVersion: tail.machineVersion },
-      );
-    }
-    const sameMachine = tail.machineVersion === machineVersion;
-
-    if (sameMachine) {
-      logEntries.push(...resumeEvents);
-      resumedLogLength = logEntries.length;
-      logExecutionId = inheritedExecutionId;
-
-      // Lineage, not length: a snapshot cached at index N of ANOTHER log (a
-      // fork, a sibling thread) can trivially collide with this log's length,
-      // so the fast path also requires the log's `executionId` and the tail
-      // entry's recorded hash to agree. The hash must be PRESENT: an
-      // unverified log (`verification: false`) records none, and trusting a
-      // snapshot on its self-reported `agentMeta` alone would let a tampered
-      // cache override the log. No hash, no fast path — the log is the truth.
-      const cachedMeta = readAgentMeta(options.snapshot);
-      const tailStateHash = tail.verification?.stateHash;
-      const trustedCache =
-        options.snapshot !== undefined &&
-        inheritedExecutionId !== undefined &&
-        cachedMeta?.logId === inheritedExecutionId &&
-        cachedMeta.logIndex === resumeEvents.length &&
-        tailStateHash !== undefined &&
-        hashResumeSnapshot(options.snapshot) === tailStateHash;
-
-      if (!trustedCache) {
-        const cachedIndex = cachedMeta?.logIndex;
-        if (
-          options.snapshot !== undefined &&
-          typeof cachedIndex === "number" &&
-          cachedIndex >= 1 &&
-          cachedIndex <= resumeEvents.length &&
-          // Only a verified log can call a snapshot divergent: with
-          // verification off the caller opted out of hashes, so a disagreeing
-          // snapshot is simply ignored in favour of the log.
-          resumeEvents[cachedIndex - 1]!.verification?.stateHash !== undefined
-        ) {
-          const atCache = replay(logMachine, resumeEvents.slice(0, cachedIndex), {
-            machineVersion,
-            verify: false,
-          });
-          const expected = getSnapshotStateHash(atCache.persistedSnapshot);
-          const actual = hashResumeSnapshot(options.snapshot);
-          if (expected !== actual) {
-            throw new AgentSnapshotDivergedError(expected, actual, cachedIndex);
-          }
-        }
-        effectiveSnapshot = replay(logMachine, resumeEvents, {
-          machineVersion,
-          verify: true,
-        }).persistedSnapshot as Snapshot<unknown>;
-      }
-    } else {
-      // Version bridge. Without a snapshot there is nothing to migrate FROM:
-      // the log's entries were produced by transitions this machine no longer
-      // has, so folding them is not sound.
-      if (options.snapshot === undefined) {
-        throw new AgentMachineVersionMismatchError(
-          tail.id,
-          tail.index,
-          { machineId, machineVersion },
-          { machineId: tail.machineId, machineVersion: tail.machineVersion },
-        );
-      }
-      // The snapshot must BE the cache of THIS log's tail under the old
-      // version: the bridge cannot fold the log itself, so an older or foreign
-      // snapshot would silently roll the thread back to state the log has
-      // already moved past.
-      const bridgeMeta = readAgentMeta(options.snapshot);
-      if (inheritedExecutionId === undefined || bridgeMeta?.logId !== inheritedExecutionId) {
-        throw new AgentMachineVersionMismatchError(
-          tail.id,
-          tail.index,
-          { machineId, machineVersion },
-          { machineId: tail.machineId, machineVersion: tail.machineVersion },
-        );
-      }
-      const bridgeTailHash = tail.verification?.stateHash;
-      // Hashed BEFORE any migration: the recorded hash describes the snapshot
-      // as the old version persisted it.
-      const bridgeSnapshotHash = hashResumeSnapshot(options.snapshot);
-      if (bridgeMeta.logIndex !== resumeEvents.length) {
-        throw new AgentSnapshotDivergedError(
-          bridgeTailHash ?? "(unrecorded)",
-          bridgeSnapshotHash,
-          resumeEvents.length,
-        );
-      }
-      if (bridgeTailHash !== undefined && bridgeSnapshotHash !== bridgeTailHash) {
-        throw new AgentSnapshotDivergedError(
-          bridgeTailHash,
-          bridgeSnapshotHash,
-          resumeEvents.length,
-        );
-      }
-      logExecutionId = inheritedExecutionId;
-      const migratedFrom: Record<string, AgentLogJsonValue> = {
-        machineVersion: tail.machineVersion,
-        logIndex: resumeEvents.length,
-      };
-      seedInitEntry = () =>
-        appendInitEntry(snapshotInitCandidates(), {
-          ...(logExecutionId !== undefined ? { executionId: logExecutionId } : {}),
-          migratedFrom,
-        });
-    }
-  } else if (options.snapshot !== undefined) {
-    logExecutionId = crypto.randomUUID();
-    seedInitEntry = () =>
-      appendInitEntry(snapshotInitCandidates(), { executionId: logExecutionId! });
-  } else {
-    logExecutionId = crypto.randomUUID();
-    seedInitEntry = () =>
-      appendInitEntry([resolvedInput !== undefined ? { input: resolvedInput } : {}], {
-        executionId: logExecutionId!,
-      });
-  }
-
-  // ─── Per-call idempotency keys (`info.callKey`) ───
-  // `${executionId}:${siteId}#${n}`: the log lineage plus the occurrence of
-  // this call at this invoke site. `n` uses ONE counting rule
-  // (`agentCallOccurrence`) over the RESUMED prefix — the log as it stood when
-  // this run began — advanced by the calls this run has already started at that
-  // site. Reading the live log instead would race: XState starts the next
-  // invoke (and its executor) before the previous completion's entry is
-  // appended by the inspect handler, so two loop iterations would collide on
-  // `#1`. Seeding from the prefix keeps a resumed leg aligned: a crash recovery
-  // whose log holds one completion re-executes the in-flight call as `#2`,
-  // exactly the id a replay derives for it.
-  const resumedHistory: readonly AgentLogEntry[] = [...logEntries];
-  const siteCallCounts = new Map<string, number>();
-  const mintedCallKeys = new WeakMap<object, string>();
-  runCtx.callKey = (siteId: string, self?: object) => {
-    if (logExecutionId === undefined) {
-      return undefined;
-    }
-    const memoized = self === undefined ? undefined : mintedCallKeys.get(self);
-    if (memoized !== undefined) {
-      return memoized;
-    }
-    const startedHere = siteCallCounts.get(siteId) ?? 0;
-    siteCallCounts.set(siteId, startedHere + 1);
-    const key = `${logExecutionId}:${siteId}#${agentCallOccurrence(resumedHistory, siteId) + startedHere}`;
-    if (self !== undefined) {
-      mintedCallKeys.set(self, key);
-    }
-    return key;
-  };
-
-  // The event this run delivers after start.
-  const resumeEventToSend: EventFromLogic<TMachine> | undefined = options.event;
-  // Set right after the event is sent, when the root actor took no transition
-  // for it: the state simply does not handle it. Not an error — reported as
-  // `result.ignored` so a host can tell the client nothing happened.
+  // One queue for everything that can move the machine: child completions and
+  // failures, child messages, root timers, the reserved usage event. Filled as
+  // things happen (never batched), drained one event per transition.
+  const mailbox: EventObject[] = [];
+  let wake: ((event: EventObject | typeof QUIESCENT) => void) | undefined;
+  // Events the loop handed out, as opposed to events the host brought in
+  // itself: only the host's own event can be reported as `ignored`.
+  const fromMailbox = new WeakSet<object>();
+  let stopReason: StopReason | undefined;
+  let started = false;
+  let finished = false;
   let ignoredEvent: EventObject | undefined;
 
-  seedInitEntry?.();
-
-  // One run = start (or resume event) to the next quiescence.
-  let settled = false;
-  // The journal chain as it stood at settle (see `settle`).
-  let journalAtSettle: Promise<void> | undefined;
-  // A call settling after the run resolved is a straggler (see
-  // deliverUsageEvent): dropped after the run settles.
-  cycleGate.isResolved = () => settled;
-  let lastResult: RunAgentResult<TMachine> | undefined;
-  const waiters: Array<(result: RunAgentResult<TMachine>) => void> = [];
-  let idleTimer: ReturnType<typeof setTimeout> | undefined;
-  let actor: ReturnType<typeof createActor<TMachine>>;
-  let actorStarted = false;
-  // True only during the resumed actor's initial (restore) transition, while
-  // an `event` is still pending delivery. The restored state may itself be a
-  // idle snapshot; without this guard, Feature A's immediate settle
-  // would fire during `start()` and settle idle BEFORE the resume event is
-  // sent. Cleared right before `actor.send(resumeEventToSend)`.
-  let deliveringResumeEvent = resumeEventToSend !== undefined;
-
-  const settle = (outcome: RunAgentOutcome<TMachine>) => {
-    if (settled) {
+  const enqueue = (event: EventObject): void => {
+    if (finished) {
       return;
     }
-    settled = true;
-    let persistedSnapshot: Snapshot<unknown> | undefined;
-    let persistenceError: unknown;
-    if (actorStarted && outcome.status !== "done") {
+    fromMailbox.add(event);
+    const waiting = wake;
+    if (waiting) {
+      wake = undefined;
+      waiting(event);
+    } else {
+      mailbox.push(event);
+    }
+  };
+
+  // ─── Timers ───
+  const inProcessTimers = options.timers === undefined || options.timers === "in-process";
+  const timerHandles = new Map<string, ReturnType<typeof setTimeout>>();
+  const timerKey = (source: AnyActorRef | undefined, id: string) =>
+    `${(source as { address?: string } | undefined)?.address ?? "(root)"}::${id}`;
+  // Arms one timer. A root timer fires into the mailbox; a child's timer is
+  // delivered to that child, which resolves it from its own snapshot.
+  const armTimer = (
+    source: AnyActorRef | undefined,
+    isRoot: boolean,
+    id: string,
+    delay: number,
+  ) => {
+    if (isRoot && !inProcessTimers) {
+      (options.timers as Exclude<AgentTimerScheduler, "in-process">).schedule({ id, delay });
+      return;
+    }
+    const key = timerKey(isRoot ? undefined : source, id);
+    clearTimeout(timerHandles.get(key));
+    timerHandles.set(
+      key,
+      setTimeout(() => {
+        timerHandles.delete(key);
+        const timerEvent = { type: "xstate.timer", id } as EventObject;
+        if (isRoot) {
+          enqueue(timerEvent);
+        } else {
+          source?.send(timerEvent as never);
+        }
+        recheck();
+      }, delay),
+    );
+  };
+
+  // ─── Quiescence ───
+  //
+  // Work is in flight while any child is still running — a request, a plain
+  // async actor, a child machine whose own children are running — or an
+  // in-process timer is armed. A child machine at rest is waiting for events,
+  // not doing work, so it does not count.
+  const childrenBusy = (snapshot: AnyMachineSnapshot | undefined): boolean =>
+    Object.values((snapshot?.children ?? {}) as Record<string, AnyActorRef | undefined>).some(
+      (child) => {
+        const childSnapshot = child?.getSnapshot?.() as AnyMachineSnapshot | undefined;
+        if (childSnapshot?.status !== "active") {
+          return false;
+        }
+        return isMachineSnapshot(childSnapshot) ? childrenBusy(childSnapshot) : true;
+      },
+    );
+  const workInFlight = (): boolean =>
+    childrenBusy(current) || (inProcessTimers && timerHandles.size > 0);
+
+  // Re-checked whenever anything the run started changes, so the loop stops
+  // waiting once the last bit of work settles — even work that never messages
+  // the root (a child machine finishing internally). A child's snapshot turns
+  // `done` a moment BEFORE its completion is relayed to the mailbox, so a
+  // quiet moment is confirmed one macrotask later, after that relay landed.
+  let recheckScheduled = false;
+  const recheck = (): void => {
+    if (wake === undefined || recheckScheduled) {
+      return;
+    }
+    if (stopReason === undefined && workInFlight()) {
+      return;
+    }
+    recheckScheduled = true;
+    setTimeout(() => {
+      recheckScheduled = false;
+      if (wake !== undefined && (stopReason !== undefined || !workInFlight())) {
+        const waiting = wake;
+        wake = undefined;
+        waiting(QUIESCENT);
+      }
+    }, 0);
+  };
+
+  const stopChildren = (snapshot: AnyMachineSnapshot | undefined): void => {
+    for (const child of Object.values(
+      (snapshot?.children ?? {}) as Record<string, AnyActorRef | undefined>,
+    )) {
+      // The public runtime helper stops children and aborts their signals.
       try {
-        persistedSnapshot = actor.getPersistedSnapshot() as Snapshot<unknown>;
-      } catch (error) {
-        persistenceError = error;
+        if (child) stopActor(child as AnyActor);
+      } catch {
+        // Already stopped.
       }
     }
-    // The log position this snapshot caches, frozen at settle: a straggler
-    // appended afterwards makes the cache stale, and the stamp says so.
-    const logIndexAtSettle = logEntries.length;
-    // Every write queued so far, in one promise: the result waits for these.
-    // A straggler `@agent.usage` entry appended after this point is still
-    // written, but chains behind and is not awaited.
-    journalAtSettle = journalChain;
-    const persist = () => {
-      if (persistenceError !== undefined) {
-        throw persistenceError;
-      }
-      persistedSnapshot ??= actor.getPersistedSnapshot() as Snapshot<unknown>;
-      // Stamped on the PERSISTED object only — a plain enumerable field, so it
-      // survives a JSON round-trip and is read back by the next resume. The
-      // live `result.snapshot` is left exactly as XState produced it.
-      (persistedSnapshot as { agentMeta?: AgentRunMeta }).agentMeta = {
-        machineId,
-        version: machineVersion,
-        ...(logExecutionId !== undefined ? { logId: logExecutionId } : {}),
-        logIndex: logIndexAtSettle,
-      };
-      return persistedSnapshot;
-    };
-    const result = {
-      ...outcome,
-      events: [...logEntries],
-      persist,
-      drain: drainJournal,
-      usage: runUsage(),
-      ...(ignoredEvent !== undefined ? { ignored: ignoredEvent } : {}),
-    } as RunAgentResult<TMachine>;
-    if (idleTimer !== undefined) {
-      clearTimeout(idleTimer);
+    for (const handle of timerHandles.values()) {
+      clearTimeout(handle);
     }
-    onTrace({ type: "run.end", ...outcome } as AgentTraceEventPayload<TMachine>);
-    if (options.signal) {
-      options.signal.removeEventListener("abort", onAbort);
+    timerHandles.clear();
+  };
+
+  // Stops the loop early: a cancel, a journal failure, an effect that threw.
+  // In-flight children are stopped (which aborts their requests' signals) and
+  // a parked `nextEvent` returns.
+  let persistedAtStop: Snapshot<unknown> | undefined;
+  const stopRun = (reason: StopReason): void => {
+    if (finished || stopReason !== undefined) {
+      return;
     }
-    actor.stop();
-    lastResult = result;
-    for (const resolve of waiters.splice(0)) {
-      resolve(result);
+    stopReason = reason;
+    // Persisted before the children stop, so a resume restarts the work
+    // this stop cut off instead of finding it stopped.
+    try {
+      persistedAtStop = current && boundMachine.getPersistedSnapshot(current as never);
+    } catch {
+      // `finish` persists (and reports the failure) itself.
+    }
+    stopChildren(current);
+    recheck();
+  };
+
+  const onAbort = () =>
+    stopRun({ cause: "aborted", error: options.signal?.reason ?? new Error("Aborted") });
+
+  const emitFromRoot = (event: EventObject): void => {
+    onTrace({ type: "emit", event: event as EmittedFrom<TMachine> });
+    const on = (options.on ?? {}) as Record<string, ((event: EventObject) => void) | undefined>;
+    on[event.type]?.(event);
+    if (event.type !== "*") {
+      on["*"]?.(event);
     }
   };
 
-  const onAbort = () => {
-    settle({
-      status: "error",
-      cause: "aborted",
-      error: options.signal?.reason ?? new Error("Aborted"),
-      snapshot: actor.getSnapshot(),
-    });
-  };
+  const inspect =
+    options.inspect === undefined
+      ? undefined
+      : (event: InspectionEvent) => {
+          if (typeof options.inspect === "function") {
+            options.inspect(event);
+          } else {
+            options.inspect?.next?.(event);
+          }
+        };
 
-  const settleIdle = (current: AnyMachineSnapshot) => {
-    // Idle is the moment persistence matters: the caller resumes from this
-    // snapshot by JSON round-trip. In dev, walk the context once and warn on
-    // any value that would silently corrupt (Date, Map, Set, function,
-    // undefined, class instance, circular). Never throws.
-    warnNonSerializableContext(current);
-    settle({ status: "idle", snapshot: current as SnapshotFrom<TMachine> });
-  };
+  let execution!: DurableExecution<TMachine>;
+  const durableAdapter = {
+    startActor: (actor: AnyActorRef) => {
+      // Every actor the run starts is watched, so quiescence is noticed the
+      // moment it happens. The error handler also keeps XState from
+      // reporting a child error the machine already handles as unhandled.
+      actor.subscribe({ next: recheck, complete: recheck, error: recheck });
+      (actor as unknown as { start(): void }).start();
+    },
+    enqueueRootEvent: (_source: unknown, event: EventObject) => enqueue(event),
+    executeAction: (
+      action: { exec: (runtime: unknown) => unknown },
+      _metadata: unknown,
+      runtime: unknown,
+    ) => action.exec(runtime),
+    waitForEvent: () => {
+      const queued = mailbox.shift();
+      if (queued !== undefined) {
+        return queued;
+      }
+      if (stopReason !== undefined || finished || !workInFlight()) {
+        return QUIESCENT as unknown as EventObject;
+      }
+      return new Promise<EventObject>((resolve) => {
+        wake = resolve as (event: EventObject | typeof QUIESCENT) => void;
+      });
+    },
+    emitEvent: (
+      source: AnyActorRef & { _emit?: (event: EventObject) => void },
+      event: EventObject,
+    ) => {
+      if ((source as { address?: string }).address === execution.rootAddress) {
+        emitFromRoot(event);
+      } else {
+        source._emit?.(event);
+      }
+    },
+    scheduleTimer: (source: AnyActorRef, id: string, delay: number) => {
+      // A restored checkpoint's timers arrive here with what is left of
+      // their delay: XState keeps their deadlines across persistence.
+      armTimer(source, (source as AnyActor).address === execution.rootAddress, id, delay);
+    },
+    cancelTimer: (source: AnyActorRef, id: string) => {
+      const isRoot = (source as { address?: string }).address === execution.rootAddress;
+      if (isRoot && !inProcessTimers) {
+        (options.timers as Exclude<AgentTimerScheduler, "in-process">).cancel(id);
+        return;
+      }
+      const key = timerKey(isRoot ? undefined : source, id);
+      clearTimeout(timerHandles.get(key));
+      timerHandles.delete(key);
+    },
+    cancelAllTimers: (source: AnyActorRef) => {
+      const isRoot = (source as { address?: string }).address === execution.rootAddress;
+      const prefix = timerKey(isRoot ? undefined : source, "");
+      for (const [key, handle] of timerHandles) {
+        if (key.startsWith(prefix)) {
+          clearTimeout(handle);
+          timerHandles.delete(key);
+        }
+      }
+    },
+  } as unknown as Parameters<typeof createDurable<TMachine>>[1];
+  execution = createDurable(boundMachine, durableAdapter, inspect ? { inspect } : undefined);
 
   // The run-level error cause ladder.
-  const runErrorCause = (error: unknown): RunAgentErrorCause =>
+  const runErrorCause = (error: unknown): AgentRunErrorCause =>
     budgetExceeded
       ? "max-model-calls"
       : wrapsDecisionExhausted(error)
         ? "decision-exhausted"
         : "machine";
 
-  // Fallback for untagged machines: defer one macrotask so in-flight work
-  // that starts synchronously with a transition registers first, then settle
-  // idle if the snapshot is at rest. Feature A short-circuits this for
-  // detector-positive (idle) snapshots — see the inspect handler.
-  const scheduleIdleCheck = () => {
-    if (idleTimer !== undefined) {
-      clearTimeout(idleTimer);
-    }
-    idleTimer = setTimeout(() => {
-      idleTimer = undefined;
-      if (settled) {
-        return;
-      }
-      const current = actor.getSnapshot() as AnyMachineSnapshot;
-      if (isIntentionalIdle(current) && isIdleSnapshot(current)) {
-        settleIdle(current);
-      }
-    }, 0);
+  const commit = (snapshot: AnyMachineSnapshot, event: EventObject): void => {
+    current = snapshot;
+    onTrace({
+      type: "machine.transition",
+      snapshot: snapshot as SnapshotFrom<TMachine>,
+      event: event as EventFromLogic<TMachine>,
+    });
   };
 
-  actor = createActor(boundMachine, {
-    input: resolvedInput as never,
-    snapshot: effectiveSnapshot,
-    inspect: (event: InspectionEvent) => {
-      // System-wide passthrough (children included) before runAgent's own
-      // root-transition filtering below. Function or observer, like createActor.
-      if (typeof options.inspect === "function") {
-        options.inspect(event);
+  /** True for a child completion/failure whose child is no longer running under the current state. */
+  const isStaleChildEvent = (event: EventObject): boolean => {
+    if (
+      !event.type.startsWith("xstate.done.actor") &&
+      !event.type.startsWith("xstate.error.actor")
+    ) {
+      return false;
+    }
+    const { sessionId, actorId } = event as { sessionId?: string; actorId?: string };
+    return !Object.values(
+      (current?.children ?? {}) as Record<
+        string,
+        (AnyActorRef & { id?: string; sessionId?: string }) | undefined
+      >,
+    ).some((child) =>
+      sessionId !== undefined ? child?.sessionId === sessionId : child?.id === actorId,
+    );
+  };
+
+  const runtime: AgentRuntime<TMachine> = {
+    async start(init = {}) {
+      if (started) {
+        throw new AgentError("runtime-started", "createAgentRuntime: `start` was already called.");
+      }
+      started = true;
+
+      // ─── Resolve the log to resume from ───
+      let resumeEvents = init.events;
+      if (store !== undefined) {
+        const storedThread = await store.read(threadId!);
+        if (resumeEvents !== undefined) {
+          // An explicit log wins as the resume, but it must BE the thread's
+          // log: appending onto a store that has moved on — or onto a
+          // same-length log that says something else — would interleave two
+          // lineages.
+          if (storedThread.length !== resumeEvents.length) {
+            throw new AgentEventLogConflictError(
+              threadId!,
+              resumeEvents.length,
+              storedThread.length,
+            );
+          }
+          assertThreadMatchesEvents(threadId!, storedThread, resumeEvents);
+        } else if (storedThread.length > 0) {
+          resumeEvents = storedThread;
+        }
+      }
+
+      // Validated once, then used everywhere `input` would have been: the
+      // start, the replayable init entry, and the `run.start` trace all see
+      // the same post-defaults value, so a replay reproduces this run exactly.
+      const resolvedInput = resolveMachineInput(machine, init.input);
+      let effectiveSnapshot: Snapshot<unknown> | undefined = init.snapshot;
+      let seedInitEntry: (() => void) | undefined;
+
+      // The persisted form of `init.snapshot` AFTER XState has restored it
+      // (which is where `createMachine({ migrate })` runs), so an init entry
+      // records the snapshot the machine will actually resume from.
+      const restoredPersistedSnapshot = (): AgentPersistedSnapshot | undefined => {
+        try {
+          const restored = (
+            logMachine as unknown as {
+              restoreSnapshot(persisted: AgentPersistedSnapshot): AnyMachineSnapshot;
+            }
+          ).restoreSnapshot(init.snapshot as AgentPersistedSnapshot);
+          return logMachine.getPersistedSnapshot(restored) as AgentPersistedSnapshot;
+        } catch {
+          return undefined;
+        }
+      };
+
+      /**
+       * Appends the log's reserved first entry, trying each candidate `init`
+       * in turn and, for each, an unverified entry if the hash cannot be
+       * computed. A machine or snapshot that defeats every attempt leaves the
+       * run WITHOUT a log rather than failing it.
+       */
+      const appendInitEntry = (
+        candidates: readonly AgentLogInit[],
+        metadata: Record<string, AgentLogJsonValue>,
+      ): void => {
+        for (const candidate of candidates) {
+          for (const verification of verificationEnabled ? [true, false] : [false]) {
+            try {
+              const entry = initEntry(logMachine, candidate, {
+                machineVersion,
+                verification,
+                metadata,
+              });
+              logEntries.push(entry);
+              journalEntry(entry);
+              options.onEvent?.(entry);
+              return;
+            } catch {
+              // Try the next (less exact) form.
+            }
+          }
+        }
+        loggingEnabled = false;
+      };
+
+      /** Init forms for a snapshot resume, most faithful first. */
+      const snapshotInitCandidates = (): AgentLogInit[] => {
+        const restored = restoredPersistedSnapshot();
+        return [
+          ...(restored !== undefined ? [{ snapshot: restored } as AgentLogInit] : []),
+          { snapshot: init.snapshot as AgentPersistedSnapshot } as AgentLogInit,
+        ];
+      };
+
+      // ─── Resume precedence: the log is truth, the snapshot is a cache ───
+      //
+      // 1. `events` at THIS machine version — continue that log. A `snapshot`
+      //    stamped at the log's tail (same lineage, same length, matching
+      //    hash) is trusted as-is; anything else replays the log and, when the
+      //    snapshot claims a position in it, hash-checks the snapshot there.
+      // 2. `events` at ANOTHER machine version — a `snapshot` is required
+      //    (XState's `migrate` applies on restore) and the run opens a NEW log
+      //    segment whose init entry carries the post-migration snapshot and
+      //    `migratedFrom`.
+      // 3. `snapshot` only — restore it and start a self-contained log from it.
+      // 4. Neither — a fresh start, logged from `input`.
+      if (resumeEvents !== undefined && resumeEvents.length > 0) {
+        validateReplayEntries(resumeEvents);
+        const tail = resumeEvents[resumeEvents.length - 1]!;
+        const inheritedExecutionId = getLogExecutionId(resumeEvents);
+        // A log written by a DIFFERENT machine is never a resume for this one.
+        if (resumeEvents[0]!.machineId !== machineId) {
+          throw new AgentMachineVersionMismatchError(
+            tail.id,
+            tail.index,
+            { machineId, machineVersion },
+            { machineId: resumeEvents[0]!.machineId, machineVersion: tail.machineVersion },
+          );
+        }
+        const sameMachine = tail.machineVersion === machineVersion;
+
+        if (sameMachine) {
+          logEntries.push(...resumeEvents);
+          resumedLogLength = logEntries.length;
+          logExecutionId = inheritedExecutionId;
+
+          // Lineage, not length: the fast path also requires the log's
+          // `executionId` and the tail entry's recorded hash to agree. No
+          // hash, no fast path — the log is the truth.
+          const cachedMeta = readAgentMeta(init.snapshot);
+          const tailStateHash = tail.verification?.stateHash;
+          const trustedCache =
+            init.snapshot !== undefined &&
+            inheritedExecutionId !== undefined &&
+            cachedMeta?.logId === inheritedExecutionId &&
+            cachedMeta.logIndex === resumeEvents.length &&
+            tailStateHash !== undefined &&
+            hashResumeSnapshot(init.snapshot) === tailStateHash;
+
+          if (!trustedCache) {
+            const cachedIndex = cachedMeta?.logIndex;
+            if (
+              init.snapshot !== undefined &&
+              typeof cachedIndex === "number" &&
+              cachedIndex >= 1 &&
+              cachedIndex <= resumeEvents.length &&
+              // Only a verified log can call a snapshot divergent.
+              resumeEvents[cachedIndex - 1]!.verification?.stateHash !== undefined
+            ) {
+              const atCache = replay(logMachine, resumeEvents.slice(0, cachedIndex), {
+                machineVersion,
+                verify: false,
+              });
+              const expected = getSnapshotStateHash(atCache.persistedSnapshot);
+              const actual = hashResumeSnapshot(init.snapshot);
+              if (expected !== actual) {
+                throw new AgentSnapshotDivergedError(expected, actual, cachedIndex);
+              }
+            }
+            effectiveSnapshot = replay(logMachine, resumeEvents, {
+              machineVersion,
+              verify: true,
+            }).persistedSnapshot as Snapshot<unknown>;
+          }
+        } else {
+          // Version bridge. Without a snapshot there is nothing to migrate FROM.
+          if (init.snapshot === undefined) {
+            throw new AgentMachineVersionMismatchError(
+              tail.id,
+              tail.index,
+              { machineId, machineVersion },
+              { machineId: tail.machineId, machineVersion: tail.machineVersion },
+            );
+          }
+          // The snapshot must BE the cache of THIS log's tail under the old
+          // version: an older or foreign snapshot would silently roll the
+          // thread back to state the log has already moved past.
+          const bridgeMeta = readAgentMeta(init.snapshot);
+          if (inheritedExecutionId === undefined || bridgeMeta?.logId !== inheritedExecutionId) {
+            throw new AgentMachineVersionMismatchError(
+              tail.id,
+              tail.index,
+              { machineId, machineVersion },
+              { machineId: tail.machineId, machineVersion: tail.machineVersion },
+            );
+          }
+          const bridgeTailHash = tail.verification?.stateHash;
+          // Hashed BEFORE any migration.
+          const bridgeSnapshotHash = hashResumeSnapshot(init.snapshot);
+          if (bridgeMeta.logIndex !== resumeEvents.length) {
+            throw new AgentSnapshotDivergedError(
+              bridgeTailHash ?? "(unrecorded)",
+              bridgeSnapshotHash,
+              resumeEvents.length,
+            );
+          }
+          if (bridgeTailHash !== undefined && bridgeSnapshotHash !== bridgeTailHash) {
+            throw new AgentSnapshotDivergedError(
+              bridgeTailHash,
+              bridgeSnapshotHash,
+              resumeEvents.length,
+            );
+          }
+          logExecutionId = inheritedExecutionId;
+          const migratedFrom: Record<string, AgentLogJsonValue> = {
+            machineVersion: tail.machineVersion,
+            logIndex: resumeEvents.length,
+          };
+          seedInitEntry = () =>
+            appendInitEntry(snapshotInitCandidates(), {
+              ...(logExecutionId !== undefined ? { executionId: logExecutionId } : {}),
+              migratedFrom,
+            });
+        }
+      } else if (init.snapshot !== undefined) {
+        logExecutionId = crypto.randomUUID();
+        seedInitEntry = () =>
+          appendInitEntry(snapshotInitCandidates(), { executionId: logExecutionId! });
       } else {
-        options.inspect?.next?.(event);
+        logExecutionId = crypto.randomUUID();
+        seedInitEntry = () =>
+          appendInitEntry([resolvedInput !== undefined ? { input: resolvedInput } : {}], {
+            executionId: logExecutionId!,
+          });
       }
 
-      if (
-        event.type !== "@xstate.transition" ||
-        (event.actorRef as unknown) !== (actor.ref as unknown)
-      ) {
-        return;
-      }
-      if (settled) {
-        return;
-      }
+      // ─── Per-call idempotency keys (`info.callKey`) ───
+      // `${executionId}:${siteId}#${n}`: the log lineage plus the occurrence
+      // of this call at this invoke site, counted over the RESUMED prefix and
+      // advanced by the calls this run has already started at that site. A
+      // crash recovery whose log holds one completion re-executes the
+      // in-flight call as `#2`, exactly the id a replay derives for it.
+      const resumedHistory: readonly AgentLogEntry[] = [...logEntries];
+      const siteCallCounts = new Map<string, number>();
+      const mintedCallKeys = new WeakMap<object, string>();
+      runCtx.callKey = (siteId: string, self?: object) => {
+        if (logExecutionId === undefined) {
+          return undefined;
+        }
+        const memoized = self === undefined ? undefined : mintedCallKeys.get(self);
+        if (memoized !== undefined) {
+          return memoized;
+        }
+        const startedHere = siteCallCounts.get(siteId) ?? 0;
+        siteCallCounts.set(siteId, startedHere + 1);
+        const key = `${logExecutionId}:${siteId}#${agentCallOccurrence(resumedHistory, siteId) + startedHere}`;
+        if (self !== undefined) {
+          mintedCallKeys.set(self, key);
+        }
+        return key;
+      };
 
-      const snapshot = event.snapshot as AnyMachineSnapshot;
-      lastRootSnapshot = snapshot;
+      seedInitEntry?.();
 
-      // ─── Ignored resume event ───
-      // XState reports every facet of a root transition here. The resume
-      // event was ignored when the machine selected no microstep, ran no
-      // action, and sent nothing: a guard or function transition returning
-      // `undefined`, or an event the state does not declare. An effect-only
-      // handler shows up in `actions`, so it is NOT ignored. Snapshot identity
-      // is not used: on this XState an effect-only transition reuses the
-      // snapshot object (pinned by the "xstate contract" tests).
-      if (
-        resumeEventToSend !== undefined &&
-        (event.event as unknown) === (resumeEventToSend as unknown) &&
-        event.microsteps.length === 0 &&
-        event.actions.length === 0 &&
-        event.sent.length === 0
-      ) {
-        ignoredEvent = resumeEventToSend as EventObject;
-      }
-
-      // ─── Journaling ───
-      // The log is deliberately smaller than the trace: only EXTERNAL inputs
-      // are recorded, because replay re-derives everything else. A root
-      // transition is external when its event came from outside the root actor
-      // (a host `send`, the resume event, a child's
-      // `xstate.done.actor`/`xstate.error.actor`, the reserved `@agent.usage`
-      // event this library sends). `xstate.timer` is the
-      // one self-sent input that must be retained — a fired `after` delay is
-      // real time passing, not machine logic. Raised/internal events and
-      // `@xstate.init` are re-derived by `initialTransition`/`transition`.
-      if (
-        pendingUsageJournal !== undefined &&
-        (event.event as unknown) === (pendingUsageJournal.event as unknown)
-      ) {
-        pendingUsageJournal.entry = appendLogEntry(event.event as EventObject, snapshot);
-      } else if (
-        event.event.type !== "@xstate.init" &&
-        (event.sourceRef !== event.actorRef || event.event.type === "xstate.timer")
-      ) {
-        appendLogEntry(event.event as EventObject, snapshot);
-      }
-
+      const resumeEvent = (init as AgentRunInit<TMachine>).event as
+        | EventFromLogic<TMachine>
+        | undefined;
       onTrace({
-        type: "machine.transition",
-        snapshot: snapshot as SnapshotFrom<TMachine>,
-        event: event.event as EventFromLogic<TMachine>,
+        type: "run.start",
+        ...(resolvedInput !== undefined ? { input: resolvedInput as InputFrom<TMachine> } : {}),
+        ...(effectiveSnapshot !== undefined ? { snapshot: effectiveSnapshot } : {}),
+        ...(resumeEvent !== undefined ? { event: resumeEvent } : {}),
       });
 
-      if (snapshot.status === "done") {
-        settle({
+      if (options.signal) {
+        if (options.signal.aborted) {
+          stopReason = {
+            cause: "aborted",
+            error: options.signal.reason ?? new Error("Aborted"),
+          };
+        } else {
+          options.signal.addEventListener("abort", onAbort);
+        }
+      }
+
+      let snapshot: AnyMachineSnapshot;
+      let effects: AgentEffects = [];
+      const initEvent = {
+        type: "@xstate.init",
+        ...(resolvedInput !== undefined ? { input: resolvedInput } : {}),
+      } as EventObject;
+      if (effectiveSnapshot === undefined) {
+        [snapshot, effects] = execution.initialTransition(resolvedInput as never) as [
+          AnyMachineSnapshot,
+          AgentEffects,
+        ];
+      } else {
+        try {
+          // Restores the checkpoint without sending the machine an event; its
+          // effects restart the children and timers that were in flight.
+          [snapshot, effects] = execution.restore(effectiveSnapshot) as [
+            AnyMachineSnapshot,
+            AgentEffects,
+          ];
+        } catch (error) {
+          // A snapshot this machine cannot restore fails the run on its own
+          // terms rather than throwing out of the host.
+          // The initial state stands in as the result's snapshot; its effects
+          // are discarded, so nothing runs.
+          try {
+            current = execution.initialTransition(resolvedInput as never)[0] as AnyMachineSnapshot;
+          } catch {
+            current = {
+              status: "error",
+              error,
+              context: undefined,
+            } as unknown as AnyMachineSnapshot;
+          }
+          stopReason ??= { cause: "machine", error };
+          return [current as SnapshotFrom<TMachine>, []];
+        }
+        current = snapshot;
+      }
+      commit(snapshot, initEvent);
+      return [snapshot as SnapshotFrom<TMachine>, effects];
+    },
+
+    transition(state, event) {
+      if (finished) {
+        throw new AgentError(
+          "runtime-finished",
+          "createAgentRuntime: the run has finished; start a new runtime to continue.",
+        );
+      }
+      // A stopped run (cancelled, or its journal failed) takes no more events.
+      if (stopReason !== undefined) {
+        return [state, []];
+      }
+      const [next, effects] = execution.transition(state, event as EventFromLogic<TMachine>) as [
+        AnyMachineSnapshot,
+        AgentEffects,
+      ];
+      // The host's own event (not one the mailbox handed out) was ignored when
+      // the state has no transition for it: nothing changed and nothing is to
+      // be done. Reported as `result.ignored`; still journaled.
+      if (
+        !fromMailbox.has(event as object) &&
+        (next as unknown) === (state as unknown) &&
+        effects.length === 0
+      ) {
+        ignoredEvent = event as EventObject;
+      }
+      appendLogEntry(event as EventObject, next);
+      commit(next, event as EventObject);
+      return [next as SnapshotFrom<TMachine>, effects];
+    },
+
+    async execute(effects) {
+      if (stopReason !== undefined || finished || effects.length === 0) {
+        return;
+      }
+      try {
+        await execution.executeEffects(effects as never);
+      } catch (error) {
+        stopRun({ cause: "machine", error });
+      }
+      recheck();
+    },
+
+    async nextEvent() {
+      for (;;) {
+        if (finished || stopReason !== undefined || current?.status !== "active") {
+          return undefined;
+        }
+        const event = (await execution.waitForEvent()) as EventObject | typeof QUIESCENT;
+        if ((event as unknown) === QUIESCENT || stopReason !== undefined) {
+          return undefined;
+        }
+        // A completion from an actor the machine already stopped is ignored,
+        // as XState itself ignores it: no transition, no log entry. (A
+        // decision sends its chosen event and then completes; the chosen
+        // event leaves the state and stops the decision, so its completion
+        // arrives with nobody left to receive it.)
+        if (isStaleChildEvent(event as EventObject)) {
+          continue;
+        }
+        return event as EventFromLogic<TMachine>;
+      }
+    },
+
+    async finish() {
+      if (finished) {
+        throw new AgentError(
+          "runtime-finished",
+          "createAgentRuntime: `finish` was already called.",
+        );
+      }
+      const snapshot = current as AnyMachineSnapshot;
+      let outcome: AgentRunOutcome<TMachine>;
+      if (stopReason !== undefined) {
+        outcome = {
+          status: "error",
+          cause:
+            stopReason.cause === "machine" ? runErrorCause(stopReason.error) : stopReason.cause,
+          error: stopReason.error,
+          snapshot: snapshot as SnapshotFrom<TMachine>,
+        };
+      } else if (snapshot.status === "done") {
+        outcome = {
           status: "done",
           output: snapshot.output as OutputFrom<TMachine>,
           snapshot: snapshot as SnapshotFrom<TMachine>,
-        });
-        return;
-      }
-
-      if (snapshot.status === "error") {
+        };
+      } else if (snapshot.status === "error") {
         // Reaching an error state means no `onError` transition handled the
-        // failure (a handled one transitions away instead of erroring). So a
-        // AgentDecisionExhaustedError surfacing here is genuinely unhandled.
-        settle({
+        // failure, so a decision exhaustion surfacing here is genuinely unhandled.
+        outcome = {
           status: "error",
           cause: runErrorCause(snapshot.error),
           error: snapshot.error,
           snapshot: snapshot as SnapshotFrom<TMachine>,
-        });
-        return;
-      }
-
-      if (snapshot.status === "stopped") {
-        settle({
+        };
+      } else if (snapshot.status === "stopped") {
+        outcome = {
           status: "error",
           cause: "stopped",
           error: new Error("Actor stopped externally."),
           snapshot: snapshot as SnapshotFrom<TMachine>,
-        });
-        return;
+        };
+      } else {
+        // Idle is the moment persistence matters: the caller resumes from
+        // this snapshot by JSON round-trip.
+        warnNonSerializableContext(snapshot);
+        outcome = { status: "idle", snapshot: snapshot as SnapshotFrom<TMachine> };
       }
 
-      // Feature A: an intentional wait (detector-positive) with nothing in
-      // flight settles idle immediately and deterministically — no
-      // setTimeout race. `deliveringResumeEvent` suppresses this during a
-      // resume's restore transition so the pending event is delivered first.
-      // Everything else (untagged machines, or a idle snapshot with
-      // sibling work still running) falls through to the timing heuristic.
-      if (!deliveringResumeEvent && isIntentionalIdle(snapshot) && isIdleSnapshot(snapshot)) {
-        // Not settled synchronously: the event that reached this idle
-        // state may have come from an invoked child mid-flush (child →
-        // parent, whose handler sendTo's the child back). A sync settle
-        // would persist — and, one-shot, stop — the child before its
-        // mailbox drains, losing those deliveries. The flush is
-        // synchronous, so one microtask is still deterministic.
-        queueMicrotask(() => {
-          if (settled) {
-            return;
-          }
-          const current = actor.getSnapshot() as AnyMachineSnapshot;
-          if (isIntentionalIdle(current) && isIdleSnapshot(current)) {
-            settleIdle(current);
-          } else {
-            // A drained child event started new work (or left the idle state)
-            // without a root transition to re-trigger idle detection — fall
-            // back to the timing heuristic so the run still settles.
-            scheduleIdleCheck();
-          }
-        });
-        return;
+      // Persisted BEFORE anything is stopped (for an early stop, by
+      // `stopRun`): a stopped child would persist as stopped, and the
+      // snapshot must resume with its children running.
+      let persistedSnapshot: Snapshot<unknown> | undefined = persistedAtStop;
+      let persistenceError: unknown;
+      if (outcome.status !== "done" && persistedSnapshot === undefined) {
+        try {
+          persistedSnapshot = boundMachine.getPersistedSnapshot(
+            snapshot as never,
+          ) as Snapshot<unknown>;
+        } catch (error) {
+          persistenceError = error;
+        }
       }
+      // The log position this snapshot caches, frozen here: a straggler
+      // appended afterwards makes the cache stale, and the stamp says so.
+      const logIndexAtSettle = logEntries.length;
+      const persist = () => {
+        if (persistenceError !== undefined) {
+          throw persistenceError;
+        }
+        persistedSnapshot ??= boundMachine.getPersistedSnapshot(
+          snapshot as never,
+        ) as Snapshot<unknown>;
+        // Stamped on the PERSISTED object only — a plain enumerable field, so
+        // it survives a JSON round-trip and is read back by the next resume.
+        (persistedSnapshot as { agentMeta?: AgentRunMeta }).agentMeta = {
+          machineId,
+          version: machineVersion,
+          ...(logExecutionId !== undefined ? { logId: logExecutionId } : {}),
+          logIndex: logIndexAtSettle,
+        };
+        return persistedSnapshot;
+      };
 
-      scheduleIdleCheck();
-    },
-  });
-
-  actorHolder.actorRef = actor as unknown as AnyActorRef;
-
-  // Errors are settled via the `inspect` transition stream above (which
-  // observes `snapshot.status === 'error'` regardless of subscribers).
-  // Without a subscriber that has an `error` handler, xstate reports
-  // machine errors as unhandled exceptions (Actor#_error) even though this
-  // run already handles them — subscribe with a no-op to suppress that.
-  actor.subscribe({ error: () => {} });
-
-  // Emitted-event handlers (`options.on`), registered before start so
-  // events emitted during the initial transition are not missed.
-  actor.on("*", (event) => {
-    onTrace({ type: "emit", event: event as EmittedFrom<TMachine> });
-  });
-  for (const [type, handler] of Object.entries(options.on ?? {})) {
-    if (typeof handler === "function") {
-      actor.on(type as never, handler as never);
-    }
-  }
-
-  const sessionApi: AgentRunSession<TMachine> = {
-    settled: async () => {
-      const result =
-        settled && lastResult !== undefined
-          ? lastResult
-          : await new Promise<RunAgentResult<TMachine>>((resolve) => {
-              waiters.push(resolve);
-            });
-      // The run resolves only once the log it reports is durable. A write that
-      // rejected has already settled the run with `cause: 'journal'`, so the
-      // failure is on the result, not thrown here.
+      finished = true;
+      // Every write queued so far: the result waits for these. A straggler
+      // entry appended after this point is still written, but not awaited.
+      const journalAtSettle = journalChain;
+      const result = {
+        ...outcome,
+        events: [...logEntries],
+        persist,
+        drain: drainJournal,
+        usage: runUsage(),
+        ...(ignoredEvent !== undefined ? { ignored: ignoredEvent } : {}),
+      } as AgentRunResult<TMachine>;
+      onTrace({ type: "run.end", ...outcome } as AgentTraceEventPayload<TMachine>);
+      options.signal?.removeEventListener("abort", onAbort);
+      stopChildren(snapshot);
+      if (wake !== undefined) {
+        const waiting = wake;
+        wake = undefined;
+        waiting(QUIESCENT);
+      }
+      // The run resolves only once the log it reports is durable. A write
+      // that rejected has already stopped the run with `cause: 'journal'`.
       await journalAtSettle;
       return result;
     },
   };
 
-  if (options.signal) {
-    if (options.signal.aborted) {
-      settle({
-        status: "error",
-        cause: "aborted",
-        error: options.signal.reason ?? new Error("Aborted"),
-        snapshot: actor.getSnapshot(),
-      });
-      return sessionApi;
-    }
-    options.signal.addEventListener("abort", onAbort);
-  }
-
-  onTrace({
-    type: "run.start",
-    ...(resolvedInput !== undefined ? { input: resolvedInput as InputFrom<TMachine> } : {}),
-    ...(effectiveSnapshot !== undefined ? { snapshot: effectiveSnapshot } : {}),
-    ...(resumeEventToSend !== undefined ? { event: resumeEventToSend } : {}),
-  });
-
-  actorStarted = true;
-  actor.start();
-  // Restoring an incompatible native XState snapshot can synchronously leave
-  // the actor in an error/stopped state without emitting an inspection event.
-  // Observe that post-start snapshot directly so the run cannot hang (or try
-  // to deliver a resume event to an actor XState has already stopped).
-  if (!settled) {
-    const startedSnapshot = actor.getSnapshot() as AnyMachineSnapshot;
-    lastRootSnapshot ??= startedSnapshot;
-    if (startedSnapshot.status === "done") {
-      settle({
-        status: "done",
-        output: startedSnapshot.output as OutputFrom<TMachine>,
-        snapshot: startedSnapshot as SnapshotFrom<TMachine>,
-      });
-    } else if (startedSnapshot.status === "error") {
-      settle({
-        status: "error",
-        cause: runErrorCause(startedSnapshot.error),
-        error: startedSnapshot.error,
-        snapshot: startedSnapshot as SnapshotFrom<TMachine>,
-      });
-    } else if (startedSnapshot.status === "stopped") {
-      settle({
-        status: "error",
-        cause: "stopped",
-        error: new Error("Actor stopped externally."),
-        snapshot: startedSnapshot as SnapshotFrom<TMachine>,
-      });
-    }
-  }
-  if (resumeEventToSend && !settled) {
-    // Restore transition is done; allow the post-event transition to settle.
-    deliveringResumeEvent = false;
-    // Whether the machine ignored this event is decided in the inspect
-    // handler from the transition's own facets (see "Ignored resume event").
-    actor.send(resumeEventToSend as never);
-  }
-
-  return sessionApi;
+  return runtime;
 }
 
 /**
@@ -2878,7 +3062,7 @@ export type InspectedActorRef = AnyActorRef & { id: string; src?: string | AnyAc
 
 /**
  * Wraps a `(snapshot, actorRef) => void` handler into a function usable as
- * {@link RunAgentOptions.inspect}: it filters the raw inspection stream to
+ * {@link AgentRuntimeOptions.inspect}: it filters the raw inspection stream to
  * `@xstate.transition` events and hands the handler the typed
  * {@link AnyMachineSnapshot} and the {@link InspectedActorRef} that
  * transitioned. Attribute a child actor via `actorRef.id`/`actorRef.src`. Saves
@@ -2911,12 +3095,12 @@ export function inspectTransitions(
  * const actor = createActor(bound, { inspect: traceTransitions(onTrace) });
  * ```
  *
- * Only ROOT-actor transitions are traced (matching `runAgent`'s
+ * Only ROOT-actor transitions are traced (matching the runtime's
  * `machine.transition`); child-actor transitions are ignored. Attribute the
  * event via its envelope `runId`.
  *
  * By design this path has NO `run.start`/`run.end` events: `createActor` has no
- * run boundary the way `runAgent` does, so the stream starts at the actor's
+ * run boundary the way `createAgentRuntime` does, so the stream starts at the actor's
  * first transition. It also does NOT emit `emit` trace events: in this xstate
  * build emitted events are delivered through `actor.on(...)`, not the inspection
  * protocol, so they are not observable from an `inspect` handler — subscribe
@@ -2930,7 +3114,7 @@ export function traceTransitions<TMachine extends AnyStateMachine = AnyStateMach
       return;
     }
     const actorRef = inspectionEvent.actorRef as unknown as { _parent?: unknown };
-    // Root actor only (no parent) — matches runAgent's root-transition filter.
+    // Root actor only (no parent) — matches the runtime's root-transition filter.
     if (actorRef?._parent) {
       return;
     }
@@ -2945,47 +3129,14 @@ export function traceTransitions<TMachine extends AnyStateMachine = AnyStateMach
   };
 }
 
-// True when a snapshot is active but has no in-flight children and no pending eventless/after work — see §3.3 in .scratch/p0-design.md for the approximation this makes.
-function isIdleSnapshot(snapshot: AnyMachineSnapshot): boolean {
-  if (snapshot.status !== "active") {
-    return false;
-  }
-  const childrenBusy = Object.values(snapshot.children ?? {}).some((child) => {
-    const ref = child as AnyActorRef | undefined;
-    const childSnapshot = ref?.getSnapshot?.();
-    if (childSnapshot?.status !== "active") {
-      return false;
-    }
-    // An active child machine that is itself idle (no busy descendants, no
-    // pending eventless/after work) is waiting for events, not doing work —
-    // e.g. a long-lived agent invoked across substates. It must not block an
-    // idle settle. Non-machine children (promises, decide invokes) that are
-    // active are always in-flight work.
-    if (isMachineSnapshot(childSnapshot)) {
-      return !isIdleSnapshot(childSnapshot);
-    }
-    return true;
-  });
-  if (childrenBusy) {
-    return false;
-  }
-  const hasPendingWork = getNextTransitions(snapshot).some(
-    (transitionDef) =>
-      transitionDef.eventType === "" || transitionDef.eventType.startsWith("xstate.after"),
-  );
-  return !hasPendingWork;
-}
-
 /**
- * Default machine-owned idle signal used by {@link runAgent}: an active
+ * Whether a snapshot is asking the outside world for something: an active
  * snapshot that accepts an external event anywhere in its active hierarchy,
  * or declares interaction metadata on an active state.
  *
- * Compose this in `setupAgent({ isIdle })` when the application has additional
- * wait states: `isIdle: (snapshot) => isAgentIdle(snapshot) || snapshot.hasTag('waiting')`.
- * Pending work and active invoked children are checked separately by the
- * runner, so this function only answers whether the state is an intentional
- * external wait.
+ * The runtime does not use this to stop; a run settles when nothing is in
+ * flight. Use it once the run is quiescent, to tell a human wait (render
+ * `getInteraction(snapshot)`) from a machine that is simply stuck.
  */
 export function isAgentIdle(snapshot: AnyMachineSnapshot): boolean {
   if (snapshot.status !== "active") {

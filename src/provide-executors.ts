@@ -26,12 +26,12 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
   /**
    * A single ordered stream of request-level trace events
    * (`request.start`/`request.end`/`request.error`/`stream.chunk`) with the
-   * SAME versioned envelope {@link runAgent} emits. Because one bound machine can
+   * SAME versioned envelope {@link createAgentRuntime} emits. Because one bound machine can
    * back many concurrent root actors, envelope state (`runId`, monotonic `seq`)
    * is minted per ROOT actor at runtime — two concurrent actors get distinct
    * `runId`s and independent `seq`. Pair with {@link traceTransitions} on the
    * actor's `inspect` to fold `machine.transition` events into the same stream.
-   * Unlike `runAgent` there are NO `run.start`/`run.end` events (no run
+   * Unlike `createAgentRuntime` there are NO `run.start`/`run.end` events (no run
    * boundary).
    */
   onTrace?: (event: AgentTraceEvent<TMachine>) => void;
@@ -40,8 +40,8 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
 /**
  * Binds a machine's agent actor sources to a set of host `executors` in one
  * call, returning a `machine.provide(...)`-ed copy ready for a plain
- * `createActor(...)` — the uncontrolled-mode counterpart to {@link runAgent}.
- * No run loop, no idle settling: the returned machine drives itself, so
+ * `createActor(...)` — the uncontrolled-mode counterpart to {@link createAgentRuntime}.
+ * No run loop, no settling: the returned machine drives itself, so
  *
  * ```ts
  * const actor = createActor(provideExecutors(machine, { generateText, decide }), { input });
@@ -56,10 +56,10 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
  * - `mode: 'stream'` text source → `executors.streamText`
  * - decision / `agent.decide` source → `executors.decide` (snapshot-driven
  *   candidate events, guard `canTake`, and auto-delivery of the chosen event,
- *   mirroring `runAgent` but without its model-call counting)
+ *   mirroring `createAgentRuntime` but without its model-call counting)
  *
  * Pass `options.onTrace` to observe request-level trace events (identical in
- * shape to `runAgent`'s); pair it with {@link traceTransitions} on the actor's
+ * shape to `createAgentRuntime`'s); pair it with {@link traceTransitions} on the actor's
  * `inspect` to also capture `machine.transition` events in the same stream.
  *
  * A source that already carries its own executor (`.withExecutor(...)`) is left
@@ -70,7 +70,7 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
  * Throws at bind time if a source needs an executor kind that `executors` does
  * not provide.
  *
- * Executor inheritance is RECURSIVE, exactly as in `runAgent`: a string-keyed
+ * Executor inheritance is RECURSIVE, exactly as in `createAgentRuntime`: a string-keyed
  * invoked child machine is rebound too, so its own text/decision requests — at
  * any depth — reach the same host executors. A direct-object invoke `src`
  * cannot be swapped via `.provide`, so nothing under one inherits; bind those
@@ -101,7 +101,7 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
 
   for (const [key, logic] of Object.entries(effectiveSources)) {
     // An invoked child machine: recursively bind ITS agent sources with the
-    // same executors (same semantics as runAgent's rebindChildMachine).
+    // same executors (same semantics as the runtime's rebindChildMachine).
     if (isStateMachineLogic(logic)) {
       // Assert BEFORE binding: a child's own invoked text/decision sources
       // need the same executors, and a missing one must fail here rather than
@@ -170,7 +170,7 @@ function executorRequirementOf(logic: AnyActorLogic):
 /**
  * Walks an invoked child machine's own invoked sources (recursively, at any
  * depth) and throws the same missing-executor error `provideExecutors` throws
- * for the top-level machine — before any actor starts. Mirrors runAgent's
+ * for the top-level machine — before any actor starts. Mirrors the runtime's
  * `assertBindable` for the uncontrolled path. Cycle-safe via `visited`.
  */
 function assertChildBindable(

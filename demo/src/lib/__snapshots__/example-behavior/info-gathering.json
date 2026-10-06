@@ -1,0 +1,89 @@
+{
+  "I need a prompt that extracts invoice fields from emails": [
+    {
+      "sent": "start {\"opener\":\"I need a prompt that extracts invoice fields from emails\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"gathering\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\""
+      ],
+      "response": "**Objective**\n\nmock objective\n\n**Variables**\n\nmock variables\n\n**Constraints**\n\nmock constraints",
+      "idle": {
+        "prompt": "mock nextQuestion",
+        "events": [
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"gathering\"",
+        "transition xstate.done.actor -> \"generatingPrompt\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "mock prompt\n\n- Turns: 1"
+    }
+  ],
+  "Help me write a prompt that summarizes support tickets for an on-call engineer": [
+    {
+      "sent": "start {\"opener\":\"Help me write a prompt that summarizes support tickets for an on-call engineer\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"gathering\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\""
+      ],
+      "response": "**Objective**\n\nmock objective\n\n**Variables**\n\nmock variables\n\n**Constraints**\n\nmock constraints",
+      "idle": {
+        "prompt": "mock nextQuestion",
+        "events": [
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"gathering\"",
+        "transition xstate.done.actor -> \"generatingPrompt\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "mock prompt\n\n- Turns: 1"
+    }
+  ],
+  "I want a prompt that turns meeting notes into action items": [
+    {
+      "sent": "start {\"opener\":\"I want a prompt that turns meeting notes into action items\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"gathering\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\""
+      ],
+      "response": "**Objective**\n\nmock objective\n\n**Variables**\n\nmock variables\n\n**Constraints**\n\nmock constraints",
+      "idle": {
+        "prompt": "mock nextQuestion",
+        "events": [
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"gathering\"",
+        "transition xstate.done.actor -> \"generatingPrompt\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "mock prompt\n\n- Turns: 1"
+    }
+  ]
+}

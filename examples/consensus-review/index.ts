@@ -18,9 +18,11 @@ import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } 
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
 
 /**
@@ -134,15 +136,20 @@ const agent = setupAgent({
     source: z.enum(["trusted", "external"]),
     votes: z.array(vote.extend({ reviewer })),
     abstentions: z.array(reviewer),
+    /** Why the human rejected the patch; null unless they did. */
+    rejectionReason: z.string().nullable(),
   }),
   output: z.object({
     approved: z.boolean(),
     humanReviewed: z.boolean(),
     votes: z.array(vote.extend({ reviewer })),
     abstentions: z.array(reviewer),
+    rejectionReason: z.string().nullable(),
   }),
   meta: interactionMetaSchema,
-  events: { APPROVE: z.object({}), REJECT: z.object({}) },
+  // A rejection says why: typed text ("reject it, no tests") reads as REJECT
+  // and fills its one string field, so the reason is recorded with it.
+  events: { APPROVE: z.object({}), REJECT: z.object({ reason: z.string() }) },
   actors: {
     // Each reviewer's vote: a Jev choice (see createReview).
     review: createReview(),
@@ -156,6 +163,7 @@ export const consensusReviewMachine = agent.createMachine({
     source: input.source,
     votes: [],
     abstentions: [],
+    rejectionReason: null,
   }),
   initial: "reviewing",
   states: {
@@ -237,11 +245,17 @@ export const consensusReviewMachine = agent.createMachine({
       meta: {
         interaction: {
           label:
-            "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved.",
+            "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved. To reject it, say why.",
           events: { APPROVE: { label: "Accept patch" }, REJECT: { label: "Reject patch" } },
         },
       },
-      on: { APPROVE: { target: "overridden" }, REJECT: { target: "rejected" } },
+      on: {
+        APPROVE: { target: "overridden" },
+        REJECT: ({ event }) => ({
+          target: "rejected",
+          context: { rejectionReason: event.reason.trim() || null },
+        }),
+      },
     },
     accepted: {
       type: "final",
@@ -250,6 +264,7 @@ export const consensusReviewMachine = agent.createMachine({
         humanReviewed: false,
         votes: context.votes,
         abstentions: context.abstentions,
+        rejectionReason: context.rejectionReason,
       }),
     },
     overridden: {
@@ -259,6 +274,7 @@ export const consensusReviewMachine = agent.createMachine({
         humanReviewed: true,
         votes: context.votes,
         abstentions: context.abstentions,
+        rejectionReason: context.rejectionReason,
       }),
     },
     rejected: {
@@ -268,12 +284,30 @@ export const consensusReviewMachine = agent.createMachine({
         humanReviewed: true,
         votes: context.votes,
         abstentions: context.abstentions,
+        rejectionReason: context.rejectionReason,
       }),
     },
   },
 });
 
-const BUILT_IN_PATCH = "Validate input before writing to the database.";
+/**
+ * The trusted, host-authored patch — and the one both demo starters send. It is
+ * a real diff on purpose: given only a one-line description ("Validate input
+ * before a database write."), every reviewer correctly chose `abstain` (there
+ * is nothing to judge), so the trusted starter could never auto-accept.
+ */
+export const BUILT_IN_PATCH = [
+  "Validate input before a database write.",
+  "",
+  "--- a/src/users.ts",
+  "+++ b/src/users.ts",
+  "@@ export async function createUser(db: Db, body: unknown) {",
+  '-  await db.insert("users", body);',
+  "+  const parsed = UserSchema.safeParse(body);",
+  "+  if (!parsed.success) throw new ValidationError(parsed.error.issues);",
+  '+  await db.insert("users", parsed.data);',
+  " }",
+].join("\n");
 
 /** The host's real judge, Jev, which reads `TYPESAFE_AI_API_KEY`. */
 function liveJudge() {
@@ -290,7 +324,11 @@ function liveJudge() {
  * to auto-acceptance by claiming it is trusted.
  */
 export async function runConsensusReviewExample(
-  options?: Omit<RunAgentOptions<typeof consensusReviewMachine>, "input"> & {
+  options?: Omit<
+    AgentRuntimeOptions<typeof consensusReviewMachine> &
+      AgentRunInit<typeof consensusReviewMachine>,
+    "input"
+  > & {
     patch?: string;
     /** The judge model; tests pass a mock, omitted the runner uses Jev (`TYPESAFE_AI_API_KEY`). */
     judge?: Experimental_EvaluationModel;
@@ -307,15 +345,20 @@ export async function runConsensusReviewExample(
   } = (options ?? {}) as typeof options & {
     input?: unknown;
   };
-  return runAgent(consensusReviewMachine, {
-    ...runOptions,
-    actors: { ...actors, review: actors?.review ?? createReview(judge ?? liveJudge()) },
-    // Last on purpose: the host-derived input wins over anything spread above.
-    input:
-      patch === undefined
-        ? { patch: BUILT_IN_PATCH, source: "trusted" }
-        : { patch, source: "external" },
-  });
+  return runToQuiescence(
+    createAgentRuntime(consensusReviewMachine, {
+      ...runOptions,
+      actors: { ...actors, review: actors?.review ?? createReview(judge ?? liveJudge()) },
+    }),
+    {
+      ...runOptions,
+      // Last on purpose: the host-derived input wins over anything spread above.
+      input:
+        patch === undefined
+          ? { patch: BUILT_IN_PATCH, source: "trusted" }
+          : { patch, source: "external" },
+    },
+  );
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {

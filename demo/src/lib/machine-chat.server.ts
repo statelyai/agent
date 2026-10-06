@@ -15,16 +15,20 @@ import {
   getAgentSchemas,
   getStateMeta,
   parseAgentEvent,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
+  type AgentRequest,
   type AgentRequestExecutors,
-  type RunAgentResult,
+  type AgentRunResult,
+  type AgentTimerScheduler,
 } from "@statelyai/agent";
 import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
 import { z } from "zod";
 import { maybeCreateRunInspection } from "./inspection.server";
+import { interpretIdleText, unclearTextReply } from "./interpret-text.server";
+import { renderIdleWork, renderOutput } from "./render-value";
 import {
   humanizeEventType,
-  humanizeFieldName,
   missingKeyMessage,
   missingKeys,
   schemaNeedsPayload,
@@ -33,6 +37,7 @@ import {
   type ChatIdle,
   type Json,
   type JsonObject,
+  type PendingTimer,
   type RequiredKey,
 } from "./machine-ui";
 
@@ -78,8 +83,14 @@ export type TraceEntry = {
  * context keys the run actually changed (most recent first). Values present at
  * init — or in `baselineContext`, for resumed snapshots — don't count as
  * changes, so input echoes stay out of the "work produced" set.
+ *
+ * `onEntry` sees each entry as it is recorded, so a streamed run can show its
+ * transition log while it is still going.
  */
-export function createTraceRecorder(baselineContext?: unknown): {
+export function createTraceRecorder(
+  baselineContext?: unknown,
+  onEntry?: (entry: TraceEntry) => void,
+): {
   trace: TraceEntry[];
   onTransition: (snapshot: AnyMachineSnapshot, event: unknown) => void;
   /** `runAgent`'s `on` handler: records an `enq.emit(...)` the machine made. */
@@ -125,8 +136,12 @@ export function createTraceRecorder(baselineContext?: unknown): {
   // is a NEW invocation rather than more of the old one.
   const attemptsSeen = new Map<string, number>();
 
+  const record = (entry: TraceEntry) => {
+    trace.push(entry);
+    onEntry?.(entry);
+  };
   const push = (kind: TraceEntryKind, event: unknown) => {
-    trace.push({
+    record({
       at: Date.now() - startedAt,
       event: smallEvent(event),
       value: lastValue,
@@ -147,7 +162,7 @@ export function createTraceRecorder(baselineContext?: unknown): {
       observe(snapshot.context, !isInit);
       latest = snapshot.context;
       lastValue = snapshot.value as Json;
-      trace.push({
+      record({
         at: Date.now() - startedAt,
         event: smallEvent(event),
         value: snapshot.value as Json,
@@ -396,10 +411,18 @@ export function jsonSchemaOf(schema: unknown): JsonObject | null {
 
 // ─── interaction hints (meta.interaction convention) ───
 
+type InteractionEventHint = {
+  label?: string;
+  style?: string;
+  /** Fixed payload fields merged into the event when this choice is sent. */
+  event?: Record<string, unknown>;
+};
+
 type InteractionHints = {
   /** A string with `{key}` placeholders, or a function of the context (see `interactionMetaSchema`). */
   label?: string | ((args: { context: unknown }) => string);
-  events?: Record<string, { label?: string; style?: string }>;
+  /** A bare label string, or a descriptor (see `AgentInteractionEventMeta`). */
+  events?: Record<string, string | InteractionEventHint>;
   textEvent?: string;
   /** Custom composer renderer for this state ("rating", "cards", …). */
   component?: string;
@@ -408,6 +431,41 @@ type InteractionHints = {
 function interactionHints(snapshot: AnyMachineSnapshot): InteractionHints {
   const meta = getStateMeta(snapshot) as { interaction?: InteractionHints };
   return meta.interaction && typeof meta.interaction === "object" ? meta.interaction : {};
+}
+
+function eventHint(hints: InteractionHints, type: string): InteractionEventHint {
+  const hint = hints.events?.[type];
+  return typeof hint === "string" ? { label: hint } : (hint ?? {});
+}
+
+/** The fixed payload fields a state's `meta.interaction.events` entry declares for `type`. */
+function fixedFields(hints: InteractionHints, type: string): Record<string, unknown> {
+  const fixed = eventHint(hints, type).event;
+  return fixed && typeof fixed === "object" && !Array.isArray(fixed) ? fixed : {};
+}
+
+/**
+ * The payload schema minus the fields the interaction fixes, so a choice whose
+ * whole payload is fixed (`APPROVE { requestId }` with the id declared in
+ * meta) renders as a plain button instead of a form.
+ */
+function withoutFields(
+  schema: JsonObject | null,
+  fixed: Record<string, unknown>,
+): JsonObject | null {
+  const names = Object.keys(fixed);
+  if (!schema || !names.length || !schema.properties || typeof schema.properties !== "object") {
+    return schema;
+  }
+  const properties = Object.fromEntries(
+    Object.entries(schema.properties as Record<string, Json>).filter(
+      ([name]) => !names.includes(name),
+    ),
+  );
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((name) => typeof name === "string" && !names.includes(name))
+    : undefined;
+  return { ...schema, properties, ...(required ? { required } : {}) };
 }
 
 /**
@@ -460,8 +518,11 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
     events: schemas.events as never,
   })
     .map((descriptor) => {
-      const jsonSchema = jsonSchemaOf(descriptor.inputSchema);
-      const hint = hints.events?.[descriptor.type] ?? {};
+      const jsonSchema = withoutFields(
+        jsonSchemaOf(descriptor.inputSchema),
+        fixedFields(hints, descriptor.type),
+      );
+      const hint = eventHint(hints, descriptor.type);
       return {
         type: descriptor.type,
         label: hint.label
@@ -477,7 +538,11 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
     // now (a guard, or a function transition returning nothing) gets no
     // button — a button that does nothing is worse than a missing one. An
     // event that needs a payload cannot be judged yet, so it stays.
-    .filter((event) => event.needsPayload || snapshot.can({ type: event.type } as never));
+    .filter(
+      (event) =>
+        event.needsPayload ||
+        snapshot.can({ ...fixedFields(hints, event.type), type: event.type } as never),
+    );
 
   // Free text maps to the declared textEvent, or — when unambiguous — the one
   // accepted event whose payload is exactly one string field.
@@ -528,6 +593,12 @@ export type RunLimits = {
   budgetMs?: number;
   /** Raw source passed to Viz so v6 function transitions remain visible. */
   machineSource?: string;
+  /** Each chunk of a streaming request, as it arrives. */
+  onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
+  /** Each trace entry, as it is recorded. */
+  onStep?: (entry: TraceEntry) => void;
+  /** The browser session's inspection room (see `inspection.server.ts`). */
+  inspectionRoom?: string;
 };
 
 export const DEFAULT_RUN_BUDGET_MS = 120_000;
@@ -547,147 +618,69 @@ export type MachineChatResult = {
   idle?: ChatIdle & { snapshot: Json };
 };
 
+// ─── host-owned timers ───
+
 /**
- * Output → chat text. Strings pass through. Object outputs read as prose: the
- * longest string field becomes the body, remaining primitives a compact
- * "Key: value" list under it. The untouched value still ships as
- * `MachineChatResult.output` for anything that wants the raw JSON.
+ * The demo host owns its runs' `after` timers, the way a durable host would
+ * (see `AgentTimerScheduler`): a run waiting on a deadline settles idle at
+ * once instead of holding the request open until the deadline, and the
+ * pending timers ride the idle result. The browser is the scheduler — it
+ * resumes with `{ type: "xstate.timer", id }` when one comes due, unless the
+ * person acts first. A resumed run re-arms the snapshot's timers through
+ * `schedule`, so each idle result reports whatever is still pending.
  */
-export function renderOutput(output: unknown): string {
-  if (typeof output === "string") return output;
-  if (output && typeof output === "object" && !Array.isArray(output)) {
-    const entries = Object.entries(output as Record<string, unknown>);
-    const strings = entries.filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== "",
-    );
-    if (strings.length) {
-      const longest = strings.reduce((best, entry) =>
-        entry[1].length > best[1].length ? entry : best,
-      );
-      // Only prose leads. An identifier-like longest string (a reference
-      // code, a slug) is one more "Key: value" line, not the body.
-      const [bodyKey, body] = /\s/.test(longest[1].trim()) ? longest : [null, null];
-      const rest = entries.filter(
-        ([key, value]) =>
-          key !== bodyKey &&
-          (typeof value === "string" || typeof value === "number" || typeof value === "boolean"),
-      );
-      // Bullets: a bare newline is not a line break in markdown.
-      const list = rest.map(([key, value]) => `- ${humanizeFieldName(key)}: ${String(value)}`);
-      // Nested values are still output — fenced JSON under their own heading,
-      // never dropped.
-      const nested = entries
-        .filter(([key, value]) => key !== bodyKey && value !== null && typeof value === "object")
-        .map(
-          ([key, value]) =>
-            `**${humanizeFieldName(key)}**\n\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``,
-        );
-      return [body, list.length ? list.join("\n") : null, ...nested]
-        .filter((section): section is string => section !== null)
-        .join("\n\n");
-    }
-  }
-  try {
-    return "```json\n" + JSON.stringify(output, null, 2) + "\n```";
-  } catch {
-    return String(output);
-  }
+export function createTimerRecorder(): {
+  timers: Exclude<AgentTimerScheduler, "in-process">;
+  pending: () => PendingTimer[];
+} {
+  const pending = new Map<string, number>();
+  return {
+    timers: {
+      schedule: ({ id, delay }) => void pending.set(id, delay),
+      cancel: (id) => void pending.delete(id),
+    },
+    pending: () => [...pending].map(([id, delay]) => ({ id, delay })),
+  };
 }
 
-/**
- * What the run produced so far, read generically off an idle snapshot: the
- * context values the run changed (per the trace recorder), most recent first.
- * Strings render before objects so prose (drafts, answers, SQL) leads; small
- * non-string values render as fenced JSON. Echoes of what the user just sent
- * (`omitValues`) are plumbing, not work — skipped. A message-history array
- * renders only its newest assistant message: the reply a chat loop keeps in
- * `messages` instead of a dedicated field.
- * Null when the run changed nothing presentable — the idle prompt alone is
- * then the whole story.
- */
-export function renderIdleWork(
-  context: unknown,
-  changedKeys: string[],
-  omitValues: string[] = [],
-): string | null {
-  const MAX_SECTIONS = 3;
-  const MAX_STRING = 4000;
-  const MAX_JSON = 1500;
-  if (!context || typeof context !== "object") return null;
-  const source = context as Record<string, unknown>;
-  const omitted = new Set(omitValues.map((value) => value.trim()).filter(Boolean));
-  const isMessageHistory = (value: unknown): boolean =>
-    Array.isArray(value) &&
-    value.length > 0 &&
-    value.every((item) => item && typeof item === "object" && "role" in item && "content" in item);
+/** The root timers a persisted snapshot holds — what a restore would re-arm. */
+function snapshotTimers(snapshot: unknown): PendingTimer[] {
+  const timers = (snapshot as { timers?: unknown } | null)?.timers;
+  if (!timers || typeof timers !== "object") return [];
+  return Object.entries(timers as Record<string, { id?: unknown; delay?: unknown }>).flatMap(
+    ([key, timer]) =>
+      typeof timer?.delay === "number"
+        ? [{ id: typeof timer.id === "string" ? timer.id : key, delay: timer.delay }]
+        : [],
+  );
+}
 
-  const strings: Array<{ key: string; body: string }> = [];
-  const objects: Array<{ key: string; body: string }> = [];
-  const latestReply = (history: unknown[]): string | null => {
-    const last = history[history.length - 1] as { role: unknown; content: unknown };
-    if (last.role !== "assistant") return null;
-    const parts = Array.isArray(last.content) ? last.content : [last.content];
-    const text = parts
-      .map((part) =>
-        typeof part === "string"
-          ? part
-          : part &&
-              typeof part === "object" &&
-              typeof (part as { text?: unknown }).text === "string"
-            ? (part as { text: string }).text
-            : "",
-      )
-      .join("")
-      .trim();
-    return text || null;
-  };
+function withTimers<T extends object>(idle: T, timers: PendingTimer[]): T {
+  return timers.length ? { ...idle, timers } : idle;
+}
 
-  for (const key of changedKeys) {
-    const rawValue = source[key];
-    const value = isMessageHistory(rawValue) ? latestReply(rawValue as unknown[]) : rawValue;
-    if (typeof value === "string") {
-      const text = value.trim();
-      if (!text || omitted.has(text)) continue;
-      strings.push({
-        key,
-        body: text.length > MAX_STRING ? `${text.slice(0, MAX_STRING)}…` : text,
-      });
-    } else if (value && typeof value === "object") {
-      let json: string;
-      try {
-        json = JSON.stringify(value, null, 2);
-      } catch {
-        continue;
-      }
-      if (!json || json === "{}" || json === "[]" || json.length > MAX_JSON) continue;
-      objects.push({ key, body: "```json\n" + json + "\n```" });
-    }
-  }
-
-  const sections = [...strings, ...objects].slice(0, MAX_SECTIONS);
-  if (!sections.length) return null;
-  if (sections.length === 1 && strings.length === 1) return sections[0].body;
-  return sections
-    .map((section) => `**${humanizeFieldName(section.key)}**\n\n${section.body}`)
-    .join("\n\n");
+/** A host timer firing, delivered back by the client (see `createTimerRecorder`). */
+function isTimerEvent(event: { type: string }): event is { type: "xstate.timer"; id: string } {
+  return event.type === "xstate.timer";
 }
 
 function toChatResult(
   machine: AnyStateMachine,
   model: string | undefined,
-  result: RunAgentResult<AnyStateMachine>,
+  result: AgentRunResult<AnyStateMachine>,
   trace: TraceEntry[],
   changedKeys: string[],
   omitValues: string[],
   latestContext?: unknown,
   limits?: RunLimits,
+  timers: PendingTimer[] = [],
 ): MachineChatResult {
   if (result.status === "done") {
     return {
       model,
       status: "done",
       trace,
-      response: renderOutput(result.output),
+      response: renderOutput(result.output, omitValues),
       output: result.output as Json,
     };
   }
@@ -696,7 +689,7 @@ function toChatResult(
     // Show the work the run produced (drafts, answers, queries…) — the idle
     // prompt ships separately in `idle` and renders in the waiting box, so
     // approvals aren't asked for sight unseen.
-    const work = renderIdleWork(result.snapshot.context, changedKeys, omitValues);
+    const work = renderIdleWork(result.snapshot.context, changedKeys, omitValues, idle.prompt);
     // An event the state has no transition for is ignored, not an error: say
     // so instead of re-showing the work as if the event had applied.
     const ignoredNote = result.ignored
@@ -706,11 +699,14 @@ function toChatResult(
       model,
       status: "idle",
       trace,
-      response: ignoredNote ?? work ?? idle.prompt ?? "The machine is idle, waiting for input.",
+      // The waiting box already shows the prompt; repeating it here would
+      // print the same text twice.
+      response:
+        ignoredNote ?? work ?? (idle.prompt ? "" : "The machine is idle, waiting for input."),
       // Resume from the run's persisted snapshot, not the live one — it
       // round-trips invoked children WITH their state (a long-lived agent
       // keeps its context across chat turns).
-      idle: { ...idle, snapshot: result.persist() as unknown as Json },
+      idle: { ...withTimers(idle, timers), snapshot: result.persist() as unknown as Json },
     };
   }
   const error = (result as { error?: unknown }).error;
@@ -774,15 +770,17 @@ export async function runExampleRunner(
   limits: RunLimits = {},
 ): Promise<MachineChatResult> {
   const live = await resolveExecutors();
-  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
+  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder(undefined, limits.onStep);
   try {
     const output = await runner({
       executors: live.executors,
       signal: runSignal(limits),
+      ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
       onTransition,
       on: { "*": onEmitted },
       onTrace,
       inspect: maybeCreateRunInspection(
+        limits.inspectionRoom,
         // Multi-run stories re-enter `runAgent` several times; the inspection
         // session spans all of them, so the root keeps one identity.
         { config: {} } as never,
@@ -822,25 +820,38 @@ export async function startMachineChat(
 ): Promise<MachineChatResult> {
   const live = await resolveExecutors();
   const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
-    createTraceRecorder();
-  const result = await runAgent(machine, {
-    input: input as never,
-    executors: live.executors,
-    signal: runSignal(limits),
-    onTransition,
-    on: { "*": onEmitted },
-    onTrace,
-    inspect: maybeCreateRunInspection(machine, limits.machineSource, "start"),
-  });
+    createTraceRecorder(undefined, limits.onStep);
+  const host = createTimerRecorder();
+  const result = await runToQuiescence(
+    createAgentRuntime(machine, {
+      executors: live.executors,
+      timers: host.timers,
+      signal: runSignal(limits),
+      ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
+      onTransition,
+      on: { "*": onEmitted },
+      onTrace,
+      inspect: maybeCreateRunInspection(
+        limits.inspectionRoom,
+        machine,
+        limits.machineSource,
+        "start",
+      ),
+    }),
+    {
+      input: input as never,
+    },
+  );
   return toChatResult(
     machine,
     live.model,
-    result as RunAgentResult<AnyStateMachine>,
+    result as AgentRunResult<AnyStateMachine>,
     trace,
     changedKeys(),
     stringValuesOf(input),
     latestContext(),
     limits,
+    host.pending(),
   );
 }
 
@@ -849,50 +860,131 @@ function stringValuesOf(source: Record<string, unknown>): string[] {
   return Object.values(source).filter((value): value is string => typeof value === "string");
 }
 
+/**
+ * What a resume delivers: a typed event (a host timer firing included), or
+ * free chat text for a state that offers several readings of it, which the
+ * server reads as one of the offered events.
+ */
+export type MachineChatResumeEvent =
+  | ({ type: string } & Record<string, unknown>)
+  | { kind: "interpret"; text: string };
+
+/** The index signature on the typed-event variant defeats `in` narrowing, so guard explicitly. */
+function isInterpretRequest(
+  event: MachineChatResumeEvent,
+): event is { kind: "interpret"; text: string } {
+  return !("type" in event) && (event as { kind?: unknown }).kind === "interpret";
+}
+
 export async function resumeMachineChat(
   machine: AnyStateMachine,
   snapshot: Snapshot<unknown>,
-  event: { type: string } & Record<string, unknown>,
+  resumeEvent: MachineChatResumeEvent,
   limits: RunLimits = {},
 ): Promise<MachineChatResult> {
   const live = await resolveExecutors();
+  // The RESTORED state: what Jev reads text against, where an interaction's
+  // fixed payload fields come from, and what a typed event is checked against.
+  // Null when the snapshot cannot be rehydrated; the runtime then still
+  // rejects an event the restored state cannot accept.
+  let restored: AnyMachineSnapshot | null = null;
+  try {
+    restored = machine.resolveState(
+      snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
+    ) as AnyMachineSnapshot;
+  } catch {
+    restored = null;
+  }
+  let event: { type: string } & Record<string, unknown>;
+  if (isInterpretRequest(resumeEvent)) {
+    // Jev reads the text against the restored state's offered events, so the
+    // run then resumes with the real typed event and the log shows it.
+    const idle = describeIdle(
+      machine,
+      restored ??
+        (machine.resolveState(
+          snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
+        ) as AnyMachineSnapshot),
+    );
+    const chosen = await interpretIdleText(resumeEvent.text, idle, { signal: limits.signal });
+    if (!chosen) {
+      // Nothing delivered: the machine is still waiting, unchanged, and so
+      // are its deadlines.
+      return {
+        model: live.model,
+        status: "idle",
+        trace: [],
+        response: unclearTextReply(idle),
+        idle: {
+          ...withTimers(idle, snapshotTimers(snapshot)),
+          snapshot: snapshot as unknown as Json,
+        },
+      };
+    }
+    event = chosen;
+  } else {
+    event = resumeEvent as { type: string } & Record<string, unknown>;
+  }
+  // A choice whose payload the interaction fixes arrives as a bare type.
+  if (restored && !isTimerEvent(event)) {
+    event = { ...fixedFields(interactionHints(restored), event.type), ...event };
+  }
   // Baseline: context restored from the snapshot is prior turns' work, not
   // this turn's — only new changes should render as produced output.
   const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
-    createTraceRecorder((snapshot as { context?: unknown }).context);
+    createTraceRecorder((snapshot as { context?: unknown }).context, limits.onStep);
   // Validate the wire event against the restored snapshot's accepted events
-  // (and payload schema, when registered) before delivering it. If the
-  // snapshot can't be rehydrated for validation, runAgent still rejects an
-  // event the restored state cannot accept.
+  // (and payload schema, when registered) before delivering it. A host timer
+  // firing is not a machine event: the runtime resolves its id against the
+  // snapshot's timers, and an unknown id comes back as ignored.
   let parsed: { type: string } & Record<string, unknown> = event;
-  try {
-    const restored = machine.resolveState(
-      snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
-    );
-    parsed = parseAgentEvent(restored as AnyMachineSnapshot, event, {
-      events: machineSchemas(machine).events as never,
-    }) as { type: string } & Record<string, unknown>;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("parseAgentEvent")) throw error;
+  if (restored && !isTimerEvent(event)) {
+    try {
+      parsed = parseAgentEvent(restored, event, {
+        events: machineSchemas(machine).events as never,
+      }) as { type: string } & Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("parseAgentEvent")) throw error;
+    }
   }
-  const result = await runAgent(machine, {
-    snapshot,
-    event: parsed as never,
-    executors: live.executors,
-    signal: runSignal(limits),
-    onTransition,
-    on: { "*": onEmitted },
-    onTrace,
-    inspect: maybeCreateRunInspection(machine, limits.machineSource, "resume"),
-  });
+  const host = createTimerRecorder();
+  const result = await runToQuiescence(
+    createAgentRuntime(machine, {
+      executors: live.executors,
+      timers: host.timers,
+      signal: runSignal(limits),
+      ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
+      onTransition,
+      on: { "*": onEmitted },
+      onTrace,
+      inspect: maybeCreateRunInspection(
+        limits.inspectionRoom,
+        machine,
+        limits.machineSource,
+        "resume",
+      ),
+    }),
+    {
+      snapshot,
+      event: parsed as never,
+    },
+  );
   return toChatResult(
     machine,
     live.model,
-    result as RunAgentResult<AnyStateMachine>,
+    result as AgentRunResult<AnyStateMachine>,
     trace,
     changedKeys(),
-    stringValuesOf(parsed),
+    // What the user sent, and what earlier turns already showed: neither is
+    // repeated in this turn's output.
+    [
+      ...stringValuesOf(parsed),
+      ...stringValuesOf(
+        ((snapshot as { context?: unknown }).context ?? {}) as Record<string, unknown>,
+      ),
+    ],
     latestContext(),
     limits,
+    host.pending(),
   );
 }

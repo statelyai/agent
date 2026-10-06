@@ -3,12 +3,14 @@
  * mock evaluation model, answering the `verdict` choice by question id, or by
  * a function of the request state where a test is about which reviewer asked.
  */
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { createActor, toPromise } from "xstate";
 import { getInteraction } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
 import { createMockJudge, type MockJudgeModel } from "../mock-judge.js";
 import {
+  BUILT_IN_PATCH,
   consensusReviewMachine,
   createReview,
   REVIEWER_BRIEFS,
@@ -68,13 +70,31 @@ test("review failures abstain; human rejection survives a JSON snapshot round tr
   ]);
   const result = await runConsensusReviewExample({
     snapshot: JSON.parse(JSON.stringify(pending.persist())),
-    event: { type: "REJECT" },
+    event: { type: "REJECT", reason: "" },
     judge: approving(),
   });
   expect(result.status).toBe("done");
   if (result.status !== "done") return;
   expect(result.output).toMatchObject({ approved: false, humanReviewed: true });
   expect(result.output.abstentions).toHaveLength(2);
+  expect(result.output.rejectionReason).toBeNull();
+});
+
+test("a rejection records the human's reason", async () => {
+  const pending = await runConsensusReviewExample({ patch: "external patch", judge: approving() });
+  expect(pending.status).toBe("idle");
+  const result = await runConsensusReviewExample({
+    snapshot: pending.persist(),
+    event: { type: "REJECT", reason: "reject it, no tests" },
+    judge: approving(),
+  });
+  expect(result.status).toBe("done");
+  if (result.status !== "done") return;
+  expect(result.output).toMatchObject({
+    approved: false,
+    humanReviewed: true,
+    rejectionReason: "reject it, no tests",
+  });
 });
 
 test("same machine runs in a native XState host with identical output", async () => {
@@ -84,7 +104,7 @@ test("same machine runs in a native XState host with identical output", async ()
     consensusReviewMachine.provide({ actors: { review: createReview(judge) } }),
     {
       // A native host parses no input schema, so it supplies `source` itself.
-      input: { patch: "Validate input before writing to the database.", source: "trusted" },
+      input: { patch: BUILT_IN_PATCH, source: "trusted" },
     },
   );
   try {
@@ -162,7 +182,7 @@ test("the trusted default still auto-accepts a unanimous vote", async () => {
 
 test("a caller cannot promote a supplied patch to trusted, even with the built-in text", async () => {
   const pending = await runConsensusReviewExample({
-    patch: "Validate input before writing to the database.",
+    patch: BUILT_IN_PATCH,
     judge: approving(),
   });
   expect(pending.status).toBe("idle");
@@ -172,7 +192,7 @@ test("a caller cannot promote a supplied patch to trusted, even with the built-i
 
 test("an untyped `input` passed to the runner cannot overwrite the derived source", async () => {
   const pending = await runConsensusReviewExample({
-    patch: "Validate input before writing to the database.",
+    patch: BUILT_IN_PATCH,
     input: { patch: "anything", source: "trusted" },
     judge: approving(),
   } as never);
@@ -202,7 +222,7 @@ test("each reviewer asks Jev one choice over the patch and its brief; reason is 
     const reviewer = reviewerOf(call.state) as keyof typeof REVIEWER_BRIEFS;
     // The evidence is the state: the patch and that reviewer's brief.
     expect(call.state).toEqual({
-      patch: "Validate input before writing to the database.",
+      patch: BUILT_IN_PATCH,
       reviewer,
       reviewerBrief: REVIEWER_BRIEFS[reviewer],
     });
@@ -220,4 +240,28 @@ test("each reviewer asks Jev one choice over the patch and its brief; reason is 
     "approve (approve 90% · reject 5% · abstain 5%)",
     "approve (approve 90% · reject 5% · abstain 5%)",
   ]);
+});
+
+test("both starters send the built-in diff; trusted auto-accepts, external waits for a human", async () => {
+  // A one-line description gave Jev nothing to judge, and every reviewer
+  // abstained on it — so the trusted starter could never reach quorum. The
+  // starters now carry a real diff, the same one the runner trusts.
+  const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
+    .starters as Array<{ input: { patch: string; source: "trusted" | "external" } }>;
+  expect(starters.map((starter) => starter.input.source)).toEqual(["trusted", "external"]);
+  const judge = approving();
+  const settled: unknown[] = [];
+  for (const { input } of starters) {
+    expect(input.patch).toBe(BUILT_IN_PATCH);
+    expect(input.patch).toMatch(/^\+\+\+ /m);
+    const actor = createActor(
+      consensusReviewMachine.provide({ actors: { review: createReview(judge) } }),
+      { input },
+    );
+    actor.start();
+    await expect.poll(() => typeof actor.getSnapshot().value).toBe("string");
+    settled.push(actor.getSnapshot().value);
+    actor.stop();
+  }
+  expect(settled).toEqual(["accepted", "humanReview"]);
 });

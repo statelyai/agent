@@ -39,10 +39,12 @@ import {
 import type { AnyStateMachine } from "xstate";
 import {
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutor,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
@@ -144,7 +146,7 @@ export const aiSdkUiStreamMachine = agentSetup.createMachine({
 
 /** Options for {@link agentRunToUIMessageStream}: the run inputs it forwards to `runAgent`. */
 export type AgentUiStreamOptions<TMachine extends AnyStateMachine> = Pick<
-  RunAgentOptions<TMachine>,
+  AgentRuntimeOptions<TMachine> & AgentRunInit<TMachine>,
   "input" | "executors" | "signal"
 >;
 
@@ -166,28 +168,33 @@ export function agentRunToUIMessageStream<TMachine extends AnyStateMachine>(
 
       writer.write({ type: "start" });
 
-      const result = await runAgent(machine, {
-        ...options,
-        // Each streamed chunk becomes a text delta on its request's text part.
-        onChunk: (chunk, { request }) => {
-          if (!openTextParts.has(request.id)) {
-            openTextParts.add(request.id);
-            writer.write({ type: "text-start", id: request.id });
-          }
-          writer.write({ type: "text-delta", id: request.id, delta: chunk });
+      const result = await runToQuiescence(
+        createAgentRuntime(machine, {
+          ...options,
+          // Each streamed chunk becomes a text delta on its request's text part.
+          onChunk: (chunk, { request }) => {
+            if (!openTextParts.has(request.id)) {
+              openTextParts.add(request.id);
+              writer.write({ type: "text-start", id: request.id });
+            }
+            writer.write({ type: "text-delta", id: request.id, delta: chunk });
+          },
+          // A resolved request closes its text part.
+          onResult: (request) => {
+            if (openTextParts.delete(request.id)) {
+              writer.write({ type: "text-end", id: request.id });
+            }
+          },
+          // Every machine transition surfaces as a data part the client can render.
+          onTransition: (snapshot) => {
+            const state = getStatePath(snapshot);
+            writer.write({ type: AGENT_STATE_PART, data: { state } });
+          },
+        }),
+        {
+          ...options,
         },
-        // A resolved request closes its text part.
-        onResult: (request) => {
-          if (openTextParts.delete(request.id)) {
-            writer.write({ type: "text-end", id: request.id });
-          }
-        },
-        // Every machine transition surfaces as a data part the client can render.
-        onTransition: (snapshot) => {
-          const state = getStatePath(snapshot);
-          writer.write({ type: AGENT_STATE_PART, data: { state } });
-        },
-      });
+      );
 
       // Close any part still open (e.g. the run errored mid-stream), surface a
       // non-done outcome as an error frame, then close the message.
@@ -215,7 +222,8 @@ export interface ChatRequest {
  */
 export async function handleChatRequest(
   request: ChatRequest,
-  executors: RunAgentOptions<typeof aiSdkUiStreamMachine>["executors"],
+  executors: (AgentRuntimeOptions<typeof aiSdkUiStreamMachine> &
+    AgentRunInit<typeof aiSdkUiStreamMachine>)["executors"],
 ) {
   const body = ((await request.json()) ?? {}) as { product?: string };
   const stream = agentRunToUIMessageStream(aiSdkUiStreamMachine, {

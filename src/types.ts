@@ -26,7 +26,7 @@ export type InferOutput<T> = T extends StandardSchemaV1<any, infer O> ? O : neve
  * passes in, before defaults are filled and transforms applied. Standard Schema
  * carries both sides (`~standard.types.input` / `.output`), so a schema
  * declaring a defaulted field makes that field optional here and required in
- * {@link InferOutput} — which is exactly the split between what `runAgent`
+ * {@link InferOutput} — which is exactly the split between what a run
  * accepts as machine `input` and what the `context` factory then sees.
  */
 export type InferInput<T> = T extends StandardSchemaV1<infer I, any> ? I : never;
@@ -38,7 +38,7 @@ export type InferInput<T> = T extends StandardSchemaV1<infer I, any> ? I : never
  * `createActor`'s `input` option and the `context: ({ input })` factory, so the
  * caller-facing and factory-facing sides cannot differ there. `setupAgent`'s
  * `createMachine` brands the machine's input type with the schema itself, which
- * lets `AgentInputFrom` recover the looser input side for `runAgent` while the
+ * lets `AgentInputFrom` recover the looser input side for a run's `input` while the
  * `context` factory keeps the strict validated side.
  *
  * The key is a `~`-prefixed phantom property (the same convention Standard
@@ -246,7 +246,7 @@ export type AllowedEventPattern<TEvent extends string = string> =
  * omitting `allowedEvents` means "all currently-legal events." A resolver
  * function can therefore only ever narrow, never widen, the real surface.
  * Wildcards expand against the live snapshot, so they need a snapshot-aware
- * host (`runAgent` or the step path).
+ * host (`createAgentRuntime`).
  */
 export type AllowedEvents<TEvent extends string = string, TInput = unknown> =
   | AllowedEventPattern<TEvent>

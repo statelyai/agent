@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { runAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import { createMockJudge, type MockJudgeEntry, type MockJudgeModel } from "../mock-judge.js";
 import {
@@ -63,11 +64,15 @@ describe("ticket-triage", () => {
     const { generateText, prompts } = scriptedExecutor();
     const jev = classifier({ sentiment: "negative", category: "billing" });
 
-    const result = await runAgent(triageMachine, {
-      input: { ticket: TICKET },
-      executors: { generateText },
-      actors: jev.actors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors: jev.actors,
+      }),
+      {
+        input: { ticket: TICKET },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -89,13 +94,17 @@ describe("ticket-triage", () => {
     const { generateText } = scriptedExecutor();
     const { actors } = classifier({ sentiment: "neutral", category: "other" }, 0.3);
 
-    const first = await runAgent(triageMachine, {
-      input: { ticket: "hi" },
-      executors: { generateText },
-      actors,
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors,
+      }),
+      {
+        input: { ticket: "hi" },
+      },
+    );
 
-    // The `waiting` tag + isIdle settles this deterministically.
+    // Nothing is in flight in `escalating`, so the run settles idle there.
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
     expect(first.snapshot.value).toBe("escalating");
@@ -105,12 +114,16 @@ describe("ticket-triage", () => {
     expect(label).toContain("SLA: first response due in 24h");
     expect(label).toContain("Confirm the category");
 
-    const result = await runAgent(triageMachine, {
-      snapshot: first.persist(),
-      event: { type: "RECLASSIFY", category: "Technical" },
-      executors: { generateText },
-      actors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors,
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "RECLASSIFY", category: "Technical" },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -123,19 +136,27 @@ describe("ticket-triage", () => {
     const { generateText } = scriptedExecutor();
     const { actors } = classifier({ sentiment: "neutral", category: "other" }, 0.2);
 
-    const first = await runAgent(triageMachine, {
-      input: { ticket: "hi" },
-      executors: { generateText },
-      actors,
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors,
+      }),
+      {
+        input: { ticket: "hi" },
+      },
+    );
     if (first.status !== "idle") throw new Error("expected idle");
 
-    const again = await runAgent(triageMachine, {
-      snapshot: first.persist(),
-      event: { type: "RECLASSIFY", category: "urgent" },
-      executors: { generateText },
-      actors,
-    });
+    const again = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors,
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "RECLASSIFY", category: "urgent" },
+      },
+    );
 
     // Still waiting on the human, now with the reason in the label.
     expect(again.status).toBe("idle");
@@ -148,19 +169,27 @@ describe("ticket-triage", () => {
     const { generateText } = scriptedExecutor();
     const { actors } = classifier({ sentiment: "negative", category: "billing" }, 0.4);
 
-    const first = await runAgent(triageMachine, {
-      input: { ticket: TICKET },
-      executors: { generateText },
-      actors,
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors,
+      }),
+      {
+        input: { ticket: TICKET },
+      },
+    );
     if (first.status !== "idle") throw new Error("expected idle");
 
-    const result = await runAgent(triageMachine, {
-      snapshot: first.persist(),
-      event: { type: "CONFIRM" },
-      executors: { generateText },
-      actors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors,
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "CONFIRM" },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -176,11 +205,15 @@ describe("ticket-triage", () => {
     };
     const jev = classifier({ sentiment: "negative", category: "billing" });
 
-    const result = await runAgent(triageMachine, {
-      input: { ticket: TICKET },
-      executors: { generateText },
-      actors: jev.actors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors: jev.actors,
+      }),
+      {
+        input: { ticket: TICKET },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -195,11 +228,15 @@ describe("ticket-triage", () => {
     // `category` is not one of billing|technical|other, so the Jev call fails.
     const { actors } = classifier({ sentiment: "neutral", category: "not-a-category" });
 
-    const result = await runAgent(triageMachine, {
-      input: { ticket: TICKET },
-      executors: { generateText },
-      actors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors,
+      }),
+      {
+        input: { ticket: TICKET },
+      },
+    );
 
     // The classify invoke's `onError` catches the failure, so the run
     // finishes with a holding reply instead of an unmodeled error state.
@@ -215,11 +252,15 @@ describe("ticket-triage", () => {
     const { generateText } = scriptedExecutor();
     const { actors } = classifier({ sentiment: "neutral" });
 
-    const result = await runAgent(triageMachine, {
-      input: { ticket: TICKET },
-      executors: { generateText },
-      actors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors,
+      }),
+      {
+        input: { ticket: TICKET },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -230,11 +271,15 @@ describe("ticket-triage", () => {
   test("the classifier asks Jev two choices over the ticket; confidence just under the threshold escalates", async () => {
     const { generateText } = scriptedExecutor();
     const at = classifier({ sentiment: "neutral", category: "technical" }, CONFIDENCE_THRESHOLD);
-    const confident = await runAgent(triageMachine, {
-      input: { ticket: TICKET },
-      executors: { generateText },
-      actors: at.actors,
-    });
+    const confident = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors: at.actors,
+      }),
+      {
+        input: { ticket: TICKET },
+      },
+    );
 
     const call = at.calls[0]!;
     expect(call.state).toEqual({ ticket: TICKET });
@@ -246,17 +291,52 @@ describe("ticket-triage", () => {
     expect(Object.keys(questions.sentiment!.criteria)).toEqual(["positive", "neutral", "negative"]);
     expect(confident.status).toBe("done");
 
-    const under = await runAgent(triageMachine, {
-      input: { ticket: TICKET },
-      executors: { generateText },
-      actors: classifier(
-        { sentiment: "neutral", category: "technical" },
-        CONFIDENCE_THRESHOLD - 0.01,
-      ).actors,
-    });
+    const under = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors: classifier(
+          { sentiment: "neutral", category: "technical" },
+          CONFIDENCE_THRESHOLD - 0.01,
+        ).actors,
+      }),
+      {
+        input: { ticket: TICKET },
+      },
+    );
     expect(under.status).toBe("idle");
     if (under.status !== "idle") throw new Error("expected idle");
     expect(under.snapshot.value).toBe("escalating");
+  });
+
+  test("one starter demonstrates escalation: a ticket that fits two queues", async () => {
+    // QA regression: the old vague starter landed in `other` at confidence 1
+    // (the criteria send vague tickets there on purpose), so no starter showed
+    // the human-in-the-loop path. A ticket that is both billing (invoice,
+    // receipt) and technical (a 500 error) splits Jev's category probability;
+    // against the real model it scored 0.31–0.42 over 11 runs.
+    const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
+      .starters as string[];
+    const twoQueues = starters.find(
+      (starter) => /invoice/i.test(starter) && /500 error/.test(starter),
+    );
+    expect(twoQueues).toBeDefined();
+
+    const { generateText } = scriptedExecutor();
+    const { actors } = classifier({ sentiment: "neutral", category: "billing" }, 0.35);
+    const result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        executors: { generateText },
+        actors,
+      }),
+      {
+        input: { ticket: twoQueues! },
+      },
+    );
+
+    expect(result.status).toBe("idle");
+    if (result.status !== "idle") throw new Error("expected idle");
+    expect(result.snapshot.value).toBe("escalating");
+    expect(escalationLabel(result.snapshot)).toContain('Low confidence (0.35) on "billing"');
   });
 
   test("the simulated SLA tightens for negative tickets", () => {

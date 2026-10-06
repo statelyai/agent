@@ -25,7 +25,7 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
-import { setupAgent, runAgent } from "@statelyai/agent";
+import { setupAgent, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const translationEvaluationSchema = z.object({
@@ -421,26 +421,30 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
 });
 
 export async function runAiSdkEvaluatorOptimizerExample() {
-  const result = await runAgent(aiSdkEvaluatorOptimizerMachine, {
-    input: {
-      text: "The early bird catches the worm.",
-      targetLanguage: "Japanese",
-      maxIterations: 3,
+  const result = await runToQuiescence(
+    createAgentRuntime(aiSdkEvaluatorOptimizerMachine, {
+      executors: createAiSdkExecutors({ models }),
+      onTransition: (snapshot) =>
+        console.log(
+          "[state]",
+          JSON.stringify(snapshot.value),
+          `iteration ${snapshot.context.iterations}`,
+        ),
+      on: {
+        TRANSLATED: () => console.log("[translated] first draft ready"),
+        EVALUATED: (e) =>
+          console.log(`[evaluated] iteration ${e.iteration}: score ${e.qualityScore}/10`),
+        IMPROVED: () => console.log("[improved] applied reviewer feedback"),
+      },
+    }),
+    {
+      input: {
+        text: "The early bird catches the worm.",
+        targetLanguage: "Japanese",
+        maxIterations: 3,
+      },
     },
-    executors: createAiSdkExecutors({ models }),
-    onTransition: (snapshot) =>
-      console.log(
-        "[state]",
-        JSON.stringify(snapshot.value),
-        `iteration ${snapshot.context.iterations}`,
-      ),
-    on: {
-      TRANSLATED: () => console.log("[translated] first draft ready"),
-      EVALUATED: (e) =>
-        console.log(`[evaluated] iteration ${e.iteration}: score ${e.qualityScore}/10`),
-      IMPROVED: () => console.log("[improved] applied reviewer feedback"),
-    },
-  });
+  );
   if (result.status !== "done") {
     throw new Error(`Evaluator-optimizer example did not complete: ${result.status}`);
   }

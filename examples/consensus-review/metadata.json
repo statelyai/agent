@@ -14,11 +14,17 @@
   "starters": [
     {
       "label": "Trusted patch (host-authored)",
-      "input": { "patch": "Validate input before a database write.", "source": "trusted" }
+      "input": {
+        "patch": "Validate input before a database write.\n\n--- a/src/users.ts\n+++ b/src/users.ts\n@@ export async function createUser(db: Db, body: unknown) {\n-  await db.insert(\"users\", body);\n+  const parsed = UserSchema.safeParse(body);\n+  if (!parsed.success) throw new ValidationError(parsed.error.issues);\n+  await db.insert(\"users\", parsed.data);\n }",
+        "source": "trusted"
+      }
     },
     {
       "label": "External patch (needs human review)",
-      "input": { "patch": "Validate input before a database write.", "source": "external" }
+      "input": {
+        "patch": "Validate input before a database write.\n\n--- a/src/users.ts\n+++ b/src/users.ts\n@@ export async function createUser(db: Db, body: unknown) {\n-  await db.insert(\"users\", body);\n+  const parsed = UserSchema.safeParse(body);\n+  if (!parsed.success) throw new ValidationError(parsed.error.issues);\n+  await db.insert(\"users\", parsed.data);\n }",
+        "source": "external"
+      }
     }
   ]
 }

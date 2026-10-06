@@ -18,7 +18,7 @@
  * async in the App Router as of Next 15. This example is typed against the real
  * `next` package, so that is enforced rather than assumed.
  */
-import { parseAgentEvent, runAgent } from "@statelyai/agent";
+import { parseAgentEvent, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { NextResponse, type NextRequest } from "next/server";
 import { announceMachine, snapshots } from "../../route";
 import { resolveExecutors, maybeCreateRunInspection } from "../../../../../agent-runtime";
@@ -43,12 +43,16 @@ export async function POST(
     );
   }
 
-  const result = await runAgent(announceMachine, {
-    snapshot,
-    event,
-    executors: resolveExecutors(),
-    inspect: await maybeCreateRunInspection(),
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(announceMachine, {
+      executors: resolveExecutors(),
+      inspect: await maybeCreateRunInspection(),
+    }),
+    {
+      snapshot,
+      event,
+    },
+  );
 
   if (result.ignored) {
     return NextResponse.json(

@@ -1,13 +1,20 @@
 /**
- * A model drafts a proposal. A host schedules a correlated EXPIRE event;
- * the machine owns which approval/expiry wins. No in-process timer survives
- * suspension: persist the idle checkpoint before scheduling delivery. The host
- * serializes deliveries (or uses compare-and-swap) and retries early deliveries;
- * independent resumes of the same snapshot do not provide mutual exclusion.
+ * A model drafts a proposal, then waits for approval with a deadline. The
+ * deadline is a plain XState `after` timer; where it lives is the host's call:
+ *
+ *   - In-process (the default): the loop counts the armed timer as work in
+ *     flight and keeps reading until it fires — fine for a script.
+ *   - Host-owned (`timers: { schedule, cancel }`): the run settles as soon as
+ *     nothing else is in flight, the host puts the timer in its own durable
+ *     scheduler (a Temporal timer, a Durable Object alarm, an Inngest sleep),
+ *     and when it fires, delivers `{ type: "xstate.timer", id }` to a resumed
+ *     run. No in-process wait has to survive the suspension.
+ *
+ * Approval and expiry race inside the machine: whichever is delivered first
+ * wins, and the other is ignored. A stale approval (another request's id)
+ * never passes the guard.
  * Inspired by https://docs.langchain.com/oss/javascript/langgraph/interrupts
- * The draft is a real model call; the clock and scheduler stay host-owned
- * (the CLI simulates one expiry delivery). Pass `executors` to swap the model
- * layer; tests script it by request name.
+ * Pass `executors` to swap the model layer; tests script it by request name.
  * Run: OPENAI_API_KEY=... pnpm tsx examples/deadline-escalation/index.ts
  */
 import { z } from "zod";
@@ -15,13 +22,22 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
 
-const input = z.object({ requestId: z.string(), task: z.string(), deadline: z.number().finite() });
-const delivery = z.object({ requestId: z.string(), observedAt: z.number().finite() });
+/** The request this example's approval UI is rendered for. */
+export const REQUEST_ID = "proposal-1";
+
+const input = z.object({
+  requestId: z.string(),
+  task: z.string(),
+  /** How long the approver has, from the moment the draft is ready. */
+  windowMs: z.number().int().nonnegative(),
+});
 const models = {
   writer: openai("gpt-5.4-mini"),
 };
@@ -34,7 +50,8 @@ const agent = setupAgent({
     proposal: z.string().nullable(),
   }),
   meta: interactionMetaSchema,
-  events: { APPROVE: delivery, EXPIRE: delivery },
+  events: { APPROVE: z.object({ requestId: z.string() }) },
+  delays: { approvalWindow: ({ context }) => context.windowMs },
   requests: {
     propose: {
       schemas: { input: z.object({ task: z.string() }), output: z.string() },
@@ -63,24 +80,17 @@ export const deadlineEscalationMachine = agent.createMachine({
     awaitingApproval: {
       meta: {
         interaction: {
-          label: "Approve the proposal before the host-owned deadline, or let it expire.",
-          events: {
-            APPROVE: { label: "Approve proposal" },
-            EXPIRE: { label: "Deadline reached" },
-          },
+          label: "Approve the proposal before the approval window closes.",
+          // The approve button is rendered for one request: its id is fixed
+          // here, so a host sends a bare APPROVE and the id rides along. An
+          // approval carrying any other id is stale and fails the guard.
+          events: { APPROVE: { label: "Approve proposal", event: { requestId: REQUEST_ID } } },
         },
       },
-      // The authenticated host supplies timestamps and correlates deliveries;
-      // never accept client-supplied observedAt as a trusted clock.
+      after: { approvalWindow: { target: "escalated" } },
       on: {
         APPROVE: ({ context, event }) =>
-          event.requestId === context.requestId && event.observedAt < context.deadline
-            ? { target: "approved" }
-            : undefined,
-        EXPIRE: ({ context, event }) =>
-          event.requestId === context.requestId && event.observedAt >= context.deadline
-            ? { target: "escalated" }
-            : undefined,
+          event.requestId === context.requestId ? { target: "approved" } : undefined,
       },
     },
     approved: {
@@ -107,14 +117,20 @@ function liveExecutors() {
 }
 
 export async function runDeadlineEscalationExample(
-  options?: RunAgentOptions<typeof deadlineEscalationMachine>,
+  options?: AgentRuntimeOptions<typeof deadlineEscalationMachine> &
+    AgentRunInit<typeof deadlineEscalationMachine>,
 ) {
   const { executors = liveExecutors(), ...runOptions } = options ?? {};
-  return runAgent(deadlineEscalationMachine, {
-    input: { requestId: "proposal-1", task: "Schedule a maintenance window", deadline: 1000 },
-    ...runOptions,
-    executors,
-  });
+  return runToQuiescence(
+    createAgentRuntime(deadlineEscalationMachine, {
+      ...runOptions,
+      executors,
+    }),
+    {
+      input: { requestId: REQUEST_ID, task: "Schedule a maintenance window", windowMs: 60_000 },
+      ...runOptions,
+    },
+  );
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {
@@ -123,12 +139,21 @@ if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").hre
     process.exit(1);
   }
   void (async () => {
-    const pending = await runDeadlineEscalationExample();
+    // A stand-in for a durable scheduler: it only records what to fire.
+    const scheduled = new Map<string, number>();
+    const timers = {
+      schedule: ({ id, delay }: { id: string; delay: number }) => scheduled.set(id, delay),
+      cancel: (id: string) => scheduled.delete(id),
+    };
+    const pending = await runDeadlineEscalationExample({ timers });
     if (pending.status !== "idle") throw new Error(`Expected approval wait, got ${pending.status}`);
-    // Simulate durable scheduler delivery after a fresh-process JSON restore.
+    const [id, delay] = [...scheduled][0]!;
+    console.log(`Approval window scheduled: fires in ${delay}ms (timer ${id}).`);
+    // Nobody approves; the scheduler fires into a fresh-process JSON restore.
     const result = await runDeadlineEscalationExample({
+      timers,
       snapshot: JSON.parse(JSON.stringify(pending.persist())),
-      event: { type: "EXPIRE", requestId: "proposal-1", observedAt: 1000 },
+      event: { type: "xstate.timer", id },
     });
     console.log(result.status === "done" ? result.output : result.status);
   })().catch((error) => {

@@ -206,7 +206,7 @@ function withJsonRepair<TOutput extends ReturnType<typeof Output.object<unknown>
  * validated structured object for structured-output requests, or the
  * accumulated text string otherwise) and `messages`, plus the AI SDK call
  * metadata. Core reads `result`, `messages` and `usage`; everything else flows
- * verbatim to `runAgent`'s `onResult(request, { raw })`, so
+ * verbatim to `createAgentRuntime`'s `onResult(request, { raw })`, so
  * `raw as AiSdkGenerateResult` is the supported cast for token accounting and
  * tracing.
  */
@@ -217,7 +217,7 @@ export type AiSdkGenerateResult = {
    * {@link providerOutputSchema}). Never enters machine context/output. */
   reasoning?: string;
   /** The call's token usage. Its flat `inputTokens`/`outputTokens`/`totalTokens`/
-   * `reasoningTokens`/`cachedInputTokens` fields are what `runAgent` folds into
+   * `reasoningTokens`/`cachedInputTokens` fields are what the runtime folds into
    * the run result's aggregated `AgentUsage`; the AI SDK's own nested
    * `inputTokenDetails`/`outputTokenDetails` and `raw` ride along untouched. */
   usage: AiSdkCallUsage;
@@ -291,7 +291,7 @@ function truncated(
 
 /**
  * The canonical Vercel AI SDK adapter: builds the `{ generateText, streamText,
- * decide }` executor set consumed by `runAgent`/`executeAgentRequest`. `ai`
+ * decide }` executor set consumed by `createAgentRuntime`/`executeAgentRequest`. `ai`
  * must not become a dependency of core `src/` files — this subpath is the one
  * place it's imported, and callers must supply their own model resolver so no
  * concrete provider package (e.g. `@ai-sdk/openai`) becomes a dependency here
@@ -300,7 +300,7 @@ function truncated(
  * @example
  * ```ts
  * const executors = createAiSdkExecutors({ models: { quick: openai('gpt-5.4-mini') } });
- * const result = await runAgent(machine, { input, executors });
+ * const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
  * ```
  */
 export function createAiSdkExecutors<TModels extends AiSdkModelMap>(

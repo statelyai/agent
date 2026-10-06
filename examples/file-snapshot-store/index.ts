@@ -1,8 +1,9 @@
 /**
  * Application-owned lifetime vs application-owned storage.
  *
- * Both halves below drive the SAME machine (`portable-xstate-loop`) to the same
- * result, and differ only in what the application chooses to own:
+ * Both halves below drive the SAME machine (`releaseNoteMachine`: draft, wait
+ * for approval, done) to the same result, and differ only in what the
+ * application chooses to own:
  *
  *   1. Storage. `runFileSnapshotStoreExample` runs the machine to its idle
  *      review pause, writes the native XState snapshot to a JSON file, and
@@ -24,20 +25,81 @@ import { mkdtempSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 import { createActor, waitFor, type AnyStateMachine, type Snapshot } from "xstate";
 import {
   getStatePath,
   provideExecutors,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
   type AgentRequestExecutors,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
-import { portableLoopMachine } from "../portable-xstate-loop/index.js";
 
-// The machine this example persists and resumes. Re-exported so the library
-// can render its statechart beside the run, rather than reporting that this
-// example has no machine to inspect.
-export { portableLoopMachine };
+/** Instructions for the draft request: the note only, nothing addressed to the reader. */
+export const RELEASE_NOTE_SYSTEM =
+  "You write release notes. Return only the release note: a one-line title, then two to " +
+  "four short bullet points. No preamble, no closing remarks, no offers of further help, " +
+  'and no follow-up questions (never write "If you want, I can…" or "Let me know…").';
+
+const releaseNoteSetup = setupAgent({
+  context: z.object({
+    topic: z.string(),
+    draft: z.string(),
+    failure: z.string().nullable(),
+  }),
+  input: z.object({ topic: z.string() }),
+  output: z.object({ draft: z.string(), failure: z.string().nullable() }),
+  events: { APPROVE: z.object({}) },
+  requests: {
+    draft: {
+      model: "writer",
+      schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+      // The draft IS the deliverable a reviewer approves, so it ends where the
+      // note ends: no chat-style offers or follow-up questions after it.
+      system: RELEASE_NOTE_SYSTEM,
+      prompt: ({ input }) => `Draft a release note about ${input.topic}.`,
+    },
+  },
+});
+
+/**
+ * The machine both halves run: draft a release note, rest in `reviewing` until
+ * someone APPROVEs, done. Exported so a host can render its statechart beside
+ * the run.
+ */
+export const releaseNoteMachine = releaseNoteSetup.createMachine({
+  id: "file-snapshot-store",
+  context: ({ input }) => ({ topic: input.topic, draft: "", failure: null }),
+  initial: "drafting",
+  states: {
+    drafting: {
+      invoke: {
+        src: "draft",
+        input: ({ context }) => ({ topic: context.topic }),
+        onDone: ({ output }) => ({ target: "reviewing", context: { draft: output.result } }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `draft failed: ${String(event.error)}` },
+        }),
+      },
+    },
+    reviewing: {
+      description: "Approve the drafted release note to finish.",
+      on: { APPROVE: { target: "done" } },
+    },
+    done: {
+      type: "final",
+      output: ({ context }) => ({ draft: context.draft, failure: null }),
+    },
+    failed: {
+      type: "final",
+      output: ({ context }) => ({ draft: context.draft, failure: context.failure }),
+    },
+  },
+});
 
 /**
  * The seams a host threads through every leg of a multi-run example: its
@@ -46,11 +108,16 @@ export { portableLoopMachine };
  * stays a single self-contained file (see CONTRIBUTING).
  */
 type ExampleRunOptions = Pick<
-  RunAgentOptions<AnyStateMachine>,
+  AgentRuntimeOptions<AnyStateMachine> & AgentRunInit<AnyStateMachine>,
   "executors" | "signal" | "onTransition" | "on" | "onTrace" | "inspect"
 >;
 
 // --- 1. Application-owned storage -------------------------------------------
+
+/** The file a run's snapshot lives in, relative to the store's directory. */
+export function snapshotFileName(id: string): string {
+  return `${id}.json`;
+}
 
 /** Ordinary application I/O; use the equivalent APIs from your framework. */
 export async function saveSnapshot(
@@ -59,14 +126,14 @@ export async function saveSnapshot(
   snapshot: Snapshot<unknown>,
 ): Promise<void> {
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, `${id}.json`), JSON.stringify(snapshot), "utf8");
+  await writeFile(join(directory, snapshotFileName(id)), JSON.stringify(snapshot), "utf8");
 }
 
 export async function loadSnapshot(
   directory: string,
   id: string,
 ): Promise<Snapshot<unknown> | undefined> {
-  const path = join(directory, `${id}.json`);
+  const path = join(directory, snapshotFileName(id));
   try {
     return JSON.parse(await readFile(path, "utf8")) as Snapshot<unknown>;
   } catch (error) {
@@ -75,31 +142,44 @@ export async function loadSnapshot(
   }
 }
 
+/** The run id the storage half saves its snapshot under. */
+export const RUN_ID = "release-42";
+
 export async function runFileSnapshotStoreExample(
   directory: string,
   executors: AgentRequestExecutors,
   observers: Omit<ExampleRunOptions, "executors"> = {},
 ): Promise<{ draft: string }> {
-  const runId = "release-42";
+  const runId = RUN_ID;
 
   // Request/process one: run until the machine waits for approval.
-  const paused = await runAgent(portableLoopMachine, {
-    ...(observers as object),
-    input: { topic: "framework-owned storage" },
-    executors,
-  });
+  const paused = await runToQuiescence(
+    createAgentRuntime(releaseNoteMachine, {
+      ...(observers as object),
+      executors,
+    }),
+    {
+      ...(observers as object),
+      input: { topic: "application-owned storage" },
+    },
+  );
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
   await saveSnapshot(directory, runId, paused.persist());
 
   // Request/process two: load the native snapshot and deliver a normal event.
   const snapshot = await loadSnapshot(directory, runId);
   if (!snapshot) throw new Error(`No snapshot stored for '${runId}'.`);
-  const resumed = await runAgent(portableLoopMachine, {
-    ...(observers as object),
-    snapshot,
-    event: { type: "APPROVE" },
-    executors,
-  });
+  const resumed = await runToQuiescence(
+    createAgentRuntime(releaseNoteMachine, {
+      ...(observers as object),
+      executors,
+    }),
+    {
+      ...(observers as object),
+      snapshot,
+      event: { type: "APPROVE" },
+    },
+  );
   if (resumed.status !== "done") throw new Error(`Expected done, got '${resumed.status}'.`);
   return resumed.output;
 }
@@ -118,7 +198,7 @@ export async function runLongLivedActor(
   observers: Omit<ExampleRunOptions, "executors"> = {},
 ): Promise<{ draft: string; states: string[] }> {
   const states: string[] = [];
-  const actor = createActor(provideExecutors(portableLoopMachine, executors), {
+  const actor = createActor(provideExecutors(releaseNoteMachine, executors), {
     input: { topic },
     ...(observers.inspect ? { inspect: observers.inspect } : {}),
   });
@@ -178,10 +258,21 @@ export async function runFileSnapshotStoreDemo(options: ExampleRunOptions = {}) 
       observers,
     );
     return {
-      storageOwnedByTheApplication: stored.draft,
-      lifetimeOwnedByTheApplication: live.draft,
+      // One body with a heading per half, so both drafts read as labeled
+      // sections instead of one bare draft and one titled one.
+      report: [
+        "### Storage owned by the application",
+        "Persisted to a JSON file at the review pause, then resumed from that file.",
+        stored.draft.trim(),
+        "### Lifetime owned by the application",
+        "One live actor from draft to approval; nothing persisted.",
+        live.draft.trim(),
+      ].join("\n\n"),
       statesSeenByTheApplication: live.states,
-      snapshotDirectory: `${directory} (removed after the run)`,
+      // The file's logical name, not the OS temp path: where the directory
+      // lives is this host's business, and it is gone by the time anyone reads
+      // this.
+      snapshotFile: `${snapshotFileName(RUN_ID)} (in a temp directory, removed after the run)`,
     };
   } finally {
     // The snapshot has already been written, read back and resumed from by the
@@ -199,7 +290,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     {
       generateText: async (request) => {
         if (request.name !== "draft") throw new Error(`unexpected request: ${request.name}`);
-        return { result: "Stored the framework way." };
+        return { result: "Stored by the application, resumed from JSON." };
       },
     },
   );

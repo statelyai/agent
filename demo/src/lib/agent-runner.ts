@@ -13,7 +13,12 @@
  * evaluation model. Tests import the `*Run` functions directly and inject
  * their own executors and a mock evaluation model as the `judge`.
  */
-import { runAgent, type AgentRequestExecutors, type RunAgentResult } from "@statelyai/agent";
+import {
+  createAgentRuntime,
+  runToQuiescence,
+  type AgentRequestExecutors,
+  type AgentRunResult,
+} from "@statelyai/agent";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
@@ -26,10 +31,12 @@ import {
   type Snapshot,
 } from "xstate";
 import { maybeCreateRunInspection } from "./inspection.server";
+import { interpretIdleText, unclearTextReply } from "./interpret-text.server";
 import {
   createTraceRecorder,
   describeIdle,
   missingApiKeys,
+  type RunLimits,
   type TraceEntry,
 } from "./machine-chat.server";
 import { missingKeyMessage, type ChatIdle } from "./machine-ui";
@@ -73,6 +80,9 @@ export type ScenarioResult = {
 export type ResumeEvent =
   | { type: string; [key: string]: unknown }
   | { kind: "interpret"; text: string };
+
+/** What a streamed run watches as it goes, and the inspection room it lands in. */
+export type RunObservers = Pick<RunLimits, "onChunk" | "onStep" | "inspectionRoom">;
 
 /** The index signature on the typed-event variant defeats `in` narrowing, so guard explicitly. */
 function isInterpretEvent(event: ResumeEvent): event is { kind: "interpret"; text: string } {
@@ -193,7 +203,7 @@ function judgeActors(
 
 // ─── result shaping ───
 
-function describeResult(scenarioId: ScenarioId, result: RunAgentResult<AnyStateMachine>): string {
+function describeResult(scenarioId: ScenarioId, result: AgentRunResult<AnyStateMachine>): string {
   if (result.ignored) {
     return `"${result.ignored.type}" isn't an accepted event in this state, so nothing happened.`;
   }
@@ -267,7 +277,7 @@ function describeEmailOutcome(output: Record<string, unknown>): string {
 function toResult(
   scenarioId: ScenarioId,
   model: string | undefined,
-  result: RunAgentResult<AnyStateMachine>,
+  result: AgentRunResult<AnyStateMachine>,
   trace: TraceEntry[],
 ): ScenarioResult {
   const base: ScenarioResult = {
@@ -297,20 +307,35 @@ export async function startScenarioRun(
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
   judge?: Experimental_EvaluationModel,
+  observers: RunObservers = {},
 ): Promise<ScenarioResult> {
-  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
+  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder(
+    undefined,
+    observers.onStep,
+  );
   const machine = machineFor(scenarioId);
-  const result = await runAgent(machine, {
-    input: inputFor(scenarioId, prompt),
-    executors,
-    ...judgeActors(scenarioId, judge),
-    ...(signal ? { signal } : {}),
-    onTransition,
-    on: { "*": onEmitted },
-    onTrace,
-    inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "start"),
-  });
-  return toResult(scenarioId, model, result as RunAgentResult<AnyStateMachine>, trace);
+  const result = await runToQuiescence(
+    createAgentRuntime(machine, {
+      executors,
+      ...judgeActors(scenarioId, judge),
+      ...(signal ? { signal } : {}),
+      ...(observers.onChunk ? { onChunk: observers.onChunk } : {}),
+      onTransition,
+      on: { "*": onEmitted },
+      onTrace,
+      inspect: maybeCreateRunInspection(
+        observers.inspectionRoom,
+        machine,
+        scenarioSource[scenarioId],
+        "start",
+      ),
+    }),
+    {
+      input: inputFor(scenarioId, prompt),
+      ...judgeActors(scenarioId, judge),
+    },
+  );
+  return toResult(scenarioId, model, result as AgentRunResult<AnyStateMachine>, trace);
 }
 
 /** Resumes a persisted idle snapshot with a typed event. Pure — used by tests. */
@@ -322,23 +347,38 @@ export async function resumeScenarioRun(
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
   judge?: Experimental_EvaluationModel,
+  observers: RunObservers = {},
 ): Promise<ScenarioResult> {
-  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder();
+  const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder(
+    undefined,
+    observers.onStep,
+  );
   const machine = machineFor(scenarioId);
   // An event the restored state has no transition for is ignored, not an
   // error: the run settles unchanged and reports `result.ignored`.
-  const result = await runAgent(machine, {
-    snapshot,
-    event,
-    executors,
-    ...judgeActors(scenarioId, judge),
-    ...(signal ? { signal } : {}),
-    onTransition,
-    on: { "*": onEmitted },
-    onTrace,
-    inspect: maybeCreateRunInspection(machine, scenarioSource[scenarioId], "resume"),
-  });
-  return toResult(scenarioId, model, result as RunAgentResult<AnyStateMachine>, trace);
+  const result = await runToQuiescence(
+    createAgentRuntime(machine, {
+      executors,
+      ...judgeActors(scenarioId, judge),
+      ...(signal ? { signal } : {}),
+      ...(observers.onChunk ? { onChunk: observers.onChunk } : {}),
+      onTransition,
+      on: { "*": onEmitted },
+      onTrace,
+      inspect: maybeCreateRunInspection(
+        observers.inspectionRoom,
+        machine,
+        scenarioSource[scenarioId],
+        "resume",
+      ),
+    }),
+    {
+      snapshot,
+      event,
+      ...judgeActors(scenarioId, judge),
+    },
+  );
+  return toResult(scenarioId, model, result as AgentRunResult<AnyStateMachine>, trace);
 }
 
 // ─── env-resolving wrappers (used by the server functions) ───
@@ -347,9 +387,10 @@ export async function startScenario(
   scenarioId: ScenarioId,
   prompt: string,
   signal?: AbortSignal,
+  observers?: RunObservers,
 ): Promise<ScenarioResult> {
   const { model, executors } = await resolveExecutors(scenarioId);
-  return startScenarioRun(scenarioId, prompt, model, executors, signal);
+  return startScenarioRun(scenarioId, prompt, model, executors, signal, undefined, observers);
 }
 
 export async function resumeScenario(
@@ -359,8 +400,41 @@ export async function resumeScenario(
   signal?: AbortSignal,
   /** Injected by tests; omitted, Jev reads `TYPESAFE_AI_API_KEY`. */
   judge?: Experimental_EvaluationModel,
+  observers?: RunObservers,
 ): Promise<ScenarioResult> {
   const { model, executors } = await resolveExecutors(scenarioId);
+
+  // Free text on any other scenario: Jev reads it as one of the offered
+  // events (the state's text event among them), as example runs do.
+  if (isInterpretEvent(event) && scenarioId !== "approval") {
+    const machine = machineFor(scenarioId);
+    const idle = describeIdle(
+      machine,
+      machine.resolveState(
+        snapshot as never as Parameters<AnyStateMachine["resolveState"]>[0],
+      ) as AnyMachineSnapshot,
+    );
+    const chosen = await interpretIdleText(event.text, idle, { signal, judge });
+    if (!chosen) {
+      return {
+        model,
+        status: "idle",
+        trace: [],
+        response: unclearTextReply(idle),
+        idle: { ...idle, snapshot: snapshot as unknown as Json },
+      };
+    }
+    return resumeScenarioRun(
+      scenarioId,
+      snapshot,
+      chosen,
+      model,
+      executors,
+      signal,
+      judge,
+      observers,
+    );
+  }
 
   // Free-text review ("looks good") → map to a typed event before delivering.
   if (isInterpretEvent(event)) {
@@ -371,10 +445,19 @@ export async function resumeScenario(
     }
     const typed =
       verdict === "REJECT" ? { type: "REJECT", reason: event.text } : { type: "APPROVE" };
-    return resumeScenarioRun(scenarioId, snapshot, typed, model, executors, signal, judge);
+    return resumeScenarioRun(
+      scenarioId,
+      snapshot,
+      typed,
+      model,
+      executors,
+      signal,
+      judge,
+      observers,
+    );
   }
 
-  return resumeScenarioRun(scenarioId, snapshot, event, model, executors, signal, judge);
+  return resumeScenarioRun(scenarioId, snapshot, event, model, executors, signal, judge, observers);
 }
 
 /** Below this confidence, a review reads as unclear and the run asks again. */

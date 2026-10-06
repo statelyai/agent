@@ -1,4 +1,6 @@
 import { expect, test } from "vitest";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { createMockModelExecutors } from "../mock-model.js";
 import { reflectionWriterMachine, runReflectionWriterExample } from "./index.js";
 
 // Mock the two model calls by routing on `request.name` (the key each request
@@ -24,7 +26,7 @@ function scriptedGenerateText(scripts: {
 }
 
 test("reflection loop runs to the revision bound then stops (LangGraph should_continue analogue)", async () => {
-  // Critic never satisfied → the typed `revisions >= maxRevisions` guard is the
+  // Critic never satisfied → the typed `rewrites >= maxRevisions` guard is the
   // only thing that stops the loop, exactly like LangGraph's message-count edge.
   const result = await runReflectionWriterExample({
     topic: "The little prince",
@@ -33,20 +35,44 @@ test("reflection loop runs to the revision bound then stops (LangGraph should_co
       critic: [
         { critique: "Too short.", satisfied: false },
         { critique: "Needs depth.", satisfied: false },
+        { critique: "Still vague.", satisfied: false },
       ],
     }),
   });
 
-  // 2 revision rounds: drafting entered twice, critiquing twice.
-  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(2);
-  expect(result.progress.filter((s) => s === "critiquing")).toHaveLength(2);
-  expect(result.revisions).toBe(2);
+  // First draft + 2 rewrites: drafting entered 3 times, each draft critiqued.
+  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(3);
+  expect(result.progress.filter((s) => s === "critiquing")).toHaveLength(3);
+  expect(result.rewrites).toBe(2);
   expect(result.satisfied).toBe(false);
-  // Final draft is the 2nd (the 3rd is never requested — bound hit first).
-  expect(result.details.essay).toBe("draft 2");
+  expect(result.comparison).toMatch(/Final draft \(rewrite 2\)\ndraft 3/);
   expect(result.progress.at(-1)).toBe("done");
-  // Transcript: 1 task + 2 drafts + 2 critiques = 5 messages.
-  expect(result.messageCount).toBe(5);
+  // The stop reason counts the rewrites that actually happened.
+  expect(result.comparison).toMatch(/not satisfied after 2 rewrites/);
+  // 3 critiques for 2 rewrites: each is labeled with the draft it graded, so
+  // no counter claims a third revision.
+  expect(result.comparison).toMatch(
+    /Critiques \(3\)\nOriginal: revise\. Too short\.\nRewrite 1: revise\. Needs depth\.\nRewrite 2: revise\. Still vague\.$/,
+  );
+  expect(result.comparison).not.toMatch(/revision/i);
+});
+
+test("the revision count is the number of rewrites, not critique rounds", async () => {
+  // Draft → critique → ONE rewrite → critique → signed off: 1 revision.
+  const result = await runReflectionWriterExample({
+    topic: "The little prince",
+    generateText: scriptedGenerateText({
+      writer: ["draft 1", "draft 2"],
+      critic: [
+        { critique: "Too short.", satisfied: false },
+        { critique: "Good.", satisfied: true },
+      ],
+    }),
+  });
+
+  expect(result.progress.filter((s) => s === "drafting")).toHaveLength(2);
+  expect(result.rewrites).toBe(1);
+  expect(result.comparison).toMatch(/^The critic signed off on rewrite 1\./);
 });
 
 test("the result shows the original next to the final draft, with a one-line revision log", async () => {
@@ -62,20 +88,23 @@ test("the result shows the original next to the final draft, with a one-line rev
   });
 
   // Both drafts are kept, and the comparison leads with them side by side.
-  expect(result.details.firstDraft).toBe("the original draft");
-  expect(result.details.essay).toBe("the final draft");
   expect(result.comparison).toMatch(/Original draft\nthe original draft/);
-  expect(result.comparison).toMatch(/Final draft \(after 2 critique rounds\)\nthe final draft/);
+  expect(result.comparison).toMatch(/Final draft \(rewrite 1\)\nthe final draft/);
 
-  // One collapsed line per revision round — no critique prose accumulating.
+  // One collapsed line per critique, labeled with the draft it graded.
   const logLines = result.comparison
     .split("\n")
-    .filter((line) => /^\d+\. (revise|satisfied)\./.test(line));
-  expect(logLines).toEqual(["1. revise. Too short.", "2. satisfied. Good enough now."]);
+    .filter((line) => /^(Original|Rewrite \d+): (revise|satisfied)\./.test(line));
+  expect(logLines).toEqual([
+    "Original: revise. Too short.",
+    "Rewrite 1: satisfied. Good enough now.",
+  ]);
 
-  // The comparison embeds both drafts, so it is always the longest string field
-  // and leads the rendered output.
-  expect(result.comparison.length).toBeGreaterThan(result.details.essay.length);
+  // The drafts live only inside the comparison: no field repeats them, and no
+  // transcript bookkeeping is part of the result.
+  expect(Object.keys(result).sort()).toEqual(
+    ["comparison", "failure", "progress", "rewrites", "satisfied"].sort(),
+  );
 });
 
 test("the critic grades against the strict rubric, so one draft is never enough", async () => {
@@ -110,9 +139,9 @@ test("the critic grades against the strict rubric, so one draft is never enough"
 
   // The loop actually ran: draft → critique → revise → critique.
   expect(result.progress.filter((s) => s === "drafting")).toHaveLength(2);
-  expect(result.revisions).toBe(2);
+  expect(result.rewrites).toBe(1);
   expect(result.satisfied).toBe(true);
-  expect(result.details.essay).toBe("revised draft with evidence");
+  expect(result.comparison).toContain("revised draft with evidence");
 });
 
 test("early exit when the critic is satisfied (improves on the fixed-count tutorial)", async () => {
@@ -127,10 +156,13 @@ test("early exit when the critic is satisfied (improves on the fixed-count tutor
   });
 
   expect(result.satisfied).toBe(true);
-  // Stopped at 1 round, under the bound of 2.
-  expect(result.revisions).toBe(1);
+  // Stopped after the first draft: no rewrite needed.
+  expect(result.rewrites).toBe(0);
   expect(result.progress.filter((s) => s === "drafting")).toHaveLength(1);
-  expect(result.details.essay).toBe("draft 1");
+  // No rewrite: the original is shown once, not repeated as a "final draft".
+  expect(result.comparison).toMatch(/^The critic signed off on the original draft\./);
+  expect(result.comparison.match(/draft 1/g)).toHaveLength(1);
+  expect(result.comparison).not.toContain("Final draft");
   expect(result.progress.at(-1)).toBe("done");
   expect(result.failure).toBeNull();
 });
@@ -149,13 +181,65 @@ test("model failure ends in `failed`, still reporting the draft it had", async (
     generateText,
   });
 
-  expect(result.details.essay).toBe("the only draft");
-  // Never reached a completed critique, so no revision counted and not satisfied.
-  expect(result.revisions).toBe(0);
+  expect(result.comparison).toContain("the only draft");
+  // Only the first draft exists, so no rewrite counted and not satisfied.
+  expect(result.rewrites).toBe(0);
   expect(result.satisfied).toBe(false);
   expect(result.failure).toMatch(/^critiqueEssay failed: /);
   expect(result.comparison).toContain("Stopped early");
   expect(result.progress.at(-1)).toBe("failed");
+});
+
+test("every rewrite sees its previous draft and the latest critique; counters agree", async () => {
+  // Real AI SDK adapter over a mock model: the writer echoes which draft it is
+  // on, the critic never signs off, so the run spends its full rewrite budget.
+  const executors = createMockModelExecutors({
+    text: {
+      writeEssay: ["draft 0", "draft 1", "draft 2"],
+      critiqueEssay: [
+        { critique: "critique of draft 0", satisfied: false },
+        { critique: "critique of draft 1", satisfied: false },
+        { critique: "critique of draft 2", satisfied: false },
+      ],
+    },
+  });
+  const emitted: Array<{ type: string; rewrite: number }> = [];
+  const result = await runToQuiescence(
+    createAgentRuntime(reflectionWriterMachine, {
+      executors,
+      on: { "*": (event) => emitted.push({ type: event.type, rewrite: event.rewrite }) },
+    }),
+    { input: { topic: "Car-free downtowns" } },
+  );
+  expect(result.status).toBe("done");
+
+  // Each rewrite's transcript ends with the draft it rewrites and the critique
+  // of exactly that draft.
+  const writes = executors.calls.filter((call) => call.name === "writeEssay");
+  expect(writes).toHaveLength(3);
+  for (const [index, call] of writes.slice(1).entries()) {
+    const messages = (call.input as { messages: Array<{ role: string; content: unknown }> })
+      .messages;
+    expect(messages.at(-2)).toMatchObject({ role: "assistant", content: `draft ${index}` });
+    expect(messages.at(-1)).toMatchObject({
+      role: "user",
+      content: `Critique:\ncritique of draft ${index}`,
+    });
+  }
+
+  // DRAFTED and CRITIQUED name the same draft numbers the output counts:
+  // the last event is the critique of rewrite 2, and the result says 2.
+  expect(emitted).toEqual([
+    { type: "DRAFTED", rewrite: 0 },
+    { type: "CRITIQUED", rewrite: 0 },
+    { type: "DRAFTED", rewrite: 1 },
+    { type: "CRITIQUED", rewrite: 1 },
+    { type: "DRAFTED", rewrite: 2 },
+    { type: "CRITIQUED", rewrite: 2 },
+  ]);
+  if (result.status !== "done") return;
+  expect(result.output.rewrites).toBe(2);
+  expect(result.output.comparison).toMatch(/Final draft \(rewrite 2\)\ndraft 2/);
 });
 
 test("machine exports a runnable definition", () => {

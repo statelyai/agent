@@ -1,0 +1,50 @@
+{
+  "How many miles is a 42.195 km marathon?": [
+    {
+      "sent": "start {\"question\":\"How many miles is a 42.195 km marathon?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"selectingTools\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition CALL_TOOL -> \"runningTool\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition RESELECT -> \"selectingTools\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition ANSWER -> \"done\""
+      ],
+      "response": "mock answer\n\nTool calls:\n\n- celsius_to_fahrenheit(\"mock arg\") → error: expected a number, got \"mock arg\"\n\n- Reselections: 1\n\n**Selected tools**\n\n- celsius_to_fahrenheit\n- fahrenheit_to_celsius\n- km_to_miles"
+    }
+  ],
+  "How many days are there between 2026-01-15 and 2026-03-01?": [
+    {
+      "sent": "start {\"question\":\"How many days are there between 2026-01-15 and 2026-03-01?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"selectingTools\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition CALL_TOOL -> \"runningTool\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition RESELECT -> \"selectingTools\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition ANSWER -> \"done\""
+      ],
+      "response": "mock answer\n\nTool calls:\n\n- celsius_to_fahrenheit(\"mock arg\") → error: expected a number, got \"mock arg\"\n\n- Reselections: 1\n\n**Selected tools**\n\n- celsius_to_fahrenheit\n- fahrenheit_to_celsius\n- km_to_miles"
+    }
+  ],
+  "What is the capital of Australia?": [
+    {
+      "sent": "start {\"question\":\"What is the capital of Australia?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"selectingTools\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition CALL_TOOL -> \"runningTool\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition RESELECT -> \"selectingTools\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition ANSWER -> \"done\""
+      ],
+      "response": "mock answer\n\nTool calls:\n\n- celsius_to_fahrenheit(\"mock arg\") → error: expected a number, got \"mock arg\"\n\n- Reselections: 1\n\n**Selected tools**\n\n- celsius_to_fahrenheit\n- fahrenheit_to_celsius\n- km_to_miles"
+    }
+  ]
+}

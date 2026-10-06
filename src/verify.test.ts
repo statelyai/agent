@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { createTextLogic, runAgent, setupAgent, type ChosenEvent } from "./index.js";
+import {
+  createTextLogic,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type ChosenEvent,
+} from "./index.js";
 import {
   AgentLintError,
   canReach,
@@ -33,7 +39,6 @@ function createRefundMachine() {
       APPROVE: z.object({}),
       DENY: z.object({}),
     },
-    isIdle: (snapshot) => snapshot.hasTag("awaiting-human"),
   });
 
   return agent.createMachine({
@@ -431,10 +436,14 @@ describe("simulateAgent ↔ runAgent — the same script produces the same outco
       input,
       script: { decisions: { "agent.decide": decisions } },
     });
-    const live = await runAgent(createRefundMachine(), {
-      input,
-      executors: { decide: scriptedDecide(decisions) },
-    });
+    const live = await runToQuiescence(
+      createAgentRuntime(createRefundMachine(), {
+        executors: { decide: scriptedDecide(decisions) },
+      }),
+      {
+        input,
+      },
+    );
 
     expect(simulated.status).toBe("idle");
     expect(live.status).toBe("idle");
@@ -449,10 +458,14 @@ describe("simulateAgent ↔ runAgent — the same script produces the same outco
       input,
       script: { decisions: { "agent.decide": decisions } },
     });
-    const live = await runAgent(createGuardedIssueMachine(), {
-      input,
-      executors: { decide: scriptedDecide(decisions) },
-    });
+    const live = await runToQuiescence(
+      createAgentRuntime(createGuardedIssueMachine(), {
+        executors: { decide: scriptedDecide(decisions) },
+      }),
+      {
+        input,
+      },
+    );
 
     expect(simulated.status).toBe("done");
     expect(live.status).toBe("done");
@@ -475,7 +488,6 @@ describe("canReach — predicate targets", () => {
         APPROVE: z.object({}),
         REJECT: z.object({}),
       },
-      isIdle: (snapshot) => snapshot.hasTag("awaiting-approval"),
     });
     return agent.createMachine({
       context: ({ input }) => ({ amount: input.amount, approved: false }),
@@ -773,7 +785,7 @@ describe("invoke-without-on-error", () => {
     const machine = agent.createMachine({
       context: { topic: "otters" },
       initial: "drafting",
-      on: { "xstate.error.actor.*": { target: ".failed" } } as never,
+      on: { "xstate.error.actor.*": { target: ".failed" } },
       states: {
         drafting: {
           invoke: {

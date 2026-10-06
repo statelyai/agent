@@ -42,9 +42,6 @@ const setup = setupAgent({
       prompt: ({ input }) => input.prompt,
     },
   },
-  isIdle: (snapshot) =>
-    typeof snapshot.value === "string" &&
-    ["prompting", "asking", "reviewing"].includes(snapshot.value),
 });
 
 const machine = setup.createMachine({

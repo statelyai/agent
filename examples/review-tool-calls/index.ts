@@ -63,7 +63,8 @@ import {
   getStatePath,
   interactionMetaSchema,
   messagesSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentMessage,
   type AgentRequestExecutors,
@@ -118,8 +119,15 @@ const agentSetup = setupAgent({
   events: {
     APPROVE: z.object({}),
     // Partial override merged over the proposal: `override` carries any subset of
-    // the refund fields, validated before it can resume.
-    EDIT: z.object({ override: refundCallSchema.partial() }),
+    // the refund fields, validated before it can resume. The description is the
+    // format hint a generated form shows next to the field.
+    EDIT: z.object({
+      override: refundCallSchema
+        .partial()
+        .describe(
+          'JSON object with only the arguments to change, e.g. {"amountCents": 1500, "reason": "partial refund"}',
+        ),
+    }),
     REJECT: z.object({ feedback: z.string() }),
   },
   actors: {
@@ -336,11 +344,16 @@ export async function runReviewToolCallsExample(
   const track = (snapshot: { value: Parameters<typeof getStatePath>[0] }) =>
     onProgress?.(getStatePath(snapshot.value));
 
-  let result = await runAgent(reviewToolCallsMachine, {
-    input: { request },
-    ...runOptions,
-    onTransition: track,
-  });
+  let result = await runToQuiescence(
+    createAgentRuntime(reviewToolCallsMachine, {
+      ...runOptions,
+      onTransition: track,
+    }),
+    {
+      input: { request },
+      ...runOptions,
+    },
+  );
 
   const proposals: RefundCall[] = [];
   let interactionLabel: string | undefined;
@@ -365,12 +378,17 @@ export async function runReviewToolCallsExample(
       );
     }
     i++;
-    result = await runAgent(reviewToolCallsMachine, {
-      snapshot: result.persist(),
-      event,
-      ...runOptions,
-      onTransition: track,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(reviewToolCallsMachine, {
+        ...runOptions,
+        onTransition: track,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...runOptions,
+      },
+    );
   }
 
   if (result.status !== "done") {
@@ -418,10 +436,12 @@ const toolCallingSetup = setupAgent({
     turns: z.number().int(),
   }),
   input: z.object({ question: z.string() }),
+  // The output is the outcome only. Every answer was already shown at its idle
+  // turn (it is `context.answer`), and the transcript stays in context where
+  // the next turn needs it; repeating either here would show the answer again.
   output: z.object({
     status: z.enum(["answered", "failed"]),
-    answer: z.string().nullable(),
-    messages: messagesField,
+    turns: z.number().int(),
   }),
   events: {
     /** The human's next question, appended to the retained transcript. */
@@ -509,19 +529,11 @@ export const toolCallingMachine = toolCallingSetup.createMachine({
     },
     done: {
       type: "final",
-      output: ({ context }) => ({
-        status: "answered" as const,
-        answer: context.answer,
-        messages: context.messages,
-      }),
+      output: ({ context }) => ({ status: "answered" as const, turns: context.turns }),
     },
     failed: {
       type: "final",
-      output: ({ context }) => ({
-        status: "failed" as const,
-        answer: null,
-        messages: context.messages,
-      }),
+      output: ({ context }) => ({ status: "failed" as const, turns: context.turns }),
     },
   },
 });
@@ -540,17 +552,32 @@ export async function runToolCallingExample(
   const executors = options.executors ?? createAiSdkExecutors({ models });
   const answers: string[] = [];
 
-  let result = await runAgent(toolCallingMachine, { input: { question }, executors });
+  let result = await runToQuiescence(
+    createAgentRuntime(toolCallingMachine, {
+      executors,
+    }),
+    {
+      input: { question },
+    },
+  );
   // A failed request ends the run in `failed` with nothing to follow up on.
-  if (result.status === "done") return { ...result.output, answers };
+  // The answer and transcript are read off the final snapshot's context, not the output.
+  if (result.status === "done") {
+    const { answer, messages } = result.snapshot.context;
+    return { ...result.output, answer, messages, answers };
+  }
   for (const followUp of options.followUps ?? []) {
     if (result.status !== "idle") break;
     answers.push(result.snapshot.context.answer ?? "");
-    result = await runAgent(toolCallingMachine, {
-      snapshot: result.persist(),
-      event: { type: "ASK", question: followUp },
-      executors,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(toolCallingMachine, {
+        executors,
+      }),
+      {
+        snapshot: result.persist(),
+        event: { type: "ASK", question: followUp },
+      },
+    );
   }
 
   if (result.status !== "idle") {
@@ -558,13 +585,18 @@ export async function runToolCallingExample(
   }
   answers.push(result.snapshot.context.answer ?? "");
 
-  const ended = await runAgent(toolCallingMachine, {
-    snapshot: result.persist(),
-    event: { type: "END" },
-    executors,
-  });
+  const ended = await runToQuiescence(
+    createAgentRuntime(toolCallingMachine, {
+      executors,
+    }),
+    {
+      snapshot: result.persist(),
+      event: { type: "END" },
+    },
+  );
   if (ended.status !== "done") throw new Error(`Tool call ended with '${ended.status}'.`);
-  return { ...ended.output, answers };
+  const { answer, messages } = ended.snapshot.context;
+  return { ...ended.output, answer, messages, answers };
 }
 
 // Direct run: propose a refund, then let the human APPROVE / EDIT / REJECT at the
@@ -601,11 +633,15 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     const executors = createAiSdkExecutors({ models });
     const request = "Customer #A-1000 was double-charged $20 on order ORD-42. Make it right.";
 
-    let result = await runAgent(reviewToolCallsMachine, {
-      input: { request },
-      executors,
-      onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
-    });
+    let result = await runToQuiescence(
+      createAgentRuntime(reviewToolCallsMachine, {
+        executors,
+        onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
+      }),
+      {
+        input: { request },
+      },
+    );
 
     while (result.status === "idle") {
       const snapshot = result.snapshot;
@@ -640,12 +676,16 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
         event = { type: "APPROVE" };
       }
 
-      result = await runAgent(reviewToolCallsMachine, {
-        snapshot: persisted,
-        event,
-        executors,
-        onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
-      });
+      result = await runToQuiescence(
+        createAgentRuntime(reviewToolCallsMachine, {
+          executors,
+          onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
+        }),
+        {
+          snapshot: persisted,
+          event,
+        },
+      );
     }
 
     if (result.status !== "done") {

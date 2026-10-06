@@ -1,0 +1,45 @@
+{
+  "Trusted patch (host-authored)": [
+    {
+      "sent": "start {\"patch\":\"Validate input before a database write.\\n\\n--- a/src/users.ts\\n+++ b/src/users.ts\\n@@ export async function createUser(db: Db, body: unknown) {\\n-  await db.insert(\\\"users\\\", body);\\n+  const parsed = UserSchema.safeParse(body);\\n+  if (!parsed.success) throw new ValidationError(parsed.error.issues);\\n+  await db.insert(\\\"users\\\", parsed.data);\\n }\",\"source\":\"trusted\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> {\"reviewing\":{\"security\":\"working\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"done\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> \"accepted\""
+      ],
+      "response": "- Approved: yes\n- Human reviewed: no\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | security |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
+    }
+  ],
+  "External patch (needs human review)": [
+    {
+      "sent": "start {\"patch\":\"Validate input before a database write.\\n\\n--- a/src/users.ts\\n+++ b/src/users.ts\\n@@ export async function createUser(db: Db, body: unknown) {\\n-  await db.insert(\\\"users\\\", body);\\n+  const parsed = UserSchema.safeParse(body);\\n+  if (!parsed.success) throw new ValidationError(parsed.error.issues);\\n+  await db.insert(\\\"users\\\", parsed.data);\\n }\",\"source\":\"external\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> {\"reviewing\":{\"security\":\"working\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"done\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> \"humanReview\""
+      ],
+      "response": "**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | security |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | maintainability |",
+      "idle": {
+        "prompt": "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved. To reject it, say why.",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": "REJECT.reason"
+      }
+    },
+    {
+      "sent": "{\"type\":\"REJECT\",\"reason\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"humanReview\"",
+        "transition REJECT -> \"rejected\""
+      ],
+      "response": "- Approved: no\n- Human reviewed: yes\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | security |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
+    }
+  ]
+}

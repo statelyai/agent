@@ -1,0 +1,58 @@
+{
+  "id": "supportReply",
+  "description": "Draft a reply to a support ticket, let a person approve or ask for changes, and give up after two revisions.",
+  "initial": "idle",
+  "context": {
+    "ticket": "",
+    "draft": null,
+    "feedback": null,
+    "revisions": 0
+  },
+  "states": {
+    "idle": {
+      "on": {
+        "SUBMIT": {
+          "target": "drafting",
+          "actions": "saveTicket"
+        }
+      }
+    },
+    "drafting": {
+      "invoke": {
+        "src": "draftReply",
+        "onDone": {
+          "target": "reviewing",
+          "actions": ["saveDraft"]
+        },
+        "onError": "failed"
+      }
+    },
+    "reviewing": {
+      "tags": ["waiting"],
+      "meta": {
+        "interaction": {
+          "label": "Approve the draft, or say what to change.",
+          "events": {
+            "APPROVE": { "label": "Send it", "style": "primary" },
+            "REVISE": { "label": "Ask for changes" }
+          },
+          "textEvent": "REVISE"
+        }
+      },
+      "on": {
+        "APPROVE": "sent",
+        "REVISE": [
+          {
+            "target": "drafting",
+            "guard": "canRevise",
+            "actions": { "type": "saveFeedback" }
+          },
+          { "target": "gaveUp" }
+        ]
+      }
+    },
+    "sent": { "type": "final" },
+    "gaveUp": { "type": "final" },
+    "failed": { "type": "final" }
+  }
+}

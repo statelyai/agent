@@ -7,8 +7,8 @@
  * LangGraph: two nodes (`generate` ↔ `reflect`) cycle, and a `should_continue`
  * conditional edge ends the run when `len(state["messages"]) > 6` — i.e. after
  * ~3 round trips, counted by message-array length. Here the loop bound is a
- * TYPED guard on an explicit `checking` choice state (`revisions >=
- * maxRevisions`), not an implicit count of an accumulating list. Same shape,
+ * TYPED guard on an explicit `checking` choice state (`rewrites >=
+ * maxRewrites`), not an implicit count of an accumulating list. Same shape,
  * but the stop condition is a named number you can point at, and the transcript
  * length is a consequence rather than the control signal.
  *   source: https://langchain-ai.github.io/langgraph/tutorials/reflection/reflection/
@@ -23,7 +23,7 @@
  *
  * The critique request returns structured `{ critique, satisfied }`, so the
  * loop can ALSO exit early the moment the critic is satisfied — an improvement
- * over the tutorial's fixed message-count loop, while `maxRevisions` stays the
+ * over the tutorial's fixed message-count loop, while `maxRewrites` stays the
  * hard upper bound. The critic grades against a strict five-item rubric, so a
  * live run reliably takes at least one revision round instead of signing off
  * on the first draft and hiding the loop. Every model invoke has an `onError`
@@ -31,7 +31,7 @@
  * never mistaken for one that simply had nothing more to say.
  *
  * Readable output: the run presents the ORIGINAL draft and the FINAL draft side
- * by side, plus a one-line-per-revision log RENDERED from the critiques the
+ * by side, plus a one-line-per-critique log RENDERED from the critiques the
  * machine recorded — not accumulated as a string in context. The intermediate
  * drafts and the full critique prose stay out of the leading string fields, so
  * the result reads as a comparison rather than a wall of essay text.
@@ -49,7 +49,8 @@ import {
   type AgentMessage,
   assistantMessage,
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   userMessage,
   type AgentRequestExecutors,
@@ -71,10 +72,10 @@ const critiqueSchema = z.object({
   satisfied: z.boolean(),
 });
 
-/** Hard upper bound on revision rounds (the tutorial's loop bound). */
-const MAX_REVISIONS = 2;
+/** Hard upper bound on rewrites after the first draft (the tutorial's loop bound). */
+const MAX_REWRITES = 2;
 
-/** Collapses critique prose to a single short line for the revision log. */
+/** Collapses critique prose to a single short line for the critique log. */
 function oneLine(text: string, max = 90): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
@@ -93,61 +94,82 @@ const reflectionContextSchema = z.object({
   // context schema keeps a typed `z.custom`.
   messages: z.custom<AgentMessage[]>((value) => Array.isArray(value)),
   // Every completed critique, in order. The latest one drives the early-exit
-  // guard; the revision log is RENDERED from this list in `output`, so there
+  // guard; the critique log is RENDERED from this list in `output`, so there
   // is no second copy of it to keep in sync.
   critiques: z.array(critiqueSchema),
   // Why the run stopped early, when it did. `null` on the happy path.
   failure: z.string().nullable(),
-  maxRevisions: z.number(),
+  maxRewrites: z.number(),
 });
 
 type ReflectionContext = z.infer<typeof reflectionContextSchema>;
 
-/** One line per completed round — derived from the recorded critiques. */
-function renderRevisionLog(critiques: ReflectionContext["critiques"]): string {
+/** Rewrites so far: every draft after the first. Derived from the transcript. */
+function rewriteCount(context: ReflectionContext): number {
+  const drafts = context.messages.filter((message) => message.role === "assistant").length;
+  return Math.max(0, drafts - 1);
+}
+
+/** Names the draft a critique graded: the original, or rewrite N. */
+function draftLabel(rewrite: number): string {
+  return rewrite === 0 ? "Original" : `Rewrite ${rewrite}`;
+}
+
+/**
+ * One line per critique, labeled with the draft it graded — derived from the
+ * recorded critiques. Critique N grades rewrite N-1, so a run that spends its
+ * whole budget has one more critique than rewrites (the last grades the final).
+ */
+function renderCritiqueLog(critiques: ReflectionContext["critiques"]): string {
   return critiques
     .map(
       (critique, index) =>
-        `${index + 1}. ${critique.satisfied ? "satisfied" : "revise"}. ${oneLine(critique.critique)}`,
+        `${draftLabel(index)}: ${critique.satisfied ? "satisfied" : "revise"}. ${oneLine(critique.critique)}`,
     )
     .join("\n");
 }
 
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
 /**
  * Why the loop ended, in the reader's words. A run that stops with
- * `satisfied: false` did not fail — it spent its revision budget — and saying
+ * `satisfied: false` did not fail — it spent its rewrite budget — and saying
  * so is the difference between "the critic approved this" and "this is the
- * best it managed in two rounds".
+ * best it managed in two rewrites".
  */
 function renderStopReason(context: ReflectionContext): string {
   if (context.failure) return `Stopped early: ${context.failure}`;
   const last = context.critiques[context.critiques.length - 1];
+  const rewrites = rewriteCount(context);
   if (last?.satisfied) {
-    return `The critic signed off after ${context.critiques.length} round${
-      context.critiques.length === 1 ? "" : "s"
-    }.`;
+    return rewrites === 0
+      ? "The critic signed off on the original draft."
+      : `The critic signed off on rewrite ${rewrites}.`;
   }
-  return (
-    `Best effort: the critic was still not satisfied after ${context.maxRevisions} ` +
-    `revision${context.maxRevisions === 1 ? "" : "s"}, which is the budget.`
-  );
+  return `Best effort: the critic was still not satisfied after ${plural(rewrites, "rewrite")}, which is the budget.`;
 }
 
-/** The comparison view: original draft, final draft, and the revision log. */
+/** The comparison view: original draft, final draft, and the critique log. */
 function renderComparison(context: ReflectionContext): string {
-  const revisions = context.critiques.length;
-  return [
+  const rewrites = rewriteCount(context);
+  const sections = [
     renderStopReason(context),
     "",
     "Original draft",
     context.firstDraft || "(none)",
+  ];
+  // With no rewrite the final draft IS the original; printing it twice is noise.
+  if (rewrites > 0) {
+    sections.push("", `Final draft (rewrite ${rewrites})`, context.essay);
+  }
+  sections.push(
     "",
-    `Final draft (after ${revisions} critique round${revisions === 1 ? "" : "s"})`,
-    context.essay || "(none)",
-    "",
-    "Revision log",
-    renderRevisionLog(context.critiques) || "(no critique completed)",
-  ].join("\n");
+    `Critiques (${context.critiques.length})`,
+    renderCritiqueLog(context.critiques) || "(no critique completed)",
+  );
+  return sections.join("\n");
 }
 
 const agentSetup = setupAgent({
@@ -156,25 +178,23 @@ const agentSetup = setupAgent({
   input: z.object({
     topic: z.string(),
   }),
-  // One leading string (original next to final, with the revision log); the
-  // raw drafts stay nested so neither essay becomes the lead.
+  // One string a reader needs (original next to final, with the critique
+  // log); the drafts live only inside it, so nothing repeats beside it.
   output: z.object({
     comparison: z.string(),
-    revisions: z.number(),
-    // Whether the critic signed off (vs. stopped at the revision bound).
+    // Rewrites after the first draft (not critiques: the last critique grades
+    // the final rewrite, so a full-budget run has one more critique).
+    rewrites: z.number(),
+    // Whether the critic signed off (vs. stopped at the rewrite budget).
     satisfied: z.boolean(),
-    // Transcript length — a consequence here, the control signal in LangGraph.
-    messageCount: z.number(),
     // Set only when a model call failed and the run ended in `failed`.
     failure: z.string().nullable(),
-    details: z.object({
-      firstDraft: z.string(),
-      essay: z.string(),
-    }),
   }),
+  // `rewrite` names the draft: 0 is the original, N is rewrite N — the same
+  // number the output's `rewrites` counts and the critique log labels.
   emitted: {
-    DRAFTED: z.object({ revision: z.number(), length: z.number() }),
-    CRITIQUED: z.object({ revision: z.number(), satisfied: z.boolean() }),
+    DRAFTED: z.object({ rewrite: z.number(), length: z.number() }),
+    CRITIQUED: z.object({ rewrite: z.number(), satisfied: z.boolean() }),
   },
   // `critiquing` runs only once a draft exists; `done` always carries an essay.
   states: {
@@ -196,9 +216,9 @@ const agentSetup = setupAgent({
       model: "writer",
       system:
         "You are an essay-writing assistant. Write the best essay you can for " +
-        "the user's request, in at most 150 words. If the transcript contains a " +
-        "critique of a prior draft, produce a revised essay that addresses every " +
-        "point while keeping what already works. Return only the essay prose.",
+        "the user's request, in at most 150 words. If the transcript ends with a " +
+        "critique, rewrite your LATEST draft so it addresses every point of that " +
+        "critique while keeping what already works. Return only the essay prose.",
       messages: ({ input }) => input.messages,
     },
     // The `reflect` node: a teacher grades the latest draft and returns prose
@@ -241,7 +261,7 @@ export const reflectionWriterMachine = agentSetup.createMachine({
     messages: [userMessage(`Write an essay on the following topic:\n${input.topic}`)],
     critiques: [],
     failure: null,
-    maxRevisions: MAX_REVISIONS,
+    maxRewrites: MAX_REWRITES,
   }),
   initial: "drafting",
   states: {
@@ -254,7 +274,7 @@ export const reflectionWriterMachine = agentSetup.createMachine({
         onDone: ({ context, output }, enq) => {
           enq.emit({
             type: "DRAFTED",
-            revision: context.critiques.length,
+            rewrite: context.critiques.length,
             length: output.result.length,
           });
           return {
@@ -285,7 +305,8 @@ export const reflectionWriterMachine = agentSetup.createMachine({
         onDone: ({ context, output }, enq) => {
           enq.emit({
             type: "CRITIQUED",
-            revision: context.critiques.length + 1,
+            // The draft just graded: one critique per draft, so the count so far.
+            rewrite: context.critiques.length,
             satisfied: output.result.satisfied,
           });
           return {
@@ -308,11 +329,11 @@ export const reflectionWriterMachine = agentSetup.createMachine({
     },
     // The typed loop bound. LangGraph's `should_continue` counts messages
     // (`len > 6`); here the same decision is a named guard: stop when the critic
-    // is satisfied OR the revision budget is spent, else loop back to drafting.
+    // is satisfied OR the rewrite budget is spent, else loop back to drafting.
     checking: {
       type: "choice",
       choice: ({ context }) =>
-        context.critiques.at(-1)?.satisfied || context.critiques.length >= context.maxRevisions
+        context.critiques.at(-1)?.satisfied || rewriteCount(context) >= context.maxRewrites
           ? { target: "done" }
           : { target: "drafting" },
     },
@@ -320,11 +341,9 @@ export const reflectionWriterMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         comparison: renderComparison(context),
-        revisions: context.critiques.length,
+        rewrites: rewriteCount(context),
         satisfied: context.critiques.at(-1)?.satisfied ?? false,
-        messageCount: context.messages.length,
         failure: null,
-        details: { firstDraft: context.firstDraft, essay: context.essay },
       }),
     },
     // A separate terminal for "a model call failed": the caller can still read
@@ -333,11 +352,9 @@ export const reflectionWriterMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         comparison: renderComparison(context),
-        revisions: context.critiques.length,
+        rewrites: rewriteCount(context),
         satisfied: false,
-        messageCount: context.messages.length,
         failure: context.failure ?? "unknown failure",
-        details: { firstDraft: context.firstDraft, essay: context.essay },
       }),
     },
   },
@@ -353,12 +370,10 @@ export interface RunReflectionWriterOptions {
 
 export interface ReflectionWriterResult {
   comparison: string;
-  revisions: number;
+  rewrites: number;
   satisfied: boolean;
-  messageCount: number;
   /** Set only when the run ended in `failed`. */
   failure: string | null;
-  details: { firstDraft: string; essay: string };
   progress: string[];
 }
 
@@ -373,19 +388,23 @@ export async function runReflectionWriterExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runAgent(reflectionWriterMachine, {
-    input: { topic },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    onTransition: (snapshot) => {
-      // `getStatePath` serializes nested and parallel state values properly;
-      // `String(snapshot.value)` would print "[object Object]" for either.
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(reflectionWriterMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      onTransition: (snapshot) => {
+        // `getStatePath` serializes nested and parallel state values properly;
+        // `String(snapshot.value)` would print "[object Object]" for either.
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { topic },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Reflection-writer example did not complete: ${result.status}`);

@@ -1,0 +1,47 @@
+{
+  "What was the Lumen lamp's average monthly revenue in Q2?": [
+    {
+      "sent": "start {\"task\":\"What was the Lumen lamp's average monthly revenue in Q2?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"supervising\"",
+        "transition DELEGATE_RESEARCH -> \"researching\"",
+        "transition xstate.done.actor -> \"supervising\"",
+        "transition DELEGATE_CODE -> \"coding\"",
+        "transition xstate.done.actor -> \"supervising\"",
+        "transition FINISH -> \"done\""
+      ],
+      "response": "mock answer\n\n- Turns: 2\n\n**Reports**\n\n- Worker: researcher · Report: Mock reply to: Task: What was the Lumen lamp's average monthly revenue in Q · Status: done\n- Worker: coder · Report: Mock reply to: Task: What was the Lumen lamp's average monthly revenue in Q · Status: done\n\n**Trail**\n\n- turn 1: researcher done. Mock reply to: Task: What was the Lumen lamp's average monthly revenue in Q\n- turn 2: coder done. Mock reply to: Task: What was the Lumen lamp's average monthly revenue in Q\n- The supervisor finished the task."
+    }
+  ],
+  "How did churn change across Q2?": [
+    {
+      "sent": "start {\"task\":\"How did churn change across Q2?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"supervising\"",
+        "transition DELEGATE_RESEARCH -> \"researching\"",
+        "transition xstate.done.actor -> \"supervising\"",
+        "transition DELEGATE_CODE -> \"coding\"",
+        "transition xstate.done.actor -> \"supervising\"",
+        "transition FINISH -> \"done\""
+      ],
+      "response": "mock answer\n\n- Turns: 2\n\n**Reports**\n\n- Worker: researcher · Status: done  \n  Report:  \n  Mock reply to: Task: How did churn change across Q2?\n\n  Notes:  \n  [sample note]\n- Worker: coder · Status: done  \n  Report:  \n  Mock reply to: Task: How did churn change across Q2?\n\n  Analysis output:  \n  [sam\n\n**Trail**\n\n- turn 1: researcher done. Mock reply to: Task: How did churn change across Q2? Notes: [sample note]\n- turn 2: coder done. Mock reply to: Task: How did churn change across Q2? Analysis output: [sam\n- The supervisor finished the task."
+    }
+  ],
+  "Did support tickets fall after the Q2 firmware release?": [
+    {
+      "sent": "start {\"task\":\"Did support tickets fall after the Q2 firmware release?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"supervising\"",
+        "transition DELEGATE_RESEARCH -> \"researching\"",
+        "transition xstate.done.actor -> \"supervising\"",
+        "transition DELEGATE_CODE -> \"coding\"",
+        "transition xstate.done.actor -> \"supervising\"",
+        "transition FINISH -> \"done\""
+      ],
+      "response": "mock answer\n\n- Turns: 2\n\n**Reports**\n\n- Worker: researcher · Report: Mock reply to: Task: Did support tickets fall after the Q2 firmware release · Status: done\n- Worker: coder · Report: Mock reply to: Task: Did support tickets fall after the Q2 firmware release · Status: done\n\n**Trail**\n\n- turn 1: researcher done. Mock reply to: Task: Did support tickets fall after the Q2 firmware release\n- turn 2: coder done. Mock reply to: Task: Did support tickets fall after the Q2 firmware release\n- The supervisor finished the task."
+    }
+  ]
+}

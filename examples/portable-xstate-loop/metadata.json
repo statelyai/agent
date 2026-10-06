@@ -1,15 +1,15 @@
 {
   "name": "portable-xstate-loop",
-  "title": "Portable durable XState transition loop",
+  "title": "Stateless loop host: run, persist, return",
   "kind": "host-adapter",
   "origin": {
     "type": "stately-agent",
-    "source": "A native XState durable transition and effect loop",
+    "source": "The createAgentRuntime loop in a persist-and-return host",
     "url": null
   },
   "comparison": {
     "targets": ["XState durable adapters", "workflow runtimes"],
-    "purpose": "Runs one agent machine through XState createDurable transitions and effects without using a Stately Agent runner."
+    "purpose": "Runs one agent machine a turn at a time: run until nothing is in flight, persist the snapshot, return; the next turn resumes from the stored JSON."
   },
   "starters": ["portable agent machines"]
 }

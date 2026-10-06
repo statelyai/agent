@@ -1,0 +1,411 @@
+{
+  "Play a match (first to 3)": [
+    {
+      "sent": "start {\"targetWins\":3}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "First to 3 wins. Throw something.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_ROCK -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n- Round: 1 · Player: rock · Opponent: rock · Result: tie",
+      "idle": {
+        "prompt": "Round 1: you both threw rock. Tie. Score: you 0, agent 0.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_PAPER -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |",
+      "idle": {
+        "prompt": "Round 2: you threw rock, the agent threw paper — you lose it. Score: you 0, agent 1.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_SCISSORS -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |",
+      "idle": {
+        "prompt": "Round 3: you threw rock, the agent threw scissors — you win it. Score: you 1, agent 1.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_ROCK -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |\n| 4 | rock | rock | tie |",
+      "idle": {
+        "prompt": "Round 4: you both threw rock. Tie. Score: you 1, agent 1.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_PAPER -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |\n| 4 | rock | rock | tie |\n| 5 | rock | paper | loss |",
+      "idle": {
+        "prompt": "Round 5: you threw rock, the agent threw paper — you lose it. Score: you 1, agent 2.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_SCISSORS -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |\n| 4 | rock | rock | tie |\n| 5 | rock | paper | loss |\n| 6 | rock | scissors | win |",
+      "idle": {
+        "prompt": "Round 6: you threw rock, the agent threw scissors — you win it. Score: you 2, agent 2.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_ROCK -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |\n| 4 | rock | rock | tie |\n| 5 | rock | paper | loss |\n| 6 | rock | scissors | win |\n| 7 | rock | rock | tie |",
+      "idle": {
+        "prompt": "Round 7: you both threw rock. Tie. Score: you 2, agent 2.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    }
+  ],
+  "Quick match (first to 2)": [
+    {
+      "sent": "start {\"targetWins\":2}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "First to 2 wins. Throw something.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_ROCK -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n- Round: 1 · Player: rock · Opponent: rock · Result: tie",
+      "idle": {
+        "prompt": "Round 1: you both threw rock. Tie. Score: you 0, agent 0.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_PAPER -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |",
+      "idle": {
+        "prompt": "Round 2: you threw rock, the agent threw paper — you lose it. Score: you 0, agent 1.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_SCISSORS -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |",
+      "idle": {
+        "prompt": "Round 3: you threw rock, the agent threw scissors — you win it. Score: you 1, agent 1.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_ROCK -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |\n| 4 | rock | rock | tie |",
+      "idle": {
+        "prompt": "Round 4: you both threw rock. Tie. Score: you 1, agent 1.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_PAPER -> \"lost\""
+      ],
+      "response": "Round 1: you rock vs agent rock — tie  \nRound 2: you rock vs agent paper — agent wins  \nRound 3: you rock vs agent scissors — you win  \nRound 4: you rock vs agent rock — tie  \nRound 5: you rock vs agent paper — agent wins  \nYou lost the match 1-2.\n\n- Outcome: lost\n- Player score: 1\n- Opponent score: 2\n\n**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |\n| 4 | rock | rock | tie |\n| 5 | rock | paper | loss |"
+    }
+  ],
+  "Long match (first to 5)": [
+    {
+      "sent": "start {\"targetWins\":5}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "First to 5 wins. Throw something.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_ROCK -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n- Round: 1 · Player: rock · Opponent: rock · Result: tie",
+      "idle": {
+        "prompt": "Round 1: you both threw rock. Tie. Score: you 0, agent 0.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_PAPER -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |",
+      "idle": {
+        "prompt": "Round 2: you threw rock, the agent threw paper — you lose it. Score: you 0, agent 1.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_SCISSORS -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |",
+      "idle": {
+        "prompt": "Round 3: you threw rock, the agent threw scissors — you win it. Score: you 1, agent 1.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_ROCK -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |\n| 4 | rock | rock | tie |",
+      "idle": {
+        "prompt": "Round 4: you both threw rock. Tie. Score: you 1, agent 1.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_PAPER -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |\n| 4 | rock | rock | tie |\n| 5 | rock | paper | loss |",
+      "idle": {
+        "prompt": "Round 5: you threw rock, the agent threw paper — you lose it. Score: you 1, agent 2.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_SCISSORS -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |\n| 4 | rock | rock | tie |\n| 5 | rock | paper | loss |\n| 6 | rock | scissors | win |",
+      "idle": {
+        "prompt": "Round 6: you threw rock, the agent threw scissors — you win it. Score: you 2, agent 2.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"HUMAN_ROCK\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingHumanThrow\"",
+        "transition HUMAN_ROCK -> \"choosingThrow\"",
+        "transition THROW_ROCK -> \"awaitingHumanThrow\""
+      ],
+      "response": "**History**\n\n| Round | Player | Opponent | Result |\n| --- | --- | --- | --- |\n| 1 | rock | rock | tie |\n| 2 | rock | paper | loss |\n| 3 | rock | scissors | win |\n| 4 | rock | rock | tie |\n| 5 | rock | paper | loss |\n| 6 | rock | scissors | win |\n| 7 | rock | rock | tie |",
+      "idle": {
+        "prompt": "Round 7: you both threw rock. Tie. Score: you 2, agent 2.",
+        "events": [
+          "HUMAN_ROCK",
+          "HUMAN_PAPER",
+          "HUMAN_SCISSORS"
+        ],
+        "textEvent": null
+      }
+    }
+  ]
+}

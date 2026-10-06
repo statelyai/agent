@@ -1,0 +1,83 @@
+{
+  "a turnstile that locks and unlocks": [
+    {
+      "sent": "start {\"prompt\":\"a turnstile that locks and unlocks\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generating\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"parsing\"",
+        "transition xstate.error.actor -> \"parsing\"",
+        "emitted CANDIDATE_REJECTED -> \"parsing\"",
+        "transition xstate.error.actor -> \"parsing\"",
+        "emitted CANDIDATE_REJECTED -> \"parsing\"",
+        "transition xstate.error.actor -> \"repairing\"",
+        "emitted CANDIDATE_REJECTED -> \"repairing\"",
+        "transition xstate.done.actor -> \"parsing\"",
+        "emitted REPAIRING -> \"parsing\"",
+        "transition xstate.error.actor -> \"repairing\"",
+        "emitted CANDIDATE_REJECTED -> \"repairing\"",
+        "transition xstate.done.actor -> \"parsing\"",
+        "emitted REPAIRING -> \"parsing\"",
+        "transition xstate.error.actor -> \"failed\"",
+        "emitted CANDIDATE_REJECTED -> \"failed\""
+      ],
+      "response": "No usable config for \"a turnstile that locks and unlocks\". No valid config after 2 repair rounds. Last validator error: No JSON code block found in the response.\n\n- Repairs: 2"
+    }
+  ],
+  "a checkout that can be paid, shipped, or refunded": [
+    {
+      "sent": "start {\"prompt\":\"a checkout that can be paid, shipped, or refunded\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generating\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"parsing\"",
+        "transition xstate.error.actor -> \"parsing\"",
+        "emitted CANDIDATE_REJECTED -> \"parsing\"",
+        "transition xstate.error.actor -> \"parsing\"",
+        "emitted CANDIDATE_REJECTED -> \"parsing\"",
+        "transition xstate.error.actor -> \"repairing\"",
+        "emitted CANDIDATE_REJECTED -> \"repairing\"",
+        "transition xstate.done.actor -> \"parsing\"",
+        "emitted REPAIRING -> \"parsing\"",
+        "transition xstate.error.actor -> \"repairing\"",
+        "emitted CANDIDATE_REJECTED -> \"repairing\"",
+        "transition xstate.done.actor -> \"parsing\"",
+        "emitted REPAIRING -> \"parsing\"",
+        "transition xstate.error.actor -> \"failed\"",
+        "emitted CANDIDATE_REJECTED -> \"failed\""
+      ],
+      "response": "No usable config for \"a checkout that can be paid, shipped, or refunded\". No valid config after 2 repair rounds. Last validator error: No JSON code block found in the response.\n\n- Repairs: 2"
+    }
+  ],
+  "a file upload with retry and cancel": [
+    {
+      "sent": "start {\"prompt\":\"a file upload with retry and cancel\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generating\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"parsing\"",
+        "transition xstate.error.actor -> \"parsing\"",
+        "emitted CANDIDATE_REJECTED -> \"parsing\"",
+        "transition xstate.error.actor -> \"parsing\"",
+        "emitted CANDIDATE_REJECTED -> \"parsing\"",
+        "transition xstate.error.actor -> \"repairing\"",
+        "emitted CANDIDATE_REJECTED -> \"repairing\"",
+        "transition xstate.done.actor -> \"parsing\"",
+        "emitted REPAIRING -> \"parsing\"",
+        "transition xstate.error.actor -> \"repairing\"",
+        "emitted CANDIDATE_REJECTED -> \"repairing\"",
+        "transition xstate.done.actor -> \"parsing\"",
+        "emitted REPAIRING -> \"parsing\"",
+        "transition xstate.error.actor -> \"failed\"",
+        "emitted CANDIDATE_REJECTED -> \"failed\""
+      ],
+      "response": "No usable config for \"a file upload with retry and cancel\". No valid config after 2 repair rounds. Last validator error: No JSON code block found in the response.\n\n- Repairs: 2"
+    }
+  ]
+}

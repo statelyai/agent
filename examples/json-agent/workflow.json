@@ -108,7 +108,7 @@
         "src": "agent.decide",
         "input": {
           "model": "openai/gpt-5.4-mini",
-          "system": "Decide whether this support ticket needs human escalation or a drafted reply.",
+          "system": "Route this support ticket. Choose REPLY when a written answer can move it forward: how-to questions, account or login trouble with standard self-serve fixes (checking spam, resetting a password, clearing the cache), feature questions. A human approves every drafted reply before it is sent, so REPLY is the default. Choose ESCALATE only when a person must act on the account or on money: refunds, duplicate or disputed charges, security incidents, legal threats, or data loss, and give the reason.",
           "prompt": "{{ context.ticket }}",
           "allowedEvents": ["ESCALATE", "REPLY"],
           "maxRetries": 2
@@ -186,8 +186,7 @@
     "replied": {
       "type": "final",
       "output": {
-        "resolution": "replied",
-        "reply": "{{ context.reply }}"
+        "resolution": "replied"
       }
     },
     "escalated": {

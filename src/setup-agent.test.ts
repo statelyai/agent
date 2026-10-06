@@ -27,7 +27,8 @@ import {
   getAcceptedEvents,
   messagesSchema,
   parseAgentEvent,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   getAgentSchemas,
   setupAgent,
   toolMessage,
@@ -39,10 +40,10 @@ import {
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "./index.js";
-import { executeAgentRequest, resolveDecision, type AgentRequest } from "./index.js";
+import { resolveDecision, type AgentRequest } from "./index.js";
+import { executeAgentRequest } from "./steps.js";
 import { getAgentOutputMode, parseOutput } from "./index.js";
 import { isStructuredOutputSchema } from "./text-logic.js";
-import { getMachineIdlePredicate } from "./internal/registry.js";
 
 /**
  * ~15-line Ajv-to-StandardSchema adapter — the recipe for a real
@@ -804,10 +805,8 @@ describe("setupAgent", () => {
       initial: "waiting",
       states: {
         waiting: {
-          always: {
-            guard: "hasPromptypo",
-            target: "done",
-          },
+          always: ({ context, guards }) =>
+            guards.hasPromptypo!({ context } as never) ? { target: "done" } : undefined,
         },
         done: { type: "final" },
       },
@@ -1639,16 +1638,20 @@ describe("setupAgent", () => {
       answer: "Answered: why agent machines?",
     });
 
-    const runResult = await runAgent(machine, {
-      input: { prompt: "why run agents?" },
-      executors: {
-        generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
-          result: {
-            answer: `Ran: ${request.prompt}`,
-          },
-        }),
+    const runResult = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
+            result: {
+              answer: `Ran: ${request.prompt}`,
+            },
+          }),
+        },
+      }),
+      {
+        input: { prompt: "why run agents?" },
       },
-    });
+    );
     expect(runResult.status).toBe("done");
     expect(runResult.status === "done" ? runResult.output : undefined).toEqual({
       answer: "Ran: why run agents?",
@@ -1812,12 +1815,16 @@ describe("setupAgent", () => {
       { compileSchema: ajvCompiler() },
     );
 
-    const result = await runAgent(machine, {
-      input: { question: "Why statecharts?" },
-      executors: {
-        generateText: async () => ({ result: { answer: "Because logic matters." } }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: { answer: "Because logic matters." } }),
+        },
+      }),
+      {
+        input: { question: "Why statecharts?" },
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({
@@ -1828,6 +1835,7 @@ describe("setupAgent", () => {
   test("fromConfig + Ajv compileSchema: rejects a `pattern`/`minLength` violation", () => {
     // `context` is validated eagerly via `validateSchemaSync` when the machine
     // takes its initial transition, so this proves the supplied compiler is used.
+    // XState surfaces a throwing context factory as an `error` snapshot.
     const configWithPattern = {
       id: "ajv-teeth-proof",
       schemas: {
@@ -1847,7 +1855,9 @@ describe("setupAgent", () => {
     const { machine: ajvMachine } = setupAgent.fromConfig(configWithPattern, {
       compileSchema: ajvCompiler(),
     });
-    expect(() => initialAgentStep(ajvMachine, { email: "not-an-email" })).toThrow();
+    const { snapshot } = initialAgentStep(ajvMachine, { email: "not-an-email" });
+    expect(snapshot.status).toBe("error");
+    expect(String(snapshot.error)).toMatch(/context\/email must (match pattern|NOT have fewer)/);
   });
 
   test("fromConfig lowers static request workflows to agent machine steps", async () => {
@@ -2023,10 +2033,14 @@ describe("setupAgent", () => {
     );
 
     const emitted: unknown[] = [];
-    const result = await runAgent(machine, {
-      input: { score: 1 },
-      on: { "*": (event) => emitted.push(event) },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        on: { "*": (event) => emitted.push(event) },
+      }),
+      {
+        input: { score: 1 },
+      },
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({ passed: true });
@@ -2098,12 +2112,16 @@ describe("setupAgent", () => {
       { compileSchema: ajvCompiler() },
     );
 
-    const result = await runAgent(machine, {
-      input: { question: "Why statecharts?" },
-      executors: {
-        generateText: async () => ({ result: { answer: "Because logic matters." } }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: { answer: "Because logic matters." } }),
+        },
+      }),
+      {
+        input: { question: "Why statecharts?" },
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({
@@ -2164,16 +2182,20 @@ describe("setupAgent", () => {
       { compileSchema: ajvCompiler() },
     );
 
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide: async (input) => {
-          receivedInputs.push(input);
-          return { event: { type: "GUESS", answer: "42" } };
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: async (input) => {
+            receivedInputs.push(input);
+            return { event: { type: "GUESS", answer: "42" } };
+          },
         },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({ mode: "guessed" });
@@ -2243,18 +2265,29 @@ describe("setupAgent", () => {
 
     const generateText = async () => ({ result: { draft: "Hello world." } });
 
-    const first = await runAgent(machine, { input: {}, executors: { generateText } });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: {},
+      },
+    );
     expect(first.status).toBe("idle");
 
     const persisted = JSON.parse(JSON.stringify(first.status === "idle" ? first.snapshot : null));
 
-    const second = await runAgent(machine, {
-      snapshot: persisted,
-      event: { type: "APPROVE" },
-      executors: {
-        generateText,
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText,
+        },
+      }),
+      {
+        snapshot: persisted,
+        event: { type: "APPROVE" },
       },
-    });
+    );
 
     expect(second.status).toBe("done");
     expect(second.status === "done" && second.output).toEqual({ draft: "Hello world." });
@@ -2293,7 +2326,11 @@ describe("setupAgent", () => {
       expect.arrayContaining(["context", "events", "input", "output", "meta"]),
     );
 
-    const first = await runAgent(machine, { executors: {} });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {},
+      }),
+    );
     expect(first.status).toBe("idle");
     const snapshot = first.status === "idle" ? first.snapshot : undefined;
 
@@ -2386,17 +2423,25 @@ describe("setupAgent", () => {
     );
 
     const emitted: unknown[] = [];
-    const first = await runAgent(machine, {
-      input: {},
-      on: { "*": (event) => emitted.push(event) },
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        on: { "*": (event) => emitted.push(event) },
+      }),
+      {
+        input: {},
+      },
+    );
     expect(first.status).toBe("idle");
 
-    const resumed = await runAgent(machine, {
-      snapshot: JSON.parse(JSON.stringify(first.status === "idle" ? first.snapshot : null)),
-      event: { type: "GO" },
-      on: { "*": (event) => emitted.push(event) },
-    });
+    const resumed = await runToQuiescence(
+      createAgentRuntime(machine, {
+        on: { "*": (event) => emitted.push(event) },
+      }),
+      {
+        snapshot: JSON.parse(JSON.stringify(first.status === "idle" ? first.snapshot : null)),
+        event: { type: "GO" },
+      },
+    );
 
     expect(resumed.status).toBe("done");
     expect(resumed.status === "done" && resumed.output).toEqual({ decision: "went" });
@@ -2603,65 +2648,34 @@ describe("setupAgent", () => {
     },
   };
 
-  test("fromConfig lowers idleTags into a machine-carried hasTag predicate", () => {
-    const { machine } = setupAgent.fromConfig(
-      { id: "suspended-tags", idleTags: ["waiting"], ...suspensionConfig },
-      { compileSchema: ajvCompiler() },
-    );
-
-    const predicate = getMachineIdlePredicate(machine);
-    expect(predicate).toBeDefined();
-    // Keyed on the root config, so it survives further `.provide(...)` rebinding.
-    expect(getMachineIdlePredicate(machine.provide({}))).toBe(predicate);
-
-    const actor = createActor(machine).start();
-    expect(predicate!(actor.getSnapshot())).toBe(true);
-    actor.send({ type: "APPROVE" });
-    expect(predicate!(actor.getSnapshot())).toBe(false);
-  });
-
-  test("fromConfig registers options.isIdle, which wins over idleTags", () => {
-    const hostPredicate = () => false;
-    const { machine } = setupAgent.fromConfig(
-      { id: "issuspended-option", idleTags: ["waiting"], ...suspensionConfig },
-      { compileSchema: ajvCompiler(), isIdle: hostPredicate },
-    );
-    expect(getMachineIdlePredicate(machine)).toBe(hostPredicate);
-  });
-
-  test("fromConfig rejects a idleTags entry that no state declares", () => {
-    expect(() =>
-      setupAgent.fromConfig(
-        {
-          id: "bad-suspended-tags",
-          schemas: { context: { type: "object", properties: {} } },
-          context: {},
-          initial: "start",
-          idleTags: ["waiting"],
-          states: { start: { type: "final" } },
-        },
-        { compileSchema: ajvCompiler() },
-      ),
-    ).toThrow(/idleTags.*'waiting'.*no state declares/s);
-  });
-
-  test("fromConfig + runAgent: idleTags settles idle without the heuristic warning", async () => {
+  test("a fromConfig wait state settles idle, then resumes to done", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const { machine } = setupAgent.fromConfig(
-        { id: "suspended-tags-run", idleTags: ["waiting"], ...suspensionConfig },
+        { id: "suspended-tags-run", ...suspensionConfig },
         { compileSchema: ajvCompiler() },
       );
 
-      const result = await runAgent(machine, { input: {}, executors: {} });
+      const result = await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: {},
+        }),
+        {
+          input: {},
+        },
+      );
       expect(result.status).toBe("idle");
       expect(warn).not.toHaveBeenCalled();
 
-      const resumed = await runAgent(machine, {
-        snapshot: result.status === "idle" ? result.snapshot : undefined,
-        event: { type: "APPROVE" },
-        executors: {},
-      });
+      const resumed = await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: {},
+        }),
+        {
+          snapshot: result.status === "idle" ? result.snapshot : undefined,
+          event: { type: "APPROVE" },
+        },
+      );
       expect(resumed.status).toBe("done");
     } finally {
       warn.mockRestore();
@@ -2942,15 +2956,19 @@ describe("decision live path (runAgent auto-delivery)", () => {
     // runAgent auto-delivers the chosen event to the invoking actor — no
     // onDone wiring. ATTACK exits `choosingMove`, so the invoke is cancelled
     // and the machine reaches `done-state`.
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide: async (): Promise<{ event: ChosenEvent }> => ({
-          event: { type: "ATTACK", target: "goblin" },
-        }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: async (): Promise<{ event: ChosenEvent }> => ({
+            event: { type: "ATTACK", target: "goblin" },
+          }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.snapshot.value).toBe("done-state");
@@ -3036,13 +3054,17 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
   test("runs to completion through runAgent with a mock decide", async () => {
     const { machine } = buildMachine();
 
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide: async () => ({ event: { type: "ATTACK", target: "goblin" } }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: async () => ({ event: { type: "ATTACK", target: "goblin" } }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.snapshot.value).toBe("attacked");

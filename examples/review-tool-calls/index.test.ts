@@ -1,10 +1,17 @@
 import { expect, test } from "vitest";
+import { z } from "zod";
 import type { ModelMessage } from "ai";
-import type { AgentTextRequest, AgentTool } from "@statelyai/agent";
+import {
+  createAgentRuntime,
+  runToQuiescence,
+  type AgentTextRequest,
+  type AgentTool,
+} from "@statelyai/agent";
 import {
   reviewToolCallsMachine,
   runReviewToolCallsExample,
   runToolCallingExample,
+  toolCallingMachine,
   type RefundCall,
 } from "./index.js";
 
@@ -118,6 +125,17 @@ test("a failing proposal request ends in `failed` without executing anything", a
   expect(result.call).toBeNull();
   expect(result.failure).toMatch(/^proposeRefund failed: /);
   expect(sent).toEqual([]);
+});
+
+test("EDIT's override field carries a format hint for generated forms", () => {
+  // A form built from the event's JSON Schema shows `description` as the
+  // field's placeholder/hint; without it the reviewer faces a bare text box.
+  const edit = reviewToolCallsMachine.schemas?.events?.EDIT as z.ZodType;
+  const schema = z.toJSONSchema(edit) as unknown as {
+    properties: { override: { description?: string } };
+  };
+  expect(schema.properties.override.description).toMatch(/^JSON object/);
+  expect(schema.properties.override.description).toContain('"amountCents"');
 });
 
 test("machine exports a runnable definition", () => {
@@ -255,4 +273,23 @@ test("a failing request ends in `failed` with the transcript so far", async () =
   expect(output.answer).toBe(null);
   // The question the human asked is still on the transcript.
   expect(output.messages).toEqual([{ role: "user", content: "What is 6 times 7?" }]);
+});
+
+test("the machine's output is the outcome, not a repeat of the answer or the transcript", async () => {
+  const executors = { generateText: toolLoop };
+  const answered = await runToQuiescence(createAgentRuntime(toolCallingMachine, { executors }), {
+    input: { question: "What is 6 times 7?" },
+  });
+  if (answered.status !== "idle") throw new Error(`Expected idle, got ${answered.status}`);
+  const ended = await runToQuiescence(createAgentRuntime(toolCallingMachine, { executors }), {
+    snapshot: answered.persist(),
+    event: { type: "END" },
+  });
+
+  if (ended.status !== "done") throw new Error(`Expected done, got ${ended.status}`);
+  // Hosts render the output; the answer was already shown at the idle turn.
+  expect(ended.output).toEqual({ status: "answered", turns: 1 });
+  expect(ended.snapshot.context.answer).toBe("6 times 7 is 42.");
+  // The transcript is still retained, in context.
+  expect(ended.snapshot.context.messages).toHaveLength(4);
 });

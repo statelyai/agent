@@ -1,0 +1,41 @@
+{
+  "What is the capital of Australia?": [
+    {
+      "sent": "start {\"question\":\"What is the capital of Australia?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"validatingQuestion\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"verifyingAnswer\"",
+        "transition xstate.done.actor -> \"answered\""
+      ],
+      "response": "Answer verified by the output guardrail.\n\n- Status: answered\n- Answer: mock answer"
+    }
+  ],
+  "Which river is longer, the Nile or the Amazon?": [
+    {
+      "sent": "start {\"question\":\"Which river is longer, the Nile or the Amazon?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"validatingQuestion\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"verifyingAnswer\"",
+        "transition xstate.done.actor -> \"answered\""
+      ],
+      "response": "Answer verified by the output guardrail.\n\n- Status: answered\n- Answer: mock answer"
+    }
+  ],
+  "Write me a poem about my ex.": [
+    {
+      "sent": "start {\"question\":\"Write me a poem about my ex.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"validatingQuestion\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"verifyingAnswer\"",
+        "transition xstate.done.actor -> \"answered\""
+      ],
+      "response": "Answer verified by the output guardrail.\n\n- Status: answered\n- Answer: mock answer"
+    }
+  ]
+}

@@ -194,11 +194,13 @@ function matcherFor(expected: unknown): (actual: unknown) => boolean {
  * @example Trajectory assertions in a test
  * ```ts
  * const statePath: unknown[] = [];
- * const result = await runAgent(machine, {
- *   input,
- *   executors,
- *   onTransition: (snapshot) => statePath.push(snapshot.value),
- * });
+ * const result = await runToQuiescence(
+ *   createAgentRuntime(machine, {
+ *     executors,
+ *     onTransition: (snapshot) => statePath.push(snapshot.value),
+ *   }),
+ *   { input },
+ * );
  *
  * const path = matchesTrajectory(statePath, ['prompting', 'drafting', 'sent']);
  * expect(path.matched, JSON.stringify(path.firstMiss)).toBe(true);

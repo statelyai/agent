@@ -6,7 +6,8 @@ import {
   eventFromInteraction,
   getInteraction,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
 } from "./index.js";
 
@@ -422,7 +423,9 @@ describe("getInteraction on a runAgent result snapshot", () => {
   });
 
   test("judges choices with the schemas setupAgent registered", async () => {
-    const result = await runAgent(machine, { input: {} });
+    const result = await runToQuiescence(createAgentRuntime(machine), {
+      input: {},
+    });
     expect(result.status).toBe("idle");
     expect(getInteraction(result.snapshot)?.events.map((event) => event.type)).toEqual([
       "PICK",

@@ -38,7 +38,8 @@ import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   createTextLogic,
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type DoneActorEventOf,
@@ -437,14 +438,18 @@ export async function runDeepResearchExample(options: RunDeepResearchOptions = {
     judge,
     onProgress,
   } = options;
-  const result = await runAgent(deepResearchMachine, {
-    input: { question },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    ...(judge ? { actors: { reflect: createReflect(judge) } } : {}),
-    ...(onProgress ? { onTransition: (snapshot) => onProgress(getStatePath(snapshot)) } : {}),
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(deepResearchMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      ...(judge ? { actors: { reflect: createReflect(judge) } } : {}),
+      ...(onProgress ? { onTransition: (snapshot) => onProgress(getStatePath(snapshot)) } : {}),
+    }),
+    {
+      input: { question },
+    },
+  );
   if (result.status !== "done") throw new Error(`Deep research did not complete: ${result.status}`);
   return result.output;
 }

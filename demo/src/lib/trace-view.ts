@@ -198,43 +198,6 @@ function stepDetail(event: unknown, context: unknown): TraceDetail | null {
   return keptEvent || keptContext ? { event: keptEvent, context: keptContext } : null;
 }
 
-/**
- * Builds a TraceStep from a live inspection `actorSnapshot` message, so the
- * chat's transition log can fill in DURING a run (the authoritative server
- * trace replaces it at settle). Lifecycle noise (`init`/`stop`) returns null.
- */
-export function liveTraceStep(
-  event: unknown,
-  stateValue: unknown,
-  at: number,
-  context?: unknown,
-): TraceStep | null {
-  const source = event && typeof event === "object" ? (event as Record<string, unknown>) : null;
-  const rawType = source?.type;
-  if (typeof rawType !== "string") return null;
-  const type = rawType.replace(/^@/, "");
-  if (type === "xstate.init" || type === "xstate.stop") return null;
-  const { label, kind } = prettifyEvent({ ...source, type } as { type: string });
-  if (kind === "system") return null;
-  const payload = summarizePayload(source ?? {});
-  // The relay attaches the whole actor to a snapshot message; the row's detail
-  // wants the step, so those two fields stay out of it (the server trace drops
-  // them the same way — see `traceDetail`).
-  const detailEvent = source
-    ? Object.fromEntries(
-        Object.entries(source).filter(([key]) => key !== "snapshot" && key !== "machine"),
-      )
-    : null;
-  return {
-    label,
-    state: stateValueLabel(stateValue),
-    payload,
-    kind,
-    at,
-    detail: stepDetail(detailEvent, context),
-  };
-}
-
 /** Derives the transition steps shown in the app panel from a trace. */
 export function traceSteps(trace: TraceEntry[]): TraceStep[] {
   return trace

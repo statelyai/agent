@@ -2,7 +2,8 @@ import { expect, test } from "vitest";
 import {
   eventFromInteraction,
   getInteraction,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
 import { createMockJudge } from "../mock-judge.js";
@@ -36,14 +37,26 @@ const actors = judgment(true);
 
 /** Start the machine and deliver the opening request as free text. */
 async function openAtReview() {
-  const opened = await runAgent(emailDrafter, { input: undefined, executors, actors });
+  const opened = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      executors,
+      actors,
+    }),
+    {
+      input: undefined,
+    },
+  );
   if (opened.status !== "idle") throw new Error(`Expected idle, got ${opened.status}`);
-  return runAgent(emailDrafter, {
-    snapshot: opened.snapshot,
-    event: eventFromInteraction(opened.snapshot, { text: "Tell the team deploys are faster." }),
-    executors,
-    actors,
-  });
+  return runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      executors,
+      actors,
+    }),
+    {
+      snapshot: opened.snapshot,
+      event: eventFromInteraction(opened.snapshot, { text: "Tell the team deploys are faster." }),
+    },
+  );
 }
 
 test("the reviewing pause renders both choices and routes free text to REQUEST_CHANGES", async () => {
@@ -57,18 +70,36 @@ test("the reviewing pause renders both choices and routes free text to REQUEST_C
   expect(interaction?.textEvent).toBe("REQUEST_CHANGES");
 });
 
+test("the draft message keeps To, Subject, and body on separate markdown paragraphs", async () => {
+  const result = await openAtReview();
+  if (result.status !== "idle") throw new Error(`Expected idle, got ${result.status}`);
+
+  // Chat hosts render messages as markdown, where a single "\n" collapses
+  // into a space; only blank lines keep the header lines apart.
+  const draftMessage = result.snapshot.context.messages.at(-1);
+  expect(draftMessage).toEqual({
+    role: "assistant",
+    content:
+      "To: team@example.com\n\nSubject: Deploy pipeline is faster\n\nHi team, deploys are twice as fast now.",
+  });
+});
+
 test("the revision budget stops rendering REQUEST_CHANGES once it is spent", async () => {
   let result = await openAtReview();
 
   for (let revision = 0; revision < MAX_REVISIONS; revision++) {
     if (result.status !== "idle") throw new Error(`Expected idle, got ${result.status}`);
     expect(getInteraction(result.snapshot)?.textEvent).toBe("REQUEST_CHANGES");
-    result = await runAgent(emailDrafter, {
-      snapshot: result.snapshot,
-      event: eventFromInteraction(result.snapshot, { text: "Shorter, please." }),
-      executors,
-      actors,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(emailDrafter, {
+        executors,
+        actors,
+      }),
+      {
+        snapshot: result.snapshot,
+        event: eventFromInteraction(result.snapshot, { text: "Shorter, please." }),
+      },
+    );
   }
 
   if (result.status !== "idle") throw new Error(`Expected idle, got ${result.status}`);
@@ -81,16 +112,28 @@ test("the revision budget stops rendering REQUEST_CHANGES once it is spent", asy
 });
 
 test("a failed request ends in `failed`, with the reason in the output", async () => {
-  const opened = await runAgent(emailDrafter, { input: undefined, executors, actors });
+  const opened = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      executors,
+      actors,
+    }),
+    {
+      input: undefined,
+    },
+  );
   if (opened.status !== "idle") throw new Error(`Expected idle, got ${opened.status}`);
 
-  const result = await runAgent(emailDrafter, {
-    snapshot: opened.snapshot,
-    event: eventFromInteraction(opened.snapshot, { text: "Anything." }),
-    executors,
-    // A judge with no scripted answers: the judgment call fails.
-    actors: { evaluatePrompt: createEvaluatePrompt(createMockJudge({}).model) },
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      executors,
+      // A judge with no scripted answers: the judgment call fails.
+      actors: { evaluatePrompt: createEvaluatePrompt(createMockJudge({}).model) },
+    }),
+    {
+      snapshot: opened.snapshot,
+      event: eventFromInteraction(opened.snapshot, { text: "Anything." }),
+    },
+  );
 
   expect(result.status).toBe("done");
   if (result.status !== "done") return;
@@ -102,20 +145,28 @@ test("SEND then END finishes with the sent email and no failure", async () => {
   const reviewing = await openAtReview();
   if (reviewing.status !== "idle") throw new Error("expected the review pause");
 
-  const sent = await runAgent(emailDrafter, {
-    snapshot: reviewing.snapshot,
-    event: eventFromInteraction(reviewing.snapshot, { type: "SEND" }),
-    executors,
-    actors,
-  });
+  const sent = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      executors,
+      actors,
+    }),
+    {
+      snapshot: reviewing.snapshot,
+      event: eventFromInteraction(reviewing.snapshot, { type: "SEND" }),
+    },
+  );
   if (sent.status !== "idle") throw new Error("expected the 'draft another?' pause");
 
-  const done = await runAgent(emailDrafter, {
-    snapshot: sent.snapshot,
-    event: eventFromInteraction(sent.snapshot, { type: "END" }),
-    executors,
-    actors,
-  });
+  const done = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      executors,
+      actors,
+    }),
+    {
+      snapshot: sent.snapshot,
+      event: eventFromInteraction(sent.snapshot, { type: "END" }),
+    },
+  );
 
   expect(done.status).toBe("done");
   if (done.status !== "done") return;
@@ -131,20 +182,31 @@ test("the prompt check asks Jev one boolean question per required detail, and th
     "*": ASSESSMENT_THRESHOLD,
   });
   const requests: string[] = [];
-  const opened = await runAgent(emailDrafter, { input: undefined, executors });
+  const opened = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      executors,
+    }),
+    {
+      input: undefined,
+    },
+  );
   if (opened.status !== "idle") throw new Error(`Expected idle, got ${opened.status}`);
 
-  const result = await runAgent(emailDrafter, {
-    snapshot: opened.snapshot,
-    event: eventFromInteraction(opened.snapshot, { text: "Tell them deploys are faster." }),
-    executors: {
-      generateText: async (request) => {
-        requests.push(request.name ?? request.model);
-        return executors.generateText(request);
+  const result = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      executors: {
+        generateText: async (request) => {
+          requests.push(request.name ?? request.model);
+          return executors.generateText(request);
+        },
       },
+      actors: { evaluatePrompt: createEvaluatePrompt(jev.model) },
+    }),
+    {
+      snapshot: opened.snapshot,
+      event: eventFromInteraction(opened.snapshot, { text: "Tell them deploys are faster." }),
     },
-    actors: { evaluatePrompt: createEvaluatePrompt(jev.model) },
-  });
+  );
 
   expect(jev.calls).toHaveLength(1);
   const call = jev.calls[0]!;
@@ -169,22 +231,34 @@ test("the prompt check asks Jev one boolean question per required detail, and th
 
 test("a complete request skips the follow-up request and goes straight to drafting", async () => {
   const requests: string[] = [];
-  const opened = await runAgent(emailDrafter, { input: undefined, executors, actors });
+  const opened = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      executors,
+      actors,
+    }),
+    {
+      input: undefined,
+    },
+  );
   if (opened.status !== "idle") throw new Error(`Expected idle, got ${opened.status}`);
 
-  const result = await runAgent(emailDrafter, {
-    snapshot: opened.snapshot,
-    event: eventFromInteraction(opened.snapshot, {
-      text: "Email team@example.com: deploys are faster.",
-    }),
-    executors: {
-      generateText: async (request) => {
-        requests.push(request.name ?? request.model);
-        return executors.generateText(request);
+  const result = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      executors: {
+        generateText: async (request) => {
+          requests.push(request.name ?? request.model);
+          return executors.generateText(request);
+        },
       },
+      actors: judgment(ASSESSMENT_THRESHOLD),
+    }),
+    {
+      snapshot: opened.snapshot,
+      event: eventFromInteraction(opened.snapshot, {
+        text: "Email team@example.com: deploys are faster.",
+      }),
     },
-    actors: judgment(ASSESSMENT_THRESHOLD),
-  });
+  );
 
   if (result.status !== "idle") throw new Error(`Expected idle, got ${result.status}`);
   expect(result.snapshot.matches("reviewing")).toBe(true);

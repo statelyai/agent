@@ -62,7 +62,13 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = {
   coder: openai("gpt-5.4-mini"),
@@ -175,9 +181,11 @@ const agentSetup = setupAgent({
     initialCode: z.string().default(""),
     maxAttempts: z.number().default(3),
   }),
+  // `summary` is Markdown: the prose trail, then the code in a fenced block. The
+  // code is not a separate output string: raw multi-line code rendered as prose
+  // collapses into one line. The helper still returns it raw (see below).
   output: z.object({
     summary: z.string(),
-    code: z.string(),
     attempts: z.number(),
     passed: z.boolean(),
     failures: z.array(z.string()),
@@ -235,6 +243,11 @@ const agentSetup = setupAgent({
 });
 
 export const codeAssistantSchemas = agentSetup.schemas;
+
+/** Code as a fenced Markdown block, so its line breaks survive rendering. */
+function fenced(code: string): string {
+  return code ? `\n\n\`\`\`js\n${code.trim()}\n\`\`\`` : "";
+}
 
 /** One line of prose for the host: what the checks said on this attempt. */
 function checkReportFor(attempt: number, total: number, result: ExecutionResult): string {
@@ -352,8 +365,9 @@ export const codeAssistantMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        summary: [context.repairSummary, context.rerunNote].filter(Boolean).join(" "),
-        code: context.code,
+        summary:
+          [context.repairSummary, context.rerunNote].filter(Boolean).join(" ") +
+          fenced(context.code),
         attempts: context.attempts,
         passed: true,
         failures: [],
@@ -364,8 +378,9 @@ export const codeAssistantMachine = agentSetup.createMachine({
     failed: {
       type: "final",
       output: ({ context }) => ({
-        summary: `Gave up after ${context.attempts} attempts. ${context.checkReport}`,
-        code: context.code,
+        summary:
+          `Gave up after ${context.attempts} attempts. ${context.checkReport}` +
+          fenced(context.code),
         attempts: context.attempts,
         passed: false,
         failures: context.failures,
@@ -388,7 +403,9 @@ export interface RunCodeAssistantOptions {
 }
 
 export interface CodeAssistantResult {
+  /** Markdown: what happened, then the final code in a ```js fence. */
   summary: string;
+  /** The final code, raw (read from context; the machine output fences it). */
   code: string;
   attempts: number;
   passed: boolean;
@@ -439,29 +456,33 @@ export async function runCodeAssistantExample(
   const notes: string[] = [];
   // Collect each prose field the moment it changes — the trail a host renders.
   const seen = new Map<string, string>();
-  const result = await runAgent(codeAssistantMachine, {
-    input: { spec, functionName, checks, initialCode, maxAttempts },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
-      for (const key of ["checkReport", "repairSummary", "rerunNote"] as const) {
-        const value = snapshot.context[key];
-        if (value && seen.get(key) !== value) {
-          seen.set(key, value);
-          notes.push(value);
+  const result = await runToQuiescence(
+    createAgentRuntime(codeAssistantMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+        for (const key of ["checkReport", "repairSummary", "rerunNote"] as const) {
+          const value = snapshot.context[key];
+          if (value && seen.get(key) !== value) {
+            seen.set(key, value);
+            notes.push(value);
+          }
         }
-      }
+      },
+    }),
+    {
+      input: { spec, functionName, checks, initialCode, maxAttempts },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Code-assistant example did not complete: ${result.status}`);
   }
-  return { ...result.output, progress, notes };
+  return { ...result.output, code: result.snapshot.context.code, progress, notes };
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.

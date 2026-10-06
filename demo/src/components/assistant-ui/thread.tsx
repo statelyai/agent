@@ -35,14 +35,7 @@ import {
   type ToolCallMessagePartComponent,
   useAuiState,
 } from "@assistant-ui/react";
-import {
-  ArrowDownIcon,
-  ArrowUpIcon,
-  CheckIcon,
-  CopyIcon,
-  MicIcon,
-  SquareIcon,
-} from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, CheckIcon, CopyIcon, MicIcon, SquareIcon } from "lucide-react";
 import {
   createContext,
   useContext,
@@ -101,6 +94,7 @@ const ThreadRoot: FC = () => {
     ComposerAfter,
     ComposerReplacement,
   } = useContext(ThreadComponentsContext);
+  const newChat = useAuiState(isNewChatView);
 
   return (
     <ThreadPrimitive.Root
@@ -118,10 +112,20 @@ const ThreadRoot: FC = () => {
         data-slot="aui_thread-viewport"
         className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
       >
-        <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-4 pt-4">
-          <AuiIf condition={isNewChatView}>
-            <Welcome />
-          </AuiIf>
+        {/* A new chat's welcome scrolls in its own region above the composer:
+            long starters (whole essays) otherwise sit under the sticky
+            composer, where a click lands on the composer instead. */}
+        <div
+          className={cn(
+            "mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-4 pt-4",
+            newChat && "min-h-0",
+          )}
+        >
+          {newChat ? (
+            <div className="aui-thread-welcome-scroll flex min-h-0 flex-1 flex-col overflow-y-auto">
+              <Welcome />
+            </div>
+          ) : null}
 
           <div data-slot="aui_message-group" className="mb-14 flex flex-col gap-y-6 empty:hidden">
             <ThreadPrimitive.Messages>{() => <ThreadMessage />}</ThreadPrimitive.Messages>
@@ -420,7 +424,6 @@ const UserMessage: FC = () => {
           <MessagePrimitive.Parts />
         </div>
       </div>
-
     </MessagePrimitive.Root>
   );
 };

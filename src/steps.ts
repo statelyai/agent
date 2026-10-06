@@ -1,11 +1,9 @@
 /**
- * The step API: the pure `(state, event) => (nextState, requests)` view of an
- * agent machine. An {@link AgentStep} is a snapshot plus the model requests
- * the machine is now waiting on; nothing here executes anything. A host
- * resolves each request however it likes ({@link executeAgentRequest},
- * `resolveDecision`, a queue, a durable workflow, a replayed log) and feeds
- * the result back with {@link resolveAgentStep} or {@link rejectAgentStep}.
- * `runAgent` is the in-process host built for the common case.
+ * Internal: the pure `(state, event) => (nextState, requests)` view of an
+ * agent machine, used by model-free simulation (`simulateAgent`) and tests.
+ * An {@link AgentStep} is a snapshot plus the model requests the machine is
+ * now waiting on; nothing here executes anything. Hosts use
+ * `createAgentRuntime`.
  * @module
  */
 import {
@@ -470,7 +468,7 @@ export async function executeAgentRequest(
 }
 
 // Throws the clear per-kind missing-executor error for a text request's mode —
-// the descriptive style runAgent uses at bind time, naming the request src.
+// the descriptive style the runtime uses at bind time, naming the request src.
 function assertTextExecutor(
   request: AgentRequest,
   executors: Partial<AgentRequestExecutors>,

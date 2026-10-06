@@ -39,11 +39,13 @@
  *   - conduct_interviews        → `interviewing` spawns one `interviewMachine` per editor;
  *                                 `collectingInterviews` reduces transcripts as each lands
  *   - ask_question              → interview `asking` (request `askQuestion`)
- *   - answer_question's search  → interview `researching` (sample-data actor)
+ *   - answer_question's search  → interview `researching` (sample-data actor; skips
+ *                                 passages this interview already cited)
  *   - answer_question           → interview `answering` (request `answerQuestion`)
  *   - route_messages            → interview `checkingTurns` (a `choice` state) + `asking`'s onDone
  *   - refine_outline            → `refiningOutline` (headings past MAX_SECTIONS are dropped, counted)
- *   - write_sections            → `writingSection` ⇄ `nextSection`, one request per heading
+ *   - write_sections            → `writingSection` ⇄ `nextSection`, one request per heading,
+ *                                 each citing only the sources `assignSources` gave it
  *   - write_article             → `writingArticle`
  *
  * Differences from LangGraph worth calling out:
@@ -55,6 +57,11 @@
  *     COUNTED in the trail, not silently truncated.
  *   - expand_topics (related-subject survey) and index_references (a vector
  *     store of cited pages) are folded away: the sample index plays both parts.
+ *   - Sources are split between sections, not shared. The sample index holds
+ *     a handful of passages per topic; handed every transcript, each section
+ *     restated the same ones. `assignSources` gives each gathered passage to
+ *     exactly one heading (the one it matches best), so no two sections cite
+ *     the same source.
  *   - A failed interview is counted, not fatal. Zero usable interviews, zero
  *     editors, or an empty outline land in `failed` with the trail so far.
  *
@@ -66,7 +73,8 @@ import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type DoneActorEventOf,
@@ -145,23 +153,74 @@ const STOP_WORDS = new Set([
   "readers",
 ]);
 
-/** Honest keyword overlap (NOT embeddings, NOT a live search API). Top 2. */
-function searchSampleIndex(input: { topic: string; question: string }): string[] {
-  const terms = new Set(
-    `${input.topic} ${input.question}`
+/** The words keyword search matches on. */
+function searchTerms(text: string): Set<string> {
+  return new Set(
+    text
       .toLowerCase()
       .split(/[^a-z]+/)
       .filter((word) => word.length > 3 && !STOP_WORDS.has(word)),
   );
+}
+
+/** How many of `query`'s search terms appear in `text`. */
+function overlap(query: string, text: string): number {
+  const haystack = text.toLowerCase();
+  return [...searchTerms(query)].filter((term) => haystack.includes(term)).length;
+}
+
+/**
+ * Honest keyword overlap (NOT embeddings, NOT a live search API). Top 2,
+ * skipping passages the interview already cited, so a follow-up question
+ * reaches new material instead of the same best match.
+ */
+export function searchSampleIndex(input: {
+  topic: string;
+  question: string;
+  exclude?: string[];
+}): string[] {
+  const excluded = new Set(input.exclude ?? []);
   const hits = SAMPLE_INDEX.map((entry) => ({
-    text: entry.text,
-    score: [...terms].filter((term) => entry.text.toLowerCase().includes(term)).length,
+    source: `${SOURCE_PREFIX}${entry.text}`,
+    score: overlap(`${input.topic} ${input.question}`, entry.text),
   }))
-    .filter((hit) => hit.score > 0)
+    .filter((hit) => hit.score > 0 && !excluded.has(hit.source))
     .sort((left, right) => right.score - left.score)
     .slice(0, 2)
-    .map((hit) => `${SOURCE_PREFIX}${hit.text}`);
+    .map((hit) => hit.source);
   return hits.length > 0 ? hits : [NO_SOURCES];
+}
+
+/**
+ * The gathered sources that share a search term with the topic. An interview
+ * search matches the editor's question too, so it can surface a passage about
+ * a neighboring subject; that passage is set aside rather than handed to a
+ * section, where it would pull the article off topic.
+ */
+export function onTopicSources(topic: string, sources: string[]): string[] {
+  return sources.filter((source) => overlap(topic, source) > 0);
+}
+
+/**
+ * Give each gathered source to exactly one heading. Each heading, in order,
+ * first takes its best-matching unclaimed source; any left over go to the
+ * heading they match best. A heading can end up with none when there are more
+ * headings than sources — better than two sections restating one passage.
+ */
+export function assignSources(headings: string[], sources: string[]): string[][] {
+  const assigned = headings.map((): string[] => []);
+  const unclaimed = [...sources];
+  const best = <T>(items: T[], score: (item: T) => number) =>
+    items.reduce((top, item, index) => (score(item) > score(items[top]!) ? index : top), 0);
+  headings.forEach((heading, index) => {
+    if (unclaimed.length === 0) return;
+    const pick = best(unclaimed, (source) => overlap(heading, source));
+    assigned[index]!.push(...unclaimed.splice(pick, 1));
+  });
+  for (const source of unclaimed) {
+    assigned[best(headings, (heading) => overlap(heading, source))]!.push(source);
+  }
+  return assigned;
 }
 
 const editorSchema = z.object({
@@ -177,6 +236,12 @@ const exchangeSchema = z.object({
   sources: z.array(z.string()),
 });
 type Exchange = z.infer<typeof exchangeSchema>;
+
+/** Distinct real passages across exchanges, in first-cited order. */
+function citedSources(exchanges: Exchange[]): string[] {
+  const all = exchanges.flatMap((exchange) => exchange.sources);
+  return [...new Set(all)].filter((source) => source !== NO_SOURCES);
+}
 
 function renderInterview(editor: Editor, exchanges: Exchange[], closing: string | null): string {
   return [
@@ -213,9 +278,18 @@ const interviewSetup = setupAgent({
   context: interviewContextSchema,
   input: z.object({ topic: z.string(), editor: editorSchema }),
   // `failed` marks an interview cut short by an error; its exchanges still count.
-  output: z.object({ transcript: z.string(), exchanges: z.number(), failed: z.boolean() }),
+  output: z.object({
+    transcript: z.string(),
+    exchanges: z.number(),
+    failed: z.boolean(),
+    /** Distinct passages the interview cited (no "nothing matched" placeholder). */
+    sources: z.array(z.string()),
+  }),
   actors: {
-    searchSources: createAsyncLogic<string[], { topic: string; question: string }>({
+    searchSources: createAsyncLogic<
+      string[],
+      { topic: string; question: string; exclude: string[] }
+    >({
       run: async ({ input }) => searchSampleIndex(input),
     }),
   },
@@ -273,6 +347,7 @@ export const interviewMachine = interviewSetup.createMachine({
     ].join("\n"),
     exchanges: context.exchanges.length,
     failed: context.failure !== null,
+    sources: citedSources(context.exchanges),
   }),
   initial: "asking",
   states: {
@@ -298,7 +373,11 @@ export const interviewMachine = interviewSetup.createMachine({
     researching: {
       invoke: {
         src: "searchSources",
-        input: ({ context }) => ({ topic: context.topic, question: context.question ?? "" }),
+        input: ({ context }) => ({
+          topic: context.topic,
+          question: context.question ?? "",
+          exclude: citedSources(context.exchanges),
+        }),
         onDone: ({ output }) => ({ target: "answering", context: { sources: output } }),
         onError: ({ event }) => ({
           target: "failed",
@@ -361,6 +440,9 @@ const contextSchema = z.object({
   // Transcripts keyed by spawned interview id, as each one lands.
   transcripts: z.record(z.string(), z.string()),
   exchanges: z.number(),
+  // Distinct passages the interviews cited, and their split across headings.
+  sources: z.array(z.string()),
+  sectionSources: z.array(z.array(z.string())),
   failedInterviews: z.array(z.string()),
   // Interviews spawned, and interviews settled (finished or errored).
   expected: z.number(),
@@ -374,9 +456,15 @@ const contextSchema = z.object({
 });
 type StormContext = z.infer<typeof contextSchema>;
 
-/** The plain-language run trail, rendered from counts in context. */
+/**
+ * The plain-language run trail, rendered from counts in context. One line of
+ * sentences, not newline-separated fields: a host that renders it as markdown
+ * (in a list item, say) folds bare newlines into spaces, running the fields
+ * together.
+ */
 function renderTrail(context: StormContext): string {
   const interviews = Object.keys(context.transcripts).length;
+  const offTopic = context.sources.length - onTopicSources(context.topic, context.sources).length;
   return [
     `Outline: ${context.outline.length} heading(s)` +
       (context.droppedHeadings ? ` (${context.droppedHeadings} dropped past ${MAX_SECTIONS})` : ""),
@@ -384,9 +472,12 @@ function renderTrail(context: StormContext): string {
       (context.droppedEditors ? ` (${context.droppedEditors} dropped past ${MAX_EDITORS})` : ""),
     `Interviews: ${interviews} (${context.exchanges} exchange(s)` +
       (context.failedInterviews.length ? `, ${context.failedInterviews.length} failed)` : ")"),
+    `Sources: ${context.sources.length}` + (offTopic ? ` (${offTopic} off-topic set aside)` : ""),
     `Sections written: ${context.sections.length}`,
-    ...(context.failure ? [`Stopped: ${context.failure}`] : []),
-  ].join("\n");
+    ...(context.failure ? [`Stopped: ${context.failure.replace(/[.!?]+$/, "")}`] : []),
+  ]
+    .map((part) => `${part}.`)
+    .join(" ");
 }
 
 const outputSchema = z.object({
@@ -396,6 +487,27 @@ const outputSchema = z.object({
   sections: z.number(),
   trail: z.string(),
 });
+
+/**
+ * The section writer's instructions. Each source is one sentence, so a
+ * section built from them has to explain them — how they bear on the heading —
+ * rather than restate one and stop.
+ */
+export const WRITE_SECTION_SYSTEM = [
+  "Write one article section under the heading, in 2–4 sentences, using ONLY facts from " +
+    "the sources listed for it.",
+  "Use EVERY listed source that is about the topic, and cite each inline as [sample source]. " +
+    "Explain what each fact means for the heading: how it works, why it matters, how the " +
+    "facts connect. Do not add facts the sources do not state.",
+  "Stay on the heading and the topic. Leave out a source that is about a different subject " +
+    "entirely; never mention it.",
+  'Cover every part of the heading. When it names several things ("Advantages and ' +
+    'Limitations", "Risks and Defenses"), address each one; if the sources say nothing about ' +
+    "one part, say so in one sentence instead of skipping it.",
+  "The other sections cite other sources, so do not cover their headings.",
+  "If no sources are listed, or none is about the topic, write one sentence saying the " +
+    "sample sources do not cover this heading.",
+].join(" ");
 
 const agentSetup = setupAgent({
   models,
@@ -410,7 +522,10 @@ const agentSetup = setupAgent({
         output: z.object({ outline: z.array(z.string()) }),
       },
       model: "writer",
-      system: "Draft a Wikipedia-style outline for the topic: three to five section headings.",
+      system:
+        "Draft a Wikipedia-style outline for the topic: three to five section headings. " +
+        "Every heading is about the topic itself; no generic filler headings and no " +
+        "headings about neighboring subjects.",
       prompt: ({ input }) => `Topic: ${input.topic}`,
     },
     choosePerspectives: {
@@ -436,7 +551,9 @@ const agentSetup = setupAgent({
       model: "writer",
       system:
         "Refine the outline using what the interviews found. Keep headings the interviews can " +
-        "support; drop the rest. Return section headings only.",
+        "support; drop the rest. Stay on the topic: an interview detail about a different " +
+        'subject gets no heading. A heading that names two things ("Advantages and ' +
+        'Limitations") only stays if the interviews support both. Return section headings only.',
       prompt: ({ input }) =>
         [
           `Topic: ${input.topic}`,
@@ -449,16 +566,21 @@ const agentSetup = setupAgent({
         input: z.object({
           topic: z.string(),
           heading: z.string(),
-          interviews: z.array(z.string()),
+          /** This heading's share of the sources — no other section gets them. */
+          sources: z.array(z.string()),
+          otherHeadings: z.array(z.string()),
         }),
         output: z.object({ section: z.string() }),
       },
       model: "writer",
-      system:
-        "Write one article section under the heading, using ONLY facts from the interviews. " +
-        "Cite sources inline as [sample source]. At most one paragraph.",
+      system: WRITE_SECTION_SYSTEM,
       prompt: ({ input }) =>
-        `Topic: ${input.topic}\nHeading: ${input.heading}\n\nInterviews:\n${input.interviews.join("\n\n")}`,
+        [
+          `Topic: ${input.topic}`,
+          `Heading: ${input.heading}`,
+          `Other sections: ${input.otherHeadings.join("; ") || "(none)"}`,
+          `Sources:\n${input.sources.join("\n") || "(none)"}`,
+        ].join("\n\n"),
     },
     writeArticle: {
       schemas: {
@@ -470,8 +592,10 @@ const agentSetup = setupAgent({
       },
       model: "writer",
       system:
-        "Assemble the sections into one article with a short lead paragraph. Keep each section's " +
-        "heading and citations. Add no new facts.",
+        "Assemble the sections into one article with a short lead paragraph. The lead " +
+        "summarizes, in two or three sentences, what the sections say about the topic, and " +
+        "nothing else: leave out any detail that is not about the topic. Keep each section's " +
+        "heading, text, and citations. Add no new facts.",
       prompt: ({ input }) =>
         [
           `Topic: ${input.topic}`,
@@ -492,6 +616,8 @@ export const stormWriterMachine = agentSetup.createMachine({
     droppedEditors: 0,
     transcripts: {},
     exchanges: 0,
+    sources: [],
+    sectionSources: [],
     failedInterviews: [],
     expected: 0,
     settled: 0,
@@ -574,6 +700,7 @@ export const stormWriterMachine = agentSetup.createMachine({
               ? { ...context.transcripts, [actorId]: output.transcript }
               : context.transcripts,
             exchanges: context.exchanges + output.exchanges,
+            sources: [...new Set([...context.sources, ...output.sources])],
             failedInterviews: output.failed
               ? [...context.failedInterviews, actorId]
               : context.failedInterviews,
@@ -629,7 +756,17 @@ export const stormWriterMachine = agentSetup.createMachine({
       choice: ({ context }) =>
         context.outline.length === 0
           ? { target: "failed", context: { failure: "The refined outline is empty." } }
-          : { target: "writingSection", context: { sectionIndex: 0, sections: [] } },
+          : {
+              target: "writingSection",
+              context: {
+                sectionIndex: 0,
+                sections: [],
+                sectionSources: assignSources(
+                  context.outline,
+                  onTopicSources(context.topic, context.sources),
+                ),
+              },
+            },
     },
     writingSection: {
       invoke: {
@@ -637,7 +774,8 @@ export const stormWriterMachine = agentSetup.createMachine({
         input: ({ context }) => ({
           topic: context.topic,
           heading: context.outline[context.sectionIndex] ?? "",
-          interviews: Object.values(context.transcripts),
+          sources: context.sectionSources[context.sectionIndex] ?? [],
+          otherHeadings: context.outline.filter((_, index) => index !== context.sectionIndex),
         }),
         onDone: ({ context, output }) => ({
           target: "nextSection",
@@ -722,17 +860,21 @@ export async function runStormWriterExample(
 ): Promise<StormWriterResult> {
   const { topic = "state machines for AI agents", generateText, onProgress } = options;
   const progress: string[] = [];
-  const result = await runAgent(stormWriterMachine, {
-    input: { topic },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(stormWriterMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { topic },
     },
-  });
+  );
   if (result.status !== "done") {
     throw new Error(`STORM writer example did not complete: ${result.status}`);
   }

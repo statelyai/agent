@@ -1,0 +1,455 @@
+{
+  "Full game (20 questions)": [
+    {
+      "sent": "start {\"questionsRemaining\":20}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition ASK -> \"awaitingAnswer\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "mock question",
+        "events": [
+          "ANSWER_YES",
+          "ANSWER_NO",
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER_YES -> \"deciding\"",
+        "transition GUESS -> \"awaitingGuessFeedback\""
+      ],
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
+      "idle": {
+        "prompt": "My guess is mock guess. Was I right?",
+        "events": [
+          "GUESS_RIGHT",
+          "GUESS_WRONG",
+          "GUESS_FEEDBACK"
+        ],
+        "textEvent": "GUESS_FEEDBACK.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"GUESS_RIGHT\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingGuessFeedback\"",
+        "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Do you want to play another round?",
+        "events": [
+          "PLAY_AGAIN_YES",
+          "PLAY_AGAIN_NO",
+          "PLAY_AGAIN"
+        ],
+        "textEvent": "PLAY_AGAIN.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PLAY_AGAIN_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingPlayAgain\"",
+        "transition PLAY_AGAIN_YES -> \"deciding\"",
+        "transition ASK -> \"awaitingAnswer\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "mock question",
+        "events": [
+          "ANSWER_YES",
+          "ANSWER_NO",
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER_YES -> \"deciding\"",
+        "transition GUESS -> \"awaitingGuessFeedback\""
+      ],
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
+      "idle": {
+        "prompt": "My guess is mock guess. Was I right?",
+        "events": [
+          "GUESS_RIGHT",
+          "GUESS_WRONG",
+          "GUESS_FEEDBACK"
+        ],
+        "textEvent": "GUESS_FEEDBACK.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"GUESS_RIGHT\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingGuessFeedback\"",
+        "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Do you want to play another round?",
+        "events": [
+          "PLAY_AGAIN_YES",
+          "PLAY_AGAIN_NO",
+          "PLAY_AGAIN"
+        ],
+        "textEvent": "PLAY_AGAIN.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PLAY_AGAIN_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingPlayAgain\"",
+        "transition PLAY_AGAIN_YES -> \"deciding\"",
+        "transition ASK -> \"awaitingAnswer\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "mock question",
+        "events": [
+          "ANSWER_YES",
+          "ANSWER_NO",
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER_YES -> \"deciding\"",
+        "transition GUESS -> \"awaitingGuessFeedback\""
+      ],
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
+      "idle": {
+        "prompt": "My guess is mock guess. Was I right?",
+        "events": [
+          "GUESS_RIGHT",
+          "GUESS_WRONG",
+          "GUESS_FEEDBACK"
+        ],
+        "textEvent": "GUESS_FEEDBACK.rawAnswer"
+      }
+    }
+  ],
+  "Short game (10 questions)": [
+    {
+      "sent": "start {\"questionsRemaining\":10}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition ASK -> \"awaitingAnswer\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "mock question",
+        "events": [
+          "ANSWER_YES",
+          "ANSWER_NO",
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER_YES -> \"deciding\"",
+        "transition GUESS -> \"awaitingGuessFeedback\""
+      ],
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
+      "idle": {
+        "prompt": "My guess is mock guess. Was I right?",
+        "events": [
+          "GUESS_RIGHT",
+          "GUESS_WRONG",
+          "GUESS_FEEDBACK"
+        ],
+        "textEvent": "GUESS_FEEDBACK.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"GUESS_RIGHT\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingGuessFeedback\"",
+        "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Do you want to play another round?",
+        "events": [
+          "PLAY_AGAIN_YES",
+          "PLAY_AGAIN_NO",
+          "PLAY_AGAIN"
+        ],
+        "textEvent": "PLAY_AGAIN.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PLAY_AGAIN_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingPlayAgain\"",
+        "transition PLAY_AGAIN_YES -> \"deciding\"",
+        "transition ASK -> \"awaitingAnswer\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "mock question",
+        "events": [
+          "ANSWER_YES",
+          "ANSWER_NO",
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER_YES -> \"deciding\"",
+        "transition GUESS -> \"awaitingGuessFeedback\""
+      ],
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
+      "idle": {
+        "prompt": "My guess is mock guess. Was I right?",
+        "events": [
+          "GUESS_RIGHT",
+          "GUESS_WRONG",
+          "GUESS_FEEDBACK"
+        ],
+        "textEvent": "GUESS_FEEDBACK.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"GUESS_RIGHT\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingGuessFeedback\"",
+        "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Do you want to play another round?",
+        "events": [
+          "PLAY_AGAIN_YES",
+          "PLAY_AGAIN_NO",
+          "PLAY_AGAIN"
+        ],
+        "textEvent": "PLAY_AGAIN.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PLAY_AGAIN_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingPlayAgain\"",
+        "transition PLAY_AGAIN_YES -> \"deciding\"",
+        "transition ASK -> \"awaitingAnswer\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "mock question",
+        "events": [
+          "ANSWER_YES",
+          "ANSWER_NO",
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER_YES -> \"deciding\"",
+        "transition GUESS -> \"awaitingGuessFeedback\""
+      ],
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
+      "idle": {
+        "prompt": "My guess is mock guess. Was I right?",
+        "events": [
+          "GUESS_RIGHT",
+          "GUESS_WRONG",
+          "GUESS_FEEDBACK"
+        ],
+        "textEvent": "GUESS_FEEDBACK.rawAnswer"
+      }
+    }
+  ],
+  "Hard mode (5 questions)": [
+    {
+      "sent": "start {\"questionsRemaining\":5}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition ASK -> \"awaitingAnswer\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "mock question",
+        "events": [
+          "ANSWER_YES",
+          "ANSWER_NO",
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER_YES -> \"deciding\"",
+        "transition GUESS -> \"awaitingGuessFeedback\""
+      ],
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
+      "idle": {
+        "prompt": "My guess is mock guess. Was I right?",
+        "events": [
+          "GUESS_RIGHT",
+          "GUESS_WRONG",
+          "GUESS_FEEDBACK"
+        ],
+        "textEvent": "GUESS_FEEDBACK.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"GUESS_RIGHT\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingGuessFeedback\"",
+        "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Do you want to play another round?",
+        "events": [
+          "PLAY_AGAIN_YES",
+          "PLAY_AGAIN_NO",
+          "PLAY_AGAIN"
+        ],
+        "textEvent": "PLAY_AGAIN.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PLAY_AGAIN_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingPlayAgain\"",
+        "transition PLAY_AGAIN_YES -> \"deciding\"",
+        "transition ASK -> \"awaitingAnswer\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "mock question",
+        "events": [
+          "ANSWER_YES",
+          "ANSWER_NO",
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER_YES -> \"deciding\"",
+        "transition GUESS -> \"awaitingGuessFeedback\""
+      ],
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
+      "idle": {
+        "prompt": "My guess is mock guess. Was I right?",
+        "events": [
+          "GUESS_RIGHT",
+          "GUESS_WRONG",
+          "GUESS_FEEDBACK"
+        ],
+        "textEvent": "GUESS_FEEDBACK.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"GUESS_RIGHT\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingGuessFeedback\"",
+        "transition GUESS_RIGHT -> \"awaitingPlayAgain\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Do you want to play another round?",
+        "events": [
+          "PLAY_AGAIN_YES",
+          "PLAY_AGAIN_NO",
+          "PLAY_AGAIN"
+        ],
+        "textEvent": "PLAY_AGAIN.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"PLAY_AGAIN_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingPlayAgain\"",
+        "transition PLAY_AGAIN_YES -> \"deciding\"",
+        "transition ASK -> \"awaitingAnswer\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "mock question",
+        "events": [
+          "ANSWER_YES",
+          "ANSWER_NO",
+          "ANSWER"
+        ],
+        "textEvent": "ANSWER.rawAnswer"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER_YES\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER_YES -> \"deciding\"",
+        "transition GUESS -> \"awaitingGuessFeedback\""
+      ],
+      "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
+      "idle": {
+        "prompt": "My guess is mock guess. Was I right?",
+        "events": [
+          "GUESS_RIGHT",
+          "GUESS_WRONG",
+          "GUESS_FEEDBACK"
+        ],
+        "textEvent": "GUESS_FEEDBACK.rawAnswer"
+      }
+    }
+  ]
+}

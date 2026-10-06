@@ -31,8 +31,9 @@
  *                              dependencies are the `$N` references in its
  *                              args — parsed, not declared
  *   - (implicit) plan parse  → `validatingPlan`, a choice state: the plan is
- *                              non-empty, at most `MAX_TASKS` long, and every
- *                              `$N` names an EARLIER position
+ *                              non-empty, at most `MAX_TASKS` long, every
+ *                              `$N` names an EARLIER position, and the plan
+ *                              USES its results (see below)
  *   - task fetching unit     → `dispatching` + `collecting`: `dispatching`
  *                              spawns every task whose dependencies have
  *                              landed as one `runTool` child (one "wave");
@@ -52,6 +53,14 @@
  *     scheduler waiting on it; here an invalid plan is a transition back to
  *     `planning` with the problem as feedback, and it spends the same replan
  *     budget as a joiner replan.
+ *   - A plan must wire its results through `$N`. A plan whose tasks never
+ *     reference each other runs as one wave, so a `math(1 - 2)` after two
+ *     searches computes on made-up numbers and a `finish(State the answer
+ *     using task 3)` closes with an instruction instead of an answer. Here a
+ *     `math` task after a search must reference a `$N`, and `finish` (last
+ *     task only) must state the answer with `$N` for the values it uses.
+ *     Either mistake is an invalid plan, replanned with the problem as
+ *     feedback.
  *   - Waves are recorded. Every spawned task carries the wave it started in
  *     (`schedule[].wave`), so "these two searches ran at the same time and
  *     the math waited for both" is data you can assert on, not a log line.
@@ -69,6 +78,10 @@
  *   - `math` is a hand-written recursive-descent evaluator over numbers,
  *     `+ - * /` and parentheses. No `eval`, no `Function`.
  *   - `finish` echoes its (substituted) argument: the plan's closing step.
+ *   - Units travel with values. A search result carries its unit; a `math`
+ *     result that only adds or subtracts same-unit values inherits it; and
+ *     `$N` in `finish` expands to the value with its unit, so an answer reads
+ *     "1.1 trillion USD", not a bare "1.1". `math` still gets bare numbers.
  *
  * Dual-mode: `runLlmCompilerExample(options?)` takes an injectable
  * `generateText` (tests pass scripted answers; no API key); the direct run
@@ -82,7 +95,8 @@ import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type DoneActorEventOf,
@@ -124,8 +138,16 @@ const METRIC_WORDS: Record<"population" | "gdp", string[]> = {
   gdp: ["gdp", "economy", "economic output"],
 };
 
-/** A tool call's result: the labeled observation and the bare value `$N` stands for. */
-const toolResultSchema = z.object({ observation: z.string(), value: z.string() });
+/**
+ * A tool call's result: the labeled observation, the bare value `$N` stands
+ * for in `math`, and the value's unit (`trillion USD`), which `$N` carries
+ * into `finish` so the answer keeps it.
+ */
+const toolResultSchema = z.object({
+  observation: z.string(),
+  value: z.string(),
+  unit: z.string().nullable(),
+});
 type ToolResult = z.infer<typeof toolResultSchema>;
 
 /** `search`: every sample fact whose subject and metric the query names. */
@@ -140,6 +162,7 @@ function searchFacts(query: string): ToolResult {
     return {
       observation: `[sample search] No sample fact matches "${query}".`,
       value: "unknown",
+      unit: null,
     };
   }
   return {
@@ -151,6 +174,7 @@ function searchFacts(query: string): ToolResult {
       )
       .join("; "),
     value: String(hits[0]!.value),
+    unit: hits[0]!.unit,
   };
 }
 
@@ -205,16 +229,21 @@ function formatNumber(value: number): string {
 
 /**
  * One scheduled tool call. A plain actor, spawned once per task; the machine
- * never waits on it by name, it lands via `xstate.done.actor`.
+ * never waits on it by name, it lands via `xstate.done.actor`. `unit` is the
+ * unit a `math` result inherits (see `mathUnit`), decided at spawn time.
  */
-export const runTool = createAsyncLogic<ToolResult, { tool: Tool; args: string }>({
+export const runTool = createAsyncLogic<
+  ToolResult,
+  { tool: Tool; args: string; unit: string | null }
+>({
   run: async ({ input }) => {
     if (input.tool === "search") return searchFacts(input.args);
     if (input.tool === "math") {
       const value = formatNumber(evaluateArithmetic(input.args));
-      return { observation: `[math] ${input.args} = ${value}`, value };
+      const withUnit = input.unit ? `${value} ${input.unit}` : value;
+      return { observation: `[math] ${input.args} = ${withUnit}`, value, unit: input.unit };
     }
-    return { observation: `[finish] ${input.args}`, value: input.args };
+    return { observation: `[finish] ${input.args}`, value: input.args, unit: null };
   },
 });
 
@@ -279,7 +308,12 @@ export function dependenciesOf(task: Task): number[] {
   return [...new Set([...task.args.matchAll(PLACEHOLDER)].map((match) => Number(match[1])))];
 }
 
-/** What is wrong with a plan, or `null` when it is a valid DAG. */
+/**
+ * What is wrong with a plan, or `null` when it is a valid DAG that uses its
+ * results: every `$N` points backward, a `math` task after a search computes
+ * on `$N` results rather than literal stand-ins, and `finish` (last only)
+ * states the answer with `$N` for the values it uses.
+ */
 export function planProblem(tasks: Task[]): string | null {
   if (tasks.length === 0) return "the plan is empty";
   if (tasks.length > MAX_TASKS) {
@@ -287,9 +321,30 @@ export function planProblem(tasks: Task[]): string | null {
   }
   for (const [index, task] of tasks.entries()) {
     const position = index + 1;
-    const bad = dependenciesOf(task).find((id) => id < 1 || id >= position);
+    const dependencies = dependenciesOf(task);
+    const bad = dependencies.find((id) => id < 1 || id >= position);
     if (bad !== undefined) {
       return `task ${position} references $${bad}, which is not an earlier task`;
+    }
+    const earlier = tasks.slice(0, index);
+    if (
+      task.tool === "math" &&
+      dependencies.length === 0 &&
+      earlier.some((other) => other.tool === "search")
+    ) {
+      return (
+        `task ${position} math(${task.args}) uses no $N result although it follows a search; ` +
+        "write $N for each searched value instead of a literal number"
+      );
+    }
+    if (task.tool === "finish") {
+      if (position !== tasks.length) return `task ${position} is finish, but finish must be last`;
+      if (earlier.length > 0 && (dependencies.length === 0 || /\btask\s*\d/i.test(task.args))) {
+        return (
+          `task ${position} finish(${task.args}) is an instruction, not an answer; state the ` +
+          "answer itself with $N for each result it uses"
+        );
+      }
     }
   }
   return null;
@@ -322,12 +377,36 @@ function allLanded(context: CompilerContext): boolean {
   );
 }
 
-/** Replaces `$N` with task N's landed value. */
-function substitute(args: string, scheduled: Scheduled[]): string {
-  return args.replace(PLACEHOLDER, (match, id: string) => {
-    const entry = scheduled.find((candidate) => candidate.taskId === Number(id));
-    return entry?.result?.value ?? match;
+/**
+ * Replaces `$N` with task N's landed value. With `units`, the value keeps its
+ * unit (`1.1 trillion USD`) unless the args already spell it out right after
+ * the `$N` — so `finish` states the answer with units, and `math` gets bare
+ * numbers.
+ */
+function substitute(args: string, scheduled: Scheduled[], units = false): string {
+  return args.replace(PLACEHOLDER, (match, id: string, offset: number) => {
+    const result = scheduled.find((candidate) => candidate.taskId === Number(id))?.result;
+    if (!result) return match;
+    const unit = units ? result.unit : null;
+    const rest = args.slice(offset + match.length).trimStart();
+    return unit && !rest.startsWith(unit) ? `${result.value} ${unit}` : result.value;
   });
+}
+
+/**
+ * The unit a `math` result inherits: its inputs' shared unit when it only adds
+ * and subtracts them (a sum of trillions is trillions). A product, ratio or
+ * percentage has no single inherited unit, so it gets none.
+ */
+function mathUnit(task: Task, scheduled: Scheduled[]): string | null {
+  if (/[*/]/.test(task.args)) return null;
+  const units = new Set(
+    dependenciesOf(task).map(
+      (id) => scheduled.find((entry) => entry.taskId === id)?.result?.unit ?? null,
+    ),
+  );
+  const [unit] = [...units];
+  return units.size === 1 && unit ? unit : null;
 }
 
 const TASK_PREFIX = "task-";
@@ -413,7 +492,12 @@ const agentSetup = setupAgent({
         "parentheses; finish(answer) closes the plan. Tasks are numbered by position: the " +
         "first is 1, the second 2, and so on. Write $N in a task's args to use task N's " +
         "result; a task may only reference earlier tasks. Tasks that reference nothing run " +
-        `in parallel, so keep independent lookups independent. At most ${MAX_TASKS} tasks.`,
+        "in parallel, so keep independent lookups independent. A math task over searched " +
+        "values must use $N for them (math($1 - $2)), never literal stand-ins. finish, if " +
+        "used, is the last task and its args are the final answer itself with $N for the " +
+        "values (finish(Japan's GDP is $3 larger than France's.)), never an instruction; " +
+        "$N in finish expands to the value WITH its unit (1.1 trillion USD). " +
+        `At most ${MAX_TASKS} tasks.`,
       prompt: ({ input }) =>
         [
           `Question: ${input.question}`,
@@ -430,8 +514,10 @@ const agentSetup = setupAgent({
       model: "compiler",
       system:
         "You are the joiner of an LLMCompiler. Read the tool observations. If they answer the " +
-        "question, choose action 'finish' and write the answer. Otherwise choose 'replan' and " +
-        "say in feedback what the next plan must do differently. Use only the observations.",
+        "question, choose action 'finish' and write the answer as a full sentence. Every " +
+        "number in the answer carries its unit from the observations (trillion USD, million " +
+        "people, %); never state a bare number. Otherwise choose 'replan' and say in " +
+        "feedback what the next plan must do differently. Use only the observations.",
       prompt: ({ input }) => `Question: ${input.question}\n\nObservations:\n${input.observations}`,
     },
   },
@@ -515,13 +601,18 @@ export const llmCompilerMachine = agentSetup.createMachine({
           taskId: task.id,
           wave,
           tool: task.tool,
-          args: substitute(task.args, scheduled),
+          args: substitute(task.args, scheduled, task.tool === "finish"),
           result: null,
         }));
         for (const entry of launched) {
+          const task = context.tasks[entry.taskId - 1]!;
           enq.spawn(actors.runTool, {
             id: taskActorId(entry.plan, entry.taskId),
-            input: { tool: entry.tool, args: entry.args },
+            input: {
+              tool: entry.tool,
+              args: entry.args,
+              unit: entry.tool === "math" ? mathUnit(task, scheduled) : null,
+            },
           });
         }
         return { context: { wave, schedule: [...context.schedule, ...launched] } };
@@ -550,6 +641,7 @@ export const llmCompilerMachine = agentSetup.createMachine({
           const schedule = landResult(context, actorId, {
             observation: `[tool error] ${message}`,
             value: "error",
+            unit: null,
           });
           if (schedule === null) return undefined;
           const next = { ...context, schedule };
@@ -665,17 +757,21 @@ export async function runLlmCompilerExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runAgent(llmCompilerMachine, {
-    input: { question },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(llmCompilerMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { question },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`LLMCompiler example did not complete: ${result.status}`);

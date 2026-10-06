@@ -8,8 +8,6 @@ import {
   describeIdle,
   describeMachineInput,
   jsonSchemaOf,
-  renderIdleWork,
-  renderOutput,
   runSignal,
   smallEvent,
   traceDetail,
@@ -20,8 +18,10 @@ import {
   schemaFields,
   schemaNeedsPayload,
   singleStringField,
+  textRouting,
   type Json,
 } from "./machine-ui";
+import { renderIdleWork, renderOutput } from "./render-value";
 
 describe("accepted-event descriptors (unified chat)", () => {
   test("refund idle carries interaction hints and no-payload buttons", async () => {
@@ -58,6 +58,9 @@ describe("accepted-event descriptors (unified chat)", () => {
     expect(fields?.map((field) => field.name)).toEqual(["reason"]);
     // Exactly one accepted event takes a single string → free text maps to it.
     expect(result.idle!.textEvent).toEqual({ type: "REJECT", field: "reason" });
+    // With APPROVE on offer too, text is not sent as REJECT directly: Jev
+    // chooses, so "looks good" is not sent as a rejection reason.
+    expect(textRouting(result.idle!)).toBe("interpret");
     // No custom renderer declared on that state.
     expect(result.idle!.component).toBeNull();
   });
@@ -176,7 +179,7 @@ describe("run output rendering", () => {
     });
     expect(text.startsWith("The request names")).toBe(true);
     expect(text).toContain("Queue: billing");
-    expect(text).toContain("Confident: true");
+    expect(text).toContain("Confident: yes");
     expect(text).not.toContain("```");
   });
 
@@ -193,7 +196,7 @@ describe("run output rendering", () => {
     ]);
   });
 
-  test("nested output fields render as fenced JSON instead of vanishing", () => {
+  test("nested output fields render as labeled fields instead of vanishing", () => {
     const text = renderOutput({
       answer: "Refund issued for the damaged order.",
       amount: 45,
@@ -202,12 +205,13 @@ describe("run output rendering", () => {
     expect(text.startsWith("Refund issued")).toBe(true);
     expect(text).toContain("- Amount: 45");
     expect(text).toContain("**Details**");
-    expect(text).toContain('"orderId": "ORD-1"');
+    expect(text).toContain("**Order id**: ORD-1");
+    expect(text).not.toContain("```");
   });
 
-  test("plain strings and non-string objects are unchanged", () => {
+  test("plain strings pass through; primitive-only objects list their fields", () => {
     expect(renderOutput("done")).toBe("done");
-    expect(renderOutput({ score: 9 })).toContain("```json");
+    expect(renderOutput({ score: 9 })).toBe("- Score: 9");
   });
 });
 
@@ -258,7 +262,7 @@ describe("idle work rendering (changed context surfaces before approval)", () =>
     expect(multi.indexOf("It counts rows.")).toBeLessThan(multi.indexOf("SELECT 1"));
   });
 
-  test("strings lead, small objects follow as JSON, noise is skipped", () => {
+  test("strings lead, small objects follow as fields, noise is skipped", () => {
     const text = renderIdleWork({ answer: "Jupiter", board: { turn: 2 }, count: 3, empty: "" }, [
       "board",
       "answer",
@@ -266,8 +270,8 @@ describe("idle work rendering (changed context surfaces before approval)", () =>
       "empty",
     ])!;
     // The prose answer outranks the more recently changed object.
-    expect(text.indexOf("Jupiter")).toBeLessThan(text.indexOf("```json"));
-    expect(text).toContain('"turn": 2');
+    expect(text.indexOf("Jupiter")).toBeLessThan(text.indexOf("**Board**"));
+    expect(text).toContain("**Turn**: 2");
     expect(text).not.toContain("Count");
     expect(renderIdleWork({ n: 1 }, ["n"])).toBeNull();
     expect(renderIdleWork({ big: "x".repeat(9000) }, ["big"])).toContain("…");

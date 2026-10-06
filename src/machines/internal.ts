@@ -13,7 +13,7 @@ import type { AgentTextResult } from "../text-logic.js";
 
 /**
  * The machine type a preset factory returns: its context, event union, input
- * and output are all concrete, so callers get typed `runAgent` input and
+ * and output are all concrete, so callers get typed run input and
  * output instead of `AnyStateMachine`. The remaining slots (children, state
  * value/tags/config, source maps) are left permissive — a preset builds its
  * states dynamically, so there is no literal state schema to infer.
@@ -143,7 +143,7 @@ export interface PresetRequestEntry {
 export interface PresetMachineEntry {
   /** What this entry is for. Shown to the routing/supervising model. */
   description?: string;
-  /** The child machine to invoke. Registered as an actor source, so `runAgent` binds its executors. */
+  /** The child machine to invoke. Registered as an actor source, so the runtime binds its executors. */
   machine: AnyStateMachine;
   /** Builds the child's `input`. Defaults to `{ prompt }` (`{ message }` for handoff). */
   input?: (args: { prompt: string }) => unknown;

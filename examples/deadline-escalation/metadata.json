@@ -1,6 +1,6 @@
 {
   "name": "deadline-escalation",
-  "title": "Approval with a host-owned deadline",
+  "title": "Approval with a deadline timer",
   "kind": "pattern",
   "origin": {
     "type": "adapted",
@@ -9,14 +9,16 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Persist an approval wait and resume with a correlated scheduler expiry; stale and late approvals cannot pass the machine guard. Requires a host clock and scheduler; the CLI drafts with a real model (OPENAI_API_KEY) and simulates one expiry delivery."
+    "purpose": "An approval wait with an XState `after` deadline. In-process, the loop waits for it; with host-owned timers, the run settles, the host schedules the deadline durably, and delivers it to a resumed run. Approval and expiry race inside the machine, and a stale approval never passes the guard."
   },
   "starters": [
     {
-      "requestId": "proposal-1",
-      "task": "Schedule maintenance",
-      "deadline": 1000
+      "label": "Schedule maintenance — 30s to approve",
+      "input": {
+        "requestId": "proposal-1",
+        "task": "Schedule maintenance",
+        "windowMs": 30000
+      }
     }
-  ],
-  "manual": true
+  ]
 }

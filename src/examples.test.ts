@@ -14,7 +14,7 @@ import { createRateJoke } from "../examples/joke/index.js";
 // The examples' repo-internal judge double: an AI SDK evaluation model with
 // scripted answers keyed by question id.
 import { createMockJudge } from "../examples/mock-judge.js";
-import { runAgent, type AgentTextRequest } from "./index.js";
+import { createAgentRuntime, runToQuiescence, type AgentTextRequest } from "./index.js";
 // The step envelope (getAgentRequests/resolveAgentStep/transitionAgentStep) is
 // internal now — imported straight from ./steps.js (it backs verify.ts and these
 // example checks); resolveDecision remains on the public /steps subpath.
@@ -225,16 +225,20 @@ describe("curated XState setup examples", () => {
 
     // runAgent auto-delivers each chosen decision event: the machine's
     // `deciding` state loops back to `telling` on TELL_ANOTHER and ends on END.
-    const result = await runAgent(machine, {
-      input: { topic: "state machines" },
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide: async (request) => {
-          decisionPrompts.push(request.prompt ?? "");
-          return { event: { type: "END" } };
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: async (request) => {
+            decisionPrompts.push(request.prompt ?? "");
+            return { event: { type: "END" } };
+          },
         },
+      }),
+      {
+        input: { topic: "state machines" },
       },
-    });
+    );
 
     // The machine, not the model, owns the first revision: no decision is asked
     // for until the improvement pass has already produced a second joke.
@@ -259,16 +263,20 @@ describe("curated XState setup examples", () => {
     const { machine, jokes } = provideJokeStubs();
     let decisions = 0;
 
-    const result = await runAgent(machine, {
-      input: { topic: "state machines" },
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide: async () => {
-          decisions += 1;
-          return { event: { type: "TELL_ANOTHER" } };
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: async () => {
+            decisions += 1;
+            return { event: { type: "TELL_ANOTHER" } };
+          },
         },
+      }),
+      {
+        input: { topic: "state machines" },
       },
-    });
+    );
 
     // Improvement pass, one TELL_ANOTHER loop, then the joke cap ends the run
     // before a second decision is ever requested.

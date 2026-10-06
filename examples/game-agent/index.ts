@@ -24,7 +24,8 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentDecisionExecutor,
 } from "@statelyai/agent";
@@ -236,6 +237,12 @@ export const rpsMachine = rpsSetup.createMachine({
             "You are playing rock-paper-scissors against a human.",
             "Study the round history for the human's habits, predict their next",
             "throw, and throw what beats it.",
+            // Without these, the model assumes "the human repeats" every round.
+            // Against a human who counters the model's last throw, that locks
+            // both sides into a tie every round.
+            "Check more than one habit: repeating their last throw, cycling,",
+            "and throwing what beats YOUR last throw. Many ties in a row mean",
+            "your prediction is wrong: change it.",
           ].join(" "),
           prompt: [
             renderHistory(context.history),
@@ -341,10 +348,15 @@ export async function runRpsExample(options?: {
     maxModelCalls: 30,
   };
 
-  let result = await runAgent(rpsMachine, {
-    input: { targetWins: options?.input?.targetWins ?? 3 },
-    ...shared,
-  });
+  let result = await runToQuiescence(
+    createAgentRuntime(rpsMachine, {
+      ...shared,
+    }),
+    {
+      input: { targetWins: options?.input?.targetWins ?? 3 },
+      ...shared,
+    },
+  );
 
   // Every throw settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
@@ -354,11 +366,16 @@ export async function runRpsExample(options?: {
       options?.nextHumanThrow?.(result.snapshot) ??
       queued.shift() ??
       toThrowEvent(await promptLine(`${label}\n(rock/paper/scissors) > `));
-    result = await runAgent(rpsMachine, {
-      snapshot: result.persist(),
-      event,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(rpsMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

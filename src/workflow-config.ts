@@ -14,7 +14,6 @@
 import {
   createMachineFromConfig,
   type AnyActorLogic,
-  type AnyMachineSnapshot,
   type AnyStateMachine,
   type AsyncActorLogic,
   type MachineJSON,
@@ -23,11 +22,7 @@ import {
 import type { AgentMessage, AgentToolChoice, AgentTools, StandardSchemaV1 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
 import { type AgentRequestMode } from "./text-logic.js";
-import {
-  machineIdlePredicates,
-  missingActor,
-  setAgentExecutionOptions,
-} from "./internal/registry.js";
+import { missingActor, setAgentExecutionOptions } from "./internal/registry.js";
 import {
   createAgentActors,
   createAgentSchemas,
@@ -156,17 +151,6 @@ export interface AgentWorkflowConfig {
   actors?: Record<string, AgentWorkflowActorConfig>;
   initial: string;
   states: Record<string, AgentWorkflowStateConfig>;
-  /**
-   * State tags that mark an INTENTIONAL wait for an external event (a human
-   * approval, an inbound webhook, …) — the declarative form of `setupAgent({
-   * isIdle })`, since a config cannot carry a function. Lowered to a
-   * `snapshot.hasTag(...)`-any-of predicate so `runAgent` settles those
-   * snapshots idle deterministically instead of using its timing heuristic.
-   * Every listed tag must appear in some state's `tags` — an unused tag is a
-   * build-time error. A `fromConfig(config, { isIdle })` option takes
-   * precedence over declarative `idleTags`.
-   */
-  idleTags?: string[];
   meta?: Record<string, unknown>;
 }
 
@@ -896,49 +880,6 @@ function translateWorkflowConfig(
   return json as unknown as MachineJSON;
 }
 
-// Recursively collects every tag declared by any state in the config.
-function collectDeclaredStateTags(
-  states: Record<string, AgentWorkflowStateConfig> | undefined,
-  tags = new Set<string>(),
-): Set<string> {
-  for (const state of Object.values(states ?? {})) {
-    for (const tag of state.tags ?? []) {
-      tags.add(tag);
-    }
-    collectDeclaredStateTags(state.states, tags);
-  }
-  return tags;
-}
-
-// Resolves the machine-carried idle predicate for a fromConfig machine:
-// the host `options.isIdle` function when given, else the config's
-// declarative `idleTags` lowered to a hasTag-any-of predicate. A
-// `idleTags` entry no state declares is a typo'd silent no-op — the
-// machine would never tests as idle there — so it throws at build time.
-function resolveIdlePredicate(
-  config: AgentWorkflowConfig,
-  options: FromConfigOptions,
-): ((snapshot: AnyMachineSnapshot) => boolean) | undefined {
-  if (options.isIdle) {
-    return options.isIdle;
-  }
-  const idleTags = config.idleTags ?? [];
-  if (!idleTags.length) {
-    return undefined;
-  }
-  const declaredTags = collectDeclaredStateTags(config.states);
-  const unknown = idleTags.filter((tag) => !declaredTags.has(tag));
-  if (unknown.length) {
-    throw new Error(
-      `setupAgent.fromConfig: 'idleTags' lists ${unknown
-        .map((tag) => `'${tag}'`)
-        .join(", ")}, which no state declares in its 'tags'. Tag the waiting state(s) — e.g. ` +
-        `"tags": ["${unknown[0]}"] — or remove the entry.`,
-    );
-  }
-  return (snapshot) => idleTags.some((tag) => snapshot.hasTag(tag));
-}
-
 // Implementation backing the public `setupAgent.fromConfig(...)` namespace member (see setup-agent.ts) — translates an AgentWorkflowConfig into MachineJSON and builds the machine through xstate's createMachineFromConfig.
 export function setupAgentFromConfig(
   config: AgentWorkflowConfig,
@@ -984,28 +925,17 @@ export function setupAgentFromConfig(
       ]),
     ),
     ...(options.actions ? { actions: options.actions } : {}),
-    // createMachineFromConfig embeds `sources.actors[src]` as the
-    // invoke's src DIRECTLY — but runAgent's executor rebinding needs srcs to
-    // stay string keys resolved through the machine's sources. Mapping
-    // each key to itself satisfies the JSON layer's every-src-implemented
-    // assertion while keeping `src` a string; the real logic is then bound via
-    // `.provide({ actors })` below (and remains host-rebindable).
-    actors: Object.fromEntries(Object.keys(actors).map((key) => [key, key])) as never,
+    // Invokes keep their string srcs, so the runtime (and a host's own
+    // `.provide({ actors })`) can still rebind them.
+    actors,
     evaluators: {
       [AGENT_EXPRESSION_LANG]: createWorkflowConfigEvaluator(schemas.context),
     },
-  }).provide({ actors });
+  });
 
-  // What setupAgent's wrapped createMachine registers for runAgent: the
+  // What setupAgent's wrapped createMachine registers for the runtime: the
   // schemas/actors this machine executes with.
   setAgentExecutionOptions(machine, { schemas, actors, models: {} });
-  // The wait-state predicate (options.isIdle, or the config's declarative
-  // `idleTags`), carried on the root config like setupAgent's — so it
-  // survives further `machine.provide(...)` executor rebinding.
-  const isIdle = resolveIdlePredicate(config, options);
-  if (isIdle && machine.config) {
-    machineIdlePredicates.set(machine.config as object, isIdle);
-  }
   return { machine, schemas };
 }
 
@@ -1023,7 +953,7 @@ export function setupAgentFromConfig(
  */
 export interface FromConfigResult {
   machine: AnyStateMachine;
-  /** Compiled `context`/`events`/`input`/`output`/`meta`/`emitted` schemas — the same pack `runAgent` executes this machine with. */
+  /** Compiled `context`/`events`/`input`/`output`/`meta`/`emitted` schemas — the same pack `createAgentRuntime` executes this machine with. */
   schemas: AgentSchemaPack<
     StandardSchemaV1<Record<string, unknown>>,
     Record<string, StandardSchemaV1>,
@@ -1056,13 +986,4 @@ export interface FromConfigOptions {
    * implementation here is a build-time error.
    */
   actions?: Record<string, (params: any) => unknown>;
-  /**
-   * Detects a snapshot that is an INTENTIONAL wait for an external event —
-   * the same machine-carried predicate `setupAgent({ isIdle })` declares
-   * for TS-authored machines, registered here because a function cannot live
-   * in the workflow config itself. Takes precedence over the config's
-   * declarative {@link AgentWorkflowConfig.idleTags}. Travels with the machine
-   * through `machine.provide(...)`.
-   */
-  isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 }

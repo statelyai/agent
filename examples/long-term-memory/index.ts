@@ -84,7 +84,8 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -194,7 +195,10 @@ const longTermMemoryContextSchema = z.object({
   recalled: z.array(z.string()),
   /** Facts the last answer proposed, waiting for `savingMemories`. */
   pendingMemories: z.array(z.string()),
-  /** The assistant's last reply (the one human-readable progress string). */
+  /**
+   * The assistant's last reply (the one human-readable progress string);
+   * empty before the first.
+   */
   reply: z.string(),
   /** "User: …" / "Assistant: …" lines for this session. */
   transcript: z.array(z.string()),
@@ -207,19 +211,19 @@ const longTermMemoryContextSchema = z.object({
 
 type LongTermMemoryContext = z.infer<typeof longTermMemoryContextSchema>;
 
-/** The session summary both final states lead with. */
+/**
+ * The session summary both final states lead with. No last reply: it was
+ * already shown at the idle turn, and repeating it here would show it twice.
+ */
 function renderSummary(context: LongTermMemoryContext, ending: string): string {
   return [
     ending,
-    context.reply ? `Last reply: ${context.reply}` : "",
     `Session for ${context.userId}: ${context.turns} message(s), ` +
       `${context.recalledTotal} memory recall(s), ${context.savedTotal} new memor${context.savedTotal === 1 ? "y" : "ies"} saved` +
       (context.evicted > 0 ? `, ${context.evicted} oldest evicted (cap ${MAX_MEMORIES})` : "") +
       ".",
     `The store now holds ${context.memories.length}/${MAX_MEMORIES} memories.`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  ].join("\n");
 }
 
 const agentSetup = setupAgent({
@@ -291,10 +295,7 @@ export const longTermMemoryMachine = agentSetup.createMachine({
     message: "",
     recalled: [],
     pendingMemories: [],
-    reply:
-      input.memories.length > 0
-        ? `Welcome back. I have ${input.memories.length} memor${input.memories.length === 1 ? "y" : "ies"} about you. What's on your mind?`
-        : "Hi! I don't know anything about you yet. What's on your mind?",
+    reply: "",
     transcript: [],
     turns: 0,
     recalledTotal: 0,
@@ -305,12 +306,15 @@ export const longTermMemoryMachine = agentSetup.createMachine({
   initial: "awaitingMessage",
   states: {
     // Resting state: the run settles idle and a host resumes with MESSAGE or
-    // END_SESSION. The label is the assistant's last reply.
+    // END_SESSION. The reply lives in context, so the label is only the
+    // prompt, plus the store's size: watch it grow as facts are saved.
     awaitingMessage: {
       tags: ["waiting"],
       meta: {
         interaction: {
-          label: "{reply}",
+          label: ({ context }) =>
+            `The store holds ${context.memories.length} memor${context.memories.length === 1 ? "y" : "ies"} about you. ` +
+            "Send a message, or end the session.",
           textEvent: "MESSAGE",
           events: {
             MESSAGE: { label: "Send", style: "primary" },
@@ -468,16 +472,31 @@ export async function runLongTermMemoryExample(
     },
   };
 
-  let result = await runAgent(longTermMemoryMachine, { input: { userId, memories }, ...shared });
-  while (result.status === "idle") {
-    const reply = getInteraction(result.snapshot)?.label ?? result.snapshot.context.reply;
-    onReply?.(reply);
-    const event = queued.shift() ?? toHumanEvent(await promptLine(`${reply}\n> `));
-    result = await runAgent(longTermMemoryMachine, {
-      snapshot: result.persist(),
-      event,
+  let result = await runToQuiescence(
+    createAgentRuntime(longTermMemoryMachine, {
       ...shared,
-    });
+    }),
+    {
+      input: { userId, memories },
+      ...shared,
+    },
+  );
+  while (result.status === "idle") {
+    const { reply } = result.snapshot.context;
+    if (reply) onReply?.(reply);
+    const label = getInteraction(result.snapshot)?.label ?? "";
+    const event =
+      queued.shift() ?? toHumanEvent(await promptLine(`${reply ? `${reply}\n` : ""}${label}\n> `));
+    result = await runToQuiescence(
+      createAgentRuntime(longTermMemoryMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

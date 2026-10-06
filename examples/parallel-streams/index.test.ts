@@ -28,16 +28,22 @@ test("parallel streaming requests are disambiguated by request.id in onChunk", a
   assert.equal(buffers.poet, "poem chunk");
   assert.equal(
     output.summary,
-    'Two streams completed for "actors": analysis (14 chars) and poem (10 chars).',
+    'Two streams completed for "actors": thinker wrote an analysis (14 chars) and poet wrote a poem (10 chars).',
   );
   assert.equal(output.analysis, "analysis chunk");
   assert.equal(output.poem, "poem chunk");
   // Completion order survives to the final view: one line per lane, numbered
   // in the order the lanes finished. It is rendered in `output`, not stored.
-  const lanes = output.laneSummary.split("\n");
+  // A blank line precedes the list so markdown renders it as a list even after
+  // a "Lane summary:" label.
+  const [lead, blank, ...lanes] = output.laneSummary.split("\n");
+  assert.equal(lead, "Finished in this order:");
+  assert.equal(blank, "");
   assert.equal(lanes.length, 2);
-  assert.match(lanes[0]!, /^1\. (analysis|poem)$/);
-  assert.match(lanes[1]!, /^2\. (analysis|poem)$/);
+  // Lanes carry the same names as the chunks' request ids (the live labels).
+  assert.match(lanes[0]!, /^1\. (thinker|poet)$/);
+  assert.match(lanes[1]!, /^2\. (thinker|poet)$/);
+  assert.deepEqual(lanes.map((lane) => lane.slice(3)).sort(), Object.keys(buffers).sort());
   assert.notEqual(lanes[0]!.slice(3), lanes[1]!.slice(3));
   assert.deepEqual(output.failures, []);
   // The summary references the streams instead of repeating their text, so the
@@ -63,7 +69,7 @@ test("a failing stream ends its region instead of hanging the parallel machine",
 
   assert.equal(output.analysis, "analysis only");
   assert.equal(output.poem, "");
-  assert.deepEqual(output.laneSummary, "1. analysis");
+  assert.deepEqual(output.laneSummary, "Finished in this order:\n\n1. thinker");
   assert.equal(output.failures.length, 1);
-  assert.match(output.failures[0]!, /^poem: /);
+  assert.match(output.failures[0]!, /^poet: /);
 });

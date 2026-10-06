@@ -8,6 +8,7 @@ import {
   CASE_LEVELS,
   MAX_ROUNDS,
   multiAgentDebateMachine,
+  plainArgument,
   runMultiAgentDebateExample,
 } from "./index.js";
 
@@ -25,9 +26,9 @@ function scripted() {
   });
 }
 
-/** The Jev judge: winner label, and each side's case level 0-5 (→ 0-10 in steps of 2). */
-function judge(winner = "pro", proCase = 4, conCase = 3) {
-  return createMockJudge({ winner, proCase, conCase });
+/** The Jev judge: each side's case level 0-5 (→ 0-10 in steps of 2). */
+function judge(proCase = 4, conCase = 3) {
+  return createMockJudge({ proCase, conCase });
 }
 
 test("two rounds alternate pro/con, then the judge decides", async () => {
@@ -58,7 +59,7 @@ test("two rounds alternate pro/con, then the judge decides", async () => {
   expect(result.winner).toBe("pro");
   expect(result.scores).toEqual({ pro: 8, con: 6 });
   expect(result.verdict).toBe(
-    `Winner: pro — Judge 90% sure. Pro: ${CASE_LEVELS[4]} Con: ${CASE_LEVELS[3]}`,
+    `Winner: pro — Pro 8/10: ${CASE_LEVELS[4]} Con 6/10: ${CASE_LEVELS[3]}`,
   );
   expect(result.transcript.split("\n\n")).toEqual([
     "Round 1 — PRO: pro point for round 1",
@@ -69,13 +70,14 @@ test("two rounds alternate pro/con, then the judge decides", async () => {
 });
 
 test("rounds defaults to 2 and the judge sees the whole transcript", async () => {
-  const jev = judge("draw", 3, 3);
+  const jev = judge(3, 3);
   const result = await runMultiAgentDebateExample({
     generateText: scripted().generateText,
     judge: jev.model,
   });
   expect(result.rounds).toBe(2);
   expect(result.winner).toBe("draw");
+  expect(result.verdict).toMatch(/^Draw — Pro 6\/10: /);
   const transcript = (jev.calls[0]!.state as { transcript: Array<{ side: string; round: number }> })
     .transcript;
   expect(transcript).toHaveLength(4);
@@ -123,7 +125,7 @@ test("a judge failure ends in `failed`, not a verdict", async () => {
       },
     }).generateText,
     judge: createMockJudge({
-      winner: () => {
+      proCase: () => {
         throw new Error("judge offline");
       },
       "*": 0,
@@ -155,8 +157,76 @@ test("starters behave as their labels advertise", async () => {
   }
 });
 
-test("the judge asks Jev a winner choice and one score per side in one call over the transcript", async () => {
-  const jev = judge("con", 2, 5);
+test("the winner is derived from the scores, so the two can never disagree", async () => {
+  // The QA run had "Winner: pro" next to {pro: 6, con: 7}: a separate winner
+  // question disagreed with the scores. Every pair of levels must agree now.
+  for (let pro = 0; pro < CASE_LEVELS.length; pro++) {
+    for (let con = 0; con < CASE_LEVELS.length; con++) {
+      const result = await runMultiAgentDebateExample({
+        rounds: 1,
+        generateText: scripted().generateText,
+        judge: judge(pro, con).model,
+      });
+      const { scores, winner } = result;
+      const expected =
+        scores!.pro > scores!.con ? "pro" : scores!.con > scores!.pro ? "con" : "draw";
+      expect(winner).toBe(expected);
+    }
+  }
+});
+
+test("each speaker's stance is restated in its prompt on every round", async () => {
+  const executors = scripted();
+  await runMultiAgentDebateExample({
+    rounds: MAX_ROUNDS,
+    generateText: executors.generateText,
+    judge: judge().model,
+  });
+
+  const prompts = (name: string) =>
+    executors.calls.filter((call) => call.name === name).map((call) => String(call.request.prompt));
+  expect(prompts("argueFor")).toHaveLength(MAX_ROUNDS);
+  expect(prompts("argueAgainst")).toHaveLength(MAX_ROUNDS);
+  // Last line of every turn's prompt pins the side, even in later rounds
+  // whose transcript is full of the other side's points.
+  for (const prompt of prompts("argueFor")) {
+    expect(prompt.split("\n").at(-1)).toMatch(/^Your side: FOR the motion\./);
+  }
+  for (const prompt of prompts("argueAgainst")) {
+    expect(prompt.split("\n").at(-1)).toMatch(/^Your side: AGAINST the motion\./);
+  }
+});
+
+test("turns read as unlabeled prose: the prompt asks for it, and leftover labels are dropped", async () => {
+  // A live speaker answered "Make one new point and rebut…" with labeled parts:
+  // "… New point: putting control flow in code …", "Rebuttal: the proposition …".
+  const executors = createMockModelExecutors({
+    text: {
+      argueFor: {
+        argument: "New point: code is testable. Rebuttal: flexibility is not precision.",
+      },
+      argueAgainst: { argument: "Prompts adapt faster. new point: they need no redeploy." },
+    },
+  });
+  const result = await runMultiAgentDebateExample({
+    rounds: 1,
+    generateText: executors.generateText,
+    judge: judge().model,
+  });
+
+  expect(result.transcript).toContain("PRO: Code is testable. Flexibility is not precision.");
+  expect(result.transcript).toContain("CON: Prompts adapt faster. They need no redeploy.");
+  expect(result.transcript).not.toMatch(/new point|rebuttal/i);
+  for (const call of executors.calls) {
+    expect(call.request.system).toMatch(/Do not label the parts/);
+    expect(call.request.system).not.toMatch(/Make one new point/);
+  }
+  // Ordinary colons and lower-case words after abbreviations are left alone.
+  expect(plainArgument("The point: e.g. prompts drift.")).toBe("The point: e.g. prompts drift.");
+});
+
+test("the judge asks Jev one score per side in one call over the transcript", async () => {
+  const jev = judge(2, 5);
   const result = await runMultiAgentDebateExample({
     motion: "Cities should ban cars.",
     rounds: 1,
@@ -174,12 +244,9 @@ test("the judge asks Jev a winner choice and one score per side in one call over
     ],
   });
   expect(Object.fromEntries(Object.entries(call.questions).map(([k, q]) => [k, q.type]))).toEqual({
-    winner: "choice",
     proCase: "score",
     conCase: "score",
   });
-  const winner = call.questions.winner!;
-  expect(winner.type === "choice" && Object.keys(winner.criteria)).toEqual(["pro", "con", "draw"]);
   expect(result).toMatchObject({ winner: "con", scores: { pro: 4, con: 10 } });
 });
 

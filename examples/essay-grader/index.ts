@@ -59,7 +59,7 @@ import { z } from "zod";
 import { createAsyncLogic } from "xstate";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
-import { getStatePath, runAgent, setupAgent } from "@statelyai/agent";
+import { getStatePath, createAgentRuntime, runToQuiescence, setupAgent } from "@statelyai/agent";
 
 /**
  * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
@@ -355,15 +355,19 @@ export async function runEssayGraderExample(
 ): Promise<EssayGraderResult> {
   const { essay = SAMPLE_ESSAY, judge, onProgress } = options;
   const progress: string[] = [];
-  const result = await runAgent(essayGraderMachine, {
-    input: { essay },
-    ...(judge ? { actors: graderActors(judge) } : {}),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(essayGraderMachine, {
+      ...(judge ? { actors: graderActors(judge) } : {}),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { essay },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Essay grader example did not complete: ${result.status}`);

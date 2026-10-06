@@ -1,0 +1,38 @@
+{
+  "The rise of state machines in AI agent design": [
+    {
+      "sent": "start {\"topic\":\"The rise of state machines in AI agent design\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> {\"thinking\":\"active\",\"versing\":\"active\"}",
+        "transition xstate.done.actor -> {\"thinking\":\"done\",\"versing\":\"active\"}",
+        "transition xstate.done.actor -> {\"versing\":\"done\",\"thinking\":\"done\"}"
+      ],
+      "response": "Two streams completed for \"The rise of state machines in AI agent design\": thinker wrote an analysis (69 chars) and poet wrote a poem (75 chars).\n\n- Analysis: Mock reply to: Analyze: The rise of state machines in AI agent design\n- Poem: Mock reply to: Write a short poem about: The rise of state machines in AI a\n\n**Lane summary**\n\nFinished in this order:\n\n1. thinker  \n2. poet"
+    }
+  ],
+  "Why octopuses would make excellent distributed systems": [
+    {
+      "sent": "start {\"topic\":\"Why octopuses would make excellent distributed systems\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> {\"thinking\":\"active\",\"versing\":\"active\"}",
+        "transition xstate.done.actor -> {\"thinking\":\"done\",\"versing\":\"active\"}",
+        "transition xstate.done.actor -> {\"versing\":\"done\",\"thinking\":\"done\"}"
+      ],
+      "response": "Two streams completed for \"Why octopuses would make excellent distributed systems\": thinker wrote an analysis (75 chars) and poet wrote a poem (75 chars).\n\n- Analysis: Mock reply to: Analyze: Why octopuses would make excellent distributed syst\n- Poem: Mock reply to: Write a short poem about: Why octopuses would make excellent\n\n**Lane summary**\n\nFinished in this order:\n\n1. thinker  \n2. poet"
+    }
+  ],
+  "What a city sounds like at 4am": [
+    {
+      "sent": "start {\"topic\":\"What a city sounds like at 4am\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> {\"thinking\":\"active\",\"versing\":\"active\"}",
+        "transition xstate.done.actor -> {\"thinking\":\"done\",\"versing\":\"active\"}",
+        "transition xstate.done.actor -> {\"versing\":\"done\",\"thinking\":\"done\"}"
+      ],
+      "response": "Two streams completed for \"What a city sounds like at 4am\": thinker wrote an analysis (54 chars) and poet wrote a poem (71 chars).\n\n- Analysis: Mock reply to: Analyze: What a city sounds like at 4am\n- Poem: Mock reply to: Write a short poem about: What a city sounds like at 4am\n\n**Lane summary**\n\nFinished in this order:\n\n1. thinker  \n2. poet"
+    }
+  ]
+}

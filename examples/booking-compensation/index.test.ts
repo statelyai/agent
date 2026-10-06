@@ -158,6 +158,7 @@ test("uncertain flight outcome retains the booking identity even without provide
       outcome: "manualRecovery",
       flightReference: null,
       hotelReference: null,
+      itinerary: "Flight: Flight to Lisbon\n\nHotel: Lisbon hotel",
     });
 });
 
@@ -205,6 +206,33 @@ test("an unconfirmed cancellation is reported as manual recovery, not compensate
       outcome: "manualRecovery",
       flightReference: "simulated-flight:trip-1",
     });
+});
+
+test("the plan prompt asks for a plain plan, without booking disclaimers", async () => {
+  const scripted = createMockModelExecutors({
+    text: { plan: { flight: "Flight to Lisbon", hotel: "Lisbon hotel" } },
+  });
+  await runBookingCompensationExample({ executors: scripted });
+  const request = scripted.calls.find((call) => call.name === "plan")!.request;
+  const text = `${request.system ?? ""}\n${request.prompt ?? ""}`;
+  // "Do not book anything" made the model echo "…but I'm not booking anything".
+  expect(text).not.toMatch(/do not book/i);
+  expect(request.system).toContain("never add disclaimers about booking");
+  expect(request.prompt).toBe("Destination: Lisbon");
+});
+
+test("the output's itinerary is readable text, not an object", async () => {
+  const pending = await runBookingCompensationExample({ executors });
+  expect(pending.status).toBe("idle");
+  if (pending.status !== "idle") return;
+  const result = await runBookingCompensationExample({
+    snapshot: pending.persist(),
+    event: { type: "APPROVE" },
+    executors,
+  });
+  expect(result.status).toBe("done");
+  if (result.status === "done")
+    expect(result.output.itinerary).toBe("Flight: Flight to Lisbon\n\nHotel: Lisbon hotel");
 });
 
 test("without injected executors or a key, the runner rejects naming the env var", async () => {

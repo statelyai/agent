@@ -1,0 +1,26 @@
+{
+  "Small refund ($129.99) — auto-approvable": [
+    {
+      "sent": "start {\"amount\":129.99,\"orderId\":\"ORD-4471\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"validating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "- Refunded: yes"
+    }
+  ],
+  "Large refund ($780) — over the approval limit": [
+    {
+      "sent": "start {\"amount\":780,\"orderId\":\"ORD-9002\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"validating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "- Refunded: yes"
+    }
+  ]
+}

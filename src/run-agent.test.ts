@@ -22,7 +22,8 @@ import {
   parseAgentEvent,
   inspectTransitions,
   isAgentIdle,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   serializeTraceEvent,
   setupAgent,
   type AgentDecisionRequest,
@@ -100,13 +101,17 @@ describe("runAgent", () => {
     });
 
     const observedEvents: string[] = [];
-    const result = await runAgent(machine, {
-      input: { prompt: "why state machines?" },
-      executors: {
-        generateText,
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText,
+        },
+        onTransition: (_snapshot, event) => observedEvents.push(event.type),
+      }),
+      {
+        input: { prompt: "why state machines?" },
       },
-      onTransition: (_snapshot, event) => observedEvents.push(event.type),
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({
@@ -163,12 +168,16 @@ describe("runAgent", () => {
       result: `Draft: ${request.prompt}`,
     });
 
-    const first = await runAgent(machine, {
-      input: { prompt: "release notes" },
-      executors: {
-        generateText,
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText,
+        },
+      }),
+      {
+        input: { prompt: "release notes" },
       },
-    });
+    );
 
     expect(first.status).toBe("idle");
     if (first.status !== "idle") {
@@ -176,13 +185,17 @@ describe("runAgent", () => {
     }
     expect(first.snapshot.value).toBe("awaitingApproval");
 
-    const second = await runAgent(machine, {
-      snapshot: first.persist(),
-      event: { type: "APPROVE" },
-      executors: {
-        generateText,
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText,
+        },
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "APPROVE" },
       },
-    });
+    );
 
     expect(second.status).toBe("done");
     expect(second.status === "done" ? second.output : undefined).toEqual({
@@ -204,11 +217,15 @@ describe("runAgent", () => {
     });
 
     const raisedEvents: string[] = [];
-    const raised = await runAgent(raisedMachine, {
-      input: undefined,
-      executors: {},
-      onTransition: (_snapshot, event) => raisedEvents.push(event.type),
-    });
+    const raised = await runToQuiescence(
+      createAgentRuntime(raisedMachine, {
+        executors: {},
+        onTransition: (_snapshot, event) => raisedEvents.push(event.type),
+      }),
+      {
+        input: undefined,
+      },
+    );
     expect(raised.status).toBe("done");
     expect(raisedEvents).toEqual(["@xstate.init"]);
 
@@ -222,11 +239,15 @@ describe("runAgent", () => {
     });
 
     const timerEvents: string[] = [];
-    const timed = await runAgent(timerMachine, {
-      input: undefined,
-      executors: {},
-      onTransition: (_snapshot, event) => timerEvents.push(event.type),
-    });
+    const timed = await runToQuiescence(
+      createAgentRuntime(timerMachine, {
+        executors: {},
+        onTransition: (_snapshot, event) => timerEvents.push(event.type),
+      }),
+      {
+        input: undefined,
+      },
+    );
     expect(timed.status).toBe("done");
     expect(timerEvents).toContain("xstate.timer");
   });
@@ -309,12 +330,16 @@ describe("runAgent", () => {
       return { result: `Draft about ${request.prompt}` };
     };
 
-    const first = await runAgent(machine, {
-      input: { topic: "incident recap" },
-      executors: {
-        generateText,
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText,
+        },
+      }),
+      {
+        input: { topic: "incident recap" },
       },
-    });
+    );
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
     expect(sideEffectRuns).toBe(1);
@@ -323,13 +348,17 @@ describe("runAgent", () => {
     // Full JSON round-trip: the resume must not depend on live actor state.
     const persisted = JSON.parse(JSON.stringify(first.snapshot));
 
-    const second = await runAgent(machine, {
-      snapshot: persisted,
-      event: { type: "APPROVE" },
-      executors: {
-        generateText,
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText,
+        },
+      }),
+      {
+        snapshot: persisted,
+        event: { type: "APPROVE" },
       },
-    });
+    );
 
     expect(second.status).toBe("done");
     expect(sideEffectRuns).toBe(1); // audit never re-ran
@@ -340,13 +369,17 @@ describe("runAgent", () => {
 
     // The loop is still real: an explicit REJECT deliberately re-enters
     // drafting, so the model runs again by AUTHORED choice, not by accident.
-    const third = await runAgent(machine, {
-      snapshot: persisted,
-      event: { type: "REJECT" },
-      executors: {
-        generateText,
+    const third = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText,
+        },
+      }),
+      {
+        snapshot: persisted,
+        event: { type: "REJECT" },
       },
-    });
+    );
     expect(third.status).toBe("idle");
     expect(sideEffectRuns).toBe(1); // audit STILL exactly once
     expect(modelCalls).toBe(2); // redraft was an explicit transition
@@ -404,13 +437,17 @@ describe("runAgent", () => {
       return { event: { type: "ATTACK", target: "goblin" } };
     };
 
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide,
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide,
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(callCount).toBe(2);
@@ -454,16 +491,20 @@ describe("runAgent", () => {
     });
 
     let calls = 0;
-    const result = await runAgent(machine, {
-      input: {},
-      maxModelCalls: 3,
-      executors: {
-        generateText: async () => {
-          calls += 1;
-          return { result: calls };
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        maxModelCalls: 3,
+        executors: {
+          generateText: async () => {
+            calls += 1;
+            return { result: calls };
+          },
         },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("error");
     expect(result.status === "error" ? result.cause : undefined).toBe("max-model-calls");
@@ -514,16 +555,20 @@ describe("runAgent", () => {
     });
 
     let calls = 0;
-    const result = await runAgent(machine, {
-      input: {},
-      maxModelCalls: 2,
-      executors: {
-        generateText: async () => {
-          calls += 1;
-          return { result: calls };
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        maxModelCalls: 2,
+        executors: {
+          generateText: async () => {
+            calls += 1;
+            return { result: calls };
+          },
         },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     // Handled: the run completes normally instead of settling an error.
     expect(result.status).toBe("done");
@@ -557,13 +602,17 @@ describe("runAgent", () => {
     const controller = new AbortController();
     controller.abort();
 
-    const result = await runAgent(machine, {
-      input: {},
-      signal: controller.signal,
-      executors: {
-        generateText: async () => ({ result: {} }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        signal: controller.signal,
+        executors: {
+          generateText: async () => ({ result: {} }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("error");
     expect(result.status === "error" ? result.cause : undefined).toBe("aborted");
@@ -593,16 +642,20 @@ describe("runAgent", () => {
     });
 
     const controller = new AbortController();
-    const resultPromise = runAgent(machine, {
-      input: {},
-      signal: controller.signal,
-      executors: {
-        generateText: () =>
-          new Promise((resolveExec) => {
-            setTimeout(() => resolveExec({ result: {} }), 50);
-          }),
+    const resultPromise = runToQuiescence(
+      createAgentRuntime(machine, {
+        signal: controller.signal,
+        executors: {
+          generateText: () =>
+            new Promise((resolveExec) => {
+              setTimeout(() => resolveExec({ result: {} }), 50);
+            }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
     setTimeout(() => controller.abort(), 5);
 
     const result = await resultPromise;
@@ -633,14 +686,18 @@ describe("runAgent", () => {
       },
     });
 
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => {
-          throw new Error("boom");
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => {
+            throw new Error("boom");
+          },
         },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("error");
     expect(result.status === "error" ? result.cause : undefined).toBe("machine");
@@ -679,11 +736,13 @@ describe("runAgent", () => {
         },
       });
 
-      const result = await runAgent(machine, {
-        executors: {
-          generateText: async () => ({ result: {} }),
-        },
-      });
+      const result = await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: {
+            generateText: async () => ({ result: {} }),
+          },
+        }),
+      );
       expect(result.status).toBe("done");
     });
 
@@ -707,9 +766,11 @@ describe("runAgent", () => {
         },
       });
 
-      await expect(
-        runAgent(machine, { input: {}, executors: { generateText: async () => ({ result: {} }) } }),
-      ).rejects.toThrow(/chooseMove/);
+      expect(() =>
+        createAgentRuntime(machine, {
+          executors: { generateText: async () => ({ result: {} }) },
+        }),
+      ).toThrow(/chooseMove/);
     });
 
     test("a machine invoking an unregistered string src throws naming the source", async () => {
@@ -728,12 +789,11 @@ describe("runAgent", () => {
         },
       });
 
-      await expect(
-        runAgent(machine, {
-          input: undefined,
+      expect(() =>
+        createAgentRuntime(machine, {
           executors: { generateText: async () => ({ result: {} }) },
         }),
-      ).rejects.toThrow(/notRegistered/);
+      ).toThrow(/notRegistered/);
     });
 
     test("a STREAM-mode TextLogic invoke with no streamText option throws naming the source", async () => {
@@ -763,9 +823,11 @@ describe("runAgent", () => {
         },
       });
 
-      await expect(
-        runAgent(machine, { input: {}, executors: { generateText: async () => ({ result: {} }) } }),
-      ).rejects.toThrow(/streamSummary/);
+      expect(() =>
+        createAgentRuntime(machine, {
+          executors: { generateText: async () => ({ result: {} }) },
+        }),
+      ).toThrow(/streamSummary/);
     });
 
     test("a direct-object invoke src that is an agent logic WITHOUT its own executor throws", async () => {
@@ -791,9 +853,11 @@ describe("runAgent", () => {
         },
       });
 
-      await expect(
-        runAgent(machine, { executors: { generateText: async () => ({ result: {} }) } }),
-      ).rejects.toThrow(/direct-object/);
+      expect(() =>
+        createAgentRuntime(machine, {
+          executors: { generateText: async () => ({ result: {} }) },
+        }),
+      ).toThrow(/direct-object/);
     });
 
     // A child machine whose states invoke agent requests is opaque to the
@@ -886,12 +950,16 @@ describe("runAgent", () => {
       test("(1) an UNBOUND child request inherits the parent generateText and runs to done", async () => {
         const parentMachine = makeParentMachine(makeChildMachine(false));
 
-        const result = await runAgent(parentMachine, {
-          input: { topic: "agents" },
-          executors: {
-            generateText: async ({ prompt }) => ({ result: `parent-ran: ${prompt}` }),
+        const result = await runToQuiescence(
+          createAgentRuntime(parentMachine, {
+            executors: {
+              generateText: async ({ prompt }) => ({ result: `parent-ran: ${prompt}` }),
+            },
+          }),
+          {
+            input: { topic: "agents" },
           },
-        });
+        );
 
         expect(result.status).toBe("done");
         expect(result.status === "done" ? result.output : undefined).toEqual({
@@ -903,15 +971,19 @@ describe("runAgent", () => {
         const parentMachine = makeParentMachine(makeChildMachine(true));
 
         let parentCalls = 0;
-        const result = await runAgent(parentMachine, {
-          input: { topic: "agents" },
-          executors: {
-            generateText: async () => {
-              parentCalls += 1;
-              return { result: "unused" };
+        const result = await runToQuiescence(
+          createAgentRuntime(parentMachine, {
+            executors: {
+              generateText: async () => {
+                parentCalls += 1;
+                return { result: "unused" };
+              },
             },
+          }),
+          {
+            input: { topic: "agents" },
           },
-        });
+        );
 
         expect(result.status).toBe("done");
         expect(result.status === "done" ? result.output : undefined).toEqual({
@@ -961,12 +1033,16 @@ describe("runAgent", () => {
 
         // The grandchild's unbound `researchTopic` inherits the top-level
         // generateText through parent > mid > grandchild (all string-keyed).
-        const result = await runAgent(parentMachine, {
-          input: { topic: "agents" },
-          executors: {
-            generateText: async ({ prompt }) => ({ result: `depth: ${prompt}` }),
+        const result = await runToQuiescence(
+          createAgentRuntime(parentMachine, {
+            executors: {
+              generateText: async ({ prompt }) => ({ result: `depth: ${prompt}` }),
+            },
+          }),
+          {
+            input: { topic: "agents" },
           },
-        });
+        );
 
         expect(result.status).toBe("done");
         expect(result.status === "done" ? result.output : undefined).toEqual({
@@ -1008,13 +1084,17 @@ describe("runAgent", () => {
         // pre-aborted signal settles the run right after binding, so reaching
         // any settled result at all proves the bind walk terminated (an
         // infinite bind loop would throw a RangeError / hang before this).
-        const result = await runAgent(selfMachine, {
-          input: { n: 0 },
-          signal: AbortSignal.abort(),
-          executors: {
-            generateText: async () => ({ result: "x" }),
+        const result = await runToQuiescence(
+          createAgentRuntime(selfMachine, {
+            signal: AbortSignal.abort(),
+            executors: {
+              generateText: async () => ({ result: "x" }),
+            },
+          }),
+          {
+            input: { n: 0 },
           },
-        });
+        );
         expect(["done", "idle", "error"]).toContain(result.status);
       });
 
@@ -1024,13 +1104,17 @@ describe("runAgent", () => {
         // The child's single inherited model call shows up in onTrace with the
         // child request's own src.
         const trace: AgentTraceEvent<typeof parentMachine>[] = [];
-        const ok = await runAgent(parentMachine, {
-          input: { topic: "agents" },
-          onTrace: (event) => trace.push(event),
-          executors: {
-            generateText: async () => ({ result: "y" }),
+        const ok = await runToQuiescence(
+          createAgentRuntime(parentMachine, {
+            onTrace: (event) => trace.push(event),
+            executors: {
+              generateText: async () => ({ result: "y" }),
+            },
+          }),
+          {
+            input: { topic: "agents" },
           },
-        });
+        );
         expect(ok.status).toBe("done");
         expect(
           trace
@@ -1040,13 +1124,17 @@ describe("runAgent", () => {
 
         // ...and it draws from the SAME shared budget: capping at 0 makes the
         // child's model call exceed it, settling a max-model-calls error.
-        const capped = await runAgent(parentMachine, {
-          input: { topic: "agents" },
-          maxModelCalls: 0,
-          executors: {
-            generateText: async () => ({ result: "y" }),
+        const capped = await runToQuiescence(
+          createAgentRuntime(parentMachine, {
+            maxModelCalls: 0,
+            executors: {
+              generateText: async () => ({ result: "y" }),
+            },
+          }),
+          {
+            input: { topic: "agents" },
           },
-        });
+        );
         expect(capped.status).toBe("error");
         expect(capped.status === "error" ? capped.cause : undefined).toBe("max-model-calls");
       });
@@ -1088,14 +1176,13 @@ describe("runAgent", () => {
 
         // generateText is present but streamText is not — the child's stream
         // request has no executor to inherit, so bind fails naming the chain.
-        await expect(
-          runAgent(parentMachine, {
-            input: { topic: "agents" },
+        expect(() =>
+          createAgentRuntime(parentMachine, {
             executors: {
               generateText: async () => ({ result: "x" }),
             },
           }),
-        ).rejects.toThrow(/child machine.*streamText/s);
+        ).toThrow(/child machine.*streamText/s);
       });
     });
   });
@@ -1112,12 +1199,16 @@ describe("runAgent", () => {
       },
     });
 
-    const result = await runAgent(machine, {
-      input: undefined,
-      executors: {
-        generateText: async () => ({ result: {} }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+        },
+      }),
+      {
+        input: undefined,
       },
-    });
+    );
 
     expect(result.status).toBe("done");
   });
@@ -1133,16 +1224,20 @@ describe("runAgent", () => {
     });
 
     const seenEventTypes: string[] = [];
-    const result = await runAgent(machine, {
-      input: undefined,
-      event: { type: "GO" },
-      onTransition: (_snapshot, event) => {
-        seenEventTypes.push(event.type);
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onTransition: (_snapshot, event) => {
+          seenEventTypes.push(event.type);
+        },
+        executors: {
+          generateText: async () => ({ result: {} }),
+        },
+      }),
+      {
+        input: undefined,
+        event: { type: "GO" },
       },
-      executors: {
-        generateText: async () => ({ result: {} }),
-      },
-    });
+    );
 
     // A machine with no invokes and only an `on: { GO }` handler settles
     // idle before the event is sent unless sent as part of this same run;
@@ -1193,13 +1288,17 @@ describe("runAgent", () => {
         return { event: { type: "ATTACK", target: "goblin" } };
       };
 
-      const result = await runAgent(machine, {
-        input: {},
-        executors: {
-          generateText: async () => ({ result: {} }),
-          decide,
+      const result = await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: {
+            generateText: async () => ({ result: {} }),
+            decide,
+          },
+        }),
+        {
+          input: {},
         },
-      });
+      );
 
       expect(result.status).toBe("done");
       expect(seenEvents.map((event) => event.type).sort()).toEqual(["ATTACK", "HEAL"]);
@@ -1243,13 +1342,17 @@ describe("runAgent", () => {
         return { event: { type: "ATTACK", target: "goblin" } };
       };
 
-      const result = await runAgent(machine, {
-        input: {},
-        executors: {
-          generateText: async () => ({ result: {} }),
-          decide,
+      const result = await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: {
+            generateText: async () => ({ result: {} }),
+            decide,
+          },
+        }),
+        {
+          input: {},
         },
-      });
+      );
 
       expect(result.status).toBe("done");
       expect(seenEvents.map((event) => event.type).sort()).toEqual(["ATTACK", "HEAL"]);
@@ -1295,13 +1398,17 @@ describe("runAgent", () => {
         return { event: { type: "ATTACK", target: "goblin" } };
       };
 
-      const result = await runAgent(machine, {
-        input: {},
-        executors: {
-          generateText: async () => ({ result: {} }),
-          decide,
+      const result = await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: {
+            generateText: async () => ({ result: {} }),
+            decide,
+          },
+        }),
+        {
+          input: {},
         },
-      });
+      );
 
       expect(result.status).toBe("done");
       expect(requestsSeen[0]!.events.map((event) => event.type).sort()).toEqual(["ATTACK", "HEAL"]);
@@ -1368,18 +1475,22 @@ describe("runAgent", () => {
     });
 
     let attackEventsObserved = 0;
-    const result = await runAgent(machine, {
-      input: {},
-      onTransition: (_snapshot, event) => {
-        if (event.type === "ATTACK") {
-          attackEventsObserved += 1;
-        }
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onTransition: (_snapshot, event) => {
+          if (event.type === "ATTACK") {
+            attackEventsObserved += 1;
+          }
+        },
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: async () => ({ event: { type: "ATTACK" } }),
+        },
+      }),
+      {
+        input: {},
       },
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide: async () => ({ event: { type: "ATTACK" } }),
-      },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.snapshot.context.attackCount : undefined).toBe(1);
@@ -1426,13 +1537,17 @@ describe("runAgent", () => {
       },
     });
 
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "NOTE" } }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "NOTE" } }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -1504,13 +1619,17 @@ describe("runAgent", () => {
       },
     });
 
-    const result = await runAgent(parentMachine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "ATTACK" } }),
+    const result = await runToQuiescence(
+      createAgentRuntime(parentMachine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: async (): Promise<{ event: ChosenEvent }> => ({ event: { type: "ATTACK" } }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -1563,16 +1682,20 @@ describe("emitted events (runAgent `on`)", () => {
     const started: string[] = [];
     const drafted: number[] = [];
 
-    const result = await runAgent(machine, {
-      input: { topic: "rivers" },
-      on: {
-        DRAFTING_STARTED: (emitted) => started.push(emitted.topic),
-        DRAFTED: (emitted) => drafted.push(emitted.length),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        on: {
+          DRAFTING_STARTED: (emitted) => started.push(emitted.topic),
+          DRAFTED: (emitted) => drafted.push(emitted.length),
+        },
+        executors: {
+          generateText: async () => ({ result: "a draft" }),
+        },
+      }),
+      {
+        input: { topic: "rivers" },
       },
-      executors: {
-        generateText: async () => ({ result: "a draft" }),
-      },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(started).toEqual(["rivers"]);
@@ -1582,13 +1705,17 @@ describe("emitted events (runAgent `on`)", () => {
   test("'*' catches every emitted event", async () => {
     const seen: string[] = [];
 
-    await runAgent(machine, {
-      input: { topic: "rivers" },
-      on: { "*": (emitted) => seen.push(emitted.type) },
-      executors: {
-        generateText: async () => ({ result: "a draft" }),
+    await runToQuiescence(
+      createAgentRuntime(machine, {
+        on: { "*": (emitted) => seen.push(emitted.type) },
+        executors: {
+          generateText: async () => ({ result: "a draft" }),
+        },
+      }),
+      {
+        input: { topic: "rivers" },
       },
-    });
+    );
 
     expect(seen).toEqual(["DRAFTING_STARTED", "DRAFTED"]);
   });
@@ -1596,13 +1723,17 @@ describe("emitted events (runAgent `on`)", () => {
   test("onTrace emits an ordered run/request/transition/emit/end stream", async () => {
     const trace: AgentTraceEvent<typeof machine>[] = [];
 
-    const result = await runAgent(machine, {
-      input: { topic: "rivers" },
-      onTrace: (event) => trace.push(event),
-      executors: {
-        generateText: async () => ({ result: "a draft", usage: { totalTokens: 3 } }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onTrace: (event) => trace.push(event),
+        executors: {
+          generateText: async () => ({ result: "a draft", usage: { totalTokens: 3 } }),
+        },
+      }),
+      {
+        input: { topic: "rivers" },
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(trace.map((event) => event.seq)).toEqual(trace.map((_, index) => index + 1));
@@ -1650,14 +1781,16 @@ describe("emitted events (runAgent `on`)", () => {
       context: {},
       initial: "done",
       states: { done: { type: "final" } },
-    } as never);
-
-    await runAgent(versioned, {
-      onTrace: (event) => trace.push(event),
-      executors: {
-        generateText: async () => ({ result: "a draft" }),
-      },
     });
+
+    await runToQuiescence(
+      createAgentRuntime(versioned, {
+        onTrace: (event) => trace.push(event),
+        executors: {
+          generateText: async () => ({ result: "a draft" }),
+        },
+      }),
+    );
 
     expect(trace.length).toBeGreaterThan(0);
     for (const event of trace) {
@@ -1697,17 +1830,19 @@ describe("onTrace stream chunks", () => {
     });
 
     const trace: AgentTraceEvent<typeof machine>[] = [];
-    const result = await runAgent(machine, {
-      onTrace: (event) => trace.push(event),
-      executors: {
-        generateText: async () => ({ result: {} }),
-        streamText: async (_request, info) => {
-          info?.onChunk?.("a");
-          info?.onChunk?.("b");
-          return { result: "ab" };
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onTrace: (event) => trace.push(event),
+        executors: {
+          generateText: async () => ({ result: {} }),
+          streamText: async (_request, info) => {
+            info?.onChunk?.("a");
+            info?.onChunk?.("b");
+            return { result: "ab" };
+          },
         },
-      },
-    });
+      }),
+    );
 
     expect(result.status).toBe("done");
     expect(
@@ -1753,19 +1888,21 @@ describe("sugar callbacks are projections of onTrace", () => {
 
     // One interleaved log: every trace event and every sugar callback, in order.
     const log: string[] = [];
-    const result = await runAgent(machine, {
-      onTrace: (event) => log.push(`trace:${event.type}`),
-      onChunk: (chunk, info) => log.push(`chunk:${chunk}:${info.request.src}`),
-      onResult: (_request, { result }) => log.push(`result:${String(result)}`),
-      onTransition: (_snapshot, event) => log.push(`transition:${event.type}`),
-      executors: {
-        streamText: async (_request, info) => {
-          info?.onChunk?.("a");
-          info?.onChunk?.("b");
-          return { result: "ab" };
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onTrace: (event) => log.push(`trace:${event.type}`),
+        onChunk: (chunk, info) => log.push(`chunk:${chunk}:${info.request.src}`),
+        onResult: (_request, { result }) => log.push(`result:${String(result)}`),
+        onTransition: (_snapshot, event) => log.push(`transition:${event.type}`),
+        executors: {
+          streamText: async (_request, info) => {
+            info?.onChunk?.("a");
+            info?.onChunk?.("b");
+            return { result: "ab" };
+          },
         },
-      },
-    });
+      }),
+    );
 
     expect(result.status).toBe("done");
 
@@ -1824,16 +1961,18 @@ describe("onResult raw pass-through", () => {
     });
 
     const raws: unknown[] = [];
-    const result = await runAgent(machine, {
-      onResult: (_request, { raw }) => raws.push(raw),
-      executors: {
-        generateText: async () => ({
-          result: "42",
-          usage: { inputTokens: 7, outputTokens: 3 },
-          finishReason: "stop",
-        }),
-      },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onResult: (_request, { raw }) => raws.push(raw),
+        executors: {
+          generateText: async () => ({
+            result: "42",
+            usage: { inputTokens: 7, outputTokens: 3 },
+            finishReason: "stop",
+          }),
+        },
+      }),
+    );
 
     expect(result.status).toBe("done");
     expect(raws).toEqual([
@@ -1875,15 +2014,17 @@ describe("onResult raw pass-through", () => {
 
     const raws: unknown[] = [];
     const trace: AgentTraceEvent[] = [];
-    const result = await runAgent(machine, {
-      onResult: (_request, { raw }) => raws.push(raw),
-      onTrace: (event) => trace.push(event),
-      executors: {
-        // Executor surfaces reasoning alongside the (already-unwrapped) output —
-        // exactly what createAiSdkExecutors returns from the envelope.
-        generateText: async () => ({ result: { answer: "42" }, reasoning: "carefully" }),
-      },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onResult: (_request, { raw }) => raws.push(raw),
+        onTrace: (event) => trace.push(event),
+        executors: {
+          // Executor surfaces reasoning alongside the (already-unwrapped) output —
+          // exactly what createAiSdkExecutors returns from the envelope.
+          generateText: async () => ({ result: { answer: "42" }, reasoning: "carefully" }),
+        },
+      }),
+    );
 
     expect(result.status).toBe("done");
     // reasoning stays out of machine context/output.
@@ -1941,21 +2082,23 @@ describe("inspect passthrough (system-wide visibility)", () => {
     const rootTransitions: string[] = [];
     const inspected: Array<{ actorId: string; value: unknown }> = [];
 
-    const result = await runAgent(parent, {
-      onTransition: (snapshot) => rootTransitions.push(JSON.stringify(snapshot.value)),
-      inspect: (event) => {
-        if (event.type !== "@xstate.transition") return;
-        const snapshot = event.snapshot as { value?: unknown };
-        if (snapshot.value === undefined) return;
-        inspected.push({
-          actorId: (event.actorRef as { id?: string }).id ?? "",
-          value: snapshot.value,
-        });
-      },
-      executors: {
-        generateText: async () => ({ result: "" }),
-      },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(parent, {
+        onTransition: (snapshot) => rootTransitions.push(JSON.stringify(snapshot.value)),
+        inspect: (event) => {
+          if (event.type !== "@xstate.transition") return;
+          const snapshot = event.snapshot as { value?: unknown };
+          if (snapshot.value === undefined) return;
+          inspected.push({
+            actorId: (event.actorRef as { id?: string }).id ?? "",
+            value: snapshot.value,
+          });
+        },
+        executors: {
+          generateText: async () => ({ result: "" }),
+        },
+      }),
+    );
 
     expect(result.status).toBe("done");
     // onTransition saw only the root machine's states...
@@ -1991,18 +2134,20 @@ describe("inspect passthrough (system-wide visibility)", () => {
     });
 
     const seen: string[] = [];
-    const result = await runAgent(machine, {
-      // The observer shape ({ next }), not a function.
-      inspect: { next: (event) => seen.push(event.type) },
-      executors: { generateText: async () => ({ result: "" }) },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        // The observer shape ({ next }), not a function.
+        inspect: { next: (event) => seen.push(event.type) },
+        executors: { generateText: async () => ({ result: "" }) },
+      }),
+    );
 
     expect(result.status).toBe("done");
     expect(seen).toContain("@xstate.transition");
   });
 });
 
-describe("Feature A: explicit suspension detection (isIdle)", () => {
+describe("Feature A: human waits settle idle once quiescent", () => {
   test("the exported default recognizes root handlers and composes with custom waits", async () => {
     const machine = setup({}).createMachine({
       on: { CONTINUE: { target: ".done" } },
@@ -2019,18 +2164,20 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     expect(isAgentIdle(snapshot) || snapshot.hasTag("waiting-for-webhook")).toBe(true);
     actor.stop();
 
-    const result = await runAgent(machine, { executors: {} });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {},
+      }),
+    );
     expect(result.status).toBe("idle");
   });
 
-  test("a machine-carried isIdle predicate settles idle and resumes to done", async () => {
+  test("a tagged wait state settles idle and resumes to done", async () => {
     const agent = setupAgent({
       context: z.object({}),
       input: z.object({}),
       output: z.object({ approved: z.boolean() }),
       events: { APPROVE: z.object({}) },
-      // The machine declares its own wait signal — a tag it chose.
-      isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
     });
     const machine = agent.createMachine({
       context: {},
@@ -2044,23 +2191,31 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       },
     });
 
-    const first = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
     expect(first.snapshot.value).toBe("reviewing");
 
-    const second = await runAgent(machine, {
-      snapshot: first.persist(),
-      event: { type: "APPROVE" },
-      executors: {
-        generateText: async () => ({ result: {} }),
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+        },
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "APPROVE" },
       },
-    });
+    );
     expect(second.status).toBe("done");
     expect(second.status === "done" ? second.output : undefined).toEqual({ approved: true });
   });
@@ -2124,7 +2279,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
         CONTINUE: z.object({}),
       },
       actors: { child: childMachine },
-      isIdle: (snapshot) => snapshot.hasTag("waiting"),
     });
     const machine = agent.createMachine({
       context: { readies: 0 },
@@ -2161,7 +2315,14 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
 
     const executors = { generateText: async () => ({ result: "tick" }) };
 
-    const first = await runAgent(machine, { input: {}, executors });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors,
+      }),
+      {
+        input: {},
+      },
+    );
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
     const persistedNotes = (
@@ -2172,11 +2333,15 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     expect(persistedNotes).toEqual(["ready-1"]);
 
     // Resume from the persisted snapshot: the child keeps accumulating.
-    const second = await runAgent(machine, {
-      snapshot: first.persist(),
-      event: { type: "CONTINUE" },
-      executors,
-    });
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors,
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "CONTINUE" },
+      },
+    );
     expect(second.status).toBe("idle");
     if (second.status !== "idle") throw new Error("expected idle");
     const secondNotes = (
@@ -2238,7 +2403,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
         DONE: z.object({}),
       },
       actors: { child: childMachine },
-      isIdle: (snapshot) => snapshot.hasTag("waiting"),
     });
     const machine = agent.createMachine({
       context: {},
@@ -2272,10 +2436,14 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       },
     });
 
-    const result = await runAgent(machine, {
-      input: {},
-      executors: { generateText: async () => ({ result: "tick" }) },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText: async () => ({ result: "tick" }) },
+      }),
+      {
+        input: {},
+      },
+    );
     expect(result.status).toBe("idle");
     if (result.status !== "idle") throw new Error("expected idle");
     const notes = (
@@ -2292,7 +2460,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       input: z.object({}),
       output: z.object({ summary: z.string() }),
       events: { APPROVE: z.object({}) },
-      isIdle: (snapshot) => snapshot.hasTag("awaiting-review"),
       requests: {
         summarize: {
           schemas: { input: z.object({}), output: z.string() },
@@ -2332,13 +2499,17 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       },
     });
 
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: () =>
-          new Promise((res) => setTimeout(() => res({ result: "done-summary" }), 10)),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: () =>
+            new Promise((res) => setTimeout(() => res({ result: "done-summary" }), 10)),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("idle");
     if (result.status !== "idle") throw new Error("expected idle");
@@ -2361,12 +2532,16 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       },
     });
 
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("idle");
     expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("paused");
@@ -2378,7 +2553,6 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       input: z.object({}),
       output: z.object({}),
       events: { GO: z.object({}) },
-      isIdle: (snapshot) => snapshot.matches("paused"),
       requests: {
         noop: {
           schemas: { input: z.object({}), output: z.string() },
@@ -2400,12 +2574,16 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
     // on the shared root `config`, so it must still be found.
     const provided = machine.provide({});
 
-    const result = await runAgent(provided, {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: "x" }),
+    const result = await runToQuiescence(
+      createAgentRuntime(provided, {
+        executors: {
+          generateText: async () => ({ result: "x" }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("idle");
     expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("paused");
@@ -2428,12 +2606,16 @@ describe("Feature A: explicit suspension detection (isIdle)", () => {
       },
     });
 
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
     expect(result.status).toBe("idle");
     expect(result.status === "idle" ? result.snapshot.value : undefined).toBe("reviewing");
   });
@@ -2469,15 +2651,26 @@ describe("Feature B: an event the state does not handle is ignored", () => {
   const generateText = async () => ({ result: {} });
 
   test("an event the restored state does not handle is ignored, not an error", async () => {
-    const first = await runAgent(machine, { input: {}, executors: { generateText } });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: {},
+      },
+    );
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
 
-    const second = await runAgent(machine, {
-      snapshot: first.persist(),
-      event: { type: "NOPE" } as never,
-      executors: { generateText },
-    });
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "NOPE" } as never,
+      },
+    );
 
     expect(second.status).toBe("idle");
     expect(second.ignored).toEqual({ type: "NOPE" });
@@ -2485,49 +2678,89 @@ describe("Feature B: an event the state does not handle is ignored", () => {
   });
 
   test("an ignored event is still journaled, and replay ignores it again", async () => {
-    const first = await runAgent(machine, { input: {}, executors: { generateText } });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: {},
+      },
+    );
     if (first.status !== "idle") throw new Error("expected idle");
 
-    const second = await runAgent(machine, {
-      events: first.events,
-      event: { type: "NOPE" } as never,
-      executors: { generateText },
-    });
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        events: first.events,
+        event: { type: "NOPE" } as never,
+      },
+    );
     expect(second.ignored).toEqual({ type: "NOPE" });
     expect(second.events.length).toBe(first.events.length + 1);
     expect(second.events[second.events.length - 1]!.event.type).toBe("NOPE");
 
     // Resuming from that log replays the ignored event without incident.
-    const third = await runAgent(machine, { events: second.events, executors: { generateText } });
+    const third = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        events: second.events,
+      },
+    );
     expect(third.status).toBe("idle");
     expect(third.ignored).toBeUndefined();
   });
 
   test("a handled event is not reported as ignored", async () => {
-    const first = await runAgent(machine, { input: {}, executors: { generateText } });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: {},
+      },
+    );
     if (first.status !== "idle") throw new Error("expected idle");
 
-    const second = await runAgent(machine, {
-      snapshot: first.persist(),
-      event: { type: "APPROVE" },
-      executors: { generateText },
-    });
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "APPROVE" },
+      },
+    );
     expect(second.ignored).toBeUndefined();
   });
 
   test("a type-legal event a guard rejects does not throw (settles per normal semantics)", async () => {
-    const first = await runAgent(machine, { input: {}, executors: { generateText } });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText },
+      }),
+      {
+        input: {},
+      },
+    );
     if (first.status !== "idle") throw new Error("expected idle");
 
     // SUBMIT is a declared, type-legal event; its guard rejects it here. This
     // is not an error either: the machine takes no transition.
-    const second = await runAgent(machine, {
-      snapshot: first.persist(),
-      event: { type: "SUBMIT" },
-      executors: {
-        generateText,
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText,
+        },
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "SUBMIT" },
       },
-    });
+    );
 
     expect(second.status).toBe("idle");
     expect(second.status === "idle" ? second.snapshot.value : undefined).toBe("reviewing");
@@ -2574,26 +2807,34 @@ describe("runAgent error cause split", () => {
   });
 
   test("unhandled AgentDecisionExhaustedError settles cause 'decision-exhausted'", async () => {
-    const result = await runAgent(exhaustingDecisionMachine(false), {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide: alwaysUnknown,
+    const result = await runToQuiescence(
+      createAgentRuntime(exhaustingDecisionMachine(false), {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: alwaysUnknown,
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("error");
     expect(result.status === "error" ? result.cause : undefined).toBe("decision-exhausted");
   });
 
   test("a AgentDecisionExhaustedError handled by onError does NOT settle an error", async () => {
-    const result = await runAgent(exhaustingDecisionMachine(true), {
-      input: {},
-      executors: {
-        generateText: async () => ({ result: {} }),
-        decide: alwaysUnknown,
+    const result = await runToQuiescence(
+      createAgentRuntime(exhaustingDecisionMachine(true), {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: alwaysUnknown,
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     // onError routed it to the machine's final `fumbled` state, not a run error.
     expect(result.status).not.toBe("error");
@@ -2621,14 +2862,18 @@ describe("runAgent error cause split", () => {
       },
     });
 
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async () => {
-          throw new Error("boom");
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => {
+            throw new Error("boom");
+          },
         },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("error");
     expect(result.status === "error" ? result.cause : undefined).toBe("machine");
@@ -2658,12 +2903,16 @@ describe("runAgent dev-mode serialization guard", () => {
       warnings.push(args.map(String).join(" "));
     };
     try {
-      const result = await runAgent(machine, {
-        input: {},
-        executors: {
-          generateText: async () => ({ result: {} }),
+      const result = await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: {
+            generateText: async () => ({ result: {} }),
+          },
+        }),
+        {
+          input: {},
         },
-      });
+      );
       expect(result.status).toBe("idle");
     } finally {
       console.warn = original;
@@ -2696,10 +2945,14 @@ describe("runAgent dev-mode serialization guard", () => {
       warnings.push(args.map(String).join(" "));
     };
     try {
-      await runAgent(machine, {
-        input: {},
-        executors: { generateText: async () => ({ result: {} }) },
-      });
+      await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: { generateText: async () => ({ result: {} }) },
+        }),
+        {
+          input: {},
+        },
+      );
     } finally {
       console.warn = original;
     }
@@ -2777,19 +3030,27 @@ describe("restore semantics: pending requests and events-only resume", () => {
         return { result: `ok:${request.prompt}` };
       },
     };
-    const restored = await runAgent(machine, {
-      snapshot: JSON.parse(JSON.stringify(persisted)),
-      executors: resolving,
-    });
+    const restored = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: resolving,
+      }),
+      {
+        snapshot: JSON.parse(JSON.stringify(persisted)),
+      },
+    );
     // First leg's call re-executed exactly once; run settled at the idle gate.
     expect(calls).toEqual(["one", "retry:one"]);
     expect(restored.status).toBe("idle");
 
-    const finished = await runAgent(machine, {
-      snapshot: restored.persist(),
-      event: { type: "GO" },
-      executors: resolving,
-    });
+    const finished = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: resolving,
+      }),
+      {
+        snapshot: restored.persist(),
+        event: { type: "GO" },
+      },
+    );
     expect(calls).toEqual(["one", "retry:one", "retry:two"]);
     expect(finished.status).toBe("done");
     expect(finished.status === "done" ? finished.output : undefined).toEqual({
@@ -2801,15 +3062,19 @@ describe("restore semantics: pending requests and events-only resume", () => {
   test("executors receive runId and requestId correlation info", async () => {
     const machine = buildMachine();
     const seen: Array<{ runId?: string; requestId?: string }> = [];
-    const result = await runAgent(machine, {
-      input: {},
-      executors: {
-        generateText: async (request, info) => {
-          seen.push({ runId: info?.runId, requestId: info?.requestId });
-          return { result: `ok:${request.prompt}` };
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async (request, info) => {
+            seen.push({ runId: info?.runId, requestId: info?.requestId });
+            return { result: `ok:${request.prompt}` };
+          },
         },
+      }),
+      {
+        input: {},
       },
-    });
+    );
     expect(result.status).toBe("idle");
     expect(seen).toHaveLength(1);
     expect(seen[0]?.runId).toMatch(/^run_\d+$/);
@@ -2827,7 +3092,6 @@ describe("machine version prop (createMachine({ version }))", () => {
       input: z.object({}),
       output: z.object({}),
       events: { GO: {} },
-      isIdle: (snapshot) => snapshot.hasTag("waiting"),
     });
     return agentSetup.createMachine({
       version,
@@ -2843,9 +3107,11 @@ describe("machine version prop (createMachine({ version }))", () => {
 
   test("XState's persisted version resumes under the same machine", async () => {
     const machine = buildVersioned("3");
-    const first = await runAgent(machine, { input: {} });
+    const first = await runToQuiescence(createAgentRuntime(machine), {
+      input: {},
+    });
     expect(first.status).toBe("idle");
-    const resumed = await runAgent(machine, {
+    const resumed = await runToQuiescence(createAgentRuntime(machine), {
       snapshot: JSON.parse(JSON.stringify(first.persist())),
       event: { type: "GO" },
     });
@@ -2854,12 +3120,14 @@ describe("machine version prop (createMachine({ version }))", () => {
 
   test("a snapshot persisted under v1 refuses to resume under v2 (via the XState version field)", async () => {
     const machineV1 = buildVersioned("1");
-    const first = await runAgent(machineV1, { input: {} });
+    const first = await runToQuiescence(createAgentRuntime(machineV1), {
+      input: {},
+    });
     expect(first.status).toBe("idle");
     const persisted = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
 
     const machineV2 = buildVersioned("2");
-    const mismatched = await runAgent(machineV2, {
+    const mismatched = await runToQuiescence(createAgentRuntime(machineV2), {
       snapshot: persisted,
       event: { type: "GO" },
     });
@@ -2869,7 +3137,7 @@ describe("machine version prop (createMachine({ version }))", () => {
     );
 
     const migratingV2 = buildVersioned("2", (snapshot) => ({ ...snapshot, version: "2" }));
-    const migrated = await runAgent(migratingV2, {
+    const migrated = await runToQuiescence(createAgentRuntime(migratingV2), {
       snapshot: persisted,
       event: { type: "GO" },
     });
@@ -2911,15 +3179,19 @@ describe("inspectTransitions", () => {
     });
 
     const observed: Array<{ id: string; value: unknown }> = [];
-    const result = await runAgent(parentMachine, {
-      input: {},
-      inspect: inspectTransitions((snapshot, actorRef) => {
-        observed.push({ id: actorRef.id, value: snapshot.value });
+    const result = await runToQuiescence(
+      createAgentRuntime(parentMachine, {
+        inspect: inspectTransitions((snapshot, actorRef) => {
+          observed.push({ id: actorRef.id, value: snapshot.value });
+        }),
+        executors: {
+          generateText: async () => ({ result: {} }),
+        },
       }),
-      executors: {
-        generateText: async () => ({ result: {} }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(observed.some((entry) => entry.id === "child" && entry.value === "childDone")).toBe(
@@ -2979,21 +3251,25 @@ describe("runAgent usage aggregation", () => {
   });
 
   test("sums reported token usage across calls and counts modelCalls", async () => {
-    const result = await runAgent(twoCallMachine, {
-      input: {},
-      executors: {
-        generateText: async (request: AgentTextRequest & { tools: AgentTools }) => ({
-          result: `out:${request.prompt}`,
-          usage: {
-            inputTokens: 10,
-            outputTokens: 4,
-            totalTokens: 14,
-            reasoningTokens: 2,
-            cachedInputTokens: 1,
-          },
-        }),
+    const result = await runToQuiescence(
+      createAgentRuntime(twoCallMachine, {
+        executors: {
+          generateText: async (request: AgentTextRequest & { tools: AgentTools }) => ({
+            result: `out:${request.prompt}`,
+            usage: {
+              inputTokens: 10,
+              outputTokens: 4,
+              totalTokens: 14,
+              reasoningTokens: 2,
+              cachedInputTokens: 1,
+            },
+          }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(result.usage).toEqual({
@@ -3008,18 +3284,22 @@ describe("runAgent usage aggregation", () => {
 
   test("partial usage: fields are summed over the calls that reported them", async () => {
     let call = 0;
-    const result = await runAgent(twoCallMachine, {
-      input: {},
-      executors: {
-        generateText: async () => {
-          call += 1;
-          // Only the FIRST call reports usage, and only two fields of it.
-          return call === 1
-            ? { result: "a", usage: { inputTokens: 5, totalTokens: 6 } }
-            : { result: "b" };
+    const result = await runToQuiescence(
+      createAgentRuntime(twoCallMachine, {
+        executors: {
+          generateText: async () => {
+            call += 1;
+            // Only the FIRST call reports usage, and only two fields of it.
+            return call === 1
+              ? { result: "a", usage: { inputTokens: 5, totalTokens: 6 } }
+              : { result: "b" };
+          },
         },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     // `outputTokens` was never reported by ANY call, so it stays undefined;
@@ -3029,10 +3309,14 @@ describe("runAgent usage aggregation", () => {
   });
 
   test("counts model calls even when no executor reports usage", async () => {
-    const result = await runAgent(twoCallMachine, {
-      input: {},
-      executors: { generateText: async () => ({ result: "x" }) },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(twoCallMachine, {
+        executors: { generateText: async () => ({ result: "x" }) },
+      }),
+      {
+        input: {},
+      },
+    );
 
     expect(result.usage).toEqual({ modelCalls: 2 });
   });
@@ -3061,37 +3345,49 @@ describe("runAgent usage aggregation", () => {
       },
     });
 
-    const result = await runAgent(idleMachine, {
-      input: {},
-      executors: {
-        generateText: async () => ({
-          result: "drafted",
-          usage: { inputTokens: 9, outputTokens: 3 },
-        }),
+    const result = await runToQuiescence(
+      createAgentRuntime(idleMachine, {
+        executors: {
+          generateText: async () => ({
+            result: "drafted",
+            usage: { inputTokens: 9, outputTokens: 3 },
+          }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("idle");
     expect(result.usage).toEqual({ inputTokens: 9, outputTokens: 3, modelCalls: 1 });
 
     // A resumed run counts only ITS OWN calls, not the prior run's.
-    const resumed = await runAgent(idleMachine, {
-      snapshot: result.persist(),
-      event: { type: "APPROVE" },
-      executors: { generateText: async () => ({ result: "unused" }) },
-    });
+    const resumed = await runToQuiescence(
+      createAgentRuntime(idleMachine, {
+        executors: { generateText: async () => ({ result: "unused" }) },
+      }),
+      {
+        snapshot: result.persist(),
+        event: { type: "APPROVE" },
+      },
+    );
     expect(resumed.status).toBe("done");
     expect(resumed.usage).toEqual({ modelCalls: 0 });
   });
 
   test("error result carries the usage of the calls made before the failure", async () => {
-    const result = await runAgent(twoCallMachine, {
-      input: {},
-      maxModelCalls: 1,
-      executors: {
-        generateText: async () => ({ result: "a", usage: { inputTokens: 11, totalTokens: 12 } }),
+    const result = await runToQuiescence(
+      createAgentRuntime(twoCallMachine, {
+        maxModelCalls: 1,
+        executors: {
+          generateText: async () => ({ result: "a", usage: { inputTokens: 11, totalTokens: 12 } }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("error");
     expect(result.status === "error" ? result.cause : undefined).toBe("max-model-calls");
@@ -3125,18 +3421,25 @@ describe("runAgent usage aggregation", () => {
     });
 
     let attempt = 0;
-    const result = await runAgent(decideMachine, {
-      input: {},
-      executors: {
-        decide: async () => {
-          attempt += 1;
-          return attempt === 1
-            ? // First attempt picks an illegal event -> retried.
-              { event: { type: "NOPE" } as ChosenEvent, usage: { inputTokens: 3 } }
-            : { event: { type: "GO" } as ChosenEvent, usage: { inputTokens: 4, outputTokens: 1 } };
+    const result = await runToQuiescence(
+      createAgentRuntime(decideMachine, {
+        executors: {
+          decide: async () => {
+            attempt += 1;
+            return attempt === 1
+              ? // First attempt picks an illegal event -> retried.
+                { event: { type: "NOPE" } as ChosenEvent, usage: { inputTokens: 3 } }
+              : {
+                  event: { type: "GO" } as ChosenEvent,
+                  usage: { inputTokens: 4, outputTokens: 1 },
+                };
+          },
         },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(result.status).toBe("done");
     expect(result.usage).toEqual({ inputTokens: 7, outputTokens: 1, modelCalls: 2 });
@@ -3144,13 +3447,17 @@ describe("runAgent usage aggregation", () => {
 
   test("per-call usage rides the request.end trace event", async () => {
     const trace: AgentTraceEvent<typeof twoCallMachine>[] = [];
-    await runAgent(twoCallMachine, {
-      input: {},
-      onTrace: (event) => trace.push(event),
-      executors: {
-        generateText: async () => ({ result: "x", usage: { inputTokens: 2, outputTokens: 1 } }),
+    await runToQuiescence(
+      createAgentRuntime(twoCallMachine, {
+        onTrace: (event) => trace.push(event),
+        executors: {
+          generateText: async () => ({ result: "x", usage: { inputTokens: 2, outputTokens: 1 } }),
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     const ends = trace.filter((event) => event.type === "request.end");
     expect(ends).toHaveLength(2);
@@ -3161,19 +3468,23 @@ describe("runAgent usage aggregation", () => {
 
   test("the call's finishReason rides the request.end trace event, normalized", async () => {
     const trace: AgentTraceEvent<typeof twoCallMachine>[] = [];
-    await runAgent(twoCallMachine, {
-      input: {},
-      onTrace: (event) => trace.push(event),
-      executors: {
-        // A provider `'error'` is not a member of the portable union (the cast
-        // is what an un-normalizing host would need), so it lands on `'other'`.
-        generateText: async ({ prompt }) =>
-          ({
-            result: "x",
-            finishReason: prompt === "one" ? "length" : "error",
-          }) as AgentRequestExecutorResult<string>,
+    await runToQuiescence(
+      createAgentRuntime(twoCallMachine, {
+        onTrace: (event) => trace.push(event),
+        executors: {
+          // A provider `'error'` is not a member of the portable union (the cast
+          // is what an un-normalizing host would need), so it lands on `'other'`.
+          generateText: async ({ prompt }) =>
+            ({
+              result: "x",
+              finishReason: prompt === "one" ? "length" : "error",
+            }) as AgentRequestExecutorResult<string>,
+        },
+      }),
+      {
+        input: {},
       },
-    });
+    );
 
     expect(
       trace.filter((event) => event.type === "request.end").map((end) => end.finishReason),
@@ -3212,7 +3523,9 @@ describe("machine input validation", () => {
     });
 
   test("fills schema defaults before the context factory runs", async () => {
-    const result = await runAgent(buildMachine(), { input: { topic: "otters" } });
+    const result = await runToQuiescence(createAgentRuntime(buildMachine()), {
+      input: { topic: "otters" },
+    });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -3224,7 +3537,7 @@ describe("machine input validation", () => {
     // Compile-time half: `{ topic }` alone type-checks above because `rounds`
     // and `tone` are defaulted, while `topic` (no default) stays required.
     await expect(
-      runAgent(buildMachine(), {
+      runToQuiescence(createAgentRuntime(buildMachine()), {
         // @ts-expect-error `topic` has no default, so it cannot be omitted
         input: { rounds: 1 },
       }),
@@ -3232,7 +3545,7 @@ describe("machine input validation", () => {
   });
 
   test("explicit values win over defaults", async () => {
-    const result = await runAgent(buildMachine(), {
+    const result = await runToQuiescence(createAgentRuntime(buildMachine()), {
       input: { topic: "otters", rounds: 9 },
     });
 
@@ -3241,7 +3554,9 @@ describe("machine input validation", () => {
   });
 
   test("schema defaults reach the machine context", async () => {
-    const result = await runAgent(buildMachine(), { input: { topic: "otters" } });
+    const result = await runToQuiescence(createAgentRuntime(buildMachine()), {
+      input: { topic: "otters" },
+    });
     expect(result.snapshot.context).toEqual({ topic: "otters", rounds: 3, tone: "neutral" });
   });
 
@@ -3249,13 +3564,13 @@ describe("machine input validation", () => {
     // Thrown, not settled: the actor never starts, so this is a bad call rather
     // than a machine failure.
     await expect(
-      runAgent(buildMachine(), {
+      runToQuiescence(createAgentRuntime(buildMachine()), {
         // `rounds` is not a number.
         input: { topic: "otters", rounds: "nine" } as never,
       }),
     ).rejects.toThrow(AgentError);
 
-    const error: unknown = await runAgent(buildMachine(), {
+    const error: unknown = await runToQuiescence(createAgentRuntime(buildMachine()), {
       input: { topic: "otters", rounds: "nine" } as never,
     }).catch((caught: unknown) => caught);
     expect((error as AgentError).code).toBe("invalid-machine-input");
@@ -3277,7 +3592,7 @@ describe("machine input validation", () => {
       states: { done: { type: "final", output: ({ context }) => context } },
     });
 
-    const result = await runAgent(machine, {});
+    const result = await runToQuiescence(createAgentRuntime(machine));
 
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output).toEqual({ topic: "(none)" });
@@ -3293,7 +3608,9 @@ describe("machine input validation", () => {
       states: { done: { type: "final", output: ({ context }) => context.seen } },
     });
 
-    const result = await runAgent(machine, { input: { anything: 1 } as never });
+    const result = await runToQuiescence(createAgentRuntime(machine), {
+      input: { anything: 1 } as never,
+    });
 
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output).toEqual({ anything: 1 });
@@ -3327,13 +3644,12 @@ describe("runAgent event log", () => {
         },
         waiting: { on: { APPROVE: { target: "wrapping" } } },
         wrapping: {
-          entry: (_args: never, enqueue: { raise: (event: { type: string }) => void }) =>
-            enqueue.raise({ type: "CONTINUE" }),
+          entry: (_, enq) => enq.raise({ type: "CONTINUE" }),
           on: { CONTINUE: { target: "done" } },
         },
         done: { type: "final", output: () => ({ ok: true }) },
       },
-    } as never);
+    });
 
   const executors = () => ({
     generateText: async () => ({ result: "42", usage: { totalTokens: 7 } }),
@@ -3345,11 +3661,15 @@ describe("runAgent event log", () => {
     const machine = makeLoggedMachine();
     const streamed: AgentLogEntry[] = [];
 
-    const first = await runAgent(machine, {
-      input: undefined,
-      executors: executors(),
-      onEvent: (entry) => streamed.push(entry),
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+        onEvent: (entry) => streamed.push(entry),
+      }),
+      {
+        input: undefined,
+      },
+    );
 
     expect(first.status).toBe("idle");
     // The reserved init entry comes first and names the lineage.
@@ -3373,12 +3693,16 @@ describe("runAgent event log", () => {
     expect((folded.snapshot as AnyMachineSnapshot).matches("waiting")).toBe(true);
 
     // Resuming continues the SAME log: same lineage, contiguous indices.
-    const second = await runAgent(machine, {
-      events: first.events,
-      snapshot: first.persist(),
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-    });
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        events: first.events,
+        snapshot: first.persist(),
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(second.status).toBe("done");
     expect(getLogExecutionId(second.events)).toBe(getLogExecutionId(first.events));
     expect(second.events.map((entry) => entry.index)).toEqual(
@@ -3393,11 +3717,15 @@ describe("runAgent event log", () => {
 
   test("verification: false omits the recorded state hashes", async () => {
     const machine = makeLoggedMachine();
-    const result = await runAgent(machine, {
-      input: undefined,
-      executors: executors(),
-      verification: false,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+        verification: false,
+      }),
+      {
+        input: undefined,
+      },
+    );
     expect(result.events.length).toBeGreaterThan(1);
     expect(result.events.every((entry) => entry.verification === undefined)).toBe(true);
   });
@@ -3422,7 +3750,7 @@ describe("runAgent event log", () => {
         waiting: { on: { GO: { target: "done" } } },
         done: { type: "final" },
       },
-    } as never);
+    });
 
     const firstCalls: Array<{ requestId?: string; callKey?: string }> = [];
     // The crash is driven by the run itself, not by the clock: abort only once
@@ -3430,19 +3758,23 @@ describe("runAgent event log", () => {
     const controller = new AbortController();
     const inFlight = deferred();
     const crashed = await (async () => {
-      const running = runAgent(twoCallMachine, {
-        input: undefined,
-        signal: controller.signal,
-        executors: {
-          generateText: async (_request, info) => {
-            firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
-            if (firstCalls.length === 1) return { result: "one" };
-            // The second call is the one still in flight at the crash.
-            inFlight.resolve();
-            return await new Promise<never>(() => {});
+      const running = runToQuiescence(
+        createAgentRuntime(twoCallMachine, {
+          signal: controller.signal,
+          executors: {
+            generateText: async (_request, info) => {
+              firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+              if (firstCalls.length === 1) return { result: "one" };
+              // The second call is the one still in flight at the crash.
+              inFlight.resolve();
+              return await new Promise<never>(() => {});
+            },
           },
+        }),
+        {
+          input: undefined,
         },
-      });
+      );
       await inFlight.promise;
       controller.abort();
       return running;
@@ -3453,16 +3785,20 @@ describe("runAgent event log", () => {
     expect(types(crashed.events)).toContain("xstate.done.actor");
 
     const secondCalls: Array<{ requestId?: string; callKey?: string }> = [];
-    const recovered = await runAgent(twoCallMachine, {
-      // Log only — no snapshot survived the crash.
-      events: crashed.events,
-      executors: {
-        generateText: async (_request, info) => {
-          secondCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
-          return { result: "two" };
+    const recovered = await runToQuiescence(
+      createAgentRuntime(twoCallMachine, {
+        executors: {
+          generateText: async (_request, info) => {
+            secondCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+            return { result: "two" };
+          },
         },
+      }),
+      {
+        // Log only — no snapshot survived the crash.
+        events: crashed.events,
       },
-    });
+    );
 
     expect(recovered.status).toBe("idle");
     // `a` completed before the crash and folds back in from the log.
@@ -3498,19 +3834,23 @@ describe("runAgent event log", () => {
 
     const run = async () => {
       const keys: Array<string | undefined> = [];
-      const result = await runAgent(machine, {
-        input: {},
-        executors: {
-          decide: async (request, info) => {
-            keys.push(info?.callKey);
-            // The first attempt picks an event that is not a candidate, so
-            // `resolveDecision` rejects it and retries with feedback.
-            return request.attempts.length === 0
-              ? { event: { type: "NOPE" } as never }
-              : { event: { type: "ATTACK" } as never };
+      const result = await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: {
+            decide: async (request, info) => {
+              keys.push(info?.callKey);
+              // The first attempt picks an event that is not a candidate, so
+              // `resolveDecision` rejects it and retries with feedback.
+              return request.attempts.length === 0
+                ? { event: { type: "NOPE" } as never }
+                : { event: { type: "ATTACK" } as never };
+            },
           },
+        }),
+        {
+          input: {},
         },
-      });
+      );
       return { keys, result };
     };
 
@@ -3532,10 +3872,14 @@ describe("runAgent event log", () => {
 
   test("resume precedence: a tail-stamped snapshot is trusted, a stale one is not", async () => {
     const machine = makeLoggedMachine();
-    const first = await runAgent(machine, {
-      input: undefined,
-      executors: executors(),
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
     const cached = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
 
     // Corrupt a MIDDLE entry's recorded hash: replaying this log throws, so a
@@ -3545,69 +3889,101 @@ describe("runAgent event log", () => {
     );
     expect(() => replay(machine, poisoned)).toThrow(/Replay diverged/);
 
-    const fastPath = await runAgent(machine, {
-      events: poisoned,
-      snapshot: cached,
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-    });
+    const fastPath = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        events: poisoned,
+        snapshot: cached,
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(fastPath.status).toBe("done");
 
     // The same poisoned log with no cache to trust must replay — and throw.
     await expect(
-      runAgent(machine, {
-        events: poisoned,
-        executors: executors(),
-      }),
+      runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: executors(),
+        }),
+        {
+          events: poisoned,
+        },
+      ),
     ).rejects.toThrow(/Replay diverged/);
   });
 
   test("a stale snapshot loses to the log, and a divergent one throws", async () => {
     const machine = makeLoggedMachine();
-    const first = await runAgent(machine, {
-      input: undefined,
-      executors: executors(),
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
     const staleSnapshot = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
-    const second = await runAgent(machine, {
-      events: first.events,
-      snapshot: staleSnapshot,
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-    });
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        events: first.events,
+        snapshot: staleSnapshot,
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(second.status).toBe("done");
 
     // `staleSnapshot` caches index 3 of a log that is now 5 entries long. It
     // still agrees with the log at index 3, so the log simply wins.
     expect(second.events.length).toBeGreaterThan(first.events.length);
-    const resumedFromStale = await runAgent(machine, {
-      events: second.events,
-      snapshot: staleSnapshot,
-      executors: executors(),
-    });
+    const resumedFromStale = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        events: second.events,
+        snapshot: staleSnapshot,
+      },
+    );
     expect(resumedFromStale.status).toBe("done");
 
     // A snapshot from another lineage that claims a position in THIS log is a
     // host bug, not a resume.
-    const otherRun = await runAgent(machine, {
-      input: undefined,
-      executors: { generateText: async () => ({ result: "different" }) },
-    });
-    await expect(
-      runAgent(machine, {
-        events: first.events,
-        snapshot: JSON.parse(JSON.stringify(otherRun.persist())) as Snapshot<unknown>,
-        executors: executors(),
+    const otherRun = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText: async () => ({ result: "different" }) },
       }),
+      {
+        input: undefined,
+      },
+    );
+    await expect(
+      runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: executors(),
+        }),
+        {
+          events: first.events,
+          snapshot: JSON.parse(JSON.stringify(otherRun.persist())) as Snapshot<unknown>,
+        },
+      ),
     ).rejects.toBeInstanceOf(AgentSnapshotDivergedError);
   });
 
   test("version bridge: a snapshot opens a new log segment, and its absence throws", async () => {
     const v1 = makeLoggedMachine({ version: "1" });
-    const first = await runAgent(v1, {
-      input: undefined,
-      executors: executors(),
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(v1, {
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
     expect(first.status).toBe("idle");
     const persisted = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
 
@@ -3616,12 +3992,16 @@ describe("runAgent event log", () => {
       migrate: (snapshot) => ({ ...(snapshot as object), version: "2" }),
     });
 
-    const bridged = await runAgent(v2, {
-      events: first.events,
-      snapshot: persisted,
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-    });
+    const bridged = await runToQuiescence(
+      createAgentRuntime(v2, {
+        executors: executors(),
+      }),
+      {
+        events: first.events,
+        snapshot: persisted,
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(bridged.status).toBe("done");
     const init = bridged.events[0]!;
     expect(init.event.type).toBe(AGENT_INIT_EVENT_TYPE);
@@ -3634,25 +4014,40 @@ describe("runAgent event log", () => {
     });
 
     await expect(
-      runAgent(v2, {
-        events: first.events,
-        executors: executors(),
-      }),
+      runToQuiescence(
+        createAgentRuntime(v2, {
+          executors: executors(),
+        }),
+        {
+          events: first.events,
+        },
+      ),
     ).rejects.toBeInstanceOf(AgentMachineVersionMismatchError);
   });
 
   test("version bridge: only the log's own tail snapshot is accepted", async () => {
     const v1 = makeLoggedMachine({ version: "1" });
-    const first = await runAgent(v1, { input: undefined, executors: executors() });
+    const first = await runToQuiescence(
+      createAgentRuntime(v1, {
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
     const tailOfFirst = JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>;
 
     // The thread moves on, so `tailOfFirst` now caches an INTERIOR index.
-    const second = await runAgent(v1, {
-      events: first.events,
-      snapshot: tailOfFirst,
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-    });
+    const second = await runToQuiescence(
+      createAgentRuntime(v1, {
+        executors: executors(),
+      }),
+      {
+        events: first.events,
+        snapshot: tailOfFirst,
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(second.events.length).toBeGreaterThan(first.events.length);
 
     const v2 = makeLoggedMachine({
@@ -3662,11 +4057,15 @@ describe("runAgent event log", () => {
 
     // Bridging with it would roll the thread back past logged entries.
     await expect(
-      runAgent(v2, {
-        events: second.events,
-        snapshot: tailOfFirst,
-        executors: executors(),
-      }),
+      runToQuiescence(
+        createAgentRuntime(v2, {
+          executors: executors(),
+        }),
+        {
+          events: second.events,
+          snapshot: tailOfFirst,
+        },
+      ),
     ).rejects.toBeInstanceOf(AgentSnapshotDivergedError);
 
     // Right index, wrong state: the tail entry's recorded hash catches it.
@@ -3675,43 +4074,70 @@ describe("runAgent event log", () => {
     };
     tampered.context.answer = "tampered";
     await expect(
-      runAgent(v2, { events: first.events, snapshot: tampered, executors: executors() }),
+      runToQuiescence(
+        createAgentRuntime(v2, {
+          executors: executors(),
+        }),
+        {
+          events: first.events,
+          snapshot: tampered,
+        },
+      ),
     ).rejects.toBeInstanceOf(AgentSnapshotDivergedError);
 
     // The genuine tail still bridges.
-    const bridged = await runAgent(v2, {
-      events: first.events,
-      snapshot: tailOfFirst,
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-    });
+    const bridged = await runToQuiescence(
+      createAgentRuntime(v2, {
+        executors: executors(),
+      }),
+      {
+        events: first.events,
+        snapshot: tailOfFirst,
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(bridged.status).toBe("done");
   });
 
   test("a log written by another machine is never a resume", async () => {
     const machine = makeLoggedMachine({ version: "1" });
     const other = makeLoggedMachine({ version: "1", id: "other-logged" });
-    const first = await runAgent(machine, { input: undefined, executors: executors() });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
 
     // Same version, different artifact: the entries fold against states this
     // machine does not have.
     await expect(
-      runAgent(other, {
-        events: first.events,
-        snapshot: JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>,
-        event: { type: "APPROVE" } as never,
-        executors: executors(),
-      }),
+      runToQuiescence(
+        createAgentRuntime(other, {
+          executors: executors(),
+        }),
+        {
+          events: first.events,
+          snapshot: JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>,
+          event: { type: "APPROVE" } as never,
+        },
+      ),
     ).rejects.toBeInstanceOf(AgentMachineVersionMismatchError);
   });
 
   test("an unverified log outranks a snapshot that merely claims to cache it", async () => {
     const machine = makeLoggedMachine();
-    const first = await runAgent(machine, {
-      input: undefined,
-      executors: executors(),
-      verification: false,
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+        verification: false,
+      }),
+      {
+        input: undefined,
+      },
+    );
     expect(first.events.every((entry) => entry.verification === undefined)).toBe(true);
 
     // Correct `agentMeta`, wrong state: with no recorded hash to check it
@@ -3720,28 +4146,40 @@ describe("runAgent event log", () => {
       context: { answer: string };
     };
     tampered.context.answer = "tampered";
-    const resumed = await runAgent(machine, {
-      events: first.events,
-      snapshot: tampered,
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-      verification: false,
-    });
+    const resumed = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+        verification: false,
+      }),
+      {
+        events: first.events,
+        snapshot: tampered,
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(resumed.status).toBe("done");
     expect((resumed.snapshot as AnyMachineSnapshot).context).toEqual({ answer: "42" });
   });
 
   test("snapshot-only resume starts a replayable log from that snapshot", async () => {
     const machine = makeLoggedMachine();
-    const first = await runAgent(machine, {
-      input: undefined,
-      executors: executors(),
-    });
-    const second = await runAgent(machine, {
-      snapshot: JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>,
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        snapshot: JSON.parse(JSON.stringify(first.persist())) as Snapshot<unknown>,
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(second.status).toBe("done");
     expect(second.events[0]!.event.type).toBe(AGENT_INIT_EVENT_TYPE);
     expect((second.events[0]!.event as { snapshot?: unknown }).snapshot).toBeDefined();
@@ -3752,12 +4190,16 @@ describe("runAgent event log", () => {
 
   test("usage is journaled even when the machine declares no transition for it, and result.usage folds the log", async () => {
     const machine = makeLoggedMachine();
-    const result = await runAgent(machine, {
-      input: undefined,
-      executors: {
-        generateText: async () => ({ result: "42", usage: { totalTokens: 7, inputTokens: 3 } }),
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: "42", usage: { totalTokens: 7, inputTokens: 3 } }),
+        },
+      }),
+      {
+        input: undefined,
       },
-    });
+    );
     const usageEntries = result.events.filter(
       (entry) => entry.event.type === AGENT_USAGE_EVENT_TYPE,
     );
@@ -3777,24 +4219,28 @@ describe("runAgent event log", () => {
     const stragglerEntry = deferred<AgentLogEntry>();
     let atSettle: number | undefined;
 
-    const running = runAgent(machine, {
-      input: undefined,
-      signal: controller.signal,
-      onEvent: (entry) => {
-        streamed.push(entry);
-        // Anything past the settle boundary is the straggler.
-        if (atSettle !== undefined && streamed.length > atSettle) {
-          stragglerEntry.resolve(entry);
-        }
-      },
-      executors: {
-        generateText: async () => {
-          inFlight.resolve();
-          await release.promise;
-          return { result: "late", usage: { totalTokens: 11 } };
+    const running = runToQuiescence(
+      createAgentRuntime(machine, {
+        signal: controller.signal,
+        onEvent: (entry) => {
+          streamed.push(entry);
+          // Anything past the settle boundary is the straggler.
+          if (atSettle !== undefined && streamed.length > atSettle) {
+            stragglerEntry.resolve(entry);
+          }
         },
+        executors: {
+          generateText: async () => {
+            inFlight.resolve();
+            await release.promise;
+            return { result: "late", usage: { totalTokens: 11 } };
+          },
+        },
+      }),
+      {
+        input: undefined,
       },
-    });
+    );
     await inFlight.promise;
     controller.abort();
     const result = await running;
@@ -3818,15 +4264,21 @@ describe("runAgent event log", () => {
       states: {
         waiting: { after: { 5: { target: "beeped" } } },
         beeped: {
-          entry: (_args: never, enqueue: { raise: (event: { type: string }) => void }) =>
-            enqueue.raise({ type: "CONTINUE" }),
+          entry: (_, enq) => enq.raise({ type: "CONTINUE" }),
           on: { CONTINUE: { target: "done" } },
         },
         done: { type: "final" },
       },
-    } as never);
+    });
 
-    const result = await runAgent(timerMachine, { input: undefined, executors: {} });
+    const result = await runToQuiescence(
+      createAgentRuntime(timerMachine, {
+        executors: {},
+      }),
+      {
+        input: undefined,
+      },
+    );
     expect(result.status).toBe("done");
     expect(types(result.events)).toContain("xstate.timer");
     expect(types(result.events)).not.toContain("CONTINUE");
@@ -3835,28 +4287,40 @@ describe("runAgent event log", () => {
 
   test("a log whose last entry reached a final state settles immediately on resume", async () => {
     const machine = makeLoggedMachine();
-    const first = await runAgent(machine, {
-      input: undefined,
-      executors: executors(),
-    });
-    const finished = await runAgent(machine, {
-      events: first.events,
-      snapshot: first.persist(),
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
+    const finished = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+      }),
+      {
+        events: first.events,
+        snapshot: first.persist(),
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(finished.status).toBe("done");
 
     let called = 0;
-    const replayed = await runAgent(machine, {
-      events: finished.events,
-      executors: {
-        generateText: async () => {
-          called++;
-          return { result: "should not happen" };
+    const replayed = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => {
+            called++;
+            return { result: "should not happen" };
+          },
         },
+      }),
+      {
+        events: finished.events,
       },
-    });
+    );
     expect(replayed.status).toBe("done");
     expect(called).toBe(0);
   });
@@ -3873,23 +4337,27 @@ describe("runAgent write-ahead store", () => {
       initial: "asking",
       states: {
         asking: {
-          invoke: { id: "ask", src: "answer", input: () => ({}), onDone: { target: "waiting" } },
+          invoke: { id: "ask", src: "answer", onDone: { target: "waiting" } },
         },
         waiting: { on: { APPROVE: { target: "done" } } },
         done: { type: "final" },
       },
-    } as never);
+    });
 
   const executors = () => ({ generateText: async () => ({ result: "42" }) });
 
   test("a fresh run writes every entry to the store, in index order", async () => {
     const store = createInMemoryEventLogStore();
-    const result = await runAgent(makeMachine(), {
-      input: undefined,
-      store,
-      threadId: "main",
-      executors: executors(),
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(makeMachine(), {
+        store,
+        threadId: "main",
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
 
     expect(result.status).toBe("idle");
     const stored = await store.read("main");
@@ -3911,12 +4379,16 @@ describe("runAgent write-ahead store", () => {
       },
     };
 
-    const result = await runAgent(makeMachine(), {
-      input: undefined,
-      store,
-      threadId: "main",
-      executors: executors(),
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(makeMachine(), {
+        store,
+        threadId: "main",
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
 
     expect(inFlight).toBe(0);
     expect(await store.read("main")).toEqual(result.events);
@@ -3937,17 +4409,21 @@ describe("runAgent write-ahead store", () => {
     };
 
     let calls = 0;
-    const settled = runAgent(makeMachine(), {
-      input: undefined,
-      store,
-      threadId: "main",
-      executors: {
-        generateText: async () => {
-          calls++;
-          return { result: "42" };
+    const settled = runToQuiescence(
+      createAgentRuntime(makeMachine(), {
+        store,
+        threadId: "main",
+        executors: {
+          generateText: async () => {
+            calls++;
+            return { result: "42" };
+          },
         },
+      }),
+      {
+        input: undefined,
       },
-    });
+    );
 
     // Several turns of the loop: the run is blocked on the init entry's write.
     for (let i = 0; i < 10; i++) {
@@ -3971,31 +4447,35 @@ describe("runAgent write-ahead store", () => {
       context: () => ({}),
       initial: "a",
       states: {
-        a: { invoke: { id: "a", src: "answer", input: () => ({}), onDone: { target: "b" } } },
-        b: { invoke: { id: "b", src: "answer", input: () => ({}), onDone: { target: "waiting" } } },
+        a: { invoke: { id: "a", src: "answer", onDone: { target: "b" } } },
+        b: { invoke: { id: "b", src: "answer", onDone: { target: "waiting" } } },
         waiting: { on: { GO: { target: "done" } } },
         done: { type: "final" },
       },
-    } as never);
+    });
 
     const store = createInMemoryEventLogStore();
     const firstCalls: Array<{ requestId?: string; callKey?: string }> = [];
     const controller = new AbortController();
     const inFlight = deferred();
-    const running = runAgent(twoCallMachine, {
-      input: undefined,
-      store,
-      threadId: "main",
-      signal: controller.signal,
-      executors: {
-        generateText: async (_request, info) => {
-          firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
-          if (firstCalls.length === 1) return { result: "one" };
-          inFlight.resolve();
-          return await new Promise<never>(() => {});
+    const running = runToQuiescence(
+      createAgentRuntime(twoCallMachine, {
+        store,
+        threadId: "main",
+        signal: controller.signal,
+        executors: {
+          generateText: async (_request, info) => {
+            firstCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+            if (firstCalls.length === 1) return { result: "one" };
+            inFlight.resolve();
+            return await new Promise<never>(() => {});
+          },
         },
+      }),
+      {
+        input: undefined,
       },
-    });
+    );
     await inFlight.promise;
     controller.abort();
     const crashed = await running;
@@ -4003,16 +4483,18 @@ describe("runAgent write-ahead store", () => {
 
     const secondCalls: Array<{ requestId?: string; callKey?: string }> = [];
     // No `events`, no snapshot: the thread's log in the store IS the resume.
-    const recovered = await runAgent(twoCallMachine, {
-      store,
-      threadId: "main",
-      executors: {
-        generateText: async (_request, info) => {
-          secondCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
-          return { result: "two" };
+    const recovered = await runToQuiescence(
+      createAgentRuntime(twoCallMachine, {
+        store,
+        threadId: "main",
+        executors: {
+          generateText: async (_request, info) => {
+            secondCalls.push({ requestId: info?.requestId, callKey: info?.callKey });
+            return { result: "two" };
+          },
         },
-      },
-    });
+      }),
+    );
 
     expect(recovered.status).toBe("idle");
     expect(secondCalls.map((call) => call.requestId)).toEqual(["b"]);
@@ -4040,17 +4522,21 @@ describe("runAgent write-ahead store", () => {
     };
 
     let calls = 0;
-    const result = await runAgent(makeMachine(), {
-      input: undefined,
-      store,
-      threadId: "main",
-      executors: {
-        generateText: async () => {
-          calls++;
-          return { result: "42" };
+    const result = await runToQuiescence(
+      createAgentRuntime(makeMachine(), {
+        store,
+        threadId: "main",
+        executors: {
+          generateText: async () => {
+            calls++;
+            return { result: "42" };
+          },
         },
+      }),
+      {
+        input: undefined,
       },
-    });
+    );
 
     expect(result.status).toBe("error");
     expect(result.status === "error" && result.cause).toBe("journal");
@@ -4061,68 +4547,95 @@ describe("runAgent write-ahead store", () => {
 
   test("`store` without `threadId` throws, and `events` must match the thread's length", async () => {
     const store = createInMemoryEventLogStore();
-    await expect(
-      runAgent(makeMachine(), { input: undefined, store, executors: executors() }),
-    ).rejects.toMatchObject({ code: "missing-thread-id" });
-
-    const first = await runAgent(makeMachine(), {
-      input: undefined,
-      store,
-      threadId: "main",
-      executors: executors(),
-    });
-    await expect(
-      runAgent(makeMachine(), {
+    expect(() =>
+      createAgentRuntime(makeMachine(), {
         store,
-        threadId: "main",
-        events: first.events.slice(0, 1),
         executors: executors(),
       }),
+    ).toThrow(expect.objectContaining({ code: "missing-thread-id" }));
+
+    const first = await runToQuiescence(
+      createAgentRuntime(makeMachine(), {
+        store,
+        threadId: "main",
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
+    await expect(
+      runToQuiescence(
+        createAgentRuntime(makeMachine(), {
+          store,
+          threadId: "main",
+          executors: executors(),
+        }),
+        {
+          events: first.events.slice(0, 1),
+        },
+      ),
     ).rejects.toBeInstanceOf(AgentEventLogConflictError);
   });
 
   test("`events` of the right length but the wrong content are rejected", async () => {
     const store = createInMemoryEventLogStore();
-    const first = await runAgent(makeMachine(), {
-      input: undefined,
-      store,
-      threadId: "main",
-      executors: executors(),
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(makeMachine(), {
+        store,
+        threadId: "main",
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
 
     // Same length, one entry from somewhere else: appending onto this thread
     // would splice two lineages together.
     const altered = JSON.parse(JSON.stringify(first.events)) as AgentLogEntry[];
     altered[1] = { ...altered[1]!, id: `${altered[1]!.id}_other` };
     await expect(
-      runAgent(makeMachine(), {
-        store,
-        threadId: "main",
-        events: altered,
-        executors: executors(),
-      }),
+      runToQuiescence(
+        createAgentRuntime(makeMachine(), {
+          store,
+          threadId: "main",
+          executors: executors(),
+        }),
+        {
+          events: altered,
+        },
+      ),
     ).rejects.toMatchObject({ code: "event-log-conflict" });
 
     // The thread's own log still resumes.
-    const resumed = await runAgent(makeMachine(), {
-      store,
-      threadId: "main",
-      events: first.events,
-      snapshot: first.persist(),
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-    });
+    const resumed = await runToQuiescence(
+      createAgentRuntime(makeMachine(), {
+        store,
+        threadId: "main",
+        executors: executors(),
+      }),
+      {
+        events: first.events,
+        snapshot: first.persist(),
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(resumed.status).toBe("done");
   });
 
   test("`events` whose payload keys are merely reordered still match the thread", async () => {
     const store = createInMemoryEventLogStore();
-    const first = await runAgent(makeMachine(), {
-      input: undefined,
-      store,
-      threadId: "main",
-      executors: executors(),
-    });
+    const first = await runToQuiescence(
+      createAgentRuntime(makeMachine(), {
+        store,
+        threadId: "main",
+        executors: executors(),
+      }),
+      {
+        input: undefined,
+      },
+    );
 
     // Same content, different key insertion order: a host that rebuilt the
     // entries from a database row must not be told its own log diverged.
@@ -4132,14 +4645,18 @@ describe("runAgent write-ahead store", () => {
         event: Object.fromEntries(Object.entries(entry.event).reverse()) as AgentLogEntry["event"],
       }),
     );
-    const resumed = await runAgent(makeMachine(), {
-      store,
-      threadId: "main",
-      events: reordered,
-      snapshot: first.persist(),
-      event: { type: "APPROVE" } as never,
-      executors: executors(),
-    });
+    const resumed = await runToQuiescence(
+      createAgentRuntime(makeMachine(), {
+        store,
+        threadId: "main",
+        executors: executors(),
+      }),
+      {
+        events: reordered,
+        snapshot: first.persist(),
+        event: { type: "APPROVE" } as never,
+      },
+    );
     expect(resumed.status).toBe("done");
   });
 
@@ -4160,25 +4677,29 @@ describe("runAgent write-ahead store", () => {
     let atSettle: number | undefined;
     let streamed = 0;
 
-    const running = runAgent(makeMachine(), {
-      input: undefined,
-      store: slowStore,
-      threadId: "main",
-      signal: controller.signal,
-      onEvent: () => {
-        streamed++;
-        if (atSettle !== undefined && streamed > atSettle) {
-          stragglerAppended.resolve();
-        }
-      },
-      executors: {
-        generateText: async () => {
-          inFlight.resolve();
-          await release.promise;
-          return { result: "42", usage: { totalTokens: 5 } };
+    const running = runToQuiescence(
+      createAgentRuntime(makeMachine(), {
+        store: slowStore,
+        threadId: "main",
+        signal: controller.signal,
+        onEvent: () => {
+          streamed++;
+          if (atSettle !== undefined && streamed > atSettle) {
+            stragglerAppended.resolve();
+          }
         },
+        executors: {
+          generateText: async () => {
+            inFlight.resolve();
+            await release.promise;
+            return { result: "42", usage: { totalTokens: 5 } };
+          },
+        },
+      }),
+      {
+        input: undefined,
       },
-    });
+    );
     await inFlight.promise;
     controller.abort();
     const result = await running;
@@ -4227,7 +4748,14 @@ describe("wire events: parse at the boundary, ignore what the state does not han
   const executors = { generateText: async () => ({ result: {} }) };
 
   const paused = async () => {
-    const first = await runAgent(machine, { input: {}, executors });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors,
+      }),
+      {
+        input: {},
+      },
+    );
     if (first.status !== "idle") throw new Error("expected idle");
     return first;
   };
@@ -4235,7 +4763,15 @@ describe("wire events: parse at the boundary, ignore what the state does not han
   test("a well-formed wire event parses from the machine and resumes the run", async () => {
     const first = await paused();
     const event = parseAgentEvent(machine, JSON.parse('{"type":"REJECT","reason":"too terse"}'));
-    const result = await runAgent(machine, { snapshot: first.persist(), event, executors });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors,
+      }),
+      {
+        snapshot: first.persist(),
+        event,
+      },
+    );
     expect(result.status).toBe("done");
     expect(result.snapshot.context.reason).toBe("too terse");
   });
@@ -4251,11 +4787,15 @@ describe("wire events: parse at the boundary, ignore what the state does not han
   test("an event with no declared schema parses, and an unhandled one settles ignored", async () => {
     const first = await paused();
     const event = parseAgentEvent(machine, { type: "NOPE" });
-    const result = await runAgent(machine, {
-      snapshot: first.persist(),
-      event,
-      executors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors,
+      }),
+      {
+        snapshot: first.persist(),
+        event,
+      },
+    );
     expect(result.status).toBe("idle");
     expect(result.ignored).toEqual({ type: "NOPE" });
     expect(result.snapshot.value).toBe("reviewing");
@@ -4278,24 +4818,41 @@ describe("wire events: parse at the boundary, ignore what the state does not han
   test("an ignored event leaves the thread resumable", async () => {
     const store = createInMemoryEventLogStore();
     const threadId = "t1";
-    const first = await runAgent(machine, { input: {}, executors, store, threadId });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors,
+        store,
+        threadId,
+      }),
+      {
+        input: {},
+      },
+    );
     if (first.status !== "idle") throw new Error("expected idle");
 
-    const ignoredRun = await runAgent(machine, {
-      store,
-      threadId,
-      event: parseAgentEvent(machine, { type: "NOPE" }),
-      executors,
-    });
+    const ignoredRun = await runToQuiescence(
+      createAgentRuntime(machine, {
+        store,
+        threadId,
+        executors,
+      }),
+      {
+        event: parseAgentEvent(machine, { type: "NOPE" }),
+      },
+    );
     expect(ignoredRun.status).toBe("idle");
     expect(ignoredRun.ignored).toEqual({ type: "NOPE" });
 
-    const ok = await runAgent(machine, {
-      store,
-      threadId,
-      event: parseAgentEvent(machine, { type: "APPROVE" }),
-      executors,
-    });
+    const ok = await runToQuiescence(
+      createAgentRuntime(machine, {
+        store,
+        threadId,
+        executors,
+      }),
+      {
+        event: parseAgentEvent(machine, { type: "APPROVE" }),
+      },
+    );
     expect(ok.status).toBe("done");
   });
 });
@@ -4323,20 +4880,35 @@ describe("result.ignored reads the transition facets, not snapshot identity", ()
         done: { type: "final" },
       },
     });
-    const first = await runAgent(machine, { input: undefined, executors: {} });
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {},
+      }),
+      {
+        input: undefined,
+      },
+    );
     expect(first.status).toBe("idle");
-    const pinged = await runAgent(machine, {
-      snapshot: first.persist(),
-      event: { type: "PING" } as never,
-      executors: {},
-    });
+    const pinged = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {},
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "PING" } as never,
+      },
+    );
     expect(effects).toEqual(["noted"]);
     expect(pinged.ignored).toBeUndefined();
-    const unknown = await runAgent(machine, {
-      snapshot: first.persist(),
-      event: { type: "NOPE" } as never,
-      executors: {},
-    });
+    const unknown = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {},
+      }),
+      {
+        snapshot: first.persist(),
+        event: { type: "NOPE" } as never,
+      },
+    );
     expect(unknown.ignored).toEqual({ type: "NOPE" });
   });
 });
@@ -4386,15 +4958,16 @@ describe("xstate contract: snapshot identity is NOT a usable `ignored` signal", 
     expect(Object.is(before, actor.getSnapshot())).toBe(true);
   });
 
-  // Known limitation of the identity heuristic: a transition that only runs an
-  // effect leaves the snapshot object untouched, so `runAgent` reports the
-  // event as `ignored` even though the machine acted on it.
-  test("an effect-only transition returns the SAME snapshot object", () => {
+  // Since xstate 6.0.0-alpha.61 a handled event always yields a new snapshot
+  // object, even when the transition only runs an effect. The runtime's
+  // `ignored` rule (same snapshot AND no effects) therefore does not report
+  // this event as ignored.
+  test("an effect-only transition returns a NEW snapshot object", () => {
     const actor = createActor(build()).start();
     const before = actor.getSnapshot();
     effects.length = 0;
     actor.send({ type: "EFFECT" } as never);
     expect(effects.length).toBeGreaterThan(0);
-    expect(Object.is(before, actor.getSnapshot())).toBe(true);
+    expect(Object.is(before, actor.getSnapshot())).toBe(false);
   });
 });

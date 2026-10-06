@@ -90,7 +90,7 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>, TMessage 
    * `stopWhen: stepCountIs(maxSteps)`.
    *
    * This is a REQUEST budget, distinct from the machine-level `maxTurns` a
-   * preset uses for its own turn budget, and from `runAgent`'s run-wide
+   * preset uses for its own turn budget, and from `createAgentRuntime`'s run-wide
    * `maxModelCalls`.
    */
   maxSteps?: number;
@@ -104,9 +104,9 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>, TMessage 
 }
 
 /**
- * Aggregated model-call usage for ONE `runAgent` call — the run-level total
- * attached to every settled {@link RunAgentResult} (and therefore to
- * `runAgent`'s `{ output, snapshot, persist, usage }`).
+ * Aggregated model-call usage for ONE run — the run-level total
+ * attached to every settled {@link AgentRunResult} (and therefore to
+ * `runToQuiescence`'s `{ output, snapshot, persist, usage }`).
  *
  * - `modelCalls` counts every model/decision call this run made (each decision
  *   retry counts separately) — the same seam `maxModelCalls` budgets. Always a
@@ -142,7 +142,7 @@ export type AgentCallUsage = Omit<AgentUsage, "modelCalls">;
  * - `'content-filter'` — a safety filter stopped it.
  * - `'other'` — anything else, including a provider error the adapter mapped.
  *
- * Adapters set it on their executor result; `runAgent` copies it onto the
+ * Adapters set it on their executor result; the runtime copies it onto the
  * `request.end` trace event. A provider's own string stays on the result's
  * `raw`.
  */
@@ -159,7 +159,7 @@ const AGENT_FINISH_REASONS = new Set<string>([
 /**
  * Reads a settled call's {@link AgentFinishReason} off a RAW executor result's
  * `finishReason` field — the finish-reason sibling of {@link getCallUsage},
- * applied by `runAgent` before it puts the reason on the `request.end` trace.
+ * applied by the runtime before it puts the reason on the `request.end` trace.
  * A provider's `'error'` normalizes to `'other'`; anything else the union does
  * not name (an un-normalized provider string, a missing field) returns
  * `undefined`.
@@ -187,7 +187,7 @@ export const AGENT_USAGE_TOKEN_FIELDS = [
 /**
  * Reads a settled call's per-call {@link AgentCallUsage} off a RAW executor
  * result's `usage` field, keeping only finite numbers — the same normalization
- * `runAgent` applies before it delivers `'@agent.usage'`. Returns `undefined`
+ * the runtime applies before it delivers `'@agent.usage'`. Returns `undefined`
  * when the result reports no usage at all. Works for our `{ result, usage }`
  * shape, for a raw Vercel AI SDK result (its `LanguageModelUsage` carries
  * the same flat field names), and for any custom executor that follows the
@@ -576,8 +576,7 @@ export interface TextLogic<
  * result under `actors:` and invoke it by name (equivalent to what
  * `setupAgent({ requests })` builds internally for each request entry). Pass
  * `execute` here, or bind it later with `.withExecutor(...)`, a runtime
- * adapter's `machine.provide(...)`, or `runAgent`'s `generateText`/
- * `streamText` options.
+ * adapter's `machine.provide(...)`, or `createAgentRuntime`'s `executors`.
  *
  * @example
  * ```ts
@@ -649,7 +648,7 @@ export function createTextLogic<
         throw new Error(
           "Text logic has no host execution. Pass an executor as the second " +
             "argument to createTextLogic(...), provide a runtime adapter, or " +
-            "bind it through runAgent/provideExecutors, or execute the XState effect in your host.",
+            "bind it through createAgentRuntime/provideExecutors, or execute the XState effect in your host.",
         );
       }
 
@@ -760,7 +759,7 @@ export function isTextLogic(value: unknown): value is TextLogic {
  * without it is a runtime error.
  *
  * `usage` is the one passthrough field core reads: report this call's tokens
- * there and `runAgent` folds them into the run's aggregated
+ * there and the runtime folds them into the run's aggregated
  * {@link AgentUsage}. Optional — an executor that reports nothing still counts
  * toward `modelCalls`.
  */
@@ -776,16 +775,15 @@ export type AgentRequestExecutorResult<TOutput = unknown, TMessage = unknown> = 
 };
 
 /**
- * Optional second argument passed to executors by `runAgent`. The step path
- * (`executeAgentRequest`) never passes this — chunk streaming only exists on
- * the live path, where `onChunk` (§3.1) needs a way to reach the executor.
+ * Optional second argument passed to executors by `createAgentRuntime`: the
+ * request's abort signal, and `onChunk` for streamed requests.
  */
 export interface AgentRequestExecutorInfo {
   onChunk?: (chunk: string) => void;
   signal?: AbortSignal;
   /**
-   * The `runAgent` run this call belongs to (`run_<n>`, matching trace
-   * events). Undefined off the runAgent path (bare `provideExecutors` /
+   * The run this call belongs to (`run_<n>`, matching trace
+   * events). Undefined off the runtime path (bare `provideExecutors` /
    * direct `TextLogic.execute`). Lets executor middleware (caching, rate
    * limits, span parenting) correlate calls without side channels.
    */
@@ -812,7 +810,7 @@ export interface AgentRequestExecutorInfo {
    * lineage id, so cache on `callKey` together with a fingerprint of the
    * request and reuse a cached result only when the request also matches.
    *
-   * Undefined off the `runAgent` path, and for a log with no `executionId`.
+   * Undefined off the `createAgentRuntime` path, and for a log with no `executionId`.
    */
   callKey?: string;
 }
@@ -847,11 +845,11 @@ export type AgentRequestExecutor<
 
 /**
  * The full set of host executors a machine's agent actors are resolved
- * with — passed to `runAgent`, `executeAgentRequest`, and
+ * with — passed to `createAgentRuntime`, `executeAgentRequest`, and
  * `TextLogic.execute`. Every slot is optional: `generateText` is needed only
  * if the machine has a `mode: 'generate'` text request, `streamText` only for
  * a `mode: 'stream'` request, and `decide` only for a decision — omitting
- * a slot the machine actually needs is a clear bind-time error (see `runAgent`
+ * a slot the machine actually needs is a clear bind-time error (see `createAgentRuntime`
  * and `provideExecutors`). Adapter result sets (`AiSdkExecutors`,
  * `OpenAiCompatExecutors`) re-require all three.
  */

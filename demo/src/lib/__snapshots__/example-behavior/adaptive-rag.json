@@ -1,0 +1,50 @@
+{
+  "Corpus hit — graded, grounded, answered": [
+    {
+      "sent": "start {\"question\":\"How do LLM agents use long-term memory?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"routing\"",
+        "transition xstate.done.actor -> \"retrieving\"",
+        "transition xstate.done.actor -> \"grading\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"checkingGrounding\"",
+        "transition xstate.done.actor -> \"checkingUsefulness\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Routed to the vector store (the sample corpus). Last retrieval returned 2 document(s); the grader kept 2. The answer passed the hallucination and usefulness checks.\n\n- Route: vectorstore\n- Rewrites: 0\n- Regenerations: 0\n\n**Answer**\n\nMock reply to: Question: How do LLM agents use long-term memory?\n\nSource no\n\n**Documents**\n\n- LLM agent memory splits into short-term memory (the working context window of the current run) and long-term memory (facts persisted across sessions in an external store).\n- Agents read and write long-term memory through tools: a retrieval tool fetches relevant past facts, and a write tool saves new observations for later runs."
+    }
+  ],
+  "Current-events question — routed to the sample web index": [
+    {
+      "sent": "start {\"question\":\"What is the latest guidance on defending agents against prompt injection?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"routing\"",
+        "transition xstate.done.actor -> \"retrieving\"",
+        "transition xstate.done.actor -> \"grading\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"checkingGrounding\"",
+        "transition xstate.done.actor -> \"checkingUsefulness\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Routed to the vector store (the sample corpus). Last retrieval returned 1 document(s); the grader kept 1. The answer passed the hallucination and usefulness checks.\n\n- Answer: Mock reply to: Question: What is the latest guidance on defending agents ag\n- Route: vectorstore\n- Rewrites: 0\n- Regenerations: 0\n\n**Documents**\n\n- Agents read and write long-term memory through tools: a retrieval tool fetches relevant past facts, and a write tool saves new observations for later runs."
+    }
+  ],
+  "Not in the corpus — rewrites run out, ends in failed": [
+    {
+      "sent": "start {\"question\":\"What is chain-of-thought prompting?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"routing\"",
+        "transition xstate.done.actor -> \"retrieving\"",
+        "transition xstate.done.actor -> \"rewriting\"",
+        "transition xstate.done.actor -> \"retrieving\"",
+        "transition xstate.done.actor -> \"rewriting\"",
+        "transition xstate.done.actor -> \"retrieving\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "Routed to the vector store (the sample corpus). Last retrieval returned 0 document(s). Rewrote the question 2 of 2 allowed time(s). Stopped: rewrite budget exhausted (MAX_REWRITES=2) without a useful, grounded answer.\n\n- Answer: Unable to produce a grounded, useful answer for this question.\n- Route: vectorstore\n- Rewrites: 2\n- Regenerations: 0"
+    }
+  ]
+}

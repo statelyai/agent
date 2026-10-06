@@ -1,0 +1,87 @@
+{
+  "Three batches of 4 — generate, update twice, review": [
+    {
+      "sent": "start {\"batchSize\":4}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"generatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"reviewingTaxonomy\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Taxonomy of 1 categories from 12 documents in 3 minibatch(es):  \n- mock name — mock description\n\n- Dropped categories: 0\n\n**Taxonomy**\n\n- Name: mock name · Description: mock description\n\n**Batches**\n\n```json\n[\n  [\n    0,\n    1,\n    2,\n    3\n  ],\n  [\n    4,\n    5,\n    6,\n    7\n  ],\n  [\n    8,\n    9,\n    10,\n    11\n  ]\n]\n```"
+    }
+  ],
+  "One batch of 12 — generate, then review": [
+    {
+      "sent": "start {\"batchSize\":12}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"generatingTaxonomy\"",
+        "transition xstate.done.actor -> \"reviewingTaxonomy\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Taxonomy of 1 categories from 12 documents in 1 minibatch(es):  \n- mock name — mock description\n\n- Dropped categories: 0\n\n**Taxonomy**\n\n- Name: mock name · Description: mock description\n\n**Batches**\n\n```json\n[\n  [\n    0,\n    1,\n    2,\n    3,\n    4,\n    5,\n    6,\n    7,\n    8,\n    9,\n    10,\n    11\n  ]\n]\n```"
+    }
+  ],
+  "Batch size 1 — generate, eleven updates, review": [
+    {
+      "sent": "start {\"batchSize\":1}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"generatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"updatingTaxonomy\"",
+        "transition xstate.done.actor -> \"reviewingTaxonomy\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Taxonomy of 1 categories from 12 documents in 12 minibatch(es):  \n- mock name — mock description\n\n- Dropped categories: 0\n\n**Taxonomy**\n\n- Name: mock name · Description: mock description\n\n**Batches**\n\n```json\n[\n  [\n    0\n  ],\n  [\n    1\n  ],\n  [\n    2\n  ],\n  [\n    3\n  ],\n  [\n    4\n  ],\n  [\n    5\n  ],\n  [\n    6\n  ],\n  [\n    7\n  ],\n  [\n    8\n  ],\n  [\n    9\n  ],\n  [\n    10\n  ],\n  [\n    11\n  ]\n]\n```"
+    }
+  ]
+}

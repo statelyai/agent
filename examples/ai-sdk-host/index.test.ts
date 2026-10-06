@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   type AgentDecisionExecutor,
   type AgentRequestExecutor,
   type ChosenEvent,
@@ -34,10 +35,14 @@ const mockSummarizer: AgentRequestExecutor = async (request) => {
 describe("combat machine", () => {
   test("narrates the turn into a readable summary", async () => {
     const chooser = createMockMoveChooser();
-    const result = await runAgent(gameMachine, {
-      input: { playerHp: 20, enemyHp: 15 },
-      executors: { decide: chooser.decide, generateText: mockSummarizer },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(gameMachine, {
+        executors: { decide: chooser.decide, generateText: mockSummarizer },
+      }),
+      {
+        input: { playerHp: 20, enemyHp: 15 },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") return;
@@ -45,9 +50,9 @@ describe("combat machine", () => {
     expect(result.output.outcome).toBe("continue");
     // Readable narration, not a bare data dump: one line per beat.
     expect(result.output.summary).toContain("You face a goblin");
-    expect(result.output.summary).toContain("You attack the goblin for 6 (goblin 15 → 9).");
+    expect(result.output.summary).toContain("You attack the goblin for 6 (goblin HP 15 → 9).");
     // The machine, not the narrator, resolved the goblin's counter.
-    expect(result.output.summary).toContain("The goblin hits back for 4 (you 20 → 16).");
+    expect(result.output.summary).toContain("The goblin hits back for 4 (your HP 20 → 16).");
     expect(result.output.summary).toContain("The goblin staggers back, bleeding.");
     expect(result.output.summary).toContain("The fight goes on.");
     expect(result.output.playerHp).toBe(16);
@@ -57,23 +62,31 @@ describe("combat machine", () => {
 
   test("a raised guard halves the counter, and that is a state, not a flag", async () => {
     const chooser = createMockMoveChooser({ type: "DEFEND" });
-    const result = await runAgent(gameMachine, {
-      input: { playerHp: 20, enemyHp: 15 },
-      executors: { decide: chooser.decide, generateText: mockSummarizer },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(gameMachine, {
+        executors: { decide: chooser.decide, generateText: mockSummarizer },
+      }),
+      {
+        input: { playerHp: 20, enemyHp: 15 },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") return;
-    expect(result.output.summary).toContain("The goblin hits back for 2 (you 20 → 18).");
+    expect(result.output.summary).toContain("The goblin hits back for 2 (your HP 20 → 18).");
     expect(result.output.playerHp).toBe(18);
   });
 
   test("a downed goblin never gets a counter-attack", async () => {
     const chooser = createMockMoveChooser();
-    const result = await runAgent(gameMachine, {
-      input: { playerHp: 20, enemyHp: 6 },
-      executors: { decide: chooser.decide, generateText: mockSummarizer },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(gameMachine, {
+        executors: { decide: chooser.decide, generateText: mockSummarizer },
+      }),
+      {
+        input: { playerHp: 20, enemyHp: 6 },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") return;
@@ -84,17 +97,25 @@ describe("combat machine", () => {
 
   test("allowedEvents widen to include HEAL only at low HP", async () => {
     const healthy = createMockMoveChooser();
-    await runAgent(gameMachine, {
-      input: { playerHp: 20, enemyHp: 15 },
-      executors: { decide: healthy.decide, generateText: mockSummarizer },
-    });
+    await runToQuiescence(
+      createAgentRuntime(gameMachine, {
+        executors: { decide: healthy.decide, generateText: mockSummarizer },
+      }),
+      {
+        input: { playerHp: 20, enemyHp: 15 },
+      },
+    );
     expect(healthy.requests[0]?.allowedEvents).not.toContain("HEAL");
 
     const hurt = createMockMoveChooser();
-    await runAgent(gameMachine, {
-      input: { playerHp: 5, enemyHp: 15 },
-      executors: { decide: hurt.decide, generateText: mockSummarizer },
-    });
+    await runToQuiescence(
+      createAgentRuntime(gameMachine, {
+        executors: { decide: hurt.decide, generateText: mockSummarizer },
+      }),
+      {
+        input: { playerHp: 5, enemyHp: 15 },
+      },
+    );
     expect(hurt.requests[0]?.allowedEvents).toContain("HEAL");
   });
 });
@@ -153,6 +174,11 @@ describe("ai-sdk host", () => {
     expect(output?.summary).toContain("The hero strikes the goblin.");
     // Host owned the loop: it chose a move, then narrated the turn, in order.
     expect(calls).toEqual(["decide", "summarize"]);
+    // The log reads as sentences: HP totals are stated, not telegraphed.
+    expect(output?.summary).toContain("You face a goblin. You have 20 HP; the goblin has 15 HP.");
+    expect(output?.summary).toContain("You attack the goblin for 6 (goblin HP 15 → 9).");
+    expect(output?.summary).toContain("End of turn: You have 16 HP; the goblin has 9 HP.");
+    expect(output?.summary).not.toMatch(/\bYou \d+ HP\b/);
     // The step callback saw the machine pass through choosing → summarizing.
     expect(states).toContain("choosingMove");
     expect(states).toContain("summarizing");

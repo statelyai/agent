@@ -21,8 +21,8 @@
  *   - pro node            → `proSpeaking` (request `argueFor`)
  *   - con node            → `conSpeaking` (request `argueAgainst`)
  *   - rounds edge         → `checkingRound` (a `choice` state over `round`)
- *   - judge node          → `judging` (Jev judgment `judgeDebate`: a `choice` for
- *                           the winner + a `score` per side — see note below)
+ *   - judge node          → `judging` (Jev judgment `judgeDebate`: a `score` per
+ *                           side; the winner is derived from the scores — see note below)
  *   - messages reducer    → `transcript` in context, appended on each speaker's `onDone`
  *
  * Differences from LangGraph worth calling out:
@@ -32,15 +32,19 @@
  *     recursion_limit if the count is wrong.
  *   - A speaker cannot speak out of turn or end the debate early: neither
  *     request can choose a next state. Only the machine's edges can.
+ *   - Each speaker's stance is pinned in its prompt on EVERY turn, not only in
+ *     its system prompt, so a later round reading a long transcript of the
+ *     other side's points does not drift into arguing the opposite side.
  *   - Any speaker or judge failure lands in `failed` with the transcript so far.
  *   - Judging is a JUDGMENT, not a generation. `judging` asks the AI SDK's
  *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model three questions in one call over `{ motion, transcript }`:
- *     `winner` (a `choice` of pro / con / draw) and `proCase` / `conCase` (a
- *     `score` per side on six concrete levels, `CASE_LEVELS`, mapped to 0-10
- *     in code). The reasoning is rendered from the winner's probability and
- *     each side's matched level, not written by a model. The speakers stay
- *     text-model requests: arguing is generative.
+ *     evaluation model two questions in one call over `{ motion, transcript }`:
+ *     `proCase` / `conCase` (a `score` per side on six concrete levels,
+ *     `CASE_LEVELS`, mapped to 0-10 in code). The winner is DERIVED from those
+ *     two scores (higher wins, equal is a draw), never asked separately, so a
+ *     verdict can never name a winner its own scores contradict. The reasoning
+ *     is rendered from each side's matched level, not written by a model. The
+ *     speakers stay text-model requests: arguing is generative.
  *
  * No stand-ins: every speaker is a model call and the judge a Jev call.
  * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/multi-agent-debate/index.ts
@@ -51,7 +55,13 @@ import { createAsyncLogic } from "xstate";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = {
   debater: openai("gpt-5.4-mini"),
@@ -123,21 +133,13 @@ function caseQuestion(side: Turn["side"]) {
 
 /**
  * The judge node as a judgment: the motion and the transcript are the state;
- * one `choice` names the winner and one `score` per side rates its case. The
- * judge model is injected by tests and hosts; the default is Jev.
+ * one `score` per side rates its case. The winner is derived from these two
+ * scores (see `decide`), so there is no separate winner question to disagree
+ * with them. The judge model is injected by tests and hosts; the default is Jev.
  */
 export function createJudgeDebate(model: Experimental_EvaluationModel = judgeModel) {
   return createAsyncLogic<
-    {
-      answers: {
-        winner: {
-          choice: "pro" | "con" | "draw";
-          probabilities?: Record<"pro" | "con" | "draw", number>;
-        };
-        proCase: { score: number };
-        conCase: { score: number };
-      };
-    },
+    { answers: { proCase: { score: number }; conCase: { score: number } } },
     { motion: string; transcript: Turn[] }
   >({
     run: async ({ input, signal }) => {
@@ -145,17 +147,6 @@ export function createJudgeDebate(model: Experimental_EvaluationModel = judgeMod
         model,
         state: { motion: input.motion, transcript: input.transcript },
         questions: {
-          winner: {
-            type: "choice" as const,
-            instructions:
-              "Which side argued `motion` better across `transcript`? Judge argument quality only, " +
-              "not your view of the motion.",
-            criteria: {
-              pro: 'The "pro" side made the stronger case: its points stood and its rebuttals landed.',
-              con: 'The "con" side made the stronger case: its points stood and its rebuttals landed.',
-              draw: "Neither case was clearly stronger: points and rebuttals were evenly matched.",
-            },
-          },
           proCase: caseQuestion("pro"),
           conCase: caseQuestion("con"),
         },
@@ -166,18 +157,29 @@ export function createJudgeDebate(model: Experimental_EvaluationModel = judgeMod
   });
 }
 
-/** A side's level on 0-10. */
+/**
+ * A side's level on 0-10, to one decimal. Jev's score is an expected level
+ * (fractional), so rounding to whole levels would call a 3.6 and a 3.4 a tie
+ * while describing them as different levels.
+ */
 function toTen(level: number) {
-  return Math.round((level / (CASE_LEVELS.length - 1)) * 10);
+  return Math.round((level / (CASE_LEVELS.length - 1)) * 100) / 10;
 }
 
-/** "Judge 90% sure. Pro: <level>. Con: <level>." — rendered, not generated. */
-function renderReasoning(probability: number, proLevel: number, conLevel: number): string {
+/**
+ * The verdict from the two case scores: the higher 0-10 score wins, equal
+ * scores are a draw. Compared on the same rounded scores the output shows, so
+ * the winner always agrees with them.
+ */
+function decide(proLevel: number, conLevel: number) {
+  const scores = { pro: toTen(proLevel), con: toTen(conLevel) };
+  const winner: "pro" | "con" | "draw" =
+    scores.pro > scores.con ? "pro" : scores.con > scores.pro ? "con" : "draw";
   const describe = (level: number) => CASE_LEVELS[Math.round(level)] ?? "";
-  return (
-    `Judge ${Math.round(probability * 100)}% sure. ` +
-    `Pro: ${describe(proLevel)} Con: ${describe(conLevel)}`
-  );
+  // "Pro 8/10: <level> Con 6/10: <level>" — rendered, not generated.
+  const reasoning =
+    `Pro ${scores.pro}/10: ${describe(proLevel)} ` + `Con ${scores.con}/10: ${describe(conLevel)}`;
+  return { winner, reasoning, scores };
 }
 
 /** What each speaker sees: the motion, where the debate is, and what was said. */
@@ -190,9 +192,33 @@ function turnInput(context: DebateContext) {
   };
 }
 
+/**
+ * How a turn reads. The earlier wording ("make one new point and rebut…")
+ * came back as labeled parts ("New point: …", "Rebuttal: …"), so the form is
+ * spelled out as one unlabeled paragraph.
+ */
+const TURN_FORM =
+  "Write one paragraph of plain, continuous prose, at most four sentences: answer the " +
+  "opponent's last point (if any), then add one argument not yet made. Do not label the " +
+  "parts — no 'New point:', 'Rebuttal:', headings, or lists.";
+
+/** Part labels a speaker may still prefix a sentence with; dropped from the turn. */
+const PART_LABEL =
+  /(^|[.!?]\s+)(?:new point|rebuttal|counterpoint|point|argument)\s*:\s*([a-z])?/gi;
+
+/** The turn as prose: any leftover part labels removed. */
+export function plainArgument(argument: string): string {
+  return argument
+    .trim()
+    .replace(
+      PART_LABEL,
+      (_match, lead: string, letter?: string) => lead + (letter?.toUpperCase() ?? ""),
+    );
+}
+
 /** The transcript with one more turn appended (the messages reducer, inline). */
 function addTurn(context: DebateContext, side: Turn["side"], argument: string): Turn[] {
-  return [...context.transcript, { side, round: context.round, argument }];
+  return [...context.transcript, { side, round: context.round, argument: plainArgument(argument) }];
 }
 
 const speakerInput = z.object({
@@ -202,13 +228,23 @@ const speakerInput = z.object({
   transcript: z.string(),
 });
 
-const speakerPrompt = ({ input }: { input: z.infer<typeof speakerInput> }) =>
-  [
-    `Motion: ${input.motion}`,
-    `Round ${input.round} of ${input.rounds}.`,
-    "Transcript so far:",
-    input.transcript || "(you speak first)",
-  ].join("\n");
+/**
+ * One speaker's turn prompt. The stance is restated on every turn, last, so it
+ * is the freshest instruction after a transcript full of the other side's
+ * points.
+ */
+const speakerPrompt =
+  (stance: "FOR" | "AGAINST") =>
+  ({ input }: { input: z.infer<typeof speakerInput> }) =>
+    [
+      `Motion: ${input.motion}`,
+      `Round ${input.round} of ${input.rounds}.`,
+      "Transcript so far:",
+      input.transcript || "(you speak first)",
+      "",
+      `Your side: ${stance} the motion. Argue only ${stance.toLowerCase()} it this round; ` +
+        "never concede the motion or switch sides.",
+    ].join("\n");
 
 const outputSchema = z.object({
   verdict: z.string(),
@@ -232,18 +268,14 @@ const agentSetup = setupAgent({
     argueFor: {
       schemas: { input: speakerInput, output: z.object({ argument: z.string() }) },
       model: "debater",
-      system:
-        "You argue FOR the motion in a formal debate. Make one new point and answer the " +
-        "opponent's last point. At most four sentences.",
-      prompt: speakerPrompt,
+      system: "You argue FOR the motion in a formal debate. " + TURN_FORM,
+      prompt: speakerPrompt("FOR"),
     },
     argueAgainst: {
       schemas: { input: speakerInput, output: z.object({ argument: z.string() }) },
       model: "debater",
-      system:
-        "You argue AGAINST the motion in a formal debate. Make one new point and rebut the " +
-        "proposer's last point. At most four sentences.",
-      prompt: speakerPrompt,
+      system: "You argue AGAINST the motion in a formal debate. " + TURN_FORM,
+      prompt: speakerPrompt("AGAINST"),
     },
   },
 });
@@ -306,23 +338,10 @@ export const multiAgentDebateMachine = agentSetup.createMachine({
           motion: context.motion,
           transcript: context.transcript,
         }),
-        onDone: ({ output }) => {
-          const { winner, proCase, conCase } = output.answers;
-          return {
-            target: "done",
-            context: {
-              verdict: {
-                winner: winner.choice,
-                reasoning: renderReasoning(
-                  winner.probabilities?.[winner.choice] ?? 1,
-                  proCase.score,
-                  conCase.score,
-                ),
-                scores: { pro: toTen(proCase.score), con: toTen(conCase.score) },
-              },
-            },
-          };
-        },
+        onDone: ({ output }) => ({
+          target: "done",
+          context: { verdict: decide(output.answers.proCase.score, output.answers.conCase.score) },
+        }),
         onError: ({ event }) => ({
           target: "failed",
           context: { failure: `judgeDebate failed: ${String(event.error)}` },
@@ -332,7 +351,11 @@ export const multiAgentDebateMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        verdict: `Winner: ${context.verdict?.winner ?? "draw"} — ${context.verdict?.reasoning ?? ""}`,
+        verdict: `${
+          !context.verdict || context.verdict.winner === "draw"
+            ? "Draw"
+            : `Winner: ${context.verdict.winner}`
+        } — ${context.verdict?.reasoning ?? ""}`,
         transcript: renderTranscript(context.transcript),
         winner: context.verdict?.winner ?? null,
         scores: context.verdict?.scores ?? null,
@@ -377,18 +400,22 @@ export async function runMultiAgentDebateExample(
 ): Promise<MultiAgentDebateResult> {
   const { motion = DEFAULT_MOTION, rounds, generateText, judge, onProgress } = options;
   const progress: string[] = [];
-  const result = await runAgent(multiAgentDebateMachine, {
-    input: { motion, ...(rounds !== undefined ? { rounds } : {}) },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    ...(judge ? { actors: { judgeDebate: createJudgeDebate(judge) } } : {}),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(multiAgentDebateMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      ...(judge ? { actors: { judgeDebate: createJudgeDebate(judge) } } : {}),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { motion, ...(rounds !== undefined ? { rounds } : {}) },
     },
-  });
+  );
   if (result.status !== "done") {
     throw new Error(`Multi-agent debate example did not complete: ${result.status}`);
   }

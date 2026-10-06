@@ -1,0 +1,34 @@
+{
+  "Quick game (1 round)": [
+    {
+      "sent": "start {\"rounds\":1}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> {\"cluing\":{\"giverA\":\"writing\",\"giverB\":\"writing\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> {\"cluing\":{\"giverA\":\"written\",\"giverB\":\"writing\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> {\"cluing\":{\"giverA\":\"written\",\"giverB\":\"written\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> \"gameOver\""
+      ],
+      "response": "Guessed 0 of 1 word.\n\nRound 1 — secret \"piano\". Clues: [Iris: not a single word], [Milo: not a single word], [Nadia: not a single word].  \nAll clues cancelled — round skipped.\n\n- Score: 0\n- Rounds: 1"
+    }
+  ],
+  "Full game (3 rounds)": [
+    {
+      "sent": "start {\"rounds\":3}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> {\"cluing\":{\"giverA\":\"writing\",\"giverB\":\"writing\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> {\"cluing\":{\"giverA\":\"written\",\"giverB\":\"writing\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> {\"cluing\":{\"giverA\":\"written\",\"giverB\":\"written\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> {\"cluing\":{\"giverA\":\"writing\",\"giverB\":\"writing\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> {\"cluing\":{\"giverA\":\"written\",\"giverB\":\"writing\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> {\"cluing\":{\"giverA\":\"written\",\"giverB\":\"written\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> {\"cluing\":{\"giverA\":\"writing\",\"giverB\":\"writing\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> {\"cluing\":{\"giverA\":\"written\",\"giverB\":\"writing\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> {\"cluing\":{\"giverA\":\"written\",\"giverB\":\"written\",\"giverC\":\"writing\"}}",
+        "transition xstate.done.actor -> \"gameOver\""
+      ],
+      "response": "Guessed 0 of 3 words.\n\nRound 1 — secret \"piano\". Clues: [Iris: not a single word], [Milo: not a single word], [Nadia: not a single word].  \nAll clues cancelled — round skipped.  \nRound 2 — secret \"volcano\". Clues: [Iris: not a single word], [Milo: not a single word], [Nadia: not a single word].  \nAll clues cancelled — round skipped.  \nRound 3 — secret \"honey\". Clues: [Iris: not a single word], [Milo: not a single word], [Nadia: not a single word].  \nAll clues cancelled — round skipped.\n\n- Score: 0\n- Rounds: 3"
+    }
+  ]
+}

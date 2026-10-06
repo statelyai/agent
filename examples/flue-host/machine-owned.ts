@@ -39,10 +39,12 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getInteraction,
   parseAgentEvent,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   type AgentRequestExecutors,
-  type RunAgentOptions,
-  type RunAgentResult,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
+  type AgentRunResult,
 } from "@statelyai/agent";
 import {
   createEvaluatePrompt,
@@ -102,7 +104,7 @@ export const completed: EmailDraft[][] = [];
  * `TYPESAFE_AI_API_KEY`). `useToolExecutors()` swaps in other executors and,
  * optionally, a judge model (a test's mocks, or a host's own provider setup).
  */
-let toolRunOptions: RunAgentOptions<typeof emailDrafter> = {
+let toolRunOptions: AgentRuntimeOptions<typeof emailDrafter> & AgentRunInit<typeof emailDrafter> = {
   executors: createAiSdkExecutors({ models }),
 };
 
@@ -145,7 +147,7 @@ function buildEvent(
 let nextHandle = 0;
 
 /** Fold a run result into a JSON-safe tool result, persisting on every pause. */
-function toToolResult(result: RunAgentResult<typeof emailDrafter>, handle: string): ToolResult {
+function toToolResult(result: AgentRunResult<typeof emailDrafter>, handle: string): ToolResult {
   if (result.status === "error") throw result.error;
   if (result.status === "done") {
     runs.delete(handle);
@@ -175,10 +177,19 @@ export async function startDraft(
   prompt: string,
   // Defaults evaluate per call, so `useToolExecutors()` takes effect for
   // direct callers too (mirrors langchain-host/bridge.ts and mastra-host).
-  runOptions: RunAgentOptions<typeof emailDrafter> = toolRunOptions,
+  runOptions: AgentRuntimeOptions<typeof emailDrafter> &
+    AgentRunInit<typeof emailDrafter> = toolRunOptions,
 ): Promise<ToolResult> {
   const handle = `draft-${++nextHandle}`;
-  const opened = await runAgent(emailDrafter, { ...runOptions, input: undefined });
+  const opened = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      ...runOptions,
+    }),
+    {
+      ...runOptions,
+      input: undefined,
+    },
+  );
   const pending = toToolResult(opened, handle);
   if (pending.status === "done") return pending;
 
@@ -195,16 +206,22 @@ export async function resumeDraft(
   handle: string,
   eventType: string,
   text: string | null = null,
-  runOptions: RunAgentOptions<typeof emailDrafter> = toolRunOptions,
+  runOptions: AgentRuntimeOptions<typeof emailDrafter> &
+    AgentRunInit<typeof emailDrafter> = toolRunOptions,
 ): Promise<ToolResult> {
   const stored = runs.get(handle);
   if (!stored) throw new Error(`Unknown handle: ${handle}`);
 
-  const result = await runAgent(emailDrafter, {
-    ...runOptions,
-    snapshot: stored.snapshot,
-    event: buildEvent(stored.interaction, eventType, text),
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(emailDrafter, {
+      ...runOptions,
+    }),
+    {
+      ...runOptions,
+      snapshot: stored.snapshot,
+      event: buildEvent(stored.interaction, eventType, text),
+    },
+  );
 
   // The state has no transition for the event, so the machine ignored it and
   // nothing happened. That is not a library error: `runAgent` settled

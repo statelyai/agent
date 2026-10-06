@@ -1,0 +1,50 @@
+{
+  "Onboard Jordan Rivera (Backend Engineer)": [
+    {
+      "sent": "start {\"employee\":{\"id\":\"emp-001\",\"name\":\"Jordan Rivera\",\"role\":\"Backend Engineer\",\"startDate\":\"2026-08-03\",\"equipment\":\"MacBook Pro 16\"}}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"sendingWelcomePacket\"",
+        "transition xstate.done.actor -> \"waitingForSignedDocs\""
+      ],
+      "response": "WELCOME-emp-001",
+      "idle": {
+        "prompt": "Waiting on Jordan Rivera's signed onboarding documents (packet WELCOME-emp-001). Mark them signed, send them back, or escalate.",
+        "events": [
+          "DOCS_SIGNED",
+          "DOCS_REJECTED",
+          "ESCALATE"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"signedAt\":\"mock signedAt\",\"type\":\"DOCS_SIGNED\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"waitingForSignedDocs\"",
+        "transition DOCS_SIGNED -> \"provisioningIt\"",
+        "transition xstate.done.actor -> \"waitingForHardware\""
+      ],
+      "response": "**Accounts**\n\n**Email**: jordan.rivera@example.com  \n**Slack**: @jordan.rivera  \n**Ticket id**: IT-emp-001",
+      "idle": {
+        "prompt": "Simulated IT provisioning done (ticket IT-emp-001): placeholder mailbox jordan.rivera@example.com and Slack handle @jordan.rivera were derived from the employee's name; no real accounts exist. Waiting on hardware delivery.",
+        "events": [
+          "HARDWARE_DELIVERED",
+          "ESCALATE"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"deliveredAt\":\"mock deliveredAt\",\"type\":\"HARDWARE_DELIVERED\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"waitingForHardware\"",
+        "transition HARDWARE_DELIVERED -> \"preparingSchedule\"",
+        "transition xstate.done.actor -> \"onboarded\""
+      ],
+      "response": "Mock reply to: Employee: Jordan Rivera  \nRole: Backend Engineer  \nStart date: 2\n\n- Employee id: emp-001\n- Status: onboarded\n- Welcome packet id: WELCOME-emp-001\n\n**Accounts**\n\n**Email**: jordan.rivera@example.com  \n**Slack**: @jordan.rivera  \n**Ticket id**: IT-emp-001"
+    }
+  ]
+}

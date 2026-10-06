@@ -31,10 +31,12 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
-  type RunAgentOptions,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
 } from "@statelyai/agent";
 
 /** Rejected document rounds allowed before the case is escalated to a human. */
@@ -119,12 +121,19 @@ const coordinatorSetup = setupAgent({
     ESCALATE: z.object({ note: z.string() }),
   },
   actors: {
+    // Each send is a new packet with its own id: a resend (`resend` > 0) must
+    // be distinguishable from the packet HR just sent back.
     sendWelcomePacket: createAsyncLogic({
       schemas: {
-        input: employeeSchema,
+        input: z.object({ employee: employeeSchema, resend: z.number() }),
         output: welcomePacketSchema,
       },
-      run: async ({ input }) => ({ packetId: `WELCOME-${input.id}` }),
+      run: async ({ input }) => ({
+        packetId:
+          input.resend > 0
+            ? `WELCOME-${input.employee.id}-R${input.resend}`
+            : `WELCOME-${input.employee.id}`,
+      }),
     }),
     provisionIt,
   },
@@ -215,7 +224,7 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
     sendingWelcomePacket: {
       invoke: {
         src: "sendWelcomePacket",
-        input: ({ context }) => context.employee,
+        input: ({ context }) => ({ employee: context.employee, resend: context.docsRejections }),
         onDone: ({ output }) => ({
           target: "waitingForSignedDocs",
           context: { welcomePacketId: output.packetId },
@@ -227,13 +236,19 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
       },
     },
     waitingForSignedDocs: {
-      // `meta.interaction` is this machine's wait signal (see setupAgent above).
+      // `meta.interaction` tells a host what to ask the person here.
       meta: {
         interaction: {
-          // `{path}` fields resolve against context when `getInteraction` reads
-          // the label.
-          label:
-            "Waiting on {employee.name}'s signed onboarding documents. Mark them signed, send them back, or escalate.",
+          // Derived from context when `getInteraction` reads it, so after a
+          // resend the human sees the new packet id and how many resends it
+          // took, not a prompt identical to the first one.
+          label: ({ context }) =>
+            `Waiting on ${context.employee.name}'s signed onboarding documents ` +
+            `(packet ${context.welcomePacketId}` +
+            (context.docsRejections > 0
+              ? `, resend ${context.docsRejections} of ${MAX_DOCS_REJECTIONS - 1}`
+              : "") +
+            "). Mark them signed, send them back, or escalate.",
           events: {
             DOCS_SIGNED: { label: "Mark documents signed", style: "primary" },
             DOCS_REJECTED: { label: "Send the packet back" },
@@ -414,17 +429,25 @@ export async function runLongRunningOnboardingExample(
 
   // One options object, built once: the mock replaces the real executors
   // rather than layering over them.
-  const shared: Partial<RunAgentOptions<typeof longRunningOnboardingMachine>> = {
+  const shared: Partial<
+    AgentRuntimeOptions<typeof longRunningOnboardingMachine> &
+      AgentRunInit<typeof longRunningOnboardingMachine>
+  > = {
     executors: options.generateText
       ? { generateText: options.generateText }
       : createAiSdkExecutors({ models }),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   };
 
-  let result = await runAgent(longRunningOnboardingMachine, {
-    input: { employee },
-    ...shared,
-  });
+  let result = await runToQuiescence(
+    createAgentRuntime(longRunningOnboardingMachine, {
+      ...shared,
+    }),
+    {
+      input: { employee },
+      ...shared,
+    },
+  );
 
   // Days pass between these calls in a real deployment. Each pause persists to
   // JSON and the next call resumes from it.
@@ -438,11 +461,16 @@ export async function runLongRunningOnboardingExample(
     if (!answer)
       throw new Error(`No answer scripted for pause at '${getStatePath(result.snapshot)}'.`);
 
-    result = await runAgent(longRunningOnboardingMachine, {
-      snapshot: JSON.parse(JSON.stringify(result.persist())) as Snapshot<unknown>,
-      event: answer,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(longRunningOnboardingMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: JSON.parse(JSON.stringify(result.persist())) as Snapshot<unknown>,
+        event: answer,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

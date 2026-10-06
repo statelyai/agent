@@ -47,7 +47,8 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
 } from "@statelyai/agent";
 
@@ -112,7 +113,6 @@ export const chameleonSchemas = createAgentSchemas({
     secretWord: z.string(),
     accused: z.string(),
     words: z.array(spokenWordSchema),
-    log: z.array(z.string()),
   }),
   events: {
     /** The detective's one move: name the seat you suspect. */
@@ -121,7 +121,8 @@ export const chameleonSchemas = createAgentSchemas({
         .number()
         .int()
         .min(0)
-        .max(PLAYERS.length - 1),
+        .max(PLAYERS.length - 1)
+        .describe(`Seat to accuse: ${PLAYERS.map((name, seat) => `${seat}=${name}`).join(", ")}`),
     }),
   },
 });
@@ -198,7 +199,7 @@ function finishGame(context: ChameleonContext, outcome: Outcome) {
     secretWord: context.secretWord,
     accused: context.accusedIndex === null ? "" : (PLAYERS[context.accusedIndex] ?? ""),
     words: context.words,
-    log: context.log,
+    // The log is the summary's body; a separate copy would print it twice.
   };
 }
 
@@ -217,7 +218,9 @@ const CHAMELEON_SYSTEM_PROMPT = [
   "You are the CHAMELEON in The Chameleon, a hidden-role party game.",
   "You know the category. You do NOT know the secret word — it was never given to you, and you cannot ask for it.",
   "Three other players know it. On your turn you must say exactly ONE word and pass as one of them.",
-  "Use the words already said to infer what the secret might be, then say something plausibly specific for that guess.",
+  "Use the words already said to infer what the secret might be, then say a word ABOUT that guess — a trait, part, habitat, or association — that a knowing player could have said.",
+  "Never say a member of the category itself (if the category is a kind of animal, name no animal at all), and never your guess at the secret: players who know the secret never say it or name a rival candidate, so naming one marks you as the chameleon, and it spends the guess you may need later.",
+  "Especially avoid the most obvious member of the category; the secret is often the first one anybody would think of.",
   "Too vague and you look like someone covering for not knowing; too specific and you are wrong out loud. If you speak early with little to go on, pick a word that stays defensible across several candidate secrets.",
   "After everyone has spoken the table votes. Reason briefly, then commit to one word.",
 ].join(" ");
@@ -509,10 +512,15 @@ export function toAccuseEvent(text: string): AccuseEvent | undefined {
 export async function main() {
   const shared = { executors: createAiSdkExecutors({ models }) };
 
-  let result = await runAgent(chameleonMachine, {
-    input: { category: "Ocean creatures", secretWord: "octopus", chameleonIndex: 2 },
-    ...shared,
-  });
+  let result = await runToQuiescence(
+    createAgentRuntime(chameleonMachine, {
+      ...shared,
+    }),
+    {
+      input: { category: "Ocean creatures", secretWord: "octopus", chameleonIndex: 2 },
+      ...shared,
+    },
+  );
 
   // The vote settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
@@ -522,11 +530,16 @@ export async function main() {
       console.log("Name a player or a seat number.");
       continue;
     }
-    result = await runAgent(chameleonMachine, {
-      snapshot: result.persist(),
-      event,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(chameleonMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") throw new Error(`Chameleon did not complete: ${result.status}`);

@@ -1,0 +1,47 @@
+{
+  "What are the leading approaches to long-context LLMs in 2026?": [
+    {
+      "sent": "start {\"question\":\"What are the leading approaches to long-context LLMs in 2026?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"collecting\"",
+        "transition xstate.done.actor -> \"collecting\"",
+        "transition xstate.done.actor -> \"reflecting\"",
+        "transition xstate.done.actor -> \"writing\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Question: What are the leading approaches to long-context LL\n\n- Rounds: 1\n- Source ledger: \n\n**Findings**\n\n**Research 1 0**: mock finding"
+    }
+  ],
+  "How do carbon-capture startups actually remove CO2?": [
+    {
+      "sent": "start {\"question\":\"How do carbon-capture startups actually remove CO2?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"collecting\"",
+        "transition xstate.done.actor -> \"collecting\"",
+        "transition xstate.done.actor -> \"reflecting\"",
+        "transition xstate.done.actor -> \"writing\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Question: How do carbon-capture startups actually remove CO2\n\n- Rounds: 1\n- Source ledger: \n\n**Findings**\n\n**Research 1 0**: mock finding"
+    }
+  ],
+  "What is the state of solid-state batteries for EVs?": [
+    {
+      "sent": "start {\"question\":\"What is the state of solid-state batteries for EVs?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"collecting\"",
+        "transition xstate.done.actor -> \"collecting\"",
+        "transition xstate.done.actor -> \"reflecting\"",
+        "transition xstate.done.actor -> \"writing\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Question: What is the state of solid-state batteries for EVs\n\n- Rounds: 1\n- Source ledger: \n\n**Findings**\n\n**Research 1 0**: mock finding"
+    }
+  ]
+}

@@ -28,8 +28,8 @@ import type {
 } from "xstate";
 import { AgentError } from "./errors.js";
 import { getCallUsage, normalizeGeneratorResult } from "./text-logic.js";
-import { runAgent } from "./run-agent.js";
-import type { RunAgentOptions, RunAgentResult } from "./run-agent.js";
+import { createAgentRuntime, runToQuiescence } from "./run-agent.js";
+import type { AgentRuntimeOptions, AgentRunInit, AgentRunResult } from "./run-agent.js";
 import { isRecord } from "./internal/is-record.js";
 import type {
   AgentCallUsage,
@@ -148,7 +148,7 @@ export interface SeamTurn<TMachine extends AnyStateMachine> {
   /** 0-based index of this pause within the run. */
   turn: number;
   /** The `idle` result that produced the pause. */
-  result: RunAgentResult<TMachine>;
+  result: AgentRunResult<TMachine>;
 }
 
 /**
@@ -182,7 +182,7 @@ export interface SeamSlice {
 
 /** Options for {@link runSeam}. */
 export interface RunSeamOptions<TMachine extends AnyStateMachine> {
-  /** Machine input, passed straight through to `runAgent`. */
+  /** Machine input, passed straight through to `runToQuiescence`. */
   input?: InputFrom<TMachine>;
   /**
    * The call plan: scripted answers per key, consumed in order. A key is a
@@ -225,16 +225,16 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
    * Text slots are always owned by the routing.
    */
   executors?: Partial<AgentRequestExecutors>;
-  /** Passed through to `runAgent`: actor implementations merged onto the machine. */
-  actors?: RunAgentOptions<TMachine>["actors"];
+  /** Passed through to `createAgentRuntime`: actor implementations merged onto the machine. */
+  actors?: (AgentRuntimeOptions<TMachine> & AgentRunInit<TMachine>)["actors"];
 }
 
 /** What {@link runSeam} returns: the seam's own answer, plus the run it caused. */
 export interface RunSeamResult<TMachine extends AnyStateMachine> {
   /**
-   * The final `runAgent` result. `usage` accounts for the last leg.
+   * The final `runToQuiescence` result. `usage` accounts for the last leg.
    */
-  result: RunAgentResult<TMachine>;
+  result: AgentRunResult<TMachine>;
   /** What the seam call returned, or `undefined` when the run never reached it. */
   seamOutput: unknown;
   /**
@@ -418,27 +418,31 @@ export async function runSeam<TMachine extends AnyStateMachine>(
   let snapshot: Snapshot<unknown> | undefined;
   let event: EventFromLogic<TMachine> | undefined;
   const events: TrajectoryEvent[] = [];
-  let result!: RunAgentResult<TMachine>;
+  let result!: AgentRunResult<TMachine>;
   const maxTurns = options.maxTurns ?? 12;
 
   for (let turn = 0; turn <= maxTurns; turn++) {
-    result = await runAgent(machine, {
-      ...(snapshot ? { snapshot } : { input: options.input }),
-      ...(event ? { event } : {}),
-      ...(options.actors ? { actors: options.actors } : {}),
-      executors,
-      onTransition: (next, causedBy) => {
-        // A resumed leg re-emits the state it restored into under
-        // `@xstate.init`. That is an artifact of the leg structure this helper
-        // owns, not a machine transition, so the path stays the machine's.
-        if (turn > 0 && causedBy.type === "@xstate.init") {
-          return;
-        }
-        events.push(causedBy as TrajectoryEvent);
-        liveEvents = events.length;
-        statePath.push((next as AnyMachineSnapshot).value);
+    result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        ...(options.actors ? { actors: options.actors } : {}),
+        executors,
+        onTransition: (next, causedBy) => {
+          // A resumed leg re-emits the state it restored into under
+          // `@xstate.init`. That is an artifact of the leg structure this helper
+          // owns, not a machine transition, so the path stays the machine's.
+          if (turn > 0 && causedBy.type === "@xstate.init") {
+            return;
+          }
+          events.push(causedBy as TrajectoryEvent);
+          liveEvents = events.length;
+          statePath.push((next as AnyMachineSnapshot).value);
+        },
+      }),
+      {
+        ...(snapshot ? { snapshot } : { input: options.input }),
+        ...(event ? { event } : {}),
       },
-    });
+    );
 
     if (result.status !== "idle" || turn === maxTurns) {
       break;

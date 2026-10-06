@@ -22,8 +22,7 @@
  *     metadata); below the
  *     threshold the run does NOT reply on its own — it settles idle in
  *     `escalating` and waits for a person to confirm the category or type the
- *     right one. `meta.interaction` tells a host how to render that, and the
- *     `waiting` tag plus `isIdle` make the idle settle deterministic.
+ *     right one. `meta.interaction` tells a host how to render that.
  *   - One retry on reply generation. A failed draft is not an exception: it
  *     routes through `replyFailed`, retries once, then degrades to a `failed`
  *     outcome carrying a fallback reply rather than throwing.
@@ -43,7 +42,8 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
 } from "@statelyai/agent";
 
@@ -428,17 +428,30 @@ export async function main() {
     onTransition: (snapshot: TriageSnapshot) => console.log("[state]", getStatePath(snapshot)),
   };
 
-  let result = await runAgent(triageMachine, { input: { ticket }, ...shared });
+  let result = await runToQuiescence(
+    createAgentRuntime(triageMachine, {
+      ...shared,
+    }),
+    {
+      input: { ticket },
+      ...shared,
+    },
+  );
 
   // A low-confidence classification settles the run idle; resume it with the
   // human's decision.
   while (result.status === "idle") {
     const answer = await promptLine(`${escalationLabel(result.snapshot)}\n> `);
-    result = await runAgent(triageMachine, {
-      snapshot: result.persist(),
-      event: answer === "" ? { type: "CONFIRM" } : { type: "RECLASSIFY", category: answer },
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(triageMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event: answer === "" ? { type: "CONFIRM" } : { type: "RECLASSIFY", category: answer },
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

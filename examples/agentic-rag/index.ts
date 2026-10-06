@@ -37,7 +37,8 @@
  *   - retrieve (ToolNode)    → `retrieving` (keyword actor over the sample posts)
  *   - grade_documents        → `grading` (ONE Jev call, one boolean question per passage),
  *                              its `onDone` choosing generate or rewrite
- *   - rewrite                → `rewriting` (request), then back to `deciding`
+ *   - rewrite                → `rewriting` (a decision whose one event is
+ *                              `REWRITE { question }`), then back to `deciding`
  *   - generate               → `generating`
  *
  * Differences from LangGraph worth calling out:
@@ -56,9 +57,16 @@
  *     transition returns `undefined`, the decision is rejected, and the model
  *     is re-asked until it chooses `ANSWER`. That forced answer has no relevant
  *     evidence behind it, so it lands in `failed`, returned as unverified. An
- *     answer the model chose freely (before the budget ran out) lands in `done`.
+ *     answer the model chose freely (before the budget ran out) lands in `done`
+ *     — still labeled unverified when its searches found no relevant passage.
  *   - A model that keeps choosing RETRIEVE past the budget exhausts the
  *     decision's retries, and `onError` lands in `failed`.
+ *   - Every retry is a NEW attempt. LangGraph's loop can re-run the same
+ *     search and the same rewrite until `recursion_limit`. Here two guards
+ *     reject repeats: a RETRIEVE whose keywords add no word to the ones already
+ *     searched (`isNewSearch`), and a REWRITE with the same content words as an
+ *     earlier version of the question (`isNewQuestion`). Both prompts list what
+ *     was already tried, and a rejected choice is fed back for another attempt.
  *   - An empty retrieval skips grading (nothing to grade) and goes straight to
  *     the rewrite.
  *   - Every invoke has an `onError` that lands in `failed`.
@@ -75,7 +83,13 @@ import { createAsyncLogic } from "xstate";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = {
   rag: openai("gpt-5.4-mini"),
@@ -155,20 +169,41 @@ const STOP_WORDS = new Set([
   "please",
 ]);
 
-/** Honest keyword-overlap score (NOT embeddings): shared content words. */
-function scoreDocument(query: string, text: string): number {
-  const terms = new Set(
-    query
+/** The words a search actually matches on: lowercase, no stop words. */
+function contentWords(text: string): Set<string> {
+  return new Set(
+    text
       .toLowerCase()
       .split(/[^a-z]+/)
       .filter((word) => word.length > 2 && !STOP_WORDS.has(word)),
   );
+}
+
+/** Honest keyword-overlap score (NOT embeddings): shared content words. */
+function scoreDocument(query: string, text: string): number {
   const haystack = text.toLowerCase();
   let score = 0;
-  for (const term of terms) {
+  for (const term of contentWords(query)) {
     if (haystack.includes(term)) score += 1;
   }
   return score;
+}
+
+/**
+ * A search is new when it adds at least one content word to everything already
+ * searched. The retriever matches words, so keywords drawn only from earlier
+ * searches can find nothing those searches did not.
+ */
+export function isNewSearch(keywords: string, tried: string[]): boolean {
+  const seen = new Set(tried.flatMap((earlier) => [...contentWords(earlier)]));
+  return [...contentWords(keywords)].some((word) => !seen.has(word));
+}
+
+/** A rewrite is new when its content words differ from every earlier version's. */
+export function isNewQuestion(candidate: string, earlier: string[]): boolean {
+  const key = (text: string) => [...contentWords(text)].sort().join(" ");
+  const candidateKey = key(candidate);
+  return candidateKey !== "" && earlier.every((question) => key(question) !== candidateKey);
 }
 
 /** A passage is kept when Jev's probability that it helps clears this. */
@@ -217,21 +252,30 @@ function renderDocuments(documents: string[]): string {
 
 const agenticRagContextSchema = z.object({
   question: z.string(),
-  // The question the model is currently working on: the original, then each
-  // rewrite of it.
-  currentQuestion: z.string(),
+  // Each accepted rewrite, in order. The last one (or the original question,
+  // before any rewrite) is what the model is working on.
+  rewrittenQuestions: z.array(z.string()),
   // Relevant passages only: cleared when a retrieval is graded irrelevant.
   documents: z.array(z.string()),
-  // The search keywords the model sent with its last RETRIEVE.
-  lastKeywords: z.string().nullable(),
+  // The keywords of every RETRIEVE so far, in order. The last one is searched.
+  triedKeywords: z.array(z.string()),
   retrievals: z.number(),
-  rewrites: z.number(),
   answer: z.string().nullable(),
   // Why the run stopped short; set only on the way into `failed`.
   failure: z.string().nullable(),
 });
 
 type AgenticRagContext = z.infer<typeof agenticRagContextSchema>;
+
+/** The question the model is working on: the latest rewrite, or the original. */
+function currentQuestion(context: AgenticRagContext): string {
+  return context.rewrittenQuestions.at(-1) ?? context.question;
+}
+
+/** Earlier searches, for a prompt: they all found nothing relevant. */
+function renderTried(keywords: string[]): string {
+  return keywords.map((entry) => `"${entry}"`).join("; ");
+}
 
 /** The plain-language trail, rendered from the counters in context. */
 function renderTrail(context: AgenticRagContext, verified: boolean): string {
@@ -246,7 +290,8 @@ function renderTrail(context: AgenticRagContext, verified: boolean): string {
     parts.push(
       `The model called the retriever ${context.retrievals} of ${MAX_RETRIEVALS} allowed time(s).`,
     );
-    if (context.rewrites > 0) parts.push(`Rewrote the question ${context.rewrites} time(s).`);
+    const rewrites = context.rewrittenQuestions.length;
+    if (rewrites > 0) parts.push(`Rewrote the question ${rewrites} time(s).`);
     if (context.documents.length > 0) {
       parts.push(`Answered from ${context.documents.length} passage(s) graded relevant.`);
     } else {
@@ -256,6 +301,15 @@ function renderTrail(context: AgenticRagContext, verified: boolean): string {
   }
   if (!verified) parts.push(`Stopped: ${context.failure ?? "unknown failure"}.`);
   return parts.join(" ");
+}
+
+/**
+ * An answer the model chose after its searches found nothing relevant: the
+ * retriever ran, yet no passage backs the answer. It is general knowledge,
+ * so it is labeled unverified like the budget-forced answer in `failed`.
+ */
+function unsupportedAnswer(context: AgenticRagContext): boolean {
+  return context.retrievals > 0 && context.documents.length === 0;
 }
 
 const agentSetup = setupAgent({
@@ -272,10 +326,23 @@ const agentSetup = setupAgent({
     answeredDirectly: z.boolean(),
   }),
   events: {
-    /** Model: call the retriever tool with these search keywords. */
-    RETRIEVE: z.object({ keywords: z.string() }),
+    /**
+     * Model: call the retriever tool with these search keywords. Blank or
+     * stop-word-only keywords would search for nothing, so they fail the
+     * schema and the reason is fed back to the model — before any guard runs.
+     */
+    RETRIEVE: z.object({
+      keywords: z
+        .string()
+        .describe("Search keywords: at least one content word, e.g. 'agent memory types'.")
+        .refine((keywords) => contentWords(keywords).size > 0, {
+          message: "keywords must contain at least one search word (not blank or only stop words)",
+        }),
+    }),
     /** Model: answer now, without (further) retrieval. */
     ANSWER: z.object({ answer: z.string() }),
+    /** Model, after a failed search: the question, rewritten from a new angle. */
+    REWRITE: z.object({ question: z.string() }),
   },
   // `done` is reached from `generating` or `answered`, both of which set `answer`.
   states: {
@@ -297,22 +364,6 @@ const agentSetup = setupAgent({
     }),
   },
   requests: {
-    // rewrite: reason about the intent and produce a better question.
-    rewriteQuestion: {
-      schemas: {
-        input: z.object({ question: z.string(), lastKeywords: z.string() }),
-        output: z.string(),
-      },
-      model: "rag",
-      system:
-        "The last search found nothing relevant. Look at the question's underlying " +
-        "intent and rewrite it as an improved question. Return only the new question.",
-      prompt: ({ input }) =>
-        [
-          `Original question: ${input.question}`,
-          `Keywords that found nothing relevant: ${input.lastKeywords}`,
-        ].join("\n"),
-    },
     // generate: grounded answer over the relevant passages.
     generateAnswer: {
       schemas: {
@@ -337,11 +388,10 @@ export const agenticRagMachine = agentSetup.createMachine({
   id: "agentic-rag",
   context: ({ input }) => ({
     question: input.question,
-    currentQuestion: input.question,
+    rewrittenQuestions: [],
     documents: [],
-    lastKeywords: null,
+    triedKeywords: [],
     retrievals: 0,
-    rewrites: 0,
     answer: null,
     failure: null,
   }),
@@ -361,11 +411,13 @@ export const agenticRagMachine = agentSetup.createMachine({
             "Choose ANSWER when it does not (arithmetic, small talk, general knowledge), " +
             "or when you already know enough.",
           prompt: [
-            `Question: ${context.currentQuestion}`,
-            context.rewrites > 0 ? `(Rewritten from: ${context.question})` : "",
+            `Question: ${currentQuestion(context)}`,
+            context.rewrittenQuestions.length > 0 ? `(Rewritten from: ${context.question})` : "",
             `Retrievals used: ${context.retrievals} of ${MAX_RETRIEVALS}.`,
             context.retrievals > 0
-              ? "The last retrieval found nothing relevant, so the question was rewritten."
+              ? "The last retrieval found nothing relevant, so the question was rewritten. " +
+                `Already searched, all without a relevant result: ${renderTried(context.triedKeywords)}. ` +
+                "A new search must use at least one word none of those used."
               : "",
             context.retrievals >= MAX_RETRIEVALS
               ? "The retrieval budget is spent. You must ANSWER now."
@@ -383,13 +435,17 @@ export const agenticRagMachine = agentSetup.createMachine({
         }),
       },
       on: {
-        // Guard: illegal once the budget is spent. The rejected choice is fed
-        // back to the model, which must then ANSWER.
+        // Guard: illegal once the budget is spent, and illegal for a search that
+        // repeats earlier keywords. The rejected choice is fed back to the
+        // model, which must then search differently or ANSWER.
         RETRIEVE: ({ context, event }) =>
-          context.retrievals < MAX_RETRIEVALS
+          context.retrievals < MAX_RETRIEVALS && isNewSearch(event.keywords, context.triedKeywords)
             ? {
                 target: "retrieving",
-                context: { retrievals: context.retrievals + 1, lastKeywords: event.keywords },
+                context: {
+                  retrievals: context.retrievals + 1,
+                  triedKeywords: [...context.triedKeywords, event.keywords],
+                },
               }
             : undefined,
         ANSWER: ({ event }) => ({ target: "answered", context: { answer: event.answer } }),
@@ -411,7 +467,9 @@ export const agenticRagMachine = agentSetup.createMachine({
     retrieving: {
       invoke: {
         src: "retrieve",
-        input: ({ context }) => ({ keywords: context.lastKeywords ?? context.currentQuestion }),
+        input: ({ context }) => ({
+          keywords: context.triedKeywords.at(-1) ?? currentQuestion(context),
+        }),
         onDone: ({ output }) => ({
           target: output.length > 0 ? "grading" : "rewriting",
           context: { documents: output },
@@ -442,22 +500,47 @@ export const agenticRagMachine = agentSetup.createMachine({
         }),
       },
     },
-    // rewrite: a better question, then the model gets another turn.
+    // rewrite: a better question, then the model gets another turn. The model
+    // sees every earlier version and search; the guard rejects a rewrite that
+    // is one of them again, and the decision re-asks.
     rewriting: {
       invoke: {
-        src: "rewriteQuestion",
+        src: "agent.decide",
         input: ({ context }) => ({
-          question: context.question,
-          lastKeywords: context.lastKeywords ?? context.currentQuestion,
-        }),
-        onDone: ({ context, output }) => ({
-          target: "deciding",
-          context: { currentQuestion: output.result, rewrites: context.rewrites + 1 },
+          model: "rag",
+          name: "rewriteQuestion",
+          system:
+            "A search for this question found nothing relevant. Look at the question's " +
+            "underlying intent and rewrite it from a DIFFERENT angle than every earlier " +
+            "version: other terms, a broader or narrower scope, or the concept underneath. " +
+            "Send the new question with REWRITE.",
+          prompt: [
+            `Original question: ${context.question}`,
+            context.rewrittenQuestions.length
+              ? `Earlier rewrites (do not repeat them):\n${context.rewrittenQuestions.map((question) => `- ${question}`).join("\n")}`
+              : "",
+            `Searches that found nothing relevant: ${renderTried(context.triedKeywords)}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          allowedEvents: ["REWRITE"],
+          maxRetries: 2,
         }),
         onError: ({ event }) => ({
           target: "failed",
           context: { failure: `rewriteQuestion failed: ${String(event.error)}` },
         }),
+      },
+      on: {
+        REWRITE: ({ context, event }) =>
+          isNewQuestion(event.question, [context.question, ...context.rewrittenQuestions])
+            ? {
+                target: "deciding",
+                context: {
+                  rewrittenQuestions: [...context.rewrittenQuestions, event.question.trim()],
+                },
+              }
+            : undefined,
       },
     },
     generating: {
@@ -474,10 +557,12 @@ export const agenticRagMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        answer: context.answer,
+        answer: unsupportedAnswer(context)
+          ? `Unverified (no relevant passages found): ${context.answer}`
+          : context.answer,
         trail: renderTrail(context, true),
         retrievals: context.retrievals,
-        rewrites: context.rewrites,
+        rewrites: context.rewrittenQuestions.length,
         answeredDirectly: context.retrievals === 0,
       }),
     },
@@ -492,7 +577,7 @@ export const agenticRagMachine = agentSetup.createMachine({
             : `Unverified (no relevant passages found): ${context.answer}`,
         trail: renderTrail(context, false),
         retrievals: context.retrievals,
-        rewrites: context.rewrites,
+        rewrites: context.rewrittenQuestions.length,
         answeredDirectly: false,
       }),
     },
@@ -536,16 +621,20 @@ export async function runAgenticRagExample(
   const executors =
     generateText || decide ? { generateText, decide } : createAiSdkExecutors({ models });
   const progress: string[] = [];
-  const result = await runAgent(agenticRagMachine, {
-    input: { question },
-    executors,
-    ...(judge ? { actors: { gradeDocuments: createGradeDocuments(judge) } } : {}),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(agenticRagMachine, {
+      executors,
+      ...(judge ? { actors: { gradeDocuments: createGradeDocuments(judge) } } : {}),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { question },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Agentic RAG example did not complete: ${result.status}`);

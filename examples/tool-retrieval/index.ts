@@ -30,7 +30,8 @@
  *   - agent → `deciding`: `agent.decide` (name `chooseTool`) over CALL_TOOL,
  *     RESELECT and ANSWER
  *   - binding only the selected tools → the CALL_TOOL guard: a tool outside
- *     the selected set is rejected and the decision retries
+ *     the selected set, or a repeat of a call already made, is rejected and
+ *     the decision retries
  *   - tools (ToolNode) → `runningTool`: a plain actor that runs the registry
  *     function and appends `{ tool, arg, result }` to `calls`
  *
@@ -49,8 +50,12 @@
  *     the rule holds whatever the host's tool-binding does.
  *   - Tool calls and reselections are budgets checked in guards
  *     (MAX_TOOL_CALLS, MAX_RESELECTIONS). LangGraph bounds the ReAct loop with
- *     recursion_limit, which raises. Here an over-budget choice is rejected and
- *     the model must ANSWER; if it will not, the decision fails into `failed`.
+ *     recursion_limit, which raises. Here a spent budget (or an empty
+ *     selection) takes the move off the decision's `allowedEvents`, so the
+ *     model is only offered what it can still do: with no tools selected it
+ *     can RESELECT or ANSWER without tools; with nothing left, only ANSWER.
+ *     The guards still enforce the budgets; if the model will not make a legal
+ *     move, the decision fails into `failed`.
  *   - Like bigtool, reselection ADDS to the selected set rather than replacing it.
  *   - The agent answers with an ANSWER event instead of a final assistant
  *     message; one tool call per turn, no parallel tool calls.
@@ -67,7 +72,13 @@ import { createAsyncLogic } from "xstate";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = { agent: openai("gpt-5.4-mini") };
 
@@ -218,11 +229,15 @@ export function createSelectTools(model: Experimental_EvaluationModel = judgeMod
           tools: TOOL_REGISTRY.map(({ name, description }) => ({ name, description })),
         },
         questions: Object.fromEntries(
-          TOOL_REGISTRY.map((tool, index) => [
+          TOOL_REGISTRY.map((tool) => [
             tool.name,
             {
               type: "boolean" as const,
-              instructions: `Could the tool \`tools[${index}]\` be used to answer \`question\`?`,
+              // Name the tool and quote its description in the question itself:
+              // a bare `tools[i]` index is easy to misalign across twelve rows.
+              instructions:
+                `Could the tool \`${tool.name}\` (${tool.description}) be used to answer ` +
+                "`question`?",
               criteria: {
                 true: "Calling this tool with some argument produces a result the answer needs.",
                 false: "The tool does something else, or only shares vocabulary with the question.",
@@ -268,6 +283,36 @@ function renderCalls(calls: ToolCall[]): string {
     .join("\n");
 }
 
+/**
+ * The run's answer: the model's, or — for `failed` — why there is none.
+ * Shared by the machine's output and the programmatic result.
+ */
+function answerText(context: RetrievalContext, failed: boolean): string {
+  return failed
+    ? `No answer: the agent stopped after ${context.calls.length} tool call(s) and ${context.reselections} reselection(s) without a legal final move.`
+    : (context.answer ?? "");
+}
+
+/**
+ * The one reader-facing string, the same shape for every run: the answer,
+ * then the tool calls behind it as a list. A single field (rather than
+ * `answer` and `calls` side by side) keeps the layout from flipping with
+ * whichever of the two happens to be longer.
+ */
+function renderResponse(context: RetrievalContext, failed: boolean): string {
+  const calls =
+    context.calls.length === 0
+      ? ["Tool calls: none."]
+      : [
+          "Tool calls:",
+          "",
+          ...renderCalls(context.calls)
+            .split("\n")
+            .map((line) => `- ${line}`),
+        ];
+  return [answerText(context, failed), "", ...calls].join("\n");
+}
+
 function decisionPrompt(context: RetrievalContext): string {
   const selected = TOOL_REGISTRY.filter((tool) => context.selectedTools.includes(tool.name));
   return [
@@ -275,10 +320,39 @@ function decisionPrompt(context: RetrievalContext): string {
     `Available tools: ${context.selectedTools.join(", ") || "(none matched)"}`,
     ...selected.map((tool) => `- ${tool.name}: ${tool.description}`),
     `Question: ${context.question}`,
-    "Tool calls so far:",
+    "Results you already have (never repeat these calls):",
     renderCalls(context.calls),
     `Tool calls left: ${MAX_TOOL_CALLS - context.calls.length}. Reselections left: ${MAX_RESELECTIONS - context.reselections}.`,
+    // Last, so it is the freshest instruction: a model that sees a result it
+    // needs otherwise tends to call the same tool again rather than answer.
+    ...(context.calls.length > 0
+      ? [
+          "If the results above answer the question, your move is ANSWER, using them. " +
+            "Calling a tool again with the same argument is refused.",
+        ]
+      : []),
   ].join("\n");
+}
+
+/** Whether this exact call (same tool, same argument) already ran. */
+function alreadyCalled(context: RetrievalContext, tool: string, arg: string): boolean {
+  return context.calls.some((call) => call.tool === tool && call.arg.trim() === arg.trim());
+}
+
+/**
+ * The moves the decision is offered: CALL_TOOL only with a tool selected and
+ * calls left, RESELECT only with reselections left, ANSWER always. An empty
+ * selection therefore offers RESELECT or ANSWER, never a CALL_TOOL the guard
+ * would have to refuse.
+ */
+function allowedMoves(context: RetrievalContext): Array<"CALL_TOOL" | "RESELECT" | "ANSWER"> {
+  return [
+    ...(context.selectedTools.length > 0 && context.calls.length < MAX_TOOL_CALLS
+      ? (["CALL_TOOL"] as const)
+      : []),
+    ...(context.reselections < MAX_RESELECTIONS ? (["RESELECT"] as const) : []),
+    "ANSWER",
+  ];
 }
 
 const agentSetup = setupAgent({
@@ -286,8 +360,7 @@ const agentSetup = setupAgent({
   context: retrievalContextSchema,
   input: z.object({ question: z.string() }),
   output: z.object({
-    answer: z.string(),
-    calls: z.string(),
+    response: z.string(),
     selectedTools: z.array(z.string()),
     reselections: z.number(),
   }),
@@ -350,19 +423,24 @@ export const toolRetrievalMachine = agentSetup.createMachine({
           model: "agent",
           name: "chooseTool",
           system:
-            "Answer the question. You may call ONE of the available tools per turn (CALL_TOOL with " +
-            "its argument string), ask for a new tool search (RESELECT with a short query) if none " +
-            "fit, or give the final answer (ANSWER). Only the listed tools exist.",
+            "Answer the question. Each turn, make exactly one move: CALL_TOOL with one of the " +
+            "available tools and its argument string, only when you still need a result you do " +
+            "not have; RESELECT with a short query naming the kind of tool you need, when no " +
+            "available tool fits; or ANSWER, as soon as the results you already have answer the " +
+            "question (or from your own knowledge when no tool can). Only the listed tools exist.",
           prompt: decisionPrompt(context),
-          allowedEvents: ["CALL_TOOL", "RESELECT", "ANSWER"],
+          allowedEvents: allowedMoves(context),
         }),
         // Retries exhausted: the model kept choosing moves the machine refused.
         onError: { target: "failed" },
       },
       on: {
-        // The binding: only a selected tool, and only within the call budget.
+        // The binding: only a selected tool, only within the call budget, and
+        // never a call whose result is already in hand.
         CALL_TOOL: ({ context, event }) =>
-          context.selectedTools.includes(event.tool) && context.calls.length < MAX_TOOL_CALLS
+          context.selectedTools.includes(event.tool) &&
+          context.calls.length < MAX_TOOL_CALLS &&
+          !alreadyCalled(context, event.tool, event.arg)
             ? {
                 target: "runningTool",
                 context: { pendingCall: { tool: event.tool, arg: event.arg } },
@@ -402,8 +480,7 @@ export const toolRetrievalMachine = agentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        answer: context.answer ?? "",
-        calls: renderCalls(context.calls),
+        response: renderResponse(context, false),
         selectedTools: context.selectedTools,
         reselections: context.reselections,
       }),
@@ -411,8 +488,7 @@ export const toolRetrievalMachine = agentSetup.createMachine({
     failed: {
       type: "final",
       output: ({ context }) => ({
-        answer: `No answer: the agent stopped after ${context.calls.length} tool call(s) and ${context.reselections} reselection(s) without a legal final move.`,
-        calls: renderCalls(context.calls),
+        response: renderResponse(context, true),
         selectedTools: context.selectedTools,
         reselections: context.reselections,
       }),
@@ -430,7 +506,11 @@ export interface RunToolRetrievalOptions {
 }
 
 export interface ToolRetrievalResult {
+  /** The answer followed by its tool calls: what the machine outputs. */
+  response: string;
+  /** The answer alone (or why there is none). */
   answer: string;
+  /** The tool calls, one `tool("arg") → result` line each. */
   calls: string;
   selectedTools: string[];
   reselections: number;
@@ -450,21 +530,33 @@ export async function runToolRetrievalExample(
     onProgress,
   } = options;
   const progress: string[] = [];
-  const result = await runAgent(toolRetrievalMachine, {
-    input: { question },
-    ...(decide ? { executors: { decide } } : { executors: createAiSdkExecutors({ models }) }),
-    ...(judge ? { actors: { selectTools: createSelectTools(judge) } } : {}),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(toolRetrievalMachine, {
+      ...(decide ? { executors: { decide } } : { executors: createAiSdkExecutors({ models }) }),
+      ...(judge ? { actors: { selectTools: createSelectTools(judge) } } : {}),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { question },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Tool retrieval example did not complete: ${result.status}`);
   }
-  return { ...result.output, finalState: getStatePath(result.snapshot), progress };
+  const finalState = getStatePath(result.snapshot);
+  const context = result.snapshot.context;
+  return {
+    ...result.output,
+    answer: answerText(context, finalState === "failed"),
+    calls: renderCalls(context.calls),
+    finalState,
+    progress,
+  };
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
@@ -480,8 +572,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       onProgress: (state) => console.log(`  → ${state}`),
     });
     console.log(`\nSelected: ${result.selectedTools.join(", ")}`);
-    console.log(`Calls:\n${result.calls}`);
-    console.log(`\nAnswer (${result.finalState}): ${result.answer}`);
+    console.log(`\n(${result.finalState})\n${result.response}`);
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

@@ -10,7 +10,8 @@
  *   - the retry/backoff wrapper → a wrapper around the host's executors (unchanged)
  *   - the `refunded` / `escalated` booleans → gone: each final state declares
  *     its own `output`, so the outcome is the state, not a flag beside it
- *   - the unbounded tool loop → a `lookups` counter checked against MAX_LOOKUPS
+ *   - the unbounded tool loop → a `lookups` counter checked against MAX_LOOKUPS,
+ *     and a lookup already made is never made again (its result is in context)
  *
  * `step1/2/3.ts` walk this conversion one shippable step at a time. Dual-mode:
  * tests inject mock executors (no API key); a direct run uses real models.
@@ -36,7 +37,8 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -51,7 +53,29 @@ export const MAX_LOOKUPS = 2;
 export const ORDERS: Record<string, { customer: string; total: number; item: string }> = {
   A1001: { customer: "Ada Lovelace", total: 240, item: "Standing desk" },
   B2002: { customer: "Alan Turing", total: 60, item: "Mechanical keyboard" },
+  // The order the "charged twice" starter quotes, so its lookup finds something.
+  "ORD-1234": { customer: "Grace Hopper", total: 89, item: "Noise-cancelling headphones" },
 };
+
+/** Order ids the ticket mentions (`A1001`, `ORD-1234`, ...). */
+export function mentionedOrderIds(ticket: string): string[] {
+  return [...new Set(ticket.match(/\b[A-Z]{1,4}-?\d{3,}\b/g) ?? [])];
+}
+
+/**
+ * Whether LOOKUP is worth offering: the budget is not spent, and either
+ * nothing has been looked up yet or the ticket names an order that has not
+ * been. Once every mentioned order is in context, a lookup can only repeat one.
+ */
+export function canLookUp(context: {
+  ticket: string;
+  orders: Record<string, string>;
+  lookups: number;
+}) {
+  if (context.lookups >= MAX_LOOKUPS) return false;
+  if (context.lookups === 0) return true;
+  return mentionedOrderIds(context.ticket).some((id) => !(id in context.orders));
+}
 
 const models = {
   agent: openai("gpt-5.4-mini"),
@@ -119,7 +143,9 @@ const schemas = createAgentSchemas({
   context: z.object({
     ticket: z.string(),
     triage: triageSchema.nullable(),
-    order: z.string().nullable(),
+    /** Every lookup so far, order id → result. All of them reach the prompt,
+     * and an id already here is not looked up again. */
+    orders: z.record(z.string(), z.string()),
     /** The order id the last LOOKUP asked for; the invoke reads it from here
      * rather than reaching back into the triggering event. */
     lookupOrderId: z.string().nullable(),
@@ -180,7 +206,7 @@ export const supportMachine = agentSetup.createMachine({
   context: ({ input }) => ({
     ticket: input.ticket,
     triage: null,
-    order: null,
+    orders: {},
     lookupOrderId: null,
     lookups: 0,
     pendingRefund: null,
@@ -212,20 +238,23 @@ export const supportMachine = agentSetup.createMachine({
           model: "agent",
           system:
             "You are a support agent. Look up an order when useful, issue small " +
-            "refunds directly, escalate what you cannot resolve, or close with a reply.",
+            "refunds directly, escalate what you cannot resolve, or close with a reply. " +
+            "Lookups already made are listed under Orders; never repeat one.",
           prompt: [
             `Ticket: ${context.ticket}`,
             context.triage ? `Triage: ${JSON.stringify(context.triage)}` : "",
-            context.order ? `Order: ${context.order}` : "",
+            Object.keys(context.orders).length > 0
+              ? `Orders:\n${Object.values(context.orders).join("\n")}`
+              : "",
           ]
             .filter(Boolean)
             .join("\n"),
-          // Once the lookup budget is spent, LOOKUP is not even offered — the
-          // guard below is still the truth, this just saves a wasted retry.
-          allowedEvents:
-            context.lookups >= MAX_LOOKUPS
-              ? ["REFUND", "ESCALATE", "RESOLVE"]
-              : ["LOOKUP", "REFUND", "ESCALATE", "RESOLVE"],
+          // Once the budget is spent or every order the ticket names is looked
+          // up, LOOKUP is not even offered — the guard below is still the
+          // truth, this just keeps the model from spending a retry on a repeat.
+          allowedEvents: canLookUp(context)
+            ? ["LOOKUP", "REFUND", "ESCALATE", "RESOLVE"]
+            : ["REFUND", "ESCALATE", "RESOLVE"],
           maxRetries: 2,
         }),
         onError: ({ event }) => ({
@@ -234,10 +263,12 @@ export const supportMachine = agentSetup.createMachine({
         }),
       },
       on: {
-        // Bounded: over the lookup budget the transition returns nothing, so
-        // LOOKUP is not an accepted event and the decision must commit.
+        // Bounded: over the lookup budget, or for an id already looked up (its
+        // result is in the prompt; asking again returns the same answer), the
+        // transition returns nothing, so LOOKUP is not accepted and the
+        // decision retries with that rejection as feedback.
         LOOKUP: ({ context, event }) =>
-          context.lookups >= MAX_LOOKUPS
+          context.lookups >= MAX_LOOKUPS || event.orderId in context.orders
             ? undefined
             : {
                 target: "lookingUp",
@@ -270,7 +301,10 @@ export const supportMachine = agentSetup.createMachine({
         // No cast: the id was written to context by the LOOKUP transition, and
         // `states.lookingUp` narrows it to a non-null string.
         input: ({ context }) => ({ orderId: context.lookupOrderId }),
-        onDone: ({ output }) => ({ target: "deciding", context: { order: output } }),
+        onDone: ({ context, output }) => ({
+          target: "deciding",
+          context: { orders: { ...context.orders, [context.lookupOrderId]: output } },
+        }),
         onError: ({ event }) => ({
           target: "escalated",
           context: { resolution: `Order lookup failed, escalated: ${String(event.error)}` },
@@ -411,12 +445,16 @@ export async function runRetrofitExample(
     onProgress?.(state);
   };
 
-  const first = await runAgent(supportMachine, {
-    input: { ticket },
-    executors,
-    ...(actors ? { actors } : {}),
-    onTransition: track,
-  });
+  const first = await runToQuiescence(
+    createAgentRuntime(supportMachine, {
+      executors,
+      ...(actors ? { actors } : {}),
+      onTransition: track,
+    }),
+    {
+      input: { ticket },
+    },
+  );
 
   if (first.status === "done") {
     return { ...first.output, settledIdle: false, progress };
@@ -432,13 +470,17 @@ export async function runRetrofitExample(
   const event = approve
     ? ({ type: "APPROVE" } as const)
     : ({ type: "DENY", reason: denyReason } as const);
-  const second = await runAgent(supportMachine, {
-    snapshot: first.persist(),
-    event,
-    executors,
-    ...(actors ? { actors } : {}),
-    onTransition: track,
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(supportMachine, {
+      executors,
+      ...(actors ? { actors } : {}),
+      onTransition: track,
+    }),
+    {
+      snapshot: first.persist(),
+      event,
+    },
+  );
   if (second.status !== "done") {
     throw new Error(`Expected done after ${event.type}, got '${second.status}'.`);
   }

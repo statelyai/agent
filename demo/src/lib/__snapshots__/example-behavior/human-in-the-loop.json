@@ -1,0 +1,58 @@
+{
+  "the new deploy pipeline": [
+    {
+      "sent": "start {\"topic\":\"the new deploy pipeline\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"drafting\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "Mock reply to: Write a short announcement about: the new deploy pipeline",
+      "idle": {
+        "prompt": "Approve the draft to publish it, or type what you want changed.",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": "REJECT.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition APPROVE -> \"published\""
+      ],
+      "response": "- Published: yes"
+    }
+  ],
+  "our move to a four-day work week": [
+    {
+      "sent": "start {\"topic\":\"our move to a four-day work week\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"drafting\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "Mock reply to: Write a short announcement about: our move to a four-day wor",
+      "idle": {
+        "prompt": "Approve the draft to publish it, or type what you want changed.",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": "REJECT.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition APPROVE -> \"published\""
+      ],
+      "response": "- Published: yes"
+    }
+  ]
+}

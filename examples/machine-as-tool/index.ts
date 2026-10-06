@@ -48,12 +48,14 @@ import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   getInteraction,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentInteraction,
   type EventOf,
-  type RunAgentOptions,
-  type RunAgentResult,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
+  type AgentRunResult,
   type SnapshotOf,
 } from "@statelyai/agent";
 
@@ -230,7 +232,8 @@ export const refundMachine = agentSetup.createMachine({
 
 export type RefundSnapshot = SnapshotOf<typeof refundMachine>;
 export type RefundEvent = EventOf<typeof refundMachine>;
-export type RefundRunOptions = RunAgentOptions<typeof refundMachine>;
+export type RefundRunOptions = AgentRuntimeOptions<typeof refundMachine> &
+  AgentRunInit<typeof refundMachine>;
 
 // ─── Recommended recipe: read the current state's interaction ───
 //
@@ -254,7 +257,7 @@ type DoneResult = {
 };
 type ToolResult = PendingResult | DoneResult;
 
-function toToolResult(result: RunAgentResult<typeof refundMachine>): ToolResult {
+function toToolResult(result: AgentRunResult<typeof refundMachine>): ToolResult {
   if (result.status === "error") {
     throw result.error;
   }
@@ -284,7 +287,15 @@ export async function startTool(
   input: { amount: number; orderId: string },
   runOptions: RefundRunOptions,
 ): Promise<ToolResult> {
-  const result = await runAgent(refundMachine, { ...runOptions, input });
+  const result = await runToQuiescence(
+    createAgentRuntime(refundMachine, {
+      ...runOptions,
+    }),
+    {
+      ...runOptions,
+      input,
+    },
+  );
   return toToolResult(result);
 }
 
@@ -295,7 +306,16 @@ export async function resumeTool(
   runOptions: RefundRunOptions,
 ): Promise<ToolResult> {
   const snapshot = JSON.parse(handle);
-  const result = await runAgent(refundMachine, { ...runOptions, snapshot, event });
+  const result = await runToQuiescence(
+    createAgentRuntime(refundMachine, {
+      ...runOptions,
+    }),
+    {
+      ...runOptions,
+      snapshot,
+      event,
+    },
+  );
 
   // The state has no transition for the event, so the machine ignored it and
   // nothing happened. That is not a library error: `runAgent` settled

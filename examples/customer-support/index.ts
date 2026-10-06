@@ -50,11 +50,10 @@
  *   - Sensitive action: instead of an `interrupt_before` flag, the machine
  *     *transitions into an idle `confirming` state* — no invoke, tags
  *     `['awaiting-approval']`, a static `meta.interaction` label, and the pending
- *     action in `context.pendingAction`. `runAgent` settles `{ status: 'idle',
- *     snapshot }` deterministically (the machine declares its own wait signal via
- *     `isIdle`), so pausing is a first-class machine state, not a host-side
- *     `snapshot.next` check. The host persists the snapshot and resumes with an
- *     APPROVE or DENY event in a *second* `runAgent` call. (See
+ *     action in `context.pendingAction`. The run settles `{ status: 'idle',
+ *     snapshot }` once nothing is in flight, so pausing is a first-class machine
+ *     state, not a host-side `snapshot.next` check. The host persists the
+ *     snapshot and resumes with an APPROVE or DENY event in a *second* run. (See
  *     examples/human-in-the-loop.)
  *
  * Dual-mode: `runCustomerSupportExample(options?)` takes an injectable
@@ -74,7 +73,8 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -400,12 +400,18 @@ const agentSetup = setupAgent({
         "You are an airline support agent. Use lookupBooking to read a booking " +
         "by confirmation code, and searchPolicies for fees, baggage, " +
         "cancellation, or change rules.\n" +
+        "Baggage allowances, fees, and cancellation or change rules are the " +
+        'same on every ticket, so "my ticket" needs no booking: call ' +
+        "searchPolicies first and answer from it — never ask which booking.\n" +
         "Return { status: 'answered', answer } when you can answer, in one or " +
-        "two friendly sentences.\n" +
-        "Return { status: 'needsInfo', question } when a detail only the " +
-        "customer has is missing — which booking, which flight. Anything you " +
-        "would end by asking the customer for something belongs in this " +
-        "branch, never in `answer`. Never ask for what the tools can tell you.",
+        "two friendly sentences. An answer is complete on its own: it never " +
+        "asks the customer for anything (no confirmation code, no 'let me " +
+        "know'), because the turn ends there and they cannot reply.\n" +
+        "Return { status: 'needsInfo', question } only when the answer really " +
+        "depends on a detail only the customer has — which booking, which " +
+        "flight. Anything you would end by asking the customer for something " +
+        "belongs in this branch, never in `answer`. Never ask for what the " +
+        "tools can tell you.",
       prompt: ({ input }) =>
         [
           input.query,
@@ -423,7 +429,9 @@ const agentSetup = setupAgent({
           },
         }),
         searchPolicies: tool({
-          description: "Look up an airline policy by topic (cancellation, baggage, changes).",
+          description:
+            "Look up an airline policy by topic (cancellation, baggage, changes). " +
+            "Policies apply to every ticket; no booking is needed.",
           inputSchema: z.object({ topic: z.enum(["cancellation", "baggage", "changes"]) }),
           execute: async ({ topic }) => ({ topic, text: POLICIES[topic] }),
         }),
@@ -679,23 +687,34 @@ export async function runCustomerSupportExample(
   };
 
   // Phase 1: classify, then either answer (done) or settle idle.
-  let first = await runAgent(customerSupportMachine, {
-    input: { query },
-    ...executors,
-    onTransition: track,
-  });
+  let first = await runToQuiescence(
+    createAgentRuntime(customerSupportMachine, {
+      ...executors,
+      onTransition: track,
+    }),
+    {
+      input: { query },
+      ...executors,
+    },
+  );
 
   // Every question the bot asks is another leg. The machine decides when to
   // stop asking; the host only decides what to say.
   const pending = [...(options.replies ?? [])];
   while (first.status === "idle" && first.snapshot.hasTag("awaiting-info")) {
     const reply = pending.shift();
-    first = await runAgent(customerSupportMachine, {
-      snapshot: first.persist(),
-      event: reply === undefined ? { type: "STOP_ASKING" } : { type: "PROVIDE_INFO", text: reply },
-      ...executors,
-      onTransition: track,
-    });
+    first = await runToQuiescence(
+      createAgentRuntime(customerSupportMachine, {
+        ...executors,
+        onTransition: track,
+      }),
+      {
+        snapshot: first.persist(),
+        event:
+          reply === undefined ? { type: "STOP_ASKING" } : { type: "PROVIDE_INFO", text: reply },
+        ...executors,
+      },
+    );
   }
 
   if (first.status === "done") {
@@ -720,12 +739,17 @@ export async function runCustomerSupportExample(
   const event = approve
     ? ({ type: "APPROVE" } as const)
     : ({ type: "DENY", reason: denyReason } as const);
-  const second = await runAgent(customerSupportMachine, {
-    snapshot: first.persist(),
-    event,
-    ...executors,
-    onTransition: track,
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(customerSupportMachine, {
+      ...executors,
+      onTransition: track,
+    }),
+    {
+      snapshot: first.persist(),
+      event,
+      ...executors,
+    },
+  );
   if (second.status !== "done") {
     throw new Error(`Expected done after ${event.type}, got '${second.status}'.`);
   }
@@ -768,11 +792,15 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       (await promptLine("Ask the airline bot (blank = cancel AB1234) > ")) ||
       "Please cancel my booking AB1234.";
 
-    let result = await runAgent(customerSupportMachine, {
-      input: { query },
-      executors,
-      onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
-    });
+    let result = await runToQuiescence(
+      createAgentRuntime(customerSupportMachine, {
+        executors,
+        onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
+      }),
+      {
+        input: { query },
+      },
+    );
 
     // Two kinds of pause, so two kinds of prompt: `confirming` wants a
     // decision about a write, `awaitingInfo` wants a detail only the customer
@@ -802,12 +830,16 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
           : { type: "DENY", reason: await promptLine("Reason: ") };
       }
 
-      result = await runAgent(customerSupportMachine, {
-        snapshot: persisted,
-        event: event as never,
-        executors,
-        onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
-      });
+      result = await runToQuiescence(
+        createAgentRuntime(customerSupportMachine, {
+          executors,
+          onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
+        }),
+        {
+          snapshot: persisted,
+          event: event as never,
+        },
+      );
     }
 
     if (result.status !== "done") {

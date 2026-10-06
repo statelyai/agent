@@ -35,8 +35,8 @@ import {
   eventFromInteraction,
   getInteraction,
   interactionMetaSchema,
-  isAgentIdle,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -74,9 +74,6 @@ const agentSetup = setupAgent({
     // for a state's declared `textEvent`.
     REJECT: z.object({ text: z.string() }),
   },
-  // Most machines need no predicate: event-handling states are structurally
-  // idle. This deliberately demonstrates extending—not replacing—the default.
-  isIdle: (snapshot) => isAgentIdle(snapshot) || snapshot.hasTag("awaiting-review"),
   requests: {
     writeDraft: {
       schemas: {
@@ -205,7 +202,15 @@ export async function runHumanInTheLoopExample(
     : { executors: createAiSdkExecutors({ models }) };
 
   // Phase 1: draft, then settle idle at `reviewing`.
-  const first = await runAgent(humanInTheLoopMachine, { input: { topic }, ...executors });
+  const first = await runToQuiescence(
+    createAgentRuntime(humanInTheLoopMachine, {
+      ...executors,
+    }),
+    {
+      input: { topic },
+      ...executors,
+    },
+  );
   if (first.status !== "idle") {
     throw new Error(`Expected idle review state, got '${first.status}'.`);
   }
@@ -216,21 +221,31 @@ export async function runHumanInTheLoopExample(
 
   // Phase 2: ...later, new process. The human wants a change. The snapshot
   // really goes through JSON — that is the whole persistence claim.
-  const second = await runAgent(humanInTheLoopMachine, {
-    snapshot: roundTrip(first.persist()),
-    event: eventFromInteraction(first.snapshot, { text: "Mention the rollback plan." }),
-    ...executors,
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(humanInTheLoopMachine, {
+      ...executors,
+    }),
+    {
+      snapshot: roundTrip(first.persist()),
+      event: eventFromInteraction(first.snapshot, { text: "Mention the rollback plan." }),
+      ...executors,
+    },
+  );
   if (second.status !== "idle") {
     throw new Error(`Expected a second review pause, got '${second.status}'.`);
   }
 
   // Phase 3: approve the revised draft, again across a JSON round-trip.
-  const third = await runAgent(humanInTheLoopMachine, {
-    snapshot: roundTrip(second.persist()),
-    event: eventFromInteraction(second.snapshot, { type: "APPROVE" }),
-    ...executors,
-  });
+  const third = await runToQuiescence(
+    createAgentRuntime(humanInTheLoopMachine, {
+      ...executors,
+    }),
+    {
+      snapshot: roundTrip(second.persist()),
+      event: eventFromInteraction(second.snapshot, { type: "APPROVE" }),
+      ...executors,
+    },
+  );
   if (third.status !== "done") {
     throw new Error(`Expected done after APPROVE, got '${third.status}'.`);
   }
@@ -272,10 +287,14 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   }
   void (async () => {
     const executors = createAiSdkExecutors({ models });
-    let result = await runAgent(humanInTheLoopMachine, {
-      input: { topic: "the new deploy pipeline" },
-      executors,
-    });
+    let result = await runToQuiescence(
+      createAgentRuntime(humanInTheLoopMachine, {
+        executors,
+      }),
+      {
+        input: { topic: "the new deploy pipeline" },
+      },
+    );
 
     while (result.status === "idle") {
       const { snapshot } = result;
@@ -291,11 +310,15 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
         ? eventFromInteraction(snapshot, { type: "APPROVE" })
         : eventFromInteraction(snapshot, { text: await promptLine("What should change? ") });
 
-      result = await runAgent(humanInTheLoopMachine, {
-        snapshot: result.persist(),
-        event,
-        executors,
-      });
+      result = await runToQuiescence(
+        createAgentRuntime(humanInTheLoopMachine, {
+          executors,
+        }),
+        {
+          snapshot: result.persist(),
+          event,
+        },
+      );
     }
 
     if (result.status !== "done") {

@@ -79,7 +79,8 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -179,6 +180,11 @@ const feynmanContextSchema = z.object({
 
 type FeynmanContext = z.infer<typeof feynmanContextSchema>;
 
+/** "1. Closures" / "Step 2: Closures" → "Closures": the machine numbers checkpoints itself. */
+export function stripNumbering(title: string): string {
+  return title.replace(/^\s*(?:(?:step|checkpoint)\s*)?\d+\s*[.):]\s+/i, "").trim() || title.trim();
+}
+
 function currentCheckpoint(context: FeynmanContext) {
   return context.checkpoints[context.checkpointIndex] ?? { title: "", keyIdea: "" };
 }
@@ -259,8 +265,8 @@ const agentSetup = setupAgent({
       model: "tutor",
       system:
         "You design Feynman-technique study sessions. Split the topic into a short, " +
-        "ordered list of checkpoints, simplest first. Each has a title and the one key " +
-        "idea a learner must be able to explain in plain words.",
+        "ordered list of checkpoints, simplest first. Each has a short, unnumbered title " +
+        "and the one key idea a learner must be able to explain in plain words.",
       prompt: ({ input }) => `Topic: ${input.topic}\nAt most ${input.max} checkpoints.`,
     },
     // context_builder: set the scene for one checkpoint.
@@ -270,9 +276,13 @@ const agentSetup = setupAgent({
         output: z.object({ context: z.string() }),
       },
       model: "tutor",
+      // The intro is shown to the learner as-is, so it talks to them ("you"),
+      // not about them ("the learner should…").
       system:
-        "Introduce one checkpoint of a study session in 3-5 sentences: why it matters " +
-        "and what the learner should understand. Do not quiz; the learner will explain it back.",
+        "Introduce one checkpoint of a study session in 3-5 sentences, speaking directly " +
+        'to the learner as "you": why it matters and what you want them to understand. ' +
+        'Never refer to "the learner" or "the student" in the third person. ' +
+        "Do not quiz; they will explain it back to you next.",
       prompt: ({ input }) =>
         `Topic: ${input.topic}\nCheckpoint: ${input.title}\nKey idea: ${input.keyIdea}`,
     },
@@ -290,7 +300,8 @@ const agentSetup = setupAgent({
       model: "tutor",
       system:
         "Re-teach a concept the Feynman way: plain words, one everyday analogy, no jargon. " +
-        "Address the specific gap in the learner's attempt. Keep it under 120 words.",
+        'Speak directly to the learner as "you", never "the learner" in the third person. ' +
+        "Address the specific gap in their attempt. Keep it under 120 words.",
       prompt: ({ input }) =>
         [
           `Checkpoint: ${input.title}`,
@@ -326,7 +337,11 @@ export const feynmanTutorMachine = agentSetup.createMachine({
         input: ({ context }) => ({ topic: context.topic, max: MAX_CHECKPOINTS }),
         onDone: ({ output }) => ({
           target: "checkingPlan",
-          context: { checkpoints: output.result.checkpoints.slice(0, MAX_CHECKPOINTS) },
+          context: {
+            checkpoints: output.result.checkpoints
+              .slice(0, MAX_CHECKPOINTS)
+              .map((checkpoint) => ({ ...checkpoint, title: stripNumbering(checkpoint.title) })),
+          },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -504,18 +519,31 @@ export async function runFeynmanTutorExample(
     },
   };
 
-  let result = await runAgent(feynmanTutorMachine, { input: { topic }, ...shared });
+  let result = await runToQuiescence(
+    createAgentRuntime(feynmanTutorMachine, {
+      ...shared,
+    }),
+    {
+      input: { topic },
+      ...shared,
+    },
+  );
   while (result.status === "idle") {
     const label =
       getInteraction(result.snapshot, { preserveWhitespace: true })?.label ??
       result.snapshot.context.notice;
     onPrompt?.(label);
     const event = queued.shift() ?? toHumanEvent(await promptLine(`${label}\n(or "skip")\n> `));
-    result = await runAgent(feynmanTutorMachine, {
-      snapshot: result.persist(),
-      event,
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(feynmanTutorMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event,
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {

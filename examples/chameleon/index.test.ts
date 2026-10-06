@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { getInteraction, runAgent } from "@statelyai/agent";
+import { getInteraction, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import {
   type AccuseEvent,
@@ -59,7 +59,15 @@ async function play(options: PlayOptions) {
   const { executor } = createPlayers(options.script, options.captured);
   const shared = { executors: { generateText: executor } };
 
-  const idle = await runAgent(chameleonMachine, { input: options.input ?? {}, ...shared });
+  const idle = await runToQuiescence(
+    createAgentRuntime(chameleonMachine, {
+      ...shared,
+    }),
+    {
+      input: options.input ?? {},
+      ...shared,
+    },
+  );
   expect(idle.status).toBe("idle");
   if (idle.status !== "idle") throw new Error(`expected idle, got ${idle.status}`);
 
@@ -68,11 +76,16 @@ async function play(options: PlayOptions) {
   expect(idle.snapshot.can(options.accuse)).toBe(true);
   const prompt = idlePrompt(idle.snapshot);
 
-  const result = await runAgent(chameleonMachine, {
-    snapshot: idle.persist(),
-    event: options.accuse,
-    ...shared,
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(chameleonMachine, {
+      ...shared,
+    }),
+    {
+      snapshot: idle.persist(),
+      event: options.accuse,
+      ...shared,
+    },
+  );
   if (result.status !== "done") throw new Error(`expected done, got ${result.status}`);
   return { result, prompt, idle };
 }
@@ -106,6 +119,10 @@ describe("chameleon", () => {
     expect(wordRequests[2]!.serialized.toLowerCase()).not.toContain("octopus");
     expect(wordRequests[2]!.prompt).toContain("You do not know the secret word.");
     expect(wordRequests[2]!.system).toContain("You are the CHAMELEON");
+    // It guesses from the category and the words, so it is steered off naming
+    // a candidate — above all the most obvious one, which is often the secret.
+    expect(wordRequests[2]!.system).toContain("Never say a member of the category itself");
+    expect(wordRequests[2]!.system).toContain("avoid the most obvious member of the category");
 
     // The public record grows by turn order: seat N sees exactly N words.
     for (const [seat, request] of wordRequests.entries()) {
@@ -144,13 +161,14 @@ describe("chameleon", () => {
     expect(result.output.summary).toContain(
       'Detectives win. Cleo was the chameleon and could not name "octopus".',
     );
-    expect(result.output.log).toEqual([
+    expect(result.output.summary.split("\n").slice(2)).toEqual([
       "Category: Ocean creatures. One of Ada, Bruno, Cleo, Dev does not know the secret word.",
       "Words — Ada: ink, Bruno: tentacle, Cleo: reef, Dev: suction.",
       "You accused Cleo.",
       "Caught — Cleo was the chameleon, and gets one guess at the secret word.",
       'Cleo guessed "jellyfish" — wrong. The secret word was "octopus".',
     ]);
+    expect(result.output).not.toHaveProperty("log");
   });
 
   test("a caught chameleon that names the secret steals the win", async () => {
@@ -160,7 +178,9 @@ describe("chameleon", () => {
     expect(result.output.summary).toContain(
       'Chameleon steals it. Cleo was caught, then named "octopus".',
     );
-    expect(result.output.log.at(-1)).toBe('Cleo guessed "octopus" — right, and steals the win.');
+    expect(result.output.summary.split("\n").at(-1)).toBe(
+      'Cleo guessed "octopus" — right, and steals the win.',
+    );
   });
 
   test("a wrong accusation lets the chameleon escape without guessing", async () => {
@@ -186,10 +206,15 @@ describe("chameleon", () => {
     });
     const shared = { executors: { generateText: executor } };
 
-    const idle = await runAgent(chameleonMachine, {
-      input: { category: "Big cats", secretWord: "Lion", chameleonIndex: 0 },
-      ...shared,
-    });
+    const idle = await runToQuiescence(
+      createAgentRuntime(chameleonMachine, {
+        ...shared,
+      }),
+      {
+        input: { category: "Big cats", secretWord: "Lion", chameleonIndex: 0 },
+        ...shared,
+      },
+    );
     expect(idle.status).toBe("idle");
     if (idle.status !== "idle") throw new Error("expected idle");
     expect(idlePrompt(idle.snapshot)).toBe(
@@ -198,11 +223,16 @@ describe("chameleon", () => {
     );
 
     // Persist mid-vote as JSON, then resume a fresh run from it.
-    const resumed = await runAgent(chameleonMachine, {
-      snapshot: JSON.parse(JSON.stringify(idle.persist())),
-      event: { type: "ACCUSE", seat: 0 },
-      ...shared,
-    });
+    const resumed = await runToQuiescence(
+      createAgentRuntime(chameleonMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: JSON.parse(JSON.stringify(idle.persist())),
+        event: { type: "ACCUSE", seat: 0 },
+        ...shared,
+      },
+    );
 
     expect(resumed.status).toBe("done");
     if (resumed.status !== "done") throw new Error("expected done");

@@ -1,0 +1,53 @@
+{
+  "penguins reviewing code": [
+    {
+      "sent": "start {\"topic\":\"penguins reviewing code\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"telling\"",
+        "transition xstate.done.actor -> \"rating\"",
+        "transition xstate.done.actor -> \"telling\"",
+        "transition xstate.done.actor -> \"rating\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition TELL_ANOTHER -> \"telling\"",
+        "transition xstate.done.actor -> \"rating\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "First attempt scored 10/10 (A sharp joke whose punchline recasts the setup in an unexpected, specific way; it would get a real laugh.). Every run takes one improvement pass before deciding whether to stop.\n\n- Status: told\n- First joke: Mock reply to: Tell a joke about penguins reviewing code.\n- Last rating: 10\n\n**Joke**\n\nMock reply to: Previous joke about penguins reviewing code:  \nMock reply to:\n\n**Jokes**\n\n- Mock reply to: Tell a joke about penguins reviewing code.\n- Mock reply to: Previous joke about penguins reviewing code:  \n  Mock reply to:\n- Mock reply to: Previous joke about penguins reviewing code:  \n  Mock reply to:"
+    }
+  ],
+  "a state machine that won't transition": [
+    {
+      "sent": "start {\"topic\":\"a state machine that won't transition\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"telling\"",
+        "transition xstate.done.actor -> \"rating\"",
+        "transition xstate.done.actor -> \"telling\"",
+        "transition xstate.done.actor -> \"rating\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition TELL_ANOTHER -> \"telling\"",
+        "transition xstate.done.actor -> \"rating\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "First attempt scored 10/10 (A sharp joke whose punchline recasts the setup in an unexpected, specific way; it would get a real laugh.). Every run takes one improvement pass before deciding whether to stop.\n\n- Status: told\n- First joke: Mock reply to: Tell a joke about a state machine that won't transition.\n- Last rating: 10\n\n**Joke**\n\nMock reply to: Previous joke about a state machine that won't transition:  \nM\n\n**Jokes**\n\n- Mock reply to: Tell a joke about a state machine that won't transition.\n- Mock reply to: Previous joke about a state machine that won't transition:  \n  M\n- Mock reply to: Previous joke about a state machine that won't transition:  \n  M"
+    }
+  ],
+  "a database that trusts no one": [
+    {
+      "sent": "start {\"topic\":\"a database that trusts no one\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"telling\"",
+        "transition xstate.done.actor -> \"rating\"",
+        "transition xstate.done.actor -> \"telling\"",
+        "transition xstate.done.actor -> \"rating\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition TELL_ANOTHER -> \"telling\"",
+        "transition xstate.done.actor -> \"rating\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "First attempt scored 10/10 (A sharp joke whose punchline recasts the setup in an unexpected, specific way; it would get a real laugh.). Every run takes one improvement pass before deciding whether to stop.\n\n- Status: told\n- First joke: Mock reply to: Tell a joke about a database that trusts no one.\n- Last rating: 10\n\n**Joke**\n\nMock reply to: Previous joke about a database that trusts no one:  \nMock repl\n\n**Jokes**\n\n- Mock reply to: Tell a joke about a database that trusts no one.\n- Mock reply to: Previous joke about a database that trusts no one:  \n  Mock repl\n- Mock reply to: Previous joke about a database that trusts no one:  \n  Mock repl"
+    }
+  ]
+}

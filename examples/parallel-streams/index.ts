@@ -1,14 +1,18 @@
 /**
  * Parallel streams — two parallel states each run a `mode: 'stream'` request
- * concurrently, and `onChunk`'s `info.request.id` disambiguates the two
+ * concurrently, and `onChunk`'s `request.id` disambiguates the two
  * interleaved chunk streams.
  *
  * Shows:
  *   - a `type: 'parallel'` machine with two independent regions, each invoking
- *     a streaming text request (`thinker` and `poet`).
- *   - `runAgent`'s `onChunk(chunk, { request })` callback: because both streams
- *     land on the same callback, `request.id` (the invoke id) tells you which
- *     region a chunk belongs to.
+ *     a streaming text request: the `thinker` lane writes an analysis, the
+ *     `poet` lane a poem. The lane names are the request (and invoke) ids, and
+ *     every place that names a lane — chunks, completion order, the summary,
+ *     failures — uses them.
+ *   - the runtime's `onChunk(chunk, { request })` option
+ *     (`createAgentRuntime(machine, { onChunk })`): because both streams land
+ *     on the same callback, `request.id` (the invoke id) tells you which lane
+ *     a chunk belongs to.
  *   - the completion ORDER of the two regions, recorded in context as each one
  *     finishes, and rendered into the output rather than kept as a pre-rendered
  *     string. Elapsed time is measured by the HOST, not stored in context:
@@ -22,7 +26,13 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
+import {
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
+} from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const models = {
@@ -30,9 +40,17 @@ const models = {
   poet: openai("gpt-5.4-mini"),
 };
 
-/** Completion order, the part a final view usually drops. Rendered in `output`. */
+/**
+ * Completion order, the part a final view usually drops. Rendered in `output`
+ * as markdown: a lead line, a blank line, then one numbered item per line, so
+ * the list renders as a list even when a host prefixes it with a label.
+ */
 function renderLanes(lanes: string[]): string {
-  return lanes.map((lane, index) => `${index + 1}. ${lane}`).join("\n");
+  return [
+    "Finished in this order:",
+    "",
+    ...lanes.map((lane, index) => `${index + 1}. ${lane}`),
+  ].join("\n");
 }
 
 const agentSetup = setupAgent({
@@ -41,7 +59,7 @@ const agentSetup = setupAgent({
     topic: z.string(),
     analysis: z.string().nullable(),
     poem: z.string().nullable(),
-    /** Lane names in the order their streams finished. Replay-stable. */
+    /** Lane names (`thinker`, `poet`) in the order their streams finished. Replay-stable. */
     lanes: z.array(z.string()),
     /** One entry per lane whose stream errored. */
     failures: z.array(z.string()),
@@ -95,8 +113,8 @@ export const parallelStreamsMachine = agentSetup.createMachine({
     // Repeating it here would render each stream twice.
     summary:
       `Two streams completed for "${context.topic}": ` +
-      `analysis (${(context.analysis ?? "").length} chars) and ` +
-      `poem (${(context.poem ?? "").length} chars).`,
+      `thinker wrote an analysis (${(context.analysis ?? "").length} chars) and ` +
+      `poet wrote a poem (${(context.poem ?? "").length} chars).`,
     analysis: context.analysis ?? "",
     poem: context.poem ?? "",
     // Completion order survives the run instead of scrolling by with the
@@ -116,13 +134,13 @@ export const parallelStreamsMachine = agentSetup.createMachine({
             input: ({ context }) => ({ topic: context.topic }),
             onDone: ({ context, output }) => ({
               target: "done",
-              context: { analysis: output.result, lanes: [...context.lanes, "analysis"] },
+              context: { analysis: output.result, lanes: [...context.lanes, "thinker"] },
             }),
             // A region that fails still has to reach a final state, or the
             // parallel machine never completes.
             onError: ({ context, event }) => ({
               target: "failed",
-              context: { failures: [...context.failures, `analysis: ${String(event.error)}`] },
+              context: { failures: [...context.failures, `thinker: ${String(event.error)}`] },
             }),
           },
         },
@@ -140,11 +158,11 @@ export const parallelStreamsMachine = agentSetup.createMachine({
             input: ({ context }) => ({ topic: context.topic }),
             onDone: ({ context, output }) => ({
               target: "done",
-              context: { poem: output.result, lanes: [...context.lanes, "poem"] },
+              context: { poem: output.result, lanes: [...context.lanes, "poet"] },
             }),
             onError: ({ context, event }) => ({
               target: "failed",
-              context: { failures: [...context.failures, `poem: ${String(event.error)}`] },
+              context: { failures: [...context.failures, `poet: ${String(event.error)}`] },
             }),
           },
         },
@@ -156,8 +174,10 @@ export const parallelStreamsMachine = agentSetup.createMachine({
 });
 
 export async function runParallelStreamsExample(
-  options?: RunAgentOptions<typeof parallelStreamsMachine>,
-  observe?: RunAgentOptions<typeof parallelStreamsMachine>["onTransition"],
+  options?: AgentRuntimeOptions<typeof parallelStreamsMachine> &
+    AgentRunInit<typeof parallelStreamsMachine>,
+  observe?: (AgentRuntimeOptions<typeof parallelStreamsMachine> &
+    AgentRunInit<typeof parallelStreamsMachine>)["onTransition"],
 ) {
   // Buffer chunks per stream, keyed by the invoke id — the disambiguator.
   const buffers: Record<string, string> = { thinker: "", poet: "" };
@@ -166,16 +186,21 @@ export async function runParallelStreamsExample(
   const startedAt = Date.now();
   const lastChunkAt: Record<string, number> = {};
 
-  const result = await runAgent(parallelStreamsMachine, {
-    input: { topic: "state machines" },
-    executors: createAiSdkExecutors({ models }),
-    ...options,
-    onChunk: (chunk, { request }) => {
-      buffers[request.id] = (buffers[request.id] ?? "") + chunk;
-      lastChunkAt[request.id] = Date.now() - startedAt;
+  const result = await runToQuiescence(
+    createAgentRuntime(parallelStreamsMachine, {
+      executors: createAiSdkExecutors({ models }),
+      ...options,
+      onChunk: (chunk, { request }) => {
+        buffers[request.id] = (buffers[request.id] ?? "") + chunk;
+        lastChunkAt[request.id] = Date.now() - startedAt;
+      },
+      onTransition: observe,
+    }),
+    {
+      input: { topic: "state machines" },
+      ...options,
     },
-    onTransition: observe,
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Parallel streams example did not complete: ${result.status}`);

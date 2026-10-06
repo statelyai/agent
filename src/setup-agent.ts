@@ -1,7 +1,6 @@
 import {
   setup,
   type AnyActorLogic,
-  type AnyMachineSnapshot,
   type AnyStateMachine,
   type AnySetupConfig,
   type AsyncActorLogic,
@@ -34,11 +33,7 @@ import {
 import { createDecideActor } from "./decision.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import type { AgentInteractionMeta } from "./interaction.js";
-import {
-  getAgentExecutionOptions,
-  machineIdlePredicates,
-  setAgentExecutionOptions,
-} from "./internal/registry.js";
+import { getAgentExecutionOptions, setAgentExecutionOptions } from "./internal/registry.js";
 import type { AgentSchemas } from "./events.js";
 import {
   setupAgentFromConfig,
@@ -119,8 +114,7 @@ export type AgentDefaultMeta<TEventSchemas extends AgentEventSchemaInputMap> = A
  * A machine's full schema set — context, event payloads, machine input/
  * output, and state/transition meta — as returned by {@link createAgentSchemas}
  * and retained on `setupAgent(...)`'s `result.schemas` for runtime
- * validation (e.g. by the step path to validate `initialAgentStep` input, or
- * by `getAcceptedEvents` to attach event payload schemas). Unlike
+ * validation (e.g. by `getAcceptedEvents` to attach event payload schemas). Unlike
  * `AgentSchemaConfig` (the input to `createAgentSchemas`), every field here
  * is required — `events`/`input`/`output`/`meta` default to empty/unknown
  * schemas when not supplied.
@@ -140,7 +134,7 @@ export interface AgentSchemaPack<
   input: TInputSchema;
   output: TOutputSchema;
   meta: TMetaSchema;
-  /** Schemas for events the machine emits (`enq.emit(...)`), keyed by event type — they type `enq.emit` in the machine and the `on` handlers of {@link runAgent}. Optional: omitted means emitted events stay untyped. */
+  /** Schemas for events the machine emits (`enq.emit(...)`), keyed by event type — they type `enq.emit` in the machine and the `on` handlers of {@link createAgentRuntime}. Optional: omitted means emitted events stay untyped. */
   emitted?: TEmittedSchemas;
 }
 
@@ -250,7 +244,7 @@ export type WithAgentUsageEvent<T extends AgentEventSchemaInputMap> = WithAgentE
  * Adds the reserved `'@agent.usage'` schema to an authored event map. A
  * user-declared entry under that key is rejected: the `@agent.*` namespace
  * belongs to the library (same rule as the reserved `agent.*` actor keys), and
- * a custom payload schema would silently disagree with what `runAgent`
+ * a custom payload schema would silently disagree with what the runtime
  * delivers.
  */
 function withAgentUsageEventSchema<T extends AgentEventSchemaInputMap>(
@@ -448,7 +442,7 @@ type AgentSetupEmittedSchema<TEmittedSchemas extends Record<string, StandardSche
  * XState resolves `schemas.input` to a single type used both by
  * `createActor`'s `input` option and by the `context: ({ input })` factory —
  * and it never validates, so a schema default reads as a required field at the
- * call site while being absent at runtime. `runAgent` validates the input
+ * call site while being absent at runtime. The runtime validates the input
  * (filling defaults) and reads this brand back through `AgentInputFrom` to
  * accept the schema's looser *input* side, while the factory keeps seeing the
  * validated *output* side.
@@ -547,17 +541,6 @@ type SetupAgentBaseConfig<
   actions?: NonNullable<AnySetupConfig["actions"]>;
   guards?: AgentGuardSources<TContextSchema, TEventSchemas>;
   delays?: AgentDelaySources<TContextSchema, TEventSchemas>;
-  /**
-   * Detects a snapshot that is an INTENTIONAL wait for an external event (a
-   * human approval, an inbound webhook, …) — the machine's own declaration of
-   * what "idle" means for it, so `runAgent` settles those snapshots idle
-   * deterministically instead of using its timing heuristic. Travels with the
-   * machine through `machine.provide(...)`. Without one, `runAgent` recognizes
-   * resting event-handling states and `meta.interaction` by structure. Use a
-   * predicate only for a more specialized machine-owned wait rule. Import and
-   * call `isAgentIdle(snapshot)` inside it when expanding the default rule.
-   */
-  isIdle?: (snapshot: AnyMachineSnapshot) => boolean;
 };
 
 // The raw xstate `setup(...)` result type for an agent config, before setupAgent's own extensions (schemas/models/requests, plus the wrapped createMachine) are added.
@@ -592,7 +575,7 @@ type SetupAgentXStateResult<
  * (`createMachine`, `assign`, …) extended with `schemas` (the resolved
  * {@link AgentSchemaPack}), `models`, and `requests` (the built request
  * actors). Machines created here are registered so
- * `runAgent` and the free step helpers can resolve their schemas/actors
+ * `createAgentRuntime` can resolve their schemas/actors
  * without re-passing them each call.
  */
 type SetupAgentResult<
@@ -623,7 +606,7 @@ type SetupAgentResult<
 > & {
   /**
    * Creates the agent machine — XState's own `createMachine`, plus: the
-   * machine is registered so step helpers and {@link runAgent} can resolve
+   * machine is registered so {@link createAgentRuntime} can resolve
    * its schemas/actors without re-passing them, and a single final state's
    * `output` is copied to the machine root when the root declares none.
    */
@@ -657,7 +640,7 @@ type SetupAgentResult<
 /**
  * Schema-first `setup(...)` for agent machines — the standard entry point
  * for authoring a machine (the blueprint) that this library then runs (via
- * {@link runAgent} or the step helpers) against host-supplied model/decision
+ * {@link createAgentRuntime}) against host-supplied model/decision
  * executors. Context, events, machine input, machine output, and
  * state/transition meta are all standard schemas — no `{} as Type` casts —
  * and are retained on `result.schemas` for runtime validation. Also
@@ -818,14 +801,6 @@ export function setupAgent<
       );
       const machine = createBaseMachine(withRootOutputFromSingleFinal(machineConfig) as never);
       setAgentExecutionOptions(machine, machineOptions);
-      // Carry the wait-state predicate on the machine's root `config` (shared by
-      // reference across `.provide`), so it survives provide/executor rebinding.
-      if (config.isIdle) {
-        const rootConfig = (machine as { config?: object }).config;
-        if (rootConfig) {
-          machineIdlePredicates.set(rootConfig, config.isIdle);
-        }
-      }
       return machine;
     },
     schemas,
@@ -890,7 +865,10 @@ export namespace setupAgent {
    * const { machine, schemas } = setupAgent.fromConfig(workflowConfig, {
    *   compileSchema,
    * });
-   * const result = await runAgent(machine, { input: { ticket }, executors: { generateText, decide } });
+   * const result = await runToQuiescence(
+   *   createAgentRuntime(machine, { executors: { generateText, decide } }),
+   *   { input: { ticket } },
+   * );
    * const event = parseAgentEvent(result.snapshot, raw, { events: schemas.events });
    * ```
    */

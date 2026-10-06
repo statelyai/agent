@@ -1,0 +1,63 @@
+{
+  "Fix sum (empty array throws)": [
+    {
+      "sent": "start {\"spec\":\"Fix this function so it returns the sum of an array of numbers.\",\"functionName\":\"sumArray\",\"initialCode\":\"function sumArray(numbers) {\\n  return numbers.reduce((total, n) => total + n);\\n}\",\"checks\":[{\"args\":[[1,2,3]],\"expected\":6},{\"args\":[[]],\"expected\":0}]}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"executing\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "Gave up after 3 attempts. Attempt 3: 1 of 2 checks failed — Code failed to load: Unexpected identifier 'code'\n\n```js\nmock code\n```\n\n- Attempts: 3\n- Passed: no\n\n**Failures**\n\n- Code failed to load: Unexpected identifier 'code'"
+    }
+  ],
+  "Fix Fibonacci (off by one)": [
+    {
+      "sent": "start {\"spec\":\"Fix this function so it returns the nth Fibonacci number (0-indexed).\",\"functionName\":\"fib\",\"initialCode\":\"function fib(n) {\\n  let a = 1;\\n  let b = 1;\\n  for (let i = 0; i < n; i++) [a, b] = [b, a + b];\\n  return a;\\n}\",\"checks\":[{\"args\":[0],\"expected\":0},{\"args\":[7],\"expected\":13}]}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"executing\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "Gave up after 3 attempts. Attempt 3: 1 of 2 checks failed — Code failed to load: Unexpected identifier 'code'\n\n```js\nmock code\n```\n\n- Attempts: 3\n- Passed: no\n\n**Failures**\n\n- Code failed to load: Unexpected identifier 'code'"
+    }
+  ],
+  "Fix palindrome (case sensitive)": [
+    {
+      "sent": "start {\"spec\":\"Fix this function so it returns true if the string is a palindrome, ignoring case.\",\"functionName\":\"isPalindrome\",\"initialCode\":\"function isPalindrome(s) {\\n  return s === s.split('').reverse().join('');\\n}\",\"checks\":[{\"args\":[\"Racecar\"],\"expected\":true},{\"args\":[\"hello\"],\"expected\":false}]}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"executing\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "Gave up after 3 attempts. Attempt 3: 1 of 2 checks failed — Code failed to load: Unexpected identifier 'code'\n\n```js\nmock code\n```\n\n- Attempts: 3\n- Passed: no\n\n**Failures**\n\n- Code failed to load: Unexpected identifier 'code'"
+    }
+  ],
+  "From scratch: Roman numerals": [
+    {
+      "sent": "start {\"spec\":\"Convert an integer from 1 to 3999 into a Roman numeral string.\",\"functionName\":\"toRoman\",\"checks\":[{\"args\":[4],\"expected\":\"IV\"},{\"args\":[1987],\"expected\":\"MCMLXXXVII\"}]}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"generating\"",
+        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "Gave up after 3 attempts. Attempt 3: 1 of 2 checks failed — Code failed to load: Unexpected identifier 'code'\n\n```js\nmock code\n```\n\n- Attempts: 3\n- Passed: no\n\n**Failures**\n\n- Code failed to load: Unexpected identifier 'code'"
+    }
+  ]
+}

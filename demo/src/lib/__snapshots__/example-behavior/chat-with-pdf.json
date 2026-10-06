@@ -1,0 +1,385 @@
+{
+  "Statecharts, 6 questions": [
+    {
+      "sent": "start {\"documentId\":\"statecharts\",\"maxQuestions\":6,\"refreshEvery\":3}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"retrieving\"",
+        "transition xstate.done.actor -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
+      ],
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 1)\n\n**Pages covered**\n\n1\n\n**Batch**\n\n1, 4, 7",
+      "idle": {
+        "prompt": "mock question A) mock choices0 (Hint: see page 1)",
+        "events": [
+          "ANSWER",
+          "SKIP",
+          "STOP"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"grading\"",
+        "transition xstate.done.actor -> \"explaining\"",
+        "transition xstate.done.actor -> \"asking\"",
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
+      ],
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 4)\n\n**Pages covered**\n\n1, 4\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)",
+      "idle": {
+        "prompt": "Correct — the answer is mock expected. mock explanation Source (page 1): \"A state machine is in exactly one of a finite set of states at a time.\" mock question A) mock choices0 (Hint: see page 4)",
+        "events": [
+          "ANSWER",
+          "SKIP",
+          "STOP"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"grading\"",
+        "transition xstate.done.actor -> \"explaining\"",
+        "transition xstate.done.actor -> \"asking\"",
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
+      ],
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 7)\n\n**Pages covered**\n\n1, 4, 7\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 4)",
+      "idle": {
+        "prompt": "Correct — the answer is mock expected. mock explanation Source (page 4): \"Invoking an actor starts it when a state is entered and stops it when the state is exited.\" mock question A) mock choices0 (Hint: see page 7)",
+        "events": [
+          "ANSWER",
+          "SKIP",
+          "STOP"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"grading\"",
+        "transition xstate.done.actor -> \"explaining\"",
+        "transition xstate.done.actor -> \"retrieving\"",
+        "emitted GRADED -> \"retrieving\"",
+        "transition xstate.done.actor -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
+      ],
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 2)\n\n**Pages covered**\n\n1, 4, 7, 2\n\n**Batch**\n\n2, 5, 8",
+      "idle": {
+        "prompt": "Correct — the answer is mock expected. mock explanation Source (page 7): \"A final state signals that a machine or region is done.\" mock question A) mock choices0 (Hint: see page 2)",
+        "events": [
+          "ANSWER",
+          "SKIP",
+          "STOP"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"grading\"",
+        "transition xstate.done.actor -> \"explaining\"",
+        "transition xstate.done.actor -> \"asking\"",
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
+      ],
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 5)\n\n**Pages covered**\n\n1, 4, 7, 2, 5\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 4)\n- Page number: 7 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 7)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 2)",
+      "idle": {
+        "prompt": "Correct — the answer is mock expected. mock explanation Source (page 2): \"Context is the extended state of a machine: arbitrary data stored alongside the finite state and updated during transitions.\" mock question A) mock choices0 (Hint: see page 5)",
+        "events": [
+          "ANSWER",
+          "SKIP",
+          "STOP"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"grading\"",
+        "transition xstate.done.actor -> \"explaining\"",
+        "transition xstate.done.actor -> \"asking\"",
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
+      ],
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 8)\n\n**Pages covered**\n\n1, 4, 7, 2, 5, 8\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 4)\n- Page number: 7 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 7)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 2)\n- Page number: 5 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 5)",
+      "idle": {
+        "prompt": "Correct — the answer is mock expected. mock explanation Source (page 5): \"Hierarchical states nest: a parent state's transitions apply to every child, so shared handling is written once.\" mock question A) mock choices0 (Hint: see page 8)",
+        "events": [
+          "ANSWER",
+          "SKIP",
+          "STOP"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"grading\"",
+        "transition xstate.done.actor -> \"explaining\"",
+        "transition xstate.done.actor -> \"summary\"",
+        "emitted GRADED -> \"summary\""
+      ],
+      "response": "- Document id: statecharts\n- Correct: 6\n- Answered: 6\n- Exhausted: no\n\n**Pages covered**\n\n1, 4, 7, 2, 5, 8\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 4)\n- Page number: 7 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 7)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 2)\n- Page number: 5 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 5)\n- Page number: 8 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 8)"
+    }
+  ],
+  "Retrieval, pages 1-4": [
+    {
+      "sent": "start {\"documentId\":\"retrieval\",\"pageStart\":1,\"pageEnd\":4,\"maxQuestions\":4,\"refreshEvery\":2}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"retrieving\"",
+        "transition xstate.done.actor -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
+      ],
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 1)\n\n**Pages covered**\n\n1\n\n**Batch**\n\n1, 3",
+      "idle": {
+        "prompt": "mock question A) mock choices0 (Hint: see page 1)",
+        "events": [
+          "ANSWER",
+          "SKIP",
+          "STOP"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"grading\"",
+        "transition xstate.done.actor -> \"explaining\"",
+        "transition xstate.done.actor -> \"asking\"",
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
+      ],
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 3)\n\n**Pages covered**\n\n1, 3\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)",
+      "idle": {
+        "prompt": "Correct — the answer is mock expected. mock explanation Source (page 1): \"Chunking splits a document into passages small enough to embed but large enough to stand alone when read.\" mock question A) mock choices0 (Hint: see page 3)",
+        "events": [
+          "ANSWER",
+          "SKIP",
+          "STOP"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"grading\"",
+        "transition xstate.done.actor -> \"explaining\"",
+        "transition xstate.done.actor -> \"retrieving\"",
+        "emitted GRADED -> \"retrieving\"",
+        "transition xstate.done.actor -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
+      ],
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 2)\n\n**Pages covered**\n\n1, 3, 2\n\n**Batch**\n\n2, 4",
+      "idle": {
+        "prompt": "Correct — the answer is mock expected. mock explanation Source (page 3): \"Top-k retrieval returns the k nearest chunks to a query vector.\" mock question A) mock choices0 (Hint: see page 2)",
+        "events": [
+          "ANSWER",
+          "SKIP",
+          "STOP"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"grading\"",
+        "transition xstate.done.actor -> \"explaining\"",
+        "transition xstate.done.actor -> \"asking\"",
+        "emitted GRADED -> \"asking\"",
+        "transition xstate.done.actor -> \"awaitingAnswer\"",
+        "emitted QUESTION -> \"awaitingAnswer\""
+      ],
+      "response": "**Question**\n\nmock question  \nA) mock choices0  \n(Hint: see page 4)\n\n**Pages covered**\n\n1, 3, 2, 4\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 3 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 3)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 2)",
+      "idle": {
+        "prompt": "Correct — the answer is mock expected. mock explanation Source (page 2): \"An embedding maps text to a vector so that semantically similar passages land near each other.\" mock question A) mock choices0 (Hint: see page 4)",
+        "events": [
+          "ANSWER",
+          "SKIP",
+          "STOP"
+        ],
+        "textEvent": "ANSWER.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"ANSWER\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingAnswer\"",
+        "transition ANSWER -> \"grading\"",
+        "transition xstate.done.actor -> \"explaining\"",
+        "transition xstate.done.actor -> \"summary\"",
+        "emitted GRADED -> \"summary\""
+      ],
+      "response": "- Document id: retrieval\n- Correct: 4\n- Answered: 4\n- Exhausted: no\n\n**Pages covered**\n\n1, 3, 2, 4\n\n**Results**\n\n- Page number: 1 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 1)\n- Page number: 3 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 3)\n- Page number: 2 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 2)\n- Page number: 4 · Answer: Yes, that works. Please continue. · Correct: yes · Explanation: mock explanation  \n  Prompt:  \n  mock question  \n  A) mock choices0  \n  (Hint: see page 4)"
+    }
+  ],
+  "Pick a document first": [
+    {
+      "sent": "start {\"maxQuestions\":4}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"choosingDocument\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Which document do you want to be quizzed on? Statecharts in Practice (statecharts), Retrieval Systems (retrieval)",
+        "events": [
+          "SELECT_DOCUMENT"
+        ],
+        "textEvent": "SELECT_DOCUMENT.documentId"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SELECT_DOCUMENT\",\"documentId\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"choosingDocument\"",
+        "transition SELECT_DOCUMENT -> \"choosingDocument\""
+      ],
+      "response": "\"SELECT_DOCUMENT\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "Which document do you want to be quizzed on? Statecharts in Practice (statecharts), Retrieval Systems (retrieval)",
+        "events": [
+          "SELECT_DOCUMENT"
+        ],
+        "textEvent": "SELECT_DOCUMENT.documentId"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SELECT_DOCUMENT\",\"documentId\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"choosingDocument\"",
+        "transition SELECT_DOCUMENT -> \"choosingDocument\""
+      ],
+      "response": "\"SELECT_DOCUMENT\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "Which document do you want to be quizzed on? Statecharts in Practice (statecharts), Retrieval Systems (retrieval)",
+        "events": [
+          "SELECT_DOCUMENT"
+        ],
+        "textEvent": "SELECT_DOCUMENT.documentId"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SELECT_DOCUMENT\",\"documentId\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"choosingDocument\"",
+        "transition SELECT_DOCUMENT -> \"choosingDocument\""
+      ],
+      "response": "\"SELECT_DOCUMENT\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "Which document do you want to be quizzed on? Statecharts in Practice (statecharts), Retrieval Systems (retrieval)",
+        "events": [
+          "SELECT_DOCUMENT"
+        ],
+        "textEvent": "SELECT_DOCUMENT.documentId"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SELECT_DOCUMENT\",\"documentId\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"choosingDocument\"",
+        "transition SELECT_DOCUMENT -> \"choosingDocument\""
+      ],
+      "response": "\"SELECT_DOCUMENT\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "Which document do you want to be quizzed on? Statecharts in Practice (statecharts), Retrieval Systems (retrieval)",
+        "events": [
+          "SELECT_DOCUMENT"
+        ],
+        "textEvent": "SELECT_DOCUMENT.documentId"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SELECT_DOCUMENT\",\"documentId\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"choosingDocument\"",
+        "transition SELECT_DOCUMENT -> \"choosingDocument\""
+      ],
+      "response": "\"SELECT_DOCUMENT\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "Which document do you want to be quizzed on? Statecharts in Practice (statecharts), Retrieval Systems (retrieval)",
+        "events": [
+          "SELECT_DOCUMENT"
+        ],
+        "textEvent": "SELECT_DOCUMENT.documentId"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SELECT_DOCUMENT\",\"documentId\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"choosingDocument\"",
+        "transition SELECT_DOCUMENT -> \"choosingDocument\""
+      ],
+      "response": "\"SELECT_DOCUMENT\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "Which document do you want to be quizzed on? Statecharts in Practice (statecharts), Retrieval Systems (retrieval)",
+        "events": [
+          "SELECT_DOCUMENT"
+        ],
+        "textEvent": "SELECT_DOCUMENT.documentId"
+      }
+    },
+    {
+      "sent": "{\"type\":\"SELECT_DOCUMENT\",\"documentId\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"choosingDocument\"",
+        "transition SELECT_DOCUMENT -> \"choosingDocument\""
+      ],
+      "response": "\"SELECT_DOCUMENT\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "Which document do you want to be quizzed on? Statecharts in Practice (statecharts), Retrieval Systems (retrieval)",
+        "events": [
+          "SELECT_DOCUMENT"
+        ],
+        "textEvent": "SELECT_DOCUMENT.documentId"
+      }
+    }
+  ]
+}

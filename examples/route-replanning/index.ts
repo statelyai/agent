@@ -38,7 +38,13 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic, setup } from "xstate";
 import { getShortestPaths } from "xstate/graph";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { runAgent, setupAgent, type RunAgentOptions } from "@statelyai/agent";
+import {
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRuntimeOptions,
+  type AgentRunInit,
+} from "@statelyai/agent";
 
 const models = { dispatcher: openai("gpt-5.4-mini") };
 
@@ -353,13 +359,20 @@ export const routeReplanningMachine = agentSetup.createMachine({
 
 /** Runs the delivery. `options` lets a test inject executors. */
 export async function runRouteReplanningExample(
-  options: Partial<RunAgentOptions<typeof routeReplanningMachine>> = {},
+  options: Partial<
+    AgentRuntimeOptions<typeof routeReplanningMachine> & AgentRunInit<typeof routeReplanningMachine>
+  > = {},
 ) {
-  const result = await runAgent(routeReplanningMachine, {
-    input: { parcel: "a birthday cake" },
-    executors: createAiSdkExecutors({ models }),
-    ...options,
-  });
+  const result = await runToQuiescence(
+    createAgentRuntime(routeReplanningMachine, {
+      executors: createAiSdkExecutors({ models }),
+      ...options,
+    }),
+    {
+      input: { parcel: "a birthday cake" },
+      ...options,
+    },
+  );
   if (result.status !== "done") throw new Error(`Expected done, got '${result.status}'.`);
   return result.output;
 }

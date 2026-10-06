@@ -1,0 +1,34 @@
+{
+  "Tight 10-day deadline — triggers a replan": [
+    {
+      "sent": "start {\"goal\":\"Ship a mobile app MVP for iOS and Android\",\"deadlineDays\":10}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generatingTasks\"",
+        "transition xstate.done.actor -> \"validatingGraph\"",
+        "transition xstate.done.actor -> \"regeneratingTasks\"",
+        "transition xstate.done.actor -> \"validatingGraph\"",
+        "transition xstate.done.actor -> \"regeneratingTasks\"",
+        "transition xstate.done.actor -> \"validatingGraph\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "The task graph was still invalid after 2 regeneration(s): mock id depends on unknown task \"mock dependsOn0\".\n\n- Deadline days: 10\n- Replans: 0\n- On time: no"
+    }
+  ],
+  "Generous 90-day deadline — fits on the first plan": [
+    {
+      "sent": "start {\"goal\":\"Launch a company blog with ten launch posts\",\"deadlineDays\":90}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generatingTasks\"",
+        "transition xstate.done.actor -> \"validatingGraph\"",
+        "transition xstate.done.actor -> \"regeneratingTasks\"",
+        "transition xstate.done.actor -> \"validatingGraph\"",
+        "transition xstate.done.actor -> \"regeneratingTasks\"",
+        "transition xstate.done.actor -> \"validatingGraph\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "The task graph was still invalid after 2 regeneration(s): mock id depends on unknown task \"mock dependsOn0\".\n\n- Deadline days: 90\n- Replans: 0\n- On time: no"
+    }
+  ]
+}

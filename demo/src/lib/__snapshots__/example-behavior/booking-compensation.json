@@ -1,0 +1,63 @@
+{
+  "Book a trip to Lisbon": [
+    {
+      "sent": "start {\"bookingId\":\"trip-1\",\"destination\":\"Lisbon\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"approval\""
+      ],
+      "response": "**Itinerary**\n\n**Flight**: mock flight  \n**Hotel**: mock hotel",
+      "idle": {
+        "prompt": "Approve the itinerary before reserving anything.",
+        "events": [
+          "APPROVE",
+          "CANCEL"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"approval\"",
+        "transition APPROVE -> \"flight\"",
+        "transition xstate.done.actor -> \"hotel\"",
+        "transition xstate.done.actor -> \"booked\""
+      ],
+      "response": "Flight: mock flight\n\nHotel: mock hotel\n\n- Booking id: trip-1\n- Outcome: booked\n- Flight reference: simulated-flight:trip-1\n- Hotel reference: simulated-hotel:trip-1"
+    }
+  ],
+  "Lisbon, but the hotel is sold out — watch it compensate": [
+    {
+      "sent": "start {\"bookingId\":\"trip-2-sold-out\",\"destination\":\"Lisbon\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"approval\""
+      ],
+      "response": "**Itinerary**\n\n**Flight**: mock flight  \n**Hotel**: mock hotel",
+      "idle": {
+        "prompt": "Approve the itinerary before reserving anything.",
+        "events": [
+          "APPROVE",
+          "CANCEL"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"approval\"",
+        "transition APPROVE -> \"flight\"",
+        "transition xstate.done.actor -> \"hotel\"",
+        "transition xstate.done.actor -> \"compensating\"",
+        "transition xstate.done.actor -> \"compensated\""
+      ],
+      "response": "Flight: mock flight\n\nHotel: mock hotel\n\n- Booking id: trip-2-sold-out\n- Outcome: compensated\n- Flight reference: simulated-flight:trip-2-sold-out"
+    }
+  ]
+}

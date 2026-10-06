@@ -24,7 +24,8 @@ import {
   type AgentTraceEvent,
   getAcceptedEvents,
   getStatePath,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
 } from "@statelyai/agent";
 import { createEvaluatePrompt, emailDrafterV1Machine } from "@/agents/email-drafter-v1";
 import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
@@ -251,12 +252,17 @@ export async function runCase(
   };
 
   const actors = judge ? { actors: { evaluatePrompt: createEvaluatePrompt(judge) } } : {};
-  let result = await runAgent(machine, {
-    input: { prompt: emailCase.prompt },
-    executors,
-    ...actors,
-    onTrace,
-  });
+  let result = await runToQuiescence(
+    createAgentRuntime(machine, {
+      executors,
+      ...actors,
+      onTrace,
+    }),
+    {
+      input: { prompt: emailCase.prompt },
+      ...actors,
+    },
+  );
 
   let guard = 0;
   while (result.status === "idle" && guard++ < 30) {
@@ -312,13 +318,18 @@ export async function runCase(
       );
     }
 
-    result = await runAgent(machine, {
-      snapshot,
-      event: event as never,
-      executors,
-      ...actors,
-      onTrace,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors,
+        ...actors,
+        onTrace,
+      }),
+      {
+        snapshot,
+        event: event as never,
+        ...actors,
+      },
+    );
   }
 
   // A partial sum would read as a total, so any call without usage voids it.

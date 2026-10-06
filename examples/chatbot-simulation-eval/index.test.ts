@@ -40,12 +40,15 @@ test("the customer finishes → one more bot reply → judged, endedBy user", as
   expect(result.passed).toBe(true);
   expect(result.score).toBe(8);
   expect(result.verdict).toBe(`PASS (8/10): ${QUALITY_LEVELS[4]}`);
-  expect(result.transcript.split("\n")).toEqual([
+  // One paragraph per turn: a blank line between turns, so Markdown renderers
+  // don't collapse the conversation into one run-on paragraph.
+  expect(result.transcript.split("\n\n")).toEqual([
     "Customer: I want a full refund for my Alaska trip.",
     "Support: That trip is past our 30-day refund window; I can offer travel credit.",
     "Customer: Fine, forget it.",
     "Support: Sorry I couldn't help more. Have a good day.",
   ]);
+  expect(result.transcript).not.toMatch(/[^\n]\n[^\n]/);
   expect(result.progress).toEqual([
     "userTurn",
     "botTurn",
@@ -146,7 +149,7 @@ test("any model error lands in `failed` with the partial transcript", async () =
     expect(result.passed).toBe(false);
     expect(result.verdict).toContain(`${broken} failed`);
     if (broken === "judgeConversation") {
-      expect(result.transcript).toBe("Customer: Refund!\nSupport: No.");
+      expect(result.transcript).toBe("Customer: Refund!\n\nSupport: No.");
     }
   }
 });

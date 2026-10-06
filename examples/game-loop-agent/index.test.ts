@@ -3,7 +3,13 @@ import type { InspectionEvent } from "xstate";
 import type { AgentDecisionExecutor, ChosenEvent } from "@statelyai/agent";
 import type { SnapshotFrom } from "xstate";
 import { createMockJudge } from "../mock-judge.js";
-import { gameMachine, PLAY_AGAIN_THRESHOLD, runGameLoopExample, type HumanEvent } from "./index.js";
+import {
+  gameMachine,
+  PLAY_AGAIN_THRESHOLD,
+  runGameLoopExample,
+  starterOf,
+  type HumanEvent,
+} from "./index.js";
 import { getInteraction } from "@statelyai/agent";
 
 type GameSnapshot = SnapshotFrom<typeof gameMachine>;
@@ -200,6 +206,25 @@ describe("game-loop-agent", () => {
     expect(call.questions.playAgain!.type).toBe("boolean");
   });
 
+  test("round 2 opens with a readable notice, and no separate starter field changes", async () => {
+    const notices: string[] = [];
+    const contexts: object[] = [];
+    const human = createMockHuman(["again"]);
+    await runGameLoopExample({
+      input: { seed: 5, target: 10, maxRounds: 2 },
+      decide: createMockPlayer().decide,
+      judge: createMockReferee([true]).judge,
+      nextHumanEvent: (snapshot) => {
+        contexts.push(snapshot.context);
+        return human.nextHumanEvent(snapshot);
+      },
+      onNotice: (notice) => notices.push(notice),
+    });
+    expect([starterOf(1), starterOf(2), starterOf(3)]).toEqual(["human", "agent", "human"]);
+    expect(notices).toContain("Round 2. The agent starts.");
+    for (const context of contexts) expect(context).not.toHaveProperty("starter");
+  });
+
   test("the round limit ends the match even when the user keeps saying yes", async () => {
     const player = createMockPlayer();
     const referee = createMockReferee([true, true, true, true]);
@@ -214,4 +239,23 @@ describe("game-loop-agent", () => {
 
     expect(output).toMatchObject({ reason: "round-limit", rounds: 2 });
   });
+});
+
+test("the player's decision offers only ROLL and BANK, never the always-accepted OBSERVE", async () => {
+  const offered = new Set<string>();
+  await runGameLoopExample({
+    input: { seed: 3, target: 20, maxRounds: 1 },
+    decide: async (request) => {
+      for (const event of request.events) offered.add(event.type);
+      return {
+        event: (request.prompt ?? "").includes("Turn total: 0")
+          ? { type: "ROLL" }
+          : { type: "BANK" },
+      };
+    },
+    judge: createMockReferee([]).judge,
+    nextHumanEvent: createMockHuman([]).nextHumanEvent,
+  });
+  // Choosing OBSERVE would be handled in place, leaving the agent's move owed.
+  expect([...offered].sort()).toEqual(["BANK", "ROLL"]);
 });

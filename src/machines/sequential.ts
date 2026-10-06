@@ -153,7 +153,7 @@ export function createSequentialMachine(config: CreateSequentialMachineConfig): 
 
   const machineConfig = {
     id: "sequential",
-    // Stamped by runAgent onto snapshots/logs instead of the structural hash;
+    // Stamped by the runtime onto snapshots/logs instead of the structural hash;
     // bumped only on a topology change a snapshot could not resume into.
     version: "1",
     context: ({ input }: { input: { prompt: string } }) => ({

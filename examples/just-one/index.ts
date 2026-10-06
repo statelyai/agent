@@ -33,6 +33,13 @@
  *      hold identically whether the clues came from a real model or the
  *      scripted executors in the tests.
  *
+ *   3. The guesser never sees the answer early. The secret word is not a
+ *      context field — it is derived from the deck and the round index
+ *      (`secretWordOf`) — and a struck clue is stored face down (its word
+ *      blanked), because a struck clue may BE the secret. The round's log line,
+ *      which names the word, is written only after the guess. Everything a host
+ *      can render from context while the guesser thinks is safe to show.
+ *
  * The guesser's turn is an idle state (no invoke) carrying `meta.interaction`:
  * the surviving clues in the label, free text routed to `GUESS`, and a `PASS`
  * button. Resume with
@@ -48,7 +55,8 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
 } from "@statelyai/agent";
 
@@ -94,9 +102,14 @@ export const PERSONAS = [
   },
 ] as const satisfies readonly Persona[];
 
+/**
+ * A clue-giver's draft: the clue word and nothing else. No `reasoning` field —
+ * any reasoning about a clue names the secret, and the request's output
+ * travels in its done event, which a host may render (a transition log) while
+ * the guesser is still thinking.
+ */
 const clueDraftSchema = z.object({
-  clue: z.string(),
-  reasoning: z.string(),
+  clue: z.string().describe("Your one-word clue, and nothing else."),
 });
 type ClueDraft = z.infer<typeof clueDraftSchema>;
 
@@ -109,10 +122,10 @@ const judgedClueSchema = z.object({
 type JudgedClue = z.infer<typeof judgedClueSchema>;
 
 const contextSchema = z.object({
+  /** The word cards, face down (see `cardBack`): readable by the machine, not at a glance. */
   deck: z.array(z.string()),
   roundIndex: z.number(),
   rounds: z.number(),
-  secretWord: z.string(),
   /**
    * One slot per clue-giver. A region writes only its own slot; no region
    * reads another's. Separate fields (rather than one array) keep the three
@@ -121,7 +134,10 @@ const contextSchema = z.object({
   clueA: clueDraftSchema.nullable(),
   clueB: clueDraftSchema.nullable(),
   clueC: clueDraftSchema.nullable(),
-  /** The judged clues of the current round, struck flags included. */
+  /**
+   * The judged clues of the current round, struck flags included. Struck clues
+   * are face down: their `word` is blanked (see `faceDown`).
+   */
   clues: z.array(judgedClueSchema),
   score: z.number(),
   log: z.array(z.string()),
@@ -140,11 +156,13 @@ export const justOneSchemas = createAgentSchemas({
     deck: z.array(z.string()).optional(),
   }),
   output: z.object({
-    /** Headline: a readable round-by-round narration of the game. */
+    /**
+     * Headline: a readable round-by-round narration of the game — the score,
+     * then one log line per line. The log is not repeated as its own field.
+     */
     summary: z.string(),
     score: z.number(),
     rounds: z.number(),
-    log: z.array(z.string()),
   }),
   events: {
     /** The guesser's answer, sent by a host as free text. */
@@ -228,12 +246,54 @@ export function isCorrectGuess(guess: string, secretWord: string): boolean {
   return clueKey(guess) === clueKey(secretWord) && clueKey(secretWord) !== "";
 }
 
+/**
+ * A word card turned face down. Context is what hosts show and persist (a
+ * developer view lists it whole), so the deck is kept as card backs: the
+ * machine turns a card over when it needs the word, and nobody reads the
+ * next secrets off the table by accident. Not secrecy, just card backs.
+ */
+export function cardBack(word: string): string {
+  return btoa(encodeURIComponent(word));
+}
+
+function cardFace(back: string): string {
+  try {
+    return decodeURIComponent(atob(back));
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The round's secret word: the deck card at the round index, turned over.
+ * Derived rather than stored, so no context field ever holds it face up.
+ */
+export function secretWordOf(context: { deck: string[]; roundIndex: number }): string {
+  return cardFace(context.deck[context.roundIndex % context.deck.length] ?? "");
+}
+
+/**
+ * Turn struck clues face down, as in the real game: the guesser never sees a
+ * struck word — and one struck for giving the word away would spoil the round.
+ */
+export function faceDown(clues: JudgedClue[]): JudgedClue[] {
+  return clues.map((clue) => (clue.struck ? { ...clue, word: "" } : clue));
+}
+
 function renderClues(clues: JudgedClue[]): string {
   return clues
     .map((clue) =>
-      clue.struck ? `${clue.word || "(blank)"} [${clue.reason}]` : `${clue.word} (${clue.author})`,
+      clue.struck ? `[${clue.author}: ${clue.reason}]` : `${clue.word} (${clue.author})`,
     )
     .join(", ");
+}
+
+/** The round's log line. It names the secret, so it is written after the guess. */
+function roundLine(context: JustOneContext): string {
+  return (
+    `Round ${context.roundIndex + 1} — secret "${secretWordOf(context)}". ` +
+    `Clues: ${renderClues(context.clues)}.`
+  );
 }
 
 function survivors(clues: JudgedClue[]): JudgedClue[] {
@@ -260,7 +320,7 @@ const CLUE_SYSTEM_PROMPT = [
   "A cancelled clue is struck out and never shown, so it helps the guesser exactly as much as writing nothing.",
   "Therefore the best clue is accurate but NOT the single most obvious word: predict what the other two are most likely to write, and approach the secret from an angle they probably will not take. Do not be so obscure that the guesser cannot use it.",
   "Rules the referee enforces mechanically: exactly one word, no spaces or hyphens; never the secret word itself or an inflection of it; matching clues cancel.",
-  "Reason briefly about what the others will write, then commit to your clue word.",
+  "Decide privately what the others will likely write, then return only your clue word — no explanation.",
 ].join(" ");
 
 const agentSetup = setupAgent({
@@ -290,10 +350,9 @@ const agentSetup = setupAgent({
 export const justOneMachine = agentSetup.createMachine({
   id: "just-one",
   context: ({ input }) => ({
-    deck: input.deck ?? [...WORD_DECK],
+    deck: (input.deck ?? WORD_DECK).map(cardBack),
     roundIndex: 0,
     rounds: input.rounds,
-    secretWord: "",
     clueA: null,
     clueB: null,
     clueC: null,
@@ -305,22 +364,14 @@ export const justOneMachine = agentSetup.createMachine({
     summary: narrate(context),
     score: context.score,
     rounds: context.rounds,
-    log: context.log,
   }),
   initial: "pickingWord",
   states: {
-    // Deal the round's secret word and clear last round's slots.
+    // Deal the round: its secret word is the deck card at `roundIndex` (see
+    // `secretWordOf`), so there is nothing to copy — just clear last round's
+    // judged clues.
     pickingWord: {
-      always: ({ context }) => ({
-        target: "cluing",
-        context: {
-          secretWord: context.deck[context.roundIndex % context.deck.length] ?? "",
-          clueA: null,
-          clueB: null,
-          clueC: null,
-          clues: [],
-        },
-      }),
+      always: { target: "cluing", context: { clues: [] } },
     },
 
     // Three simultaneous clue-givers. Each region invokes the SAME `writeClue`
@@ -339,7 +390,7 @@ export const justOneMachine = agentSetup.createMachine({
               invoke: {
                 src: "writeClue",
                 input: ({ context }) => ({
-                  secretWord: context.secretWord,
+                  secretWord: secretWordOf(context),
                   persona: PERSONAS[0],
                 }),
                 onDone: ({ output }) => ({ target: "written", context: { clueA: output.result } }),
@@ -358,7 +409,7 @@ export const justOneMachine = agentSetup.createMachine({
               invoke: {
                 src: "writeClue",
                 input: ({ context }) => ({
-                  secretWord: context.secretWord,
+                  secretWord: secretWordOf(context),
                   persona: PERSONAS[1],
                 }),
                 onDone: ({ output }) => ({ target: "written", context: { clueB: output.result } }),
@@ -375,7 +426,7 @@ export const justOneMachine = agentSetup.createMachine({
               invoke: {
                 src: "writeClue",
                 input: ({ context }) => ({
-                  secretWord: context.secretWord,
+                  secretWord: secretWordOf(context),
                   persona: PERSONAS[2],
                 }),
                 onDone: ({ output }) => ({ target: "written", context: { clueC: output.result } }),
@@ -391,30 +442,32 @@ export const justOneMachine = agentSetup.createMachine({
     // The rulebook, applied in one pure step. If every clue was struck the
     // guesser is never shown anything — the round is skipped, as in the real
     // game — so `guessing` is not even entered.
+    //
+    // The drafts are cleared here (a struck draft may be the secret itself)
+    // and the struck clues are kept face down, so the idle guessing snapshot
+    // holds nothing that gives the word away.
     judging: {
       always: ({ context }) => {
-        const clues = judgeClues(context.secretWord, [context.clueA, context.clueB, context.clueC]);
-        const shown = survivors(clues);
-        const roundLine =
-          `Round ${context.roundIndex + 1} — secret "${context.secretWord}". ` +
-          `Clues: ${renderClues(clues)}.`;
+        const clues = faceDown(
+          judgeClues(secretWordOf(context), [context.clueA, context.clueB, context.clueC]),
+        );
+        const drafts = { clueA: null, clueB: null, clueC: null };
 
-        if (shown.length === 0) {
+        if (survivors(clues).length === 0) {
           return {
             target: "roundEnd",
             context: {
+              ...drafts,
               clues,
-              log: [...context.log, roundLine, "All clues cancelled — round skipped."],
+              log: [
+                ...context.log,
+                roundLine({ ...context, clues }),
+                "All clues cancelled — round skipped.",
+              ],
             },
           };
         }
-        return {
-          target: "guessing",
-          context: {
-            clues,
-            log: [...context.log, roundLine],
-          },
-        };
+        return { target: "guessing", context: { ...drafts, clues } };
       },
     },
 
@@ -439,16 +492,18 @@ export const justOneMachine = agentSetup.createMachine({
       },
       on: {
         GUESS: ({ context, event }) => {
-          const correct = isCorrectGuess(event.guess, context.secretWord);
+          const secretWord = secretWordOf(context);
+          const correct = isCorrectGuess(event.guess, secretWord);
           return {
             target: "roundEnd",
             context: {
               score: context.score + (correct ? 1 : 0),
               log: [
                 ...context.log,
+                roundLine(context),
                 correct
                   ? `Guessed "${event.guess.trim()}" — correct.`
-                  : `Guessed "${event.guess.trim()}" — wrong, the word was "${context.secretWord}".`,
+                  : `Guessed "${event.guess.trim()}" — wrong, the word was "${secretWord}".`,
               ],
             },
           };
@@ -456,7 +511,11 @@ export const justOneMachine = agentSetup.createMachine({
         PASS: ({ context }) => ({
           target: "roundEnd",
           context: {
-            log: [...context.log, `Passed — the word was "${context.secretWord}".`],
+            log: [
+              ...context.log,
+              roundLine(context),
+              `Passed — the word was "${secretWordOf(context)}".`,
+            ],
           },
         }),
       },
@@ -495,16 +554,29 @@ export function toGuesserEvent(text: string): GuesserEvent {
 export async function main() {
   const shared = { executors: createAiSdkExecutors({ models }) };
 
-  let result = await runAgent(justOneMachine, { input: { rounds: 3 }, ...shared });
+  let result = await runToQuiescence(
+    createAgentRuntime(justOneMachine, {
+      ...shared,
+    }),
+    {
+      input: { rounds: 3 },
+      ...shared,
+    },
+  );
 
   // Every guessing turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
-    result = await runAgent(justOneMachine, {
-      snapshot: result.persist(),
-      event: toGuesserEvent(text),
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(justOneMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event: toGuesserEvent(text),
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") throw new Error(`Just One did not complete: ${result.status}`);

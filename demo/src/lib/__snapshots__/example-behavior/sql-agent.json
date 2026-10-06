@@ -1,0 +1,62 @@
+{
+  "What is the total amount spent on electronics?": [
+    {
+      "sent": "start {\"question\":\"What is the total amount spent on electronics?\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"awaitingApproval\""
+      ],
+      "response": "**Plan**\n\n**Operation**: count  \n**Column**: amount  \n**Category**: mock category",
+      "idle": {
+        "prompt": "Run this query against the orders table?",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"executing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Question: What is the total amount spent on electronics?  \nPla\n\n- Status: answered\n- Result: 0\n\n**Plan**\n\n**Operation**: count  \n**Column**: amount  \n**Category**: mock category"
+    }
+  ],
+  "How many book orders are there?": [
+    {
+      "sent": "start {\"question\":\"How many book orders are there?\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"planning\"",
+        "transition xstate.done.actor -> \"awaitingApproval\""
+      ],
+      "response": "**Plan**\n\n**Operation**: count  \n**Column**: amount  \n**Category**: mock category",
+      "idle": {
+        "prompt": "Run this query against the orders table?",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"executing\"",
+        "transition xstate.done.actor -> \"summarizing\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Mock reply to: Question: How many book orders are there?  \nPlan: {\"operation\"\n\n- Status: answered\n- Result: 0\n\n**Plan**\n\n**Operation**: count  \n**Column**: amount  \n**Category**: mock category"
+    }
+  ]
+}

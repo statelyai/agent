@@ -1,0 +1,44 @@
+{
+  "Public libraries remain essential in the digital age. Search engines put facts at everyone's fingertips, but libraries offer curated knowledge, quiet space, and free internet access for people who have none at home. Librarians teach patrons to judge sources, a skill that matters more as misinformation spreads, and libraries host job workshops and language classes. Critics argue funding should move to digital services, yet many of those services are delivered through libraries. The library has not been replaced by the internet; it is where the internet becomes useful to everyone.": [
+    {
+      "sent": "start {\"essay\":\"Public libraries remain essential in the digital age. Search engines put facts at everyone's fingertips, but libraries offer curated knowledge, quiet space, and free internet access for people who have none at home. Librarians teach patrons to judge sources, a skill that matters more as misinformation spreads, and libraries host job workshops and language classes. Critics argue funding should move to digital services, yet many of those services are delivered through libraries. The library has not been replaced by the internet; it is where the internet becomes useful to everyone.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"checkingRelevance\"",
+        "transition xstate.done.actor -> \"checkingGrammar\"",
+        "transition xstate.done.actor -> \"analyzingStructure\"",
+        "transition xstate.done.actor -> \"evaluatingDepth\"",
+        "transition xstate.done.actor -> \"scoring\""
+      ],
+      "response": "Final score 1 (all four stages ran).  \n- relevance 1.00 (weight 0.3): Every sentence serves one clearly stated topic.  \n- grammar 1.00 (weight 0.2): No grammar, spelling or punctuation errors.  \n- structure 1.00 (weight 0.2): A clear introduction, points that build on one another, and a conclusion that follows from them.  \n- depth 1.00 (weight 0.3): Well-evidenced claims, answers counterarguments, and offers an original insight.\n\n- Final score: 1\n- Stage: all four stages ran\n\n**Scores**\n\n**Relevance**: 1  \n**Grammar**: 1  \n**Structure**: 1  \n**Depth**: 1"
+    }
+  ],
+  "My favorite pizza topping is mushrooms. Also I think the bus was late today.": [
+    {
+      "sent": "start {\"essay\":\"My favorite pizza topping is mushrooms. Also I think the bus was late today.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"checkingRelevance\"",
+        "transition xstate.done.actor -> \"checkingGrammar\"",
+        "transition xstate.done.actor -> \"analyzingStructure\"",
+        "transition xstate.done.actor -> \"evaluatingDepth\"",
+        "transition xstate.done.actor -> \"scoring\""
+      ],
+      "response": "Final score 1 (all four stages ran).  \n- relevance 1.00 (weight 0.3): Every sentence serves one clearly stated topic.  \n- grammar 1.00 (weight 0.2): No grammar, spelling or punctuation errors.  \n- structure 1.00 (weight 0.2): A clear introduction, points that build on one another, and a conclusion that follows from them.  \n- depth 1.00 (weight 0.3): Well-evidenced claims, answers counterarguments, and offers an original insight.\n\n- Final score: 1\n- Stage: all four stages ran\n\n**Scores**\n\n**Relevance**: 1  \n**Grammar**: 1  \n**Structure**: 1  \n**Depth**: 1"
+    }
+  ],
+  "social media is bad for teenager because they spends to much time on it and there sleep get worse. also the comparing to other peoples is making them sad and anxious alot, studies shows this. schools should teached kids about it more, and parents to.": [
+    {
+      "sent": "start {\"essay\":\"social media is bad for teenager because they spends to much time on it and there sleep get worse. also the comparing to other peoples is making them sad and anxious alot, studies shows this. schools should teached kids about it more, and parents to.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"checkingRelevance\"",
+        "transition xstate.done.actor -> \"checkingGrammar\"",
+        "transition xstate.done.actor -> \"analyzingStructure\"",
+        "transition xstate.done.actor -> \"evaluatingDepth\"",
+        "transition xstate.done.actor -> \"scoring\""
+      ],
+      "response": "Final score 1 (all four stages ran).  \n- relevance 1.00 (weight 0.3): Every sentence serves one clearly stated topic.  \n- grammar 1.00 (weight 0.2): No grammar, spelling or punctuation errors.  \n- structure 1.00 (weight 0.2): A clear introduction, points that build on one another, and a conclusion that follows from them.  \n- depth 1.00 (weight 0.3): Well-evidenced claims, answers counterarguments, and offers an original insight.\n\n- Final score: 1\n- Stage: all four stages ran\n\n**Scores**\n\n**Relevance**: 1  \n**Grammar**: 1  \n**Structure**: 1  \n**Depth**: 1"
+    }
+  ]
+}

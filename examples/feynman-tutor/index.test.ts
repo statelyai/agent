@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
+import {
+  getInteraction,
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+} from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
 import { createMockJudge, type MockJudgeEntry } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
@@ -12,6 +17,7 @@ import {
   createVerifyExplanation,
   feynmanTutorMachine,
   runFeynmanTutorExample,
+  stripNumbering,
   type FeynmanHumanEvent,
 } from "./index.js";
 
@@ -149,11 +155,15 @@ test("SKIP records the checkpoint as skipped without scoring it", async () => {
 test("idle → persist() → resume round-trips through JSON", async () => {
   const scripted = executors();
   const actors = { verifyExplanation: createVerifyExplanation(grader([pass]).model) };
-  const first = await runAgent(feynmanTutorMachine, {
-    input: { topic: "RSA" },
-    executors: scripted,
-    actors,
-  });
+  const first = await runToQuiescence(
+    createAgentRuntime(feynmanTutorMachine, {
+      executors: scripted,
+      actors,
+    }),
+    {
+      input: { topic: "RSA" },
+    },
+  );
   expect(first.status).toBe("idle");
   if (first.status !== "idle") return;
   expect(getStatePath(first.snapshot)).toBe("awaitingExplanation");
@@ -161,12 +171,16 @@ test("idle → persist() → resume round-trips through JSON", async () => {
   expect(interaction?.textEvent).toBe("EXPLAIN");
   expect(interaction?.events.map((choice) => choice.type)).toEqual(["EXPLAIN", "SKIP"]);
 
-  const second = await runAgent(feynmanTutorMachine, {
-    snapshot: JSON.parse(JSON.stringify(first.persist())),
-    event: explain("public encrypts, private decrypts"),
-    executors: scripted,
-    actors,
-  });
+  const second = await runToQuiescence(
+    createAgentRuntime(feynmanTutorMachine, {
+      executors: scripted,
+      actors,
+    }),
+    {
+      snapshot: JSON.parse(JSON.stringify(first.persist())),
+      event: explain("public encrypts, private decrypts"),
+    },
+  );
   expect(second.status).toBe("idle");
   if (second.status !== "idle") return;
   expect(second.snapshot.context.checkpointIndex).toBe(1);
@@ -196,6 +210,33 @@ test("planner caps checkpoints at MAX_CHECKPOINTS; zero checkpoints ends in fail
   });
   expect(empty.outcome).toBe("failed");
   expect(empty.summary).toContain("no checkpoints");
+});
+
+test("numbered planner titles are stripped; the machine numbers checkpoints itself", async () => {
+  expect(stripNumbering("1. Two keys")).toBe("Two keys");
+  expect(stripNumbering("Step 2: Signatures")).toBe("Signatures");
+  expect(stripNumbering("3) Hashes")).toBe("Hashes");
+  expect(stripNumbering("RSA in 3 steps")).toBe("RSA in 3 steps");
+  expect(stripNumbering("2048-bit keys")).toBe("2048-bit keys");
+
+  const numbered = checkpoints.map((checkpoint, i) => ({
+    ...checkpoint,
+    title: `${i + 1}. ${checkpoint.title}`,
+  }));
+  const result = await runFeynmanTutorExample({
+    generateText: createMockModelExecutors({
+      text: {
+        planCheckpoints: [{ checkpoints: numbered }],
+        introduceCheckpoint: [{ context: "intro" }],
+      },
+    }).generateText,
+    judge: grader([pass]).model,
+    humanEvents: [explain("x"), explain("y")],
+  });
+  expect(result.checkpoints.map((checkpoint) => checkpoint.title)).toEqual([
+    "Two keys",
+    "Signatures",
+  ]);
 });
 
 test("a model error lands in failed with the checkpoints finished so far", async () => {
@@ -263,6 +304,20 @@ test("verifying asks Jev one five-level score over the checkpoint, and PASS_SCOR
   expect(question.type === "score" && question.criteria).toEqual([...UNDERSTANDING_LEVELS]);
   expect(result.progress.slice(3, 5)).toEqual(["verifying", "teaching"]);
   expect(result.checkpoints[0]).toMatchObject({ status: "passed", score: 75, reteaches: 1 });
+});
+
+test('the intro and re-teach speak to the learner as "you", not in the third person', async () => {
+  const scripted = executors();
+  await runFeynmanTutorExample({
+    generateText: scripted.generateText,
+    judge: grader([weak, pass]).model,
+    humanEvents: [explain("private encrypts?"), explain("a"), explain("b")],
+  });
+  for (const name of ["introduceCheckpoint", "explainSimply"]) {
+    const system = scripted.calls.find((call) => call.name === name)!.request.system ?? "";
+    expect(system).toContain('as "you"');
+    expect(system).not.toMatch(/what the learner should/);
+  }
 });
 
 test("lintAgentMachine is clean", () => {

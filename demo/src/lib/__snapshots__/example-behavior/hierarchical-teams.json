@@ -1,0 +1,41 @@
+{
+  "One reason RISC-V matters for data centers.": [
+    {
+      "sent": "start {\"topic\":\"One reason RISC-V matters for data centers.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"researching\"",
+        "transition xstate.done.actor -> \"writing\"",
+        "transition xstate.done.actor -> \"reviewing\"",
+        "transition PUBLISH -> \"done\""
+      ],
+      "response": "research team  \n  search. done. Mock reply to: Topic: One reason RISC-V matters for data center…  \n  scrape. done. Mock reply to: Topic: One reason RISC-V matters for data center…  \nwriting team  \n  outline. done. Mock reply to: Research: Mock reply to: Topic: One reason RISC-…  \n  write. done. Mock reply to: Outline: Mock reply to: Research: Mock reply to:…  \ncoordinator  \n  review. done. publish\n\nReport  \nMock reply to: Outline:  \nMock reply to: Research:  \nMock reply to: Topic: One\n\n**Details**\n\n**Research**\n\nMock reply to: Topic: One reason RISC-V matters for data centers.  \nAlready g  \nMock reply to: Topic: One reason RISC-V matters for data centers.  \nLeads and\n\n**Report**\n\nMock reply to: Outline:  \nMock reply to: Research:  \nMock reply to: Topic: One"
+    }
+  ],
+  "One way tokenization trips up LLM arithmetic.": [
+    {
+      "sent": "start {\"topic\":\"One way tokenization trips up LLM arithmetic.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"researching\"",
+        "transition xstate.done.actor -> \"writing\"",
+        "transition xstate.done.actor -> \"reviewing\"",
+        "transition PUBLISH -> \"done\""
+      ],
+      "response": "research team  \n  search. done. Mock reply to: Topic: One way tokenization trips up LLM arithme…  \n  scrape. done. Mock reply to: Topic: One way tokenization trips up LLM arithme…  \nwriting team  \n  outline. done. Mock reply to: Research: Mock reply to: Topic: One way tokeniza…  \n  write. done. Mock reply to: Outline: Mock reply to: Research: Mock reply to:…  \ncoordinator  \n  review. done. publish\n\nReport  \nMock reply to: Outline:  \nMock reply to: Research:  \nMock reply to: Topic: One\n\n**Details**\n\n**Research**\n\nMock reply to: Topic: One way tokenization trips up LLM arithmetic.  \nAlready  \nMock reply to: Topic: One way tokenization trips up LLM arithmetic.  \nLeads a\n\n**Report**\n\nMock reply to: Outline:  \nMock reply to: Research:  \nMock reply to: Topic: One"
+    }
+  ],
+  "Which way are grid-scale battery costs moving?": [
+    {
+      "sent": "start {\"topic\":\"Which way are grid-scale battery costs moving?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"researching\"",
+        "transition xstate.done.actor -> \"writing\"",
+        "transition xstate.done.actor -> \"reviewing\"",
+        "transition PUBLISH -> \"done\""
+      ],
+      "response": "research team  \n  search. done. Mock reply to: Topic: Which way are grid-scale battery costs mo…  \n  scrape. done. Mock reply to: Topic: Which way are grid-scale battery costs mo…  \nwriting team  \n  outline. done. Mock reply to: Research: Mock reply to: Topic: Which way are gr…  \n  write. done. Mock reply to: Outline: Mock reply to: Research: Mock reply to:…  \ncoordinator  \n  review. done. publish\n\nReport  \nMock reply to: Outline:  \nMock reply to: Research:  \nMock reply to: Topic: Whic\n\n**Details**\n\n**Research**\n\nMock reply to: Topic: Which way are grid-scale battery costs moving?  \nAlread  \nMock reply to: Topic: Which way are grid-scale battery costs moving?  \nLeads\n\n**Report**\n\nMock reply to: Outline:  \nMock reply to: Research:  \nMock reply to: Topic: Whic"
+    }
+  ]
+}

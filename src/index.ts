@@ -87,18 +87,11 @@ export type {
   TextLogicExecuteArgs,
   TextLogicExecutor,
 } from "./text-logic.js";
-export {
-  executeAgentRequest,
-  initialAgentStep,
-  rejectAgentStep,
-  resolveAgentStep,
-  transitionAgentStep,
-} from "./steps.js";
-export type { AgentRequest, AgentStep, AgentStepRequest } from "./steps.js";
+export type { AgentRequest, AgentStepRequest } from "./steps.js";
 export { AGENT_USAGE_EVENT_TYPE } from "./usage.js";
 export type { AgentUsageEvent } from "./usage.js";
 // The event log itself (replay, forking, hand-built entries, stores) lives in
-// `@statelyai/agent/log`. The root keeps only what `runAgent` reads and
+// `@statelyai/agent/log`. The root keeps only what the agent runtime reads and
 // returns, and the errors it can throw.
 export { AgentMachineVersionMismatchError } from "./event-log.js";
 export type { AgentLogEntry } from "./event-log.js";
@@ -108,14 +101,22 @@ export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentMaxModelCallsExceededError,
   AgentSnapshotDivergedError,
+  createAgentRuntime,
   inspectTransitions,
   isAgentIdle,
-  runAgent,
+  runToQuiescence,
   serializeTraceEvent,
   traceTransitions,
 } from "./run-agent.js";
-export { runAgentStream } from "./agent-run.js";
-export type { AgentStreamEvent } from "./agent-run.js";
+export type {
+  AgentEffects,
+  AgentRunInit,
+  AgentRunStart,
+  AgentRuntime,
+  AgentRuntimeOptions,
+  AgentTimerEvent,
+  AgentTimerScheduler,
+} from "./run-agent.js";
 export type {
   AgentInputFrom,
   AgentRunMeta,
@@ -123,9 +124,8 @@ export type {
   AgentTraceEvent,
   InspectedActorRef,
   JsonSerializableTraceEvent,
-  RunAgentOptions,
-  RunAgentResult,
-  RunAgentErrorCause,
+  AgentRunResult,
+  AgentRunErrorCause,
 } from "./run-agent.js";
 export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";

@@ -15,7 +15,3 @@ test.each([
     0,
   );
 });
-
-test("scheduler example is excluded from generic chat because the host must supply a trusted clock", () => {
-  expect(listExampleSummaries().map((entry) => entry.id)).not.toContain("deadline-escalation");
-});

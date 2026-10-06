@@ -69,7 +69,13 @@ import { createAsyncLogic } from "xstate";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { getStatePath, runAgent, setupAgent, type AgentRequestExecutors } from "@statelyai/agent";
+import {
+  getStatePath,
+  createAgentRuntime,
+  runToQuiescence,
+  setupAgent,
+  type AgentRequestExecutors,
+} from "@statelyai/agent";
 
 const models = {
   crag: openai("gpt-5.4-mini"),
@@ -253,7 +259,12 @@ function renderRetrievalNotice(context: CragContext, options: { answered: boolea
       `The grader kept ${context.relevantCount} of ${context.retrievedCount} as relevant.`,
     );
   }
-  if (context.fallbackCount !== null) {
+  if (context.fallbackCount === 0) {
+    parts.push(
+      "Tried to correct: rewrote the question, but the fallback sample web index " +
+        "found no results either.",
+    );
+  } else if (context.fallbackCount !== null) {
     parts.push(
       "Corrected: rewrote the question and answered from the fallback sample web index " +
         `(${context.fallbackCount} result(s)).`,
@@ -290,14 +301,14 @@ const agentSetup = setupAgent({
       run: async ({ input }) => searchCorpus(SAMPLE_CORPUS, input.question, 3),
     }),
     // web_search: keyword search over the SEPARATE sample web index (canned,
-    // clearly-labeled stand-in for a live search API). Top 2 docs.
+    // clearly-labeled stand-in for a live search API). Top 2 docs. No hits is
+    // an empty list — never a placeholder "result" that would be counted, and
+    // handed to the model, as evidence.
     webSearch: createAsyncLogic<string[], { question: string }>({
-      run: async ({ input }) => {
-        const hits = searchCorpus(SAMPLE_WEB_INDEX, input.question, 2);
-        return hits.length > 0
-          ? hits.map((text) => `[sample web result] ${text}`)
-          : ["[sample web result] No external results found for this query."];
-      },
+      run: async ({ input }) =>
+        searchCorpus(SAMPLE_WEB_INDEX, input.question, 2).map(
+          (text) => `[sample web result] ${text}`,
+        ),
     }),
   },
   requests: {
@@ -492,18 +503,22 @@ export async function runCorrectiveRagExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runAgent(correctiveRagMachine, {
-    input: { question },
-    ...(generateText
-      ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
-    ...(judge ? { actors: { gradeDocuments: createGradeDocuments(judge) } } : {}),
-    onTransition: (snapshot) => {
-      const state = getStatePath(snapshot);
-      progress.push(state);
-      onProgress?.(state);
+  const result = await runToQuiescence(
+    createAgentRuntime(correctiveRagMachine, {
+      ...(generateText
+        ? { executors: { generateText } }
+        : { executors: createAiSdkExecutors({ models }) }),
+      ...(judge ? { actors: { gradeDocuments: createGradeDocuments(judge) } } : {}),
+      onTransition: (snapshot) => {
+        const state = getStatePath(snapshot);
+        progress.push(state);
+        onProgress?.(state);
+      },
+    }),
+    {
+      input: { question },
     },
-  });
+  );
 
   if (result.status !== "done") {
     throw new Error(`Corrective-RAG example did not complete: ${result.status}`);

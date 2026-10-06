@@ -67,8 +67,10 @@ test("draft → search → revise, looped until MAX_REVISIONS, with grounded cit
   expect((secondRevise!.input as { results: string }).results).toContain(
     "Query: measure pays off cycle time",
   );
-  expect(result.trail).toContain("Draft:; missing: No rollout plan, no security rules.");
-  expect(result.trail).toContain("Revision 2: cites [S1, S3, S5]");
+  // Each trail line reads as prose: no empty "Draft:;" field.
+  expect(result.trail).toMatch(/^Draft — missing: No rollout plan, no security rules\.$/m);
+  expect(result.trail).toContain("Revision 2 cites [S1, S3, S5] — missing:");
+  expect(result.trail).not.toMatch(/:;/);
 });
 
 test("citations to passages the run never retrieved are dropped", async () => {

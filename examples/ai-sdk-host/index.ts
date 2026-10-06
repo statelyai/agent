@@ -12,7 +12,7 @@
  *
  * 2. The HOST (`runAiSdkGameTurn`) — the only part that knows about the AI SDK.
  *    It contributes `createAiSdkExecutors({ models })` and drives the run with
- *    `runAgentStream`, so it sees every transition as the turn plays out. The
+ *    the agent loop, so it sees every transition as the turn plays out. The
  *    same machine runs unchanged on Workers AI (examples/cloudflare-workers-ai-host).
  *
  * `decide` forces a tool call, one tool per candidate event, and reads the
@@ -30,7 +30,7 @@ import { type AiSdkModelMap, createAiSdkExecutors } from "@statelyai/agent/ai-sd
 import {
   createAgentSchemas,
   createTextLogic,
-  runAgentStream,
+  createAgentRuntime,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -119,8 +119,9 @@ export const summarizeTurn = createTextLogic({
   name: "summarizeTurn",
   model: "turnSummarizer",
   system:
-    "Narrate the turn in one or two sentences. Report no numbers of your own: " +
-    "the HP totals below are already final.",
+    "Narrate the turn in one or two sentences of color. The beats and HP totals " +
+    "below are already shown to the player, so do not restate them or report any " +
+    "numbers: describe how it felt, not what the log says.",
   prompt: ({ input }) =>
     [
       `What happened: ${input.beats.join(" ")}`,
@@ -151,10 +152,15 @@ function enemyCounter(
       playerHp,
       log: [
         ...context.log,
-        `The goblin hits back for ${damage} (you ${context.playerHp} → ${playerHp}).`,
+        `The goblin hits back for ${damage} (your HP ${context.playerHp} → ${playerHp}).`,
       ],
     },
   };
+}
+
+/** Both sides' HP as a sentence for the combat log. */
+export function hpLine(playerHp: number, enemyHp: number): string {
+  return `You have ${playerHp} HP; the goblin has ${enemyHp} HP.`;
 }
 
 /** Renders the combat log plus how the encounter ended, as readable text. */
@@ -202,7 +208,7 @@ export const gameMachine = gameAgentSetup.createMachine({
     playerHp: input.playerHp,
     enemyHp: input.enemyHp,
     lastSummary: null,
-    log: [`You face a goblin. You ${input.playerHp} HP, goblin ${input.enemyHp} HP.`],
+    log: [`You face a goblin. ${hpLine(input.playerHp, input.enemyHp)}`],
   }),
   initial: "choosingMove",
   states: {
@@ -221,7 +227,7 @@ export const gameMachine = gameAgentSetup.createMachine({
               enemyHp,
               log: [
                 ...context.log,
-                `You attack the ${event.target} for ${PLAYER_DAMAGE} (goblin ${context.enemyHp} → ${enemyHp}).`,
+                `You attack the ${event.target} for ${PLAYER_DAMAGE} (goblin HP ${context.enemyHp} → ${enemyHp}).`,
               ],
             },
           };
@@ -240,7 +246,7 @@ export const gameMachine = gameAgentSetup.createMachine({
               playerHp,
               log: [
                 ...context.log,
-                `You heal ${event.amount} (you ${context.playerHp} → ${playerHp}).`,
+                `You heal ${event.amount} (your HP ${context.playerHp} → ${playerHp}).`,
               ],
             },
           };
@@ -282,7 +288,7 @@ export const gameMachine = gameAgentSetup.createMachine({
             log: [
               ...context.log,
               output.result.summary,
-              `End of turn: you ${context.playerHp} HP, goblin ${context.enemyHp} HP.`,
+              `End of turn: ${hpLine(context.playerHp, context.enemyHp)}`,
             ],
           },
         }),
@@ -363,23 +369,28 @@ export const gameMachine = gameAgentSetup.createMachine({
 const defaultExecutors = createAiSdkExecutors({ models });
 
 /**
- * Drives one combat turn with `runAgentStream`, reporting each state the
- * machine enters as it goes. Executors are injected so tests drive the turn
- * with mocks; the direct run uses the AI SDK set above.
+ * Drives one combat turn with the agent loop, reporting each state the machine
+ * enters as it goes. The loop is the host's own code: this is where a UI, a
+ * log line or a server-sent event would go. Executors are injected so tests
+ * drive the turn with mocks; the direct run uses the AI SDK set above.
  */
 export async function runAiSdkGameTurn(
   input: { playerHp: number; enemyHp: number } = { playerHp: 20, enemyHp: 15 },
   onStep?: (value: StateValue) => void,
   executors: AgentRequestExecutors = defaultExecutors,
 ) {
-  for await (const event of runAgentStream(gameMachine, { input, executors })) {
-    if (event.kind === "transition") onStep?.(event.value);
-    if (event.kind === "done") return event.result.output;
-    if (event.kind === "idle" || event.kind === "error") {
-      throw new Error(`Game turn ended with ${event.kind}.`);
-    }
+  const runtime = createAgentRuntime(gameMachine, { executors });
+  let [state, effects] = await runtime.start({ input });
+  onStep?.(state.value);
+  await runtime.execute(effects);
+  for (let event; (event = await runtime.nextEvent()); ) {
+    [state, effects] = runtime.transition(state, event);
+    onStep?.(state.value);
+    await runtime.execute(effects);
   }
-  throw new Error("Game turn ended without a result.");
+  const result = await runtime.finish();
+  if (result.status === "done") return result.output;
+  throw new Error(`Game turn ended with ${result.status}.`);
 }
 
 export interface RunAiSdkHostOptions {

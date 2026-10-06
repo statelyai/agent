@@ -1,5 +1,5 @@
 import { createStore } from "@xstate/store";
-import type { ChatTurnResult, Turn } from "@/components/app-panel";
+import type { ChatTurnResult, Turn, TurnPartial } from "@/components/app-panel";
 import type { ChatIdle, Json } from "./machine-ui";
 import type { Selection } from "./selection";
 
@@ -47,7 +47,14 @@ type ShellEvents = {
     eventType?: string;
   };
   turnSettled: { epoch: number; id: number; result: AnyRunResult };
-  turnFailed: { epoch: number; id: number; message: string };
+  turnFailed: {
+    epoch: number;
+    id: number;
+    message: string;
+    cancelled?: boolean;
+    /** A cancelled turn's live transitions and streamed text, kept in the log. */
+    partial?: TurnPartial;
+  };
 };
 
 const themeStorageKey = "stately-agent-demo-theme";
@@ -158,7 +165,18 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
         return {
           ...context,
           turns: context.turns.map((turn) =>
-            turn.id === event.id ? { ...turn, status: "error", error: event.message } : turn,
+            turn.id === event.id
+              ? event.cancelled
+                ? {
+                    ...turn,
+                    status: "cancelled",
+                    ...(event.partial &&
+                    (event.partial.steps.length > 0 || event.partial.text.length > 0)
+                      ? { partial: event.partial }
+                      : {}),
+                  }
+                : { ...turn, status: "error", error: event.message }
+              : turn,
           ),
         };
       },

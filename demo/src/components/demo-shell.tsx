@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useSelector } from "@xstate/store-react";
-import { AppPanel, type TextPolicy, type Turn } from "@/components/app-panel";
-import { liveTraceStep, type TraceStep } from "@/lib/trace-view";
+import { AppPanel, type LiveText, type TextPolicy, type Turn } from "@/components/app-panel";
+import { traceSteps, type TraceStep } from "@/lib/trace-view";
 import { ExampleIntro, ScenarioIntro, type StarterAction } from "@/components/chat-intros";
 import { SiteHeader } from "@/components/site-header";
-import { VizPanel, type SystemMessage } from "@/components/viz-panel";
+import { VizPanel } from "@/components/viz-panel";
 import {
   declareExampleMachine,
   getExample,
@@ -17,13 +17,21 @@ import {
   type ExampleSummary,
   type InspectionInfo,
 } from "@/lib/example-library";
-import { humanizeEventType, missingKeyMessage, type RequiredKey } from "@/lib/machine-ui";
+import {
+  humanizeEventType,
+  missingKeyMessage,
+  textRouting,
+  type ChatIdle,
+  type RequiredKey,
+} from "@/lib/machine-ui";
 import {
   declareScenarioMachine,
   getApiKeyStatus,
   resumeScenario,
   startScenario,
 } from "@/lib/run-demo-agent";
+import type { TraceEntry } from "@/lib/agent-runner";
+import { readRunStream, type RunChunk } from "@/lib/run-stream";
 import { getScenario, scenarios, scenarioVizConfig } from "@/lib/scenarios";
 import type { Selection } from "@/lib/selection";
 import {
@@ -100,11 +108,6 @@ export function DemoShell() {
     : null;
   const activeMachine = exampleDetail?.machines[machineIndex] ?? exampleDetail?.machines[0] ?? null;
 
-  // A resumed turn reuses the session's inspector, so no init/actorRegistered
-  // arrives for the root — remember its session id across turns;
-  // a reset or a new selection forgets it so replayed frames are not misread.
-  const lastRootSessionId = useRef<string | null>(null);
-
   // Apply the persisted theme attribute on mount (SSR renders light).
   useEffect(() => {
     persistTheme(store.getSnapshot().context.theme);
@@ -120,7 +123,6 @@ export function DemoShell() {
       const current = store.getSnapshot().context.selection;
       if (fromHash && (fromHash.type !== current.type || fromHash.id !== current.id)) {
         store.trigger.exampleSelected({ selection: fromHash });
-        lastRootSessionId.current = null;
       }
     }
     window.addEventListener("hashchange", onHashChange);
@@ -246,13 +248,12 @@ export function DemoShell() {
     // was showing, and the run's own inspection still lights the chart up.
     const ignore = () => {};
     if (inspectScenarioId) {
-      void declareScenarioMachine({ data: { scenarioId: inspectScenarioId } }).then(
-        onDeclared,
-        ignore,
-      );
+      void declareScenarioMachine({
+        data: { scenarioId: inspectScenarioId, room: inspection.roomId },
+      }).then(onDeclared, ignore);
     } else if (inspectExampleId && inspectExportName) {
       void declareExampleMachine({
-        data: { id: inspectExampleId, exportName: inspectExportName },
+        data: { id: inspectExampleId, exportName: inspectExportName, room: inspection.roomId },
       }).then(onDeclared, ignore);
     }
     return () => {
@@ -265,79 +266,69 @@ export function DemoShell() {
   // The controller's signal rides the server-fn request; aborting it (Cancel,
   // navigation) tears down the HTTP request, whose signal the server passes
   // into `runAgent` — so cancellation actually stops server-side model calls.
-  // The live feed mirrors the inspection relay (via VizPanel) into TraceSteps
-  // so the chat's transition log fills in while the run is still going.
+  // The live feed is the run's own stream: each trace entry the server records
+  // arrives as a step, so the chat's transition log fills in while the run is
+  // still going — and never with another session's run.
   const abortRef = useRef<AbortController | null>(null);
-  const liveRun = useRef<{ sessionId: string | null; startedAt: number } | null>(null);
+  // The live feed is mirrored in refs so a cancelled turn can keep what it
+  // showed: the settle callbacks run long after the render that created them.
+  const liveStepsRef = useRef<TraceStep[]>([]);
   const [liveSteps, setLiveSteps] = useState<TraceStep[]>([]);
+  const appendStep = useCallback((entry: TraceEntry) => {
+    const [step] = traceSteps([entry]);
+    if (!step) return;
+    liveStepsRef.current = [...liveStepsRef.current, step];
+    setLiveSteps(liveStepsRef.current);
+  }, []);
+  // Streamed text of the turn in flight, one lane per streaming request.
+  const liveTextRef = useRef<LiveText[]>([]);
+  const [liveText, setLiveText] = useState<LiveText[]>([]);
+  const appendChunk = useCallback((chunk: RunChunk) => {
+    const lanes = liveTextRef.current;
+    const index = lanes.findIndex((lane) => lane.key === chunk.key);
+    const lane = { key: chunk.key, call: chunk.call, label: chunk.label, text: chunk.delta };
+    let next: LiveText[];
+    if (index === -1) {
+      next = [...lanes, lane];
+    } else {
+      next = lanes.slice();
+      const previous = lanes[index]!;
+      // A new call of the same request (a redraft) replaces what it streamed before.
+      next[index] =
+        previous.call === chunk.call ? { ...previous, text: previous.text + chunk.delta } : lane;
+    }
+    liveTextRef.current = next;
+    setLiveText(next);
+  }, []);
 
+  const clearLive = () => {
+    liveStepsRef.current = [];
+    liveTextRef.current = [];
+    setLiveSteps([]);
+    setLiveText([]);
+  };
   const beginRun = () => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
-    liveRun.current = { sessionId: lastRootSessionId.current, startedAt: Date.now() };
-    setLiveSteps([]);
+    clearLive();
     return controller.signal;
   };
   const endRun = () => {
     abortRef.current = null;
-    liveRun.current = null;
-    setLiveSteps([]);
+    clearLive();
   };
   const cancelRun = () => abortRef.current?.abort();
 
-  const handleSystemMessage = useCallback((message: SystemMessage) => {
-    const run = liveRun.current;
-    if (!run) return; // only observe while a turn is in flight
-    if (message.type === "@statelyai.system.init") {
-      const root = Array.isArray(message.actors)
-        ? [...message.actors].reverse().find((actor) => actor.parentSessionId == null)
-        : null;
-      // A fresh system means a fresh run — drop any replayed leftovers.
-      if (root) {
-        run.sessionId = root.sessionId;
-        lastRootSessionId.current = root.sessionId;
-        setLiveSteps([]);
-      }
-      return;
-    }
-    if (
-      message.type === "@statelyai.system.actorRegistered" &&
-      message.parentSessionId == null &&
-      typeof message.sessionId === "string"
-    ) {
-      run.sessionId = message.sessionId;
-      lastRootSessionId.current = message.sessionId;
-      setLiveSteps([]);
-      return;
-    }
-    if (message.type === "@statelyai.system.actorSnapshot" && message.sessionId === run.sessionId) {
-      const snapshot = message.snapshot as
-        | { value?: unknown; context?: unknown }
-        | null
-        | undefined;
-      const step = liveTraceStep(
-        message.event,
-        snapshot?.value,
-        Date.now() - run.startedAt,
-        snapshot?.context,
-      );
-      if (step) setLiveSteps((previous) => [...previous, step]);
-    }
-  }, []);
-
   const resetRun = () => {
-    lastRootSessionId.current = null;
     store.trigger.runReset();
   };
 
   const select = (next: Selection) => {
-    lastRootSessionId.current = null;
     store.trigger.exampleSelected({ selection: next });
   };
 
   const selectMachine = (index: number) => {
-    lastRootSessionId.current = null;
     store.trigger.machineSelected({ index });
   };
 
@@ -347,20 +338,28 @@ export function DemoShell() {
   };
 
   const fail = (epoch: number, turnId: number, error: unknown) => {
-    endRun();
     // An aborted fetch is the user's Cancel, not a failure worth a stack trace.
-    const aborted = error instanceof DOMException && error.name === "AbortError";
-    const message = aborted
-      ? "Run cancelled."
-      : error instanceof Error
-        ? error.message
-        : "Agent request failed";
-    store.trigger.turnFailed({ epoch, id: turnId, message });
+    // What the run showed before the stop stays in its turn.
+    const cancelled = error instanceof DOMException && error.name === "AbortError";
+    const partial = cancelled
+      ? { steps: liveStepsRef.current, text: liveTextRef.current }
+      : undefined;
+    endRun();
+    const message = error instanceof Error ? error.message : "Agent request failed";
+    store.trigger.turnFailed({ epoch, id: turnId, message, cancelled, partial });
   };
 
   const loading = turns.some((turn) => turn.status === "loading");
   const started = turns.length > 0;
   const interpretMode = isScenario && scenario.id === "approval" && pendingIdle !== null;
+  const routing = pendingIdle ? textRouting(pendingIdle) : "none";
+  // Where Jev chooses, the placeholder cannot promise one event.
+  const idlePlaceholder =
+    routing === "direct" && pendingIdle?.textEvent
+      ? `Message becomes ${pendingIdle.textEvent.type} (${pendingIdle.textEvent.field})`
+      : routing === "interpret"
+        ? "Type a reply, or pick an action above…"
+        : null;
 
   /** Appends a turn and returns its id + the epoch it belongs to. */
   const pushTurn = (
@@ -393,18 +392,24 @@ export function DemoShell() {
         id: selection.type === "example" ? selection.id : "",
         exportName: activeMachine.exportName,
         input: machineInput,
+        room: inspection?.roomId,
       },
       signal,
-    }).then(
-      (result) => {
-        settle(epoch, id, result);
-        const textEvent = result?.status === "idle" ? result.idle?.textEvent : null;
-        if (followUpText && textEvent && store.getSnapshot().context.epoch === epoch) {
-          sendEvent({ type: textEvent.type, [textEvent.field]: followUpText });
-        }
-      },
-      (error) => fail(epoch, id, error),
-    );
+    })
+      .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+      .then(
+        (result) => {
+          settle(epoch, id, result);
+          if (
+            followUpText &&
+            result?.status === "idle" &&
+            store.getSnapshot().context.epoch === epoch
+          ) {
+            sendIdleText(followUpText, result.idle ?? null);
+          }
+        },
+        (error) => fail(epoch, id, error),
+      );
   };
 
   /**
@@ -417,9 +422,53 @@ export function DemoShell() {
     const signal = beginRun();
     const { id, epoch } = pushTurn(label, "user", "loading");
     void runExample({
-      data: { id: selection.type === "example" ? selection.id : "", exportName },
+      data: {
+        id: selection.type === "example" ? selection.id : "",
+        exportName,
+        room: inspection?.roomId,
+      },
       signal,
-    }).then(
+    })
+      .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+      .then(
+        (result) => settle(epoch, id, result),
+        (error) => fail(epoch, id, error),
+      );
+  };
+
+  /**
+   * Resumes the idle machine (either run path) with a typed event, a host
+   * timer firing, or free text for the server to interpret, as one new turn.
+   */
+  const resume = (
+    event: { type: string; [key: string]: unknown } | { kind: "interpret"; text: string },
+    turn: { label: string; role: Turn["role"]; eventType?: string },
+  ) => {
+    const { idleSnapshot } = store.getSnapshot().context;
+    if (!idleSnapshot || loading) return;
+    const signal = beginRun();
+    const { id, epoch } = pushTurn(turn.label, turn.role, "loading", turn.eventType);
+    const deliver: Promise<AnyRunResult> = isScenario
+      ? resumeScenario({
+          data: {
+            scenarioId: scenario.id,
+            snapshot: idleSnapshot as never,
+            event,
+            room: inspection?.roomId,
+          },
+          signal,
+        }).then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+      : resumeExample({
+          data: {
+            id: selection.type === "example" ? selection.id : "",
+            exportName: activeMachine?.exportName ?? "",
+            snapshot: idleSnapshot as never,
+            event,
+            room: inspection?.roomId,
+          },
+          signal,
+        }).then((stream) => readRunStream(stream, appendChunk, signal, appendStep));
+    void deliver.then(
       (result) => settle(epoch, id, result),
       (error) => fail(epoch, id, error),
     );
@@ -427,8 +476,7 @@ export function DemoShell() {
 
   /** Delivers a typed event to the idle machine (either run path). */
   const sendEvent = (event: { type: string; [key: string]: unknown }) => {
-    const { idleSnapshot, pendingIdle: idle } = store.getSnapshot().context;
-    if (!idleSnapshot || loading) return;
+    const idle = store.getSnapshot().context.pendingIdle;
     const descriptor = idle?.events.find((candidate) => candidate.type === event.type);
     const { type: _type, ...payload } = event;
     // A message typed into the composer reads as what was said, not as
@@ -443,67 +491,75 @@ export function DemoShell() {
       : "";
     const label =
       spokenText ?? `${descriptor?.label ?? humanizeEventType(event.type)}${payloadNote}`;
-    const signal = beginRun();
-    const { id, epoch } = pushTurn(label, spokenText ? "user" : "action", "loading", event.type);
-    const deliver = isScenario
-      ? resumeScenario({
-          data: { scenarioId: scenario.id, snapshot: idleSnapshot as never, event },
-          signal,
-        })
-      : resumeExample({
-          data: {
-            id: selection.type === "example" ? selection.id : "",
-            exportName: activeMachine?.exportName ?? "",
-            snapshot: idleSnapshot as never,
-            event,
-          },
-          signal,
-        });
-    void deliver.then(
-      (result) => settle(epoch, id, result as AnyRunResult),
-      (error) => fail(epoch, id, error),
-    );
+    resume(event, { label, role: spokenText ? "user" : "action", eventType: event.type });
   };
 
-  /** Free chat text: start a run, map to the idle text event, or mark ignored. */
+  // ─── host-owned timers ───
+  //
+  // A run waiting on a deadline settles idle with the timers it armed; the
+  // browser is their scheduler. Each fires by resuming with the timer event,
+  // unless the person acts first: sending anything clears `pendingIdle` (and
+  // with it these timeouts), and the next idle result reports whatever is
+  // still pending. Reset, selection changes and unmounting clear them too.
+  const resumeRef = useRef(resume);
+  resumeRef.current = resume;
+  useEffect(() => {
+    // Past `setTimeout`'s 32-bit range a delay would fire at once; a timer
+    // that far out is left to fire never rather than immediately.
+    const timers = (pendingIdle?.timers ?? []).filter((timer) => timer.delay <= 2 ** 31 - 1);
+    const handles = timers.map((timer) =>
+      window.setTimeout(
+        () =>
+          resumeRef.current(
+            { type: "xstate.timer", id: timer.id },
+            { label: "Timer fired", role: "action", eventType: "xstate.timer" },
+          ),
+        timer.delay,
+      ),
+    );
+    return () => handles.forEach((handle) => window.clearTimeout(handle));
+  }, [pendingIdle]);
+
+  /**
+   * Free text for the idle machine. When its text event is the only thing
+   * text can mean, it is sent as that; when several readings are on offer
+   * (buttons, the text event among them), the server reads it (Jev) as one of
+   * them, or says it couldn't. False when nothing can carry text.
+   */
+  const sendIdleText = (text: string, idle: ChatIdle | null): boolean => {
+    const routing = idle ? textRouting(idle) : "none";
+    if (routing === "direct" && idle?.textEvent) {
+      sendEvent({ type: idle.textEvent.type, [idle.textEvent.field]: text });
+      return true;
+    }
+    if (routing === "interpret") {
+      resume({ kind: "interpret", text }, { label: text, role: "user" });
+      return true;
+    }
+    return false;
+  };
+
+  /** Free chat text: start a run, send or interpret it for the idle machine, or mark ignored. */
   const submit = (raw: string) => {
     const text = raw.trim();
     if (!text || loading) return;
     const { idleSnapshot } = store.getSnapshot().context;
-
-    // Approval scenario while idle → model-interpreted free-text review.
-    if (interpretMode && idleSnapshot) {
-      const signal = beginRun();
-      const { id, epoch } = pushTurn(text, "user", "loading");
-      void resumeScenario({
-        data: {
-          scenarioId: scenario.id,
-          snapshot: idleSnapshot as never,
-          event: { kind: "interpret", text },
-        },
-        signal,
-      }).then(
-        (result) => settle(epoch, id, result),
-        (error) => fail(epoch, id, error),
-      );
-      return;
-    }
-
-    // Idle with a text-mapped event → typed event carrying the message.
-    if (pendingIdle?.textEvent && idleSnapshot) {
-      sendEvent({ type: pendingIdle.textEvent.type, [pendingIdle.textEvent.field]: text });
-      return;
-    }
+    if (idleSnapshot && sendIdleText(text, pendingIdle)) return;
 
     // Not started → the prompt starts the run.
     if (!started) {
       if (isScenario) {
         const signal = beginRun();
         const { id, epoch } = pushTurn(text, "user", "loading");
-        void startScenario({ data: { scenarioId: scenario.id, prompt: text }, signal }).then(
-          (result) => settle(epoch, id, result),
-          (error) => fail(epoch, id, error),
-        );
+        void startScenario({
+          data: { scenarioId: scenario.id, prompt: text, room: inspection?.roomId },
+          signal,
+        })
+          .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+          .then(
+            (result) => settle(epoch, id, result),
+            (error) => fail(epoch, id, error),
+          );
       } else if (activeMachine?.promptField) {
         startExampleRun(text, { [activeMachine.promptField]: text });
       }
@@ -531,9 +587,7 @@ export function DemoShell() {
         visible: true,
         placeholder: interpretMode
           ? "Say “looks good” or “that’s no good”…"
-          : pendingIdle?.textEvent
-            ? `Message becomes ${pendingIdle.textEvent.type} (${pendingIdle.textEvent.field})`
-            : scenario.placeholder,
+          : (idlePlaceholder ?? scenario.placeholder),
         submitLabel: interpretMode ? "Interpret review" : started ? "Send" : scenario.startLabel,
       };
     }
@@ -552,11 +606,8 @@ export function DemoShell() {
     }
     return {
       visible: true,
-      placeholder: pendingIdle?.textEvent
-        ? `Message becomes ${pendingIdle.textEvent.type} (${pendingIdle.textEvent.field})`
-        : started
-          ? "Send a message…"
-          : `${activeMachine.promptField}…`,
+      placeholder:
+        idlePlaceholder ?? (started ? "Send a message…" : `${activeMachine.promptField}…`),
       submitLabel: started ? "Send" : "Start run",
     };
   })();
@@ -625,6 +676,7 @@ export function DemoShell() {
       starters={starters}
       turns={turns}
       liveSteps={liveSteps}
+      liveText={liveText}
       pendingIdle={pendingIdle}
       startForm={startForm}
       onSubmit={submit}
@@ -683,7 +735,6 @@ export function DemoShell() {
       theme={theme}
       liveWs={liveWs}
       liveUrl={liveUrl}
-      onSystemMessage={handleSystemMessage}
     />
   );
 

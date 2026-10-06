@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import {
   canReach,
   explorePaths,
@@ -137,18 +137,29 @@ describe("verification", () => {
       return { event: { type, reasoning: `scripted ${type}` } };
     };
 
-    const idle = await runAgent(refundMachine, { input: LARGE, executors: { decide } });
+    const idle = await runToQuiescence(
+      createAgentRuntime(refundMachine, {
+        executors: { decide },
+      }),
+      {
+        input: LARGE,
+      },
+    );
     expect(idle.status).toBe("idle");
     if (idle.status !== "idle") throw new Error("expected idle");
     expect(idle.snapshot.value).toBe("approving");
     expect(requests[1]!.attempts.at(-1)!.failure).toBe("rejected-by-guard");
 
     // The human approves; only now can the payout happen.
-    const done = await runAgent(refundMachine, {
-      snapshot: idle.snapshot,
-      event: { type: "APPROVE", approver: "ops" },
-      executors: { decide },
-    });
+    const done = await runToQuiescence(
+      createAgentRuntime(refundMachine, {
+        executors: { decide },
+      }),
+      {
+        snapshot: idle.snapshot,
+        event: { type: "APPROVE", approver: "ops" },
+      },
+    );
     expect(done.status).toBe("done");
     if (done.status !== "done") throw new Error("expected done");
     expect(done.output.outcome).toBe("issued");
@@ -156,10 +167,14 @@ describe("verification", () => {
   });
 
   test("a small refund runs straight through without a human", async () => {
-    const result = await runAgent(refundMachine, {
-      input: SMALL,
-      executors: { decide: scriptedDecide(["ISSUE"]) },
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(refundMachine, {
+        executors: { decide: scriptedDecide(["ISSUE"]) },
+      }),
+      {
+        input: SMALL,
+      },
+    );
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output.outcome).toBe("issued");

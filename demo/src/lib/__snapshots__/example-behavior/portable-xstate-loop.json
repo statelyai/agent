@@ -1,0 +1,29 @@
+{
+  "portable agent machines": [
+    {
+      "sent": "start {\"topic\":\"portable agent machines\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"drafting\"",
+        "transition xstate.done.actor -> \"reviewing\""
+      ],
+      "response": "Mock reply to: Draft a release note about portable agent machines.",
+      "idle": {
+        "prompt": "Approve the drafted release notes to finish.",
+        "events": [
+          "APPROVE"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"reviewing\"",
+        "transition APPROVE -> \"done\""
+      ],
+      "response": "Mock reply to: Draft a release note about portable agent machines."
+    }
+  ]
+}

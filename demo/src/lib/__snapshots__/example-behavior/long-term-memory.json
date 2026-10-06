@@ -1,0 +1,455 @@
+{
+  "Empty store — every fact you tell it is new": [
+    {
+      "sent": "start {\"userId\":\"demo\",\"memories\":[]}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 0 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "**Reply**\n\nmock reply\n\n**Memories**\n\n- mock newMemories0",
+      "idle": {
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "**Recalled**\n\n- mock newMemories0",
+      "idle": {
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 1 memory about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    }
+  ],
+  "Returning user — already knows Priya's name and preferences": [
+    {
+      "sent": "start {\"userId\":\"demo\",\"memories\":[\"The user's name is Priya.\",\"Priya prefers short answers.\",\"Priya is vegetarian.\",\"Priya is training for a half marathon in October.\"]}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 4 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "**Reply**\n\nmock reply\n\n**Memories**\n\n- The user's name is Priya.\n- Priya prefers short answers.\n- Priya is vegetarian.\n- Priya is training for a half marathon in October.\n- mock newMemories0\n\n**Recalled**\n\n- Priya is training for a half marathon in October.\n- Priya is vegetarian.\n- Priya prefers short answers.",
+      "idle": {
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "**Recalled**\n\n- mock newMemories0\n- Priya is training for a half marathon in October.\n- Priya is vegetarian.",
+      "idle": {
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 5 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    }
+  ],
+  "Store at the 20-fact cap — new facts evict the oldest": [
+    {
+      "sent": "start {\"userId\":\"demo\",\"memories\":[\"The user's name is Sam.\",\"Sam lives in Lisbon.\",\"Sam works as a nurse on night shifts.\",\"Sam prefers answers in bullet points.\",\"Sam is allergic to peanuts.\",\"Sam has a cat named Miso.\",\"Sam is learning Portuguese.\",\"Sam runs on weekday mornings.\",\"Sam's partner is called Alex.\",\"Sam drives an electric car.\",\"Sam dislikes horror movies.\",\"Sam's birthday is in March.\",\"Sam is saving for a trip to Japan.\",\"Sam plays the guitar.\",\"Sam drinks tea, not coffee.\",\"Sam's sister lives in Porto.\",\"Sam uses a Linux laptop.\",\"Sam is vegetarian.\",\"Sam volunteers at an animal shelter.\",\"Sam wants reminders kept short.\"]}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "**Reply**\n\nmock reply\n\n**Memories**\n\n- Sam lives in Lisbon.\n- Sam works as a nurse on night shifts.\n- Sam prefers answers in bullet points.\n- Sam is allergic to peanuts.\n- Sam has a cat named Miso.\n- Sam is learning Portuguese.\n- Sam runs on weekday mornings.\n- Sam's partner is called Alex.\n- Sam drives an electric car.\n- Sam dislikes horror movies.\n- Sam's birthday is in March.\n- Sam is saving for a trip to Japan.\n- Sam plays the guitar.\n- Sam drinks tea, not coffee.\n- Sam's sister lives in Porto.\n- Sam uses a Linux laptop.\n- Sam is vegetarian.\n- Sam volunteers at an animal shelter.\n- Sam wants reminders kept short.\n- mock newMemories0\n\n**Recalled**\n\n- Sam wants reminders kept short.\n- Sam volunteers at an animal shelter.\n- Sam is vegetarian.",
+      "idle": {
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "**Recalled**\n\n- mock newMemories0\n- Sam wants reminders kept short.\n- Sam volunteers at an animal shelter.",
+      "idle": {
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    },
+    {
+      "sent": "{\"type\":\"MESSAGE\",\"text\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingMessage\"",
+        "transition MESSAGE -> \"recalling\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"awaitingMessage\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "The store holds 20 memories about you. Send a message, or end the session.",
+        "events": [
+          "MESSAGE",
+          "END_SESSION"
+        ],
+        "textEvent": "MESSAGE.text"
+      }
+    }
+  ]
+}

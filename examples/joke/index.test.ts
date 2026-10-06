@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { runAgent } from "@statelyai/agent";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import type { AgentRequestExecutor, ChosenEvent } from "@statelyai/agent";
 import { createMockJudge } from "../mock-judge.js";
 import { JOKE_LEVELS, createRateJoke, jokeMachine } from "./index.js";
@@ -54,11 +54,15 @@ describe("joke-teller", () => {
   test("always takes one improvement pass, even when the first joke rates well", async () => {
     const mock = createJokeExecutors({ levels: [3, 4], decision: "END" });
 
-    const result = await runAgent(jokeMachine, {
-      input: { topic: "penguins" },
-      executors: mock.executors,
-      actors: mock.actors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(jokeMachine, {
+        executors: mock.executors,
+        actors: mock.actors,
+      }),
+      {
+        input: { topic: "penguins" },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -89,11 +93,15 @@ describe("joke-teller", () => {
   test("the decision event drives the loop: TELL_ANOTHER re-tells, then the joke cap stops it", async () => {
     const mock = createJokeExecutors({ levels: [1, 1, 3], decision: "TELL_ANOTHER" });
 
-    const result = await runAgent(jokeMachine, {
-      input: { topic: "state machines" },
-      executors: mock.executors,
-      actors: mock.actors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(jokeMachine, {
+        executors: mock.executors,
+        actors: mock.actors,
+      }),
+      {
+        input: { topic: "state machines" },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -108,11 +116,15 @@ describe("joke-teller", () => {
   test("the model can end the loop after the improvement pass", async () => {
     const mock = createJokeExecutors({ levels: [1, 3], decision: "END" });
 
-    const result = await runAgent(jokeMachine, {
-      input: { topic: "state machines" },
-      executors: mock.executors,
-      actors: mock.actors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(jokeMachine, {
+        executors: mock.executors,
+        actors: mock.actors,
+      }),
+      {
+        input: { topic: "state machines" },
+      },
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -123,25 +135,29 @@ describe("joke-teller", () => {
   });
 
   test("a rating failure ends in the failed final state, not a done with an empty joke", async () => {
-    const result = await runAgent(jokeMachine, {
-      input: { topic: "state machines" },
-      executors: {
-        streamText: async () => ({ result: "A joke about state machines." }),
-        // Bound because the machine declares a decision state; never reached here.
-        decide: async () => {
-          throw new Error("unreachable");
+    const result = await runToQuiescence(
+      createAgentRuntime(jokeMachine, {
+        executors: {
+          streamText: async () => ({ result: "A joke about state machines." }),
+          // Bound because the machine declares a decision state; never reached here.
+          decide: async () => {
+            throw new Error("unreachable");
+          },
         },
+        actors: {
+          rateJoke: createRateJoke(
+            createMockJudge({
+              rating: () => {
+                throw new Error("rater offline");
+              },
+            }).model,
+          ),
+        },
+      }),
+      {
+        input: { topic: "state machines" },
       },
-      actors: {
-        rateJoke: createRateJoke(
-          createMockJudge({
-            rating: () => {
-              throw new Error("rater offline");
-            },
-          }).model,
-        ),
-      },
-    });
+    );
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -154,11 +170,15 @@ describe("joke-teller", () => {
   test("rateJoke asks Jev one five-level score over the joke and maps it to 1-10", async () => {
     const mock = createJokeExecutors({ levels: [0, 2], decision: "END" });
 
-    const result = await runAgent(jokeMachine, {
-      input: { topic: "penguins" },
-      executors: mock.executors,
-      actors: mock.actors,
-    });
+    const result = await runToQuiescence(
+      createAgentRuntime(jokeMachine, {
+        executors: mock.executors,
+        actors: mock.actors,
+      }),
+      {
+        input: { topic: "penguins" },
+      },
+    );
 
     expect(mock.jevCalls.map((call) => call.state)).toEqual([
       { joke: "A joke about penguins." },

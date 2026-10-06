@@ -1,0 +1,16 @@
+{
+  "name": "xstate-v5-json",
+  "title": "XState v5-style JSON config as an agent",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "New example for bringing an existing XState v5 machine config",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["XState v5", "Stately Studio exports"],
+    "purpose": "Runs a v5-style machine kept as JSON (string targets, named actions and guards, invoke by src name) on XState v6: the code supplies the model request, input, assigns and guards by name, and the agent runtime runs it."
+  },
+  "starters": [],
+  "manual": true
+}

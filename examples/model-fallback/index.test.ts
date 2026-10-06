@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { type AgentTextRequest } from "@statelyai/agent";
 import { lintAgentMachine } from "@statelyai/agent/testing";
-import { createMockModelExecutors } from "../mock-model.js";
+import { createMockModelExecutors, type MockTextEntry } from "../mock-model.js";
 import {
   KNOWN_CITIES,
   MAX_FALLBACKS,
@@ -13,9 +13,9 @@ import {
 const call = (...cities: string[]) => ({ tool: "get_weather", cities });
 
 /** Mock ONLY the model, keyed by request name; validator and tool run for real. */
-function scripted(text: Record<string, unknown[]>) {
+function scripted(text: Record<string, MockTextEntry[]>) {
   return createMockModelExecutors({
-    text: { answerFromWeather: [{ answer: "Mild everywhere." }], ...text },
+    text: { answerFromWeather: [{ lines: ["Mild everywhere."] }], ...text },
   });
 }
 
@@ -51,7 +51,7 @@ test("quick call rejected → strong model's call validates", async () => {
   });
 
   expect(result).toMatchObject({ outcome: "done", modelUsed: "strong", fallbacks: 1 });
-  expect(result.toolCalls.split("\n")).toEqual([
+  expect(result.toolCalls.split("\n\n")).toEqual([
     "quick: get_weather(SF, Boston) rejected (get_weather rejects cities: SF)",
     "strong: get_weather(San Francisco, Boston) accepted",
   ]);
@@ -70,7 +70,10 @@ test("quick call rejected → strong model's call validates", async () => {
 });
 
 test("both rungs rejected → failed after MAX_FALLBACKS", async () => {
-  const executors = scripted({ draftToolCall: [call()], draftToolCallStrong: [call("Atlantis")] });
+  const executors = scripted({
+    draftToolCall: [call("Gotham")],
+    draftToolCallStrong: [call("Atlantis")],
+  });
   const result = await runModelFallbackExample({ generateText: executors.generateText });
 
   expect(result).toMatchObject({
@@ -80,7 +83,7 @@ test("both rungs rejected → failed after MAX_FALLBACKS", async () => {
   });
   expect(result.answer).toContain("Both models' calls were rejected.");
   expect(result.toolCalls).toContain(
-    "quick: get_weather() rejected (get_weather rejects cities: (none))",
+    "quick: get_weather(Gotham) rejected (get_weather rejects cities: Gotham)",
   );
   expect(result.toolCalls).toContain("strong: get_weather(Atlantis) rejected");
   expect(result.progress).not.toContain("runningTool");
@@ -106,6 +109,39 @@ test("a quick-model error falls back; a strong-model error is failed", async () 
   });
   expect(failed.outcome).toBe("failed");
   expect(failed.answer).toContain("draftToolCallStrong failed");
+});
+
+test("an empty city list is a malformed call: the schema requires at least one city", async () => {
+  let sentSchema: unknown;
+  const executors = scripted({
+    // Records the JSON schema the provider was sent, then answers with no cities.
+    draftToolCall: [
+      (_request, options) => {
+        sentSchema = options.responseFormat?.type === "json" && options.responseFormat.schema;
+        return call();
+      },
+    ],
+    draftToolCallStrong: [call("Tokyo")],
+  });
+  const result = await runModelFallbackExample({ generateText: executors.generateText });
+
+  // The model is told up front: the schema it sees says at least one city.
+  expect(JSON.stringify(sentSchema)).toContain('"minItems":1');
+  // An empty call never reaches the tool; it fails parsing and falls back.
+  expect(result).toMatchObject({ outcome: "done", modelUsed: "strong", fallbacks: 1 });
+  expect(result.toolCalls).toContain("quick: (no call) rejected (draftToolCall failed");
+  expect(result.toolCalls).not.toContain("get_weather()");
+});
+
+test("the answer puts each line in its own paragraph", async () => {
+  const executors = scripted({
+    draftToolCall: [call("San Francisco", "Boston")],
+    answerFromWeather: [{ lines: ["San Francisco: 60F, foggy.", "Boston: 48F, clear and windy."] }],
+  });
+  const result = await runModelFallbackExample({ generateText: executors.generateText });
+
+  // A blank line between lines: Markdown collapses a single newline into a space.
+  expect(result.answer).toBe("San Francisco: 60F, foggy.\n\nBoston: 48F, clear and windy.");
 });
 
 test("starters behave as their labels advertise", async () => {

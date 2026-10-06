@@ -24,6 +24,7 @@ const REFUND_LIMIT = 100;
 const ORDERS: Record<string, { customer: string; total: number; item: string }> = {
   A1001: { customer: "Ada Lovelace", total: 240, item: "Standing desk" },
   B2002: { customer: "Alan Turing", total: 60, item: "Mechanical keyboard" },
+  "ORD-1234": { customer: "Grace Hopper", total: 89, item: "Noise-cancelling headphones" },
 };
 
 type Phase = "triage" | "resolving" | "awaiting_approval" | "done";

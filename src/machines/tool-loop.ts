@@ -60,9 +60,8 @@ const outputSchema = objectSchema<{ result: unknown }>({ result: jsonAny }, ["re
  *   maxSteps: 5,
  * });
  *
- * const result = await runAgent(machine, {
+ * const result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
  *   input: { prompt: "What is 42 * 17?" },
- *   executors,
  * });
  * // Snapshots and log entries carry machine.version ("1") automatically.
  * ```
@@ -79,7 +78,7 @@ export function createToolLoopMachine(config: CreateToolLoopMachineConfig): Tool
   const machine = agentSetup.createMachine({
     id: "tool-loop",
     // The machine's own version (XState `createMachine({ version })`), stamped
-    // by runAgent onto snapshots/logs instead of the structural hash. Bumped
+    // by the runtime onto snapshots/logs instead of the structural hash. Bumped
     // only on a topology change a persisted snapshot could not resume into.
     version: "1",
     context: ({ input }) => ({ prompt: input.prompt, result: null }),

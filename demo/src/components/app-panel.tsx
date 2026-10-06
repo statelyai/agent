@@ -1,4 +1,4 @@
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   AssistantRuntimeProvider,
   type AppendMessage,
@@ -27,10 +27,18 @@ export type Turn = {
   input: string;
   role: "user" | "action";
   eventType?: string;
-  status: "loading" | "ready" | "error" | "ignored";
+  status: "loading" | "ready" | "error" | "ignored" | "cancelled";
   result?: ChatTurnResult;
   error?: string;
+  /** What a cancelled run showed before the stop: its live transitions and streamed text. */
+  partial?: TurnPartial;
 };
+
+/** One streaming request's text so far, while its turn is in flight. */
+export type LiveText = { key: string; call: number; label: string; text: string };
+
+/** The live feed of a turn that did not settle, kept so a Cancel does not erase it. */
+export type TurnPartial = { steps: TraceStep[]; text: LiveText[] };
 
 export type TextPolicy = {
   visible: boolean;
@@ -46,6 +54,8 @@ type AppPanelProps = {
   turns: Turn[];
   /** Transitions streamed from live inspection while the last turn runs. */
   liveSteps: TraceStep[];
+  /** Streamed model text of the turn in flight. */
+  liveText: LiveText[];
   pendingIdle: ChatIdle | null;
   startForm: { schema: JsonObject; onStart: (values: Record<string, unknown>) => void } | null;
   onSubmit: (value: string) => void;
@@ -82,7 +92,19 @@ function transitionPartsFor(turnId: number, steps: TraceStep[], idPrefix: string
   }));
 }
 
-function messagesFromTurns(turns: Turn[], liveSteps: TraceStep[]): ThreadMessageLike[] {
+/** Live text parts: one lane alone reads as the reply; parallel lanes are labeled. */
+function liveTextParts(lanes: LiveText[]) {
+  return lanes.map((lane) => ({
+    type: "text" as const,
+    text: lanes.length === 1 ? lane.text : `**${lane.label}**\n\n${lane.text}`,
+  }));
+}
+
+export function messagesFromTurns(
+  turns: Turn[],
+  liveSteps: TraceStep[],
+  liveText: LiveText[],
+): ThreadMessageLike[] {
   return turns.flatMap((turn, index): ThreadMessageLike[] => {
     const isLast = index === turns.length - 1;
     const userMessage: ThreadMessageLike = {
@@ -94,15 +116,16 @@ function messagesFromTurns(turns: Turn[], liveSteps: TraceStep[]): ThreadMessage
     };
 
     if (turn.status === "loading") {
-      // Live inspection fills the transition log in as the run happens; the
-      // authoritative server trace replaces it at settle.
-      if (!isLast || liveSteps.length === 0) return [userMessage];
+      // Live inspection fills the transition log in, and streaming requests
+      // their text, as the run happens; the server's result replaces both at
+      // settle.
+      if (!isLast || (liveSteps.length === 0 && liveText.length === 0)) return [userMessage];
       return [
         userMessage,
         {
           id: `turn-${turn.id}-assistant`,
           role: "assistant",
-          content: transitionPartsFor(turn.id, liveSteps, "live"),
+          content: [...transitionPartsFor(turn.id, liveSteps, "live"), ...liveTextParts(liveText)],
           status: { type: "running" },
         },
       ];
@@ -120,13 +143,34 @@ function messagesFromTurns(turns: Turn[], liveSteps: TraceStep[]): ThreadMessage
       ];
     }
 
-    if (turn.status === "error") {
+    if (turn.status === "cancelled") {
+      // The work gathered before the stop stays: the transitions it made and
+      // what it streamed, then the note.
+      const partial = turn.partial ?? { steps: [], text: [] };
       return [
         userMessage,
         {
           id: `turn-${turn.id}-assistant`,
           role: "assistant",
-          content: turn.error ?? "Agent request failed.",
+          content: [
+            ...transitionPartsFor(turn.id, partial.steps, "cancelled"),
+            ...liveTextParts(partial.text),
+            { type: "text", text: "Run cancelled." },
+          ],
+          status: { type: "incomplete", reason: "cancelled" },
+        },
+      ];
+    }
+
+    if (turn.status === "error") {
+      // The error banner carries the message; repeating it as the body
+      // would show it twice.
+      return [
+        userMessage,
+        {
+          id: `turn-${turn.id}-assistant`,
+          role: "assistant",
+          content: [],
           status: {
             type: "incomplete",
             reason: "error",
@@ -143,21 +187,39 @@ function messagesFromTurns(turns: Turn[], liveSteps: TraceStep[]): ThreadMessage
       traceSteps(turn.result.trace),
       "transition",
     );
+    // An idle turn with nothing new to say leaves the words to the waiting box.
     const response =
       turn.result.response ||
-      (turn.result.status === "done" ? "The machine reached its final state." : "Ready.");
+      (turn.result.status === "done"
+        ? "The machine reached its final state."
+        : turn.result.status === "idle"
+          ? ""
+          : "Ready.");
+    const textParts = response ? [{ type: "text" as const, text: response }] : [];
+    if (transitionParts.length === 0 && textParts.length === 0) return [userMessage];
 
     return [
       userMessage,
       {
         id: `turn-${turn.id}-assistant`,
         role: "assistant",
-        content: [...transitionParts, { type: "text", text: response }],
+        content: [...transitionParts, ...textParts],
         status: { type: "complete", reason: "stop" },
         metadata: { custom: { state: resultState(turn.result) } },
       },
     ];
   });
+}
+
+/** Seconds until a pending host timer fires, ticking once a second. */
+function TimerNote({ dueAt }: { dueAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const handle = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(handle);
+  }, []);
+  const seconds = Math.max(0, Math.ceil((dueAt - now) / 1000));
+  return <span className="chat-waiting__state">Deadline in {seconds}s</span>;
 }
 
 // SSR paints the welcome chips seconds before React hydrates in dev; clicks
@@ -188,6 +250,7 @@ export function AppPanel({
   starters,
   turns,
   liveSteps,
+  liveText,
   pendingIdle,
   startForm,
   onSubmit,
@@ -202,8 +265,14 @@ export function AppPanel({
   const finished = Boolean(
     !pendingIdle && !loading && started && lastReady && lastReady.status !== "idle",
   );
-  const messages = messagesFromTurns(turns, liveSteps);
+  const messages = messagesFromTurns(turns, liveSteps, liveText);
   const hydrated = useHydrated();
+  // When the soonest pending host timer fires, fixed once per idle result.
+  const [timerDueAt, setTimerDueAt] = useState<number | null>(null);
+  useEffect(() => {
+    const delays = (pendingIdle?.timers ?? []).map((timer) => timer.delay);
+    setTimerDueAt(delays.length ? Date.now() + Math.min(...delays) : null);
+  }, [pendingIdle]);
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -235,15 +304,17 @@ export function AppPanel({
               onClick={starter.onStart}
               className="aui-thread-welcome-suggestion text-foreground hover:bg-muted border-border/60 h-auto max-w-full gap-1.5 rounded-xl border px-3.5 py-1.5 text-center text-sm font-normal whitespace-normal transition-colors sm:rounded-full"
             >
-              {starter.label}
+              {/* A starter can be a whole essay: clamped, so every starter
+                  fits above the composer; the full text is its title. */}
+              <span className="line-clamp-3" title={starter.label}>
+                {starter.label}
+              </span>
             </Button>
           ))}
         </div>
       ) : null}
       {startForm ? <StartFormCard schema={startForm.schema} onStart={startForm.onStart} /> : null}
-      <p className="chat-intro__hint">
-        The machine on the right updates with every reply.
-      </p>
+      <p className="chat-intro__hint">The machine on the right updates with every reply.</p>
     </div>
   );
 
@@ -258,6 +329,7 @@ export function AppPanel({
                 {pendingIdle.component ? (
                   <span className="chat-waiting__state">{pendingIdle.component}</span>
                 ) : null}
+                {timerDueAt !== null ? <TimerNote dueAt={timerDueAt} /> : null}
               </div>
               {pendingIdle.prompt ? (
                 <p className="chat-waiting__prompt">{pendingIdle.prompt}</p>

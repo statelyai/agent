@@ -10,7 +10,9 @@
  *     letting the window grow unchecked.
  *   - Compaction as a machine state: `compacting` invokes a `summarize` request
  *     over the stale messages (everything but the last `keepRecent`) plus the
- *     prior summary, folding them into one running summary. The state is
+ *     prior summary, folding them into one running summary. The kept tail
+ *     goes along as read-only context so the summary does not call an offer
+ *     "pending" when the next (kept) message already took it up. The state is
  *     inspectable — you can see in the state chart exactly when the agent
  *     compacts, and pause/persist there.
  *   - Summary-as-context: the `respond` request is rendered from the running
@@ -32,7 +34,7 @@
  * function of the context, so the window state is derived, never stored.
  *
  * Type `exit` to end; the machine outputs the final summary, recent messages,
- * and turn count.
+ * turn count, and a readable `transcript` (summary + recent turns as text).
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/context-compaction/index.ts
  */
@@ -47,7 +49,8 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  runAgent,
+  createAgentRuntime,
+  runToQuiescence,
   setupAgent,
   systemMessage,
   userMessage,
@@ -87,6 +90,8 @@ export const contextCompactionSchemas = createAgentSchemas({
     summary: z.string().nullable(),
     messages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
     turns: z.number(),
+    /** Readable conversation: the running summary, then the recent turns. */
+    transcript: z.string(),
   }),
 });
 
@@ -99,8 +104,23 @@ const SUMMARIZE_SYSTEM =
   "You compact conversation history for context-window management. Fold the " +
   "PRIOR SUMMARY and the OLD MESSAGES into one compact summary. Preserve " +
   "concrete facts, names, numbers, decisions made, and any open questions. " +
+  "The RECENT MESSAGES are kept verbatim and continue the conversation: do not " +
+  "summarize them, but use them to judge what is still open. An offer, request " +
+  "or question they follow up on is resolved, not pending or declined. " +
   "Drop pleasantries and redundant phrasing. Write it as terse notes, not " +
-  "prose. Return only the summary text.";
+  "prose, in English and plain words: no words from other languages or " +
+  "scripts, even where the conversation uses a technical term. Return only " +
+  "the summary text.";
+
+/** `role: text` lines — the shape both the summarizer and the transcript read. */
+function renderMessages(messages: AgentMessage[], separator = "\n"): string {
+  return messages
+    .map((message) => {
+      const text = typeof message.content === "string" ? message.content : "";
+      return `${message.role}: ${text}`;
+    })
+    .join(separator);
+}
 
 const agentSetup = setupAgent({
   schemas: contextCompactionSchemas,
@@ -130,6 +150,10 @@ const agentSetup = setupAgent({
         input: z.object({
           priorSummary: z.string().nullable(),
           staleMessages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
+          // The kept tail, as read-only context. Without it the summarizer
+          // only sees an offer ("want a code example?") and not the reply that
+          // took it up, and records the offer as never taken.
+          recentMessages: z.custom<AgentMessage[]>((v) => Array.isArray(v)),
         }),
         output: z.object({ summary: z.string() }),
       },
@@ -142,12 +166,10 @@ const agentSetup = setupAgent({
             : "PRIOR SUMMARY:\n(none yet)",
           "",
           "OLD MESSAGES:",
-          input.staleMessages
-            .map((message) => {
-              const text = typeof message.content === "string" ? message.content : "";
-              return `${message.role}: ${text}`;
-            })
-            .join("\n"),
+          renderMessages(input.staleMessages),
+          "",
+          "RECENT MESSAGES (kept verbatim; context only, do not summarize):",
+          renderMessages(input.recentMessages),
         ].join("\n"),
     },
   },
@@ -238,6 +260,7 @@ export const contextCompactionMachine = agentSetup.createMachine({
         input: ({ context }) => ({
           priorSummary: context.summary,
           staleMessages: context.messages.slice(0, -context.keepRecent),
+          recentMessages: context.messages.slice(-context.keepRecent),
         }),
         onDone: ({ context, output }) => ({
           target: "awaitingUser",
@@ -257,6 +280,7 @@ export const contextCompactionMachine = agentSetup.createMachine({
         summary: context.summary,
         messages: context.messages,
         turns: context.turns,
+        transcript: renderTranscript(context),
       }),
     },
   },
@@ -274,6 +298,14 @@ function describeWindow(context: {
     `${context.messages.length}/${context.maxMessages} messages` +
     (context.summary ? ", summary active" : ", no summary yet")
   );
+}
+
+/** The summary (if any) followed by the recent turns, as plain text. */
+function renderTranscript(context: { messages: AgentMessage[]; summary: string | null }): string {
+  const recent = renderMessages(context.messages, "\n\n");
+  if (!context.summary) return recent || "(no messages)";
+  // Blank lines between parts: Markdown folds a lone "\n" into a space.
+  return `Summary of earlier conversation:\n\n${context.summary}\n\nRecent messages:\n\n${recent}`;
 }
 
 /** The latest assistant reply, read off `messages` rather than mirrored into context. */
@@ -306,13 +338,18 @@ export async function runContextCompactionExample(options?: {
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
   };
 
-  let result = await runAgent(contextCompactionMachine, {
-    input: {
-      maxMessages: options?.input?.maxMessages ?? 8,
-      keepRecent: options?.input?.keepRecent ?? 4,
+  let result = await runToQuiescence(
+    createAgentRuntime(contextCompactionMachine, {
+      ...shared,
+    }),
+    {
+      input: {
+        maxMessages: options?.input?.maxMessages ?? 8,
+        keepRecent: options?.input?.keepRecent ?? 4,
+      },
+      ...shared,
     },
-    ...shared,
-  });
+  );
 
   // Each chat turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
@@ -321,11 +358,16 @@ export async function runContextCompactionExample(options?: {
       : options?.userMessages
         ? "exit"
         : await promptLine(`${idlePrompt(result.snapshot)}\n> `);
-    result = await runAgent(contextCompactionMachine, {
-      snapshot: result.persist(),
-      event: { type: "USER_MESSAGE", text },
-      ...shared,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(contextCompactionMachine, {
+        ...shared,
+      }),
+      {
+        snapshot: result.persist(),
+        event: { type: "USER_MESSAGE", text },
+        ...shared,
+      },
+    );
   }
 
   if (result.status !== "done") {
