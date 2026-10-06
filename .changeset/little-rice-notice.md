@@ -1,5 +1,5 @@
 ---
-"@statelyai/agent": patch
+"@statelyai/agent": minor
 ---
 
 Restore agent runs with XState's `execution.restore()` instead of sending a
