@@ -8,16 +8,17 @@ A runnable Worker that hosts the [email drafter](../email-drafter/agent-logic.ts
 
 Every turn — the first request, each POST, each WebSocket message — is one `runToQuiescence` call:
 
+<!-- runToQuiescence init arguments from src/run-agent.ts -->
+
 ```ts
 const result = await runToQuiescence(
   createAgentRuntime(machine, {
     store,
     threadId, // used only when the thread's log is empty
-    event,
     executors,
     onTransition: (snapshot) => broadcast(snapshot),
   }),
-  { input },
+  { input, event },
 );
 ```
 

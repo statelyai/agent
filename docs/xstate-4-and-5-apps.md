@@ -109,6 +109,8 @@ export async function POST(request: Request) {
 
 Persisted snapshots are JSON. `result.persist()` returns a plain JSON value, and `runToQuiescence(createAgentRuntime(machine, {}), { snapshot, event })` takes one back, so a paused run can be stored by the app, in its own database, and resumed by a later call into the package. Pair `snapshot` with the `event` that unblocks the idle state: a resume with `snapshot` alone starts the run back at the same wait.
 
+<!-- runToQuiescence snapshot/event resume from src/run-agent.ts; exercised by src/docs-integration-recipes.test.ts -->
+
 ```ts no-check
 // Inside the package: the app stores and returns the value, and never reads it.
 import type { Snapshot } from "xstate";
