@@ -135,11 +135,13 @@ export async function resumeGeneration(
 ): Promise<GenerationOutput> {
   const result = await runToQuiescence(
     createAgentRuntime(generationMachine(deps.lookup), {
-      // Opaque to the app, typed again here at the package boundary.
-      snapshot: snapshot as Snapshot<unknown>,
       executors: createAiSdkExecutors({ models }),
     }),
-    { event: { type: "ANSWER", answer } },
+    {
+      // Opaque to the app, typed again here at the package boundary.
+      snapshot: snapshot as Snapshot<unknown>,
+      event: { type: "ANSWER", answer },
+    },
   );
   if (result.status !== "done") {
     throw new Error(`Generation did not complete: ${result.status}`);
