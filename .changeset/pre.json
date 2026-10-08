@@ -48,6 +48,7 @@
     "executor-result-widening",
     "explicit-suspension-detection",
     "finish-reason-and-truncation",
+    "fix-agent-runtime-recipes",
     "from-config-host-guards",
     "from-config-suspension-predicate",
     "get-agent-schemas",

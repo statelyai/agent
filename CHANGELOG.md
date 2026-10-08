@@ -1,5 +1,11 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.28
+
+### Patch Changes
+
+- [#145](https://github.com/statelyai/agent/pull/145) [`da82c86`](https://github.com/statelyai/agent/commit/da82c86f973f56b880956f0ea6779534068c08d5) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Correct the Cloudflare and XState 4/5 integration recipes so incoming events and persisted snapshots are passed through the `runToQuiescence` initialization argument.
+
 ## 2.0.0-alpha.27
 
 ### Minor Changes
