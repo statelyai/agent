@@ -14,8 +14,8 @@
  *     in an `unverified` final state carrying the critique as the reason —
  *     the content is flagged, never returned as if trusted.
  *   - Both guardrails are JUDGMENTS, not generations. Each calls the AI SDK's
- *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model, which answers boolean questions over explicit state: the input check asks "is the question answerable?" and "is it
+ *     `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model, which answers boolean questions over explicit state: the input check asks "is the question answerable?" and "is it
  *     within the topic?" over `{ question, topic }`; the output check asks "is
  *     every claim correct?" and "does it answer the question?" over
  *     `{ question, answer }`. The machine compares each probability with an
@@ -41,7 +41,7 @@
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -58,10 +58,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Scope the input guardrail enforces. Hardcoded so input is just the question. */
 const DEFAULT_TOPIC = "geography";
@@ -80,16 +80,16 @@ export const OUTPUT_THRESHOLD = 0.7;
 
 /**
  * Input guardrail as a judgment: two independent boolean questions over the
- * question and the allowed topic, in one `experimental_evaluate` call. The
+ * question and the allowed topic, in one `experimental_decide` call. The
  * judge model is injected by tests and hosts; the default is Jev.
  */
-export function createValidateQuestion(model: Experimental_EvaluationModel = judgeModel) {
+export function createValidateQuestion(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { answerable: { probability: number }; inScope: { probability: number } } },
     { question: string; topic: string | null }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { question: input.question, topic: input.topic ?? "(any topic)" },
         questions: {
@@ -118,13 +118,13 @@ export function createValidateQuestion(model: Experimental_EvaluationModel = jud
 }
 
 /** Output guardrail as a judgment: correctness and responsiveness, one boolean question each. */
-export function createVerifyAnswer(model: Experimental_EvaluationModel = judgeModel) {
+export function createVerifyAnswer(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { correct: { probability: number }; responsive: { probability: number } } },
     { question: string; answer: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { question: input.question, answer: input.answer },
         questions: {

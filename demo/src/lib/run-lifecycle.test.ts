@@ -54,8 +54,8 @@ vi.mock("@ai-sdk/openai", async () => {
 });
 
 vi.mock("@ai-sdk/typesafe-ai", async () => {
-  const { genericEvaluationModel } = await import("./test-generic-models");
-  const provider = { evaluationModel: () => genericEvaluationModel() };
+  const { genericDecisionModel } = await import("./test-generic-models");
+  const provider = { decisionModel: () => genericDecisionModel() };
   return { typeSafeAi: provider, createTypeSafeAi: () => provider };
 });
 

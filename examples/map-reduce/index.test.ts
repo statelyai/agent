@@ -29,8 +29,8 @@ function scripted(text: MockModelScript["text"], best: string | string[] = "joke
 }
 
 /**
- * A judge that answers labels the machine never offered. `experimental_evaluate`
- * rejects those for any evaluation model, so this is a swapped-in judge ACTOR
+ * A judge that answers labels the machine never offered. `experimental_decide`
+ * rejects those for any decision model, so this is a swapped-in judge ACTOR
  * (the `judgeJokes` slot itself): what the choice state has to guard against.
  */
 function offListJudge(picks: string[]) {

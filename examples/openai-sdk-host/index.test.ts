@@ -18,8 +18,8 @@ function confidentJudge() {
   const { model } = createMockJudge({ category: "billing", sentiment: "negative" });
   return {
     ...model,
-    doEvaluate: async (options: Parameters<typeof model.doEvaluate>[0]) => ({
-      ...(await model.doEvaluate(options)),
+    doDecide: async (options: Parameters<typeof model.doDecide>[0]) => ({
+      ...(await model.doDecide(options)),
       providerMetadata: { typesafe: { confidence: { category: 0.9 } } },
     }),
   };

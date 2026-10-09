@@ -50,8 +50,8 @@
  *     the model with the problems listed, at most MAX_REGENERATIONS times per
  *     proposed plan (a replan starts a fresh repair budget).
  *   - Risk is a JUDGMENT, the mitigation a generation. LangGraph asks one LLM
- *     for both. Here `assessingRisk` asks the AI SDK's `experimental_evaluate`
- *     with Jev (`@ai-sdk/typesafe-ai`) as the evaluation model one
+ *     for both. Here `assessingRisk` asks the AI SDK's `experimental_decide`
+ *     with Jev (`@ai-sdk/typesafe-ai`) as the decision model one
  *     `choice` over `{ goal, schedule, projectDays, deadlineDays }` (the
  *     computed schedule, not the model's), and only the mitigation, free text
  *     the output and the replanner both read, stays a text-model request.
@@ -74,7 +74,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -90,10 +90,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Most tasks a plan may hold, whatever the model returns. */
 export const MAX_TASKS = 8;
@@ -123,13 +123,13 @@ const riskSchema = z.enum(["low", "medium", "high"]);
  * the state, and one `choice` names the delivery risk. The judge model is
  * injected by tests and hosts; the default is Jev.
  */
-export function createAssessRisk(model: Experimental_EvaluationModel = judgeModel) {
+export function createAssessRisk(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { risk: { choice: "low" | "medium" | "high" } } },
     { goal: string; schedule: string[]; projectDays: number; deadlineDays: number }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: {
           goal: input.goal,
@@ -599,7 +599,7 @@ export interface RunProjectPlannerOptions {
   /** Injected for tests; the direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }

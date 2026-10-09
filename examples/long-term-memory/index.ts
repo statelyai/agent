@@ -42,8 +42,8 @@
  * Differences from LangGraph worth calling out:
  *   - Recall is a JUDGMENT, not a search. The template embeds the message and
  *     takes the nearest memories. Here `recalling` calls the AI SDK's
- *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model, with the message and the whole store as state and one
+ *     `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model, with the message and the whole store as state and one
  *     boolean question per memory ("does this fact bear on the message?"). The
  *     probabilities rank the store; the threshold and `RECALL_LIMIT` are code
  *     (`searchMemoryStore`). The text model is reserved for `answering`.
@@ -77,7 +77,7 @@
 import { z } from "zod";
 import { createAsyncLogic, type SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -95,10 +95,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Messages one session answers before it closes (in `done`, not `failed`). */
 export const MAX_TURNS = 8;
@@ -121,14 +121,14 @@ export const RECALL_THRESHOLD = 0.5;
  * probability per memory. The judge model is injected by tests and hosts; the
  * default is Jev, which reads `TYPESAFE_AI_API_KEY` from the environment.
  */
-export function createSearchMemories(model: Experimental_EvaluationModel = judgeModel) {
+export function createSearchMemories(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: Record<string, { probability: number }> },
     { message: string; memories: string[] }
   >({
     run: async ({ input, signal }) => {
       if (input.memories.length === 0) return { answers: {} };
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { message: input.message, memories: input.memories },
         questions: Object.fromEntries(
@@ -435,7 +435,7 @@ export interface RunLongTermMemoryOptions {
   /** Injected for tests; the direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Scripted human events, consumed in order on each idle settle; then stdin. */
   humanEvents?: LongTermMemoryHumanEvent[];
   /** Observes each machine transition. */

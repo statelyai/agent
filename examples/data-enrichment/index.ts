@@ -51,8 +51,8 @@
  *     search is a transition in the trail.
  *   - Reflection is a JUDGMENT, not a generation. LangGraph asks a chat model
  *     for `{ is_satisfactory, reason }`. Here `reflecting` asks the AI SDK's
- *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model, with the company, the requested fields of the
+ *     `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model, with the company, the requested fields of the
  *     record, and every passage as state, and one boolean question per requested
  *     field ("does a passage state `record.<field>`?"). The record is
  *     satisfactory when every probability clears `SUPPORT_THRESHOLD`; the
@@ -65,7 +65,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -81,10 +81,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Search passes (plan → search → extract) before the run ends in `failed`. */
 export const MAX_LOOPS = 3;
@@ -243,7 +243,7 @@ export const SUPPORT_THRESHOLD = 0.5;
  * question. One call, one probability per field, no prose. The judge model is
  * injected by tests and hosts; the default is Jev.
  */
-export function createReviewRecord(model: Experimental_EvaluationModel = judgeModel) {
+export function createReviewRecord(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: Record<string, { probability: number }> },
     { company: string; fields: Field[]; passages: string[]; record: CompanyRecord }
@@ -266,7 +266,7 @@ export function createReviewRecord(model: Experimental_EvaluationModel = judgeMo
           },
         ]),
       );
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: {
           company: input.company,
@@ -531,7 +531,7 @@ export interface RunDataEnrichmentOptions {
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }

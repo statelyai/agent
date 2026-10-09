@@ -31,7 +31,7 @@
  */
 import { z } from "zod";
 import type { Snapshot } from "xstate";
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import { Agent } from "@mastra/core/agent";
 import { createTool, isValidationError, type ValidationError } from "@mastra/core/tools";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -131,7 +131,7 @@ export interface CreateHostOptions {
    * The judge model for the drafter's prompt check. Omitted, the machine's own
    * Jev judgment reads `TYPESAFE_AI_API_KEY` from the environment.
    */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Where paused runs are persisted. Defaults to a fresh in-memory store. */
   store?: RunStore;
 }

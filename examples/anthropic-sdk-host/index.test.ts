@@ -26,8 +26,8 @@ const judgeActors = () => {
   return {
     classifyTicket: createClassifyTicket({
       ...model,
-      doEvaluate: async (options) => ({
-        ...(await model.doEvaluate(options)),
+      doDecide: async (options) => ({
+        ...(await model.doDecide(options)),
         providerMetadata: { typesafe: { confidence: { category: 0.9 } } },
       }),
     }),

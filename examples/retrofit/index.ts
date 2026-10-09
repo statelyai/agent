@@ -17,8 +17,8 @@
  * tests inject mock executors (no API key); a direct run uses real models.
  *
  * The final form adds triage, and triage is a JUDGMENT, not a generation:
- * `triageTicket` calls the AI SDK's `experimental_evaluate` with Jev
- * (`@ai-sdk/typesafe-ai`) as the evaluation model: two `choice` questions over
+ * `triageTicket` calls the AI SDK's `experimental_decide` with Jev
+ * (`@ai-sdk/typesafe-ai`) as the decision model: two `choice` questions over
  * `{ ticket }` in one call, `category` (refund | question | complaint) and
  * `sentiment` (positive | neutral | negative). The labels land in context and
  * the decision reads them. The text model is left with the one open-ended
@@ -29,7 +29,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -82,10 +82,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 const triageSchema = z.object({
   category: z.enum(["refund", "question", "complaint"]),
@@ -98,7 +98,7 @@ const triageSchema = z.object({
  * judge model is injected by tests and hosts; the default is Jev, which reads
  * `TYPESAFE_AI_API_KEY` from the environment.
  */
-export function createTriageTicket(model: Experimental_EvaluationModel = judgeModel) {
+export function createTriageTicket(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     {
       answers: {
@@ -109,7 +109,7 @@ export function createTriageTicket(model: Experimental_EvaluationModel = judgeMo
     { ticket: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { ticket: input.ticket },
         questions: {
@@ -405,7 +405,7 @@ export interface RunRetrofitOptions {
   /** Injected for tests; a direct run builds real executors. */
   executors?: Pick<AgentRequestExecutors, "decide">;
   /** The judge model; tests pass a mock, a direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   onProgress?: (state: string) => void;
 }
 

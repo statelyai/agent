@@ -20,7 +20,7 @@ behavior pinned by tests the whole way.
   event.
 - **`index.ts`** — the final form (adds triage + an order-lookup tool), dual-mode
   via the shared harness. Triage is a Jev judgment (the AI SDK's
-  `experimental_evaluate` with `@ai-sdk/typesafe-ai`): two
+  `experimental_decide` with `@ai-sdk/typesafe-ai`): two
   `choice` questions, `category` and `sentiment`, over the ticket, because a
   label is a judgment, not a generation.
 
@@ -48,7 +48,7 @@ OPENAI_API_KEY=... npx tsx examples/retrofit/before.ts  # the loop it replaces
 ```
 
 Tests (`index.test.ts`) run with no API key with mock executors and a scripted
-judge (a mock AI SDK evaluation model):
+judge (a mock AI SDK decision model):
 
 ```bash
 pnpm vitest run examples/retrofit

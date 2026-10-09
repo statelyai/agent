@@ -19,7 +19,7 @@
  * the canonical `xstate.done.actor` event's `actorId` (see docs/multi-agent.md).
  *
  * Reflection is a JUDGMENT, not a generation: `reflecting` calls the AI SDK's
- * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
  * model, with the question and the findings as state and one boolean
  * question, "do these findings answer the question comprehensively?". The
  * `reflected` choice state compares that probability to
@@ -33,7 +33,7 @@
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   createTextLogic,
@@ -55,10 +55,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 const BRANCH_PREFIX = "research-";
 
@@ -130,13 +130,13 @@ export const SUFFICIENCY_THRESHOLD = 0.5;
  * state, and one boolean question asks whether they cover it. The judge model
  * is injected by tests and hosts; the default is Jev.
  */
-export function createReflect(model: Experimental_EvaluationModel = judgeModel) {
+export function createReflect(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { sufficient: { probability: number } } },
     { question: string; findings: string[] }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { question: input.question, findings: input.findings },
         questions: {
@@ -426,7 +426,7 @@ export interface RunDeepResearchOptions {
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }

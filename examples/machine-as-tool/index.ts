@@ -31,8 +31,8 @@
  * so `explorePaths`/`canReach` can see both arms.
  *
  * The policy check is a JUDGMENT, not a generation: `validateRefund` calls
- * the AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as
- * the evaluation model and asks one boolean question, `valid`, over the refund
+ * the AI SDK's `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as
+ * the decision model and asks one boolean question, `valid`, over the refund
  * and the written policy, and the machine auto-approves when that probability
  * clears `VALID_THRESHOLD`. It is the only model call, so the example needs no
  * text model at all. `runOptions` passes a judge model with
@@ -43,7 +43,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   getInteraction,
@@ -60,10 +60,10 @@ import {
 } from "@statelyai/agent";
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Refunds at or under this amount need no human approval. */
 export const AUTO_APPROVAL_LIMIT = 500;
@@ -77,13 +77,13 @@ export const VALID_THRESHOLD = 0.5;
  * model (fraud check, policy, …). The judge model is injected by tests and
  * hosts; the default is Jev, which reads `TYPESAFE_AI_API_KEY`.
  */
-export function createValidateRefund(model: Experimental_EvaluationModel = judgeModel) {
+export function createValidateRefund(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { valid: { probability: number } } },
     { amount: number; orderId: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: {
           refund: { orderId: input.orderId, amountDollars: input.amount },

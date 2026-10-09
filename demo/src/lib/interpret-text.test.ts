@@ -40,15 +40,16 @@ vi.mock("@ai-sdk/typesafe-ai", () => {
     provider: "test-judge",
     modelId: "test-judge",
     supportedQuestionTypes: ["choice"],
-    doEvaluate: async ({
+    doDecide: async ({
       questions,
       state,
     }: {
       questions: Record<string, { criteria: object }>;
-      state: Record<string, unknown>;
+      // The SDK wraps the machine's plain state in one `{ type: "json" }` part.
+      state: [{ type: "json"; value: Record<string, unknown> }];
     }) => {
       if (control.fail) throw control.fail;
-      control.states.push(state);
+      control.states.push(state[0].value);
       const answers: Record<string, unknown> = {};
       const confidence: Record<string, number> = {};
       for (const [id, question] of Object.entries(questions)) {
@@ -77,7 +78,7 @@ vi.mock("@ai-sdk/typesafe-ai", () => {
       };
     },
   };
-  const provider = { evaluationModel: () => model };
+  const provider = { decisionModel: () => model };
   return { typeSafeAi: provider, createTypeSafeAi: () => provider };
 });
 

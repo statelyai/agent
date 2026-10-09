@@ -14,7 +14,7 @@
 - [Decisions](docs/decisions.md): Let the model choose one currently-legal machine event, validated and retried by the machine before it is taken.
 - [Text requests](docs/text-requests.md): Declare typed model calls on an agent machine and invoke them from a state, parsing structured or streamed output.
 - [Tools](docs/tools.md): Define tools, attach them to a text request, and let the host run the tool loop while the machine stays in one state.
-- [Judgments with the AI SDK](docs/judgments.md): Ask classification, grading, relevance, and yes/no questions with the AI SDK's experimental_evaluate and Jev, and branch on the typed answers in a machine.
+- [Judgments with the AI SDK](docs/judgments.md): Ask classification, grading, relevance, and yes/no questions with the AI SDK's experimental_decide and Jev, and branch on the typed answers in a machine.
 - [Messages](docs/messages.md): Build and store conversation history as a parts-based message model that mirrors the AI SDK without depending on it.
 - [Preset machines](docs/machines-presets.md): Factories for proven agent shapes (tool loop, sequential, router, parallel, loop, supervisor, handoff) that return ordinary, inspectable agent machines.
 - [Choosing a run mode](docs/choosing-a-run-mode.md): Three ways to execute the same agent machine, what each one owns, and which to reach for.

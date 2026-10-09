@@ -37,7 +37,7 @@ function scriptedExecutor(reply: string | Error = REPLY): {
 
 /**
  * The classifier's judge answers, by question name. The mock judge wraps
- * `doEvaluate` to report Jev's `category` confidence the way TypeSafe does, in
+ * `doDecide` to report Jev's `category` confidence the way TypeSafe does, in
  * `providerMetadata.typesafe.confidence`: 0.9 by default, or `confidence` so a
  * test can land below the threshold.
  */
@@ -51,8 +51,8 @@ function classifier(
   const judge = createMockJudge(script);
   const model: MockJudgeModel = {
     ...judge.model,
-    doEvaluate: async (options) => ({
-      ...(await judge.model.doEvaluate(options)),
+    doDecide: async (options) => ({
+      ...(await judge.model.doDecide(options)),
       providerMetadata: { typesafe: { confidence: { category: confidence } } },
     }),
   };
