@@ -17,6 +17,7 @@
     "agent-runtime-loop",
     "agent-usage-event",
     "aggregated-usage-on-run-results",
+    "ai-sdk-experimental-decide",
     "ai-sdk-v7",
     "allowed-events-wildcards",
     "alpha-api-consistency-pass",
