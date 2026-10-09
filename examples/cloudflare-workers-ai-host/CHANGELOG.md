@@ -1,5 +1,12 @@
 # @statelyai/example-cloudflare-workers-ai-host
 
+## 0.0.1-alpha.17
+
+### Patch Changes
+
+- Updated dependencies [[`9d32376`](https://github.com/statelyai/agent/commit/9d3237698e71b83d7a671a799ffab6085338f43c)]:
+  - @statelyai/agent@2.0.0-alpha.29
+
 ## 0.0.1-alpha.16
 
 ### Patch Changes
