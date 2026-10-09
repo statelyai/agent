@@ -1,7 +1,7 @@
 // vitest.config.ts
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const src = (p: string) => fileURLToPath(new URL(`./src/${p}`, import.meta.url));
 

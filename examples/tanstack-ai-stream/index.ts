@@ -17,6 +17,10 @@
  * `useChat({ connection: fetchServerSentEvents('/api/chat') })` client needs no
  * changes — see ./chat.tsx.
  *
+ * The model calls go through TanStack AI too: `createTanStackAiExecutors` runs
+ * each request on `chat()` with an `openaiText` adapter, so this example has no
+ * Vercel AI SDK in it at all.
+ *
  * The machine is a two-step streaming answer (outline → answer), so a single
  * chat turn produces two assistant messages and four step events.
  *
@@ -30,7 +34,6 @@
  * Run on the command line: OPENAI_API_KEY=... npx tsx examples/tanstack-ai-stream/index.ts
  */
 import { z } from "zod";
-import { openai } from "@ai-sdk/openai";
 import type { AnyStateMachine } from "xstate";
 import {
   getStatePath,
@@ -41,7 +44,8 @@ import {
   type AgentRuntimeOptions,
   type AgentRunInit,
 } from "@statelyai/agent";
-import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { createTanStackAiExecutors } from "@statelyai/agent/tanstack-ai";
+import { openaiText } from "@tanstack/ai-openai";
 import { maybeCreateRunInspection } from "./inspect.js";
 import {
   chatParamsFromRequest,
@@ -58,9 +62,15 @@ import {
 // catches drift instead of a dated comment claiming it was verified once.
 // Unpublished hosts keep their boundaries explicit in ordinary TypeScript.
 
+// Model refs → OpenAI model ids. The text adapters are built in
+// `resolveExecutors`, because `openaiText` reads `OPENAI_API_KEY` when called.
 const models = {
-  writer: openai("gpt-5.4-mini"),
-};
+  writer: "gpt-5.4-mini",
+} as const;
+
+function createExecutors() {
+  return createTanStackAiExecutors({ models: { writer: openaiText(models.writer) } });
+}
 
 // ─── The machine: outline the answer, then write it ───
 
@@ -315,7 +325,7 @@ export function resolveExecutors(): AgentRequestExecutors {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("Set OPENAI_API_KEY to run the tanstack-ai-stream example.");
   }
-  return createAiSdkExecutors({ models });
+  return createExecutors();
 }
 
 /** Flattens a parsed AG-UI message to plain text, whichever shape it arrived in. */
@@ -405,7 +415,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
           context: [],
         }),
       }),
-      createAiSdkExecutors({ models }),
+      createExecutors(),
     );
 
     const body = response.body;

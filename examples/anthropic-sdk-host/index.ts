@@ -97,19 +97,17 @@ export function toAnthropicMessages(messages: AgentMessage[]): MessageParam[] {
     if (message.role === "tool") {
       result.push({
         role: "user",
-        content: message.content.map(
-          (part): ContentBlockParam => ({
-            type: "tool_result",
-            tool_use_id: part.toolCallId,
-            content:
-              part.output.type === "text" || part.output.type === "error-text"
-                ? part.output.value
-                : JSON.stringify(part.output.value),
-            ...(part.output.type === "error-text" || part.output.type === "error-json"
-              ? { is_error: true }
-              : {}),
-          }),
-        ),
+        content: message.content.map((part): ContentBlockParam => ({
+          type: "tool_result",
+          tool_use_id: part.toolCallId,
+          content:
+            part.output.type === "text" || part.output.type === "error-text"
+              ? part.output.value
+              : JSON.stringify(part.output.value),
+          ...(part.output.type === "error-text" || part.output.type === "error-json"
+            ? { is_error: true }
+            : {}),
+        })),
       });
       continue;
     }

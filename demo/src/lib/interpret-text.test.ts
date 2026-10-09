@@ -45,10 +45,11 @@ vi.mock("@ai-sdk/typesafe-ai", () => {
       state,
     }: {
       questions: Record<string, { criteria: object }>;
-      state: Record<string, unknown>;
+      // The SDK wraps the machine's plain state in one `json` part.
+      state: [{ type: "json"; value: Record<string, unknown> }];
     }) => {
       if (control.fail) throw control.fail;
-      control.states.push(state);
+      control.states.push(state[0].value);
       const answers: Record<string, unknown> = {};
       const confidence: Record<string, number> = {};
       for (const [id, question] of Object.entries(questions)) {

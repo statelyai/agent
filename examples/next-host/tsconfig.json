@@ -12,8 +12,8 @@
     // parent's) but not for every bundler that reads tsconfig — Turbopack keeps
     // the inherited `../../src/*` mapping and compiles the library from source,
     // where the `.js` specifiers it cannot resolve then blow up. Mapping each
-    // entry back at the installed package is unambiguous for both.
-    "baseUrl": ".",
+    // entry back at the installed package is unambiguous for both. Entries
+    // resolve relative to this file (TypeScript 7 has no `baseUrl`).
     //
     // Subpaths need their own entry pointing at the built file: the wildcard
     // below maps `@statelyai/agent/ai-sdk` at a path that does not exist on

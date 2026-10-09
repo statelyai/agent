@@ -26,10 +26,7 @@ vi.mock("@ai-sdk/typesafe-ai", async () => {
   const { genericEvaluationModel } = await import("./test-generic-models");
   const provider = {
     evaluationModel: () => {
-      const model = genericEvaluationModel() as Exclude<
-        ReturnType<typeof genericEvaluationModel>,
-        string
-      >;
+      const model = genericEvaluationModel();
       return {
         ...model,
         doEvaluate: async (options: Parameters<typeof model.doEvaluate>[0]) => {

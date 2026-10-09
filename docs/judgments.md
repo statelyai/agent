@@ -257,7 +257,7 @@ test("routes a double charge to billing", async () => {
 });
 ```
 
-- `doEvaluate` receives `{ state, questions }`. Record them to assert on the evidence and the questions the machine sent.
+- `doEvaluate` receives `{ state, questions }`. Record them to assert on the evidence and the questions the machine sent. The SDK wraps a plain `state` value in one part, `[{ type: "json", value }]`, so read the machine's value from `state[0].value`.
 - To script TypeSafe confidence, return `providerMetadata: { typesafe: { confidence: { team: 0.9 } } }` from `doEvaluate`.
 - The AI SDK validates answers: a `choice` must be one of the labels and the most probable one, `probabilities` must sum to 1, and a score with `probabilities` must equal their weighted mean. Omit `probabilities` from scripted answers unless a test needs them.
 - The repository's examples share one scripted judge that keys answers by question id; see [examples/mock-judge.ts](../examples/mock-judge.ts).

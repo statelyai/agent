@@ -383,7 +383,7 @@ export async function runAiSdkGameTurn(
   let [state, effects] = await runtime.start({ input });
   onStep?.(state.value);
   await runtime.execute(effects);
-  for (let event; (event = await runtime.nextEvent()); ) {
+  for (let event; (event = await runtime.nextEvent());) {
     [state, effects] = runtime.transition(state, event);
     onStep?.(state.value);
     await runtime.execute(effects);

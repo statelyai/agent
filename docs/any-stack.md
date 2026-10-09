@@ -50,10 +50,8 @@ Bind executors with `provideExecutors`, create a normal XState actor, and connec
 
 - Next.js: [next-host](../examples/next-host)
 - Cloudflare: [cloudflare-agent-host](../examples/cloudflare-agent-host), [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host)
-- Mastra, LangChain, Flue: [mastra-host](../examples/mastra-host), [langchain-host](../examples/langchain-host), [flue-host](../examples/flue-host)
+- Mastra, LangChain: [mastra-host](../examples/mastra-host), [langchain-host](../examples/langchain-host)
 - AI SDK and AG-UI streaming: [ai-sdk-ui-stream](../examples/ai-sdk-ui-stream), [tanstack-ai-stream](../examples/tanstack-ai-stream)
-
-Flue is covered by the [flue-host](../examples/flue-host) example only; there is no separate guide for it in these docs. Eve has no bridge in this repository, so a machine running under Eve needs a host adapter you write yourself, following the same shape as the examples above.
 
 Use each framework's own storage, retry, queue, and interruption semantics.
 

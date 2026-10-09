@@ -8,17 +8,17 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4.0.0",
+    "@ai-sdk/openai": "^4.0.89",
     "@statelyai/agent": "workspace:*",
-    "@statelyai/sdk": "^0.22.1",
-    "@tanstack/react-query": "^5.102.2",
+    "@statelyai/sdk": "^0.37.4",
+    "@tanstack/react-query": "^5.104.1",
     "@xstate/store": "^4.2.3",
     "@xstate/store-react": "^2.0.0",
-    "ai": "^7.0.113",
-    "next": "^16.3.2",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "ai": "^7.0.133",
+    "next": "^16.4.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "xstate": "6.0.0-alpha.64",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   }
 }

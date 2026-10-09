@@ -1,6 +1,6 @@
 /**
  * Machine-as-tool: embed a whole agent machine inside one tool call of a host
- * harness (eve / Flue / an MCP server / any tool-calling loop).
+ * harness (an MCP server, or any tool-calling loop).
  *
  * The harness owns the conversation; the machine owns one durable process. A
  * pair of tools bridges them:

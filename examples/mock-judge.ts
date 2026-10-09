@@ -19,8 +19,9 @@ import type {
   Experimental_EvaluationQuestion as EvaluationQuestion,
 } from "ai";
 
-/** The spec object form of an evaluation model (not a registry id string). */
-export type MockJudgeModel = Exclude<EvaluationModel, string>;
+/** The spec object form of an evaluation model (not a registry id string or
+ * the newer `doDecide` decision-model spec). */
+export type MockJudgeModel = Extract<EvaluationModel, { doEvaluate: unknown }>;
 type CallOptions = Parameters<MockJudgeModel["doEvaluate"]>[0];
 type Answer = Awaited<ReturnType<MockJudgeModel["doEvaluate"]>>["answers"][string];
 
@@ -28,11 +29,13 @@ export type MockJudgeAnswer = number | boolean | string;
 export type MockJudgeEntry =
   | MockJudgeAnswer
   | ((
-      state: CallOptions["state"],
+      // The plain value the machine passed (see `machineState`), which
+      // callers narrow themselves.
+      state: unknown,
       question: EvaluationQuestion,
     ) => MockJudgeAnswer | Promise<MockJudgeAnswer>);
 
-export type MockJudgeCall = { state: CallOptions["state"]; questions: CallOptions["questions"] };
+export type MockJudgeCall = { state: unknown; questions: CallOptions["questions"] };
 
 export type MockJudge = {
   /** Pass this wherever an example takes its judge model. */
@@ -74,6 +77,19 @@ function answerFor(question: EvaluationQuestion, raw: MockJudgeAnswer, id: strin
   return { type: "score", score, probabilities: distribution(levels, String(score), 1) };
 }
 
+/**
+ * The value the machine passed as `state`. The SDK hands a model its state as
+ * parts, wrapping a plain value in one `{ type: 'json', value }` part; scripts
+ * and assertions read the value the machine actually sent.
+ */
+function machineState(state: CallOptions["state"]): unknown {
+  const parts = state as unknown;
+  if (Array.isArray(parts) && parts.length === 1 && parts[0]?.type === "json") {
+    return parts[0].value;
+  }
+  return parts;
+}
+
 /** An evaluation model that answers from the script. */
 export function createMockJudge(
   script: Record<string, MockJudgeEntry | MockJudgeEntry[]>,
@@ -97,11 +113,12 @@ export function createMockJudge(
     modelId: "mock-judge",
     supportedQuestionTypes: ["choice", "score", "boolean"],
     doEvaluate: async (options) => {
-      calls.push({ state: options.state, questions: options.questions });
+      const state = machineState(options.state);
+      calls.push({ state, questions: options.questions });
       const answers: Record<string, Answer> = {};
       for (const [id, question] of Object.entries(options.questions)) {
         const entry = take(id);
-        const raw = typeof entry === "function" ? await entry(options.state, question) : entry;
+        const raw = typeof entry === "function" ? await entry(state, question) : entry;
         answers[id] = answerFor(question, raw, id);
       }
       return {

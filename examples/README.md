@@ -94,7 +94,7 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 - [ai-sdk-ui-stream](ai-sdk-ui-stream): the AI SDK v7 UI message stream protocol — a text lane per request plus live machine state, to an unmodified `useChat`
 - [tanstack-ai-stream](tanstack-ai-stream): the same run as AG-UI server-sent events
 - [anthropic-sdk-host](anthropic-sdk-host), [openai-sdk-host](openai-sdk-host): the executor contract against the raw provider APIs, with no AI SDK in between
-- [langchain-host](langchain-host), [mastra-host](mastra-host), [flue-host](flue-host): coexistence with a framework — the framework makes the text-model calls, Jev the judgments, the machine owns legality
+- [langchain-host](langchain-host), [mastra-host](mastra-host): coexistence with a framework — the framework makes the text-model calls, Jev the judgments, the machine owns legality
 - [cloudflare-agent-host](cloudflare-agent-host): a Durable Object whose SQLite event log is the source of truth
 - [cloudflare-workers-ai-host](cloudflare-workers-ai-host): a provider with no native tool calling, so the legal events are serialized into the prompt
 - [next-host](next-host): controlled mode across a stateless Next route handler

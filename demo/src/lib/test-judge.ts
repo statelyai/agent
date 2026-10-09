@@ -15,7 +15,7 @@ import type {
   Experimental_EvaluationQuestion as EvaluationQuestion,
 } from "ai";
 
-type JudgeModel = Exclude<EvaluationModel, string>;
+type JudgeModel = Extract<EvaluationModel, { doEvaluate: unknown }>;
 type CallOptions = Parameters<JudgeModel["doEvaluate"]>[0];
 type ModelAnswer = Awaited<ReturnType<JudgeModel["doEvaluate"]>>["answers"][string];
 
@@ -43,14 +43,28 @@ function answerFor(question: EvaluationQuestion, raw: string | number): ModelAns
   return { type: "score", score: Number(raw), probabilities: distribution(levels, String(raw), 1) };
 }
 
+/**
+ * The value the machine passed as `state`. The SDK hands a model its state as
+ * parts, wrapping a plain value in one `{ type: 'json', value }` part.
+ */
+function machineState(state: CallOptions["state"]): unknown {
+  const parts = state as unknown;
+  if (Array.isArray(parts) && parts.length === 1 && parts[0]?.type === "json") {
+    return parts[0].value;
+  }
+  return parts;
+}
+
 export function createTestJudge(answers: Record<string, Answer | ((state: any) => Answer)>) {
-  const calls: Pick<CallOptions, "state" | "questions">[] = [];
+  const calls: { state: unknown; questions: CallOptions["questions"] }[] = [];
   const model: JudgeModel = {
     specificationVersion: "v4",
     provider: "test-judge",
     modelId: "test-judge",
     supportedQuestionTypes: ["choice", "score", "boolean"],
-    doEvaluate: async ({ state, questions }) => {
+    doEvaluate: async (options) => {
+      const state = machineState(options.state);
+      const questions = options.questions;
       calls.push({ state, questions });
       const out: Record<string, ModelAnswer> = {};
       const confidence: Record<string, number> = {};

@@ -63,7 +63,7 @@ const stubExecutors = (): AgentRequestExecutors => ({
  * judges every request complete; `judge.calls` makes the same durability
  * claim observable for the judgment as `modelCalls` does for the text model.
  */
-type JudgeModel = Exclude<Experimental_EvaluationModel, string>;
+type JudgeModel = Extract<Experimental_EvaluationModel, { doEvaluate: unknown }>;
 type JudgeCall = Parameters<JudgeModel["doEvaluate"]>[0];
 type Judgment = ReturnType<typeof createEvaluatePrompt>;
 

@@ -24,7 +24,7 @@ type DoStream = Extract<MockOptions["doStream"], (...args: never[]) => unknown>;
 type CallOptions = Parameters<DoGenerate>[0];
 type StreamPart =
   Awaited<ReturnType<DoStream>>["stream"] extends ReadableStream<infer TPart> ? TPart : never;
-type EvaluationModel = Exclude<Experimental_EvaluationModel, string>;
+type EvaluationModel = Extract<Experimental_EvaluationModel, { doEvaluate: unknown }>;
 type EvaluateAnswer = Awaited<ReturnType<EvaluationModel["doEvaluate"]>>["answers"][string];
 
 type JsonSchema = {

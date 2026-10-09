@@ -26,6 +26,6 @@ The examples are non-trivial state machines, not special runner APIs.
 
 ## Host portability
 
-The same machine artifact runs through AI SDK, Anthropic, OpenAI, LangChain, Mastra, Flue, Cloudflare, Next.js, or plain XState examples. Host adapters supply requests; they do not redefine agent control flow.
+The same machine artifact runs through AI SDK, Anthropic, OpenAI, LangChain, Mastra, Cloudflare, Next.js, or plain XState examples. Host adapters supply requests; they do not redefine agent control flow.
 
 Generic orchestration such as fan-out remains ordinary XState composition.

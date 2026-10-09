@@ -56,6 +56,7 @@ function textMessage(): Message {
     id: "msg_1",
     container: null,
     content: [{ type: "text", text: "hi", citations: null }] as Message["content"],
+    diagnostics: null,
     model: "claude-sonnet-4-5" as Message["model"],
     role: "assistant",
     stop_details: null,
