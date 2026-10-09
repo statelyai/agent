@@ -47,8 +47,8 @@
  *   - The pass/fail decision is a threshold the machine checks (PASS_SCORE),
  *     not a model's "understood: yes/no".
  *   - Grading is a JUDGMENT, not a generation. `verifying` asks the AI SDK's
- *     `experimental_evaluate`, with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model, one `score` question over `{ checkpoint, keyIdea,
+ *     `experimental_decide`, with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model, one `score` question over `{ checkpoint, keyIdea,
  *     explanation }` on five concrete levels (`UNDERSTANDING_LEVELS`), mapped
  *     to 0-100 in code as `score / (levels - 1) * 100`. The feedback the
  *     learner sees is the matched level's description; the text model is kept
@@ -71,7 +71,7 @@
  */
 import { z } from "zod";
 import { createAsyncLogic, type SnapshotFrom } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -90,10 +90,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Most checkpoints a session covers, whatever the planner returns. */
 export const MAX_CHECKPOINTS = 3;
@@ -119,13 +119,13 @@ export const UNDERSTANDING_LEVELS = [
  * on `UNDERSTANDING_LEVELS`. The judge model is injected by tests and hosts;
  * the default is Jev.
  */
-export function createVerifyExplanation(model: Experimental_EvaluationModel = judgeModel) {
+export function createVerifyExplanation(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { understanding: { score: number } } },
     { title: string; keyIdea: string; explanation: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { checkpoint: input.title, keyIdea: input.keyIdea, explanation: input.explanation },
         questions: {
@@ -479,7 +479,7 @@ export interface RunFeynmanTutorOptions {
   /** Injected for tests; the direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Scripted learner events, consumed in order on each idle settle; then stdin. */
   humanEvents?: FeynmanHumanEvent[];
   /** Observes each machine transition. */

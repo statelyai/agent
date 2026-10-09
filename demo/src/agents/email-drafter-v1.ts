@@ -4,7 +4,7 @@
  * What JEV owns: judging whether the request has enough detail
  * (`evaluatePrompt`). A completeness check is a typed judgment over text the
  * machine already holds, not a generation, so it goes to the AI SDK's
- * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
  * model: one boolean question for "enough to draft from?" plus one per
  * required detail, in one call. Code turns the probabilities into `missing` against
  * `ASSESSMENT_THRESHOLD`.
@@ -23,13 +23,13 @@
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { setupAgent } from "@statelyai/agent";
 import { type EmailDraft, emailDraftSchema, hasRecipient, hasSubject } from "./email-draft";
 
 /** The judge: Jev through the AI SDK. Reads `TYPESAFE_AI_API_KEY`; tests inject a mock. */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Revision rounds `reviewing` allows before only SEND is legal. */
 export const MAX_REVISIONS = 2;
@@ -59,13 +59,13 @@ export const ASSESSMENT_THRESHOLD = 0.5;
  * questions. `model` is injected by tests; omitted, Jev reads
  * `TYPESAFE_AI_API_KEY`.
  */
-export function createEvaluatePrompt(model: Experimental_EvaluationModel = judgeModel) {
+export function createEvaluatePrompt(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: Record<"satisfied" | RequiredDetail, { probability: number }> },
     { prompt: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { request: input.prompt, requiredDetails: REQUIRED_DETAILS },
         questions: {

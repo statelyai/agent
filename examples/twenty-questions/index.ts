@@ -23,8 +23,8 @@
  *   - Two paths into the same state: button events are deterministic (no model
  *     call), free text goes through a Jev judgment instead.
  *   - Reading the player's free text is a JUDGMENT, not a generation. Each of
- *     the three classifying states calls the AI SDK's `experimental_evaluate`
- *     with Jev (`@ai-sdk/typesafe-ai`) as the evaluation model, with the
+ *     the three classifying states calls the AI SDK's `experimental_decide`
+ *     with Jev (`@ai-sdk/typesafe-ai`) as the decision model, with the
  *     pending prompt and the raw reply as state: a `choice` among
  *     yes / no / sideQuestion for an answer, and a boolean question each for "does the
  *     player say the guess was right?" and "does the player want another
@@ -42,7 +42,7 @@
  */
 import { z } from "zod";
 import { createAsyncLogic, type SnapshotFrom } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -85,23 +85,23 @@ export const GUESS_CORRECT_THRESHOLD = 0.5;
 export const PLAY_AGAIN_THRESHOLD = 0.5;
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /**
  * The player's reply to a yes/no question, as a `choice` judgment: yes, no,
  * or a side question asked back. The judge model is injected by tests and
  * hosts; the default is Jev.
  */
-export function createClassifyAnswer(model: Experimental_EvaluationModel = judgeModel) {
+export function createClassifyAnswer(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { reply: { choice: "yes" | "no" | "sideQuestion" } } },
     { question: string; rawAnswer: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { question: input.question, reply: input.rawAnswer },
         questions: {
@@ -124,13 +124,13 @@ export function createClassifyAnswer(model: Experimental_EvaluationModel = judge
 }
 
 /** Free-text guess feedback as a boolean question. */
-export function createClassifyGuessFeedback(model: Experimental_EvaluationModel = judgeModel) {
+export function createClassifyGuessFeedback(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { guessCorrect: { probability: number } } },
     { guess: string; rawAnswer: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { guess: input.guess, reply: input.rawAnswer },
         questions: {
@@ -151,13 +151,13 @@ export function createClassifyGuessFeedback(model: Experimental_EvaluationModel 
 }
 
 /** Free-text reply to the play-again prompt as a boolean question. */
-export function createClassifyPlayAgain(model: Experimental_EvaluationModel = judgeModel) {
+export function createClassifyPlayAgain(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { playAgain: { probability: number } } },
     { rawAnswer: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { question: PLAY_AGAIN_PROMPT, reply: input.rawAnswer },
         questions: {

@@ -18,9 +18,9 @@ import {
  * Mock the text model, keyed by REQUEST NAME (`rewriteQuestion` /
  * `generateAnswer`), so an answer cannot land on the wrong call when the
  * machine takes a different branch. The router and the three graders are
- * evaluation-model judgments, scripted separately by QUESTION NAME
+ * decision-model judgments, scripted separately by QUESTION NAME
  * (`datasource`, `doc<i>`, `grounded`, `useful`) through a mock judge that
- * implements the AI SDK's evaluation-model spec. The retrieve/webSearch
+ * implements the AI SDK's decision-model spec. The retrieve/webSearch
  * actors run REAL keyword logic.
  */
 function scripted(text: Record<string, unknown[]>) {

@@ -62,8 +62,8 @@
  * Differences from LangGraph worth calling out:
  *   - Routing and all three graders are JUDGMENTS, not generations. LangGraph
  *     runs each through a chat model with structured output. Here each one
- *     calls the AI SDK's `experimental_evaluate` with Jev
- *     (`@ai-sdk/typesafe-ai`) as the evaluation model, which answers a typed
+ *     calls the AI SDK's `experimental_decide` with Jev
+ *     (`@ai-sdk/typesafe-ai`) as the decision model, which answers a typed
  *     question over the evidence the machine already holds: a `choice` between
  *     the two datasources, one boolean question per document ("does it help
  *     answer the question?"), and a boolean question each for "is every claim
@@ -102,7 +102,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -118,10 +118,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Rewrites allowed per run, shared by "nothing relevant" and "not useful". */
 export const MAX_REWRITES = 2;
@@ -272,13 +272,13 @@ export const USEFUL_THRESHOLD = 0.5;
  * datasources are the labels of one `choice` question. The judge model is
  * injected by tests and hosts; the default is Jev.
  */
-export function createRouteQuestion(model: Experimental_EvaluationModel = judgeModel) {
+export function createRouteQuestion(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { datasource: { choice: "vectorstore" | "websearch" } } },
     { question: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { question: input.question },
         questions: {
@@ -303,7 +303,7 @@ export function createRouteQuestion(model: Experimental_EvaluationModel = judgeM
 }
 
 /** grade_documents as a judgment: one boolean question per document. */
-export function createGradeDocuments(model: Experimental_EvaluationModel = judgeModel) {
+export function createGradeDocuments(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: Record<string, { probability: number }> },
     { question: string; documents: string[] }
@@ -322,7 +322,7 @@ export function createGradeDocuments(model: Experimental_EvaluationModel = judge
           },
         ]),
       );
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { question: input.question, documents: input.documents },
         questions,
@@ -334,13 +334,13 @@ export function createGradeDocuments(model: Experimental_EvaluationModel = judge
 }
 
 /** The hallucination grader as a boolean question over the documents and the answer. */
-export function createGradeGrounding(model: Experimental_EvaluationModel = judgeModel) {
+export function createGradeGrounding(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { grounded: { probability: number } } },
     { documents: string[]; generation: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { documents: input.documents, answer: input.generation },
         questions: {
@@ -362,13 +362,13 @@ export function createGradeGrounding(model: Experimental_EvaluationModel = judge
 }
 
 /** The answer grader as a boolean question over the question and the answer. */
-export function createGradeUsefulness(model: Experimental_EvaluationModel = judgeModel) {
+export function createGradeUsefulness(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { useful: { probability: number } } },
     { question: string; generation: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { question: input.question, answer: input.generation },
         questions: {
@@ -732,7 +732,7 @@ export interface RunAdaptiveRagOptions {
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }

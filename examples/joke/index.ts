@@ -15,7 +15,7 @@
  * `MAX_JOKES` cap. Any request failure lands in a `failed` final state.
  *
  * Rating is a JUDGMENT, not a generation. `rateJoke` asks the AI SDK's
- * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
  * model one `score` question, `rating`, over `{ joke }` on five concrete
  * levels (`JOKE_LEVELS`), lowest to highest. The machine maps the level to the
  * 1-10 rating it already stores as `1 + score / (levels - 1) * 9`, and the
@@ -31,7 +31,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -99,10 +99,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 export const tellJoke = createTextLogic({
   mode: "stream",
@@ -146,10 +146,10 @@ export const JOKE_LEVELS = [
  * places it on `JOKE_LEVELS`. The judge model is injected by tests and hosts;
  * the default is Jev.
  */
-export function createRateJoke(model: Experimental_EvaluationModel = judgeModel) {
+export function createRateJoke(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<{ answers: { rating: { score: number } } }, { joke: string }>({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { joke: input.joke },
         questions: {

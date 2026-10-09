@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import type { Snapshot } from "xstate";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import {
@@ -16,13 +16,13 @@ import { createTestJudge } from "./test-judge";
 type Executors = Partial<AgentRequestExecutors>;
 
 // Every test runs the REAL machine with a small stub executor that stands in
-// for the model's answer in that test, and a scripted evaluation model for
+// for the model's answer in that test, and a scripted decision model for
 // Jev's judgments. No network, no key.
 function start(
   id: ScenarioId,
   prompt: string,
   executors: Executors,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ) {
   return startScenarioRun(id, prompt, undefined, executors, undefined, judge);
 }

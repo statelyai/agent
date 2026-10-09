@@ -17,21 +17,21 @@
  * not a hidden guard.
  *
  * `evaluating` is a JUDGMENT, not a generation: it calls the AI SDK's
- * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
  * model, which reads the request and the required details as state and
  * answers one boolean question for "is this enough to draft from?" plus one
  * boolean question per required detail, in one call. Code turns those
  * probabilities into `missing` against `ASSESSMENT_THRESHOLD`. Only when
  * something is missing does `clarifying` ask the text model for follow-up
  * questions, the one generative part of the check. `draftEmail` stays a text
- * request. Hosts pass their own evaluation model with
+ * request. Hosts pass their own decision model with
  * `createEvaluatePrompt(model)` as an `actors` override; omitted, the judge is
  * Jev, which reads `TYPESAFE_AI_API_KEY`.
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import type { AiSdkModelMap } from "@statelyai/agent/ai-sdk";
 import {
@@ -100,10 +100,10 @@ export const models: AiSdkModelMap<"followUpWriter" | "emailDrafter"> = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /**
  * What a request must state before drafting, keyed by the name `missing`
@@ -126,13 +126,13 @@ export const ASSESSMENT_THRESHOLD = 0.5;
  * questions, asked in one call. The judge model is injected by tests and
  * hosts; the default is Jev, which reads `TYPESAFE_AI_API_KEY`.
  */
-export function createEvaluatePrompt(model: Experimental_EvaluationModel = judgeModel) {
+export function createEvaluatePrompt(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: Record<"satisfied" | RequiredDetail, { probability: number }> },
     { prompt: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { request: input.prompt, requiredDetails: REQUIRED_DETAILS },
         questions: {

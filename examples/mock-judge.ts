@@ -1,8 +1,8 @@
 /**
- * Test-only double for an AI SDK evaluation model (the judge behind
- * `experimental_evaluate`), repo-internal and unpublished like
- * `mock-model.ts`. It implements the SDK's evaluation-model spec directly, the
- * way `MockLanguageModelV3` does for language models, so `experimental_evaluate`
+ * Test-only double for an AI SDK decision model (the judge behind
+ * `experimental_decide`), repo-internal and unpublished like
+ * `mock-model.ts`. It implements the SDK's `doDecide` spec directly, the way
+ * `MockLanguageModelV3` does for language models, so `experimental_decide`
  * runs its real validation and result shaping over scripted answers.
  *
  * Answers are keyed by QUESTION ID (the key in the `questions` map). An entry
@@ -15,29 +15,34 @@
  * fallback id. A question with no entry throws naming it.
  */
 import type {
-  Experimental_EvaluationModel as EvaluationModel,
-  Experimental_EvaluationQuestion as EvaluationQuestion,
+  Experimental_DecisionModel as DecisionModel,
+  Experimental_DecisionQuestion as DecisionQuestion,
 } from "ai";
 
-/** The spec object form of an evaluation model (not a registry id string). */
-export type MockJudgeModel = Exclude<EvaluationModel, string>;
-type CallOptions = Parameters<MockJudgeModel["doEvaluate"]>[0];
-type Answer = Awaited<ReturnType<MockJudgeModel["doEvaluate"]>>["answers"][string];
+/**
+ * The `doDecide` spec object form of a decision model (not a registry id
+ * string or the deprecated `doEvaluate` spec).
+ */
+export type MockJudgeModel = Extract<DecisionModel, { doDecide: unknown }>;
+type CallOptions = Parameters<MockJudgeModel["doDecide"]>[0];
+type Answer = Awaited<ReturnType<MockJudgeModel["doDecide"]>>["answers"][string];
 
 export type MockJudgeAnswer = number | boolean | string;
 export type MockJudgeEntry =
   | MockJudgeAnswer
   | ((
-      state: CallOptions["state"],
-      question: EvaluationQuestion,
+      // The plain value the machine passed (see `machineState`), which
+      // callers narrow themselves.
+      state: unknown,
+      question: DecisionQuestion,
     ) => MockJudgeAnswer | Promise<MockJudgeAnswer>);
 
-export type MockJudgeCall = { state: CallOptions["state"]; questions: CallOptions["questions"] };
+export type MockJudgeCall = { state: unknown; questions: CallOptions["questions"] };
 
 export type MockJudge = {
   /** Pass this wherever an example takes its judge model. */
   model: MockJudgeModel;
-  /** Every evaluation request the model saw, in order. */
+  /** Every decision request the model saw, in order. */
   calls: MockJudgeCall[];
 };
 
@@ -47,7 +52,7 @@ function distribution(labels: string[], winner: string, share = 0.9) {
   return Object.fromEntries(labels.map((label) => [label, label === winner ? share : rest]));
 }
 
-function answerFor(question: EvaluationQuestion, raw: MockJudgeAnswer, id: string): Answer {
+function answerFor(question: DecisionQuestion, raw: MockJudgeAnswer, id: string): Answer {
   if (question.type === "boolean") {
     const probability = typeof raw === "boolean" ? (raw ? 0.95 : 0.05) : Number(raw);
     return { type: "boolean", probability };
@@ -74,7 +79,17 @@ function answerFor(question: EvaluationQuestion, raw: MockJudgeAnswer, id: strin
   return { type: "score", score, probabilities: distribution(levels, String(score), 1) };
 }
 
-/** An evaluation model that answers from the script. */
+/**
+ * The value the machine passed as `state`. The SDK hands a model its state as
+ * parts, wrapping a plain value in one `{ type: 'json', value }` part; scripts
+ * and assertions read the value the machine actually sent.
+ */
+function machineState(state: CallOptions["state"]): unknown {
+  const [part] = state;
+  return state.length === 1 && part?.type === "json" ? part.value : state;
+}
+
+/** A decision model that answers from the script. */
 export function createMockJudge(
   script: Record<string, MockJudgeEntry | MockJudgeEntry[]>,
 ): MockJudge {
@@ -96,12 +111,13 @@ export function createMockJudge(
     provider: "mock-judge",
     modelId: "mock-judge",
     supportedQuestionTypes: ["choice", "score", "boolean"],
-    doEvaluate: async (options) => {
-      calls.push({ state: options.state, questions: options.questions });
+    doDecide: async (options) => {
+      const state = machineState(options.state);
+      calls.push({ state, questions: options.questions });
       const answers: Record<string, Answer> = {};
       for (const [id, question] of Object.entries(options.questions)) {
         const entry = take(id);
-        const raw = typeof entry === "function" ? await entry(options.state, question) : entry;
+        const raw = typeof entry === "function" ? await entry(state, question) : entry;
         answers[id] = answerFor(question, raw, id);
       }
       return {

@@ -34,7 +34,7 @@
 import assert from "node:assert/strict";
 import type { z } from "zod";
 import type { Snapshot } from "xstate";
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getInteraction,
@@ -110,7 +110,7 @@ let toolRunOptions: AgentRuntimeOptions<typeof emailDrafter> & AgentRunInit<type
 
 export function useToolExecutors(
   executors: AgentRequestExecutors,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ) {
   toolRunOptions = {
     executors,

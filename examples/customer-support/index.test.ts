@@ -17,7 +17,7 @@ beforeEach(resetBookings);
 // Mock host: the `answer` request plays the adapter's tool loop — picks the
 // named tool, runs its REAL logic, formats the result. `classify` is a judge
 // call, scripted by question name (`intent`, `newFlight`, `confirmationCode`)
-// through a mock judge that implements the AI SDK's evaluation-model spec; the
+// through a mock judge that implements the AI SDK's decision-model spec; the
 // candidate pre-parsing runs for real.
 function executeTool(tool: AgentTool | undefined, input: unknown) {
   return typeof tool === "function" ? tool(input) : tool?.execute?.(input);

@@ -28,7 +28,7 @@
  *
  * What maps to what:
  *   - retrieve            → `retrieving`  (typed plain actor over a sample corpus)
- *   - grade_documents     → `grading`     (ONE evaluate call, one boolean per doc — see note)
+ *   - grade_documents     → `grading`     (ONE `experimental_decide` call, one boolean per doc — see note)
  *   - decide_to_generate  → grading's two `onDone` targets (the conditional edge)
  *   - transform_query     → `transformingQuery` (a model request that rewrites the question)
  *   - web_search          → `webSearching` (a second sample-data actor, clearly labeled)
@@ -37,12 +37,12 @@
  * Differences from LangGraph worth calling out:
  *   - Grading is a JUDGMENT, not a generation. LangGraph loops a chat model
  *     with structured output once PER document. Here `grading` asks the AI
- *     SDK's `experimental_evaluate` with TypeSafe's Jev as the evaluation
+ *     SDK's `experimental_decide` with TypeSafe's Jev as the evaluation
  *     model: one call carrying every document as state and one boolean
  *     question per document ("does this document help answer the question?"),
  *     which returns a probability per document. The machine keeps a document
  *     when that probability clears `RELEVANCE_THRESHOLD`. A yes/no over given
- *     evidence is what an evaluation model is for; the language model is
+ *     evidence is what a decision model is for; the language model is
  *     reserved for the rewrite and the answer.
  *   - The rewrite loop is bounded by construction: no edge returns to `retrieving`
  *     or `grading`, so at most ONE rewrite + web-search pass happens before
@@ -66,7 +66,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -82,10 +82,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /**
  * Sample data: the primary knowledge base `retrieve` searches. Stand-in for a
@@ -196,12 +196,12 @@ function searchCorpus(
 export const RELEVANCE_THRESHOLD = 0.5;
 
 /**
- * grade_documents as a judgment: one `experimental_evaluate` call whose state
+ * grade_documents as a judgment: one `experimental_decide` call whose state
  * is the question and every candidate document, with one boolean question per
  * document. One call, one probability per document, no prose. The judge model
  * is injected by tests and hosts; the default is Jev.
  */
-export function createGradeDocuments(model: Experimental_EvaluationModel = judgeModel) {
+export function createGradeDocuments(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: Record<string, { probability: number }> },
     { question: string; documents: string[] }
@@ -220,7 +220,7 @@ export function createGradeDocuments(model: Experimental_EvaluationModel = judge
           },
         ]),
       );
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { question: input.question, documents: input.documents },
         questions,
@@ -477,7 +477,7 @@ export interface RunCorrectiveRagOptions {
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Observes each machine transition (the visible corrective flow). */
   onProgress?: (state: string) => void;
 }

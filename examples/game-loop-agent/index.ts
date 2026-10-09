@@ -25,8 +25,8 @@
  *     resumes with `runAgent(machine, { snapshot: result.persist(), event })`.
  *   - Natural-language round control. The free-text round reply is a JUDGMENT,
  *     not a generation: `classifyingNextRound` asks the AI SDK's
- *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model, with the reply and the standings as state and one
+ *     `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model, with the reply and the standings as state and one
  *     boolean question ("does the player want another round?"). Another round starts when the
  *     probability clears `PLAY_AGAIN_THRESHOLD`. The player's moves stay model
  *     decisions through `agent.decide`.
@@ -40,7 +40,7 @@
 import { z } from "zod";
 import { createAsyncLogic, type InspectionEvent, type SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   getInteraction,
@@ -57,10 +57,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 const DEFAULT_TARGET = 50;
 const DEFAULT_MAX_ROUNDS = 3;
@@ -178,13 +178,13 @@ export const PLAY_AGAIN_THRESHOLD = 0.5;
  * one boolean question asks whether the player wants another round. The judge
  * model is injected by tests and hosts; the default is Jev.
  */
-export function createClassifyRoundControl(model: Experimental_EvaluationModel = judgeModel) {
+export function createClassifyRoundControl(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { playAgain: { probability: number } } },
     { reply: string; standings: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { reply: input.reply, standings: input.standings },
         questions: {
@@ -543,7 +543,7 @@ export async function runGameLoopExample(options?: {
   input?: { seed?: number; target?: number; maxRounds?: number };
   decide?: AgentDecisionExecutor;
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Scripted human events, consumed in order on each idle settle. */
   humanEvents?: HumanEvent[];
   /** Or decide per idle snapshot; falls back to `humanEvents`, then stdin. */

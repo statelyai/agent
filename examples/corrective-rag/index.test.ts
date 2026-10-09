@@ -7,9 +7,9 @@ import { RELEVANCE_THRESHOLD, correctiveRagMachine, runCorrectiveRagExample } fr
 /**
  * Mock the text model, keyed by REQUEST NAME (`rewriteQuery` /
  * `generateAnswer`), so an answer cannot land on the wrong call when the
- * machine takes a different branch. The grader is an evaluation-model
+ * machine takes a different branch. The grader is a decision-model
  * judgment, scripted separately by question id through a mock judge that
- * implements the AI SDK's evaluation-model spec. The retrieve/webSearch
+ * implements the AI SDK's decision-model spec. The retrieve/webSearch
  * actors run REAL keyword logic.
  */
 function scriptedGenerateText(text: { rewriteQuery?: unknown[]; generateAnswer?: unknown[] }) {

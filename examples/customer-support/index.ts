@@ -21,8 +21,8 @@
  *     the intermediate tool calls — same as LangGraph's safe-tools path, minus
  *     the extra node. (See examples/tool-calling.)
  *   - Intent routing as a JUDGMENT that SELECTS instead of generating. `classify`
- *     is ONE call to the AI SDK's `experimental_evaluate` with Jev
- *     (`@ai-sdk/typesafe-ai`) as the evaluation model, over `{ message,
+ *     is ONE call to the AI SDK's `experimental_decide` with Jev
+ *     (`@ai-sdk/typesafe-ai`) as the decision model, over `{ message,
  *     knownCodes, flights }`, where code pre-parses the candidates first: `knownCodes` are
  *     the confirmation-code-shaped spans in the message (`findCodeCandidates`),
  *     and `flights` are the sample schedule's alternatives for the bookings
@@ -63,7 +63,7 @@
  * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/customer-support/index.ts
  */
 import { z } from "zod";
-import { experimental_evaluate as evaluate, tool, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, tool, type Experimental_DecisionModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAsyncLogic, type StateValue } from "xstate";
@@ -184,19 +184,19 @@ export function flightCandidates(knownCodes: string[]): typeof FLIGHTS {
 const NONE = "none";
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /**
- * `classify` as ONE `experimental_evaluate` call: the message and the
+ * `classify` as ONE `experimental_decide` call: the message and the
  * pre-parsed candidates are the state; `intent`, `newFlight`, and (with 2+
  * candidates) `confirmationCode` are `choice` questions whose labels ARE the
  * candidates. The judge model is injected by tests and hosts; the default is
  * Jev.
  */
-export function createClassify(model: Experimental_EvaluationModel = judgeModel) {
+export function createClassify(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     {
       answers: {
@@ -233,7 +233,7 @@ export function createClassify(model: Experimental_EvaluationModel = judgeModel)
           },
         },
       };
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { message: input.query, knownCodes, flights },
         questions:
@@ -634,7 +634,7 @@ export interface RunCustomerSupportOptions {
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Observes each machine transition across both runAgent calls. */
   onProgress?: (state: string) => void;
 }

@@ -11,8 +11,8 @@
  *
  * The pieces:
  *   - Classification as a JUDGMENT, not a generation. `classifying` calls the
- *     AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model, the ticket as state, and two `choice` questions asked
+ *     AI SDK's `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model, the ticket as state, and two `choice` questions asked
  *     in one call: `category` (billing, technical,
  *     other) and `sentiment` (positive, neutral, negative). The labels come
  *     back typed, with probabilities, so nothing has to parse prose. The reply
@@ -34,7 +34,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic, type SnapshotFrom } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -82,20 +82,20 @@ export const triageOutputSchema = z.object({
 export const CONFIDENCE_THRESHOLD = 0.6;
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /**
  * The classifier as a judgment: the ticket is the state, and the queue and the
- * tone are two independent `choice` questions in one `experimental_evaluate`
+ * tone are two independent `choice` questions in one `experimental_decide`
  * call. Jev's confidence in `category` comes from the result's TypeSafe
  * provider metadata; a judge that reports none counts as not confident (0), so
  * a person decides. The judge model is injected by tests and hosts; the default
  * is Jev.
  */
-export function createClassifyTicket(model: Experimental_EvaluationModel = judgeModel) {
+export function createClassifyTicket(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     {
       answers: {
@@ -107,7 +107,7 @@ export function createClassifyTicket(model: Experimental_EvaluationModel = judge
     { ticket: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers, providerMetadata } = await evaluate({
+      const { answers, providerMetadata } = await experimental_decide({
         model,
         state: { ticket: input.ticket },
         questions: {

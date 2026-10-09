@@ -37,8 +37,8 @@
  *     other side's points does not drift into arguing the opposite side.
  *   - Any speaker or judge failure lands in `failed` with the transcript so far.
  *   - Judging is a JUDGMENT, not a generation. `judging` asks the AI SDK's
- *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model two questions in one call over `{ motion, transcript }`:
+ *     `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model two questions in one call over `{ motion, transcript }`:
  *     `proCase` / `conCase` (a `score` per side on six concrete levels,
  *     `CASE_LEVELS`, mapped to 0-10 in code). The winner is DERIVED from those
  *     two scores (higher wins, equal is a draw), never asked separately, so a
@@ -52,7 +52,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -68,10 +68,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Upper bound on debate rounds (one pro turn + one con turn each). */
 export const MAX_ROUNDS = 3;
@@ -137,13 +137,13 @@ function caseQuestion(side: Turn["side"]) {
  * scores (see `decide`), so there is no separate winner question to disagree
  * with them. The judge model is injected by tests and hosts; the default is Jev.
  */
-export function createJudgeDebate(model: Experimental_EvaluationModel = judgeModel) {
+export function createJudgeDebate(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { proCase: { score: number }; conCase: { score: number } } },
     { motion: string; transcript: Turn[] }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { motion: input.motion, transcript: input.transcript },
         questions: {
@@ -384,7 +384,7 @@ export interface RunMultiAgentDebateOptions {
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }

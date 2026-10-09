@@ -1,6 +1,6 @@
 /**
  * The runner defaults to Jev. These tests script the judge through the repo's
- * mock evaluation model, answering the `verdict` choice by question id, or by
+ * mock decision model, answering the `verdict` choice by question id, or by
  * a function of the request state where a test is about which reviewer asked.
  */
 import { readFileSync } from "node:fs";
@@ -122,11 +122,11 @@ test("same machine runs in a native XState host with identical output", async ()
 
 test("invalid model output cannot count as an approval", async () => {
   // A label outside approve/reject/abstain. The mock judge refuses to answer
-  // one, so this is a bare evaluation model returning it; the AI SDK rejects
+  // one, so this is a bare decision model returning it; the AI SDK rejects
   // the answer and the reviewer abstains.
   const judge: MockJudgeModel = {
     ...createMockJudge({}).model,
-    doEvaluate: async () => ({
+    doDecide: async () => ({
       answers: { verdict: { type: "choice", choice: "yes", probabilities: { yes: 1 } } },
       usage: { inputTokens: 0, outputTokens: 0 },
       warnings: [],

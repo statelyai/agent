@@ -3,7 +3,7 @@
  * runtime, pi's `fauxProvider` (Flue's own documented test double) plays the
  * conversational model; the machine-owned bridge's model calls go through the
  * repo's mock model (`../mock-model.js`) behind the real AI SDK executors, and
- * its Jev prompt check through a scripted evaluation model (`../mock-judge.js`).
+ * its Jev prompt check through a scripted decision model (`../mock-judge.js`).
  */
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { init } from "@flue/runtime";

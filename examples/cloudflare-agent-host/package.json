@@ -11,10 +11,10 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.0",
-    "@ai-sdk/typesafe-ai": "3.0.6",
+    "@ai-sdk/typesafe-ai": "3.0.16",
     "@statelyai/agent": "workspace:*",
     "agents": "^0.21.0",
-    "ai": "^7.0.113",
+    "ai": "^7.0.133",
     "xstate": "6.0.0-alpha.64",
     "zod": "^4.4.3"
   },

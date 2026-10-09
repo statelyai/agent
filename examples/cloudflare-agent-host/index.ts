@@ -21,7 +21,7 @@
  * Executors are resolved per Durable Object, not at import: Workers have no
  * ambient `process.env`, so the provider is constructed from the `env` binding.
  * The same goes for the drafter's prompt check, a Jev judgment (the AI SDK's
- * `experimental_evaluate`): its evaluation model is built from the
+ * `experimental_decide`): its decision model is built from the
  * `TYPESAFE_AI_API_KEY` binding and passed as an `actors` override. Set
  * `OPENAI_API_KEY` and `TYPESAFE_AI_API_KEY`
  * (via `.dev.vars` locally — `dev:live` writes them from the repo `.env` — or
@@ -132,7 +132,7 @@ export class EmailDrafter extends Agent<Env> {
     }
     return {
       evaluatePrompt: createEvaluatePrompt(
-        createTypeSafeAi({ apiKey: this.env.TYPESAFE_AI_API_KEY }).evaluationModel("jev-latest"),
+        createTypeSafeAi({ apiKey: this.env.TYPESAFE_AI_API_KEY }).decisionModel("jev-latest"),
       ),
     };
   }

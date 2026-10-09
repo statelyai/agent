@@ -23,18 +23,15 @@ vi.mock("@ai-sdk/openai", async () => {
 const control = vi.hoisted(() => ({ judgeFails: false }));
 
 vi.mock("@ai-sdk/typesafe-ai", async () => {
-  const { genericEvaluationModel } = await import("./test-generic-models");
+  const { genericDecisionModel } = await import("./test-generic-models");
   const provider = {
-    evaluationModel: () => {
-      const model = genericEvaluationModel() as Exclude<
-        ReturnType<typeof genericEvaluationModel>,
-        string
-      >;
+    decisionModel: () => {
+      const model = genericDecisionModel();
       return {
         ...model,
-        doEvaluate: async (options: Parameters<typeof model.doEvaluate>[0]) => {
+        doDecide: async (options: Parameters<typeof model.doDecide>[0]) => {
           if (control.judgeFails) throw new Error("judge unavailable");
-          return model.doEvaluate(options);
+          return model.doDecide(options);
         },
       };
     },

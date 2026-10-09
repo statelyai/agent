@@ -9,9 +9,9 @@
  * Runs need a real model and Jev: `createAiSdkExecutors` with `OPENAI_API_KEY`
  * for text requests and decisions, and `TYPESAFE_AI_API_KEY` for the judgments
  * (routing, reflection's scoring, the free-text review), which call the AI
- * SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- * evaluation model. Tests import the `*Run` functions directly and inject
- * their own executors and a mock evaluation model as the `judge`.
+ * SDK's `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ * decision model. Tests import the `*Run` functions directly and inject
+ * their own executors and a mock decision model as the `judge`.
  */
 import {
   createAgentRuntime,
@@ -19,7 +19,7 @@ import {
   type AgentRequestExecutors,
   type AgentRunResult,
 } from "@statelyai/agent";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   createActor,
@@ -191,7 +191,7 @@ async function resolveExecutors(
  */
 function judgeActors(
   scenarioId: ScenarioId,
-  judge: Experimental_EvaluationModel | undefined,
+  judge: Experimental_DecisionModel | undefined,
 ): { actors?: Record<string, AnyActorLogic> } {
   if (!judge) return {};
   if (scenarioId === "routing") return { actors: { classifyIntent: createClassifyIntent(judge) } };
@@ -306,7 +306,7 @@ export async function startScenarioRun(
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
   observers: RunObservers = {},
 ): Promise<ScenarioResult> {
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder(
@@ -346,7 +346,7 @@ export async function resumeScenarioRun(
   model: string | undefined,
   executors: Partial<AgentRequestExecutors>,
   signal?: AbortSignal,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
   observers: RunObservers = {},
 ): Promise<ScenarioResult> {
   const { trace, onTransition, onEmitted, onTrace } = createTraceRecorder(
@@ -399,7 +399,7 @@ export async function resumeScenario(
   event: ResumeEvent,
   signal?: AbortSignal,
   /** Injected by tests; omitted, Jev reads `TYPESAFE_AI_API_KEY`. */
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
   observers?: RunObservers,
 ): Promise<ScenarioResult> {
   const { model, executors } = await resolveExecutors(scenarioId);
@@ -464,7 +464,7 @@ export async function resumeScenario(
 export const REVIEW_CONFIDENCE = 0.6;
 
 /** The judge: Jev through the AI SDK. Reads `TYPESAFE_AI_API_KEY`; tests inject a mock. */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /**
  * Reading a review as approve / reject is a typed judgment over the person's
@@ -472,13 +472,13 @@ const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev
  * confidence in the label comes from the result's TypeSafe provider metadata;
  * a judge that reports none counts as unsure (0).
  */
-export function createInterpretReview(model: Experimental_EvaluationModel = judgeModel) {
+export function createInterpretReview(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { verdict: { choice: "approve" | "reject" | "unclear" } }; confidence: number },
     { review: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers, providerMetadata } = await evaluate({
+      const { answers, providerMetadata } = await experimental_decide({
         model,
         state: { review: input.review },
         questions: {
@@ -506,7 +506,7 @@ export function createInterpretReview(model: Experimental_EvaluationModel = judg
 /** Interprets a free-text review as a typed verdict; a failed or unsure call reads as UNCLEAR. */
 async function interpretReview(
   text: string,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ): Promise<"APPROVE" | "REJECT" | "UNCLEAR"> {
   try {
     const actor = createActor(createInterpretReview(judge), { input: { review: text } });

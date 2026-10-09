@@ -48,10 +48,10 @@
  *     failing `Send` branch fails the superstep.
  *   - Judging is a JUDGMENT, not a generation. LangGraph asks a chat model to
  *     write back an index. Here `judging` asks the AI SDK's
- *     `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model, with the topic and every landed joke as state and one
+ *     `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model, with the topic and every landed joke as state and one
  *     `choice` question whose labels are the jokes themselves (`joke0`,
- *     `joke1`, …, one per landed joke). `evaluate` rejects a label that was not
+ *     `joke1`, …, one per landed joke). `experimental_decide` rejects a label that was not
  *     offered, so an out-of-range or fractional index cannot happen by
  *     construction; the text model is reserved for the subjects and the jokes.
  *   - LangGraph indexes `state["jokes"][response.id]` directly; an index the
@@ -73,7 +73,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -91,10 +91,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Most subjects fanned out; extra subjects are dropped and `truncated` is set. */
 export const MAX_SUBJECTS = 4;
@@ -136,13 +136,13 @@ function labelIndex(label: string): number | null {
  * one `choice` question offers one label per joke. The judge model is injected
  * by tests and hosts; the default is Jev.
  */
-export function createJudgeJokes(model: Experimental_EvaluationModel = judgeModel) {
+export function createJudgeJokes(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { best: { choice: string } } },
     { topic: string; jokes: Joke[] }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { topic: input.topic, jokes: input.jokes },
         questions: {
@@ -337,7 +337,7 @@ export const mapReduceMachine = agentSetup.createMachine({
         }),
       },
     },
-    // The label must name a joke that exists. `evaluate` only returns offered
+    // The label must name a joke that exists. `experimental_decide` only returns offered
     // labels, so this guards a swapped-in judge actor: retry once, then give up with
     // every joke still in the output.
     checkingJudgement: {
@@ -400,7 +400,7 @@ export interface RunMapReduceOptions {
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
