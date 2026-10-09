@@ -3,18 +3,18 @@
  * Inspired by https://www.anthropic.com/engineering/building-effective-agents
  * A failed reviewer abstains. Fewer than two approvals requires human review.
  * Each vote is a JUDGMENT, not a generation: every reviewer region calls the
- * AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- * evaluation model, with the patch and that reviewer's brief as state and one
+ * AI SDK's `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ * decision model, with the patch and that reviewer's brief as state and one
  * `choice` question (`approve` / `reject` / `abstain`). The vote's `reason` is
  * rendered from the chosen label and its probabilities, so no model prose
  * reaches the tally. No text model is left in this example.
  * Run: TYPESAFE_AI_API_KEY=... pnpm tsx examples/consensus-review/index.ts
- * The runner defaults to Jev; pass `judge` to swap the evaluation model
+ * The runner defaults to Jev; pass `judge` to swap the decision model
  * (tests script it by question id). The machine stays intact.
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   interactionMetaSchema,
@@ -26,10 +26,10 @@ import {
 } from "@statelyai/agent";
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 const vote = z.object({ approve: z.boolean(), reason: z.string() });
 const reviewer = z.enum(["security", "reliability", "maintainability"]);
@@ -62,11 +62,11 @@ type Verdict = {
  * tally. The judge model is injected by tests and hosts; the default is Jev,
  * which reads `TYPESAFE_AI_API_KEY` from the environment.
  */
-export function createReview(model: Experimental_EvaluationModel = judgeModel) {
+export function createReview(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<{ answers: { verdict: Verdict } }, { patch: string; reviewer: Reviewer }>(
     {
       run: async ({ input, signal }) => {
-        const { answers } = await evaluate({
+        const { answers } = await experimental_decide({
           model,
           state: {
             patch: input.patch,
@@ -331,7 +331,7 @@ export async function runConsensusReviewExample(
   > & {
     patch?: string;
     /** The judge model; tests pass a mock, omitted the runner uses Jev (`TYPESAFE_AI_API_KEY`). */
-    judge?: Experimental_EvaluationModel;
+    judge?: Experimental_DecisionModel;
   },
 ) {
   // `input` is stripped at runtime too, not only by the type: a caller passing

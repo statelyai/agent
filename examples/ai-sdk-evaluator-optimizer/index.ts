@@ -8,8 +8,8 @@
  * has something to catch and every run shows a real before/after revision.
  *
  * The evaluator is split along the judgment/generation line. The grade is a
- * JUDGMENT: `evaluating` calls the AI SDK's `experimental_evaluate` with Jev
- * (`@ai-sdk/typesafe-ai`) as the evaluation model and asks one `score`
+ * JUDGMENT: `evaluating` calls the AI SDK's `experimental_decide` with Jev
+ * (`@ai-sdk/typesafe-ai`) as the decision model and asks one `score`
  * (`quality`, on `QUALITY_LEVELS`, mapped to the 1-10 `qualityScore`) and three
  * boolean questions (`preservesTone`, `preservesNuance`, `culturallyAccurate`,
  * each against `ASPECT_THRESHOLD`) in one call. The optimizer needs prose feedback
@@ -23,7 +23,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { setupAgent, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -65,7 +65,7 @@ export function toQualityScore(level: number): number {
  * one call. The judge model is injected by tests and hosts; the default is
  * Jev, which reads `TYPESAFE_AI_API_KEY` from the environment.
  */
-export function createGradeTranslation(model: Experimental_EvaluationModel = judgeModel) {
+export function createGradeTranslation(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     {
       answers: {
@@ -78,7 +78,7 @@ export function createGradeTranslation(model: Experimental_EvaluationModel = jud
     { original: string; translation: string; targetLanguage: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: {
           original: input.original,
@@ -130,10 +130,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 const contextSchema = z.object({
   text: z.string(),

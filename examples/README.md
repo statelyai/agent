@@ -139,9 +139,9 @@ Every example follows these. A new example that breaks one is probably wrong.
   positional array, or `request.model` — those pass while silently exercising
   the wrong request.
 - **Tests mock the judge with `examples/mock-judge.ts`**: an object that
-  implements the AI SDK's evaluation-model spec, passed wherever an example
+  implements the AI SDK's decision-model spec, passed wherever an example
   takes its judge model, with answers keyed by question id (the key in the
-  `questions` map). It runs `experimental_evaluate`'s real validation over
+  `questions` map). It runs `experimental_decide`'s real validation over
   scripted answers. Repo-internal and not published, like `mock-model.ts`.
 - **Context is replay-stable**: no `Date.now()`, `Math.random()`, or
   `randomUUID()` in context, and no module-level mutable state. Pass stores and
@@ -153,5 +153,5 @@ Every example follows these. A new example that breaks one is probably wrong.
   model makes go through `agent.decide` and are filtered by guards.
 - **Sibling imports are allowed** — an example may import another example's
   machine — but the only shared test helpers are the `examples/mock-model.ts`
-  language-model double and the `examples/mock-judge.ts` evaluation-model
+  language-model double and the `examples/mock-judge.ts` decision-model
   double. Each example's test stands on its own.

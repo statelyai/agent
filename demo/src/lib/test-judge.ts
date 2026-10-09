@@ -1,6 +1,6 @@
 /**
- * Test-only: an AI SDK evaluation model (the judge behind
- * `experimental_evaluate`) that answers from a script, so the SDK's own
+ * Test-only: an AI SDK decision model (the judge behind
+ * `experimental_decide`) that answers from a script, so the SDK's own
  * validation and result shaping run over canned Jev answers with no key and no
  * network. The same pattern as `examples/mock-judge.ts`, plus the confidence
  * TypeSafe reports in `providerMetadata.typesafe.confidence`.
@@ -11,13 +11,13 @@
  * A question with no answer throws. `calls` records every request.
  */
 import type {
-  Experimental_EvaluationModel as EvaluationModel,
-  Experimental_EvaluationQuestion as EvaluationQuestion,
+  Experimental_DecisionModel as DecisionModel,
+  Experimental_DecisionQuestion as DecisionQuestion,
 } from "ai";
 
-type JudgeModel = Extract<EvaluationModel, { doEvaluate: unknown }>;
-type CallOptions = Parameters<JudgeModel["doEvaluate"]>[0];
-type ModelAnswer = Awaited<ReturnType<JudgeModel["doEvaluate"]>>["answers"][string];
+type JudgeModel = Extract<DecisionModel, { doDecide: unknown }>;
+type CallOptions = Parameters<JudgeModel["doDecide"]>[0];
+type ModelAnswer = Awaited<ReturnType<JudgeModel["doDecide"]>>["answers"][string];
 
 type Answer = string | number | { value: string | number; confidence: number };
 
@@ -27,7 +27,7 @@ function distribution(labels: string[], winner: string, share: number) {
   return Object.fromEntries(labels.map((label) => [label, label === winner ? share : rest]));
 }
 
-function answerFor(question: EvaluationQuestion, raw: string | number): ModelAnswer {
+function answerFor(question: DecisionQuestion, raw: string | number): ModelAnswer {
   if (question.type === "boolean") return { type: "boolean", probability: Number(raw) };
   if (question.type === "choice") {
     const choice = String(raw);
@@ -48,11 +48,8 @@ function answerFor(question: EvaluationQuestion, raw: string | number): ModelAns
  * parts, wrapping a plain value in one `{ type: 'json', value }` part.
  */
 function machineState(state: CallOptions["state"]): unknown {
-  const parts = state as unknown;
-  if (Array.isArray(parts) && parts.length === 1 && parts[0]?.type === "json") {
-    return parts[0].value;
-  }
-  return parts;
+  const [part] = state;
+  return state.length === 1 && part?.type === "json" ? part.value : state;
 }
 
 export function createTestJudge(answers: Record<string, Answer | ((state: any) => Answer)>) {
@@ -62,7 +59,7 @@ export function createTestJudge(answers: Record<string, Answer | ((state: any) =
     provider: "test-judge",
     modelId: "test-judge",
     supportedQuestionTypes: ["choice", "score", "boolean"],
-    doEvaluate: async (options) => {
+    doDecide: async (options) => {
       const state = machineState(options.state);
       const questions = options.questions;
       calls.push({ state, questions });

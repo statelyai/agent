@@ -14,7 +14,7 @@ Both libraries represent agent control flow explicitly. Stately Agent uses XStat
 | `StateGraph`                               | XState machine                                                                                                                          |
 | Node                                       | State, invoked actor, or action                                                                                                         |
 | Tool/model node                            | Named Agent request actor                                                                                                               |
-| Grader / classifier node                   | An actor calling the AI SDK's `experimental_evaluate` with Jev via `@ai-sdk/typesafe-ai` ([judgments](judgments.md))                    |
+| Grader / classifier node                   | An actor calling the AI SDK's `experimental_decide` with Jev via `@ai-sdk/typesafe-ai` ([judgments](judgments.md))                    |
 | Plain (non-model) node                     | An ordinary XState actor, usually `createAsyncLogic({ schemas, run })`                                                                  |
 | `START` / `END`                            | `initial` on the machine; a `type: 'final'` state whose `output` is the run's typed result                                              |
 | Conditional edge, a pure function of state | A [`type: 'choice'` state](machines.md#choice-states)                                                                                   |
@@ -153,7 +153,7 @@ A machine can run with `runToQuiescence`, an application-owned XState actor, a p
 
 ## Ported LangGraph examples
 
-Every example below runs in the demo and has a test that scripts the model by request name. Classification, grading, relevance, and yes/no steps are [judgments](judgments.md) made with the AI SDK's `experimental_evaluate` and Jev via `@ai-sdk/typesafe-ai`, not text requests; live services (web search, vector stores, sandboxes) are replaced by small in-file sample data, labelled as such in the code. The right column names the construct the machine makes structural where the LangGraph version leaves it to a prompt or to `recursion_limit`.
+Every example below runs in the demo and has a test that scripts the model by request name. Classification, grading, relevance, and yes/no steps are [judgments](judgments.md) made with the AI SDK's `experimental_decide` and Jev via `@ai-sdk/typesafe-ai`, not text requests; live services (web search, vector stores, sandboxes) are replaced by small in-file sample data, labelled as such in the code. The right column names the construct the machine makes structural where the LangGraph version leaves it to a prompt or to `recursion_limit`.
 
 | LangGraph source                            | Example                                                                       | What the machine makes structural                                               |
 | ------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |

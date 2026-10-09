@@ -5,7 +5,7 @@
  * What JEV owns: one `choice` over the request (`billing` / `technical` /
  * `account` / `unclear`). Routing is a typed judgment over text the machine
  * already holds, not a generation, so it goes to the AI SDK's
- * `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
  * model rather than to a text model: the answer is a label, no prose, and Jev
  * reports its confidence in the label in the result's provider metadata.
  * What the MACHINE owns: where each label goes, and how sure is sure enough.
@@ -16,12 +16,12 @@
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { setupAgent } from "@statelyai/agent";
 
 /** The judge: Jev through the AI SDK. Reads `TYPESAFE_AI_API_KEY`; tests inject a mock. */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Route only when Jev's confidence in its pick clears this; otherwise ask. */
 export const ROUTING_CONFIDENCE = 0.5;
@@ -38,13 +38,13 @@ const INTENTS = {
  * tests. Jev's confidence in the label comes from the result's TypeSafe
  * provider metadata; a judge that reports none counts as unsure (0).
  */
-export function createClassifyIntent(model: Experimental_EvaluationModel = judgeModel) {
+export function createClassifyIntent(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { intent: { choice: keyof typeof INTENTS } }; confidence: number },
     { query: string }
   >({
     run: async ({ input, signal }) => {
-      const { answers, providerMetadata } = await evaluate({
+      const { answers, providerMetadata } = await experimental_decide({
         model,
         state: { query: input.query },
         questions: {

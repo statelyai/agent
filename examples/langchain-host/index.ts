@@ -21,7 +21,7 @@
  * call (Direction A) inside a machine that a LangChain agent calls as a tool
  * (Direction B). The judgments are the exception: the joke's rating and the
  * drafter's "is this request complete?" check are Jev judgments (the AI SDK's
- * `experimental_evaluate` with Jev as the evaluation model), typed answers
+ * `experimental_decide` with Jev as the decision model), typed answers
  * over explicit state rather than generations, so each demo takes a judge
  * model beside the LangChain model.
  *
@@ -37,7 +37,7 @@
 import assert from "node:assert/strict";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { HumanMessage } from "@langchain/core/messages";
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import { ChatOpenAI } from "@langchain/openai";
 import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { createRateJoke, jokeMachine } from "../joke/index.js";
@@ -67,7 +67,7 @@ const LIVE_MODEL = "gpt-5.4-mini";
 export async function runJokeDemo(
   model: BaseChatModel,
   onChunk?: (chunk: string) => void,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ) {
   const result = await runToQuiescence(
     createAgentRuntime(jokeMachine, {
@@ -94,7 +94,7 @@ export async function runJokeDemo(
  */
 export async function runBridgeDemo(
   machineModel: BaseChatModel,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ) {
   useModel(machineModel, judge);
 
@@ -123,7 +123,7 @@ export async function runAgentLoopDemo(
   model: BaseChatModel,
   machineModel: BaseChatModel,
   ask: string,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ) {
   const agent = createEmailHostAgent(model, machineModel, judge);
   const result = await agent.invoke({ messages: [new HumanMessage(ask)] });

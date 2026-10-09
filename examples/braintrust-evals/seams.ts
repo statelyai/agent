@@ -21,7 +21,7 @@
  * - `revise` — draft + revision request → new draft (`draftEmail`, second call).
  *
  * WHETHER to ask is not a seam: it is a Jev judgment (the AI SDK's
- * `experimental_evaluate` with `@ai-sdk/typesafe-ai`), a typed probability
+ * `experimental_decide` with `@ai-sdk/typesafe-ai`), a typed probability
  * per required detail, not a text request, so `runSeam` does not route it.
  * `runSeamCase` takes the judge model instead: the test scripts it, the live
  * run asks the real one. The branch that judgment picks
@@ -34,7 +34,7 @@
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic } from "xstate";
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import { matchesTrajectory, runSeam } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -120,7 +120,7 @@ function respondFor(input: SeamCaseInput) {
 export async function runSeamCase(
   input: SeamCaseInput,
   candidate: AgentRequestExecutors["generateText"] | null,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ): Promise<SeamOutcome> {
   const run = await runSeam(emailDrafter, {
     scripts: input.scripts,

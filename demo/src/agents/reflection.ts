@@ -4,8 +4,8 @@
  * What the MODEL owns: writing the draft (`writeDraft`, a text request).
  * What JEV owns: scoring it (`evaluate`). Grading a draft against a rubric is a
  * typed judgment over text the machine holds, not a generation, so it goes to
- * the AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- * evaluation model: one `score` on the described levels in `QUALITY_LEVELS`,
+ * the AI SDK's `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ * decision model: one `score` on the described levels in `QUALITY_LEVELS`,
  * plus one boolean question per criterion in the same call. The criteria Jev
  * reads as unmet become the feedback for the next draft.
  * What the MACHINE owns: the revise/stop decision. The `checking` choice state
@@ -15,12 +15,12 @@
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { setupAgent } from "@statelyai/agent";
 
 /** The judge: Jev through the AI SDK. Reads `TYPESAFE_AI_API_KEY`; tests inject a mock. */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 const MAX_REVISIONS = 2;
 
@@ -65,7 +65,7 @@ const CRITERIA = {
 } as const;
 
 /** The evaluator as one Jev call: a rubric `score` and a boolean question per criterion. */
-export function createEvaluate(model: Experimental_EvaluationModel = judgeModel) {
+export function createEvaluate(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     {
       answers: { quality: { score: number } } & Record<
@@ -77,7 +77,7 @@ export function createEvaluate(model: Experimental_EvaluationModel = judgeModel)
   >({
     run: async ({ input, signal }) => {
       const criterion = (instructions: string) => ({ type: "boolean" as const, instructions });
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { topic: input.topic, draft: input.draft },
         questions: {

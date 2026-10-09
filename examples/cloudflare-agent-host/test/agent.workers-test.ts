@@ -4,7 +4,7 @@
  * real thing — not a Node stand-in. Only the models are stubbed: the suite
  * overrides `EmailDrafter.prototype.createExecutors` with a plain-function
  * executor keyed by request name, and `createJudgments` with the drafter's Jev
- * judgment over a scripted evaluation model. `vitest.config.ts` also forces
+ * judgment over a scripted decision model. `vitest.config.ts` also forces
  * the `OPENAI_API_KEY` and `TYPESAFE_AI_API_KEY` bindings empty (they would
  * otherwise be picked up from a `.dev.vars` left behind by `dev:live`), so
  * this suite never bills a provider.
@@ -18,7 +18,7 @@ import { getAgentByName } from "agents";
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createAsyncLogic, type InputFrom, type OutputFrom } from "xstate";
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import type { AgentLogEntry, AgentRequestExecutors } from "@statelyai/agent";
 import { createEvaluatePrompt } from "../../email-drafter/agent-logic.js";
 import { EmailDrafter } from "../index.js";
@@ -58,13 +58,13 @@ const stubExecutors = (): AgentRequestExecutors => ({
 });
 
 /**
- * The judge stand-in, an AI SDK evaluation model written inline (the Worker
+ * The judge stand-in, an AI SDK decision model written inline (the Worker
  * bundle cannot reach `../../mock-judge.ts` across the wrangler alias). It
  * judges every request complete; `judge.calls` makes the same durability
  * claim observable for the judgment as `modelCalls` does for the text model.
  */
-type JudgeModel = Extract<Experimental_EvaluationModel, { doEvaluate: unknown }>;
-type JudgeCall = Parameters<JudgeModel["doEvaluate"]>[0];
+type JudgeModel = Extract<Experimental_DecisionModel, { doDecide: unknown }>;
+type JudgeCall = Parameters<JudgeModel["doDecide"]>[0];
 type Judgment = ReturnType<typeof createEvaluatePrompt>;
 
 const judge: { calls: JudgeCall[]; model: JudgeModel } = {
@@ -74,7 +74,7 @@ const judge: { calls: JudgeCall[]; model: JudgeModel } = {
     provider: "stub-judge",
     modelId: "stub-judge",
     supportedQuestionTypes: ["boolean"],
-    doEvaluate: async (options) => {
+    doDecide: async (options) => {
       judge.calls.push(options);
       const answers = Object.fromEntries(
         Object.keys(options.questions).map((id) => [
@@ -309,7 +309,7 @@ describe("cloudflare agent host", () => {
     const name = "append-fails";
     // The failed turn tears down the judgment it started, so this
     // conversation's judgment never answers. It is a bare pending actor, not
-    // `evaluate` over a waiting judge: under workerd, an `experimental_evaluate`
+    // `evaluate` over a waiting judge: under workerd, an `experimental_decide`
     // call whose `abortSignal` fires at teardown surfaces as an unhandled
     // rejection after the turn has already failed.
     createJudgments.mockImplementationOnce(() => ({

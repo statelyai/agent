@@ -37,8 +37,8 @@
  * that well, and encoding it as states would be ceremony.
  *
  * Grading is split along the judgment/generation line. `grading` calls the AI
- * SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- * evaluation model: one boolean question, `correct`, over
+ * SDK's `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ * decision model: one boolean question, `correct`, over
  * `{ passage, question, answer }`,
  * and the answer counts as correct when that probability clears
  * `CORRECT_THRESHOLD`. `explaining` then asks the text model only for the prose
@@ -55,7 +55,7 @@ import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { createAsyncLogic } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -114,13 +114,13 @@ export const CORRECT_THRESHOLD = 0.5;
  * question. The judge model is injected by tests and hosts; the default is
  * Jev, which reads `TYPESAFE_AI_API_KEY` from the environment.
  */
-export function createGradeAnswer(model: Experimental_EvaluationModel = judgeModel) {
+export function createGradeAnswer(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: { correct: { probability: number } } },
     { prompt: string; answer: string; sourceText: string; pageNumber: number }
   >({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: {
           passage: { page: input.pageNumber, text: input.sourceText },
@@ -308,10 +308,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 export const chatWithPdfSchemas = createAgentSchemas({
   // The library's own interaction protocol, not a per-machine restatement.

@@ -31,8 +31,8 @@
  * Differences from LangGraph worth calling out:
  *   - Selection is a JUDGMENT, not a generation. The tutorial asks a chat
  *     model to copy the chosen modules' text back. Here `selecting` asks the
- *     AI SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model, with the task and every module as state and one
+ *     AI SDK's `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model, with the task and every module as state and one
  *     boolean question per module that quotes it ("would the reasoning module
  *     '<module>' help solve `task`?"). The machine keeps the modules whose
  *     probability clears `MODULE_THRESHOLD`, most probable first, capped at
@@ -71,7 +71,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -87,10 +87,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** The most modules a selection may contain. */
 export const MAX_SELECTED_MODULES = 5;
@@ -123,10 +123,10 @@ export const REASONING_MODULES: readonly string[] = [
  * module, no prose. The judge model is injected by tests and hosts; the
  * default is Jev.
  */
-export function createSelectModules(model: Experimental_EvaluationModel = judgeModel) {
+export function createSelectModules(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<{ answers: Record<string, { probability: number }> }, { task: string }>({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { task: input.task, modules: [...REASONING_MODULES] },
         questions: Object.fromEntries(
@@ -430,7 +430,7 @@ export interface RunSelfDiscoverOptions {
   /** Injected for tests; direct run supplies a real model executor. */
   generateText?: AgentRequestExecutors["generateText"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }

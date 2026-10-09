@@ -13,7 +13,7 @@
  *
  * The models are real: `OPENAI_API_KEY` for the text requests (follow-up
  * questions, the draft) and `TYPESAFE_AI_API_KEY` for the Jev judgment (the
- * AI SDK's `experimental_evaluate` with `@ai-sdk/typesafe-ai`) that decides
+ * AI SDK's `experimental_decide` with `@ai-sdk/typesafe-ai`) that decides
  * whether the prompt is complete. `runDrafterCase` takes its executors and
  * judge model as arguments, so the test drives the same dataset and scorers
  * over a mock model and a scripted judge instead — only those change.
@@ -30,7 +30,7 @@
  */
 import { Eval } from "braintrust";
 import type { EventFromLogic, Snapshot, SnapshotFrom } from "xstate";
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import { getStatePath, createAgentRuntime, runToQuiescence } from "@statelyai/agent";
 import { matchesTrajectory } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
@@ -122,7 +122,7 @@ function nextUserEvent(
 export async function runDrafterCase(
   drafterCase: DrafterCase,
   executors: Partial<AgentRequestExecutors>,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
   maxLegs = 12,
 ): Promise<DrafterOutcome> {
   const actors = judge ? { evaluatePrompt: createEvaluatePrompt(judge) } : undefined;

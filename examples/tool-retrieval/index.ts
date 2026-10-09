@@ -38,8 +38,8 @@
  * Differences from LangGraph worth calling out:
  *   - Selection is a JUDGMENT, not a search or a generation. bigtool embeds
  *     the query and takes the nearest tool descriptions. Here `selectingTools`
- *     calls the AI SDK's `experimental_evaluate` with Jev
- *     (`@ai-sdk/typesafe-ai`) as the evaluation model, with the query and
+ *     calls the AI SDK's `experimental_decide` with Jev
+ *     (`@ai-sdk/typesafe-ai`) as the decision model, with the query and
  *     every registry tool's name and description as state, and one boolean
  *     question per tool
  *     ("could this tool help answer the question?"). The probabilities are the
@@ -69,7 +69,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -83,10 +83,10 @@ import {
 const models = { agent: openai("gpt-5.4-mini") };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** How many tools one selection exposes. */
 export const TOOLS_PER_SELECTION = 3;
@@ -219,10 +219,10 @@ const TOOL_NAMES = TOOL_REGISTRY.map((tool) => tool.name) as [string, ...string[
  * question, keyed by the tool's name. One call, one probability per tool. The
  * judge model is injected by tests and hosts; the default is Jev.
  */
-export function createSelectTools(model: Experimental_EvaluationModel = judgeModel) {
+export function createSelectTools(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<{ answers: Record<string, { probability: number }> }, { query: string }>({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: {
           question: input.query,
@@ -501,7 +501,7 @@ export interface RunToolRetrievalOptions {
   /** Injected for tests; the direct run supplies a real model executor. */
   decide?: AgentRequestExecutors["decide"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   onProgress?: (state: string) => void;
 }
 

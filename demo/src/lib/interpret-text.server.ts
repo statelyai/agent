@@ -8,11 +8,11 @@
  * the readings — the catch-all for a reply that is a message in its own right
  * — so "approve it" is not sent as rejection feedback.
  *
- * The judge is Jev through the AI SDK's `experimental_evaluate`, which reads
+ * The judge is Jev through the AI SDK's `experimental_decide`, which reads
  * `TYPESAFE_AI_API_KEY`; tests mock `@ai-sdk/typesafe-ai`.
  */
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { createActor, createAsyncLogic, toPromise } from "xstate";
 import { textCandidates, type ChatIdle, type JsonObject } from "./machine-ui";
 
@@ -31,7 +31,7 @@ function normalizeName(value: string): string {
 /** The label Jev picks when the text asks for none of the offered events. */
 const UNCLEAR = "unclear";
 
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /**
  * What Jev is told. The app's prompt is background, not the question: after a
@@ -56,7 +56,7 @@ const INSTRUCTIONS =
  * the result's TypeSafe provider metadata; a judge that reports none counts
  * as unsure (0).
  */
-export function createInterpretText(model: Experimental_EvaluationModel = judgeModel) {
+export function createInterpretText(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { choice: string; confidence: number },
     {
@@ -70,7 +70,7 @@ export function createInterpretText(model: Experimental_EvaluationModel = judgeM
     }
   >({
     run: async ({ input, signal }) => {
-      const { answers, providerMetadata } = await evaluate({
+      const { answers, providerMetadata } = await experimental_decide({
         model,
         state: {
           reply: input.message,
@@ -110,7 +110,7 @@ export function createInterpretText(model: Experimental_EvaluationModel = judgeM
 export async function interpretIdleText(
   text: string,
   idle: ChatIdle,
-  options: { signal?: AbortSignal; judge?: Experimental_EvaluationModel } = {},
+  options: { signal?: AbortSignal; judge?: Experimental_DecisionModel } = {},
 ): Promise<({ type: string } & JsonObject) | null> {
   const candidates = textCandidates(idle.events);
   if (!candidates.length) return null;

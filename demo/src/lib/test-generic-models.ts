@@ -9,14 +9,14 @@
  *     from the JSON Schema the AI SDK sends, a decision with a tool call that
  *     rotates through the offered tools (so a loop waiting for a "finish" event
  *     reaches it), and a plain request with a short echo of the prompt.
- *   - The evaluation model answers a boolean with 0.9, a choice with its first
+ *   - The decision model answers a boolean with 0.9, a choice with its first
  *     label, and a score with its top level.
  *
  * `resetGenericModels()` restores the rotation, so each example starts from the
  * same state regardless of test order.
  */
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 
 type MockOptions = NonNullable<ConstructorParameters<typeof MockLanguageModelV3>[0]>;
 type DoGenerate = Extract<MockOptions["doGenerate"], (...args: never[]) => unknown>;
@@ -24,8 +24,8 @@ type DoStream = Extract<MockOptions["doStream"], (...args: never[]) => unknown>;
 type CallOptions = Parameters<DoGenerate>[0];
 type StreamPart =
   Awaited<ReturnType<DoStream>>["stream"] extends ReadableStream<infer TPart> ? TPart : never;
-type EvaluationModel = Extract<Experimental_EvaluationModel, { doEvaluate: unknown }>;
-type EvaluateAnswer = Awaited<ReturnType<EvaluationModel["doEvaluate"]>>["answers"][string];
+type DecisionModel = Extract<Experimental_DecisionModel, { doDecide: unknown }>;
+type DecisionAnswer = Awaited<ReturnType<DecisionModel["doDecide"]>>["answers"][string];
 
 type JsonSchema = {
   type?: string | string[];
@@ -236,15 +236,15 @@ export function genericLanguageModel(modelId = "mock-model"): MockLanguageModelV
   });
 }
 
-/** An evaluation model that passes every gate the same way every time. */
-export function genericEvaluationModel(): EvaluationModel {
+/** A decision model that passes every gate the same way every time. */
+export function genericDecisionModel(): DecisionModel {
   return {
     specificationVersion: "v4",
     provider: "mock-judge",
     modelId: "mock-judge",
     supportedQuestionTypes: ["choice", "score", "boolean"],
-    doEvaluate: async (options) => {
-      const answers: Record<string, EvaluateAnswer> = {};
+    doDecide: async (options) => {
+      const answers: Record<string, DecisionAnswer> = {};
       for (const [id, question] of Object.entries(options.questions)) {
         if (question.type === "boolean") {
           answers[id] = { type: "boolean", probability: 0.9 };

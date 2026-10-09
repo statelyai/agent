@@ -33,8 +33,8 @@
  *
  * Differences from LangGraph worth calling out:
  *   - Grading is a JUDGMENT, not a generation. Each pass asks the AI SDK's
- *     `experimental_evaluate`, with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model, one `score` question whose five levels describe concrete
+ *     `experimental_decide`, with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model, one `score` question whose five levels describe concrete
  *     essays, lowest to highest (`RUBRICS`). The machine maps the level to
  *     [0, 1] as `score / (levels - 1)`, so the gate thresholds and the
  *     weighted final score keep the tutorial's meaning, and the comment is the
@@ -57,15 +57,15 @@
  */
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { getStatePath, createAgentRuntime, runToQuiescence, setupAgent } from "@statelyai/agent";
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Each gate passes only on a score strictly above its threshold. */
 export const RELEVANCE_THRESHOLD = 0.5;
@@ -145,12 +145,12 @@ export const RUBRICS: Record<Criterion, Rubric> = {
  */
 export function createGrader<C extends Criterion>(
   criterion: C,
-  model: Experimental_EvaluationModel = judgeModel,
+  model: Experimental_DecisionModel = judgeModel,
 ) {
   const rubric = RUBRICS[criterion];
   return createAsyncLogic<{ answers: Record<C, { score: number }> }, { essay: string }>({
     run: async ({ input, signal }) => {
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { essay: input.essay },
         questions: {
@@ -168,7 +168,7 @@ export function createGrader<C extends Criterion>(
 }
 
 /** The four passes' actors, all over one (optional) judge model. */
-function graderActors(model?: Experimental_EvaluationModel) {
+function graderActors(model?: Experimental_DecisionModel) {
   return {
     checkRelevance: createGrader("relevance", model),
     checkGrammar: createGrader("grammar", model),
@@ -333,7 +333,7 @@ export const essayGraderMachine = agentSetup.createMachine({
 export interface RunEssayGraderOptions {
   essay?: string;
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   onProgress?: (state: string) => void;
 }
 

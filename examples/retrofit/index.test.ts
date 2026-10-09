@@ -23,7 +23,7 @@ const TRIAGE = {
   },
 };
 
-/** The same triage through a mock evaluation model, for `runRetrofitExample`. */
+/** The same triage through a mock decision model, for `runRetrofitExample`. */
 const triageJev = () => createMockJudge({ category: "refund", sentiment: "neutral" });
 
 // ─── (a) the final machine is structurally sound ───

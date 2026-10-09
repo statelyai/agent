@@ -48,7 +48,7 @@ For the optional TanStack AI executor (`@statelyai/agent/tanstack-ai`):
 pnpm add @tanstack/ai @tanstack/ai-openai
 ```
 
-Classification, grading, relevance, and yes/no checks are judgments: call the AI SDK's `experimental_evaluate` with `@ai-sdk/typesafe-ai` (`pnpm add ai @ai-sdk/typesafe-ai`) from an ordinary actor; see [Judgments with the AI SDK](docs/judgments.md).
+Classification, grading, relevance, and yes/no checks are judgments: call the AI SDK's `experimental_decide` with `@ai-sdk/typesafe-ai` (`pnpm add ai @ai-sdk/typesafe-ai`) from an ordinary actor; see [Judgments with the AI SDK](docs/judgments.md).
 
 Requirements:
 

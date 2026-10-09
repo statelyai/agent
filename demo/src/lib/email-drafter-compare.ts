@@ -18,7 +18,7 @@
  * Writes demo/results/email-drafter/comparison.json.
  */
 import type { AnyStateMachine, SnapshotFrom } from "xstate";
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import {
   type AgentRequestExecutors,
   type AgentTraceEvent,
@@ -125,7 +125,7 @@ export interface RunMetrics {
   revisions: number;
   /** Text-model calls (`request.start`). Jev judgments are counted in `jevCalls`. */
   modelCalls: number;
-  /** Jev judgments (`experimental_evaluate` calls): one per entry into v1's `evaluating`. */
+  /** Jev judgments (`experimental_decide` calls): one per entry into v1's `evaluating`. */
   jevCalls: number;
   /** Sum over every model call, or `null` if any call did not report usage. */
   totalTokens: number | null;
@@ -204,7 +204,7 @@ export async function runCase(
   emailCase: EmailCase,
   executors: Partial<AgentRequestExecutors>,
   /** Injected by tests; omitted, Jev reads `TYPESAFE_AI_API_KEY`. */
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ): Promise<RunMetrics> {
   const metrics: RunMetrics = {
     caseId: emailCase.id,
@@ -353,7 +353,7 @@ export async function runCase(
 export async function runComparison(
   executors: Partial<AgentRequestExecutors>,
   selectedCases: EmailCase[] = cases,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ): Promise<MachineSummary[]> {
   const machines = [
     { name: "v1", machine: emailDrafterV1Machine },

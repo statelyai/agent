@@ -51,7 +51,7 @@ curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"SEND"}'
 curl -X POST localhost:3009/agents/email-drafter/demo -d '{"type":"END"}'
 ```
 
-`OPENAI_API_KEY` and `TYPESAFE_AI_API_KEY` are required: the drafter's prompt check is a Jev judgment, and its evaluation model (`@ai-sdk/typesafe-ai`) is built from the binding like the model provider. Without either binding a turn fails with a 500 naming it. There is no fallback model.
+`OPENAI_API_KEY` and `TYPESAFE_AI_API_KEY` are required: the drafter's prompt check is a Jev judgment, and its decision model (`@ai-sdk/typesafe-ai`) is built from the binding like the model provider. Without either binding a turn fails with a 500 naming it. There is no fallback model.
 
 ## Test
 

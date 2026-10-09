@@ -24,7 +24,7 @@
  */
 import { z } from "zod";
 import type { Snapshot } from "xstate";
-import type { Experimental_EvaluationModel } from "ai";
+import type { Experimental_DecisionModel } from "ai";
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { createAgent } from "langchain";
@@ -101,7 +101,7 @@ const runs = new Map<string, StoredRun>();
  */
 export function langChainRunOptions(
   model: BaseChatModel,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ): AgentRuntimeOptions<typeof emailDrafter> & AgentRunInit<typeof emailDrafter> {
   return {
     executors: createLangChainExecutors({ model }),
@@ -118,7 +118,7 @@ let toolRunOptions:
   | null = null;
 
 /** Point the bridge tools at a LangChain model (and, optionally, a judge model). */
-export function useModel(model: BaseChatModel, judge?: Experimental_EvaluationModel) {
+export function useModel(model: BaseChatModel, judge?: Experimental_DecisionModel) {
   toolRunOptions = langChainRunOptions(model, judge);
 }
 
@@ -296,7 +296,7 @@ export const SYSTEM_PROMPT =
 export function createEmailHostAgent(
   model: BaseChatModel,
   machineModel: BaseChatModel = model,
-  judge?: Experimental_EvaluationModel,
+  judge?: Experimental_DecisionModel,
 ) {
   // The conversing model and the model *inside* the machine are separable, and
   // separate models keep the test's scripts readable; live, they are one model.

@@ -44,8 +44,8 @@
  * Differences from LangGraph worth calling out:
  *   - Grading is a JUDGMENT, not a generation. LangGraph asks a chat model for
  *     one structured yes/no over all passages. Here `grading` calls the AI
- *     SDK's `experimental_evaluate` with Jev (`@ai-sdk/typesafe-ai`) as the
- *     evaluation model: the question and the passages are the state, and each
+ *     SDK's `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the
+ *     decision model: the question and the passages are the state, and each
  *     passage gets its own boolean question ("does it help answer the
  *     question?"). Passages whose probability clears `RELEVANCE_THRESHOLD` are
  *     kept; none kept → rewrite. The RETRIEVE / ANSWER choice stays an
@@ -80,7 +80,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationModel } from "ai";
+import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -96,10 +96,10 @@ const models = {
 };
 
 /**
- * The judge: TypeSafe's Jev through the AI SDK's evaluation-model provider.
- * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock evaluation model instead.
+ * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
+ * Reads `TYPESAFE_AI_API_KEY`. Tests pass a mock decision model instead.
  */
-const judgeModel: Experimental_EvaluationModel = typeSafeAi.evaluationModel("jev-latest");
+const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
 /** Retrievals the model may make per run. Past it, RETRIEVE is rejected. */
 export const MAX_RETRIEVALS = 3;
@@ -212,10 +212,10 @@ export const RELEVANCE_THRESHOLD = 0.5;
 /**
  * grade_documents as a judgment: the question and every retrieved passage are
  * the state, and each passage gets its own boolean question, all in one
- * `experimental_evaluate` call. The judge model is injected by tests and
+ * `experimental_decide` call. The judge model is injected by tests and
  * hosts; the default is Jev.
  */
-export function createGradeDocuments(model: Experimental_EvaluationModel = judgeModel) {
+export function createGradeDocuments(model: Experimental_DecisionModel = judgeModel) {
   return createAsyncLogic<
     { answers: Record<string, { probability: number }> },
     { question: string; documents: string[] }
@@ -234,7 +234,7 @@ export function createGradeDocuments(model: Experimental_EvaluationModel = judge
           },
         ]),
       );
-      const { answers } = await evaluate({
+      const { answers } = await experimental_decide({
         model,
         state: { question: input.question, documents: input.documents },
         questions,
@@ -590,7 +590,7 @@ export interface RunAgenticRagOptions {
   generateText?: AgentRequestExecutors["generateText"];
   decide?: AgentRequestExecutors["decide"];
   /** The judge model; tests pass a mock, the direct run uses Jev. */
-  judge?: Experimental_EvaluationModel;
+  judge?: Experimental_DecisionModel;
   /** Observes each machine transition. */
   onProgress?: (state: string) => void;
 }
