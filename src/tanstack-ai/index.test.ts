@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { EventType, type StreamChunk, type TextOptions, type TokenUsage } from "@tanstack/ai";
 import {
@@ -516,6 +516,12 @@ describe("toTanStackAiModelOptions", () => {
     });
   });
 
+  test("anthropic: 'none' disables tool calls rather than being dropped", () => {
+    expect(toTanStackAiModelOptions({ name: "anthropic" }, { toolChoice: "none" })).toEqual({
+      tool_choice: { type: "none" },
+    });
+  });
+
   test("gemini: generation config keys and a function-calling config", () => {
     expect(toTanStackAiModelOptions({ name: "gemini" }, request)).toEqual({
       temperature: 0.2,
@@ -558,6 +564,167 @@ describe("settings precedence", () => {
       temperature: 0,
     });
     expect(adapter.requests[0]!.metadata).toEqual({ request: "draft" });
+  });
+});
+
+describe("response messages", () => {
+  const lookup = {
+    inputSchema: z.object({ city: z.string() }),
+    execute: async ({ city }: { city: string }) => ({ city, temp: 20 }),
+  };
+
+  test("a tool loop returns each turn's assistant message and the tool results between", async () => {
+    const adapter = new FakeTextAdapter([
+      { text: "Checking.", toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },
+      { text: "It is 20 degrees." },
+    ]);
+    const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
+
+    const { messages } = await generateText(
+      textRequest({ tools: { lookup } as unknown as AgentTools, maxSteps: 2 }),
+    );
+
+    expect(messages).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Checking." },
+          {
+            type: "tool-call",
+            toolCallId: "run-1-call-0",
+            toolName: "lookup",
+            input: { city: "Oslo" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "run-1-call-0",
+            toolName: "lookup",
+            output: { type: "json", value: { city: "Oslo", temp: 20 } },
+          },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "It is 20 degrees." }] },
+    ]);
+
+    // They replay into the next request as the same conversation.
+    expect(toTanStackAiMessages({ messages }).messages).toEqual([
+      {
+        role: "assistant",
+        content: "Checking.",
+        toolCalls: [
+          {
+            id: "run-1-call-0",
+            type: "function",
+            function: { name: "lookup", arguments: JSON.stringify({ city: "Oslo" }) },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        toolCallId: "run-1-call-0",
+        content: JSON.stringify({ city: "Oslo", temp: 20 }),
+      },
+      { role: "assistant", content: "It is 20 degrees." },
+    ]);
+  });
+
+  test("a plain text reply is one assistant message, from generateText and streamText", async () => {
+    const adapter = new FakeTextAdapter([{ text: "Hi." }, { text: "Hi." }]);
+    const { generateText, streamText } = createTanStackAiExecutors({ models: { quick: adapter } });
+    const expected = [{ role: "assistant", content: [{ type: "text", text: "Hi." }] }];
+
+    expect((await generateText(textRequest())).messages).toEqual(expected);
+    expect((await streamText(textRequest())).messages).toEqual(expected);
+  });
+});
+
+describe("tool choice", () => {
+  const lookup = {
+    inputSchema: z.object({ city: z.string() }),
+    execute: async () => ({ temp: 20 }),
+  };
+  const twoTurns = () => [
+    { toolCalls: [{ name: "lookup", input: { city: "Oslo" } }] },
+    { text: "It is 20 degrees." },
+  ];
+
+  test("a forced choice applies to the first turn only, so the model can answer", async () => {
+    const adapter = new FakeTextAdapter(twoTurns(), "openai");
+    const { generateText } = createTanStackAiExecutors({ models: { quick: adapter } });
+
+    const result = await generateText(
+      textRequest({
+        tools: { lookup } as unknown as AgentTools,
+        toolChoice: "required",
+        maxSteps: 2,
+        temperature: 0,
+      }),
+    );
+
+    expect(result.result).toBe("It is 20 degrees.");
+    expect(adapter.requests.map((request) => request.modelOptions)).toEqual([
+      { tool_choice: "required", temperature: 0 },
+      { temperature: 0 },
+    ]);
+  });
+
+  test("after the first turn, a host's own tool choice comes back", async () => {
+    const adapter = new FakeTextAdapter(twoTurns(), "openai");
+    const { generateText } = createTanStackAiExecutors({
+      models: { quick: adapter },
+      settings: { modelOptions: { tool_choice: "auto" } },
+    });
+
+    await generateText(
+      textRequest({
+        tools: { lookup } as unknown as AgentTools,
+        toolChoice: "required",
+        maxSteps: 2,
+      }),
+    );
+
+    expect(adapter.requests.map((request) => request.modelOptions?.tool_choice)).toEqual([
+      "required",
+      "auto",
+    ]);
+  });
+});
+
+describe("cancellation", () => {
+  test("the abort listener is removed once a call settles", async () => {
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, "addEventListener");
+    const remove = vi.spyOn(controller.signal, "removeEventListener");
+    const { generateText } = createTanStackAiExecutors({
+      models: { quick: new FakeTextAdapter([{ text: "a" }, { error: { message: "boom" } }]) },
+    });
+
+    await generateText(textRequest(), { signal: controller.signal });
+    await expect(generateText(textRequest(), { signal: controller.signal })).rejects.toThrow(
+      "boom",
+    );
+
+    expect(add).toHaveBeenCalledTimes(2);
+    expect(remove.mock.calls.map(([, listener]) => listener)).toEqual(
+      add.mock.calls.map(([, listener]) => listener),
+    );
+  });
+
+  test("an aborted call throws the abort reason", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("stop"));
+    const { generateText } = createTanStackAiExecutors({
+      models: { quick: new FakeTextAdapter([{ text: "a" }]) },
+    });
+
+    await expect(generateText(textRequest(), { signal: controller.signal })).rejects.toThrow(
+      "stop",
+    );
   });
 });
 

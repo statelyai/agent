@@ -14,7 +14,7 @@ const executors = createTanStackAiExecutors({
 ```
 
 - `models`, `resolveModel`, and `settings` work as in `createAiSdkExecutors`; a model entry can be `{ adapter, settings }`.
-- Structured output, tool loops bounded by `maxSteps` (in `generateText` and `streamText`), forced-tool decisions, usage summed over model turns, and `AgentTruncatedError` all follow the shared adapter contract.
+- Structured output, tool loops bounded by `maxSteps` (in `generateText` and `streamText`), response `messages`, forced-tool decisions, usage summed over model turns, and `AgentTruncatedError` all follow the shared adapter contract.
 - A request's generation settings and `toolChoice` map onto `modelOptions` for the `openai`, `anthropic`, and `gemini` providers. For others, map them in a `settings` function.
 
 `@tanstack/ai` (`>=0.66.0 <1`) is a new optional peer dependency.

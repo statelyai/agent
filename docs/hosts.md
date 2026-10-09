@@ -145,7 +145,7 @@ Precedence is global `settings`, then the model entry's `settings`, then the req
 
 TanStack AI has no portable sampling or tool-choice options; each provider adapter names its own `modelOptions`. The adapter maps a request's `temperature`, `topP`, `topK`, `maxOutputTokens`, `seed`, `stopSequences`, and `toolChoice` by provider:
 
-- `openai`: `temperature`, `top_p`, `max_output_tokens`, and `tool_choice`. The Responses API has no `top_k`, `seed`, or `stop`, so those are dropped.
+- `openai`: `temperature`, `top_p`, `max_output_tokens`, and `tool_choice`. The Responses API has no `top_k`, `seed`, or `stop`, so those are dropped. TanStack AI's OpenAI adapter also drops `temperature` and `top_p` for reasoning models.
 - `anthropic`: `temperature`, `top_p`, `top_k`, `max_tokens`, `stop_sequences`, and `tool_choice`. `seed` is dropped.
 - `gemini`: `temperature`, `topP`, `topK`, `maxOutputTokens`, `seed`, `stopSequences`, and `toolConfig`.
 - Any other provider gets none of them. Map them in a `settings` function, which receives the request.
@@ -154,6 +154,8 @@ The rest of the contract matches the other adapters:
 
 - Structured output passes the declared schema, wrapped as `{ result, reasoning? }`, as `chat()`'s `outputSchema`. A structured run cut off by the token limit is an `AgentTruncatedError`.
 - Tools run in `chat()`'s own loop, in `generateText` and `streamText` alike. The request's `maxSteps` bounds the model turns; the default is one. A tool with no `execute` stops the run at its call, with `finishReason: 'tool-calls'`.
+- A forced `toolChoice` applies to the first model turn only, so the model can answer after the tool runs.
+- `generateText` and `streamText` return the run's response `messages`: each turn's assistant text and tool calls, and the tool results fed back. Append them to a conversation and they replay into the next request.
 - Decisions offer one tool per candidate event, with no `execute`, so the run stops at the model's first call. The tool choice is forced where the provider supports it.
 - System messages and the request's `system` become `systemPrompts`, since TanStack AI messages have no `system` role. Image parts become `url` or base64 `data` sources; other part types throw.
 - Every result reports `usage` summed over the run's model turns, the normalized `finishReason`, and every chunk the run produced on `raw`. A provider error arrives as a `RUN_ERROR` chunk and is thrown with its `code`.

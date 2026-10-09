@@ -13,6 +13,7 @@ import {
   chat,
   maxIterations,
   type AnyTextAdapter,
+  type ChatMiddleware,
   type ContentPart,
   type ModelMessage,
   type StreamChunk,
@@ -36,10 +37,13 @@ import type { AgentEventDescriptor } from "../events.js";
 import type {
   AgentMessage,
   AgentTool,
+  AssistantMessage,
   AgentToolChoice,
   AgentTools,
   ChosenEvent,
   DataContent,
+  ToolCallPart,
+  ToolResultOutput,
   ToolResultPart,
 } from "../types.js";
 import { getJsonSchema, getJsonSchemaSync, isStandardSchema } from "../utils.js";
@@ -256,8 +260,7 @@ function defined<T extends object>(settings: T): Partial<T> {
  * - `openai` (Responses API): `temperature`, `top_p`, `max_output_tokens`,
  *   `tool_choice`. The API has no `top_k`, `seed`, or `stop`; those are dropped.
  * - `anthropic`: `temperature`, `top_p`, `top_k`, `max_tokens`,
- *   `stop_sequences`, `tool_choice`. `seed` is dropped; a `'none'` choice is
- *   not expressible and is dropped.
+ *   `stop_sequences`, `tool_choice`. `seed` is dropped.
  * - `gemini`: `temperature`, `topP`, `topK`, `maxOutputTokens`, `seed`,
  *   `stopSequences`, `toolConfig.functionCallingConfig`.
  *
@@ -290,9 +293,9 @@ export function toTanStackAiModelOptions(
             ? { type: "tool", name: toolChoice.name }
             : toolChoice === "required"
               ? { type: "any" }
-              : toolChoice === "auto"
-                ? { type: "auto" }
-                : undefined,
+              : toolChoice === undefined
+                ? undefined
+                : { type: toolChoice },
       });
     case "gemini":
       return defined({
@@ -401,8 +404,22 @@ type RunSummary = {
   usage: AgentCallUsage | undefined;
   finishReason: AgentFinishReason;
   toolCalls: TanStackAiToolCall[];
+  messages: AgentMessage[];
   chunks: StreamChunk[];
 };
+
+// A tool result's content as the run carried it: JSON when it parses, text
+// otherwise. Multimodal content parts are kept as JSON.
+function toToolResultOutput(content: unknown): ToolResultOutput {
+  if (typeof content !== "string") {
+    return { type: "json", value: content };
+  }
+  try {
+    return { type: "json", value: JSON.parse(content) };
+  } catch {
+    return { type: "text", value: content };
+  }
+}
 
 /** A `RUN_ERROR` chunk as the `Error` it reports, `code` included. */
 class TanStackAiRunError extends Error {
@@ -430,22 +447,65 @@ async function readRun(
     usage: undefined,
     finishReason: "other",
     toolCalls: [],
+    messages: [],
     chunks: [],
   };
-  const args = new Map<string, { toolName: string; json: string }>();
+  const args = new Map<string, { part: ToolCallPart; json: string }>();
+
+  // The response messages, in the order a later request replays them: each
+  // model turn's assistant message (text and tool calls), then one tool
+  // message with the results `chat()` fed back before the next turn.
+  let assistant: Extract<AssistantMessage["content"], unknown[]> | undefined;
+  let results: ToolResultPart[] | undefined;
+  const flushAssistant = () => {
+    if (assistant?.length) summary.messages.push({ role: "assistant", content: assistant });
+    assistant = undefined;
+  };
+  const flushResults = () => {
+    if (results?.length) summary.messages.push({ role: "tool", content: results });
+    results = undefined;
+  };
+  const assistantParts = () => {
+    flushResults();
+    return (assistant ??= []);
+  };
+
   for await (const chunk of stream) {
     summary.chunks.push(chunk);
     switch (chunk.type) {
-      case "TEXT_MESSAGE_CONTENT":
+      case "TEXT_MESSAGE_CONTENT": {
         summary.text += chunk.delta;
         onDelta?.(chunk.delta);
+        const parts = assistantParts();
+        const last = parts.at(-1);
+        if (last?.type === "text") last.text += chunk.delta;
+        else parts.push({ type: "text", text: chunk.delta });
         break;
-      case "TOOL_CALL_START":
-        args.set(chunk.toolCallId, { toolName: chunk.toolCallName, json: "" });
+      }
+      case "TOOL_CALL_START": {
+        const part: ToolCallPart = {
+          type: "tool-call",
+          toolCallId: chunk.toolCallId,
+          toolName: chunk.toolCallName,
+          input: {},
+        };
+        assistantParts().push(part);
+        args.set(chunk.toolCallId, { part, json: "" });
         break;
+      }
       case "TOOL_CALL_ARGS": {
         const call = args.get(chunk.toolCallId);
         if (call) call.json += chunk.delta;
+        break;
+      }
+      case "TOOL_CALL_RESULT": {
+        flushAssistant();
+        (results ??= []).push({
+          type: "tool-result",
+          toolCallId: chunk.toolCallId,
+          toolName: args.get(chunk.toolCallId)?.part.toolName ?? "",
+          output: toToolResultOutput(chunk.content),
+        });
         break;
       }
       case "CUSTOM":
@@ -468,10 +528,15 @@ async function readRun(
         throw new TanStackAiRunError(chunk.message, chunk.code ?? chunk.error?.code);
     }
   }
-  summary.toolCalls = [...args].map(([toolCallId, call]) => ({
-    toolCallId,
-    toolName: call.toolName,
-    input: call.json ? JSON.parse(call.json) : {},
+  for (const { part, json } of args.values()) {
+    part.input = json ? JSON.parse(json) : {};
+  }
+  flushAssistant();
+  flushResults();
+  summary.toolCalls = [...args.values()].map(({ part }) => ({
+    toolCallId: part.toolCallId,
+    toolName: part.toolName,
+    input: part.input,
   }));
   return summary;
 }
@@ -559,6 +624,10 @@ export type TanStackAiGenerateResult = {
   finishReason: AgentFinishReason;
   /** Every tool call the model made during the run. */
   toolCalls: TanStackAiToolCall[];
+  /** The run's response messages — each turn's assistant text and tool
+   * calls, and the tool results fed back — ready to append to a
+   * conversation. */
+  messages: AgentMessage[];
   /** Every chunk the run produced, in order. */
   raw: StreamChunk[];
 };
@@ -570,6 +639,8 @@ export type TanStackAiStreamResult = {
   result: string;
   usage?: AgentCallUsage;
   finishReason: AgentFinishReason;
+  /** The run's response messages, as on {@link TanStackAiGenerateResult}. */
+  messages: AgentMessage[];
   raw: StreamChunk[];
 };
 
@@ -646,25 +717,64 @@ function usageField(usage: AgentCallUsage | undefined): { usage?: AgentCallUsage
   return usage ? { usage } : {};
 }
 
-/** `chat()` takes an `AbortController`, not a signal: bridge the runtime's. */
-function abortControllerFor(signal: AbortSignal | undefined): AbortController | undefined {
-  if (!signal) {
-    return undefined;
-  }
+/**
+ * Runs one `chat()` call to the end. `chat()` takes an `AbortController`, not
+ * a signal, so the runtime's signal is bridged to one — and unhooked once the
+ * run settles, so a long-lived signal does not collect a listener per request.
+ * An aborted `chat()` stream just ends, so the abort is surfaced as the throw
+ * it is.
+ */
+async function runChat(
+  options: Record<string, unknown>,
+  signal: AbortSignal | undefined,
+  onDelta?: (delta: string) => void,
+): Promise<RunSummary> {
   const controller = new AbortController();
-  if (signal.aborted) {
-    controller.abort(signal.reason);
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) {
+    abort();
   } else {
-    signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+    signal?.addEventListener("abort", abort, { once: true });
   }
-  return controller;
-}
-
-/** An aborted `chat()` stream just ends, so surface the abort as the throw it is. */
-function throwIfAborted(signal: AbortSignal | undefined): void {
+  let run: RunSummary;
+  try {
+    run = await readRun(
+      chat({ ...options, abortController: controller } as Parameters<
+        typeof chat
+      >[0]) as AsyncIterable<StreamChunk>,
+      onDelta,
+    );
+  } finally {
+    signal?.removeEventListener("abort", abort);
+  }
   if (signal?.aborted) {
     throw signal.reason ?? new Error("createTanStackAiExecutors: the request was aborted.");
   }
+  return run;
+}
+
+/**
+ * A request's tool choice belongs to its first model turn. `chat()` reuses
+ * `modelOptions` for every turn of its tool loop, so a forced choice left in
+ * place would force another tool call after each result, and the request could
+ * never answer. From the second turn on, the choice's keys go back to what the
+ * host set, or away.
+ */
+function toolChoiceOnFirstTurn(keys: string[], later: Record<string, unknown>): ChatMiddleware {
+  return {
+    name: "statelyai:tool-choice-first-turn",
+    onConfig: (ctx, config) => {
+      if (ctx.iteration === 0) {
+        return;
+      }
+      const modelOptions = { ...config.modelOptions };
+      for (const key of keys) {
+        if (key in later) modelOptions[key] = later[key];
+        else delete modelOptions[key];
+      }
+      return { modelOptions };
+    },
+  };
 }
 
 /**
@@ -717,16 +827,24 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
     }
     const host =
       (typeof options.settings === "function" ? options.settings(request) : options.settings) ?? {};
+    const merged = { ...host, ...entrySettings };
+    const base = { ...host.modelOptions, ...entrySettings?.modelOptions };
+    const generation = toTanStackAiModelOptions(adapter, { ...portable, toolChoice: undefined });
+    const firstTurn = toTanStackAiModelOptions(adapter, portable);
+    const choiceKeys = Object.keys(firstTurn).filter((key) => !(key in generation));
     return {
       adapter,
       settings: {
-        ...host,
-        ...entrySettings,
-        modelOptions: {
-          ...host.modelOptions,
-          ...entrySettings?.modelOptions,
-          ...toTanStackAiModelOptions(adapter, portable),
-        },
+        ...merged,
+        modelOptions: { ...base, ...firstTurn },
+        ...(choiceKeys.length > 0
+          ? {
+              middleware: [
+                ...(merged.middleware ?? []),
+                toolChoiceOnFirstTurn(choiceKeys, { ...base, ...generation }),
+              ],
+            }
+          : {}),
       },
     };
   };
@@ -759,23 +877,22 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
 
     let run: RunSummary;
     try {
-      run = await readRun(
-        chat({
+      run = await runChat(
+        {
           ...settings,
           adapter,
           ...toTanStackAiMessages(request),
           ...(tools.length > 0 ? { tools } : {}),
-          ...(outputSchema ? { outputSchema: outputSchema as object, stream: true as const } : {}),
+          ...(outputSchema ? { outputSchema, stream: true } : {}),
           agentLoopStrategy: loopBound(request),
-          abortController: abortControllerFor(info?.signal),
-        } as Parameters<typeof chat>[0]) as AsyncIterable<StreamChunk>,
+        },
+        info?.signal,
       );
     } catch (error) {
       throw structured && isTruncationError(error)
         ? truncated(request, info, undefined, error)
         : error;
     }
-    throwIfAborted(info?.signal);
 
     if (outputSchema) {
       // A structured output the model DID close, but only because it stopped
@@ -793,6 +910,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
         ...usageField(run.usage),
         finishReason: run.finishReason,
         toolCalls: run.toolCalls,
+        messages: run.messages,
         raw: run.chunks,
       };
     }
@@ -804,6 +922,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
       ...usageField(run.usage),
       finishReason: run.finishReason,
       toolCalls: run.toolCalls,
+      messages: run.messages,
       raw: run.chunks,
     };
   };
@@ -824,23 +943,23 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
 
     const { adapter, settings } = resolve(request, request);
     const tools = toTanStackAiTools(request.tools ?? {});
-    const run = await readRun(
-      chat({
+    const run = await runChat(
+      {
         ...settings,
         adapter,
         ...toTanStackAiMessages(request),
         ...(tools.length > 0 ? { tools } : {}),
         agentLoopStrategy: loopBound(request),
-        abortController: abortControllerFor(info?.signal),
-      } as Parameters<typeof chat>[0]) as AsyncIterable<StreamChunk>,
+      },
+      info?.signal,
       (delta) => info?.onChunk?.(delta),
     );
-    throwIfAborted(info?.signal);
 
     return {
       result: run.text,
       ...usageField(run.usage),
       finishReason: run.finishReason,
+      messages: run.messages,
       raw: run.chunks,
     };
   };
@@ -850,17 +969,16 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
     info?: AgentRequestExecutorInfo,
   ): Promise<TanStackAiDecideResult> => {
     const { adapter, settings } = resolve(request, { ...request, toolChoice: "required" });
-    const run = await readRun(
-      chat({
+    const run = await runChat(
+      {
         ...settings,
         adapter,
         ...toDecisionMessages(request),
         tools: toTanStackAiEventTools(request.events),
         agentLoopStrategy: maxIterations(1),
-        abortController: abortControllerFor(info?.signal),
-      } as Parameters<typeof chat>[0]) as AsyncIterable<StreamChunk>,
+      },
+      info?.signal,
     );
-    throwIfAborted(info?.signal);
 
     const toolCall = run.toolCalls[0];
     if (!toolCall) {
