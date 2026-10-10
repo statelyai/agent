@@ -5,7 +5,7 @@
  * What JEV owns: one `choice` over the request (`billing` / `technical` /
  * `account` / `unclear`). Routing is a typed judgment over text the machine
  * already holds, not a generation, so it goes to the AI SDK's
- * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the decision
  * model rather than to a text model: the answer is a label, no prose, and Jev
  * reports its confidence in the label in the result's provider metadata.
  * What the MACHINE owns: where each label goes, and how sure is sure enough.
