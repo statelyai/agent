@@ -4,7 +4,7 @@
  * What JEV owns: judging whether the request has enough detail
  * (`evaluatePrompt`). A completeness check is a typed judgment over text the
  * machine already holds, not a generation, so it goes to the AI SDK's
- * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the decision
  * model: one boolean question for "enough to draft from?" plus one per
  * required detail, in one call. Code turns the probabilities into `missing` against
  * `ASSESSMENT_THRESHOLD`.
