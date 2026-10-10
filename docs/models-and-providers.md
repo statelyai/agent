@@ -1,6 +1,6 @@
 ---
 title: Models and providers
-description: Reuse models and executors from other AI frameworks via AI SDK LanguageModel objects and OpenAI-compatible endpoints.
+description: Reuse models and executors from other AI frameworks via AI SDK LanguageModel objects, TanStack AI text adapters, and OpenAI-compatible endpoints.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
@@ -21,10 +21,11 @@ const executors = createAiSdkExecutors({
 await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 ```
 
-There are four integration paths. The first two both go through `createAiSdkExecutors`, so they appear as one row in the [support table](#support-by-path).
+There are five integration paths. The first two both go through `createAiSdkExecutors`, so they appear as one row in the [support table](#support-by-path).
 
-- **AI SDK adapter.** Accepts any `LanguageModel`, including models from Mastra, Cloudflare Workers AI through `workers-ai-provider`, TanStack AI, OpenRouter's AI SDK provider, and any `@ai-sdk/*` package. Supports all three executors, including `decide`.
+- **AI SDK adapter.** Accepts any `LanguageModel`, including models from Mastra, Cloudflare Workers AI through `workers-ai-provider`, OpenRouter's AI SDK provider, and any `@ai-sdk/*` package. Supports all three executors, including `decide`.
 - **OpenAI-compatible endpoints.** Point `createOpenAI({ baseURL })` from `@ai-sdk/openai` at any OpenAI-shaped endpoint, such as Groq, Ollama, vLLM, Together, or LM Studio, then pass the result to the same adapter. Supports all three executors, including `decide`.
+- **TanStack AI adapter.** `createTanStackAiExecutors` from `@statelyai/agent/tanstack-ai` accepts any TanStack AI text adapter, such as `openaiText` or `anthropicText`. Supports all three executors, including `decide`. See [Hosts](hosts.md#tanstack-ai-adapter).
 - **Hand-written executors.** Write the three executors yourself against a provider's HTTP API, or against a client that is not an AI SDK `LanguageModel`, such as a LangChain `BaseChatModel`. Supports all three executors, but you map structured output and decision retries yourself. See [Hosts](hosts.md) and [LangChain models](#langchain-models).
 - **Raw `ai` functions.** Pass the `ai` package's `generateText` and `streamText` as your `executors` set. This path supports text only. `decide` requires the adapter, and structured output is best-effort.
 
@@ -178,11 +179,12 @@ When the adapter is not what is under test, a plain function executor that route
 
 ## Support by path
 
-| Path                    | `generateText` | `streamText` | `decide` | Structured output |
-| ----------------------- | -------------- | ------------ | -------- | ----------------- |
-| `createAiSdkExecutors`  | yes            | yes          | yes      | yes               |
-| `createOpenAiExecutors` | yes            | yes          | yes      | yes               |
-| Hand-written executors  | yes            | yes          | yes      | yes (you map it)  |
+| Path                        | `generateText` | `streamText` | `decide` | Structured output |
+| --------------------------- | -------------- | ------------ | -------- | ----------------- |
+| `createAiSdkExecutors`      | yes            | yes          | yes      | yes               |
+| `createOpenAiExecutors`     | yes            | yes          | yes      | yes               |
+| `createTanStackAiExecutors` | yes            | yes          | yes      | yes               |
+| Hand-written executors      | yes            | yes          | yes      | yes (you map it)  |
 
 The `decide` executor maps each machine event to a forced tool call, and structured output is requested as `{ result, reasoning? }`. Both live in the adapter layer, so an executor is either an adapter's or a function of yours that returns `{ result }`. See [Text requests](text-requests.md) and [Decisions](decisions.md).
 
@@ -194,6 +196,7 @@ Each example is a runnable host for one provider stack.
 | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | [ai-sdk-host](../examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the optional adapter                                                                       |
 | [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | `createOpenAiExecutors` from `@statelyai/agent/openai`, over the raw `openai` package (Chat Completions)          |
+| [tanstack-ai-stream](../examples/tanstack-ai-stream/index.ts)                 | `createTanStackAiExecutors` from `@statelyai/agent/tanstack-ai`, streamed to a `useChat` client over AG-UI        |
 | [anthropic-sdk-host](../examples/anthropic-sdk-host/index.ts)                 | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }` |
 | [langchain-host](../examples/langchain-host/index.ts)                         | LangChain `BaseChatModel` (`@langchain/core`), wrapped into the executor contract                                 |
 | [mastra-host](../examples/mastra-host/index.ts)                               | Mastra `Agent` and `createTool`, bridging to `runToQuiescence`                                                    |

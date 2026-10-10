@@ -124,7 +124,7 @@ describe("createAgentRuntime", () => {
     });
     let [state, effects] = await runtime.start();
     await runtime.execute(effects);
-    for (let event; (event = await runtime.nextEvent()); ) {
+    for (let event; (event = await runtime.nextEvent());) {
       [state, effects] = runtime.transition(state, event);
       await runtime.execute(effects);
     }

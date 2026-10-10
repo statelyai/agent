@@ -7,7 +7,7 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
       // Same as vite.config.ts: test the library's source, never a stale dist/.
       ...Object.fromEntries(
-        ["ai-sdk", "log", "machines", "openai", "otel", "testing"].map((sub) => [
+        ["ai-sdk", "log", "machines", "openai", "otel", "tanstack-ai", "testing"].map((sub) => [
           `@statelyai/agent/${sub}`,
           fileURLToPath(new URL(`../src/${sub}/index.ts`, import.meta.url)),
         ]),

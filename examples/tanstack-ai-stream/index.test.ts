@@ -155,15 +155,12 @@ test("TanStack AI's own StreamProcessor reconstructs the messages from those eve
     "State machines make an agent's control flow explicit and replayable.",
   ]);
 
-  // Worth knowing: STEP_STARTED / STEP_FINISHED are not inert. The real
-  // processor reads them as reasoning boundaries and appends an (empty)
-  // `thinking` part per step, so a UI that renders every part verbatim shows
-  // blanks. Filtering to text parts — as `messageText` does — is the fix.
+  // STEP_STARTED / STEP_FINISHED name the machine state; the processor no
+  // longer reads them as reasoning boundaries, so they add no `thinking` parts.
   const thinking = messages.flatMap((message) =>
     message.parts.filter((part) => part.type === "thinking"),
   );
-  expect(thinking.length).toBeGreaterThan(0);
-  expect(thinking.every((part) => part.content === "")).toBe(true);
+  expect(thinking).toEqual([]);
 });
 
 test("the question comes off the request body", async () => {

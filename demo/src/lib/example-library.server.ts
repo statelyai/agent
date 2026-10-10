@@ -10,7 +10,7 @@
  * their node-only dependencies must never reach the client bundle.
  */
 import type { AnyStateMachine } from "xstate";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { describeMachineInput } from "./machine-chat.server";
 import { humanizeFieldName, type JsonObject } from "./machine-ui";
 import { toVizConfig } from "./scenarios";

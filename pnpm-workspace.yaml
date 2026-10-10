@@ -22,6 +22,3 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - xstate
   - "@statelyai/sdk"
-  # Flue 2.0 and the pi runtime under it, for examples/flue-host.
-  - "@flue/runtime"
-  - "@earendil-works/pi-ai"

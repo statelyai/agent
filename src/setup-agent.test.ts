@@ -2980,11 +2980,9 @@ describe("decision live path (runAgent auto-delivery)", () => {
     const actor = createActor(
       machine.provide({
         actors: {
-          chooseMove: chooseMove.withExecutor(
-            async (): Promise<{ event: ChosenEvent }> => ({
-              event: { type: "FLEE" },
-            }),
-          ),
+          chooseMove: chooseMove.withExecutor(async (): Promise<{ event: ChosenEvent }> => ({
+            event: { type: "FLEE" },
+          })),
         },
         states: {
           choosingMove: {

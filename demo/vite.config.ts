@@ -6,6 +6,8 @@ import { nitro } from "nitro/vite";
 import { defineConfig } from "vite";
 import viteTsConfigPaths from "vite-tsconfig-paths";
 
+const serverOnlyDeps = ["agents", "@mastra/core", "execa", "npm-run-path"];
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -16,7 +18,7 @@ export default defineConfig({
       // the bare alias below would prefix-match them too, and the first
       // matching entry wins.
       ...Object.fromEntries(
-        ["ai-sdk", "log", "machines", "openai", "otel", "testing"].map((sub) => [
+        ["ai-sdk", "log", "machines", "openai", "otel", "tanstack-ai", "testing"].map((sub) => [
           `@statelyai/agent/${sub}`,
           fileURLToPath(new URL(`../src/${sub}/index.ts`, import.meta.url)),
         ]),
@@ -29,11 +31,17 @@ export default defineConfig({
   // protocol imports that esbuild can't optimize — keep it external.
   // `@mastra/core` (mastra-host) pulls execa → npm-run-path, whose browser
   // export of `unicorn-magic` breaks esbuild's dep optimization — external too.
+  // `agents` is not a demo dependency at all, so the server build cannot
+  // resolve it; Vite 8 fails on an unresolved import unless it is declared
+  // external.
   optimizeDeps: {
-    exclude: ["agents", "@mastra/core", "execa", "npm-run-path"],
+    exclude: serverOnlyDeps,
   },
   ssr: {
-    external: ["agents", "@mastra/core", "execa", "npm-run-path"],
+    external: serverOnlyDeps,
+  },
+  build: {
+    rolldownOptions: { external: serverOnlyDeps },
   },
   plugins: [
     nitro(),

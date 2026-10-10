@@ -29,15 +29,16 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 
 ## Entry points
 
-| Entry                       | Purpose                                                                       |
-| --------------------------- | ----------------------------------------------------------------------------- |
-| `@statelyai/agent`          | Authoring, running, human interaction, and the executor contract              |
-| `@statelyai/agent/testing`  | `lintAgentMachine`, `simulateAgent`, `canReach`, trajectories, seams          |
-| `@statelyai/agent/log`      | The event log: `replay`, `forkEventLog`, hand-built entries, stores           |
-| `@statelyai/agent/ai-sdk`   | `createAiSdkExecutors`, the Vercel AI SDK adapter                             |
-| `@statelyai/agent/openai`   | Executors over the raw `openai` package                                       |
-| `@statelyai/agent/machines` | Preset machines: tool loop, sequential, parallel, router, supervisor, handoff |
-| `@statelyai/agent/otel`     | OpenTelemetry trace handler                                                   |
-| `@statelyai/agent/validate` | JSON workflow config validation                                               |
+| Entry                          | Purpose                                                                       |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| `@statelyai/agent`             | Authoring, running, human interaction, and the executor contract              |
+| `@statelyai/agent/testing`     | `lintAgentMachine`, `simulateAgent`, `canReach`, trajectories, seams          |
+| `@statelyai/agent/log`         | The event log: `replay`, `forkEventLog`, hand-built entries, stores           |
+| `@statelyai/agent/ai-sdk`      | `createAiSdkExecutors`, the Vercel AI SDK adapter                             |
+| `@statelyai/agent/openai`      | Executors over the raw `openai` package                                       |
+| `@statelyai/agent/tanstack-ai` | `createTanStackAiExecutors`, the TanStack AI adapter                          |
+| `@statelyai/agent/machines`    | Preset machines: tool loop, sequential, parallel, router, supervisor, handoff |
+| `@statelyai/agent/otel`        | OpenTelemetry trace handler                                                   |
+| `@statelyai/agent/validate`    | JSON workflow config validation                                               |
 
 Core has no runtime dependency on the AI SDK.

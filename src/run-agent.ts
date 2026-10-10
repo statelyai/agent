@@ -1883,7 +1883,7 @@ export async function runToQuiescence<TMachine extends AnyStateMachine>(
     [state, effects] = runtime.transition(state, init.event);
     await runtime.execute(effects);
   }
-  for (let event; (event = await runtime.nextEvent()); ) {
+  for (let event; (event = await runtime.nextEvent());) {
     [state, effects] = runtime.transition(state, event);
     await runtime.execute(effects);
   }

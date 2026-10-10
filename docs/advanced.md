@@ -102,4 +102,4 @@ childMachine.provide({
 - `getCallFinishReason(raw)` reads its normalized finish reason.
 - `parseOutput(schema, value)` validates a bare value against a request's declared schema, for hosts that unwrap provider output themselves.
 
-The adapters in `@statelyai/agent/ai-sdk` and `@statelyai/agent/openai` are built from exactly these pieces. Read them when a provider needs something this page does not cover.
+The adapters in `@statelyai/agent/ai-sdk`, `@statelyai/agent/openai`, and `@statelyai/agent/tanstack-ai` are built from exactly these pieces. Read them when a provider needs something this page does not cover.

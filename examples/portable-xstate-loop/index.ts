@@ -99,7 +99,7 @@ export async function handleTurn(
     await runtime.execute(effects);
   }
   // `undefined` means quiescent: only the outside world can move it now.
-  for (let event; (event = await runtime.nextEvent()); ) {
+  for (let event; (event = await runtime.nextEvent());) {
     [state, effects] = runtime.transition(state, event);
     await runtime.execute(effects);
   }

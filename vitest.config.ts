@@ -1,7 +1,7 @@
 // vitest.config.ts
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const src = (p: string) => fileURLToPath(new URL(`./src/${p}`, import.meta.url));
 
@@ -17,6 +17,10 @@ export default {
       { find: "@statelyai/agent/machines", replacement: src("machines/index.ts") },
       { find: "@statelyai/agent/openai", replacement: src("openai/index.ts") },
       { find: "@statelyai/agent/otel", replacement: src("otel/index.ts") },
+      {
+        find: "@statelyai/agent/tanstack-ai",
+        replacement: src("tanstack-ai/index.ts"),
+      },
       { find: "@statelyai/agent/testing", replacement: src("testing/index.ts") },
       { find: "@statelyai/agent/validate", replacement: src("validate/index.ts") },
       { find: /^@statelyai\/agent$/, replacement: src("index.ts") },

@@ -5,10 +5,12 @@
  * Usage: pnpm docs:check
  */
 import { readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
-import { createTwoslasher } from "twoslash";
+import ts from "@typescript/typescript6";
+// twoslash's default entry imports `typescript`, which is TypeScript 7 here and
+// has no compiler API; its core takes the TypeScript 6 API module instead.
+import { createTwoslasher } from "twoslash/core";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -30,6 +32,7 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
     "@statelyai/agent/machines": ["./src/machines/index.ts"],
     "@statelyai/agent/openai": ["./src/openai/index.ts"],
     "@statelyai/agent/otel": ["./src/otel/index.ts"],
+    "@statelyai/agent/tanstack-ai": ["./src/tanstack-ai/index.ts"],
   },
 };
 
@@ -90,6 +93,7 @@ const PACKAGE_ENTRIES: Record<string, string> = {
   "@statelyai/agent/machines": "src/machines/index.ts",
   "@statelyai/agent/openai": "src/openai/index.ts",
   "@statelyai/agent/otel": "src/otel/index.ts",
+  "@statelyai/agent/tanstack-ai": "src/tanstack-ai/index.ts",
   "@statelyai/agent/testing": "src/testing/index.ts",
 };
 
@@ -218,7 +222,12 @@ const files = [
     .map((f) => join(root, "docs", f)),
 ].filter((f) => !filters.length || filters.some((arg) => f.includes(arg)));
 
-const twoslasher = createTwoslasher({ compilerOptions: COMPILER_OPTIONS });
+const twoslasher = createTwoslasher({
+  compilerOptions: COMPILER_OPTIONS,
+  tsModule: ts,
+  tsLibDirectory: dirname(ts.getDefaultLibFilePath(COMPILER_OPTIONS)),
+  vfsRoot: process.cwd(),
+});
 
 let checked = 0;
 let skipped = 0;

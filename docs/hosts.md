@@ -109,6 +109,59 @@ Messages map part by part. Text and image parts become OpenAI content parts (`im
 
 Every result reports `usage` on the flat `AgentCallUsage` field names, with `reasoning_tokens` and `cached_tokens` folded onto `reasoningTokens` and `cachedInputTokens`, plus the normalized `finishReason` and the untouched response on `raw`. Streams ask for `stream_options: { include_usage: true }`, so a stream reports usage too.
 
+## TanStack AI adapter
+
+`@statelyai/agent/tanstack-ai` maps the same three executors onto [TanStack AI](https://tanstack.com/ai)'s `chat()` activity. Any TanStack AI text adapter works as a model: `openaiText`, `anthropicText`, `geminiText`, `ollamaText`, and the rest.
+
+```sh
+pnpm add @tanstack/ai @tanstack/ai-openai
+```
+
+```ts no-check
+import { openaiText } from "@tanstack/ai-openai";
+import { anthropicText } from "@tanstack/ai-anthropic";
+import { createTanStackAiExecutors } from "@statelyai/agent/tanstack-ai";
+
+const executors = createTanStackAiExecutors({
+  models: {
+    quick: openaiText("gpt-5.4-mini"),
+    deep: {
+      adapter: anthropicText("claude-sonnet-5"),
+      settings: { modelOptions: { thinking: { type: "enabled", budget_tokens: 4096 } } },
+    },
+  },
+});
+
+await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+```
+
+The options mirror `createAiSdkExecutors`:
+
+- `models` maps model refs to text adapters, or to `{ adapter, settings }` pairs that give a ref a persona.
+- `resolveModel` resolves refs dynamically, and wins over `models` when both are set.
+- `settings` carries `chat()` options that belong to the host, such as `modelOptions`, `middleware`, or `metadata`. Pass an object for every call, or a function of the request.
+
+Precedence is global `settings`, then the model entry's `settings`, then the request's own generation settings. `modelOptions` merge key by key.
+
+TanStack AI has no portable sampling or tool-choice options; each provider adapter names its own `modelOptions`. The adapter maps a request's `temperature`, `topP`, `topK`, `maxOutputTokens`, `seed`, `stopSequences`, and `toolChoice` by provider:
+
+- `openai`: `temperature`, `top_p`, `max_output_tokens`, and `tool_choice`. The Responses API has no `top_k`, `seed`, or `stop`, so those are dropped. TanStack AI's OpenAI adapter also drops `temperature` and `top_p` for reasoning models.
+- `anthropic`: `temperature`, `top_p`, `top_k`, `max_tokens`, `stop_sequences`, and `tool_choice`. `seed` is dropped.
+- `gemini`: `temperature`, `topP`, `topK`, `maxOutputTokens`, `seed`, `stopSequences`, and `toolConfig`.
+- Any other provider gets none of them. Map them in a `settings` function, which receives the request.
+
+The rest of the contract matches the other adapters:
+
+- Structured output passes the declared schema, wrapped as `{ result, reasoning? }`, as `chat()`'s `outputSchema`. A structured run cut off by the token limit is an `AgentTruncatedError`.
+- Tools run in `chat()`'s own loop, in `generateText` and `streamText` alike. The request's `maxSteps` bounds the model turns; the default is one. A tool with no `execute` stops the run at its call, with `finishReason: 'tool-calls'`.
+- A forced `toolChoice` applies to the first model turn only, so the model can answer after the tool runs.
+- `generateText` and `streamText` return the run's response `messages`: each turn's assistant text and tool calls, and the tool results fed back. Append them to a conversation and they replay into the next request.
+- Decisions offer one tool per candidate event, with no `execute`, so the run stops at the model's first call. The tool choice is forced where the provider supports it.
+- System messages and the request's `system` become `systemPrompts`, since TanStack AI messages have no `system` role. Image parts become `url` or base64 `data` sources; other part types throw.
+- Every result reports `usage` summed over the run's model turns, the normalized `finishReason`, and every chunk the run produced on `raw`. A provider error arrives as a `RUN_ERROR` chunk and is thrown with its `code`.
+
+`@tanstack/ai` is an optional peer dependency. To stream a run to a `useChat` client over TanStack AI's wire protocol, see [tanstack-ai-stream](../examples/tanstack-ai-stream).
+
 ## Finish reasons and truncation
 
 An executor result may report `finishReason`, normalized to `'stop'`, `'length'`, `'tool-calls'`, `'content-filter'`, or `'other'`. Map the provider's own vocabulary onto those five and leave the raw value on `raw`. `runToQuiescence` lifts the normalized reason onto the `request.end` trace event, beside `usage`.

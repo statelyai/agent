@@ -3,7 +3,7 @@
  * setup, and the machine itself. Everything a host needs, in one file and with
  * nothing host-flavored in it.
  *
- * Every framework host in `examples/` (Mastra, Flue, LangChain, Cloudflare, the
+ * Every framework host in `examples/` (Mastra, LangChain, Cloudflare, the
  * inspector, the CLI in `./index.ts`) imports this module and nothing else from
  * the example. Each state that needs the human carries the library's own
  * `meta.interaction` descriptor — typed against the machine's events by
