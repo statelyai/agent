@@ -89,25 +89,29 @@ When several requests each need their own canned answer, the executor routes on
 
 ## Use a real model
 
-Leave the machine unchanged and replace only the host executors:
+Leave the states unchanged. Declare the model once by adding `models` to the
+`setupAgent` call, then hand the machine to the AI SDK adapter, which reads
+those models:
 
 ```ts
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-const executors = createAiSdkExecutors({
-  models: { fast: openai("gpt-5.4-mini") },
-});
+// In the setupAgent({ ... }) call above:
+//   models: { fast: openai("gpt-5.4-mini") },
 
 const liveResult = await runAgent(machine, {
   input: { prompt: "Why state machines?" },
-  executors,
+  executors: createAiSdkExecutors(machine),
 });
 
 if (liveResult.status === "done") {
   console.log(liveResult.output);
 }
 ```
+
+A host that owns its own model map passes it instead:
+`createAiSdkExecutors({ models: { fast: openai("gpt-5.4-mini") } })`.
 
 Continue with [Choosing a run mode](choosing-a-run-mode.md),
 [Messages](messages.md), and [Persistence](persistence.md). A host that drives

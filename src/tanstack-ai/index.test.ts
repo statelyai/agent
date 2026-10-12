@@ -759,3 +759,42 @@ describe("createTanStackAiExecutors with createAgentRuntime", () => {
     expect(result.usage).toMatchObject({ inputTokens: 5, outputTokens: 2, totalTokens: 7 });
   });
 });
+
+describe("createTanStackAiExecutors model sources", () => {
+  function build() {
+    const models = { quick: new FakeTextAdapter([{ text: "hello" }]) };
+    const agentSetup = setupAgent({ context: z.object({}), input: z.object({}), models });
+    const machine = agentSetup.createMachine({
+      context: ({ input }) => input,
+      initial: "done",
+      states: { done: { type: "final" } },
+    });
+    return { models, agentSetup, machine };
+  }
+
+  test("accepts the legacy { models } object, a setupAgent(...) result, and a machine", async () => {
+    for (const pick of [
+      ({ models }: ReturnType<typeof build>) => createTanStackAiExecutors({ models }),
+      ({ agentSetup }: ReturnType<typeof build>) => createTanStackAiExecutors(agentSetup),
+      ({ machine }: ReturnType<typeof build>) => createTanStackAiExecutors(machine),
+    ]) {
+      const { generateText } = pick(build());
+      expect((await generateText(textRequest())).result).toBe("hello");
+    }
+  });
+
+  test("throws at construction for a wrong-shaped argument, naming what it got", () => {
+    expect(() => createTanStackAiExecutors({} as never)).toThrow(
+      /createTanStackAiExecutors: .*got an empty object/,
+    );
+    const bare = setupAgent({ context: z.object({}), input: z.object({}) });
+    const bareMachine = bare.createMachine({
+      context: ({ input }) => input,
+      initial: "done",
+      states: { done: { type: "final" } },
+    });
+    expect(() => createTanStackAiExecutors(bareMachine)).toThrow(
+      /got a machine whose setupAgent\(\.\.\.\) declared no models/,
+    );
+  });
+});

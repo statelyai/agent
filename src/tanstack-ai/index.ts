@@ -21,6 +21,8 @@ import {
   type Tool,
 } from "@tanstack/ai";
 import type { TextActivityOptions } from "@tanstack/ai/adapters";
+import type { AnyStateMachine } from "xstate";
+import { resolveModelSource } from "../internal/model-source.js";
 import {
   AGENT_USAGE_TOKEN_FIELDS,
   getAgentOutputMode,
@@ -791,6 +793,10 @@ function toolChoiceOnFirstTurn(keys: string[], later: Record<string, unknown>): 
  *   run stops at the model's first call; the tool choice is forced where the
  *   provider supports it (see {@link toTanStackAiModelOptions}).
  *
+ * Pass the options object, or pass the machine (or its `setupAgent(...)`
+ * result) to reuse the `models` declared in `setupAgent({ models })`. Anything
+ * else throws here, at construction.
+ *
  * @example
  * ```ts
  * import { openaiText } from '@tanstack/ai-openai';
@@ -801,7 +807,15 @@ function toolChoiceOnFirstTurn(keys: string[], later: Record<string, unknown>): 
  */
 export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
   options: CreateTanStackAiExecutorsOptions<TModels>,
+): TanStackAiExecutors;
+export function createTanStackAiExecutors(machine: AnyStateMachine): TanStackAiExecutors;
+export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
+  source: CreateTanStackAiExecutorsOptions<TModels> | AnyStateMachine,
 ): TanStackAiExecutors {
+  const options = resolveModelSource<CreateTanStackAiExecutorsOptions<TModels>>(
+    "createTanStackAiExecutors",
+    source,
+  );
   // Resolves a request's `model` ref to a text adapter plus the settings that
   // apply to it, merged in precedence order.
   const resolve = (
