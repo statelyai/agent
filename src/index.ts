@@ -104,6 +104,7 @@ export {
   createAgentRuntime,
   inspectTransitions,
   isAgentIdle,
+  runAgent,
   runToQuiescence,
   serializeTraceEvent,
   traceTransitions,
@@ -111,6 +112,7 @@ export {
 export type {
   AgentEffects,
   AgentRunInit,
+  AgentRunOptions,
   AgentRunStart,
   AgentRuntime,
   AgentRuntimeOptions,

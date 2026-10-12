@@ -251,6 +251,36 @@ if (result.ignored) {
 
 See [Persistence](persistence.md#resume-with-an-event-off-the-wire).
 
+## Write your own host loop
+
+`runAgent(machine, options)` is `createAgentRuntime(machine, options)` driven by this loop:
+
+```ts
+const init = { snapshot, event: { type: "APPROVE" } };
+const runtime = createAgentRuntime(machine, { executors });
+
+let [state, effects] = await runtime.start(init);
+await runtime.execute(effects);
+if (init.event !== undefined && state.status === "active") {
+  [state, effects] = runtime.transition(state, init.event);
+  await runtime.execute(effects);
+}
+for (let event; (event = await runtime.nextEvent());) {
+  [state, effects] = runtime.transition(state, event);
+  await runtime.execute(effects);
+}
+
+const result = await runtime.finish();
+```
+
+Write the loop yourself when `runAgent` cannot express the host:
+
+- **Non-blocking durable host.** A Durable Object woken by alarms runs one leg per wake-up and cannot await a whole run.
+- **Events pushed mid-run.** A socket delivers user events while requests are in flight; pass each one to `runtime.transition` between effects.
+- **Custom stop or checkpoint policy.** Persist after selected transitions, or stop before `nextEvent()` returns `undefined`.
+
+Each operation is described in [The runtime loop](steps.md).
+
 ## Uncontrolled XState actor
 
 `provideExecutors(machine, executors)` binds the executors onto the machine so a plain `createActor` runs it, for an application that owns the actor or embeds the agent machine in a larger XState system. See [Advanced](advanced.md).

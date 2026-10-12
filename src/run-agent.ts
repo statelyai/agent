@@ -1890,6 +1890,85 @@ export async function runToQuiescence<TMachine extends AnyStateMachine>(
   return runtime.finish();
 }
 
+/** Everything {@link runAgent} takes: the runtime's options plus how to open the run. */
+export interface AgentRunOptions<TMachine extends AnyStateMachine>
+  extends AgentRuntimeOptions<TMachine>, AgentRunInit<TMachine> {
+  /**
+   * Answers an idle state for a host that can block for it. When given,
+   * {@link runAgent} loops: each time the run settles `idle`, it calls
+   * `onIdle` with the idle snapshot, persists the run, and resumes from that
+   * persisted snapshot with the returned event — until the run is `done` or
+   * `error`. Each pass is a fresh {@link createAgentRuntime} over the same
+   * options, so nothing of the earlier pass is held across the wait; the log
+   * travels with the result (or the store's thread), so the final `events`
+   * replays every pass, and `maxModelCalls` bounds the whole call. An answer
+   * the idle state does not handle ends the loop: the result is `idle` with
+   * {@link AgentRunResult.ignored} set, not another call to `onIdle`.
+   *
+   * A host that cannot block for the answer (a request handler, a durable
+   * object) leaves this out, stores `result.persist()`, and calls
+   * {@link runAgent} again later with `{ snapshot, event }`.
+   */
+  onIdle?: (snapshot: SnapshotFrom<TMachine>) => Promise<EventFromLogic<TMachine>>;
+}
+
+/**
+ * Runs `machine` to quiescence in one call: {@link createAgentRuntime} over
+ * `options`, then {@link runToQuiescence} with the same object as its init.
+ * One options object carries both halves (`executors`, `store`, callbacks,
+ * and `input` | `snapshot` + `event`), and the result is the same
+ * {@link AgentRunResult}. With {@link AgentRunOptions.onIdle}, idle states are
+ * answered in place and the call returns only `done` or `error`.
+ *
+ * Reach for {@link createAgentRuntime} directly when the host needs the loop
+ * itself: a non-blocking durable host, events pushed mid-run, or a custom stop
+ * or checkpoint policy.
+ *
+ * @example
+ * ```ts
+ * const result = await runAgent(machine, { input: { topic }, executors });
+ * if (result.status === "done") console.log(result.output);
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Resume a run a request handler left idle.
+ * const result = await runAgent(machine, { executors, snapshot, event });
+ * ```
+ */
+export async function runAgent<TMachine extends AnyStateMachine>(
+  machine: TMachine,
+  options: AgentRunOptions<TMachine> = {},
+): Promise<AgentRunResult<TMachine>> {
+  const { onIdle, ...rest } = options;
+  let result = await runToQuiescence(createAgentRuntime(machine, rest), rest);
+  if (!onIdle) return result;
+  // The budget is for the whole call: each pass gets what the earlier passes
+  // left, since every runtime counts only its own calls.
+  const maxModelCalls = rest.maxModelCalls ?? 100;
+  let modelCalls = result.usage.modelCalls;
+  const { input: _input, events: _events, ...resumeOptions } = rest;
+  // An ignored event (the opening `event`, or an answer) leaves the run where
+  // it was; it is reported, not retried from the same snapshot.
+  while (result.status === "idle" && result.ignored === undefined) {
+    const event = await onIdle(result.snapshot);
+    result = await runToQuiescence(
+      createAgentRuntime(machine, { ...resumeOptions, maxModelCalls: maxModelCalls - modelCalls }),
+      {
+        ...resumeOptions,
+        // Without a store the log travels with the result, so the final
+        // `events` replays every pass. With one, the store's thread is the log
+        // (the result may not yet hold a straggler usage entry the store does).
+        ...(rest.store === undefined ? { events: result.events } : {}),
+        snapshot: result.persist(),
+        event,
+      },
+    );
+    modelCalls += result.usage.modelCalls;
+  }
+  return result;
+}
+
 /**
  * Entry-by-entry check that the caller's `events` IS the store's thread. Equal
  * lengths prove nothing: a fork, a rolled-back replay, or a concurrent writer
@@ -1950,7 +2029,7 @@ const QUIESCENT = Symbol("quiescent");
  * while (r.status === 'idle') {
  *   const event = await promptUser(getAcceptedEvents(r.snapshot));
  *   r = await runToQuiescence(createAgentRuntime(machine, { executors }), {
- *     snapshot: r.snapshot,
+ *     snapshot: r.persist(),
  *     event,
  *   });
  * }
