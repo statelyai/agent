@@ -4979,7 +4979,8 @@ describe("runAgent (sugar over createAgentRuntime + runToQuiescence)", () => {
       context: z.object({ topic: z.string(), draft: z.string().nullable(), drafts: z.number() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ draft: z.string(), drafts: z.number() }),
-      events: { APPROVE: z.object({}), REJECT: z.object({}) },
+      // NUDGE is declared but no state handles it: an answer the idle state ignores.
+      events: { APPROVE: z.object({}), REJECT: z.object({}), NUDGE: z.object({}) },
     });
     const draftText = createTextLogic({
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
@@ -5153,6 +5154,83 @@ describe("runAgent (sugar over createAgentRuntime + runToQuiescence)", () => {
         input: reviewInput,
       }),
     );
+  });
+
+  test("onIdle: an ignored answer stops the loop and is reported", async () => {
+    let calls = 0;
+    const result = await runAgent(createReviewMachine(), {
+      input: { topic: "nudged" },
+      executors: createExecutors(),
+      onIdle: async () => {
+        calls += 1;
+        return { type: "NUDGE" } as const;
+      },
+    });
+    expect(calls).toBe(1);
+    expect(result.status).toBe("idle");
+    expect(result.ignored).toEqual({ type: "NUDGE" });
+    expect(result.snapshot.value).toBe("awaitingApproval");
+  });
+
+  test("onIdle: an ignored opening event is returned before any answer", async () => {
+    const machine = createReviewMachine();
+    const executors = createExecutors();
+    const first = await runAgent(machine, { input: { topic: "opening" }, executors });
+    let calls = 0;
+    const result = await runAgent(machine, {
+      executors,
+      snapshot: first.persist(),
+      event: { type: "NUDGE" },
+      onIdle: async () => {
+        calls += 1;
+        return { type: "APPROVE" } as const;
+      },
+    });
+    expect(calls).toBe(0);
+    expect(result.ignored).toEqual({ type: "NUDGE" });
+  });
+
+  test("onIdle: maxModelCalls bounds the whole call, not each pass", async () => {
+    let calls = 0;
+    const result = await runAgent(createReviewMachine(), {
+      input: { topic: "budget" },
+      executors: createExecutors(),
+      maxModelCalls: 2,
+      onIdle: async () => {
+        calls += 1;
+        return { type: "REJECT" } as const;
+      },
+    });
+    // Draft 1 (pass 1), draft 2 (pass 2), draft 3 is over budget (pass 3).
+    expect(calls).toBe(2);
+    expect(result.status).toBe("error");
+    expect(result.status === "error" ? result.cause : undefined).toBe("max-model-calls");
+  });
+
+  test("onIdle: the final log replays every pass from the original input", async () => {
+    const answers: Array<{ type: "APPROVE" } | { type: "REJECT" }> = [
+      { type: "REJECT" },
+      { type: "APPROVE" },
+    ];
+    const result = await runAgent(createReviewMachine(), {
+      input: { topic: "history" },
+      executors: createExecutors(),
+      onIdle: async () => answers.shift()!,
+    });
+    expect(result.status).toBe("done");
+    const types = result.events.map((entry) => entry.event.type);
+    expect(types[0]).toBe("@agent.init");
+    expect(types.filter((type) => type === "@agent.init")).toHaveLength(1);
+    expect(types.filter((type) => type === "REJECT")).toHaveLength(1);
+    expect(types.filter((type) => type === "APPROVE")).toHaveLength(1);
+    expect(types.filter((type) => type === "xstate.done.actor")).toHaveLength(2);
+    // The log alone rebuilds the finished run.
+    const replayed = await runAgent(createReviewMachine(), {
+      events: result.events,
+      executors: createExecutors(),
+    });
+    expect(replayed.status).toBe("done");
+    expect(replayed.snapshot.context).toEqual(result.snapshot.context);
   });
 
   test("onIdle is not called when the first pass finishes done", async () => {

@@ -1899,7 +1899,11 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
    * `onIdle` with the idle snapshot, persists the run, and resumes from that
    * persisted snapshot with the returned event — until the run is `done` or
    * `error`. Each pass is a fresh {@link createAgentRuntime} over the same
-   * options, so nothing of the earlier pass is held across the wait.
+   * options, so nothing of the earlier pass is held across the wait; the log
+   * travels with the result (or the store's thread), so the final `events`
+   * replays every pass, and `maxModelCalls` bounds the whole call. An answer
+   * the idle state does not handle ends the loop: the result is `idle` with
+   * {@link AgentRunResult.ignored} set, not another call to `onIdle`.
    *
    * A host that cannot block for the answer (a request handler, a durable
    * object) leaves this out, stores `result.persist()`, and calls
@@ -1939,14 +1943,28 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   const { onIdle, ...rest } = options;
   let result = await runToQuiescence(createAgentRuntime(machine, rest), rest);
   if (!onIdle) return result;
-  while (result.status === "idle") {
+  // The budget is for the whole call: each pass gets what the earlier passes
+  // left, since every runtime counts only its own calls.
+  const maxModelCalls = rest.maxModelCalls ?? 100;
+  let modelCalls = result.usage.modelCalls;
+  const { input: _input, events: _events, ...resumeOptions } = rest;
+  // An ignored event (the opening `event`, or an answer) leaves the run where
+  // it was; it is reported, not retried from the same snapshot.
+  while (result.status === "idle" && result.ignored === undefined) {
     const event = await onIdle(result.snapshot);
-    const { input: _input, events: _events, ...resumeOptions } = rest;
-    result = await runToQuiescence(createAgentRuntime(machine, resumeOptions), {
-      ...resumeOptions,
-      snapshot: result.persist(),
-      event,
-    });
+    result = await runToQuiescence(
+      createAgentRuntime(machine, { ...resumeOptions, maxModelCalls: maxModelCalls - modelCalls }),
+      {
+        ...resumeOptions,
+        // Without a store the log travels with the result, so the final
+        // `events` replays every pass. With one, the store's thread is the log
+        // (the result may not yet hold a straggler usage entry the store does).
+        ...(rest.store === undefined ? { events: result.events } : {}),
+        snapshot: result.persist(),
+        event,
+      },
+    );
+    modelCalls += result.usage.modelCalls;
   }
   return result;
 }
