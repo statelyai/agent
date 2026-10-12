@@ -1,0 +1,14 @@
+{
+  "name": "port-walkthrough",
+  "title": "Port a generateText loop",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "pattern",
+    "source": "The hand-rolled support loop from docs/from-a-loop.md, ported line for line and pinned by tests"
+  },
+  "comparison": {
+    "targets": ["hand-rolled loop"],
+    "purpose": "The short, linear version of retrofit. before.ts is the generateText while-loop from docs/from-a-loop.md, runnable with a key. index.ts is the same agent as a machine run with runAgent, with the same call signature and result type. index.test.ts runs it on a mock model with no key, shows the step limit settling done in failed, pauses for approval and resumes from a JSON snapshot, and proves with canReach that no path sends an email without approval."
+  },
+  "starters": ["Refund my duplicate charge"]
+}

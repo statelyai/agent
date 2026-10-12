@@ -11,6 +11,7 @@ they happen to call.
 
 - [email-drafter](email-drafter): typed requests, a Jev completeness judgment, revision, approval, and sending
 - [plain-xstate](plain-xstate): an ordinary XState machine that knows nothing about the agent library
+- [port-walkthrough](port-walkthrough): the `generateText` loop from [Migrating from a hand-rolled loop](../docs/from-a-loop.md), ported with the same result type and ending on its tests
 - [retrofit](retrofit): the same agent as a `while(true)` loop and as a machine, refactored step by step, ending with Jev triage
 - [json-agent](json-agent): the whole workflow authored as a `.json` file and lowered to the same machine
 - [triage](triage): Jev classifies category and sentiment and escalates when unsure, with one retry when the draft fails

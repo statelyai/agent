@@ -88,6 +88,7 @@ describe("example human waits", () => {
       "long-running-onboarding#longRunningOnboardingMachine",
       "long-term-memory#longTermMemoryMachine",
       "machine-as-tool#refundMachine",
+      "port-walkthrough#supportLoopMachine",
       "retrofit#supportMachine",
       "review-tool-calls#reviewToolCallsMachine",
       "review-tool-calls#toolCallingMachine",
