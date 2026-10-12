@@ -9,6 +9,7 @@ import {
   REUSE_THRESHOLD,
   reviewLabel,
   searchHelpArticles,
+  shown,
   type Candidate,
 } from "./index.js";
 
@@ -143,6 +144,9 @@ describe("answer-reuse", () => {
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output.reused).toBe(false);
     expect(investigations()).toBe(1);
+    // The notice never shows a failed confidence as the threshold it failed.
+    expect(shown(REUSE_THRESHOLD - 0.004)).toBe(0.79);
+    expect(shown(REUSE_THRESHOLD)).toBe(REUSE_THRESHOLD);
   });
 
   test("an empty search investigates, stays uncertain, and a person approves on resume", async () => {
