@@ -20,13 +20,7 @@
  * DB row, a KV namespace — keyed by run id. See examples/file-snapshot-store.
  */
 import { z } from "zod";
-import {
-  getInteraction,
-  interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-} from "@statelyai/agent";
+import { getInteraction, interactionMetaSchema, runAgent, setupAgent } from "@statelyai/agent";
 import type { Snapshot } from "xstate";
 import { NextResponse, type NextRequest } from "next/server";
 import { models, resolveExecutors, maybeCreateRunInspection } from "../../../agent-runtime";
@@ -144,15 +138,11 @@ export const snapshots = new Map<string, Snapshot<unknown>>();
 /** POST /api/agent — start a run; settle idle (draft) or done. */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const body = (await request.json().catch(() => ({}))) as { topic?: string };
-  const result = await runToQuiescence(
-    createAgentRuntime(announceMachine, {
-      executors: resolveExecutors(),
-      inspect: await maybeCreateRunInspection(),
-    }),
-    {
-      input: { topic: body.topic ?? "the new deploy pipeline" },
-    },
-  );
+  const result = await runAgent(announceMachine, {
+    input: { topic: body.topic ?? "the new deploy pipeline" },
+    executors: resolveExecutors(),
+    inspect: await maybeCreateRunInspection(),
+  });
 
   if (result.status === "idle") {
     const id = crypto.randomUUID();

@@ -5,8 +5,9 @@ The machine is framework-independent. Adapters only supply executors and transpo
 ## Server request
 
 ```ts no-check
-const result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+const result = await runAgent(machine, {
   input: await request.json(),
+  executors,
 });
 
 if (result.status === "idle") {
@@ -27,10 +28,7 @@ try {
   return Response.json({ error: String(error) }, { status: 400 });
 }
 
-const result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
-  snapshot,
-  event,
-});
+const result = await runAgent(machine, { executors, snapshot, event });
 
 if (result.ignored) {
   return Response.json(
@@ -40,11 +38,15 @@ if (result.ignored) {
 }
 ```
 
-Parse at the boundary; `runToQuiescence` adds no validation of its own. An event the restored state does not handle is ignored, not an error.
+Parse at the boundary; `runAgent` adds no validation of its own. An event the restored state does not handle is ignored, not an error.
 
 ## Long-lived UI actor
 
 Bind executors with `provideExecutors`, create a normal XState actor, and connect it using the framework's XState integration.
+
+## Durable or event-pushing host
+
+A host that cannot block on a run, such as a Durable Object woken by alarms, drives the transition loop itself. See [Write your own host loop](hosts.md#write-your-own-host-loop).
 
 ## Examples
 

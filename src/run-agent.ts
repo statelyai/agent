@@ -1890,6 +1890,67 @@ export async function runToQuiescence<TMachine extends AnyStateMachine>(
   return runtime.finish();
 }
 
+/** Everything {@link runAgent} takes: the runtime's options plus how to open the run. */
+export interface AgentRunOptions<TMachine extends AnyStateMachine>
+  extends AgentRuntimeOptions<TMachine>, AgentRunInit<TMachine> {
+  /**
+   * Answers an idle state for a host that can block for it. When given,
+   * {@link runAgent} loops: each time the run settles `idle`, it calls
+   * `onIdle` with the idle snapshot, persists the run, and resumes from that
+   * persisted snapshot with the returned event — until the run is `done` or
+   * `error`. Each pass is a fresh {@link createAgentRuntime} over the same
+   * options, so nothing of the earlier pass is held across the wait.
+   *
+   * A host that cannot block for the answer (a request handler, a durable
+   * object) leaves this out, stores `result.persist()`, and calls
+   * {@link runAgent} again later with `{ snapshot, event }`.
+   */
+  onIdle?: (snapshot: SnapshotFrom<TMachine>) => Promise<EventFromLogic<TMachine>>;
+}
+
+/**
+ * Runs `machine` to quiescence in one call: {@link createAgentRuntime} over
+ * `options`, then {@link runToQuiescence} with the same object as its init.
+ * One options object carries both halves (`executors`, `store`, callbacks,
+ * and `input` | `snapshot` + `event`), and the result is the same
+ * {@link AgentRunResult}. With {@link AgentRunOptions.onIdle}, idle states are
+ * answered in place and the call returns only `done` or `error`.
+ *
+ * Reach for {@link createAgentRuntime} directly when the host needs the loop
+ * itself: a non-blocking durable host, events pushed mid-run, or a custom stop
+ * or checkpoint policy.
+ *
+ * @example
+ * ```ts
+ * const result = await runAgent(machine, { input: { topic }, executors });
+ * if (result.status === "done") console.log(result.output);
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Resume a run a request handler left idle.
+ * const result = await runAgent(machine, { executors, snapshot, event });
+ * ```
+ */
+export async function runAgent<TMachine extends AnyStateMachine>(
+  machine: TMachine,
+  options: AgentRunOptions<TMachine> = {},
+): Promise<AgentRunResult<TMachine>> {
+  const { onIdle, ...rest } = options;
+  let result = await runToQuiescence(createAgentRuntime(machine, rest), rest);
+  if (!onIdle) return result;
+  while (result.status === "idle") {
+    const event = await onIdle(result.snapshot);
+    const { input: _input, events: _events, ...resumeOptions } = rest;
+    result = await runToQuiescence(createAgentRuntime(machine, resumeOptions), {
+      ...resumeOptions,
+      snapshot: result.persist(),
+      event,
+    });
+  }
+  return result;
+}
+
 /**
  * Entry-by-entry check that the caller's `events` IS the store's thread. Equal
  * lengths prove nothing: a fork, a rolled-back replay, or a concurrent writer
@@ -1950,7 +2011,7 @@ const QUIESCENT = Symbol("quiescent");
  * while (r.status === 'idle') {
  *   const event = await promptUser(getAcceptedEvents(r.snapshot));
  *   r = await runToQuiescence(createAgentRuntime(machine, { executors }), {
- *     snapshot: r.snapshot,
+ *     snapshot: r.persist(),
  *     event,
  *   });
  * }
