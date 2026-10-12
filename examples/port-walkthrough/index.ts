@@ -60,11 +60,11 @@ const agentSetup = setupAgent({
     z.object({ sent: z.boolean(), pending: z.literal(true) }),
   ]),
   events: {
-    REPLY: z.object({}),
-    CONTINUE: z.object({}),
+    REPLY: {},
+    CONTINUE: {},
     SEND_EMAIL: emailSchema,
-    APPROVE: z.object({}),
-    REJECT: z.object({}),
+    APPROVE: {},
+    REJECT: {},
   },
   meta: interactionMetaSchema,
   requests: {
