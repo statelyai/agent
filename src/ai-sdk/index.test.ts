@@ -230,6 +230,71 @@ describe("toAiSdkCallSettings", () => {
   });
 });
 
+describe("createAiSdkExecutors — decide with the `{}` event shorthand", () => {
+  test("an event declared as `{}` converts to an empty-object JSON Schema", async () => {
+    let inputSchema: unknown;
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        const approve = options.tools?.find((t) => t.name === "send_event_APPROVE");
+        inputSchema = approve?.type === "function" ? approve.inputSchema : undefined;
+        return {
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call-1",
+              toolName: "send_event_APPROVE",
+              input: JSON.stringify({}),
+            },
+          ],
+          finishReason: { unified: "tool-calls", raw: "tool_calls" },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 1, text: 1, reasoning: 0 },
+          },
+          warnings: [],
+        };
+      },
+    });
+    const models = { m: model };
+    const machine = setupAgent({
+      context: z.object({}),
+      events: { APPROVE: {}, REJECT: z.object({ reason: z.string() }) },
+      models,
+    }).createMachine({
+      context: {},
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: {
+            src: "agent.decide",
+            input: {
+              model: "m",
+              prompt: "Approve?",
+              allowedEvents: ["APPROVE", "REJECT"] as const,
+            },
+          },
+          on: { APPROVE: { target: "approved" }, REJECT: { target: "rejected" } },
+        },
+        approved: { type: "final" },
+        rejected: { type: "final" },
+      },
+    });
+
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, { executors: createAiSdkExecutors({ models }) }),
+    );
+
+    if (result.status === "error") throw result.error;
+    expect(result.status).toBe("done");
+    expect(result.snapshot.value).toBe("approved");
+    expect(inputSchema).toEqual({
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    });
+  });
+});
+
 describe("toAiSdkEventTools", () => {
   test("builds one tool per event with a permissive fallback schema", () => {
     const events: AgentEventDescriptor[] = [

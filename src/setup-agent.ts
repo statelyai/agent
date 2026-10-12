@@ -155,7 +155,11 @@ type AgentSchemaConfig<
   emitted?: TEmittedSchemas;
 };
 
-const emptyEventSchema: StandardSchemaV1<Record<string, never>> = {
+// Schema behind the `{}` event shorthand. Besides validating, it exposes the
+// Standard Schema JSON Schema extension (`~standard.jsonSchema.input`) so model
+// adapters that convert event schemas to tool definitions (e.g. the AI SDK's
+// `asSchema`) get an empty object instead of refusing the vendor.
+const emptyEventSchema = {
   "~standard": {
     version: 1,
     vendor: "statelyai-agent",
@@ -164,8 +168,11 @@ const emptyEventSchema: StandardSchemaV1<Record<string, never>> = {
         ? { value: {} }
         : { issues: [{ message: "Expected an empty event payload" }] };
     },
+    jsonSchema: {
+      input: () => ({ type: "object", properties: {}, additionalProperties: false }),
+    },
   },
-};
+} as StandardSchemaV1<Record<string, never>>;
 
 /**
  * The payload of the reserved `'@agent.usage'` event — {@link AgentUsageEvent}
