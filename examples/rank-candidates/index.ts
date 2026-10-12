@@ -43,7 +43,7 @@ import { z } from "zod";
 import { createAsyncLogic } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
-import { getStatePath, createAgentRuntime, runToQuiescence, setupAgent } from "@statelyai/agent";
+import { getStatePath, runAgent, setupAgent } from "@statelyai/agent";
 
 /**
  * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.
@@ -455,17 +455,15 @@ export async function runRankCandidatesExample(
 ): Promise<RankCandidatesResult> {
   const { input = SAMPLE_INPUT, judge, onProgress } = options;
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(rankCandidatesMachine, {
-      ...(judge ? { actors: rankActors(judge) } : {}),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    { input },
-  );
+  const result = await runAgent(rankCandidatesMachine, {
+    input,
+    ...(judge ? { actors: rankActors(judge) } : {}),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
+    },
+  });
 
   if (result.status !== "done") {
     throw new Error(`Rank candidates example did not complete: ${result.status}`);

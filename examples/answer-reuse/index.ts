@@ -46,12 +46,11 @@ import { experimental_decide, tool, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
-  createAgentRuntime,
   createAgentSchemas,
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  runToQuiescence,
+  runAgent,
   setupAgent,
 } from "@statelyai/agent";
 
@@ -479,25 +478,18 @@ export async function main() {
   const pasted = await promptLine("Support request (blank = sample) > ");
   const request = pasted === "" ? SAMPLE_REQUEST : pasted;
 
-  const shared = {
+  const result = await runAgent(answerReuseMachine, {
+    input: { request },
     executors,
     onTransition: (snapshot: AnswerReuseSnapshot) => console.log("[state]", getStatePath(snapshot)),
-  };
-
-  let result = await runToQuiescence(createAgentRuntime(answerReuseMachine, shared), {
-    input: { request },
-    ...shared,
+    // Escalation settles the run idle; a person's reply resumes it in place.
+    onIdle: async (snapshot) => {
+      const reply = await promptLine(`${reviewLabel(snapshot)}\n(blank = send) > `);
+      return reply === ""
+        ? ({ type: "APPROVE" } as const)
+        : ({ type: "DENY", text: reply } as const);
+    },
   });
-
-  // Escalation settles the run idle; resume it with the person's decision.
-  while (result.status === "idle") {
-    const reply = await promptLine(`${reviewLabel(result.snapshot)}\n(blank = send) > `);
-    result = await runToQuiescence(createAgentRuntime(answerReuseMachine, shared), {
-      snapshot: result.persist(),
-      event: reply === "" ? { type: "APPROVE" } : { type: "DENY", text: reply },
-      ...shared,
-    });
-  }
 
   if (result.status !== "done") {
     throw new Error(`Answer run did not complete: ${result.status}`);

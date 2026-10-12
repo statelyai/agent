@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createAgentRuntime, eventFromInteraction, runToQuiescence } from "@statelyai/agent";
+import { eventFromInteraction, runAgent, type AgentRunOptions } from "@statelyai/agent";
 import { createAsyncLogic } from "xstate";
 import { createMockJudge, type MockJudgeEntry, type MockJudgeModel } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
@@ -56,23 +56,24 @@ function setup(options: {
 }) {
   const jev = judge(options.turns);
   const executors = createMockModelExecutors({ text: { investigate: INVESTIGATED } });
-  const runtime = () =>
-    createAgentRuntime(answerReuseMachine, {
+  const run = (init: AgentRunOptions<typeof answerReuseMachine>) =>
+    runAgent(answerReuseMachine, {
       executors,
       actors: { helpSearch: search(options.candidate), checkAnswer: jev.checkAnswer },
+      ...init,
     });
   const investigations = () => executors.calls.filter((call) => call.name === "investigate").length;
-  return { jev, executors, runtime, investigations };
+  return { jev, executors, run, investigations };
 }
 
 describe("answer-reuse", () => {
   test("a good cached answer judged yes@0.9 is reused with zero model calls", async () => {
-    const { jev, executors, runtime } = setup({
+    const { jev, executors, run } = setup({
       candidate: ARTICLE,
       turns: [{ verdict: "yes", confidence: 0.9 }],
     });
 
-    const result = await runToQuiescence(runtime(), { input: { request: REQUEST } });
+    const result = await run({ input: { request: REQUEST } });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -96,7 +97,7 @@ describe("answer-reuse", () => {
   });
 
   test("yes below the threshold investigates once, and the recheck passes", async () => {
-    const { jev, executors, runtime, investigations } = setup({
+    const { jev, executors, run, investigations } = setup({
       candidate: ARTICLE,
       turns: [
         { verdict: "yes", confidence: 0.6 },
@@ -104,7 +105,7 @@ describe("answer-reuse", () => {
       ],
     });
 
-    const result = await runToQuiescence(runtime(), { input: { request: REQUEST } });
+    const result = await run({ input: { request: REQUEST } });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
@@ -122,25 +123,25 @@ describe("answer-reuse", () => {
   });
 
   test("confidence exactly at the threshold is enough to reuse", async () => {
-    const { executors, runtime } = setup({
+    const { executors, run } = setup({
       candidate: ARTICLE,
       turns: [{ verdict: "yes", confidence: REUSE_THRESHOLD }],
     });
-    const result = await runToQuiescence(runtime(), { input: { request: REQUEST } });
+    const result = await run({ input: { request: REQUEST } });
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output.reused).toBe(true);
     expect(executors.calls).toHaveLength(0);
   });
 
   test("confidence just under the threshold is not rounded up past it", async () => {
-    const { runtime, investigations } = setup({
+    const { run, investigations } = setup({
       candidate: ARTICLE,
       turns: [
         { verdict: "yes", confidence: REUSE_THRESHOLD - 0.004 },
         { verdict: "yes", confidence: 0.9 },
       ],
     });
-    const result = await runToQuiescence(runtime(), { input: { request: REQUEST } });
+    const result = await run({ input: { request: REQUEST } });
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output.reused).toBe(false);
     expect(investigations()).toBe(1);
@@ -150,12 +151,12 @@ describe("answer-reuse", () => {
   });
 
   test("an empty search investigates, stays uncertain, and a person approves on resume", async () => {
-    const { jev, runtime, investigations } = setup({
+    const { jev, run, investigations } = setup({
       candidate: { text: "", sources: [] },
       turns: [{ verdict: "uncertain", confidence: 0.55 }],
     });
 
-    const first = await runToQuiescence(runtime(), {
+    const first = await run({
       input: { request: "Why was I charged twice?" },
     });
 
@@ -170,7 +171,7 @@ describe("answer-reuse", () => {
     // Nothing to judge on the empty search: only the recheck asked Jev.
     expect(jev.calls).toHaveLength(1);
 
-    const result = await runToQuiescence(runtime(), {
+    const result = await run({
       snapshot: first.persist(),
       event: { type: "APPROVE" },
     });
@@ -188,7 +189,7 @@ describe("answer-reuse", () => {
   });
 
   test("free text from the interaction is a DENY that ends rejected", async () => {
-    const { runtime, investigations } = setup({
+    const { run, investigations } = setup({
       candidate: ARTICLE,
       turns: [
         { verdict: "no", confidence: 0.9 },
@@ -196,10 +197,10 @@ describe("answer-reuse", () => {
       ],
     });
 
-    const first = await runToQuiescence(runtime(), { input: { request: REQUEST } });
+    const first = await run({ input: { request: REQUEST } });
     if (first.status !== "idle") throw new Error("expected idle");
 
-    const result = await runToQuiescence(runtime(), {
+    const result = await run({
       snapshot: first.persist(),
       // The free text a host collects from the rendered interaction.
       event: eventFromInteraction(first.snapshot, { text: "Cites the wrong account." }),
@@ -213,12 +214,12 @@ describe("answer-reuse", () => {
   });
 
   test("a judgment error ends in failed without investigating", async () => {
-    const { runtime, investigations } = setup({
+    const { run, investigations } = setup({
       candidate: ARTICLE,
       turns: [new Error("judge unavailable")],
     });
 
-    const result = await runToQuiescence(runtime(), { input: { request: REQUEST } });
+    const result = await run({ input: { request: REQUEST } });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") throw new Error("expected done");
