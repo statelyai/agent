@@ -55,6 +55,7 @@ it survives a snapshot round-trip instead of living in a closure.
 - [human-in-the-loop](human-in-the-loop): the base shape — an idle review state, a `REJECT`-with-feedback redraft loop bounded by a counter, and a real JSON round-trip
 - [review-tool-calls](review-tool-calls): who owns the tool loop — the machine gates each proposed call behind `APPROVE`/`EDIT`/`REJECT`, or the AI SDK runs the whole loop under `maxSteps` and the machine only appends the messages it returns
 - [customer-support](customer-support): one Jev call routes safe questions past the gate and sensitive actions into it, selecting the confirmation code and new flight from candidates found in code rather than generating them
+- [answer-reuse](answer-reuse): Jev checks the help article the search already found before any agent call, reusing it at `yes` and confidence `0.8` or higher, otherwise investigating exactly once, rechecking, and waiting for a person when the answer still fails
 - [sql-agent](sql-agent): the model plans the query, a human approves, and only then does the engine run it
 - [long-running-onboarding](long-running-onboarding): pauses measured in days, with a bounded resend loop and an escalation path off every wait
 - [machine-as-tool](machine-as-tool): the whole machine behind one tool call, where the handle _is_ the persisted snapshot and the policy check is a Jev judgment
@@ -106,6 +107,7 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 - [ai-sdk-evaluator-optimizer](ai-sdk-evaluator-optimizer): the evaluator-optimizer loop as explicit states, with a Jev score and aspect checks gating the exit
 - [chatbot-simulation-eval](chatbot-simulation-eval): a simulated customer and the bot under test alternate under a `MAX_EXCHANGES` choice guard, the bot's request input provably omits the persona, and a Jev judge (a policy yes/no plus a quality score) runs inside the machine
 - [essay-grader](essay-grader): each pass is a Jev score over a five-level rubric; three choice states over exported score thresholds stop grading at the first weak pass, and the result names the stage it stopped after
+- [rank-candidates](rank-candidates): Jev decides, code sorts — a Jev score per candidate against a brief and a yes/no per shortlisted pair, while the threshold, sort, per-bucket quota and top-k cut-off are plain code, and every cut carries a reason
 
 ## Statechart policies
 
