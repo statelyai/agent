@@ -147,6 +147,7 @@ describe("answer-reuse", () => {
     expect(investigations()).toBe(1);
     // The notice never shows a failed confidence as the threshold it failed.
     expect(shown(REUSE_THRESHOLD - 0.004)).toBe(0.79);
+    expect(shown(REUSE_THRESHOLD - 5e-12)).toBe(0.79);
     expect(shown(REUSE_THRESHOLD)).toBe(REUSE_THRESHOLD);
   });
 

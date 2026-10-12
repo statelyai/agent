@@ -182,11 +182,11 @@ function passes(context: {
 }
 
 /**
- * Confidence as shown in notices, floored to two places so a value below the
+ * Confidence as shown in notices, truncated to two places so a value below the
  * threshold never displays as the threshold. The gate compares the raw number.
  */
 export function shown(confidence: number) {
-  return Math.floor(confidence * 100 + 1e-9) / 100;
+  return Math.floor(confidence * 100) / 100;
 }
 
 // ─── schemas ───
