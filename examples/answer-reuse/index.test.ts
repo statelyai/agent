@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { createAgentRuntime, eventFromInteraction, runToQuiescence } from "@statelyai/agent";
 import { createAsyncLogic } from "xstate";
 import { createMockJudge, type MockJudgeEntry, type MockJudgeModel } from "../mock-judge.js";
 import { createMockModelExecutors } from "../mock-model.js";
@@ -131,6 +131,20 @@ describe("answer-reuse", () => {
     expect(executors.calls).toHaveLength(0);
   });
 
+  test("confidence just under the threshold is not rounded up past it", async () => {
+    const { runtime, investigations } = setup({
+      candidate: ARTICLE,
+      turns: [
+        { verdict: "yes", confidence: REUSE_THRESHOLD - 0.004 },
+        { verdict: "yes", confidence: 0.9 },
+      ],
+    });
+    const result = await runToQuiescence(runtime(), { input: { request: REQUEST } });
+    if (result.status !== "done") throw new Error("expected done");
+    expect(result.output.reused).toBe(false);
+    expect(investigations()).toBe(1);
+  });
+
   test("an empty search investigates, stays uncertain, and a person approves on resume", async () => {
     const { jev, runtime, investigations } = setup({
       candidate: { text: "", sources: [] },
@@ -169,7 +183,7 @@ describe("answer-reuse", () => {
     expect(investigations()).toBe(1);
   });
 
-  test("DENY with a reason ends rejected", async () => {
+  test("free text from the interaction is a DENY that ends rejected", async () => {
     const { runtime, investigations } = setup({
       candidate: ARTICLE,
       turns: [
@@ -183,7 +197,8 @@ describe("answer-reuse", () => {
 
     const result = await runToQuiescence(runtime(), {
       snapshot: first.persist(),
-      event: { type: "DENY", reason: "Cites the wrong account." },
+      // The free text a host collects from the rendered interaction.
+      event: eventFromInteraction(first.snapshot, { text: "Cites the wrong account." }),
     });
 
     expect(result.status).toBe("done");

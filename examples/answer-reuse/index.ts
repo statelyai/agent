@@ -161,7 +161,7 @@ export function createCheckAnswer(model: Experimental_DecisionModel = judgeModel
       )?.answersRequest;
       return {
         verdict: answers.answersRequest.choice as Verdict,
-        confidence: typeof reported === "number" ? Math.round(reported * 100) / 100 : 0,
+        confidence: typeof reported === "number" ? reported : 0,
       };
     },
   });
@@ -180,6 +180,11 @@ function passes(context: {
     context.verdict === "yes" &&
     context.confidence >= REUSE_THRESHOLD
   );
+}
+
+/** Confidence as shown in notices. The gate compares the raw number. */
+function shown(confidence: number) {
+  return Math.round(confidence * 100) / 100;
 }
 
 // ─── schemas ───
@@ -217,8 +222,8 @@ const schemas = createAgentSchemas({
   events: {
     /** Send the draft answer as it stands. */
     APPROVE: z.object({}),
-    /** Reject it. Free text lands in `reason`. */
-    DENY: z.object({ reason: z.string() }),
+    /** Reject it. Free text lands in `text`, the field `eventFromInteraction` fills. */
+    DENY: z.object({ text: z.string() }),
   },
 });
 
@@ -337,7 +342,7 @@ export const answerReuseMachine = answerReuseSetup.createMachine({
               target: "answered",
               context: {
                 reused: true,
-                notice: `Reused the help article (confidence ${context.confidence}).`,
+                notice: `Reused the help article (confidence ${shown(context.confidence)}).`,
               },
             }
           : {
@@ -345,7 +350,7 @@ export const answerReuseMachine = answerReuseSetup.createMachine({
               context: {
                 notice:
                   `The help article is not enough (${context.verdict}, ` +
-                  `confidence ${context.confidence}); investigating once.`,
+                  `confidence ${shown(context.confidence)}); investigating once.`,
               },
             },
     },
@@ -383,7 +388,7 @@ export const answerReuseMachine = answerReuseSetup.createMachine({
           ? {
               target: "answered",
               context: {
-                notice: `Investigated once; answer checks out (confidence ${context.confidence}).`,
+                notice: `Investigated once; answer checks out (confidence ${shown(context.confidence)}).`,
               },
             }
           : {
@@ -391,7 +396,7 @@ export const answerReuseMachine = answerReuseSetup.createMachine({
               context: {
                 notice:
                   `Investigated once; still ${context.verdict} ` +
-                  `(confidence ${context.confidence}). Needs review.`,
+                  `(confidence ${shown(context.confidence)}). Needs review.`,
               },
             },
     },
@@ -416,7 +421,7 @@ export const answerReuseMachine = answerReuseSetup.createMachine({
         }),
         DENY: ({ event }) => ({
           target: "rejected",
-          context: { notice: `A person rejected the answer: ${event.reason}` },
+          context: { notice: `A person rejected the answer: ${event.text}` },
         }),
       },
     },
@@ -486,7 +491,7 @@ export async function main() {
     const reply = await promptLine(`${reviewLabel(result.snapshot)}\n(blank = send) > `);
     result = await runToQuiescence(createAgentRuntime(answerReuseMachine, shared), {
       snapshot: result.persist(),
-      event: reply === "" ? { type: "APPROVE" } : { type: "DENY", reason: reply },
+      event: reply === "" ? { type: "APPROVE" } : { type: "DENY", text: reply },
       ...shared,
     });
   }
