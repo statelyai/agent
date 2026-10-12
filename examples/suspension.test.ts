@@ -71,6 +71,7 @@ describe("example human waits", () => {
     // be a deliberate edit here, and a wait that silently disappears from an
     // example is a regression this test exists to catch.
     expect([...humanWaits].sort()).toEqual([
+      "answer-reuse#answerReuseMachine",
       "booking-compensation#bookingCompensationMachine",
       "chameleon#chameleonMachine",
       "chat-with-pdf#chatWithPdfMachine",
