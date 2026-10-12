@@ -1,0 +1,20 @@
+{
+  "name": "answer-reuse",
+  "title": "Reuse a support answer before investigating",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Original pattern: judge the cached answer before spending an agent call",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Judges the help article a search already found with Jev before spending an agent call: reuses it on a confident yes, otherwise investigates exactly once with read-only tools, rechecks, and settles idle for a person when the answer still does not pass."
+  },
+  "starters": [
+    "How do I reset my password?",
+    "How do I export my data as CSV?",
+    "Why was my card charged twice on March 3?",
+    "Can I move my workspace to the EU region?"
+  ]
+}

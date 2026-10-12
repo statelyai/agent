@@ -1,0 +1,50 @@
+{
+  "How do I reset my password?": [
+    {
+      "sent": "start {\"request\":\"How do I reset my password?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"searching\"",
+        "transition xstate.done.actor -> \"checkingExistingAnswer\"",
+        "transition xstate.done.actor -> \"answered\""
+      ],
+      "response": "To reset your password, open the sign-in page, choose Forgot password, and follow the link we email you. The link expires after 30 minutes.\n\n- Outcome: answered\n- Reused: yes\n- Confidence: 0.9\n- Notice: Reused the help article (confidence 0.9).\n\n**Sources**\n\n- help/reset-password"
+    }
+  ],
+  "How do I export my data as CSV?": [
+    {
+      "sent": "start {\"request\":\"How do I export my data as CSV?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"searching\"",
+        "transition xstate.done.actor -> \"checkingExistingAnswer\"",
+        "transition xstate.done.actor -> \"answered\""
+      ],
+      "response": "Export your workspace from Settings → Data → Export. You get a CSV per project, emailed to the workspace owner within a few minutes.\n\n- Outcome: answered\n- Reused: yes\n- Confidence: 0.9\n- Notice: Reused the help article (confidence 0.9).\n\n**Sources**\n\n- help/export-data"
+    }
+  ],
+  "Why was my card charged twice on March 3?": [
+    {
+      "sent": "start {\"request\":\"Why was my card charged twice on March 3?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"searching\"",
+        "transition xstate.done.actor -> \"checkingExistingAnswer\"",
+        "transition xstate.done.actor -> \"answered\""
+      ],
+      "response": "Invoices and receipts live under Billing → Invoices. Each charge links to its invoice PDF.\n\n- Outcome: answered\n- Reused: yes\n- Confidence: 0.9\n- Notice: Reused the help article (confidence 0.9).\n\n**Sources**\n\n- help/invoices"
+    }
+  ],
+  "Can I move my workspace to the EU region?": [
+    {
+      "sent": "start {\"request\":\"Can I move my workspace to the EU region?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"searching\"",
+        "transition xstate.done.actor -> \"investigating\"",
+        "transition xstate.error.actor -> \"failed\""
+      ],
+      "response": "Stopped: No output generated.\n\n- Outcome: failed\n- Answer: \n- Reused: no\n- Confidence: 0"
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+{
+  "name": "rank-candidates",
+  "title": "Rank a list against a brief, cutting weak picks, duplicates and full buckets",
+  "kind": "pattern",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Original pattern: typed judgments for fuzzy ranking, code for the exact parts",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Jev decides, code sorts: Jev scores each candidate's fit to the brief and judges whether two shortlisted candidates are the same thing, while thresholds, sorting, pairing, per-bucket quotas and the top-k cut-off are plain code. Every candidate either makes the list or is cut with a reason."
+  },
+  "starters": [
+    {
+      "label": "Conference talks \u2014 9 proposals, top 5, two per track",
+      "input": {
+        "brief": "A one-day programme for engineers who run agent workflows in production: what breaks, how to see it, and how to keep cost and latency in hand.",
+        "top": 5,
+        "consider": 8,
+        "perBucket": 2,
+        "minScore": 1.5,
+        "candidates": [
+          {
+            "id": "p01",
+            "bucket": "reliability",
+            "title": "What we learned from 400 failed runs",
+            "summary": "A taxonomy of production failures in agent workflows and the checks that caught each one."
+          },
+          {
+            "id": "p02",
+            "bucket": "reliability",
+            "title": "Retries that do not repeat side effects",
+            "summary": "Idempotency keys, uncertain outcomes and when a retry is safe."
+          },
+          {
+            "id": "p03",
+            "bucket": "reliability",
+            "title": "A field guide to agent workflow failures",
+            "summary": "Failure classes seen in production runs and how each was detected."
+          },
+          {
+            "id": "p04",
+            "bucket": "observability",
+            "title": "Traces you can replay",
+            "summary": "Recording every model call and tool call so a run can be inspected and rerun."
+          },
+          {
+            "id": "p05",
+            "bucket": "observability",
+            "title": "Dashboards nobody reads",
+            "summary": "Which workflow metrics changed a decision, and which only filled a wall."
+          },
+          {
+            "id": "p06",
+            "bucket": "cost",
+            "title": "Pricing a loop before it runs",
+            "summary": "Estimating spend for bounded loops and maps, and stopping on a budget."
+          },
+          {
+            "id": "p07",
+            "bucket": "cost",
+            "title": "Small models for typed judgments",
+            "summary": "Moving routing and screening decisions off the large model."
+          },
+          {
+            "id": "p08",
+            "bucket": "reliability",
+            "title": "Timeouts, deadlines and clocks",
+            "summary": "Why a one-second deadline fired at 999 ms, and other timer surprises."
+          },
+          {
+            "id": "p09",
+            "bucket": "community",
+            "title": "Our team offsite in pictures",
+            "summary": "Photos and stories from this year."
+          }
+        ]
+      }
+    },
+    {
+      "label": "Reading list \u2014 8 articles, top 4, two per kind",
+      "input": {
+        "brief": "A reading list for a new backend engineer learning how to make payment APIs safe to retry.",
+        "top": 4,
+        "consider": 6,
+        "perBucket": 2,
+        "minScore": 1.5,
+        "candidates": [
+          {
+            "id": "a1",
+            "bucket": "guide",
+            "title": "Designing robust and predictable APIs with idempotency",
+            "summary": "Why idempotency keys matter for payment requests and how a server should store and replay results."
+          },
+          {
+            "id": "a2",
+            "bucket": "guide",
+            "title": "Idempotency keys, explained",
+            "summary": "How a client attaches a key to each payment request so a retried call does not charge twice."
+          },
+          {
+            "id": "a3",
+            "bucket": "case-study",
+            "title": "The double-charge incident",
+            "summary": "A postmortem of a retry storm that charged customers twice, and the fix."
+          },
+          {
+            "id": "a4",
+            "bucket": "case-study",
+            "title": "Moving our checkout to exactly-once",
+            "summary": "How one team combined idempotency keys and an outbox to stop duplicate orders."
+          },
+          {
+            "id": "a5",
+            "bucket": "reference",
+            "title": "HTTP status codes cheat sheet",
+            "summary": "Every status code with a one-line meaning."
+          },
+          {
+            "id": "a6",
+            "bucket": "reference",
+            "title": "Retry with exponential backoff and jitter",
+            "summary": "When and how long a client should wait before retrying a failed request."
+          },
+          {
+            "id": "a7",
+            "bucket": "guide",
+            "title": "Getting started with our design system",
+            "summary": "Buttons, colours and spacing tokens for the web app."
+          },
+          {
+            "id": "a8",
+            "bucket": "case-study",
+            "title": "Timeouts in distributed transactions",
+            "summary": "What a timed-out payment call might have done, and how to find out safely."
+          }
+        ]
+      }
+    },
+    {
+      "label": "Weeknight dinners \u2014 7 recipes, defaults",
+      "input": {
+        "brief": "Vegetarian dinners a beginner can cook in under 30 minutes on a weeknight.",
+        "candidates": [
+          {
+            "id": "r1",
+            "bucket": "pasta",
+            "title": "Lemon garlic spaghetti",
+            "summary": "Spaghetti tossed with garlic, lemon zest, olive oil and parmesan; 20 minutes."
+          },
+          {
+            "id": "r2",
+            "bucket": "pasta",
+            "title": "Quick garlic-lemon pasta",
+            "summary": "Pasta with saut\u00e9ed garlic, lemon juice and grated cheese, ready in 20 minutes."
+          },
+          {
+            "id": "r3",
+            "bucket": "pasta",
+            "title": "Pesto gnocchi with peas",
+            "summary": "Shop-bought gnocchi pan-fried and tossed with pesto and frozen peas; 15 minutes."
+          },
+          {
+            "id": "r4",
+            "bucket": "bowls",
+            "title": "Black bean rice bowls",
+            "summary": "Rice, spiced black beans, corn and salsa; 25 minutes."
+          },
+          {
+            "id": "r5",
+            "bucket": "bowls",
+            "title": "Crispy tofu teriyaki bowl",
+            "summary": "Pressed tofu fried crisp with a teriyaki glaze over rice; 30 minutes."
+          },
+          {
+            "id": "r6",
+            "bucket": "roasts",
+            "title": "Slow-roasted beef brisket",
+            "summary": "A brisket braised for six hours with onions and stock."
+          },
+          {
+            "id": "r7",
+            "bucket": "soups",
+            "title": "Tomato and white bean soup",
+            "summary": "Canned tomatoes and beans simmered with herbs; 25 minutes."
+          }
+        ]
+      }
+    }
+  ]
+}

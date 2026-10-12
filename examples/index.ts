@@ -41,6 +41,7 @@ export {
   workflowConfig as jsonAgentWorkflowConfig,
 } from "./json-agent/index.js";
 export { triageMachine, triageSchemas, triageSchema } from "./triage/index.js";
+export { answerReuseMachine, answerReuseSchemas } from "./answer-reuse/index.js";
 
 // --- Control flow a loop can't express --------------------------------------
 
@@ -314,6 +315,13 @@ export {
   essayGraderSchemas,
   runEssayGraderExample,
 } from "./essay-grader/index.js";
+export {
+  rankCandidatesMachine,
+  rankCandidatesSchemas,
+  shortlist,
+  rank,
+  DEFAULTS as rankCandidatesDefaults,
+} from "./rank-candidates/index.js";
 
 // --- Statechart policies ----------------------------------------------------
 
