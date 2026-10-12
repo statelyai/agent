@@ -23,6 +23,7 @@ import {
   inspectTransitions,
   isAgentIdle,
   createAgentRuntime,
+  runAgent,
   runToQuiescence,
   serializeTraceEvent,
   setupAgent,
@@ -4969,5 +4970,280 @@ describe("xstate contract: snapshot identity is NOT a usable `ignored` signal", 
     actor.send({ type: "EFFECT" } as never);
     expect(effects.length).toBeGreaterThan(0);
     expect(Object.is(before, actor.getSnapshot())).toBe(false);
+  });
+});
+
+describe("runAgent (sugar over createAgentRuntime + runToQuiescence)", () => {
+  function createReviewMachine() {
+    const schemas = createAgentSchemas({
+      context: z.object({ topic: z.string(), draft: z.string().nullable(), drafts: z.number() }),
+      input: z.object({ topic: z.string() }),
+      output: z.object({ draft: z.string(), drafts: z.number() }),
+      // NUDGE is declared but no state handles it: an answer the idle state ignores.
+      events: { APPROVE: z.object({}), REJECT: z.object({}), NUDGE: z.object({}) },
+    });
+    const draftText = createTextLogic({
+      schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+      model: "test-model",
+      prompt: ({ input }) => input.topic,
+    });
+    const agent = setupAgent({ schemas, actors: { draftText } });
+    return agent.createMachine({
+      context: ({ input }) => ({ topic: input.topic, draft: null, drafts: 0 }),
+      initial: "drafting",
+      states: {
+        drafting: {
+          invoke: {
+            id: "draft",
+            src: "draftText",
+            input: ({ context }) => ({ topic: context.topic }),
+            onDone: ({ context, output }) => ({
+              target: "awaitingApproval",
+              context: { draft: output.result, drafts: context.drafts + 1 },
+            }),
+          },
+        },
+        awaitingApproval: {
+          on: { APPROVE: { target: "done" }, REJECT: { target: "drafting" } },
+        },
+        done: {
+          type: "final",
+          output: ({ context }) => ({ draft: context.draft ?? "", drafts: context.drafts }),
+        },
+      },
+    });
+  }
+
+  function createExecutors() {
+    let calls = 0;
+    return {
+      generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
+        calls += 1;
+        return { result: `Draft ${calls} about ${request.prompt}` };
+      },
+    };
+  }
+
+  function createDoneMachine() {
+    const schemas = createAgentSchemas({
+      context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
+      input: z.object({ prompt: z.string() }),
+      output: z.object({ answer: z.string() }),
+    });
+    const answerQuestion = createTextLogic({
+      schemas: {
+        input: z.object({ prompt: z.string() }),
+        output: z.object({ answer: z.string() }),
+      },
+      model: "test-model",
+      prompt: ({ input }) => input.prompt,
+    });
+    const agent = setupAgent({ schemas, actors: { answerQuestion } });
+    return agent.createMachine({
+      context: ({ input }) => ({ prompt: input.prompt, answer: null }),
+      initial: "answering",
+      states: {
+        answering: {
+          invoke: {
+            id: "answer",
+            src: "answerQuestion",
+            input: ({ context }) => ({ prompt: context.prompt }),
+            onDone: ({ output }) => ({ target: "done", context: { answer: output.result.answer } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => ({ answer: context.answer ?? "" }) },
+      },
+    });
+  }
+
+  const answerExecutors = {
+    generateText: async (request: AgentTextRequest & { tools: AgentTools }) => ({
+      result: { answer: `Answered: ${request.prompt}` },
+    }),
+  };
+
+  test("happy path: one call runs to done with the typed output", async () => {
+    const result = await runAgent(createDoneMachine(), {
+      input: { prompt: "why state machines?" },
+      executors: answerExecutors,
+    });
+    expect(result.status).toBe("done");
+    expect(result.status === "done" ? result.output : undefined).toEqual({
+      answer: "Answered: why state machines?",
+    });
+  });
+
+  test("resume: a run left idle finishes from { snapshot, event }", async () => {
+    const machine = createReviewMachine();
+    const executors = createExecutors();
+    const first = await runAgent(machine, { input: { topic: "release notes" }, executors });
+    expect(first.status).toBe("idle");
+    expect(first.snapshot.value).toBe("awaitingApproval");
+
+    const second = await runAgent(machine, {
+      executors,
+      snapshot: first.persist(),
+      event: { type: "APPROVE" },
+    });
+    expect(second.status).toBe("done");
+    expect(second.status === "done" ? second.output : undefined).toEqual({
+      draft: "Draft 1 about release notes",
+      drafts: 1,
+    });
+  });
+
+  test("onIdle: answers each idle in place until done", async () => {
+    const answers: Array<{ type: "APPROVE" } | { type: "REJECT" }> = [
+      { type: "REJECT" },
+      { type: "APPROVE" },
+    ];
+    const seen: Array<{ value: unknown; idle: boolean; drafts: number }> = [];
+    const result = await runAgent(createReviewMachine(), {
+      input: { topic: "incident recap" },
+      executors: createExecutors(),
+      onIdle: async (snapshot) => {
+        seen.push({
+          value: snapshot.value,
+          idle: isAgentIdle(snapshot),
+          drafts: snapshot.context.drafts,
+        });
+        return answers.shift()!;
+      },
+    });
+
+    expect(seen).toEqual([
+      { value: "awaitingApproval", idle: true, drafts: 1 },
+      { value: "awaitingApproval", idle: true, drafts: 2 },
+    ]);
+    expect(answers).toHaveLength(0);
+    expect(result.status).toBe("done");
+    expect(result.status === "done" ? result.output : undefined).toEqual({
+      draft: "Draft 2 about incident recap",
+      drafts: 2,
+    });
+  });
+
+  test("equivalence: matches runToQuiescence(createAgentRuntime(...))", async () => {
+    type Run = Awaited<ReturnType<typeof runAgent>>;
+    const expectSameRun = (viaSugar: Run, viaRuntime: Run) => {
+      expect(viaSugar.status).toBe(viaRuntime.status);
+      expect(viaSugar.status === "done" ? viaSugar.output : undefined).toEqual(
+        viaRuntime.status === "done" ? viaRuntime.output : undefined,
+      );
+      expect(viaSugar.snapshot.value).toEqual(viaRuntime.snapshot.value);
+      expect(viaSugar.snapshot.context).toEqual(viaRuntime.snapshot.context);
+      expect(viaSugar.events.map((entry) => entry.event.type)).toEqual(
+        viaRuntime.events.map((entry) => entry.event.type),
+      );
+    };
+
+    const done = createDoneMachine();
+    const doneInput = { prompt: "same?" };
+    expectSameRun(
+      await runAgent(done, { input: doneInput, executors: answerExecutors }),
+      await runToQuiescence(createAgentRuntime(done, { executors: answerExecutors }), {
+        input: doneInput,
+      }),
+    );
+
+    const review = createReviewMachine();
+    const reviewInput = { topic: "same?" };
+    expectSameRun(
+      await runAgent(review, { input: reviewInput, executors: createExecutors() }),
+      await runToQuiescence(createAgentRuntime(review, { executors: createExecutors() }), {
+        input: reviewInput,
+      }),
+    );
+  });
+
+  test("onIdle: an ignored answer stops the loop and is reported", async () => {
+    let calls = 0;
+    const result = await runAgent(createReviewMachine(), {
+      input: { topic: "nudged" },
+      executors: createExecutors(),
+      onIdle: async () => {
+        calls += 1;
+        return { type: "NUDGE" } as const;
+      },
+    });
+    expect(calls).toBe(1);
+    expect(result.status).toBe("idle");
+    expect(result.ignored).toEqual({ type: "NUDGE" });
+    expect(result.snapshot.value).toBe("awaitingApproval");
+  });
+
+  test("onIdle: an ignored opening event is returned before any answer", async () => {
+    const machine = createReviewMachine();
+    const executors = createExecutors();
+    const first = await runAgent(machine, { input: { topic: "opening" }, executors });
+    let calls = 0;
+    const result = await runAgent(machine, {
+      executors,
+      snapshot: first.persist(),
+      event: { type: "NUDGE" },
+      onIdle: async () => {
+        calls += 1;
+        return { type: "APPROVE" } as const;
+      },
+    });
+    expect(calls).toBe(0);
+    expect(result.ignored).toEqual({ type: "NUDGE" });
+  });
+
+  test("onIdle: maxModelCalls bounds the whole call, not each pass", async () => {
+    let calls = 0;
+    const result = await runAgent(createReviewMachine(), {
+      input: { topic: "budget" },
+      executors: createExecutors(),
+      maxModelCalls: 2,
+      onIdle: async () => {
+        calls += 1;
+        return { type: "REJECT" } as const;
+      },
+    });
+    // Draft 1 (pass 1), draft 2 (pass 2), draft 3 is over budget (pass 3).
+    expect(calls).toBe(2);
+    expect(result.status).toBe("error");
+    expect(result.status === "error" ? result.cause : undefined).toBe("max-model-calls");
+  });
+
+  test("onIdle: the final log replays every pass from the original input", async () => {
+    const answers: Array<{ type: "APPROVE" } | { type: "REJECT" }> = [
+      { type: "REJECT" },
+      { type: "APPROVE" },
+    ];
+    const result = await runAgent(createReviewMachine(), {
+      input: { topic: "history" },
+      executors: createExecutors(),
+      onIdle: async () => answers.shift()!,
+    });
+    expect(result.status).toBe("done");
+    const types = result.events.map((entry) => entry.event.type);
+    expect(types[0]).toBe("@agent.init");
+    expect(types.filter((type) => type === "@agent.init")).toHaveLength(1);
+    expect(types.filter((type) => type === "REJECT")).toHaveLength(1);
+    expect(types.filter((type) => type === "APPROVE")).toHaveLength(1);
+    expect(types.filter((type) => type === "xstate.done.actor")).toHaveLength(2);
+    // The log alone rebuilds the finished run.
+    const replayed = await runAgent(createReviewMachine(), {
+      events: result.events,
+      executors: createExecutors(),
+    });
+    expect(replayed.status).toBe("done");
+    expect(replayed.snapshot.context).toEqual(result.snapshot.context);
+  });
+
+  test("onIdle is not called when the first pass finishes done", async () => {
+    let calls = 0;
+    const result = await runAgent(createDoneMachine(), {
+      input: { prompt: "no wait" },
+      executors: answerExecutors,
+      onIdle: async () => {
+        calls += 1;
+        throw new Error("unreachable");
+      },
+    });
+    expect(result.status).toBe("done");
+    expect(calls).toBe(0);
   });
 });

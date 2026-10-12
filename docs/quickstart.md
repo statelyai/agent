@@ -15,7 +15,7 @@ key or model SDK.
 
 ```ts
 import { z } from "zod";
-import { createAgentRuntime, runToQuiescence, setupAgent } from "@statelyai/agent";
+import { runAgent, setupAgent } from "@statelyai/agent";
 
 const answerOutputSchema = z.object({ answer: z.string() });
 
@@ -53,14 +53,12 @@ const machine = agent.createMachine({
   },
 });
 
-const result = await runToQuiescence(
-  createAgentRuntime(machine, {
-    executors: {
-      generateText: async () => ({ result: "Because transitions constrain behavior." }),
-    },
-  }),
-  { input: { prompt: "Why state machines?" } },
-);
+const result = await runAgent(machine, {
+  input: { prompt: "Why state machines?" },
+  executors: {
+    generateText: async () => ({ result: "Because transitions constrain behavior." }),
+  },
+});
 
 if (result.status !== "done") {
   throw new Error(`Unexpected status: ${result.status}`);
@@ -101,8 +99,9 @@ const executors = createAiSdkExecutors({
   models: { fast: openai("gpt-5.4-mini") },
 });
 
-const liveResult = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+const liveResult = await runAgent(machine, {
   input: { prompt: "Why state machines?" },
+  executors,
 });
 
 if (liveResult.status === "done") {
@@ -111,4 +110,6 @@ if (liveResult.status === "done") {
 ```
 
 Continue with [Choosing a run mode](choosing-a-run-mode.md),
-[Messages](messages.md), and [Persistence](persistence.md).
+[Messages](messages.md), and [Persistence](persistence.md). A host that drives
+the transition loop itself uses `createAgentRuntime`; see
+[Write your own host loop](hosts.md#write-your-own-host-loop).
