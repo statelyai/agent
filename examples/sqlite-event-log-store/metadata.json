@@ -1,0 +1,16 @@
+{
+  "name": "sqlite-event-log-store",
+  "title": "SQLite event-log store",
+  "kind": "host-adapter",
+  "manual": true,
+  "origin": {
+    "type": "stately-agent",
+    "source": "AgentEventLogStore over Node's built-in node:sqlite, checked with assertEventLogStoreConformance",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["SQLite", "Postgres", "LangGraph checkpointer"],
+    "purpose": "Implements the four-method AgentEventLogStore contract over one append-only SQL table, with the length check and insert in one transaction, and passes the shared conformance suite."
+  },
+  "starters": []
+}

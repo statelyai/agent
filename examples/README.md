@@ -81,6 +81,7 @@ it survives a snapshot round-trip instead of living in a closure.
 ## Persistence and recovery
 
 - [crash-recovery](crash-recovery): events-only recovery by folding the log; no snapshot is persisted
+- [time-travel](time-travel): replay a finished thread's log to a resting state, edit `context` on that snapshot, and resume it as a new thread — LangGraph's `get_state_history` plus `update_state`
 - [snapshot-migration](snapshot-migration): a run paused before a deploy and resumed after it, through XState's native `version`/`migrate` contract
 - [portable-xstate-loop](portable-xstate-loop): the durable transition/effect loop written by hand, with no Agent runner
 - [file-snapshot-store](file-snapshot-store): the same machine two ways — persisted to a JSON file between processes, and kept alive in one long-lived `createActor` that persists nothing
@@ -98,6 +99,7 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 - [anthropic-sdk-host](anthropic-sdk-host), [openai-sdk-host](openai-sdk-host): the executor contract against the raw provider APIs, with no AI SDK in between
 - [langchain-host](langchain-host), [mastra-host](mastra-host): coexistence with a framework — the framework makes the text-model calls, Jev the judgments, the machine owns legality
 - [cloudflare-agent-host](cloudflare-agent-host): a Durable Object whose SQLite event log is the source of truth
+- [sqlite-event-log-store](sqlite-event-log-store): `AgentEventLogStore` over Node's built-in `node:sqlite`, checked by `assertEventLogStoreConformance`
 - [cloudflare-workers-ai-host](cloudflare-workers-ai-host): a provider with no native tool calling, so the legal events are serialized into the prompt
 - [next-host](next-host): controlled mode across a stateless Next route handler
 

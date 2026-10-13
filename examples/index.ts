@@ -258,6 +258,7 @@ export {
   migrateOrderSnapshot,
   runSnapshotMigrationExample,
 } from "./snapshot-migration/index.js";
+export { runTimeTravelExample, timeTravelMachine } from "./time-travel/index.js";
 export { portableLoopMachine, runPortableXstateLoop } from "./portable-xstate-loop/index.js";
 export {
   loadSnapshot,

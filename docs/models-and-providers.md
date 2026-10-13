@@ -194,30 +194,7 @@ To avoid depending on `ai` or `openai`, write the three executors over raw `fetc
 
 ## Testing with a mock model
 
-To exercise the adapter path itself without a provider, put one of the AI SDK's own mock models from `ai/test` in the `models` map.
-
-```ts
-import { MockLanguageModelV3 } from "ai/test";
-import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-
-const executors = createAiSdkExecutors({
-  models: {
-    fast: new MockLanguageModelV3({
-      doGenerate: async () => ({
-        content: [{ type: "text", text: "Because transitions constrain behavior." }],
-        finishReason: { unified: "stop", raw: "stop" },
-        usage: {
-          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-          outputTokens: { total: 1, text: 1, reasoning: 0 },
-        },
-        warnings: [],
-      }),
-    }),
-  },
-});
-```
-
-When the adapter is not what is under test, a plain function executor that routes on `request.name` is lighter. See [Evals](evals.md#plain-function-executors).
+For AI SDK, OpenAI, and TanStack AI test doubles behind the real adapter, and for plain-function executors, see [Testing without a provider](evals.md#testing-without-a-provider).
 
 ## Support by path
 

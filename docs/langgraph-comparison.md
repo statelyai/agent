@@ -9,26 +9,31 @@ Both libraries represent agent control flow explicitly. Stately Agent uses XStat
 
 ## Construct map
 
-| LangGraph concept                          | Stately Agent / XState                                                                                                                  |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `StateGraph`                               | XState machine                                                                                                                          |
-| Node                                       | State, invoked actor, or action                                                                                                         |
-| Tool/model node                            | Named Agent request actor                                                                                                               |
-| Grader / classifier node                   | An actor calling the AI SDK's `experimental_decide` with Jev via `@ai-sdk/typesafe-ai` ([judgments](judgments.md))                    |
-| Plain (non-model) node                     | An ordinary XState actor, usually `createAsyncLogic({ schemas, run })`                                                                  |
-| `START` / `END`                            | `initial` on the machine; a `type: 'final'` state whose `output` is the run's typed result                                              |
-| Conditional edge, a pure function of state | A [`type: 'choice'` state](machines.md#choice-states)                                                                                   |
-| Conditional edge, a response to an event   | A guarded [transition](machines.md#transitions); when the model picks the branch, `agent.decide` with `allowedEvents`                   |
-| `Annotation` reducer                       | No reducers. A transition returns a partial `context` patch, so the merge is written where the change happens                           |
-| `withStructuredOutput(schema)`             | `schemas: { output }` on the request; the parsed value arrives as `output.result` in the invoke's `onDone`                              |
-| Interrupt                                  | A resting state that settles `runToQuiescence` as idle. See [Human in the loop](human-in-the-loop.md)                                   |
-| `new Command({ resume })`                  | A typed machine event: `runToQuiescence(createAgentRuntime(machine, {}), { snapshot, event })`, or `{ events, event }` from the log     |
-| Checkpointer                               | A persisted XState snapshot the host stores. See [Persistence](persistence.md)                                                          |
-| `config.configurable.thread_id`            | `runToQuiescence(createAgentRuntime(machine, { store, threadId }), {})`, which reads and appends the thread's [event log](event-log.md) |
-| Stream events                              | `onTrace` (`stream.chunk`) plus XState inspection                                                                                       |
-| Subgraph                                   | Invoked child machine                                                                                                                   |
+| LangGraph concept                               | Stately Agent / XState                                                                                                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `StateGraph`                                    | XState machine                                                                                                                                          |
+| Node                                            | State, invoked actor, or action                                                                                                                         |
+| Tool/model node                                 | Named Agent request actor                                                                                                                               |
+| Grader / classifier node                        | An actor calling the AI SDK's `experimental_decide` with Jev via `@ai-sdk/typesafe-ai` ([judgments](judgments.md))                                      |
+| Plain (non-model) node                          | An ordinary XState actor, usually `createAsyncLogic({ schemas, run })`                                                                                  |
+| `START` / `END`                                 | `initial` on the machine; a `type: 'final'` state whose `output` is the run's typed result                                                              |
+| Conditional edge, a pure function of state      | A [`type: 'choice'` state](machines.md#choice-states)                                                                                                   |
+| Conditional edge, a response to an event        | A guarded [transition](machines.md#transitions); when the model picks the branch, `agent.decide` with `allowedEvents`                                   |
+| `Annotation` reducer                            | No reducers. A transition returns a partial `context` patch, so the merge is written where the change happens                                           |
+| `withStructuredOutput(schema)`                  | `schemas: { output }` on the request; the parsed value arrives as `output.result` in the invoke's `onDone`                                              |
+| Interrupt                                       | A resting state that settles `runToQuiescence` as idle. See [Human in the loop](human-in-the-loop.md)                                                   |
+| `new Command({ resume })`                       | A typed machine event: `runToQuiescence(createAgentRuntime(machine, {}), { snapshot, event })`, or `{ events, event }` from the log                     |
+| Checkpointer                                    | A persisted XState snapshot the host stores. See [Persistence](persistence.md)                                                                          |
+| `config.configurable.thread_id`                 | `runToQuiescence(createAgentRuntime(machine, { store, threadId }), {})`, which reads and appends the thread's [event log](event-log.md)                 |
+| Stream events                                   | `onTrace` (`stream.chunk`) plus XState inspection                                                                                                       |
+| Subgraph sharing state keys                     | Nested compound state. See [Subgraphs](multi-agent.md#subgraphs)                                                                                        |
+| Subgraph with its own schema                    | Invoked child machine, `input` + `onDone`. See [Subgraphs](multi-agent.md#subgraphs)                                                                    |
+| `BaseStore` / `store.put` / `store.search`      | Host store behind an `actors` entry. See [Long-term memory](patterns.md#long-term-memory) and [long-term-memory](../examples/long-term-memory/index.ts) |
+| `MemorySaver` / `SqliteSaver` / `PostgresSaver` | `createInMemoryEventLogStore`, or your store checked by `assertEventLogStoreConformance`. See [Stores](event-log.md#stores)                             |
+| `get_state_history` / `update_state`            | `replay` on a log prefix, edit the persisted snapshot, resume on a new thread. See [Branch with edited state](event-log.md#branch-with-edited-state)    |
+| `FakeListChatModel` / test fakes                | The provider SDK's own test model behind the real adapter. See [Testing without a provider](evals.md#testing-without-a-provider)                        |
 
-Stately Agent does not ship a checkpointer or event-log backend. `store` is an interface; the built-in implementation is in-memory, and a host implements it over its own database. Use the storage, retry, and interruption semantics of the framework hosting XState.
+Stately Agent does not ship a checkpointer or event-log backend. `store` is an interface; the built-in implementation is in-memory, and a host implements it over its own database. There is no `BaseStore` equivalent by design: long-term memory belongs to the host's database, and the machine reaches it through actors. Use the storage, retry, and interruption semantics of the framework hosting XState.
 
 ## One node, before and after
 

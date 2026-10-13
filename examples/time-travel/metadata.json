@@ -1,0 +1,24 @@
+{
+  "name": "time-travel",
+  "title": "Rewind a run, edit its state, and branch",
+  "kind": "agent-workflow",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Event-log replay of a prefix, an edited persisted snapshot, and a resume on a new thread",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["LangGraph"],
+    "purpose": "Replays a finished thread's log up to the outline, edits the tone on that snapshot, and resumes it as a new thread that redrafts in the new tone, where LangGraph uses get_state_history to pick a checkpoint and update_state to edit it."
+  },
+  "starters": [
+    { "label": "State machines, formal", "input": { "topic": "state machines", "tone": "formal" } },
+    { "label": "Slow builds, dry", "input": { "topic": "why builds are slow", "tone": "dry" } }
+  ],
+  "runners": [
+    {
+      "label": "Run formal, then branch playful from the outline",
+      "export": "runTimeTravelExample"
+    }
+  ]
+}
