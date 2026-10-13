@@ -396,7 +396,7 @@ export const guardrailsMachine = agentSetup.createMachine({
   },
 });
 
-const executors = createAiSdkExecutors({ models });
+const executors = createAiSdkExecutors(guardrailsMachine);
 
 export async function main() {
   const result = await runToQuiescence(

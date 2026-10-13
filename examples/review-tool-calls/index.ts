@@ -327,7 +327,7 @@ export async function runReviewToolCallsExample(
     onProgress,
   } = options;
   const runOptions = {
-    executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+    executors: generateText ? { generateText } : createAiSdkExecutors(reviewToolCallsMachine),
     // The side effect is the caller's: a test passes a recording one, a real
     // host passes the payments call.
     ...(sendRefund
@@ -549,7 +549,7 @@ export async function runToolCallingExample(
     executors?: AgentRequestExecutors;
   } = {},
 ) {
-  const executors = options.executors ?? createAiSdkExecutors({ models });
+  const executors = options.executors ?? createAiSdkExecutors(toolCallingMachine);
   const answers: string[] = [];
 
   let result = await runToQuiescence(
@@ -630,7 +630,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       return;
     }
 
-    const executors = createAiSdkExecutors({ models });
+    const executors = createAiSdkExecutors(reviewToolCallsMachine);
     const request = "Customer #A-1000 was double-charged $20 on order ORD-42. Make it right.";
 
     let result = await runToQuiescence(

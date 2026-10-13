@@ -675,7 +675,7 @@ export async function runCustomerSupportExample(
   const executors = {
     ...(generateText
       ? { executors: { generateText } }
-      : { executors: createAiSdkExecutors({ models }) }),
+      : { executors: createAiSdkExecutors(customerSupportMachine) }),
     ...(judge ? { actors: { classify: createClassify(judge) } } : {}),
   };
 
@@ -786,7 +786,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const executors = createAiSdkExecutors({ models });
+    const executors = createAiSdkExecutors(customerSupportMachine);
 
     const query =
       (await promptLine("Ask the airline bot (blank = cancel AB1234) > ")) ||

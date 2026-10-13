@@ -461,7 +461,7 @@ export async function runLongTermMemoryExample(
   const queued = [...(options.humanEvents ?? [])];
   const progress: string[] = [];
   const shared = {
-    executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+    executors: generateText ? { generateText } : createAiSdkExecutors(longTermMemoryMachine),
     ...(judge ? { actors: { searchMemories: createSearchMemories(judge) } } : {}),
     onTransition: (snapshot: LongTermMemorySnapshot) => {
       const state = getStatePath(snapshot);

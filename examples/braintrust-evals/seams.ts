@@ -39,7 +39,7 @@ import { matchesTrajectory, runSeam } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import type { SeamRef, SeamScriptEntry, SeamTurn, TrajectoryMatch } from "@statelyai/agent/testing";
-import { createEvaluatePrompt, emailDrafter, models } from "../email-drafter/agent-logic.js";
+import { createEvaluatePrompt, emailDrafter } from "../email-drafter/agent-logic.js";
 
 type DrafterEvent = EventFromLogic<typeof emailDrafter>;
 
@@ -388,7 +388,7 @@ export async function main() {
   const upload = Boolean(process.env.BRAINTRUST_API_KEY);
   // The seam under test hits the real model; every other text call replays its
   // script. The Jev judgment is live (it reads TYPESAFE_AI_API_KEY).
-  const candidate = createAiSdkExecutors({ models }).generateText;
+  const candidate = createAiSdkExecutors(emailDrafter).generateText;
 
   console.log(
     `[seam-evals] braintrust: ${upload ? "uploading experiments" : "local summaries (noSendLogs)"}`,

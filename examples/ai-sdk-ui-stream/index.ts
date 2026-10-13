@@ -269,7 +269,7 @@ export async function runAiSdkUiStreamExample(
   options: RunAiSdkUiStreamOptions = {},
 ): Promise<AiSdkUiStreamResult> {
   const { product = "a state-machine agent framework", streamText, onMessage } = options;
-  const executors = streamText ? { streamText } : createAiSdkExecutors({ models });
+  const executors = streamText ? { streamText } : createAiSdkExecutors(aiSdkUiStreamMachine);
   const stream = agentRunToUIMessageStream(aiSdkUiStreamMachine, { input: { product }, executors });
   const startedAt = Date.now();
 

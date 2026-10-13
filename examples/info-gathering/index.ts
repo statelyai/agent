@@ -392,7 +392,7 @@ export async function runInfoGatheringExample(
   const queued = [...(options.humanEvents ?? [])];
   const progress: string[] = [];
   const shared = {
-    executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+    executors: generateText ? { generateText } : createAiSdkExecutors(infoGatheringMachine),
     onTransition: (snapshot: InfoGatheringSnapshot) => {
       const state = getStatePath(snapshot);
       // A resume re-reports the restored state; record each state once per visit.

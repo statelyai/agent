@@ -392,7 +392,7 @@ export async function runReflectionWriterExample(
     createAgentRuntime(reflectionWriterMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(reflectionWriterMachine) }),
       onTransition: (snapshot) => {
         // `getStatePath` serializes nested and parallel state values properly;
         // `String(snapshot.value)` would print "[object Object]" for either.
@@ -419,7 +419,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const { generateText } = createAiSdkExecutors({ models });
+    const { generateText } = createAiSdkExecutors(reflectionWriterMachine);
 
     const topic = "Why the little prince is relevant to modern childhood";
     const result = await runReflectionWriterExample({

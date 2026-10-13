@@ -342,9 +342,7 @@ export async function runRpsExample(options?: {
 }) {
   const queued = [...(options?.humanThrows ?? [])];
   const shared = {
-    executors: options?.decide
-      ? { decide: options.decide }
-      : createAiSdkExecutors({ models: rpsModels }),
+    executors: options?.decide ? { decide: options.decide } : createAiSdkExecutors(rpsMachine),
     maxModelCalls: 30,
   };
 

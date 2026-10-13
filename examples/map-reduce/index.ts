@@ -414,7 +414,7 @@ export async function runMapReduceExample(options: RunMapReduceOptions = {}) {
     createAgentRuntime(mapReduceMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(mapReduceMachine) }),
       ...(judge ? { actors: { judgeJokes: createJudgeJokes(judge) } } : {}),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);

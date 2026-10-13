@@ -508,7 +508,7 @@ export async function runFeynmanTutorExample(
   const queued = [...(options.humanEvents ?? [])];
   const progress: string[] = [];
   const shared = {
-    executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+    executors: generateText ? { generateText } : createAiSdkExecutors(feynmanTutorMachine),
     ...(judge ? { actors: { verifyExplanation: createVerifyExplanation(judge) } } : {}),
     onTransition: (snapshot: FeynmanSnapshot) => {
       const state = getStatePath(snapshot);

@@ -517,7 +517,7 @@ export async function runRiverCrossingExample(
 ) {
   const result = await runToQuiescence(
     createAgentRuntime(riverCrossingMachine, {
-      executors: createAiSdkExecutors({ models }),
+      executors: createAiSdkExecutors(riverCrossingMachine),
       ...options,
     }),
     {

@@ -365,7 +365,7 @@ export async function runRouteReplanningExample(
 ) {
   const result = await runToQuiescence(
     createAgentRuntime(routeReplanningMachine, {
-      executors: createAiSdkExecutors({ models }),
+      executors: createAiSdkExecutors(routeReplanningMachine),
       ...options,
     }),
     {

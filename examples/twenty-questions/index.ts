@@ -643,7 +643,7 @@ export const twentyQuestionsMachine = agentSetup.createMachine({
   },
 });
 
-const executors = createAiSdkExecutors({ models });
+const executors = createAiSdkExecutors(twentyQuestionsMachine);
 
 type TwentyQuestionsSnapshot = SnapshotFrom<typeof twentyQuestionsMachine>;
 

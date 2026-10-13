@@ -131,7 +131,7 @@ export const supportMachineStep3 = agentSetup.createMachine({
 });
 
 function buildExecutors(): Pick<AgentRequestExecutors, "generateText" | "decide"> {
-  const ai = createAiSdkExecutors({ models });
+  const ai = createAiSdkExecutors(supportMachineStep3);
   const generateText: NonNullable<AgentRequestExecutors["generateText"]> = async (
     request,
     info,

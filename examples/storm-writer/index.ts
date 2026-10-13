@@ -864,7 +864,7 @@ export async function runStormWriterExample(
     createAgentRuntime(stormWriterMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(stormWriterMachine) }),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
         progress.push(state);

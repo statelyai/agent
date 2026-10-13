@@ -423,7 +423,7 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
 export async function runAiSdkEvaluatorOptimizerExample() {
   const result = await runToQuiescence(
     createAgentRuntime(aiSdkEvaluatorOptimizerMachine, {
-      executors: createAiSdkExecutors({ models }),
+      executors: createAiSdkExecutors(aiSdkEvaluatorOptimizerMachine),
       onTransition: (snapshot) =>
         console.log(
           "[state]",

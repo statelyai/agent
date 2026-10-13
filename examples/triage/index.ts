@@ -418,7 +418,7 @@ const SAMPLE_TICKET =
   "the third time billing has gone wrong this year.";
 
 export async function main() {
-  const executors = createAiSdkExecutors({ models });
+  const executors = createAiSdkExecutors(triageMachine);
 
   const pasted = await promptLine("Paste a ticket (blank = sample) > ");
   const ticket = pasted === "" ? SAMPLE_TICKET : pasted;

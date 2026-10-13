@@ -624,7 +624,7 @@ export async function runProjectPlannerExample(
   const progress: string[] = [];
   const result = await runToQuiescence(
     createAgentRuntime(projectPlannerMachine, {
-      executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+      executors: generateText ? { generateText } : createAiSdkExecutors(projectPlannerMachine),
       ...(judge ? { actors: { assessRisk: createAssessRisk(judge) } } : {}),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);

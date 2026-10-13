@@ -395,7 +395,7 @@ export const generateAndRepairMachine = agentMachine.provide({
 export async function runGenerateAndRepairExample(prompt: string) {
   const result = await runToQuiescence(
     createAgentRuntime(generateAndRepairMachine, {
-      executors: createAiSdkExecutors({ models }),
+      executors: createAiSdkExecutors(generateAndRepairMachine),
       onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
       on: {
         CANDIDATE_REJECTED: (e) =>

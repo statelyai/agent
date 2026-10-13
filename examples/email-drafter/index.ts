@@ -24,7 +24,7 @@ import {
   createAgentRuntime,
   runToQuiescence,
 } from "@statelyai/agent";
-import { type DrafterEvent, type Interaction, emailDrafter, models } from "./agent-logic.js";
+import { type DrafterEvent, type Interaction, emailDrafter } from "./agent-logic.js";
 
 // Re-exported so existing importers of this module keep working; hosts should
 // import from './agent-logic.js' directly.
@@ -68,7 +68,7 @@ export async function promptInteraction(
 }
 
 export async function main() {
-  const executors = createAiSdkExecutors({ models });
+  const executors = createAiSdkExecutors(emailDrafter);
 
   await withReadline(async (rl) => {
     // Start the machine; it settles idle at the first interaction state.

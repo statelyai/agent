@@ -821,7 +821,7 @@ export function toLearnerEvent(snapshot: QuizSnapshot, text: string): LearnerEve
 
 export async function main() {
   const shared = {
-    executors: createAiSdkExecutors({ models }),
+    executors: createAiSdkExecutors(chatWithPdfMachine),
     on: {
       QUESTION: ({ prompt }: { prompt: string }) => console.log(`\n${prompt}`),
       GRADED: (grade: { correct: boolean; expected: string; explanation: string }) =>

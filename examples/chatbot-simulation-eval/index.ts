@@ -445,7 +445,9 @@ export async function runChatbotSimulationEvalExample(
   const progress: string[] = [];
   const result = await runToQuiescence(
     createAgentRuntime(chatbotSimulationEvalMachine, {
-      executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+      executors: generateText
+        ? { generateText }
+        : createAiSdkExecutors(chatbotSimulationEvalMachine),
       ...(judge ? { actors: { judgeConversation: createJudgeConversation(judge) } } : {}),
       onTransition: (snapshot: ChatbotSimulationEvalSnapshot) => {
         const state = getStatePath(snapshot);

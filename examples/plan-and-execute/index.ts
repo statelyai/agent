@@ -320,7 +320,7 @@ export async function runPlanAndExecuteExample(
 ) {
   const result = await runToQuiescence(
     createAgentRuntime(planAndExecuteMachine, {
-      executors: createAiSdkExecutors({ models }),
+      executors: createAiSdkExecutors(planAndExecuteMachine),
       ...options,
     }),
     {
@@ -342,7 +342,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   }
   void (async () => {
     const output = await runPlanAndExecuteExample({
-      executors: createAiSdkExecutors({ models }),
+      executors: createAiSdkExecutors(planAndExecuteMachine),
       onTransition: (snapshot) =>
         console.log(
           "[state]",

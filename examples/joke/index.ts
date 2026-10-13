@@ -346,7 +346,7 @@ export async function main() {
 
   const result = await runToQuiescence(
     createAgentRuntime(jokeMachine, {
-      executors: createAiSdkExecutors({ models }),
+      executors: createAiSdkExecutors(jokeMachine),
       onChunk: (chunk) => process.stdout.write(chunk),
       onTransition: (snapshot) => {
         const path = getStatePath(snapshot);

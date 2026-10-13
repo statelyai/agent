@@ -552,7 +552,7 @@ export function toGuesserEvent(text: string): GuesserEvent {
 // ─── Dual-mode entrypoint ───
 
 export async function main() {
-  const shared = { executors: createAiSdkExecutors({ models }) };
+  const shared = { executors: createAiSdkExecutors(justOneMachine) };
 
   let result = await runToQuiescence(
     createAgentRuntime(justOneMachine, {

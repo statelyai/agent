@@ -510,7 +510,7 @@ export function toAccuseEvent(text: string): AccuseEvent | undefined {
 // ─── Dual-mode entrypoint ───
 
 export async function main() {
-  const shared = { executors: createAiSdkExecutors({ models }) };
+  const shared = { executors: createAiSdkExecutors(chameleonMachine) };
 
   let result = await runToQuiescence(
     createAgentRuntime(chameleonMachine, {

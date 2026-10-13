@@ -507,7 +507,7 @@ export async function runHierarchicalTeamsExample(options: RunHierarchicalTeamsO
   const executors =
     generateText || decide
       ? { ...(generateText ? { generateText } : {}), ...(decide ? { decide } : {}) }
-      : createAiSdkExecutors({ models });
+      : createAiSdkExecutors(hierarchicalTeamsMachine);
 
   const result = await runToQuiescence(
     createAgentRuntime(hierarchicalTeamsMachine, {

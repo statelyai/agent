@@ -461,7 +461,7 @@ export async function runSelfDiscoverExample(
     createAgentRuntime(selfDiscoverMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(selfDiscoverMachine) }),
       ...(judge ? { actors: { selectModules: createSelectModules(judge) } } : {}),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
@@ -487,7 +487,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const { generateText } = createAiSdkExecutors({ models });
+    const { generateText } = createAiSdkExecutors(selfDiscoverMachine);
     const result = await runSelfDiscoverExample({
       generateText,
       onProgress: (state) => console.log(`  → ${state}`),
