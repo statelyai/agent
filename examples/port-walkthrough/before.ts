@@ -11,13 +11,13 @@
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/port-walkthrough/before.ts
  */
-import { generateText, tool } from "ai";
+import { generateText, tool, type Tool } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 
 export const emailSchema = z.object({ to: z.string(), subject: z.string(), body: z.string() });
 
-export const search = tool({
+export const search: Tool<{ query: string }, { results: string[] }> = tool({
   description: "Search the support knowledge base.",
   inputSchema: z.object({ query: z.string() }),
   execute: async ({ query }) => ({ results: [`top doc for ${query}`] }),

@@ -1,5 +1,5 @@
 import { expect, expectTypeOf, test } from "vitest";
-import { runAgent } from "@statelyai/agent";
+import { runAgent, type AgentTextRequest } from "@statelyai/agent";
 import { canReach } from "@statelyai/agent/testing";
 import { createMockModelExecutors } from "../mock-model.js";
 import type { runSupportAgent as runLoop } from "./before.js";
@@ -22,6 +22,21 @@ test("the port runs on a mock model with no API key", async () => {
 
   expectTypeOf(output).toEqualTypeOf<Awaited<ReturnType<typeof runLoop>>>();
   expect(output).toEqual({ sent: false, reply: "Your duplicate charge is refunded." });
+});
+
+test("later rounds receive the retained support transcript", async () => {
+  const executors = createMockModelExecutors({
+    text: { assist: ["First search result.", "Answer using both searches."] },
+    decisions: { chooseAction: [{ type: "CONTINUE" }, { type: "REPLY" }] },
+  });
+
+  await runSupportAgent(request, never, executors);
+
+  const assistCalls = executors.calls.filter((call) => call.name === "assist");
+  expect(assistCalls).toHaveLength(2);
+  expect(JSON.stringify(assistCalls[1]!.request.messages)).toContain("First search result.");
+  expect(JSON.stringify(assistCalls[1]!.request.messages)).toContain("Continue researching");
+  expect((assistCalls[1]!.request as AgentTextRequest).maxSteps).toBe(5);
 });
 
 test("the step limit settles done in failed, not a thrown error", async () => {
@@ -61,6 +76,10 @@ test("the approval pauses idle and resumes from a JSON snapshot", async () => {
   expect(resumed.status).toBe("done");
   if (resumed.status !== "done") return;
   expect(resumed.output).toEqual({ sent: true, reply: "Refund issued; emailing the customer." });
+  const assistCalls = executors.calls.filter((call) => call.name === "assist");
+  expect(JSON.stringify(assistCalls[1]!.request.messages)).toContain(
+    "approved email was sent successfully",
+  );
 });
 
 test("no path sends an email without approval", async () => {

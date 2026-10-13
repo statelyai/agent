@@ -30,6 +30,7 @@ The port's call site is this:
 const result = await runAgent(supportLoopMachine, {
   input: { request },
   executors,
+});
 ```
 
 The `generateText` call still exists. It moves into the executors, and the loop around it becomes the machine. The result carries `result.output`, the live `result.snapshot`, native `result.persist()`, and aggregated `result.usage`.

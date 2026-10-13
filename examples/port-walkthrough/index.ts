@@ -21,8 +21,11 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import {
   interactionMetaSchema,
+  messagesSchema,
   runAgent,
   setupAgent,
+  userMessage,
+  type AgentMessage,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -33,6 +36,11 @@ export const MAX_STEPS = 8;
 
 // Model IDs here are illustrative; substitute your provider's current models.
 const models = { quick: openai("gpt-5.4-mini") };
+
+const messagesField = z.custom<AgentMessage[]>(
+  (value) => !("issues" in messagesSchema["~standard"].validate(value)),
+  { message: "Expected an array of agent messages" },
+);
 
 // The loop's sendEmail implementation, unchanged, wrapped as an actor.
 const sendEmailActor = createAsyncLogic({
@@ -48,6 +56,7 @@ const agentSetup = setupAgent({
     reply: z.string(),
     draft: emailSchema.nullable(),
     sent: z.boolean(),
+    messages: messagesField,
     // Set only by APPROVE, cleared once the email is sent.
     approved: z.boolean(),
     steps: z.number(),
@@ -71,19 +80,13 @@ const agentSetup = setupAgent({
     assist: {
       model: "quick",
       schemas: {
-        input: z.object({ request: z.string(), reply: z.string(), sent: z.boolean() }),
+        input: z.object({ messages: messagesField }),
         output: z.string(),
       },
       system: "You are a support agent. Search the docs before you answer.",
-      prompt: ({ input }) =>
-        [
-          input.request,
-          input.reply && `Your draft so far: ${input.reply}`,
-          input.sent && "The email to the customer was sent.",
-        ]
-          .filter(Boolean)
-          .join("\n"),
+      messages: ({ input }) => input.messages,
       tools: { search }, // the loop's tool, unchanged
+      maxSteps: 5,
     },
   },
 });
@@ -95,6 +98,7 @@ export const supportLoopMachine = agentSetup.createMachine({
     reply: "",
     draft: null,
     sent: false,
+    messages: [userMessage(input.request)],
     approved: false,
     steps: 0,
   }),
@@ -110,13 +114,15 @@ export const supportLoopMachine = agentSetup.createMachine({
       invoke: {
         src: "assist",
         input: ({ context }) => ({
-          request: context.request,
-          reply: context.reply,
-          sent: context.sent,
+          messages: context.messages,
         }),
         onDone: ({ context, output }) => ({
           target: "deciding",
-          context: { reply: output.result, steps: context.steps + 1 },
+          context: {
+            reply: output.result,
+            messages: [...context.messages, ...output.messages],
+            steps: context.steps + 1,
+          },
         }),
       },
     },
@@ -134,7 +140,15 @@ export const supportLoopMachine = agentSetup.createMachine({
       },
       on: {
         REPLY: { target: "replied" },
-        CONTINUE: { target: "checkingSteps" },
+        CONTINUE: ({ context }) => ({
+          target: "checkingSteps",
+          context: {
+            messages: [
+              ...context.messages,
+              userMessage("Continue researching this support request."),
+            ],
+          },
+        }),
         SEND_EMAIL: ({ event }) => ({
           target: "awaitingApproval",
           context: { draft: { to: event.to, subject: event.subject, body: event.body } },
@@ -161,9 +175,17 @@ export const supportLoopMachine = agentSetup.createMachine({
       invoke: {
         src: "sendEmail",
         input: ({ context }) => context.draft!,
-        onDone: () => ({
+        onDone: ({ context }) => ({
           target: "checkingSteps",
-          context: { sent: true, approved: false, draft: null },
+          context: {
+            sent: true,
+            approved: false,
+            draft: null,
+            messages: [
+              ...context.messages,
+              userMessage("The approved email was sent successfully."),
+            ],
+          },
         }),
       },
     },
