@@ -95,6 +95,7 @@ describe("example human waits", () => {
       "review-tool-calls#toolCallingMachine",
       "sql-agent#sqlAgentMachine",
       "swarm-handoff#swarmHandoffMachine",
+      "time-travel#timeTravelMachine",
       "todo-nl#todoMachine",
       "triage#triageMachine",
       "twenty-questions#twentyQuestionsMachine",

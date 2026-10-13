@@ -146,13 +146,64 @@ const branch = forkEventLog(entries, 8);
 
 `store.fork({ threadId, newThreadId, upToIndex })` does the same at the storage layer. To diverge, append different entries to the new thread.
 
+A fork shares the parent's execution id, and so its idempotency keys. `info.callKey` is `${executionId}:${siteId}#${n}`, so the first call at a site after the fork point carries the same key in both threads. A host that caches provider results by `callKey` must not serve that cache across a fork. To branch under a new execution id, use [an edited snapshot](#branch-with-edited-state).
+
+## Branch with edited state
+
+Three calls rewind a log, edit the state, and continue on a new thread:
+
+1. `replay(machine, entries.slice(0, n))` folds the prefix. Nothing executes.
+2. Edit `persistedSnapshot`: `context`, or any other part.
+3. Resume the edited snapshot on a new, empty thread.
+
+```ts
+import { runAgent } from "@statelyai/agent";
+import { replay } from "@statelyai/agent/log";
+
+const { persistedSnapshot } = replay(machine, entries.slice(0, 4));
+const rewound = persistedSnapshot as typeof persistedSnapshot & { context: object };
+const edited = { ...rewound, context: { ...rewound.context, tone: "playful" } };
+
+const branch = await runAgent(machine, {
+  store,
+  threadId: "session-1-playful",
+  snapshot: edited,
+  event: { type: "DRAFT" },
+  executors,
+});
+```
+
+- With no `events` and an empty thread, a `snapshot` resume writes a fresh init entry carrying that snapshot and mints a new execution id. The branch is a new lineage with its own `callKey`s.
+- The parent thread is not touched.
+- The edited snapshot is not checked against the parent log. Its init entry is the start of the new log, and nothing links it to the parent.
+- Edit at an index where the replayed state is at rest, with no request in flight. A request in flight at that index is restored with the input it started with, so an edit to `context` does not reach it. See [Snapshot as cache](persistence.md#snapshot-as-cache).
+- `runToQuiescence(createAgentRuntime(machine, { store, threadId, executors }), { snapshot: edited, event })` is the same branch without `runAgent`.
+
+[examples/time-travel](../examples/time-travel) runs a thread to done, branches it at a rest with a new `tone`, and checks that the parent log is unchanged.
+
 ## Usage totals
 
 `getUsageFromEvents(entries)` folds the `@agent.usage` entries into one cumulative total. The log is the source of truth, so the totals are a projection of it rather than a host-side accumulator. See [Usage and budgets](usage-and-budgets.md).
 
 ## Stores
 
-`AgentEventLogStore` is the one interface a host implements. It is append-only, with optimistic concurrency on log length.
+`AgentEventLogStore` is the one interface a host implements: four methods, append-only, with optimistic concurrency on log length.
+
+| Method                                         | Contract                                                                                                                                                                                                                                                                                       |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `append({ threadId, expectedIndex, entries })` | Atomic: all entries land or none do. Rejects with `AgentEventLogConflictError` (`threadId`, `expectedIndex`, `actualIndex`) when the thread's length is not `expectedIndex`. Indices must be contiguous from `expectedIndex` and ids unique within the thread; a violation is a plain `Error`. |
+| `read(threadId, { from? })`                    | Entries in index order, from `from` (default 0). An unknown thread reads `[]`.                                                                                                                                                                                                                 |
+| `length(threadId)`                             | The thread's length: the next `expectedIndex`. An unknown thread is 0.                                                                                                                                                                                                                         |
+| `fork({ threadId, newThreadId, upToIndex? })`  | Copies the prefix `[0, upToIndex)` onto an empty `newThreadId`. `upToIndex` is an integer in `[1, length]` and defaults to the full length.                                                                                                                                                    |
+
+The SQL shape:
+
+- One append-only table with a `(thread_id, index)` primary key. Store each entry as JSON text.
+- `append` is one transaction: count the thread's rows, reject unless the count equals `expectedIndex`, then insert. Two hosts resuming one thread resolve to exactly one winner.
+- `fork` is one `INSERT ... SELECT` of the prefix.
+- No update and no delete.
+
+Then run [`assertEventLogStoreConformance`](#store-conformance) against the store. A store that passes is a drop-in for `createInMemoryEventLogStore()`. Recipes: [SQLite](#sqlite) and [Postgres](#postgres).
 
 ```ts no-check
 const store = createInMemoryEventLogStore();
@@ -167,20 +218,127 @@ const recent = await store.read("session-1", { from: 3 });
 const next = await store.length("session-1"); // the next expectedIndex
 ```
 
-- `append` is atomic. A stale writer fails with `AgentEventLogConflictError`, carrying `threadId`, `expectedIndex`, and `actualIndex`, so two hosts resuming one thread resolve to exactly one winner. Entry indices must be contiguous from `expectedIndex`, and ids unique within the thread.
-- `createAgentRuntime(machine, { store, threadId })` drives all three: `read` to resume, `append` per entry, `read` again to check an explicit `events` log against the thread.
-- `read` and `length` are the only reads. Everything else about a thread is derived from its entries.
-- `fork` copies a prefix onto a fresh thread.
+`createAgentRuntime(machine, { store, threadId })` drives three of the methods: `read` to resume, `append` per entry, and `read` again to check an explicit `events` log against the thread.
 
-`createInMemoryEventLogStore()` is the reference implementation. No SQLite or database store ships with the package: hosts own durability. An append-only table with a `(thread_id, index)` primary key maps onto any database.
+`createInMemoryEventLogStore()` is the reference implementation. No SQLite or database store ships with the package: hosts own durability.
+
+### SQLite
+
+[examples/sqlite-event-log-store](../examples/sqlite-event-log-store) implements the store over Node's built-in `node:sqlite` (`DatabaseSync`), with no dependency. `append` runs the length check and the inserts inside `BEGIN IMMEDIATE`. Its test runs the conformance suite and one `runAgent` round trip.
+
+[examples/cloudflare-agent-host](../examples/cloudflare-agent-host) is the same shape on Durable Object SQLite storage.
+
+### Postgres
+
+The same table and transaction with the `pg` client. The insert is conditional on the thread's length, and the primary key catches a writer that raced past the check.
+
+```ts no-check
+import type { Pool, PoolClient } from "pg";
+import { AgentEventLogConflictError, type AgentEventLogStore } from "@statelyai/agent";
+import { assertAgentLogEntry } from "@statelyai/agent/log";
+
+// CREATE TABLE agent_event_log (
+//   thread_id text NOT NULL,
+//   idx integer NOT NULL,
+//   entry_id text NOT NULL,
+//   entry text NOT NULL, -- text, not jsonb: reads return the entry as written
+//   PRIMARY KEY (thread_id, idx),
+//   UNIQUE (thread_id, entry_id)
+// );
+
+export function createPostgresEventLogStore(pool: Pool): AgentEventLogStore {
+  const lengthOf = async (db: Pool | PoolClient, threadId: string) =>
+    Number(
+      (await db.query("SELECT count(*) AS n FROM agent_event_log WHERE thread_id = $1", [threadId]))
+        .rows[0].n,
+    );
+
+  const transaction = async (run: (client: PoolClient) => Promise<void>) => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await run(client);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+
+  return {
+    async append({ threadId, expectedIndex, entries }) {
+      entries.forEach((entry, i) => {
+        assertAgentLogEntry(entry);
+        if (entry.index !== expectedIndex + i) throw new Error("entry.index is not contiguous");
+      });
+      try {
+        await transaction(async (client) => {
+          for (const entry of entries) {
+            const { rowCount } = await client.query(
+              `INSERT INTO agent_event_log (thread_id, idx, entry_id, entry)
+               SELECT $1, $2::int, $3, $4
+               WHERE (SELECT count(*) FROM agent_event_log WHERE thread_id = $1) = $2::int`,
+              [threadId, entry.index, entry.id, JSON.stringify(entry)],
+            );
+            if (rowCount === 0) throw new AgentEventLogConflictError(threadId, expectedIndex, -1);
+          }
+        });
+      } catch (error) {
+        const raced = (error as { constraint?: string }).constraint === "agent_event_log_pkey";
+        if (error instanceof AgentEventLogConflictError || raced) {
+          throw new AgentEventLogConflictError(
+            threadId,
+            expectedIndex,
+            await lengthOf(pool, threadId),
+          );
+        }
+        throw error;
+      }
+    },
+
+    async read(threadId, options) {
+      const { rows } = await pool.query(
+        "SELECT entry FROM agent_event_log WHERE thread_id = $1 AND idx >= $2 ORDER BY idx",
+        [threadId, options?.from ?? 0],
+      );
+      return rows.map((row) => JSON.parse(row.entry));
+    },
+
+    length: (threadId) => lengthOf(pool, threadId),
+
+    async fork({ threadId, newThreadId, upToIndex }) {
+      await transaction(async (client) => {
+        if ((await lengthOf(client, newThreadId)) > 0) throw new Error("target is not empty");
+        const length = await lengthOf(client, threadId);
+        const upTo = upToIndex ?? length;
+        if (!Number.isInteger(upTo) || upTo < 1 || upTo > length) {
+          throw new Error(`upToIndex must be an integer in [1, ${length}]`);
+        }
+        await client.query(
+          `INSERT INTO agent_event_log (thread_id, idx, entry_id, entry)
+           SELECT $1, idx, entry_id, entry FROM agent_event_log
+           WHERE thread_id = $2 AND idx < $3`,
+          [newThreadId, threadId, upTo],
+        );
+      });
+    },
+  };
+}
+```
 
 ## Store conformance
 
 ```ts no-check
-await assertEventLogStoreConformance(() => createMyStore(), { describe, it });
+import { describe, it } from "vitest";
+import { assertEventLogStoreConformance } from "@statelyai/agent/log";
+
+assertEventLogStoreConformance(() => createMyStore(), { describe, it });
 ```
 
-The suite runs a host-written store against the reference on races, isolation, ordering, and fork semantics. It drives any test runner, or a plain script.
+- The suite runs a host-written store against the reference semantics: unknown threads, append and read-back, the contiguity guard, stale-`expectedIndex` conflicts, an interleaved race with one winner, id uniqueness, `read({ from })`, thread isolation, metadata round-trip, copy isolation, and fork.
+- With a `{ describe, it }` harness, each case registers as its own test. Without one, `await` the call: the cases run in sequence and the first violation throws.
 
 ## Related
 

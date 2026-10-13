@@ -88,7 +88,7 @@ const resumed = await runToQuiescence(createAgentRuntime(machine, { executors })
 - Otherwise the log is replayed and the run resumes from the replayed state.
 - A cache that disagrees with the state the log replays to throws `AgentSnapshotDivergedError` (code `snapshot-diverged`). Drop the snapshot and resume from `events` alone.
 
-A snapshot is never authoritative within a version. Snapshot only at quiescent points: a mid-flight snapshot cannot carry in-flight request state, but the log can.
+A snapshot is never authoritative within a version. Snapshot only at quiescent points: a mid-flight snapshot restores the in-flight child with the input it started with, so the request re-executes from scratch against that input, and only the log carries its result.
 
 Resuming from a snapshot with no log also yields a self-contained log — the new segment's init entry carries that snapshot — so every result is replayable.
 
@@ -123,7 +123,7 @@ const machine = setup.createMachine({
 
 ## Framework storage
 
-Implement `AgentEventLogStore` against the host's database, or append through the framework's own mechanism: a Durable Object, workflow checkpoint, or server action store. See [Stores](event-log.md#stores) and [Hosts and executors](hosts.md).
+Implement `AgentEventLogStore` against the host's database, or append through the framework's own mechanism: a Durable Object, workflow checkpoint, or server action store. See [Stores](event-log.md#stores), the [SQLite](event-log.md#sqlite) and [Postgres](event-log.md#postgres) recipes, and [Hosts and executors](hosts.md). To rewind a thread and continue from edited state, see [Branch with edited state](event-log.md#branch-with-edited-state).
 
 The recipe per turn is one call: `runToQuiescence` reads the thread, runs, and writes back.
 
