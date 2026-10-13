@@ -379,6 +379,8 @@ drafting: {
 
 The `onDone` handler receives the actor's `output`. For a text request that is `{ result, messages }`: `result` is typed from the request's output schema, and `messages` is the executor's response messages (see [Messages](messages.md)). Any other actor's `output` is whatever its logic resolves. Both `onDone` and `onError` are transition functions.
 
+`runAgent` runs only what a state invokes. It does not read descriptions or metadata as hidden requests. A machine that keeps its prompts in state metadata or an external map still needs an explicit invoke for each model call, so execution stays visible to XState tooling, persistence, inspection, and tests.
+
 ### Inline text requests
 
 <!-- inline agent.generateText + runToQuiescence, from src/setup-agent.ts and src/index.ts -->

@@ -5,128 +5,128 @@ description: Convert a while-loop tool-calling agent into an agent machine one s
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-This page refactors a working `while`-loop agent into an agent machine without rewriting your model calls. Your SDK calls, tools, and retry logic become the [executors](hosts.md). The machine replaces only the control flow.
+This page ports a working `while`-loop agent to an agent machine without rewriting your model calls. Your SDK calls, tools, and retry logic become the [executors](hosts.md). The machine replaces only the control flow. The page ends on the tests the port makes possible.
 
-The call site stays one line. Where you had this:
+The code is in `examples/port-walkthrough`:
+
+- [`before.ts`](../examples/port-walkthrough/before.ts): the loop, runnable with `OPENAI_API_KEY=... npx tsx examples/port-walkthrough/before.ts`.
+- [`index.ts`](../examples/port-walkthrough/index.ts): the machine, and a `runSupportAgent` with the loop's signature and result type.
+- [`index.test.ts`](../examples/port-walkthrough/index.test.ts): four tests that run without an API key.
+
+The loop's model call is this:
 
 ```ts no-check
-const result = await generateText({ model, prompt, tools });
+const { toolCalls, text, response } = await generateText({
+  // Model IDs here are illustrative; substitute your provider's current models.
+  model: openai("gpt-5.4-mini"),
+  messages,
+  tools: { search, sendEmail },
+});
 ```
 
-you end with this:
+The port's call site is this:
 
-```ts
-const result = await runAgent(machine, { input, executors });
+```ts no-check
+const result = await runAgent(supportLoopMachine, {
+  input: { request },
+  executors,
+});
 ```
 
 The `generateText` call still exists. It moves into the executors, and the loop around it becomes the machine. The result carries `result.output`, the live `result.snapshot`, native `result.persist()`, and aggregated `result.usage`.
 
 For the design work behind this refactor, read [Thinking in state machines](thinking-in-state-machines.md). It covers how to find the states in a loop before you write any of them down.
 
+## What stays the same, what changes
+
+The model work moves into executors unchanged. The control flow around it changes in six places.
+
+| Area                     | In the loop                                           | With `runAgent`                                                                                                                                                                            | Why                                                                       | Read more                                                                   |
+| ------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Same: SDK call           | `generateText` with your options                      | The same call inside an executor, written by hand or through an adapter such as `createAiSdkExecutors`                                                                                     | Executors are host code; the machine never calls a provider               | [Hosts](hosts.md)                                                           |
+| Same: tools              | The SDK runs the tool-call loop                       | The request's `tools` reach the executor, and the SDK still runs the tool-call loop. With the AI SDK adapter, `maxSteps` becomes `stopWhen`                                                | A tool loop inside one state is one request                               | [Hosts](hosts.md#ai-sdk-adapter)                                            |
+| Same: messages           | Your message array                                    | A request's `messages` reach the executor without conversion                                                                                                                               | Messages stay framework-native                                            | [Messages](messages.md)                                                     |
+| Same: retries and errors | Your retry and `try`/`catch` code                     | The same code inside the executor. Core does not retry a text request                                                                                                                      | Retry policy belongs to the SDK or the executor                           | [Hosts](hosts.md#executor-owned-structured-retries)                         |
+| Same: model              | A provider model object                               | The same object, registered in `models` and named by key in the request                                                                                                                    | The machine names a model; the host resolves it                           | [Models and providers](models-and-providers.md)                             |
+| Same: token usage        | Read off each response                                | Each executor returns `usage`; `result.usage` sums it for the run, plus `modelCalls`                                                                                                       | Core reads only what the executor reports                                 | [Usage and budgets](usage-and-budgets.md#the-usage-result)                  |
+| Changes: human wait      | `await approve(...)` blocks the process               | The run settles `{ status: "idle" }`. Resume with `runAgent(machine, { snapshot, event })`, or pass `onIdle` to keep the blocking shape                                                    | A pause can outlive the process; the persisted snapshot is plain JSON     | [Human in the loop](human-in-the-loop.md)                                   |
+| Changes: call cap        | Your own step counter, or none                        | `maxModelCalls` defaults to `100`. Pass a higher value to raise it. The overrun reaches the invoke's `onError`, or settles `{ status: "error", cause: "max-model-calls" }`                 | A runaway loop stops at a fixed budget                                    | [Usage and budgets](usage-and-budgets.md#the-global-backstop-maxmodelcalls) |
+| Changes: timers          | `setTimeout` or a sleep in the loop                   | Root `after` timers run in process by default, and the run waits for them. A durable host passes `timers: { schedule, cancel }` and delivers `{ type: "xstate.timer", id }` when one fires | A timer can outlive the process                                           | [The runtime loop](steps.md#host-owned-timers)                              |
+| Changes: unknown events  | Your code decides: a `switch` falls through or throws | An event the current state does not handle is ignored. The run settles normally and returns the event as `result.ignored`                                                                  | A stale or duplicate answer is not a failure                              | [Persistence](persistence.md#resume-with-an-event-off-the-wire)             |
+| Changes: input           | Passed to the first prompt unchecked                  | Validated against the machine's input schema before the run starts. Invalid input throws `AgentError` with code `invalid-machine-input`                                                    | Bad input fails before any model call                                     | [Machines](machines.md#schema-declarations)                                 |
+| Changes: executor errors | A thrown SDK error rejects the loop's promise         | The error goes to the invoke's `onError`. With no `onError`, the run settles `{ status: "error", cause: "machine" }` with the error and the snapshot                                       | The machine routes failures as transitions; the result keeps the snapshot | [Machines](machines.md#request-and-actor-invokes)                           |
+
 ## Starting point: a hand-rolled loop
 
-The starting point is a support agent written as a `while` loop against an SDK. It has the shape most real loops have: the model calls one tool freely, and it proposes one action that a human must approve first.
+The starting point is a support agent written as a `while` loop against the AI SDK. The model calls `search` freely, and it can call `sendEmail`, which a human must approve. The full loop is in [`before.ts`](../examples/port-walkthrough/before.ts). Its control flow is these lines:
 
-```ts
-import { generateText, tool } from "ai";
-import { openai } from "@ai-sdk/openai";
-import { z } from "zod";
+```ts no-check
+if (steps++ >= 8) return { sent, stopped: "step-limit" };
+// ...
+if (!toolCalls?.length) return { sent, reply: text };
 
-const emailSchema = z.object({ to: z.string(), subject: z.string(), body: z.string() });
-
-const search = tool({
-  description: "Search the support knowledge base.",
-  inputSchema: z.object({ query: z.string() }),
-  execute: async ({ query }) => ({ results: [`top doc for ${query}`] }),
-});
-
-const sendEmail = tool({
-  description: "Send an email to the customer.",
-  inputSchema: emailSchema,
-  execute: async ({ to }) => ({ sent: true, id: `msg_${to}` }),
-});
-
-async function runSupportAgent(request: string, approve: (draft: unknown) => Promise<boolean>) {
-  const messages: any[] = [{ role: "user", content: request }];
-  let sent = false;
-  let steps = 0;
-
-  while (true) {
-    if (steps++ >= 8) return { sent, stopped: "step-limit" };
-
-    const { toolCalls, text } = await generateText({
-      // Model IDs here are illustrative; substitute your provider's current models.
-      model: openai("gpt-5.4-mini"),
-      messages,
-      tools: { search, sendEmail },
-    });
-    if (!toolCalls?.length) return { sent, reply: text };
-
-    for (const call of toolCalls) {
-      if (call.toolName === "sendEmail") {
-        if (!(await approve(call.input))) return { sent, pending: true }; // loop state is lost here
-        sent = true;
-      }
-      // push the tool result onto messages, continue the loop
-    }
+for (const call of toolCalls) {
+  if (call.toolName === "sendEmail") {
+    if (!(await approve(call.input))) return { sent, pending: true }; // loop state is lost here
+    sent = true;
   }
 }
 ```
 
-This loop has three problems:
+The loop returns one of three shapes. `before.ts` names them so the port can be checked against them:
 
-- Nothing stops `sendEmail` from running before the model has searched.
-- The approval rule is an `if` statement inside the tool switch, so a prompt can steer around the branch that reaches it.
+```ts
+export type SupportResult =
+  | { sent: boolean; stopped: "step-limit" }
+  | { sent: boolean; reply: string }
+  | { sent: boolean; pending: true };
+```
+
+This loop has four problems:
+
+- `generateText` runs a tool's `execute` in the same call that returns `toolCalls`. By the time the loop asks `approve`, `sendEmail` has already run.
+- The approval rule is an `if` statement inside the tool loop, so no test can list the paths around it.
 - The human pause returns `{ pending: true }` and discards the loop's state, so the run cannot resume.
+- The step cap is a local counter. A test reaches it only by spending eight model calls.
 
 ## Step 1: implicit phases as explicit states
 
-The loop has phases: answering with tools, deciding what to do next, waiting on a human, then sending. Name each phase as a state. Declare the schemas and the setup with `setupAgent`.
+Each line of the loop becomes a state in [`index.ts`](../examples/port-walkthrough/index.ts):
 
-A tool the machine must gate is not a tool any more. It becomes an actor the machine invokes, written with XState's `createAsyncLogic`.
+| In the loop                                    | In the machine                                     |
+| ---------------------------------------------- | -------------------------------------------------- |
+| `if (steps++ >= 8)`                            | The `checkingSteps` choice state                   |
+| `generateText` with `search`                   | The `assisting` state, which invokes `assist`      |
+| `if (!toolCalls?.length)`                      | The `deciding` state, which invokes `agent.decide` |
+| `await approve(call.input)`                    | The idle `awaitingApproval` state                  |
+| `sendEmail`'s `execute`                        | The `sending` state, which invokes `sendEmail`     |
+| `return { sent, reply }`, `pending`, `stopped` | The final states `replied`, `declined`, `failed`   |
 
-```ts
-import { createAsyncLogic } from "xstate";
-import { z } from "zod";
-import { setupAgent } from "@statelyai/agent";
-import {} from "@statelyai/agent/ai-sdk";
-import { openai } from "@ai-sdk/openai";
+The loop's first line becomes the machine's initial state. A choice state compares the counter against an exported constant:
 
-const models = { quick: openai("gpt-5.4-mini") };
-
-const emailSchema = z.object({ to: z.string(), subject: z.string(), body: z.string() });
-
-// The loop's sendEmail implementation, unchanged, wrapped as an actor.
-const sendEmailActor = createAsyncLogic({
-  schemas: { input: emailSchema, output: z.object({ id: z.string() }) },
-  run: async ({ input }): Promise<{ id: string }> => ({ id: `msg_${input.to}` }),
-});
-
-const agentSetup = setupAgent({
-  models,
-  actors: { sendEmail: sendEmailActor },
-  context: z.object({
-    request: z.string(),
-    reply: z.string(),
-    draft: emailSchema.nullable(),
-    sent: z.boolean(),
-  }),
-  input: z.object({ request: z.string() }),
-  output: z.object({ sent: z.boolean(), reply: z.string() }),
-  events: {
-    SEND_EMAIL: emailSchema,
-    DONE: z.object({ reply: z.string() }),
-    APPROVE: {}, // {} is shorthand for a payload-less event
-    REJECT: {},
-  },
-});
+```ts no-check
+// The loop's first line: `if (steps++ >= 8) return { sent, stopped: "step-limit" }`.
+checkingSteps: {
+  type: "choice",
+  choice: ({ context }) =>
+    context.steps >= MAX_STEPS ? { target: "failed" } : { target: "assisting" },
+},
 ```
 
-`createAsyncLogic` takes `{ schemas, run }`. Annotate `run`'s return type when it resolves an array or another literal; the schema type parameters are `const`, so an unannotated array literal infers as a readonly tuple.
+`setupAgent` declares the context, events, request, and actor. Its `output` schema lists the loop's three returns, one per final state:
 
-The phases become the states `assisting`, `deciding`, `awaitingApproval`, `sending`, and `finished`.
+```ts no-check
+// The loop's three returns, one per final state.
+output: z.union([
+  z.object({ sent: z.boolean(), stopped: z.literal("step-limit") }),
+  z.object({ sent: z.boolean(), reply: z.string() }),
+  z.object({ sent: z.boolean(), pending: z.literal(true) }),
+]),
+```
 
-<!-- viz: support machine: assisting (text request with the search tool) -> deciding (agent.decide) -> awaitingApproval (SEND_EMAIL) -> sending (APPROVE) -> finished / finished (DONE or REJECT) -->
+A tool the machine must gate is not a tool any more. `sendEmail` becomes an actor the machine invokes, written with XState's `createAsyncLogic`. `createAsyncLogic` takes `{ schemas, run }`. Annotate `run`'s return type when it resolves an array or another literal; the schema type parameters are `const`, so an unannotated array literal infers as a readonly tuple.
+
+<!-- viz: support loop machine: checkingSteps -> assisting (text request with the search tool) -> deciding (agent.decide) -> awaitingApproval (SEND_EMAIL) -> sending (APPROVE) -> checkingSteps; deciding -> replied (REPLY); deciding -> checkingSteps (CONTINUE); awaitingApproval -> declined (REJECT); checkingSteps -> failed (MAX_STEPS) -->
 
 ## Step 2: free tools stay tools, the gated action becomes a decision
 
@@ -137,74 +137,19 @@ A converted loop splits its tools in two, and the split is the whole refactor:
 | A tool with no side effect you gate   | Stays a tool on a [text request](text-requests.md). The host runs the tool loop inside one state.    |
 | A tool a human or a rule must approve | Becomes an event the model proposes through `agent.decide`, plus a state that invokes the real work. |
 
-`search` is the first kind. It stays in `tools` on the `assist` request, and `maxSteps` carries the loop's step cap. The machine stays in `assisting` for every search turn and sees one `onDone`.
+`search` is the first kind. `index.ts` imports it from `before.ts` and passes it to the `assist` request as `tools: { search }`. The machine stays in `assisting` for every search turn and sees one `onDone`.
 
-`sendEmail` is the second kind. The model no longer calls it; it proposes a `SEND_EMAIL` event carrying the draft, and the machine decides what happens next. `sendEmail` cannot run before approval, because the only state that invokes it is entered from `APPROVE`.
+`sendEmail` is the second kind. The model no longer calls it. In `deciding`, the model chooses one of three events: `REPLY` ends the run, `CONTINUE` starts another round, and `SEND_EMAIL` proposes a draft:
 
-```ts
-const agentSetup = setupAgent({
-  models,
-  actors: { sendEmail: sendEmailActor },
-  context: z.object({
-    request: z.string(),
-    reply: z.string(),
-    draft: emailSchema.nullable(),
-    sent: z.boolean(),
+```ts no-check
+on: {
+  REPLY: { target: "replied" },
+  CONTINUE: { target: "checkingSteps" },
+  SEND_EMAIL: ({ event }) => ({
+    target: "awaitingApproval",
+    context: { draft: { to: event.to, subject: event.subject, body: event.body } },
   }),
-  input: z.object({ request: z.string() }),
-  output: z.object({ sent: z.boolean(), reply: z.string() }),
-  events: {
-    SEND_EMAIL: emailSchema,
-    DONE: z.object({ reply: z.string() }),
-    APPROVE: {},
-    REJECT: {},
-  },
-  requests: {
-    assist: {
-      model: "quick",
-      schemas: { input: z.object({ request: z.string() }), output: z.string() },
-      system: "You are a support agent. Search the docs before you answer.",
-      prompt: ({ input }) => input.request,
-      tools: { search }, // the loop's tool, unchanged
-      maxSteps: 8, // the loop's step counter, unchanged
-    },
-  },
-});
-
-const machine = agentSetup.createMachine({
-  context: ({ input }) => ({ request: input.request, reply: "", draft: null, sent: false }),
-  initial: "assisting",
-  states: {
-    assisting: {
-      invoke: {
-        src: "assist",
-        input: ({ context }) => ({ request: context.request }),
-        onDone: ({ output }) => ({ target: "deciding", context: { reply: output.result } }),
-      },
-    },
-    deciding: {
-      invoke: {
-        // Name the invoke. Simulation can use this id when no src queue exists.
-        id: "chooseAction",
-        src: "agent.decide",
-        input: ({ context }) => ({
-          model: "quick",
-          system: "Reply directly, or send the customer an email.",
-          prompt: `Draft so far: ${context.reply}`,
-          allowedEvents: ["SEND_EMAIL", "DONE"], // an unknown name is a compile error
-        }),
-      },
-      on: {
-        SEND_EMAIL: ({ event }) => ({
-          target: "awaitingApproval",
-          context: { draft: { to: event.to, subject: event.subject, body: event.body } },
-        }),
-        DONE: ({ event }) => ({ target: "finished", context: { reply: event.reply } }),
-      },
-    },
-    // ...
-  },
-});
+},
 ```
 
 A tool-carrying request and a decision are two different states. The request is one model call that may run many tool turns inside the host. The decision is one model call that returns exactly one event the current state accepts.
@@ -213,176 +158,125 @@ Rules that were `if` statements can move into the transition instead of a separa
 
 ## Step 3: the pause as an idle state
 
-The loop's `return { pending: true }` becomes a waiting state with no invoke. `runAgent` settles as `idle` in that state instead of discarding the run. The snapshot is plain JSON, so you can persist it anywhere.
+The loop's `return { sent, pending: true }` becomes `awaitingApproval`, a state with no invoke. `runAgent` settles as `idle` in that state instead of discarding the run. The snapshot is plain JSON, so you can persist it anywhere.
+
+`APPROVE` is the only way into `sending`, and it is the only writer of `approved`:
 
 ```ts no-check
-    // ...
-    awaitingApproval: {
-      // No invoke: the run settles { status: 'idle', snapshot } here.
-      meta: {
-        interaction: {
-          // Paths are relative to context: `{draft.to}`, not `{context.draft.to}`.
-          label: 'Send this email to {draft.to}?',
-          events: {
-            APPROVE: { label: 'Send', style: 'primary' },
-            REJECT: { label: 'Discard', style: 'danger' },
-          },
-        },
-      },
-      on: {
-        APPROVE: { target: 'sending' },
-        REJECT: { target: 'finished' },
-      },
-    },
-    sending: {
-      invoke: {
-        src: 'sendEmail',
-        input: ({ context }) => context.draft!,
-        onDone: () => ({ target: 'finished', context: { sent: true } }),
-      },
-    },
-    finished: {
-      type: 'final',
-      output: ({ context }) => ({ sent: context.sent, reply: context.reply }),
-    },
-    // ...
+on: {
+  APPROVE: () => ({ target: "sending", context: { approved: true } }),
+  REJECT: { target: "declined" },
+},
 ```
 
-The `meta.interaction` block is what a host renders for the pause. `setupAgent` types it against the machine's events by default, so a choice naming an undeclared event does not compile. See [Human in the loop](human-in-the-loop.md).
+`REJECT` lands in `declined`, whose output is the loop's `{ sent, pending: true }`, so callers do not change. After `sending`, the machine returns to `checkingSteps`, as the loop continued after a send.
+
+The state's `meta.interaction` block is what a host renders for the pause. `setupAgent` types it against the machine's events, so a choice naming an undeclared event does not compile. See [Human in the loop](human-in-the-loop.md).
 
 ## Step 4: the run with `runAgent`
 
-The loop ran N turns. Its replacement is one `runAgent` call with `onIdle`. Each time the machine pauses on a human, `runAgent` calls `onIdle` with the idle snapshot, then resumes from the persisted snapshot with the event `onIdle` returns. Your existing approval callback becomes `onIdle`.
+The loop ran N turns. Its replacement is one `runAgent` call with `onIdle`. Each time the machine pauses on a human, `runAgent` calls `onIdle` with the idle snapshot, then resumes from the persisted snapshot with the event `onIdle` returns. The loop's `approve` callback becomes `onIdle`:
 
-```ts
-import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-
-const executors = createAiSdkExecutors({ models });
-
-const result = await runAgent(machine, {
-  input: { request: "Refund my duplicate charge" },
+```ts no-check
+const result = await runAgent(supportLoopMachine, {
+  input: { request },
   executors,
   onIdle: async (snapshot) =>
-    (await approve(snapshot.context.draft)) ? { type: "APPROVE" } : { type: "REJECT" },
+    (await approve(snapshot.context.draft))
+      ? { type: "APPROVE" as const }
+      : { type: "REJECT" as const },
 });
-
-if (result.status === "done") console.log(result.output); // { sent: true, reply: '...' }
 ```
 
-With `onIdle`, the call returns only `done` or `error`.
+With `onIdle`, the call returns only `done` or `error`. `runSupportAgent` in [`index.ts`](../examples/port-walkthrough/index.ts) wraps this call with the loop's signature: it returns `result.output` and rethrows a run that settles `error`. The invokes have no `onError`, so an SDK error still rejects the call, as it did in the loop.
 
-For a single leg that hands the pause back to a caller, leave out `onIdle` and resume later with a second `runAgent` call. This is the form an HTTP handler wants, because the pause outlives the request.
+For a single leg that hands the pause back to a caller, leave out `onIdle` and resume later with a second `runAgent` call that passes `{ snapshot, event }`. This is the form an HTTP handler wants, because the pause outlives the request. The third test below runs it. [Use in any stack](any-stack.md) runs one machine in local, Express, and Cloudflare hosts. See [Choosing a run mode](choosing-a-run-mode.md) for the full set.
 
-```ts
-const result = await runAgent(machine, {
-  input: { request: "Refund my duplicate charge" },
-  executors,
-});
+The executors hold your existing model code:
 
-if (result.status === "idle") {
-  const wire = JSON.stringify(result.persist()); // stored by your DB or queue
-  const restored = JSON.parse(wire); // read in a fresh process, with no live objects
-
-  const resumed = await runAgent(machine, {
-    executors,
-    snapshot: restored,
-    event: { type: "APPROVE" },
-  });
-  if (resumed.status === "done") console.log(resumed.output);
-}
-```
-
-<!-- viz: resume flow: runAgent settles idle -> persisted snapshot -> JSON in a store -> new process calls runAgent with snapshot plus event -> done -->
-
-See [Choosing a run mode](choosing-a-run-mode.md) for the full set. The executors hold your existing model code:
-
-- The `createAiSdkExecutors` adapter wraps the AI SDK.
+- The `createAiSdkExecutors` adapter wraps the AI SDK. `runSupportAgent` uses it by default.
 - Another SDK, or a raw `fetch`, is three plain functions that return `{ result }`. See [Hosts](hosts.md).
 - The tools, retry logic, and provider calls you already wrote move across unchanged.
 
-Only the `while` loop is removed. See [Hosts](hosts.md).
-
 A host that drives the transition loop itself uses `createAgentRuntime`. See [Write your own host loop](hosts.md#write-your-own-host-loop).
 
-## Existing server integration
+## Step 5: the tests
 
-The machine is host-agnostic, so it runs wherever your loop ran. For a request handler that runs straight through and owns its own actor, bind the executors with `provideExecutors` and run a plain XState actor instead of `runAgent`.
+[`index.test.ts`](../examples/port-walkthrough/index.test.ts) has four tests. None of them needs an API key or network access. Each one starts with a comment naming what the `while` loop could not test.
+
+The model is `examples/mock-model.ts`: the AI SDK's `MockLanguageModelV3` behind the real `createAiSdkExecutors` adapter. Answers are keyed by request name, `assist` for the text request and `chooseAction` for the decision.
+
+### The port runs with no key
+
+The loop builds its model inside the function, so it runs only against a live provider. The port takes executors, so the test passes the mock:
 
 ```ts no-check
-import { createActor } from "xstate";
-import { provideExecutors } from "@statelyai/agent";
+const executors = createMockModelExecutors({
+  text: { assist: "Your duplicate charge is refunded." },
+  decisions: { chooseAction: { type: "REPLY" } },
+});
 
-app.post("/support", async (req, res) => {
-  const actor = createActor(provideExecutors(machine, executors), {
-    input: { request: req.body.request },
-  });
-  actor.subscribe((s) => {
-    if (s.status === "done") res.json(s.output);
-  });
-  actor.start();
+const output = await runSupportAgent(request, never, executors);
+
+expectTypeOf(output).toEqualTypeOf<Awaited<ReturnType<typeof runLoop>>>();
+expect(output).toEqual({ sent: false, reply: "Your duplicate charge is refunded." });
+```
+
+`runLoop` is `before.ts`'s `runSupportAgent`, imported as a type only. The `expectTypeOf` line fails `pnpm run typecheck:examples` if the port's result type drifts from the loop's.
+
+### The step limit settles `done`
+
+The decision answers `CONTINUE` every time, so the run spends its whole budget:
+
+```ts no-check
+const result = await runAgent(supportLoopMachine, { input: { request }, executors });
+
+expect(result.status).toBe("done");
+if (result.status !== "done") return;
+expect(result.snapshot.value).toBe("failed");
+expect(result.output).toEqual({ sent: false, stopped: "step-limit" });
+expect(executors.calls.filter((call) => call.name === "assist")).toHaveLength(MAX_STEPS);
+```
+
+The run ends in the `failed` final state with the loop's `stopped: "step-limit"` output. It does not throw. The test also counts the `assist` calls, which the loop's local counter never exposed.
+
+### The approval pauses and resumes
+
+The decision proposes `SEND_EMAIL`, and the run settles `idle`. The test round-trips the snapshot through JSON and resumes with `APPROVE`:
+
+```ts no-check
+const paused = await runAgent(supportLoopMachine, { input: { request }, executors });
+expect(paused.status).toBe("idle");
+expect(paused.snapshot.value).toBe("awaitingApproval");
+
+const restored = JSON.parse(JSON.stringify(paused.persist()));
+const resumed = await runAgent(supportLoopMachine, {
+  executors,
+  snapshot: restored,
+  event: { type: "APPROVE" },
 });
 ```
 
-To handle the human pause over HTTP, persist the snapshot from `runAgent` and resume it on a later request. [Use in any stack](any-stack.md) runs one machine in local, Express, and Cloudflare hosts without machine changes.
+The resumed run sends the email, takes another round, and ends with `{ sent: true, reply }`. The loop returned `{ pending: true }` at this point and had nothing to resume.
 
-## Behavior preservation
+### No path sends without approval
 
-Before you ship, pin the new machine's behavior with a deterministic playthrough that uses no model. `simulateAgent` scripts the decisions and traverses the same machine transitions as `runAgent`, with no API key and no network access.
-
-```ts
-import { simulateAgent } from "@statelyai/agent/testing";
-// The agent must stop for approval instead of sending.
-const result = await simulateAgent(machine, {
-  input: { request: "Refund my duplicate charge" },
-  script: {
-    text: { assist: ["Looks like a duplicate charge."] },
-    decisions: {
-      chooseAction: [{ type: "SEND_EMAIL", to: "a@b.co", subject: "Refund", body: "Done." }],
-    },
-  },
-});
-expect(result.status).toBe("idle");
-```
-
-Script one entry per decision attempt, including attempts a transition rejects. A rejected decision consumes its entry, and the retry consumes the next one. If a queue runs dry while a request is pending, `simulateAgent` throws an error naming the request's kind, src, and id.
-
-<!-- simulation queue routing from src/verify.ts -->
-
-`simulateAgent` scripts key by invoke `src`: `assist` for the registered request above and `agent.decide` for an inline decision. Decisions also accept the invoke `id` (`chooseAction`) when no src-keyed queue exists. The `invokes` channel supplies output for non-model actors. Executors and [`runSeam` scripts](evals.md#script-keys) route by request name instead.
-
-`explorePaths` enumerates every branch, and `canReach` returns `{ reachable, witness }` for one target state. See [Testing and verification](verify.md).
-
-## Make model work explicit
-
-If an existing machine does not invoke its model work, add an ordinary XState invoke. The state graph should remain the single artifact that says what runs and when; `runAgent` does not interpret descriptions or metadata as hidden requests.
+`canReach` enumerates every decision branch and every human answer with no model calls. The target is a snapshot predicate: the machine is in `sending` and `approved` is `false`.
 
 ```ts no-check
-const machine = existingMachine.provide({ actors: { writeDraft } });
+const sendsUnapproved = await canReach(
+  supportLoopMachine,
+  (snapshot) => snapshot.matches("sending") && !snapshot.context.approved,
+  everyPath,
+);
 
-// In the machine config:
-drafting: {
-  invoke: {
-    src: "writeDraft",
-    input: ({ context }) => ({ topic: context.topic }),
-    onDone: ({ output }) => ({
-      target: "reviewing",
-      context: { draft: output.result },
-    }),
-  },
-}
+expect(sendsUnapproved.reachable).toBe(false);
 ```
 
-The actor can be a normal promise actor or Agent request logic. Prompts may still come from state metadata or an external map, but the invoke remains explicit. This keeps execution visible to XState tooling, persistence, inspection, and tests.
+`everyPath` scripts the `assist` text and the `sendEmail` output, and sets `maxDepth` and `maxPaths` high enough that all 766 paths through the eight rounds are explored. The loop's approval was an `if` inside the tool loop, and no test could list the paths around it. Here the claim holds for every path. See [Testing and verification](verify.md) for `explorePaths`, `simulateAgent`, and `lintAgentMachine`.
 
 ## Related
 
-For what the machine gives you over the loop, see the [overview](index.md).
-
-For a worked version of this conversion, see [retrofit](../examples/retrofit/index.ts). It refactors a tangled loop one step at a time with the behavior pinned by tests, in the order `before.ts`, `step1.ts`, `step2.ts`, `step3.ts`, and `index.ts`.
-
-The same conversion works from shapes other than a `while` loop:
-
-- [plain-xstate](../examples/plain-xstate/index.ts): a standard XState machine driven with no agent-specific setup.
-- [todo-nl](../examples/todo-nl/index.ts): natural-language commands mapped onto machine events.
-- [Coming from LangGraph](langgraph-comparison.md): the same conversion from a `StateGraph`.
-- [Thinking in state machines](thinking-in-state-machines.md): the design tutorial behind this refactor, worked through on one triage agent.
+- [retrofit](../examples/retrofit/index.ts): a larger loop refactored one step at a time, in the order `before.ts`, `step1.ts`, `step2.ts`, `step3.ts`, and `index.ts`.
+- [Overview](index.md): what the machine gives you over the loop.
+- [Human in the loop](human-in-the-loop.md): idle states, `meta.interaction`, and resuming.

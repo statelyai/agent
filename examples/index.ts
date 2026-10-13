@@ -32,6 +32,10 @@ export {
 export { plainWriterMachine, runPlainXstateExample } from "./plain-xstate/index.js";
 export { supportMachine, runRetrofitExample } from "./retrofit/index.js";
 export {
+  supportLoopMachine,
+  runSupportAgent as runPortWalkthroughExample,
+} from "./port-walkthrough/index.js";
+export {
   jsonAgentMachine,
   runJsonAgentDemo,
   workflowConfig as jsonAgentWorkflowConfig,
