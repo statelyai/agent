@@ -240,7 +240,7 @@ function liveExecutors() {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("Set OPENAI_API_KEY to run the booking-compensation example.");
   }
-  return createAiSdkExecutors({ models });
+  return createAiSdkExecutors(bookingCompensationMachine);
 }
 
 export async function runBookingCompensationExample(

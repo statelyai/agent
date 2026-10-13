@@ -435,7 +435,7 @@ export async function runLongRunningOnboardingExample(
   > = {
     executors: options.generateText
       ? { generateText: options.generateText }
-      : createAiSdkExecutors({ models }),
+      : createAiSdkExecutors(longRunningOnboardingMachine),
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   };
 

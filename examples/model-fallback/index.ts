@@ -293,7 +293,7 @@ export async function runModelFallbackExample(
   const progress: string[] = [];
   const result = await runToQuiescence(
     createAgentRuntime(modelFallbackMachine, {
-      executors: generateText ? { generateText } : createAiSdkExecutors({ models }),
+      executors: generateText ? { generateText } : createAiSdkExecutors(modelFallbackMachine),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
         progress.push(state);

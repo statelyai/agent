@@ -209,7 +209,7 @@ export const supportLoopMachine = agentSetup.createMachine({
 export async function runSupportAgent(
   request: string,
   approve: (draft: unknown) => Promise<boolean>,
-  executors: Partial<AgentRequestExecutors> = createAiSdkExecutors({ models }),
+  executors: Partial<AgentRequestExecutors> = createAiSdkExecutors(supportLoopMachine),
 ) {
   const result = await runAgent(supportLoopMachine, {
     input: { request },

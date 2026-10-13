@@ -379,7 +379,7 @@ export const supportMachine = agentSetup.createMachine({
  * now wrapping the AI SDK adapter's `decide` (the machine's one text-model
  * call; triage is a Jev judgment). */
 function buildExecutors(): Pick<AgentRequestExecutors, "decide"> {
-  const ai = createAiSdkExecutors({ models });
+  const ai = createAiSdkExecutors(supportMachine);
   const withRetry =
     (fn: NonNullable<AgentRequestExecutors["decide"]>): typeof fn =>
     async (request, info) => {

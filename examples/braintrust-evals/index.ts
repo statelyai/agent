@@ -35,7 +35,7 @@ import { getStatePath, createAgentRuntime, runToQuiescence } from "@statelyai/ag
 import { matchesTrajectory } from "@statelyai/agent/testing";
 import type { AgentRequestExecutors } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createEvaluatePrompt, emailDrafter, models } from "../email-drafter/agent-logic.js";
+import { createEvaluatePrompt, emailDrafter } from "../email-drafter/agent-logic.js";
 
 type DrafterEvent = EventFromLogic<typeof emailDrafter>;
 type DrafterSnapshot = SnapshotFrom<typeof emailDrafter>;
@@ -359,7 +359,7 @@ export async function main() {
     );
   }
   const upload = Boolean(process.env.BRAINTRUST_API_KEY);
-  const executors = createAiSdkExecutors({ models });
+  const executors = createAiSdkExecutors(emailDrafter);
 
   console.log(
     `[braintrust-evals] braintrust: ${upload ? "uploading experiment" : "local summary (noSendLogs)"}`,

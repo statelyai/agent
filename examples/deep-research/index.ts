@@ -442,7 +442,7 @@ export async function runDeepResearchExample(options: RunDeepResearchOptions = {
     createAgentRuntime(deepResearchMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(deepResearchMachine) }),
       ...(judge ? { actors: { reflect: createReflect(judge) } } : {}),
       ...(onProgress ? { onTransition: (snapshot) => onProgress(getStatePath(snapshot)) } : {}),
     }),

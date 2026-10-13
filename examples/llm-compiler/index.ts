@@ -761,7 +761,7 @@ export async function runLlmCompilerExample(
     createAgentRuntime(llmCompilerMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(llmCompilerMachine) }),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
         progress.push(state);

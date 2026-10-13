@@ -334,7 +334,7 @@ export async function runContextCompactionExample(options?: {
   const shared = {
     executors: options?.generateText
       ? { generateText: options.generateText }
-      : createAiSdkExecutors({ models }),
+      : createAiSdkExecutors(contextCompactionMachine),
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
   };
 

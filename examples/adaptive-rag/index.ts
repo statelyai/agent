@@ -765,7 +765,7 @@ export async function runAdaptiveRagExample(
     createAgentRuntime(adaptiveRagMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(adaptiveRagMachine) }),
       ...(judge
         ? {
             actors: {
@@ -800,7 +800,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const { generateText } = createAiSdkExecutors({ models });
+    const { generateText } = createAiSdkExecutors(adaptiveRagMachine);
     const question = "How do LLM agents use long-term memory?";
     const result = await runAdaptiveRagExample({
       question,

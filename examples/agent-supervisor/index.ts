@@ -641,7 +641,7 @@ export async function runAgentSupervisorExample(options: RunAgentSupervisorOptio
   const executors =
     generateText || decide
       ? { ...(generateText ? { generateText } : {}), ...(decide ? { decide } : {}) }
-      : createAiSdkExecutors({ models });
+      : createAiSdkExecutors(agentSupervisorMachine);
 
   const progress: string[] = [];
   const result = await runToQuiescence(

@@ -272,7 +272,7 @@ export async function runSqlAgentExample(
   // Spread-merge, so a caller passing only `onTransition` keeps the live executors.
   const resolved: AgentRuntimeOptions<typeof sqlAgentMachine> &
     AgentRunInit<typeof sqlAgentMachine> = {
-    executors: createAiSdkExecutors({ models }),
+    executors: createAiSdkExecutors(sqlAgentMachine),
     ...runOptions,
   };
 

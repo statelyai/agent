@@ -356,7 +356,7 @@ export async function runTodoNlExample(options?: {
   const queued = [...(options?.commands ?? [])];
 
   const shared = {
-    executors: options?.executors ?? createAiSdkExecutors({ models }),
+    executors: options?.executors ?? createAiSdkExecutors(todoMachine),
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
   };
 

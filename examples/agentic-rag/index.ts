@@ -619,7 +619,7 @@ export async function runAgenticRagExample(
   } = options;
 
   const executors =
-    generateText || decide ? { generateText, decide } : createAiSdkExecutors({ models });
+    generateText || decide ? { generateText, decide } : createAiSdkExecutors(agenticRagMachine);
   const progress: string[] = [];
   const result = await runToQuiescence(
     createAgentRuntime(agenticRagMachine, {
@@ -649,7 +649,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const { generateText, decide } = createAiSdkExecutors({ models });
+    const { generateText, decide } = createAiSdkExecutors(agenticRagMachine);
     const question = "What does Lilian Weng say about the types of agent memory?";
     const result = await runAgenticRagExample({
       question,

@@ -473,7 +473,7 @@ export function reviewLabel(snapshot: AnswerReuseSnapshot): string {
 const SAMPLE_REQUEST = "How do I reset my password?";
 
 export async function main() {
-  const executors = createAiSdkExecutors({ models });
+  const executors = createAiSdkExecutors(answerReuseMachine);
 
   const pasted = await promptLine("Support request (blank = sample) > ");
   const request = pasted === "" ? SAMPLE_REQUEST : pasted;

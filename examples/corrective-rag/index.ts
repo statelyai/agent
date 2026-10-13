@@ -507,7 +507,7 @@ export async function runCorrectiveRagExample(
     createAgentRuntime(correctiveRagMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(correctiveRagMachine) }),
       ...(judge ? { actors: { gradeDocuments: createGradeDocuments(judge) } } : {}),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
@@ -533,7 +533,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const { generateText } = createAiSdkExecutors({ models });
+    const { generateText } = createAiSdkExecutors(correctiveRagMachine);
 
     // Off-topic for the sample corpus — retrieval is weak, so CRAG corrects:
     // grade → rewrite → sample web index → generate. (The sample web index has a

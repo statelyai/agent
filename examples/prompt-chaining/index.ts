@@ -235,7 +235,7 @@ export async function runPromptChainingExample(options: RunPromptChainingOptions
     createAgentRuntime(promptChainingMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(promptChainingMachine) }),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
         progress.push(state);

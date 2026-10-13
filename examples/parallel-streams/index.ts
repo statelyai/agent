@@ -188,7 +188,7 @@ export async function runParallelStreamsExample(
 
   const result = await runToQuiescence(
     createAgentRuntime(parallelStreamsMachine, {
-      executors: createAiSdkExecutors({ models }),
+      executors: createAiSdkExecutors(parallelStreamsMachine),
       ...options,
       onChunk: (chunk, { request }) => {
         buffers[request.id] = (buffers[request.id] ?? "") + chunk;

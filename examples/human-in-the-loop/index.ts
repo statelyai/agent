@@ -199,7 +199,7 @@ export async function runHumanInTheLoopExample(
   const { topic = "the new deploy pipeline", generateText } = options;
   const executors = generateText
     ? { executors: { generateText } }
-    : { executors: createAiSdkExecutors({ models }) };
+    : { executors: createAiSdkExecutors(humanInTheLoopMachine) };
 
   // Phase 1: draft, then settle idle at `reviewing`.
   const first = await runToQuiescence(
@@ -286,7 +286,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const executors = createAiSdkExecutors({ models });
+    const executors = createAiSdkExecutors(humanInTheLoopMachine);
     let result = await runToQuiescence(
       createAgentRuntime(humanInTheLoopMachine, {
         executors,

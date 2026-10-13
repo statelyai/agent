@@ -230,7 +230,7 @@ export async function runSwarmHandoffExample(
   // Spread-merge, so a caller passing only `onTransition` keeps the live executors.
   const resolved: AgentRuntimeOptions<typeof swarmHandoffMachine> &
     AgentRunInit<typeof swarmHandoffMachine> = {
-    executors: createAiSdkExecutors({ models }),
+    executors: createAiSdkExecutors(swarmHandoffMachine),
     ...options,
   };
 
@@ -283,7 +283,7 @@ export async function runSwarmHandoffExample(
  * snapshot with a SAY event; an empty line sends END.
  */
 async function runInteractive() {
-  const executors = createAiSdkExecutors({ models });
+  const executors = createAiSdkExecutors(swarmHandoffMachine);
 
   let active: "travel" | "food" = "travel";
   console.log("Swarm handoff — two concierges share one conversation.");

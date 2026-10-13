@@ -134,7 +134,7 @@ export const supportMachineStep1 = agentSetup.createMachine({
 
 /** The retry/backoff wrapper from `before.ts`, now wrapping the executor. */
 function buildExecutors(): Pick<AgentRequestExecutors, "generateText"> {
-  const ai = createAiSdkExecutors({ models });
+  const ai = createAiSdkExecutors(supportMachineStep1);
   const generateText: NonNullable<AgentRequestExecutors["generateText"]> = async (
     request,
     info,

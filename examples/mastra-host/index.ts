@@ -46,7 +46,6 @@ import {
 import {
   createEvaluatePrompt,
   emailDrafter,
-  models,
   type DrafterEvent,
   type Interaction,
 } from "../email-drafter/agent-logic.js";
@@ -327,7 +326,7 @@ export async function main() {
   if (!process.env.OPENAI_API_KEY || !process.env.TYPESAFE_AI_API_KEY) {
     throw new Error("Set OPENAI_API_KEY and TYPESAFE_AI_API_KEY to run this example.");
   }
-  const { agent } = createHost({ executors: createAiSdkExecutors({ models }) });
+  const { agent } = createHost({ executors: createAiSdkExecutors(emailDrafter) });
   const result = await agent.generate(
     "Draft an email telling the team the deploy pipeline is twice as fast, then send it.",
     { maxSteps: 6 },

@@ -11,7 +11,7 @@
  *    a model that could return HP could revive the goblin.
  *
  * 2. The HOST (`runAiSdkGameTurn`) — the only part that knows about the AI SDK.
- *    It contributes `createAiSdkExecutors({ models })` and drives the run with
+ *    It contributes `createAiSdkExecutors(gameMachine)` and drives the run with
  *    the agent loop, so it sees every transition as the turn plays out. The
  *    same machine runs unchanged on Workers AI (examples/cloudflare-workers-ai-host).
  *
@@ -366,7 +366,7 @@ export const gameMachine = gameAgentSetup.createMachine({
 
 // Adapter-provided executors. The machine above names its models symbolically
 // (`models` keys); this is where those refs become real AI SDK models.
-const defaultExecutors = createAiSdkExecutors({ models });
+const defaultExecutors = createAiSdkExecutors(gameMachine);
 
 /**
  * Drives one combat turn with the agent loop, reporting each state the machine

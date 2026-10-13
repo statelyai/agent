@@ -404,7 +404,7 @@ export async function runMultiAgentDebateExample(
     createAgentRuntime(multiAgentDebateMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(multiAgentDebateMachine) }),
       ...(judge ? { actors: { judgeDebate: createJudgeDebate(judge) } } : {}),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);

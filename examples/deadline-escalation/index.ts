@@ -113,7 +113,7 @@ function liveExecutors() {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("Set OPENAI_API_KEY to run the deadline-escalation example.");
   }
-  return createAiSdkExecutors({ models });
+  return createAiSdkExecutors(deadlineEscalationMachine);
 }
 
 export async function runDeadlineEscalationExample(

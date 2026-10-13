@@ -552,7 +552,7 @@ export async function runDataEnrichmentExample(
     createAgentRuntime(dataEnrichmentMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(dataEnrichmentMachine) }),
       ...(judge ? { actors: { reviewRecord: createReviewRecord(judge) } } : {}),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);

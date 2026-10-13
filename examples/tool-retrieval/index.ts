@@ -532,7 +532,9 @@ export async function runToolRetrievalExample(
   const progress: string[] = [];
   const result = await runToQuiescence(
     createAgentRuntime(toolRetrievalMachine, {
-      ...(decide ? { executors: { decide } } : { executors: createAiSdkExecutors({ models }) }),
+      ...(decide
+        ? { executors: { decide } }
+        : { executors: createAiSdkExecutors(toolRetrievalMachine) }),
       ...(judge ? { actors: { selectTools: createSelectTools(judge) } } : {}),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
@@ -566,7 +568,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const { decide } = createAiSdkExecutors({ models });
+    const { decide } = createAiSdkExecutors(toolRetrievalMachine);
     const result = await runToolRetrievalExample({
       decide,
       onProgress: (state) => console.log(`  → ${state}`),

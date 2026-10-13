@@ -441,7 +441,7 @@ export async function runTreeOfThoughtsExample(
     createAgentRuntime(treeOfThoughtsMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(treeOfThoughtsMachine) }),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
         progress.push(state);

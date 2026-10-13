@@ -470,7 +470,7 @@ export async function runReflexionExample(
     createAgentRuntime(reflexionMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(reflexionMachine) }),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
         progress.push(state);

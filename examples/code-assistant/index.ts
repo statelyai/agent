@@ -460,7 +460,7 @@ export async function runCodeAssistantExample(
     createAgentRuntime(codeAssistantMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(codeAssistantMachine) }),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
         progress.push(state);
@@ -492,7 +492,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const { generateText } = createAiSdkExecutors({ models });
+    const { generateText } = createAiSdkExecutors(codeAssistantMachine);
 
     const result = await runCodeAssistantExample({
       ...DEFAULT_TASK,

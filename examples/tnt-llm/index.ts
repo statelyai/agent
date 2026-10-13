@@ -414,7 +414,7 @@ export async function runTntLlmExample(options: RunTntLlmOptions = {}): Promise<
     createAgentRuntime(tntLlmMachine, {
       ...(generateText
         ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors({ models }) }),
+        : { executors: createAiSdkExecutors(tntLlmMachine) }),
       onTransition: (snapshot) => {
         const state = getStatePath(snapshot);
         progress.push(state);
@@ -439,7 +439,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   void (async () => {
-    const { generateText } = createAiSdkExecutors({ models });
+    const { generateText } = createAiSdkExecutors(tntLlmMachine);
     const result = await runTntLlmExample({
       generateText,
       onProgress: (state) => console.log(`  → ${state}`),

@@ -560,7 +560,7 @@ export async function runGameLoopExample(options?: {
   const queued = [...(options?.humanEvents ?? [])];
 
   const shared = {
-    executors: options?.decide ? { decide: options.decide } : createAiSdkExecutors({ models }),
+    executors: options?.decide ? { decide: options.decide } : createAiSdkExecutors(gameMachine),
     // `player` is already registered on the setup; only the referee's judge
     // model is swapped when one is injected.
     ...(options?.judge
