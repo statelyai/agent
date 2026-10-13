@@ -12,6 +12,8 @@ import {
   type TypedToolCall,
   type TypedToolResult,
 } from "ai";
+import type { AnyStateMachine } from "xstate";
+import { resolveModelSource } from "../internal/model-source.js";
 import {
   providerOutputSchema,
   type AgentFinishReason,
@@ -297,15 +299,29 @@ function truncated(
  * concrete provider package (e.g. `@ai-sdk/openai`) becomes a dependency here
  * either.
  *
+ * Pass the options object, or pass the machine (or its `setupAgent(...)`
+ * result) to reuse the `models` declared in `setupAgent({ models })`. Anything
+ * else throws here, at construction.
+ *
  * @example
  * ```ts
- * const executors = createAiSdkExecutors({ models: { quick: openai('gpt-5.4-mini') } });
- * const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+ * const agentSetup = setupAgent({ models: { quick: openai('gpt-5.4-mini') }, ... });
+ * const machine = agentSetup.createMachine({ ... });
+ * const result = await runAgent(machine, { input, executors: createAiSdkExecutors(machine) });
+ * // Or explicitly: createAiSdkExecutors({ models: { quick: openai('gpt-5.4-mini') } })
  * ```
  */
 export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
   options: CreateAiSdkExecutorsOptions<TModels>,
+): AiSdkExecutors;
+export function createAiSdkExecutors(machine: AnyStateMachine): AiSdkExecutors;
+export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
+  source: CreateAiSdkExecutorsOptions<TModels> | AnyStateMachine,
 ): AiSdkExecutors {
+  const options = resolveModelSource<CreateAiSdkExecutorsOptions<TModels>>(
+    "createAiSdkExecutors",
+    source,
+  );
   const generateText = async (
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,

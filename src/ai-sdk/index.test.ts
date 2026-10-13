@@ -1212,3 +1212,72 @@ describe("parseModelRef", () => {
     expect(parseModelRef("quick")).toEqual({ provider: undefined, modelId: "quick" });
   });
 });
+
+describe("createAiSdkExecutors model sources", () => {
+  const textResponse = {
+    content: [{ type: "text" as const, text: "hello" }],
+    finishReason: { unified: "stop" as const, raw: "stop" },
+    usage: {
+      inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 1, text: 1, reasoning: 0 },
+    },
+    warnings: [],
+  };
+  const request = { name: "greet", model: "quick", prompt: "hi", tools: {} };
+
+  function build() {
+    const models = { quick: new MockLanguageModelV3({ doGenerate: textResponse }) };
+    const agentSetup = setupAgent({ context: z.object({}), input: z.object({}), models });
+    const machine = agentSetup.createMachine({
+      context: ({ input }) => input,
+      initial: "done",
+      states: { done: { type: "final" } },
+    });
+    return { models, agentSetup, machine };
+  }
+
+  test("accepts the legacy { models } object", async () => {
+    const { models } = build();
+    const { generateText } = createAiSdkExecutors({ models });
+    expect((await generateText(request)).result).toBe("hello");
+  });
+
+  test("accepts a setupAgent(...) result and reads its models", async () => {
+    const { agentSetup } = build();
+    const { generateText } = createAiSdkExecutors(agentSetup);
+    expect((await generateText(request)).result).toBe("hello");
+  });
+
+  test("accepts a machine and reads the models registered by setupAgent", async () => {
+    const { machine, models } = build();
+    const { generateText } = createAiSdkExecutors(machine);
+    expect((await generateText(request)).result).toBe("hello");
+    expect(models.quick.doGenerateCalls).toHaveLength(1);
+  });
+
+  test("accepts a machine rebound with .provide(...)", async () => {
+    const { machine } = build();
+    const { generateText } = createAiSdkExecutors(machine.provide({}));
+    expect((await generateText(request)).result).toBe("hello");
+  });
+
+  test("throws at construction for a wrong-shaped argument, naming what it got", () => {
+    expect(() => createAiSdkExecutors({} as never)).toThrow(/got an empty object/);
+    expect(() => createAiSdkExecutors({ model: "x" } as never)).toThrow(
+      /got an object with keys model/,
+    );
+    expect(() => createAiSdkExecutors(undefined as never)).toThrow(/got undefined/);
+    const bare = setupAgent({ context: z.object({}), input: z.object({}) });
+    expect(() => createAiSdkExecutors(bare)).toThrow(
+      /got a setupAgent\(\.\.\.\) result that declared no models/,
+    );
+    const bareMachine = bare.createMachine({
+      context: ({ input }) => input,
+      initial: "done",
+      states: { done: { type: "final" } },
+    });
+    expect(() => createAiSdkExecutors(bareMachine)).toThrow(
+      /got a machine whose setupAgent\(\.\.\.\) declared no models/,
+    );
+  });
+});

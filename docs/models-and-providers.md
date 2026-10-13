@@ -21,6 +21,48 @@ const executors = createAiSdkExecutors({
 await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 ```
 
+## Declaring models once
+
+When the models are already declared in `setupAgent({ models })`, pass the machine, or the setup result, instead of repeating the map. The adapter reads the models registered for that machine, including through `machine.provide(...)`.
+
+```ts
+import { z } from "zod";
+import { runAgent, setupAgent } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+
+const agentSetup = setupAgent({
+  context: z.object({ prompt: z.string() }),
+  input: z.object({ prompt: z.string() }),
+  models: { quick: someLanguageModel },
+});
+
+const machine = agentSetup.createMachine({
+  context: ({ input }) => input,
+  initial: "writing",
+  states: {
+    writing: {
+      invoke: {
+        src: "agent.generateText",
+        input: ({ context }) => ({ model: "quick", prompt: context.prompt }),
+        onDone: { target: "done" },
+      },
+    },
+    done: { type: "final" },
+  },
+});
+
+await runAgent(machine, {
+  input: { prompt: "Why state machines?" },
+  executors: createAiSdkExecutors(machine),
+});
+```
+
+- `createAiSdkExecutors(machine)` and `createAiSdkExecutors(agentSetup)` resolve the same `models`.
+- `createTanStackAiExecutors` accepts the same three forms.
+- Host settings still need the options form: `createAiSdkExecutors({ models: agentSetup.models, settings })`.
+- Anything else throws when the executors are built, not on the first call. That includes a setup or machine that declared no models.
+- Core stays provider-free: it stores the models without reading them, and only the adapter interprets them.
+
 There are five integration paths. The first two both go through `createAiSdkExecutors`, so they appear as one row in the [support table](#support-by-path).
 
 - **AI SDK adapter.** Accepts any `LanguageModel`, including models from Mastra, Cloudflare Workers AI through `workers-ai-provider`, OpenRouter's AI SDK provider, and any `@ai-sdk/*` package. Supports all three executors, including `decide`.

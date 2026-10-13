@@ -137,21 +137,24 @@ When the machine reaches `refunded`, the result is:
 
 The model chooses between the events allowed in `deciding`. The `AUTO_REFUND` transition only works when the amount is at most $100. If the model chooses it for a larger amount, the guard rejects the choice and the decision is tried again.
 
-To call a real model, leave the machine unchanged and swap the executors:
+To call a real model, leave the states unchanged. Declare the model once on the setup by adding `models` to the `setupAgent` call above, and hand the machine to the AI SDK adapter:
 
 ```ts
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
+// In the setupAgent({ ... }) call above:
+//   models: { fast: openai("gpt-5.4-mini") },
+
 const liveResult = await runAgent(refundMachine, {
   input: { request: "I was charged twice for the same order.", amount: 75 },
-  executors: createAiSdkExecutors({ models: { fast: openai("gpt-5.4-mini") } }),
+  executors: createAiSdkExecutors(refundMachine),
 });
 ```
 
-For a machine with several requests, the executor routes on `request.name`, or `MockLanguageModelV3` from `ai/test` stands in for the provider behind `createAiSdkExecutors`. See [Evals](docs/evals.md#testing-without-a-provider).
+`createAiSdkExecutors(refundMachine)` reads the `models` declared in `setupAgent({ models })`, which also type the machine's model refs. `createAiSdkExecutors({ models })` still works when the host owns the map. Executors are always explicit, and core does not import the AI SDK. See [Models and providers](docs/models-and-providers.md) and [Hosts and executors](docs/hosts.md).
 
-Passing the same `models` map to `setupAgent({ models })` types the machine's model refs. Executors are always explicit, and core does not import the AI SDK. See [Hosts and executors](docs/hosts.md).
+For a machine with several requests, the executor routes on `request.name`, or `MockLanguageModelV3` from `ai/test` stands in for the provider behind `createAiSdkExecutors`. See [Evals](docs/evals.md#testing-without-a-provider).
 
 A host that needs the transition loop itself (a durable object, events pushed mid-run, a custom checkpoint policy) uses `createAgentRuntime` directly. See [Write your own host loop](docs/hosts.md#write-your-own-host-loop).
 
