@@ -1372,7 +1372,9 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
         request,
         { decide: createCountingDecide(runCtx, self) },
         {
-          maxRetries: logic.maxRetries,
+          // The invoke's own input (agent.decide inline `maxRetries`) wins over
+          // the logic's configured budget.
+          maxRetries: lowered.maxRetries ?? logic.maxRetries,
           signal,
           canTake: (event) =>
             actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true,

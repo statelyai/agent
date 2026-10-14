@@ -330,6 +330,48 @@ describe("simulateAgent — live-run decision retry semantics", () => {
     ).rejects.toThrow(/Decision exhausted after 3 attempts.*guard rejected/);
   });
 
+  test("an inline agent.decide `maxRetries: 0` caps scripted attempts at one", async () => {
+    // Regression: simulateAgent used to read the builtin logic's fixed
+    // `maxRetries: 2`, ignoring the invoke input's own value. No onError, so
+    // the exhaustion error (and its attempt count) surfaces directly.
+    const agent = setupAgent({
+      context: z.object({ amount: z.number() }),
+      input: z.object({ amount: z.number() }),
+      events: { ISSUE: z.object({}), REFUSE: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      context: ({ input }) => input,
+      initial: "classifying",
+      states: {
+        classifying: {
+          invoke: {
+            id: "decide",
+            src: "agent.decide",
+            input: {
+              model: "quick",
+              prompt: "Issue or refuse?",
+              allowedEvents: ["ISSUE", "REFUSE"] as const,
+              maxRetries: 0,
+            },
+          },
+          on: {
+            ISSUE: ({ context }) => (context.amount > 100 ? undefined : { target: "issued" }),
+            REFUSE: { target: "refused" },
+          },
+        },
+        issued: { type: "final" },
+        refused: { type: "final" },
+      },
+    });
+
+    await expect(
+      simulateAgent(machine, {
+        input: { amount: 5000 },
+        script: { decisions: { "agent.decide": [{ type: "ISSUE" }] } },
+      }),
+    ).rejects.toThrow(/Decision exhausted after 1 attempt\b/);
+  });
+
   test("a direct-object decision logic's own maxRetries caps scripted attempts", async () => {
     // maxRetries: 0 → exactly one attempt. The logic rides on the invoke
     // itself (no string src, nothing registered), so the budget must come from

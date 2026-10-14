@@ -2842,6 +2842,60 @@ describe("runAgent error cause split", () => {
     expect(result.snapshot.value).toBe("fumbled");
   });
 
+  test("an inline agent.decide `maxRetries: 0` caps the live attempt budget at one", async () => {
+    // Regression: the runtime used to read the builtin logic's fixed
+    // `maxRetries: 2` and ignore the invoke input's own value.
+    const schemas = createAgentSchemas({
+      context: z.object({ amount: z.number() }),
+      input: z.object({ amount: z.number() }),
+      events: { ISSUE: z.object({}), REFUSE: z.object({}) },
+    });
+    const agent = setupAgent({ schemas });
+    const machine = agent.createMachine({
+      context: ({ input }) => input,
+      initial: "classifying",
+      states: {
+        classifying: {
+          invoke: {
+            id: "decide",
+            src: "agent.decide",
+            input: {
+              model: "test-model",
+              prompt: "Issue or refuse?",
+              allowedEvents: ["ISSUE", "REFUSE"] as const,
+              maxRetries: 0,
+            },
+            onError: { target: "refused" },
+          },
+          on: {
+            ISSUE: ({ context }) => (context.amount > 100 ? undefined : { target: "issued" }),
+            REFUSE: { target: "refused" },
+          },
+        },
+        issued: { type: "final" },
+        refused: { type: "final" },
+      },
+    });
+
+    let calls = 0;
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          generateText: async () => ({ result: {} }),
+          decide: async () => {
+            calls += 1;
+            return { event: { type: "ISSUE" } }; // always guard-rejected
+          },
+        },
+      }),
+      { input: { amount: 5000 } },
+    );
+
+    expect(calls).toBe(1);
+    expect(result.status).not.toBe("error");
+    expect(result.snapshot.value).toBe("refused");
+  });
+
   test("a plain executor throw (not decision-exhausted) still settles cause 'machine'", async () => {
     const schemas = createAgentSchemas({
       context: z.object({}),
