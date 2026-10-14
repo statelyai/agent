@@ -5287,4 +5287,40 @@ describe("invoked async actor completing without a value", () => {
     expect(Object.hasOwn(done!.event, "output")).toBe(false);
     expect(() => JSON.parse(JSON.stringify(done))).not.toThrow();
   });
+
+  test("replay sees the same own `output` key the live transition did", async () => {
+    const machine = setupAgent({
+      context: z.object({ hadKey: z.boolean() }),
+      output: z.object({ hadKey: z.boolean() }),
+      actors: { voidActor: createAsyncLogic({ run: async () => {} }) },
+    }).createMachine({
+      id: "voidOutputKey",
+      context: { hadKey: false },
+      initial: "working",
+      states: {
+        working: {
+          invoke: {
+            src: "voidActor",
+            onDone: ({ event }) => ({
+              target: "finished",
+              context: { hadKey: Object.hasOwn(event, "output") },
+            }),
+          },
+        },
+        finished: { type: "final", output: ({ context }) => ({ hadKey: context.hadKey }) },
+      },
+    });
+
+    const entries: AgentLogEntry[] = [];
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onEvent: (entry) => entries.push(entry),
+        executors: { generateText: async () => ({ result: "" }) },
+      }),
+    );
+    expect(result.status === "done" ? result.output : undefined).toEqual({ hadKey: true });
+    // A JSON round-trip (what a store does) must replay to the same state.
+    const replayed = replay(machine, JSON.parse(JSON.stringify(entries)) as AgentLogEntry[]);
+    expect(replayed.snapshot.output).toEqual({ hadKey: true });
+  });
 });

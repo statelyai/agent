@@ -539,8 +539,8 @@ function toPersisted(
 // resolves `undefined` (a void actor) and, through its `data ?? output`
 // coalesce, when it resolves `null` as well. Both reach the root machine as an
 // `xstate.done.actor` event carrying the key explicitly, which
-// `assertJsonSerializable` rejects. The key is dropped instead: the fold sees
-// the same `undefined` either way, and the hash already ignores it.
+// `assertJsonSerializable` rejects. The key is dropped instead; `replay` puts
+// it back (`restoreDoneActorOutput`), and the hash already ignores it.
 function normalizeDoneActorEvent(event: EventObject): EventObject {
   if (event.type !== DONE_ACTOR_EVENT_TYPE) return event;
   const { output, ...rest } = event as EventObject & { output?: unknown };
@@ -877,6 +877,15 @@ export function rebindActorSession(
   return { ...event, sessionId } as EventObject;
 }
 
+// The inverse of `normalizeDoneActorEvent`: the live transition received the
+// completion with an own `output` key (value `undefined`), so the fold gets
+// the same shape — a guard testing key presence takes the same branch both
+// times.
+function restoreDoneActorOutput(event: EventObject): EventObject {
+  if (event.type !== DONE_ACTOR_EVENT_TYPE || Object.hasOwn(event, "output")) return event;
+  return { ...event, output: undefined } as EventObject;
+}
+
 /** Options for {@link replay}. */
 export interface ReplayOptions {
   /** Explicit expected machine version; defaults to the machine's resolved version. */
@@ -962,7 +971,7 @@ export function replay<TMachine extends AnyStateMachine>(
   const sessions = new Map<string, string>();
   for (let index = 1; index < entries.length; index++) {
     const entry = entries[index]!;
-    const event = rebindActorSession(entry.event, snapshot, sessions);
+    const event = restoreDoneActorOutput(rebindActorSession(entry.event, snapshot, sessions));
     [snapshot] = transition(machine, snapshot as never, event as never) as [
       AnyMachineSnapshot,
       unknown,
