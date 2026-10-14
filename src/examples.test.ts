@@ -11,7 +11,7 @@ import {
 } from "../examples/index.js";
 import { createEvaluatePrompt, writeFollowUps } from "../examples/email-drafter/agent-logic.js";
 import { createRateJoke } from "../examples/joke/index.js";
-// The examples' repo-internal judge double: an AI SDK evaluation model with
+// The examples' repo-internal judge double: an AI SDK decision model with
 // scripted answers keyed by question id.
 import { createMockJudge } from "../examples/mock-judge.js";
 import { createAgentRuntime, runToQuiescence, type AgentTextRequest } from "./index.js";

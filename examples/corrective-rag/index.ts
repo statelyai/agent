@@ -37,7 +37,7 @@
  * Differences from LangGraph worth calling out:
  *   - Grading is a JUDGMENT, not a generation. LangGraph loops a chat model
  *     with structured output once PER document. Here `grading` asks the AI
- *     SDK's `experimental_decide` with TypeSafe's Jev as the evaluation
+ *     SDK's `experimental_decide` with TypeSafe's Jev as the decision
  *     model: one call carrying every document as state and one boolean
  *     question per document ("does this document help answer the question?"),
  *     which returns a probability per document. The machine keeps a document

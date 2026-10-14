@@ -19,7 +19,7 @@
  * the canonical `xstate.done.actor` event's `actorId` (see docs/multi-agent.md).
  *
  * Reflection is a JUDGMENT, not a generation: `reflecting` calls the AI SDK's
- * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the decision
  * model, with the question and the findings as state and one boolean
  * question, "do these findings answer the question comprehensively?". The
  * `reflected` choice state compares that probability to

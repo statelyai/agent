@@ -15,7 +15,7 @@
  * `MAX_JOKES` cap. Any request failure lands in a `failed` final state.
  *
  * Rating is a JUDGMENT, not a generation. `rateJoke` asks the AI SDK's
- * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the decision
  * model one `score` question, `rating`, over `{ joke }` on five concrete
  * levels (`JOKE_LEVELS`), lowest to highest. The machine maps the level to the
  * 1-10 rating it already stores as `1 + score / (levels - 1) * 9`, and the

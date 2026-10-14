@@ -17,7 +17,7 @@
  * not a hidden guard.
  *
  * `evaluating` is a JUDGMENT, not a generation: it calls the AI SDK's
- * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the evaluation
+ * `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as the decision
  * model, which reads the request and the required details as state and
  * answers one boolean question for "is this enough to draft from?" plus one
  * boolean question per required detail, in one call. Code turns those
