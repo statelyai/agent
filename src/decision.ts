@@ -77,6 +77,7 @@ function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest
     seed: input.seed,
     stopSequences: input.stopSequences,
     metadata: input.metadata,
+    maxRetries: input.maxRetries,
   };
 }
 
@@ -387,6 +388,11 @@ export interface AgentDecisionRequest {
   seed?: number;
   stopSequences?: string[];
   metadata?: Record<string, unknown>;
+  /**
+   * Per-invoke retry budget lowered from `agent.decide` inline input. Hosts
+   * prefer it over the logic's configured `maxRetries` when set.
+   */
+  maxRetries?: number;
   /**
    * The run this decision belongs to (`run_<n>`, matching trace
    * events), injected by the runtime like `signal` (symmetric with the text
