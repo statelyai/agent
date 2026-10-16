@@ -5247,3 +5247,80 @@ describe("runAgent (sugar over createAgentRuntime + runToQuiescence)", () => {
     expect(calls).toBe(0);
   });
 });
+
+describe("invoked async actor completing without a value", () => {
+  // XState's `createAsyncLogic` completes with `output: undefined` for a void
+  // `run`, and (via its `data ?? output` coalesce) for one resolving `null`.
+  // The journal must accept both rather than reject the explicit `undefined`.
+  test.each([
+    ["undefined", async () => {}],
+    ["null", async () => null],
+  ])("journals the done event when run resolves %s", async (_label, run) => {
+    const machine = setupAgent({
+      context: z.object({}),
+      output: z.object({ ok: z.boolean() }),
+    }).createMachine({
+      id: "voidOutput",
+      context: {},
+      initial: "working",
+      states: {
+        working: {
+          invoke: {
+            src: createAsyncLogic({ run }),
+            onDone: { target: "finished" },
+          },
+        },
+        finished: { type: "final", output: () => ({ ok: true }) },
+      },
+    });
+
+    const entries: AgentLogEntry[] = [];
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onEvent: (entry) => entries.push(entry),
+        executors: { generateText: async () => ({ result: "" }) },
+      }),
+    );
+    expect(result.status).toBe("done");
+    const done = entries.find((entry) => entry.event.type === "xstate.done.actor");
+    expect(done).toBeDefined();
+    expect(Object.hasOwn(done!.event, "output")).toBe(false);
+    expect(() => JSON.parse(JSON.stringify(done))).not.toThrow();
+  });
+
+  test("replay sees the same own `output` key the live transition did", async () => {
+    const machine = setupAgent({
+      context: z.object({ hadKey: z.boolean() }),
+      output: z.object({ hadKey: z.boolean() }),
+      actors: { voidActor: createAsyncLogic({ run: async () => {} }) },
+    }).createMachine({
+      id: "voidOutputKey",
+      context: { hadKey: false },
+      initial: "working",
+      states: {
+        working: {
+          invoke: {
+            src: "voidActor",
+            onDone: ({ event }) => ({
+              target: "finished",
+              context: { hadKey: Object.hasOwn(event, "output") },
+            }),
+          },
+        },
+        finished: { type: "final", output: ({ context }) => ({ hadKey: context.hadKey }) },
+      },
+    });
+
+    const entries: AgentLogEntry[] = [];
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        onEvent: (entry) => entries.push(entry),
+        executors: { generateText: async () => ({ result: "" }) },
+      }),
+    );
+    expect(result.status === "done" ? result.output : undefined).toEqual({ hadKey: true });
+    // A JSON round-trip (what a store does) must replay to the same state.
+    const replayed = replay(machine, JSON.parse(JSON.stringify(entries)) as AgentLogEntry[]);
+    expect(replayed.snapshot.output).toEqual({ hadKey: true });
+  });
+});
