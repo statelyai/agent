@@ -1,7 +1,14 @@
 import { describe, expect, test } from "vitest";
 import { createMachine, type AnyMachineSnapshot } from "xstate";
-import { type AgentDecisionExecutor, type ChosenEvent } from "@statelyai/agent";
-import { createInMemoryEventLogStore } from "@statelyai/agent/log";
+import {
+  createAgentRuntime,
+  eventFromInteraction,
+  getInteraction,
+  runToQuiescence,
+  type AgentDecisionExecutor,
+  type ChosenEvent,
+} from "@statelyai/agent";
+import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import { canReach, lintAgentMachine, type ExplorePathsOptions } from "@statelyai/agent/testing";
 import {
   APPROVAL_THRESHOLD,
@@ -10,11 +17,13 @@ import {
   ORDERS,
   PROPOSALS,
   SCENARIOS,
+  createWorld,
   runBatch,
   type Order,
   type Scenario,
 } from "./contract.js";
 import {
+  answerFromWorld,
   createDeskArm,
   createWorldActors,
   factsOf,
@@ -245,7 +254,7 @@ describe("the decider at the boundary", () => {
       expect(episode.correct, `${episode.scenarioId}: ${episode.trail.join(" | ")}`).toBe(true);
       expect(episode.violations).toEqual([]);
       // The trace is the thread: an init entry plus every input the desk consumed.
-      const entries = await store.read(episode.threadId!);
+      const entries = await store.read(`scripted/${episode.scenarioId}`);
       expect(entries[0]?.event.type).toBe("@agent.init");
       expect(entries.length).toBeGreaterThan(2);
     }
@@ -254,8 +263,11 @@ describe("the decider at the boundary", () => {
     expect(batch.rejections).toBe(1); // identity-fails: the failed identity check
     expect(batch.modelCalls).toBe(calls);
 
+    // The store lists the arm's threads; nobody had to record their ids.
+    const { threadIds } = await store.listThreads!({ prefix: "scripted/" });
+    expect(threadIds).toEqual(SCENARIOS.map((s) => `scripted/${s.id}`).sort());
+
     const largeApproved = batch.episodes.find((e) => e.scenarioId === "large-approved")!;
-    expect(largeApproved.threadId).toBe("scripted/large-approved");
     expect(largeApproved.trail).toEqual([
       "turn 1: LOOKUP_ORDER ORD-1002",
       "turn 1: ORD-1002 found ($240, C-1)",
@@ -269,16 +281,57 @@ describe("the decider at the boundary", () => {
     ]);
   });
 
-  test("a sloppy decider never causes a violation, and its misses are counted", async () => {
+  test("a sloppy decider never causes a violation, and its misses are journaled", async () => {
+    const store = createInMemoryEventLogStore();
     for (const s of SCENARIOS) {
-      const episode = await runDeskEpisode(s, { decide: sloppy });
+      const episode = await runDeskEpisode(s, { decide: sloppy, store });
       expect(episode.violations, s.id).toEqual([]);
       expect(episode.outcome, s.id).toBe("escalate");
       expect(episode.rejections, s.id).toBe(MAX_REJECTIONS);
-      expect(episode.trail[0], s.id).toBe(
+      expect(episode.trail.at(-1), s.id).toBe(
         `turn 1: GIVE_UP (${MAX_REJECTIONS} choices matched no legal option)`,
       );
+      expect(episode.trail.slice(0, -1), s.id).toEqual(
+        Array.from({ length: MAX_REJECTIONS }, () =>
+          expect.stringMatching(/^turn 1: refused ISSUE_REFUND \$[\d.]+ \(rejected-by-guard\)$/),
+        ),
+      );
+
+      // The refused attempts live in the store, on the GIVE_UP entry they explain.
+      const entries = await store.read(s.id);
+      const refused = getDecisionAttempts(entries);
+      expect(refused, s.id).toHaveLength(1);
+      expect(refused[0]!.eventType).toBe("GIVE_UP");
+      expect(entries[refused[0]!.index]!.event.type).toBe("GIVE_UP");
+      expect(refused[0]!.attempts).toHaveLength(MAX_REJECTIONS);
+      for (const attempt of refused[0]!.attempts) {
+        expect(attempt.event?.type).toBe("ISSUE_REFUND");
+        expect(attempt.reason).toContain("matched no offered option");
+      }
     }
+  });
+
+  test("a decider that lands after a refused try journals the try on the landed proposal", async () => {
+    const store = createInMemoryEventLogStore();
+    const episode = await runDeskEpisode(scenario("large-approved"), {
+      store,
+      decide: (request, info) =>
+        request.attempts.length === 0 ? sloppy(request, info) : rightPath(request, info),
+    });
+    expect(episode.correct).toBe(true);
+    const refused = getDecisionAttempts(await store.read("large-approved"));
+    // One refused try per turn, each on the proposal that then landed.
+    expect(refused.map((r) => [r.eventType, r.attempts.length])).toEqual([
+      ["LOOKUP_ORDER", 1],
+      ["VERIFY_IDENTITY", 1],
+      ["REQUEST_APPROVAL", 1],
+    ]);
+    // Turn 4's payout was offered, so the sloppy first try landed.
+    expect(episode.rejections).toBe(3);
+    expect(episode.trail.slice(0, 2)).toEqual([
+      "turn 1: refused ISSUE_REFUND $100 (rejected-by-guard)",
+      "turn 1: LOOKUP_ORDER ORD-1002",
+    ]);
   });
 
   test("the decider is only ever offered legal options", async () => {
@@ -295,5 +348,54 @@ describe("the decider at the boundary", () => {
     // Turn 4: approved, so the payout is legal and another approval is not.
     expect(seen[3]).toContain("ISSUE_REFUND");
     expect(seen[3]).not.toContain("REQUEST_APPROVAL");
+  });
+});
+
+describe("a person at the desk", () => {
+  test("deciding offers only the accepted proposals as choices, and the chosen one drives the desk", async () => {
+    const s = scenario("large-approved");
+    const world = createWorld(s);
+    const runtime = () =>
+      createAgentRuntime(refundDeskMachine, { actors: createWorldActors(world) });
+    const labels = (snapshot: AnyMachineSnapshot) =>
+      getInteraction(snapshot)?.choices?.map((choice) => choice.label) ?? [];
+
+    let result = await runToQuiescence(runtime(), { input: inputOf(s) });
+    // Nothing loaded or verified yet: no payout, no approval request.
+    expect(labels(result.snapshot)).toEqual(
+      expect.arrayContaining(["Verify identity", "Look up ORD-1002", "Ask for the order number"]),
+    );
+    expect(labels(result.snapshot).some((label) => /^(Refund|Request approval)/.test(label))).toBe(
+      false,
+    );
+
+    // A person presses buttons; the customer and approver answer from the world's script.
+    const press = async (label: string) => {
+      expect(labels(result.snapshot)).toContain(label);
+      result = await runToQuiescence(runtime(), {
+        snapshot: result.persist(),
+        event: eventFromInteraction(result.snapshot, { choice: label }),
+      });
+      while (result.status === "idle" && !result.snapshot.matches("deciding")) {
+        result = await runToQuiescence(runtime(), {
+          snapshot: result.persist(),
+          event: answerFromWorld(result.snapshot, world),
+        });
+      }
+    };
+
+    await press("Verify identity");
+    expect(labels(result.snapshot)).not.toContain("Verify identity");
+    await press("Look up ORD-1002");
+    // $240 is over the approval threshold and not approved yet.
+    expect(labels(result.snapshot)).toContain("Request approval for $240");
+    expect(labels(result.snapshot)).not.toContain("Refund $240");
+    await press("Request approval for $240");
+    expect(labels(result.snapshot)).not.toContain("Request approval for $240");
+    await press("Refund $240");
+
+    expect(result.status).toBe("done");
+    expect(result.status === "done" && result.output.outcome).toBe("refund");
+    expect(world.violations).toEqual([]);
   });
 });

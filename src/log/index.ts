@@ -20,6 +20,7 @@ export {
   assertJsonSerializable,
   createReplayEntry,
   forkEventLog,
+  getDecisionAttempts,
   getLogExecutionId,
   getSnapshotStateHash,
   getUsageFromEvents,
@@ -30,6 +31,8 @@ export {
 } from "../event-log.js";
 export type {
   AgentInitEvent,
+  AgentLogDecision,
+  AgentLogDecisionAttempts,
   AgentLogEntry,
   AgentLogInit,
   AgentLogVerification,
@@ -40,6 +43,10 @@ export type {
   ReplayResult,
 } from "../event-log.js";
 export { AgentEventLogConflictError, createInMemoryEventLogStore } from "../event-log-store.js";
-export type { AgentEventLogStore } from "../event-log-store.js";
+export type {
+  AgentEventLogStore,
+  ListThreadsOptions,
+  ListThreadsResult,
+} from "../event-log-store.js";
 export { assertEventLogStoreConformance } from "../event-log-store-conformance.js";
 export type { EventLogStoreConformanceHarness } from "../event-log-store-conformance.js";

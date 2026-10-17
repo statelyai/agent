@@ -127,17 +127,18 @@ const request = createDecisionRequest({
 
 Each attempt runs three checks in order. Each failure is typed and fed back to the model on the next attempt:
 
-| Failure             | Cause                                                                       |
-| ------------------- | --------------------------------------------------------------------------- |
-| `unknown-event`     | The event type is not among the candidate events.                           |
-| `invalid-payload`   | The payload does not match that event's schema.                             |
-| `rejected-by-guard` | The type and payload are valid, but `snapshot.can(event)` returned `false`. |
+| Failure             | Cause                                                                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `unknown-event`     | The event type is not among the candidate events.                                                                                                      |
+| `invalid-payload`   | The payload does not match that event's schema.                                                                                                        |
+| `rejected-by-guard` | The type and payload are valid, but `snapshot.can(event)` returned `false`, or the event matches none of a [closed choice](#closed-choices)'s options. |
 
 Retry behavior:
 
 - The default is 2 retries, so up to 3 attempts. Set `maxRetries` on the decide input to change it.
 - Prior failed attempts are carried on `request.attempts`, so the host can render the previous failure into the next call. Core does not rewrite the prompt itself. See [Hosts](hosts.md).
 - Exhausting retries throws `AgentDecisionExhaustedError`, which carries the attempts list and is caught by the invoke's `onError`.
+- The run's [event log](event-log.md) keeps the failed attempts on the entry they explain. `getDecisionAttempts` reads them back. See [Decision attempts](event-log.md#decision-attempts).
 
 ## Coercion
 
@@ -321,7 +322,7 @@ actor.subscribe(async (snapshot) => {
 actor.start();
 ```
 
-The result also carries `attempts`, the failed choices before the one that landed, and the `request` the executor saw. Exhausting retries throws `AgentDecisionExhaustedError`.
+The result also carries `attempts`, the failed choices before the one that landed, and the `request` the executor saw. Exhausting retries throws `AgentDecisionExhaustedError`. To journal `attempts`, pass them with the event to the run that delivers it. See [Boundary decisions](event-log.md#boundary-decisions).
 
 ## Related
 

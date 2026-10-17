@@ -3,9 +3,14 @@
  * the demo's idle contract, all through `refundDeskMachine` and its guards.
  */
 import { describe, expect, test } from "vitest";
-import { createAgentRuntime, getInteraction, runToQuiescence } from "@statelyai/agent";
+import {
+  createAgentRuntime,
+  eventFromInteraction,
+  getInteraction,
+  runToQuiescence,
+} from "@statelyai/agent";
 import { createMockModelExecutors } from "../mock-model.js";
-import { runSplits } from "./contract.js";
+import { CUSTOMERS, runSplits } from "./contract.js";
 import {
   HELD_OUT_SCENARIOS,
   SCENARIOS,
@@ -108,13 +113,8 @@ describe("the demo contract", () => {
     expect(idle.status).toBe("idle");
     expect(idle.snapshot.matches("deciding")).toBe(true);
     const interaction = getInteraction(idle.snapshot);
-    // Buttons with fixed payloads only; LOOKUP_ORDER and the payout need context-derived ones.
-    expect(interaction?.events.map((event) => event.type)).toEqual([
-      "VERIFY_IDENTITY",
-      "ASK_CUSTOMER",
-      "CLOSE",
-      "ESCALATE",
-    ]);
+    // One button per concrete proposal the desk accepts, computed from context.
+    expect(interaction?.choices?.map((choice) => choice.label)).toContain("Look up ORD-1001");
     expect(interaction?.label).toBe("Turn 1: New ticket. Choose the next step.");
 
     const persist = (result: { persist(): unknown }) =>
@@ -124,12 +124,15 @@ describe("the demo contract", () => {
       event: { type: "VERIFY_IDENTITY" },
     });
     expect(asking.snapshot.matches("askingIdentity")).toBe(true);
-    expect(getInteraction(asking.snapshot)?.textEvent).toBe("IDENTITY_CLAIM");
-
-    const verified = await runToQuiescence(runtime(), {
-      snapshot: persist(asking),
-      event: { type: "IDENTITY_CLAIM", claim: scenario.identityClaim },
+    expect(getInteraction(asking.snapshot)).toMatchObject({
+      textEvent: "IDENTITY_CLAIM",
+      textField: "claim",
     });
+    // Free text lands in the claim field.
+    const claim = eventFromInteraction(asking.snapshot, { text: scenario.identityClaim });
+    expect(claim).toEqual({ type: "IDENTITY_CLAIM", claim: scenario.identityClaim });
+
+    const verified = await runToQuiescence(runtime(), { snapshot: persist(asking), event: claim });
     expect(verified.snapshot.matches("deciding")).toBe(true);
     expect(verified.snapshot.context.identityVerified).toBe(true);
 
@@ -141,5 +144,82 @@ describe("the demo contract", () => {
     if (done.status !== "done") return;
     expect(done.output.outcome).toBe("close");
     expect(typeof done.output.summary).toBe("string");
+  });
+});
+
+describe("the plain desk on the sample world (what the demo runs)", () => {
+  const ada = CUSTOMERS.find((customer) => customer.id === "C-1")!;
+  const persist = (result: { persist(): unknown }) => JSON.parse(JSON.stringify(result.persist()));
+
+  /** Drives the desk with no actors bound: a person picks choices and types answers. */
+  async function play(ticket: string, steps: ({ choice: string } | { text: string })[]) {
+    // No `actors`: the machine's default tools act on the sample world.
+    const runtime = () => createAgentRuntime(refundDeskMachine);
+    let result = await runToQuiescence(runtime(), { input: { ticket, customerId: ada.id } });
+    for (const step of steps) {
+      if (result.status !== "idle") break;
+      result = await runToQuiescence(runtime(), {
+        snapshot: persist(result),
+        event: eventFromInteraction(result.snapshot, step),
+      });
+    }
+    return result;
+  }
+
+  test("a person finishes a ticket with payload choices and free text", async () => {
+    const result = await play("ORD-1001 arrived broken. Can I get my $40 back?", [
+      { choice: "Look up ORD-1001" },
+      { choice: "Verify identity" },
+      { text: ada.identityAnswer },
+      { choice: "Refund $40" },
+    ]);
+    expect(result.status).toBe("done");
+    expect(result.status === "done" && result.output.outcome).toBe("refund");
+  });
+
+  test("a customer reply typed as free text lands in the reply field", async () => {
+    const result = await play("I want a refund for my cable.", [
+      { choice: "Ask for the order number" },
+      { text: "It was ORD-1001" },
+    ]);
+    expect(result.status === "idle" && result.snapshot.context.customerReplies).toEqual([
+      "It was ORD-1001",
+    ]);
+    expect(getInteraction(result.snapshot)?.choices?.map((c) => c.label)).toContain(
+      "Look up ORD-1001",
+    );
+  });
+
+  test("each run gets a fresh sample world: a refund does not leak into the next run", async () => {
+    for (let run = 0; run < 2; run++) {
+      const result = await play("ORD-1001 arrived broken.", [
+        { choice: "Look up ORD-1001" },
+        { choice: "Verify identity" },
+        { text: ada.identityAnswer },
+        { choice: "Refund $40" },
+      ]);
+      expect(result.status === "done" && result.output.outcome, `run ${run}`).toBe("refund");
+    }
+  });
+
+  test("a wrong identity claim fails the check, and the approver can reject in free text", async () => {
+    const failed = await play("Refund ORD-1002, $240.", [
+      { choice: "Verify identity" },
+      { text: "I forgot" },
+    ]);
+    expect(failed.status === "idle" && failed.snapshot.context.rejections).toEqual([
+      { proposal: "VERIFY_IDENTITY", reason: "identity check failed" },
+    ]);
+
+    const rejected = await play("Refund ORD-1002, $240.", [
+      { choice: "Look up ORD-1002" },
+      { choice: "Verify identity" },
+      { text: ada.identityAnswer },
+      { choice: "Request approval for $240" },
+      { text: "Outside the return window" },
+    ]);
+    expect(rejected.status === "done" && rejected.output.summary).toBe(
+      "Closed without a refund: approver rejected: Outside the return window.",
+    );
   });
 });

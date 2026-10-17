@@ -12,6 +12,7 @@ function createPayoutMachine({
   guardLimit = 100,
   payloads = false,
   wildcard = false,
+  withholdEscalate = false,
 } = {}) {
   const agent = setupAgent({
     context: z.object({ amount: z.number() }),
@@ -32,7 +33,14 @@ function createPayoutMachine({
             model: "quick",
             prompt: "Pay out?",
             ...(wildcard ? {} : { allowedEvents: ["ISSUE", "ESCALATE"] as const }),
-            ...(payloads ? { payloads: { ISSUE: [{ amount: 40 }, { amount: 400 }] } } : {}),
+            ...(payloads
+              ? {
+                  payloads: {
+                    ISSUE: [{ amount: 40 }, { amount: 400 }],
+                    ...(withholdEscalate ? { ESCALATE: [] } : {}),
+                  },
+                }
+              : {}),
           }),
         },
         on: {
@@ -134,6 +142,13 @@ describe("explorePaths — decision request options", () => {
       [{ type: "ESCALATE" }],
     ]);
     expect(report.prunedByGuard).toBe(1);
+  });
+
+  test("an empty payload list on the decide input withholds that event, as at run time", async () => {
+    const report = await explorePaths(
+      createPayoutMachine({ payloads: true, withholdEscalate: true }),
+    );
+    expect(report.terminals.map((t) => t.path)).toEqual([[{ type: "ISSUE", amount: 40 }]]);
   });
 
   test("omitted allowedEvents: options are rebuilt over the snapshot's candidates", async () => {
@@ -391,11 +406,12 @@ describe("explorePaths — dedupeBy", () => {
         goal: { type: "final" },
       },
     });
-    const { witness } = await canReach(machine, "goal", {
+    const report = await explorePaths(machine, {
       maxDepth: 4,
       dedupeBy: (snapshot) => JSON.stringify(snapshot.value),
     });
-    expect(witness?.map((event) => event.type)).toEqual(["SHORT", "GO", "GO"]);
+    const done = report.terminals.filter((t) => t.status === "done");
+    expect(done.map((t) => t.path.map((event) => event.type))).toEqual([["SHORT", "GO", "GO"]]);
   });
 });
 
@@ -427,5 +443,149 @@ describe("canReach completeness", () => {
   test("a path cap cut short is not a proof", async () => {
     const result = await canReach(loop, "never", { maxPaths: 1, maxDepth: 50 });
     expect(result).toMatchObject({ reachable: false, complete: false });
+  });
+});
+
+describe("canReach — shortest witness", () => {
+  // Depth-first search takes LONG first and would answer with the long route.
+  const twoRoutes = createMachine({
+    initial: "start",
+    states: {
+      start: { on: { LONG: { target: "l1" }, SHORT: { target: "goal" } } },
+      l1: { on: { NEXT: { target: "l2" } } },
+      l2: { on: { NEXT: { target: "goal" } } },
+      goal: { type: "final" },
+    },
+  });
+
+  test("the witness is the short route, while explorePaths keeps depth-first order", async () => {
+    const { witness } = await canReach(twoRoutes, "goal");
+    expect(witness).toEqual([{ type: "SHORT" }]);
+    const report = await explorePaths(twoRoutes);
+    expect(report.terminals.map((t) => t.path.map((e) => e.type))).toEqual([
+      ["LONG", "NEXT", "NEXT"],
+      ["SHORT"],
+    ]);
+  });
+
+  test("with dedupeBy, the witness is still the short route", async () => {
+    const { witness } = await canReach(twoRoutes, "goal", {
+      dedupeBy: (snapshot) => JSON.stringify(snapshot.value),
+    });
+    expect(witness).toEqual([{ type: "SHORT" }]);
+  });
+
+  test("over output forks, a retry loop does not lengthen the witness", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { RETRY: z.object({}) },
+      actors: {
+        lookup: createAsyncLogic<{ found: boolean }>({ run: async () => ({ found: true }) }),
+      },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "lookingUp",
+      states: {
+        lookingUp: {
+          invoke: {
+            id: "lookup",
+            src: "lookup",
+            onDone: ({ output }) => (output.found ? { target: "found" } : { target: "waiting" }),
+          },
+        },
+        // A miss waits for a retry; depth-first search would retry down to
+        // `maxDepth` before trying the hit.
+        waiting: { on: { RETRY: { target: "lookingUp" } } },
+        found: { type: "final" },
+      },
+    });
+    const { witness } = await canReach(machine, "found", {
+      outputs: { lookup: [{ found: false }, { found: true }] },
+    });
+    expect(witness).toEqual([{ type: "xstate.done.actor.lookup", output: { found: true } }]);
+  });
+
+  test("over payloads, the witness takes the one payload that gets there", async () => {
+    const counter = setupAgent({
+      context: z.object({ total: z.number() }),
+      events: { ADD: z.object({ n: z.number() }) },
+    }).createMachine({
+      context: { total: 0 },
+      on: {
+        ADD: ({ context, event }) => ({ context: { total: context.total + event.n } }),
+      },
+    });
+    const { witness } = await canReach(counter, (snapshot) => snapshot.context.total >= 2, {
+      payloads: () => ({ ADD: [{ n: 1 }, { n: 2 }] }),
+      maxDepth: 4,
+    });
+    expect(witness).toEqual([{ type: "ADD", n: 2 }]);
+  });
+
+  test("with dedupeBy, a key reached again with more depth left is explored again", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { LONG: z.object({}), SHORT: z.object({}), GO: z.object({}) },
+      actors: { check: createAsyncLogic({ run: async () => "ok" }) },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "start",
+      states: {
+        // SHORT reaches `hub` first by path length (one event) but spends three
+        // depth on it: each check's success branch is an unrecorded fork. LONG
+        // reaches it second, at depth 2, with enough depth left to finish.
+        start: { on: { LONG: { target: "l1" }, SHORT: { target: "c1" } } },
+        c1: {
+          invoke: {
+            id: "c1",
+            src: "check",
+            onDone: { target: "c2" },
+            onError: { target: "failed" },
+          },
+        },
+        c2: {
+          invoke: {
+            id: "c2",
+            src: "check",
+            onDone: { target: "hub" },
+            onError: { target: "failed" },
+          },
+        },
+        l1: { on: { GO: { target: "hub" } } },
+        hub: { on: { GO: { target: "h1" } } },
+        h1: { on: { GO: { target: "goal" } } },
+        goal: { type: "final" },
+        failed: { type: "final" },
+      },
+    });
+    const { witness } = await canReach(machine, "goal", {
+      invokes: { check: "ok" },
+      errors: { check: new Error("down") },
+      maxDepth: 4,
+      dedupeBy: (snapshot) => JSON.stringify(snapshot.value),
+    });
+    expect(witness?.map((event) => event.type)).toEqual(["LONG", "GO", "GO", "GO"]);
+  });
+
+  test("a path cap is reported only when it cut a branch", async () => {
+    const fork = createMachine({
+      initial: "start",
+      states: {
+        start: { on: { A: { target: "a" }, B: { target: "b" } } },
+        a: { type: "final" },
+        b: { type: "final" },
+        never: {},
+      },
+    });
+    expect(await canReach(fork, "never", { maxPaths: 2 })).toMatchObject({
+      reachable: false,
+      complete: true,
+    });
+    expect(await canReach(fork, "never", { maxPaths: 1 })).toMatchObject({
+      reachable: false,
+      complete: false,
+    });
   });
 });

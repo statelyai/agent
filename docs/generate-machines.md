@@ -70,7 +70,7 @@ The result behaves as follows.
 - `result.config` is the typed config once `validate` passes. `result.machine` is the lowered machine once `lower` passes.
 - A config that throws while lowering is reported as a failed `lower` gate. `verifyAgentConfig` does not throw on a bad config.
 - An omitted `allow` key is unrestricted. Omit `allow` to skip the `vocabulary` gate, and omit `explore` to skip the `explore` gate.
-- `explore.terminals` defaults to `['done']`. Other `explore` keys, such as `text`, `invokes`, `errors`, and `maxPaths`, pass through to `explorePaths`.
+- `explore.terminals` defaults to `['done']`. Other `explore` keys, such as `text`, `invokes`, `errors`, `outputs`, `payloads`, `dedupeBy`, and `maxPaths`, pass through to `explorePaths`. See [Payloads and invoke outputs](verify.md#payloads-and-invoke-outputs).
 - `actors` are bound with `machine.provide({ actors })` after lowering. `guards` and `actions` go to `fromConfig`.
 - No gate needs an API key.
 - `validateAgentConfig(config)` runs the `validate` gate alone. It returns `{ valid, errors }`, and each error's `path` is a JSON Pointer into the config.
@@ -84,11 +84,13 @@ A failed gate's `detail` is the repair prompt. Send it back to the model with th
 
 ## The skill
 
-The full authoring procedure ships as an agent skill. It covers the schema location, the rules a config must follow, a few-shot config, the Ajv adapter, the lint and simulate calls, and the repair loop.
+The full authoring procedure ships as an agent skill. It covers the environment and policy split, the schema location, the rules a config must follow, a few-shot config, the Ajv adapter, `verifyAgentConfig`, the repair loop, and persisting traces.
 
 **[`skills/generate-machine/SKILL.md`](https://github.com/statelyai/agent/blob/main/skills/generate-machine/SKILL.md)**
 
 Copy that directory into your coding agent's skills directory. For Claude Code this is `.claude/skills/`. Other harnesses use their own location. The agent then loads the skill on requests such as "author an agent machine for X" and runs the gates itself.
+
+To improve a generated policy from its run traces, use [`skills/improve-machine`](https://github.com/statelyai/agent/blob/main/skills/improve-machine/SKILL.md). See [Environment and policy](environment-and-policy.md).
 
 ## Limits
 

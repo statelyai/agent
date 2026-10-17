@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
-import type { AgentWorkflowConfig } from "@statelyai/agent";
+import type { AgentDecisionExecutor, AgentWorkflowConfig } from "@statelyai/agent";
 import { createMockModelExecutors, type MockTextEntry } from "../mock-model.js";
-import { HELD_OUT_SCENARIOS, summarize, type BatchMetrics } from "./contract.js";
+import { HELD_OUT_SCENARIOS, SCENARIOS, summarize, type BatchMetrics } from "./contract.js";
+import { createDeskArm, rejectionsFromLog } from "./desk.js";
 import { improvePlaybook, objective, OBJECTIVE_WEIGHTS } from "./improve.js";
 import { loadPlaybook, type PlaybookExecutors } from "./playbook.js";
 import { eagerChoice, jevJudge } from "./test-doubles.js";
@@ -120,11 +121,54 @@ describe("improvePlaybook", () => {
       // Held-out trails stay out of the prompt.
       for (const scenario of HELD_OUT_SCENARIOS) expect(prompt).not.toContain(scenario.id);
 
-      // Every episode is a thread in the store.
-      const thread = await result.store.read("round-1/after/small-clean");
+      // Every episode is a thread in the store, train and held-out under their own prefixes.
+      const thread = await result.store.read("round-1/after/train/small-clean");
       expect(thread[0]?.event.type).toBe("@agent.init");
+      const { threadIds } = await result.store.listThreads!({ prefix: "round-1/before/held-out/" });
+      expect(threadIds).toHaveLength(HELD_OUT_SCENARIOS.length);
     },
   );
+
+  test("rejections are counted from the log: refused proposals and failed checks", async () => {
+    // Every turn's first try is an unoffered payout; the playbook answers the retry.
+    const firstTrySloppy =
+      (decide: AgentDecisionExecutor): AgentDecisionExecutor =>
+      async (request, info) =>
+        request.attempts.length === 0
+          ? { event: { type: "ISSUE_REFUND", amount: 99_999 } }
+          : decide(request, info);
+    const { executors: ex, prompts } = executors(alwaysEscalate);
+    const result = await improvePlaybook({
+      current: v1,
+      executors: ex,
+      judge: jevJudge().model,
+      arm: (decide, run) =>
+        createDeskArm({
+          label: "first-try-sloppy",
+          name: "playbook",
+          decide: firstTrySloppy(decide),
+          store: run.store,
+          threadPrefix: run.threadPrefix,
+          counters: () => ({ ...decide.counters }),
+        }),
+    });
+
+    const { threadIds } = await result.store.listThreads!({ prefix: "round-1/before/train/" });
+    expect(threadIds).toHaveLength(SCENARIOS.length);
+    let fromLog = 0;
+    for (const threadId of threadIds)
+      fromLog += rejectionsFromLog(await result.store.read(threadId));
+    // At least one refused try per episode.
+    expect(fromLog).toBeGreaterThanOrEqual(SCENARIOS.length);
+    expect(result.before.train.rejections).toBe(fromLog);
+    // Refused tries don't derail v1: their reasons never read as a failed identity check.
+    expect(result.before.train.accuracy).toBe(1);
+
+    // The reflection prompt shows the refused tries, read from the store.
+    const [prompt] = prompts();
+    expect(prompt).toContain("turn 1: refused ISSUE_REFUND $99999 (rejected-by-guard)");
+    expect(prompt).toContain(`rejections ${fromLog},`);
+  });
 
   test("failed gates feed back as repairs, then the current playbook stays", async () => {
     const { executors: ex, prompts } = executors([badTarget, unknownActor]);

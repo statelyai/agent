@@ -29,10 +29,15 @@
  * human answer within the turn budget.
  *
  * Every episode is journaled to an event-log store, one thread per scenario
- * and arm. Those threads are the traces the improvement loop reads.
+ * and arm, and each proposal's entry carries the decider's refused attempts
+ * (`entry.decision`). Those threads are the traces the improvement loop reads.
+ *
+ * The tool actors default to a shared sample world (the sample customers and
+ * orders, fresh per actor system), so the plain machine runs end to end in
+ * the demo. Episodes bind their own world with {@link createWorldActors}.
  */
 import { z } from "zod";
-import { createAsyncLogic, setup, type SnapshotFrom } from "xstate";
+import { createAsyncLogic, setup, type AnyActorSystem, type SnapshotFrom } from "xstate";
 import {
   AgentDecisionExhaustedError,
   createAgentRuntime,
@@ -42,15 +47,18 @@ import {
   type AgentEventLogStore,
   type AgentLogEntry,
   type ChosenEvent,
+  type DecisionAttempt,
 } from "@statelyai/agent";
-import { createInMemoryEventLogStore } from "@statelyai/agent/log";
+import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import {
   APPROVAL_THRESHOLD,
   ASK_QUESTION,
   CLOSE_REASONS,
+  CUSTOMERS,
   ESCALATE_REASONS,
   MAX_REJECTIONS,
   MAX_TURNS,
+  ORDERS,
   PROPOSALS,
   createWorld,
   factsSchema,
@@ -83,6 +91,13 @@ const pendingProposalSchema = z
   })
   .nullable();
 
+/** One button a person can press in `deciding`: a label and the full proposal it sends. */
+const choiceSchema = z.object({
+  label: z.string(),
+  event: z.object({ type: z.string() }).catchall(z.unknown()),
+  style: z.string().optional(),
+});
+
 const contextSchema = factsSchema.extend({
   /** The proposal being carried out, read by the invoke and choice states. */
   pendingProposal: pendingProposalSchema,
@@ -92,6 +107,11 @@ const contextSchema = factsSchema.extend({
   stopReason: z.string(),
   /** Latest human-readable status. */
   notice: z.string(),
+  /**
+   * This turn's proposals as labeled buttons, set on entry to `deciding` from
+   * {@link deskPayloads}. `getInteraction` shows the ones the desk accepts.
+   */
+  choices: z.array(choiceSchema).optional(),
 });
 
 export type DeskContext = z.infer<typeof contextSchema>;
@@ -111,15 +131,20 @@ const metaSchema = z.object({
   interaction: z
     .object({
       label: z.string(),
-      textEvent: z.string().optional(),
-      events: z.record(
-        z.string(),
-        z.object({
-          label: z.string(),
-          style: z.string().optional(),
-          event: z.record(z.string(), z.unknown()).optional(),
-        }),
-      ),
+      textEvent: z
+        .union([z.string(), z.object({ type: z.string(), field: z.string() })])
+        .optional(),
+      events: z
+        .record(
+          z.string(),
+          z.object({
+            label: z.string(),
+            style: z.string().optional(),
+            event: z.record(z.string(), z.unknown()).optional(),
+          }),
+        )
+        .optional(),
+      choicesFrom: z.string().optional(),
     })
     .optional(),
 });
@@ -153,44 +178,77 @@ type IssueRefundInput = {
   approved: boolean;
 };
 
-/** The three tool actors bound to one episode's world. Pass to `createAgentRuntime(machine, { actors })`. */
-export function createWorldActors(world: World) {
+/** What the three tool actors call: one episode's world, or the sample world. */
+type DeskTools = {
+  verifyIdentity(input: VerifyIdentityInput): boolean;
+  lookupOrder(orderId: string): Order | null;
+  issueRefund(input: IssueRefundInput): void;
+};
+
+/** The three tool actors over the tools `toolsFor` picks for the running actor system. */
+function createToolActors(toolsFor: (system: AnyActorSystem) => DeskTools) {
   return {
     verifyIdentity: createAsyncLogic<boolean, VerifyIdentityInput>({
-      run: async ({ input }) => world.verifyIdentity(input.claim),
+      run: async ({ input, system }) => toolsFor(system).verifyIdentity(input),
     }),
     lookupOrder: createAsyncLogic<Order | null, LookupOrderInput>({
-      run: async ({ input }) => world.lookupOrder(input.orderId),
+      run: async ({ input, system }) => toolsFor(system).lookupOrder(input.orderId),
     }),
     // Resolves a JSON value (not void): invoke outputs land in the event log.
     issueRefund: createAsyncLogic<{ issued: true }, IssueRefundInput>({
-      run: async ({ input }) => {
-        world.issueRefund(input);
+      run: async ({ input, system }) => {
+        toolsFor(system).issueRefund(input);
         return { issued: true };
       },
     }),
   };
 }
 
-const unbound = (name: string) => () => {
-  throw new Error(
-    `refund desk: '${name}' has no world bound. Pass createWorldActors(world) as ` +
-      "createAgentRuntime(refundDeskMachine, { actors }).",
-  );
+/** The three tool actors bound to one episode's world. Pass to `createAgentRuntime(machine, { actors })`. */
+export function createWorldActors(world: World) {
+  const tools: DeskTools = {
+    verifyIdentity: ({ claim }) => world.verifyIdentity(claim),
+    lookupOrder: (orderId) => world.lookupOrder(orderId),
+    issueRefund: (input) => world.issueRefund(input),
+  };
+  return createToolActors(() => tools);
+}
+
+/**
+ * The sample world the default actors use: the sample customers and a fresh
+ * copy of the sample orders. A claim verifies when it matches the customer's
+ * identity answer on file. It records no violations; the per-episode worlds
+ * from `createWorld` do.
+ */
+function createSampleWorld(): DeskTools {
+  const orders = new Map(ORDERS.map((order) => [order.id, { ...order }]));
+  return {
+    verifyIdentity: ({ customerId, claim }) => {
+      const customer = CUSTOMERS.find((c) => c.id === customerId);
+      return !!customer && claim.trim().toLowerCase() === customer.identityAnswer.toLowerCase();
+    },
+    lookupOrder: (orderId) => {
+      const order = orders.get(orderId);
+      return order ? { ...order } : null;
+    },
+    issueRefund: ({ orderId }) => {
+      const order = orders.get(orderId);
+      if (order) order.refunded = true;
+    },
+  };
+}
+
+// One sample world per actor system, so a refund in one run never shows up in another.
+const sampleWorlds = new WeakMap<AnyActorSystem, DeskTools>();
+const sampleWorldOf = (system: AnyActorSystem) => {
+  let world = sampleWorlds.get(system);
+  if (!world) sampleWorlds.set(system, (world = createSampleWorld()));
+  return world;
 };
 
-// Defaults so the machine builds; every run overrides them.
-const unboundActors = {
-  verifyIdentity: createAsyncLogic<boolean, VerifyIdentityInput>({
-    run: async () => unbound("verifyIdentity")(),
-  }),
-  lookupOrder: createAsyncLogic<Order | null, LookupOrderInput>({
-    run: async () => unbound("lookupOrder")(),
-  }),
-  issueRefund: createAsyncLogic<{ issued: true }, IssueRefundInput>({
-    run: async () => unbound("issueRefund")(),
-  }),
-};
+// Defaults: the sample world, so the plain machine (the demo) can finish a
+// ticket. Benchmark arms and tests override them with createWorldActors.
+const sampleActors = createToolActors(sampleWorldOf);
 
 // ─── The invariants, as blocker functions (undefined = legal) ───
 
@@ -231,7 +289,7 @@ export function issueBlocker(facts: GuardFacts, amount: number): string | undefi
 
 // ─── The machine ───
 
-const deskSetup = setup({ schemas: refundDeskSchemas, actors: unboundActors });
+const deskSetup = setup({ schemas: refundDeskSchemas, actors: sampleActors });
 
 export const refundDeskMachine = deskSetup.createMachine({
   id: "refund-desk",
@@ -271,26 +329,15 @@ export const refundDeskMachine = deskSetup.createMachine({
     // decider at the boundary, or a person in the demo) sends one proposal.
     deciding: {
       description: "Choose the next step for this ticket.",
-      // Buttons carry fixed payloads only, so a person can verify, ask, close,
-      // or escalate here; LOOKUP_ORDER, REQUEST_APPROVAL, and ISSUE_REFUND need
-      // a payload read from context (an order id, the order total) and are
-      // left to the decider.
+      // The same closed vocabulary the decider gets, as one button per
+      // concrete proposal ("Look up ORD-1002", "Refund $240"), so a person
+      // can drive the whole desk. `getInteraction` keeps the ones the desk
+      // accepts right now.
+      entry: ({ context }) => ({ context: { choices: deskChoices(context) } }),
       meta: {
         interaction: {
           label: "Turn {turn}: {notice} Choose the next step.",
-          events: {
-            VERIFY_IDENTITY: { label: "Verify identity" },
-            ASK_CUSTOMER: { label: "Ask for the order number", event: { question: ASK_QUESTION } },
-            CLOSE: {
-              label: "Close: not a refund request",
-              event: { reason: "not a refund request" },
-            },
-            ESCALATE: {
-              label: "Escalate to a person",
-              style: "danger",
-              event: { reason: "order belongs to another customer" },
-            },
-          },
+          choicesFrom: "choices",
         },
       },
       on: {
@@ -362,7 +409,7 @@ export const refundDeskMachine = deskSetup.createMachine({
       meta: {
         interaction: {
           label: "Please confirm your identity (email and one order detail).",
-          textEvent: "IDENTITY_CLAIM",
+          textEvent: { type: "IDENTITY_CLAIM", field: "claim" },
           events: { IDENTITY_CLAIM: { label: "Confirm identity" } },
         },
       },
@@ -439,7 +486,7 @@ export const refundDeskMachine = deskSetup.createMachine({
       meta: {
         interaction: {
           label: "{notice}",
-          textEvent: "CUSTOMER_REPLY",
+          textEvent: { type: "CUSTOMER_REPLY", field: "reply" },
           events: { CUSTOMER_REPLY: { label: "Reply" } },
         },
       },
@@ -461,7 +508,7 @@ export const refundDeskMachine = deskSetup.createMachine({
       meta: {
         interaction: {
           label: "{notice}",
-          textEvent: "REJECT",
+          textEvent: { type: "REJECT", field: "reason" },
           events: {
             APPROVE: { label: "Approve refund", style: "primary" },
             REJECT: { label: "Reject refund", style: "danger", event: { reason: "Not eligible" } },
@@ -598,6 +645,41 @@ export function deskPayloads(snapshot: {
   };
 }
 
+/** The button text for one proposal: `Refund $240`, `Look up ORD-1002`, `Escalate: order not found`. */
+function choiceLabel(type: ProposalType, payload: Record<string, unknown>): string {
+  switch (type) {
+    case "VERIFY_IDENTITY":
+      return "Verify identity";
+    case "LOOKUP_ORDER":
+      return `Look up ${String(payload["orderId"])}`;
+    case "ASK_CUSTOMER":
+      return "Ask for the order number";
+    case "REQUEST_APPROVAL":
+      return `Request approval for $${String(payload["amount"])}`;
+    case "ISSUE_REFUND":
+      return `Refund $${String(payload["amount"])}`;
+    case "ESCALATE":
+      return `Escalate: ${String(payload["reason"])}`;
+    case "CLOSE":
+      return `Close: ${String(payload["reason"])}`;
+  }
+}
+
+/**
+ * {@link deskPayloads} as labeled interaction choices, for a person driving
+ * the desk. Every proposal is listed; `getInteraction` keeps the accepted ones.
+ */
+export function deskChoices(context: DeskContext) {
+  return Object.entries(deskPayloads({ context })).flatMap(([type, payloads]) =>
+    payloads.map((payload) => ({
+      label: choiceLabel(type as ProposalType, payload),
+      event: { type, ...payload },
+      ...(type === "ISSUE_REFUND" ? { style: "primary" } : {}),
+      ...(type === "ESCALATE" ? { style: "danger" } : {}),
+    })),
+  );
+}
+
 /** The decider's system prompt: the goal, read off the machine. */
 export const DESK_SYSTEM_PROMPT = [
   `Goal: ${refundDeskMachine.root.description}`,
@@ -650,19 +732,36 @@ export function describeProposal(event: ChosenEvent): string {
   return event.type;
 }
 
+/** A tool result the desk counts as a rejection: a failed identity check or a missing order. */
+function isFailedCheck(event: ChosenEvent & Record<string, unknown>): boolean {
+  if (event.type !== "xstate.done.actor") return false;
+  return (
+    (event.actorId === "verifyIdentity" && !event.output) ||
+    (event.actorId === "lookupOrder" && !event.output)
+  );
+}
+
 /**
  * One episode's trail, projected from its event-log thread: one line per
- * journaled input (`turn 2: VERIFY_IDENTITY`, `turn 2: identity verified`).
- * The log is the source of truth; this is a view of it.
+ * journaled input (`turn 2: VERIFY_IDENTITY`, `turn 2: identity verified`),
+ * preceded on each turn by the proposals the desk refused
+ * (`turn 1: refused ISSUE_REFUND $40 (rejected-by-guard)`), read from
+ * `entry.decision`. The log is the source of truth; this is a view of it.
  */
 export function trailFromLog(entries: readonly AgentLogEntry[]): string[] {
+  const refused = new Map(getDecisionAttempts(entries).map((e) => [e.index, e.attempts]));
   const trail: string[] = [];
   let turn = 0;
   const push = (text: string) => trail.push(`turn ${turn}: ${text}`);
-  for (const { event } of entries) {
+  for (const { event, index } of entries) {
     const e = event as ChosenEvent & Record<string, unknown>;
     if ((PROPOSALS as string[]).includes(e.type) || e.type === "GIVE_UP") {
       turn += 1;
+      for (const attempt of refused.get(index) ?? []) {
+        push(
+          `refused ${attempt.event ? describeProposal(attempt.event) : "(no event)"} (${attempt.failure})`,
+        );
+      }
       push(describeProposal(e));
     } else if (e.type === "xstate.done.actor") {
       const output = e.output;
@@ -693,14 +792,26 @@ export function trailFromLog(entries: readonly AgentLogEntry[]): string[] {
   return trail;
 }
 
-/** Reads one episode's trail back from its thread. */
-export async function readTrail(store: AgentEventLogStore, threadId: string): Promise<string[]> {
-  return trailFromLog(await store.read(threadId));
+/**
+ * One episode's rejections, counted from its thread: every proposal the desk
+ * refused (`getDecisionAttempts`) plus every failed identity check or order
+ * lookup.
+ */
+export function rejectionsFromLog(entries: readonly AgentLogEntry[]): number {
+  const refused = getDecisionAttempts(entries).reduce((n, e) => n + e.attempts.length, 0);
+  const failedChecks = entries.filter(({ event }) =>
+    isFailedCheck(event as ChosenEvent & Record<string, unknown>),
+  ).length;
+  return refused + failedChecks;
 }
 
 /** A desk snapshot idle in `deciding` with `context`: a probe for gates and tests. */
 export function deskSnapshotAt(context: DeskContext): DeskSnapshot {
-  return refundDeskMachine.resolveState({ value: "deciding", context });
+  // resolveState runs no entry actions, so fill in this turn's choices here.
+  return refundDeskMachine.resolveState({
+    value: "deciding",
+    context: { ...context, choices: deskChoices(context) },
+  });
 }
 
 /**
@@ -732,6 +843,12 @@ export function decideDeskStep(
 
 // ─── Running an episode ───
 
+/**
+ * Reads the decider's model and judge call counts. The log cannot supply
+ * these: the decider runs at the boundary, outside the runtime, so no
+ * `@agent.usage` entry is journaled for it (and `getUsageFromEvents` folds
+ * tokens, not calls).
+ */
 type Counters = () => { modelCalls: number; judgeCalls: number };
 
 export type DeskEpisodeOptions = {
@@ -753,7 +870,8 @@ export type DeskEpisodeOptions = {
  * Runs one scenario through the desk against a fresh world and returns its
  * metrics. Idle waits are answered by the decider (in `deciding`) or the
  * world's script (identity, customer, approver). The episode is journaled to
- * `store` under `threadId`, and its trail is read back from there.
+ * `store` under `threadId`, each proposal with the attempts the desk refused
+ * before it, and its trail and rejections are read back from there.
  */
 export async function runDeskEpisode(
   scenario: Scenario,
@@ -769,30 +887,31 @@ export async function runDeskEpisode(
   const run = (init: Parameters<typeof runToQuiescence<typeof refundDeskMachine>>[1]) =>
     runToQuiescence(createAgentRuntime(refundDeskMachine, { actors, store, threadId }), init);
 
-  let failedChoices = 0;
   let result = await run({ input: { ticket: scenario.ticket, customerId: scenario.customerId } });
   while (result.status === "idle") {
     const snapshot = result.snapshot;
-    let event: DeskEvent;
-    if (snapshot.matches("deciding")) {
-      try {
-        const decision = await decideDeskStep(snapshot, options);
-        failedChoices += decision.attempts.length;
-        event = decision.event ?? { type: "GIVE_UP", reason: "no legal option" };
-      } catch (error) {
-        const exhausted = error instanceof AgentDecisionExhaustedError;
-        failedChoices += exhausted ? error.attempts.length : 1;
-        event = {
-          type: "GIVE_UP",
-          reason: exhausted
-            ? `${error.attempts.length} choices matched no legal option`
-            : `the decider failed: ${error instanceof Error ? error.message : String(error)}`,
-        };
-      }
-    } else {
-      event = answerFromWorld(snapshot, world);
+    if (!snapshot.matches("deciding")) {
+      result = await run({ event: answerFromWorld(snapshot, world) });
+      continue;
     }
-    result = await run({ event });
+    // The refused attempts ride on the entry of the event they explain.
+    let event: DeskEvent;
+    let attempts: DecisionAttempt[] = [];
+    try {
+      const decision = await decideDeskStep(snapshot, options);
+      attempts = decision.attempts;
+      event = decision.event ?? { type: "GIVE_UP", reason: "no legal option" };
+    } catch (error) {
+      const exhausted = error instanceof AgentDecisionExhaustedError;
+      if (exhausted) attempts = error.attempts;
+      event = {
+        type: "GIVE_UP",
+        reason: exhausted
+          ? `${error.attempts.length} choices matched no legal option`
+          : `the decider failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    result = await run({ event, decision: { attempts } });
   }
   if (result.status !== "done") {
     const why = result.status === "error" ? `: ${String(result.error)}` : "";
@@ -801,6 +920,7 @@ export async function runDeskEpisode(
 
   const end = { ...(options.counters?.() ?? start) };
   const outcome: Outcome = result.output.outcome;
+  const entries = await store.read(threadId);
   return {
     scenarioId: scenario.id,
     outcome,
@@ -808,10 +928,9 @@ export async function runDeskEpisode(
     turns: result.output.turns,
     modelCalls: end.modelCalls - start.modelCalls,
     judgeCalls: end.judgeCalls - start.judgeCalls,
-    rejections: failedChoices + result.output.rejections,
+    rejections: rejectionsFromLog(entries),
     violations: world.violations,
-    trail: await readTrail(store, threadId),
-    threadId,
+    trail: trailFromLog(entries),
   };
 }
 

@@ -349,6 +349,7 @@ export type EpisodeMetrics = {
   modelCalls: number;
   /** Judge (Jev / decision-model) calls. */
   judgeCalls: number;
+  /** Refused proposals plus failed checks. Desk arms count them from the episode's event-log thread. */
   rejections: number;
   violations: Violation[];
   /**
@@ -357,8 +358,6 @@ export type EpisodeMetrics = {
    * free of secrets.
    */
   trail: string[];
-  /** The event-log thread the episode was journaled to (desk arms only). */
-  threadId?: string;
 };
 
 export type BatchMetrics = {

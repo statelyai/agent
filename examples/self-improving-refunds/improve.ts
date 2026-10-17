@@ -5,8 +5,9 @@
  *   run train + held-out with the current playbook       → before (traces in the store)
  *   reflect: one `proposePlaybook` text request          → a candidate config
  *     the prompt: the goal, the objective, the environment and policy as
- *     `describeMachine` text, the train metrics, and each train episode's
- *     trail read back from its event-log thread
+ *     `describeMachine` text, the train metrics, and each train thread the
+ *     store lists (`listThreads`), with its trail and its refused proposals
+ *     (`getDecisionAttempts`) read back from the log
  *   gates: verifyAgentConfig (validate → vocabulary → lower → lint → explore),
  *     then `outputs` (the candidate answers the real desk boundary from probe states)
  *     a failing gate's `detail` goes back as a repair prompt (≤ maxRepairs)
@@ -29,8 +30,9 @@ import {
   APPROVAL_THRESHOLD,
   HELD_OUT_SCENARIOS,
   PROPOSALS,
-  runSplits,
+  runBatch,
   SCENARIOS,
+  summarize,
   type Arm,
   type BatchMetrics,
   type Facts,
@@ -42,8 +44,9 @@ import {
   createDeskArm,
   decideDeskStep,
   deskSnapshotAt,
-  readTrail,
   refundDeskMachine,
+  rejectionsFromLog,
+  trailFromLog,
   type DeskContext,
 } from "./desk.js";
 import {
@@ -122,7 +125,7 @@ export type ImproveOptions = {
   maxRepairs?: number;
   /** Where episodes are journaled. Default: a fresh in-memory store. */
   store?: AgentEventLogStore;
-  /** Prefix for this round's threads (`<runId>/before/<scenario>`). Default `'round-1'`. */
+  /** Prefix for this round's threads (`<runId>/before/train/<scenario>`). Default `'round-1'`. */
   runId?: string;
 };
 
@@ -180,26 +183,48 @@ function metricsLine(metrics: BatchMetrics): string {
   );
 }
 
-async function reflectionPrompt(
-  current: AgentWorkflowConfig,
-  before: SplitMetrics,
+/**
+ * The train episodes, read back from the store: every thread under `prefix`
+ * (`listThreads`), with its trail and rejections counted from the log. Model
+ * and judge calls come from the metrics; the log does not hold them.
+ */
+async function trainTraces(
   store: AgentEventLogStore,
-  feedback: string[],
-): Promise<string> {
+  prefix: string,
+  metrics: BatchMetrics,
+): Promise<string[]> {
+  if (!store.listThreads) {
+    throw new Error("improvePlaybook: the event-log store must implement listThreads.");
+  }
+  const { threadIds } = await store.listThreads({ prefix });
   const episodes: string[] = [];
-  for (const episode of before.train.episodes) {
-    const trail = episode.threadId ? await readTrail(store, episode.threadId) : episode.trail;
+  for (const threadId of threadIds) {
+    const entries = await store.read(threadId);
+    const scenarioId = threadId.slice(prefix.length);
+    const episode = metrics.episodes.find((e) => e.scenarioId === scenarioId);
+    const result = episode
+      ? `${episode.outcome} (${episode.correct ? "correct" : "WRONG"}), ` +
+        `${episode.modelCalls} model, ${episode.judgeCalls} judge, `
+      : "";
+    const violations = episode?.violations.length
+      ? `, VIOLATIONS: ${episode.violations.map((v) => v.rule).join(", ")}`
+      : "";
     episodes.push(
       [
-        `### ${episode.scenarioId}: ${episode.outcome} (${episode.correct ? "correct" : "WRONG"}), ` +
-          `${episode.modelCalls} model, ${episode.judgeCalls} judge, ${episode.rejections} rejected` +
-          (episode.violations.length
-            ? `, VIOLATIONS: ${episode.violations.map((v) => v.rule).join(", ")}`
-            : ""),
-        ...trail.map((line) => `  ${line}`),
+        `### ${scenarioId}: ${result}${rejectionsFromLog(entries)} rejected${violations}`,
+        ...trailFromLog(entries).map((line) => `  ${line}`),
       ].join("\n"),
     );
   }
+  return episodes;
+}
+
+function reflectionPrompt(
+  current: AgentWorkflowConfig,
+  before: SplitMetrics,
+  traces: string[],
+  feedback: string[],
+): string {
   return [
     "## Goal",
     DESK_GOAL,
@@ -220,7 +245,7 @@ async function reflectionPrompt(
     ...RULES,
     "",
     `## Last batch (train): ${metricsLine(before.train)}`,
-    ...episodes,
+    ...traces,
     "",
     `## Held-out (trails withheld): objective ${fmt(objective(before.heldOut))}`,
     ...(feedback.length
@@ -404,17 +429,28 @@ export async function improvePlaybook(options: ImproveOptions): Promise<Improvem
     store = createInMemoryEventLogStore(),
     runId = "round-1",
   } = options;
-  const measure = (config: AgentWorkflowConfig, phase: "before" | "after") =>
-    runSplits(
-      arm(createPlaybookDecide(config, { executors, judge }), {
-        store,
-        threadPrefix: `${runId}/${phase}`,
-      }),
-      train,
-      heldOut,
-    );
+  // Train and held-out journal under their own prefixes, so the reflection
+  // lists train threads only: held-out trails never reach the prompt.
+  const threadPrefix = (phase: "before" | "after", split: "train" | "held-out") =>
+    `${runId}/${phase}/${split}`;
+  const measure = async (
+    config: AgentWorkflowConfig,
+    phase: "before" | "after",
+  ): Promise<SplitMetrics> => {
+    const decide = createPlaybookDecide(config, { executors, judge });
+    const batch = (split: "train" | "held-out", scenarios: Scenario[]) =>
+      runBatch(arm(decide, { store, threadPrefix: threadPrefix(phase, split) }), scenarios);
+    const trainBatch = await batch("train", train);
+    const heldOutBatch = await batch("held-out", heldOut);
+    return {
+      train: trainBatch,
+      heldOut: heldOutBatch,
+      all: summarize(trainBatch.label, [...trainBatch.episodes, ...heldOutBatch.episodes]),
+    };
+  };
 
   const before = await measure(current, "before");
+  const traces = await trainTraces(store, `${threadPrefix("before", "train")}/`, before.train);
 
   const feedback: string[] = [];
   let repairs = 0;
@@ -423,7 +459,7 @@ export async function improvePlaybook(options: ImproveOptions): Promise<Improvem
 
   for (let attempt = 0; ; attempt++) {
     const { result } = await proposePlaybook.execute(
-      { prompt: await reflectionPrompt(current, before, store, feedback) },
+      { prompt: reflectionPrompt(current, before, traces, feedback) },
       executors,
     );
     proposed = result as unknown as AgentWorkflowConfig;

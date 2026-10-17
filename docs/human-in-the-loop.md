@@ -49,7 +49,73 @@ agentSetup.createMachine({
 });
 ```
 
-The descriptor is an optional `interaction` with a `label` (a string with `{context.path}` interpolation, or a function of the context), an `events` map of choices, and a `textEvent`. A machine that declares its own `meta` schema replaces the default; `interactionMetaSchema` is the runtime schema for the interaction shape when you build a schema pack by hand with `createAgentSchemas`.
+The descriptor is an optional `interaction` with a `label` (a string with `{context.path}` interpolation, or a function of the context), an `events` map of choices, payload `choices` and a `choicesFrom` context path, and a `textEvent`. A machine that declares its own `meta` schema replaces the default; `interactionMetaSchema` is the runtime schema for the interaction shape when you build a schema pack by hand with `createAgentSchemas`.
+
+## Payload choices
+
+An `events` entry is one button per event type. When one event type needs several buttons, one per payload, declare `choices` instead. Each choice is a label and the full event it sends:
+
+```ts no-check
+voting: {
+  meta: {
+    interaction: {
+      label: "Who is the chameleon?",
+      choices: [
+        { label: "Seat 1", event: { type: "ACCUSE", seat: 1 } },
+        { label: "Seat 2", event: { type: "ACCUSE", seat: 2 } },
+        { label: "Pass", event: { type: "PASS" }, style: "danger" }
+      ]
+    }
+  },
+  on: { ACCUSE: { target: "revealing" }, PASS: { target: "revealing" } }
+}
+```
+
+When the choices depend on context, keep them in a context array of the same shape and name its path with `choicesFrom`. The refund desk computes this turn's proposals on entry to `deciding`:
+
+```ts no-check
+deciding: {
+  entry: ({ context }) => ({ context: { choices: deskChoices(context) } }),
+  meta: {
+    interaction: {
+      label: "Turn {turn}: {notice} Choose the next step.",
+      choicesFrom: "choices" // [{ label: "Refund $240", event: { type: "ISSUE_REFUND", amount: 240 } }, ...]
+    }
+  }
+}
+```
+
+`getInteraction(snapshot).choices` lists static `choices` first, then the `choicesFrom` array:
+
+- Labels interpolate `{context.path}` like the interaction label.
+- Each event is checked against the machine's event schema and `snapshot.can(event)`. Only the choices the machine takes right now are listed.
+- `choices` is present only when the state declares `choices` or `choicesFrom`. The `events` list is unchanged.
+
+Convert a pressed button back with its index in `choices`, or its label:
+
+```ts no-check
+const first = eventFromInteraction(paused.snapshot, { choice: 0 });
+const refund = eventFromInteraction(paused.snapshot, { choice: "Refund $240" });
+// { type: "ISSUE_REFUND", amount: 240 }
+```
+
+## Free-text field
+
+`textEvent: "REJECT"` puts the text in a `text` field. Name another field with `{ type, field }`:
+
+```ts no-check
+asking: {
+  meta: {
+    interaction: {
+      label: "Please confirm your identity.",
+      textEvent: { type: "IDENTITY_CLAIM", field: "claim" }
+    }
+  },
+  on: { IDENTITY_CLAIM: { target: "verifying" } }
+}
+```
+
+`getInteraction` reports `textEvent: "IDENTITY_CLAIM"` and `textField: "claim"`, and `eventFromInteraction(snapshot, { text })` returns `{ type: "IDENTITY_CLAIM", claim: text }`. `textField` is absent when the field is `text`.
 
 ## Render and validate
 
@@ -66,6 +132,8 @@ if (paused.status === "idle") {
 ```
 
 `getInteraction` interpolates labels, collapses whitespace, and filters choices and `textEvent` through XState's currently accepted events. `eventFromInteraction` preserves fixed fields declared in interaction metadata and validates the chosen payload against the machine's event schema.
+
+Both read event schemas from `setupAgent`, or from a plain XState machine's own `setup({ schemas: { events } })`.
 
 Whitespace collapses because labels are usually authored as multi-line template literals and interpolated context can carry newlines of its own. Pass `{ preserveWhitespace: true }` when the label is deliberately multi-line, such as a rendered diff:
 

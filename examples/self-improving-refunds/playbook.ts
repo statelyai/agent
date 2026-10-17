@@ -174,10 +174,12 @@ function factsOf(context: unknown): Facts | undefined {
  * missing.
  */
 export const playbookGuards = {
-  /** A rejection this episode was about identity (a refused VERIFY_IDENTITY, or a reason naming it). */
+  /** A VERIFY_IDENTITY this episode failed its check or was refused. */
   identityRejected: ({ context }: { context: unknown }) =>
     factsOf(context)?.rejections.some(
-      (rejection) => rejection.proposal === "VERIFY_IDENTITY" || /identity/i.test(rejection.reason),
+      // Match on the proposal, never the reason text: refused decision attempts
+      // land in `rejections` too, and their reasons list every offered option id.
+      (rejection) => rejection.proposal === "VERIFY_IDENTITY",
     ) ?? false,
   /** The loaded order's `customerId` is not the ticket's customer. */
   orderBelongsToOtherCustomer: ({ context }: { context: unknown }) => {

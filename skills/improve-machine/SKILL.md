@@ -30,7 +30,7 @@ Find all six before changing anything. If one is missing, stop and ask.
 | -------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
 | Goal           | Root `description` of the policy config or the environment machine                               | Draft one with measurable success criteria; ask the user to confirm it      |
 | Objective      | A scorer over outcomes (an eval file, a `score*` function, a benchmark)                          | Write one from the goal's success criteria; **ask the user to confirm it**  |
-| Traces         | The `store` passed to `createAgentRuntime` / `runAgent`, plus the recorded thread ids            | Wire a store first (see `generate-machine` step 6) and collect runs         |
+| Traces         | The `store` passed to `createAgentRuntime` / `runAgent`; its `listThreads`, or recorded ids      | Wire a store first (see `generate-machine` step 6) and collect runs         |
 | Scenarios      | A scenario list with expected outcomes, split into train and held-out                            | Propose a fixed split (about 70/30, every category in both); ask to confirm |
 | Vocabulary     | The actors, requests, named guards, actions, decision events, and model refs the host implements | Read them off the host code; never invent names                             |
 | Policy history | The policy files and a `CHANGELOG.md` next to them                                               | Create the changelog with the current policy as `v0`                        |
@@ -53,30 +53,45 @@ const environmentText = describeMachine(environment);
 const policyText = describeMachine(policy);
 ```
 
-Then load the training threads and compute one outcome row per episode:
+Then find the training threads and compute one outcome row per episode:
 
 ```ts
-import { getUsageFromEvents, replay } from "@statelyai/agent/log";
+import { getDecisionAttempts, getUsageFromEvents, replay } from "@statelyai/agent/log";
+
+// Thread ids name the split and policy version: "train:v<n>:<scenario>:r<k>".
+const prefix = `train:v${currentVersion}:`;
+const threadIds: string[] = [];
+let cursor: string | undefined;
+do {
+  const page = await store.listThreads!({ prefix, limit: 100, cursor });
+  threadIds.push(...page.threadIds);
+  cursor = page.cursor;
+} while (cursor !== undefined);
 
 const rows = [];
-for (const scenario of trainScenarios) {
-  const entries = await store.read(scenario.threadId);
+for (const threadId of threadIds) {
+  const scenario = scenarioOf(threadId);
+  const entries = await store.read(threadId);
   const { snapshot } = replay(environment, entries); // pure fold, no model calls
   rows.push({
-    id: scenario.id,
+    threadId,
     expected: scenario.expected,
     state: snapshot.value,
     status: snapshot.status,
     output: snapshot.output,
     steps: entries.length,
     tokens: getUsageFromEvents(entries).totalTokens ?? 0,
+    failedAttempts: getDecisionAttempts(entries).flatMap(({ attempts }) => attempts),
   });
 }
 ```
 
-- `store.read(threadId)` returns a thread's entries in log order. The store does not list threads, so use the ids recorded with each scenario.
+- `store.listThreads({ prefix, limit, cursor })` pages through the threads that hold at least one entry. `cursor` is present only while more ids remain. It is optional on a custom `AgentEventLogStore`; `createInMemoryEventLogStore` implements it. Without it, use the thread ids recorded with each scenario.
+- Prefix thread ids with the split and version so a `listThreads` prefix returns one version's training runs and never a held-out thread. `scenarioOf` is your mapping from a thread id back to its scenario.
+- `store.read(threadId)` returns a thread's entries in log order.
 - `replay` throws `AgentMachineVersionMismatchError` on a thread recorded by a different environment version. Score each thread with the version that recorded it.
-- Decision attempts the environment did not accept are retried inside the decision, so they are not log entries. Under `createAgentRuntime`, every retry's `request.start` trace event carries the earlier `attempts` with their reasons: persist trace events with `onTrace` and `serializeTraceEvent` (JSON lines) next to the log. With `decideNext` at the boundary, record the returned `attempts` yourself. The `attempts` on an `AgentDecisionExhaustedError` cover the exhausted case.
+- `getDecisionAttempts(entries)` returns `{ index, eventType, attempts }` for each entry whose decision needed retries: the failed tries before the event landed, or every try of an exhausted decision (`eventType` is then `xstate.error.actor.*`). Each attempt has `failure` (`unknown-event`, `invalid-payload`, or `rejected-by-guard`), `reason`, and the attempted `event` when there was one. A first-try decision records nothing.
+- `agent.decide` invokes journal their attempts on their own. With `decideNext` at the boundary, the host must pass them with the event, `runToQuiescence(runtime, { event, decision: { attempts } })` or `runtime.transition(state, event, { decision: { attempts } })`, or they never reach the log.
 - Compute the objective over the rows. This is the baseline for the round.
 
 ## 3. Diagnose
@@ -85,7 +100,7 @@ Group the failing training episodes by cause. Check these clusters in order:
 
 1. **Invariant violations.** Any violation is a stop: the environment is wrong, not the policy. Write a change request.
 2. **Wrong terminal state.** The episode ended in `escalated` when the label says `issued`, or the reverse. Look at which decision led there.
-3. **Guard rejections.** The policy keeps proposing events the environment refuses. The policy lacks a check the environment already makes.
+3. **Guard rejections.** The policy keeps proposing events the environment refuses: `rejected-by-guard` entries in the rows' `failedAttempts`. The policy lacks a check the environment already makes.
 4. **Loops and budget exhaustion.** Repeated state values, or a terminal reached because a turn or retry budget ran out.
 5. **Cost hotspots.** Correct episodes that spend model calls where a `choice` over known facts, or a cheap judgment, would decide.
 
@@ -124,12 +139,12 @@ const failed = verified.gates.find((gate) => !gate.ok);
 
 - Gates run in order and stop at the first failure: `validate`, `vocabulary`, `lower`, `lint`, `explore`.
 - A failed gate's `detail` names the offending path, state, or name. Send it back verbatim with the rejected config and regenerate. Cap repairs at 3. After 3, discard the candidate, record it, and move to the next cause.
-- `explore` keys besides `inputs` and `terminals` pass through to `explorePaths`: `text`, `invokes`, `errors`, `outputs` (one branch per listed output), `payloads` (one branch per payload), `maxDepth`, `maxPaths`.
+- `explore` keys besides `inputs` and `terminals` pass through to `explorePaths`: `text`, `invokes`, `errors`, `outputs` (one branch per listed output), `payloads` (one branch per payload), `dedupeBy` (explore each snapshot key once; the key must cover every field a guard reads), `maxDepth`, `maxPaths`.
 - The environment's own `canReach` proofs cover every policy, because the environment's guards judge every proposed event. You did not change the environment, so you do not re-prove it.
 
 ## 6. Replay
 
-Run the candidate on the training scenarios, then on the held-out scenarios. Write every replay to the store under new thread ids that name the version (`<scenario>-v3-r1`), so the next round can read them.
+Run the candidate on the training scenarios, then on the held-out scenarios. Write every replay to the store under new thread ids that name the split and version (`train:v3:<scenario>:r1`, `heldout:v3:<scenario>:r1`), so the next round can list them by prefix.
 
 - Run the current policy and the candidate on the same scenarios, the same world state, and the same model refs.
 - Model calls are nondeterministic. Run each scenario k times (k ≥ 3 when calls are not cached) and compare means.

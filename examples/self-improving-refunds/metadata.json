@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["raw tool loop", "prompt-level guardrails", "LangGraph"],
-    "purpose": "The desk is a plain XState machine: its description is the goal, its guards are the rules, and a sentinel state is proven unreachable with canReach. A decider at the boundary only ever sees legal options, and every episode lands in an event-log store. The agent rewrites its JSON playbook from those traces and keeps it only when a goal-derived objective rises on train and held-out tickets. The benchmark shows the raw tool loop breaking the rules and every desk arm never breaking them."
+    "purpose": "The desk is a plain XState machine: its description is the goal, its guards are the rules, and a sentinel state is proven unreachable with canReach. A decider at the boundary only ever sees legal options, and every episode lands in an event-log store with the proposals the desk refused. The agent rewrites its JSON playbook from those traces and keeps it only when a goal-derived objective rises on train and held-out tickets. The benchmark shows the raw tool loop breaking the rules and every desk arm never breaking them. In the demo a person can drive the desk the same way, through payload choices (one button per legal proposal, such as \"Refund $240\") and free-text answers, against a sample world of customers and orders."
   },
   "starters": [
     {

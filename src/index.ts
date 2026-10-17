@@ -46,6 +46,8 @@ export { AgentInvalidEventPayloadError, getAcceptedEvents, parseAgentEvent } fro
 export { eventFromInteraction, getInteraction, interactionMetaSchema } from "./interaction.js";
 export type {
   AgentInteraction,
+  AgentInteractionChoice,
+  AgentInteractionChoiceMeta,
   AgentInteractionDescriptor,
   AgentInteractionEvent,
   AgentInteractionEventMeta,
@@ -98,7 +100,7 @@ export type { AgentUsageEvent } from "./usage.js";
 // `@statelyai/agent/log`. The root keeps only what the agent runtime reads and
 // returns, and the errors it can throw.
 export { AgentMachineVersionMismatchError } from "./event-log.js";
-export type { AgentLogEntry } from "./event-log.js";
+export type { AgentLogDecision, AgentLogEntry } from "./event-log.js";
 export { AgentEventLogConflictError } from "./event-log-store.js";
 export type { AgentEventLogStore } from "./event-log-store.js";
 export {
@@ -122,6 +124,7 @@ export type {
   AgentRuntimeOptions,
   AgentTimerEvent,
   AgentTimerScheduler,
+  AgentTransitionOptions,
 } from "./run-agent.js";
 export type {
   AgentInputFrom,

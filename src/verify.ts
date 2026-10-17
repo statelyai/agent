@@ -1085,13 +1085,23 @@ function finitePayloads(jsonSchema: unknown): Record<string, unknown>[] | undefi
   return product;
 }
 
-// Shared DFS engine for explorePaths/canReach. When `stopWhen` returns true for
-// a visited snapshot, exploration halts and the witness path is returned.
-async function explore(
+// A pending branch point: the step to advance, the events that led to it, and
+// how many branch points it has spent against `maxDepth`.
+interface ExploreNode {
+  step: AgentStep;
+  path: ChosenEvent[];
+  depth: number;
+}
+
+// Shared engine for explorePaths/canReach. Without `stopWhen` it walks depth
+// first (explorePaths' terminal order). With `stopWhen` (canReach) it walks
+// breadth first by path length and halts on the first snapshot the predicate
+// holds for, so the returned witness is a shortest path.
+function explore(
   machine: AnyStateMachine,
   options: ExplorePathsOptions,
   stopWhen?: (snapshot: AnyMachineSnapshot) => boolean,
-): Promise<{ report: AgentPathReport; witness?: ChosenEvent[] }> {
+): { report: AgentPathReport; witness?: ChosenEvent[] } {
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 200;
   const textScript = options.text ?? {};
@@ -1126,9 +1136,12 @@ async function explore(
     if (listed) {
       return listed.map((payload) => ({ ...payload, type }));
     }
-    const offered = requestOptions?.filter((option) => option.event.type === type);
-    if (offered && offered.length > 0) {
-      return offered.map((option) => option.event);
+    // A closed choice is the whole branch set, as at run time: a type the
+    // decide input withheld with `[]` has no options and is not explored.
+    if (requestOptions) {
+      return requestOptions
+        .filter((option) => option.event.type === type)
+        .map((option) => option.event);
     }
     return (schemaPayloads(type) ?? [{}]).map((payload) => ({ ...payload, type }));
   };
@@ -1251,7 +1264,11 @@ async function explore(
     return { step: current };
   };
 
-  const visit = async (step: AgentStep, path: ChosenEvent[], startDepth: number): Promise<void> => {
+  // One branch point: advance the node, record its terminal or skip it as a
+  // dedupe revisit, and yield its children lazily. The DFS driver visits each
+  // child before resuming, so the cap and witness checks between children see
+  // the state left by the previous child's subtree.
+  function* expand({ step, path, depth: startDepth }: ExploreNode): Generator<ExploreNode> {
     let depth = startDepth;
     if (witness !== undefined) {
       return;
@@ -1269,6 +1286,9 @@ async function explore(
 
     // A key already explored at this depth or shallower has nothing new
     // below it. A shallower revisit explores again: it has more depth left.
+    // Breadth-first order is by path length, not depth (an unrecorded output
+    // fork or a decision's rejection spends depth without adding the same
+    // number of events), so the rule holds for both walks.
     if (options.dedupeBy) {
       const key = options.dedupeBy(settled.snapshot as AnyMachineSnapshot);
       const seenAt = visited.get(key);
@@ -1285,12 +1305,16 @@ async function explore(
         unexplored.push(`max-depth: stopped at path [${path.map((e) => e.type).join(", ")}]`);
         return;
       }
-      // The failing branch first, so a canReach witness for an onError-only
-      // state is the short one.
+      // The failing branch first: it leads explorePaths' terminals, and breaks
+      // ties between equally short canReach witnesses.
       if (fork.errorKey !== undefined) {
         const failed = rejectAgentStep(machine, settled, fork.id, errorScript[fork.errorKey]);
         recordState(failed.snapshot);
-        await visit(failed, [...path, { type: `xstate.error.actor.${fork.id}` }], depth + 1);
+        yield {
+          step: failed,
+          path: [...path, { type: `xstate.error.actor.${fork.id}` }],
+          depth: depth + 1,
+        };
       }
       if (!fork.isDecision) {
         for (const output of fork.outputs) {
@@ -1305,11 +1329,13 @@ async function explore(
             fork.isText ? asTextResult(output) : output,
           );
           recordState(resolved.snapshot);
-          await visit(
-            resolved,
-            fork.recordOutputs ? [...path, { type: `xstate.done.actor.${fork.id}`, output }] : path,
-            depth + 1,
-          );
+          yield {
+            step: resolved,
+            path: fork.recordOutputs
+              ? [...path, { type: `xstate.done.actor.${fork.id}`, output }]
+              : path,
+            depth: depth + 1,
+          };
         }
         return;
       }
@@ -1395,12 +1421,38 @@ async function explore(
       }
       const next = transitionAgentStep(machine, settled, event);
       recordState(next.snapshot);
-      await visit(next, [...path, event], depth + 1);
+      yield { step: next, path: [...path, event], depth: depth + 1 };
     }
-  };
+  }
 
-  if (witness === undefined) {
-    await visit(initial, [], 0);
+  const root: ExploreNode = { step: initial, path: [], depth: 0 };
+  if (witness === undefined && stopWhen) {
+    // Breadth-first by path length, so the first witness found is a shortest
+    // one. A fork that records no event (an unrecorded output) keeps its
+    // child at the parent's length, so it joins the level being drained.
+    const levels: (ExploreNode | undefined)[][] = [[root]];
+    search: for (let length = 0; length < levels.length; length++) {
+      const level = levels[length] ?? [];
+      for (let i = 0; i < level.length; i++) {
+        const node = level[i]!;
+        // Drop the reference once taken, so a drained level frees its snapshots.
+        level[i] = undefined;
+        for (const child of expand(node)) {
+          (levels[child.path.length] ??= []).push(child);
+        }
+        if (witness !== undefined || hitPathCap) {
+          break search;
+        }
+      }
+      levels[length] = [];
+    }
+  } else if (witness === undefined) {
+    const visit = (node: ExploreNode): void => {
+      for (const child of expand(node)) {
+        visit(child);
+      }
+    };
+    visit(root);
   }
 
   return {
@@ -1447,7 +1499,7 @@ export async function explorePaths(
   machine: AnyStateMachine,
   options: ExplorePathsOptions = {},
 ): Promise<AgentPathReport> {
-  return (await explore(machine, options)).report;
+  return explore(machine, options).report;
 }
 
 /** The result of a {@link canReach} query. */
@@ -1527,7 +1579,7 @@ export async function canReach(
       ? target
       : (snapshot: AnyMachineSnapshot): boolean =>
           snapshot.nodes.some((node) => node.id === resolvedTarget);
-  const { witness, report } = await explore(machine, options, stopWhen);
+  const { witness, report } = explore(machine, options, stopWhen);
   if (witness !== undefined) {
     return {
       reachable: true,

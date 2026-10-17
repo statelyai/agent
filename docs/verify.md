@@ -212,7 +212,7 @@ By default, events are applied as `{ type }`. A guard that reads the payload, su
 - `payloads` is a function of the snapshot at each branch point. It returns payloads per event type. A type with an entry forks once per payload as `{ ...payload, type }`, at decisions and idle waits alike.
 - Guard-rejected variants count in `prunedByGuard`.
 - A decide input's own `payloads` become that decision's branch set. An explorer `payloads` entry for the same type overrides them.
-- A type with no entry is filled from its event schema when every required field is an `enum`, `const`, `boolean`, or a union of those. The schema is the agent machine's, or a plain XState machine's own `schemas.events`. Exploration forks over their product, up to 64 combinations. The schema must expose JSON Schema through Standard JSON Schema, as Zod 4 does. Any other type stays `{ type }`.
+- A type with no entry is filled from its event schema when every required field is an `enum`, `const`, `boolean`, `null`, or a union of those. The schema is the agent machine's, or a plain XState machine's own `schemas.events`. Exploration forks over their product, up to 64 combinations. The schema must expose JSON Schema through Standard JSON Schema, as Zod 4 does. Any other type stays `{ type }`.
 - `outputs` lists every output to try per src. Two or more outputs fork one branch each, and an `errors` entry for the same src adds the failing branch. Each branch records `{ type: 'xstate.done.actor.<id>', output }` in the path. An `outputs` entry replaces that src's `text` or `invokes` value.
 - `dedupeBy` projects a settled snapshot to a key. Each key is explored once, or again when reached at a shallower depth. The key must include every field a guard, choice, or `onDone` reads, or the search misses paths.
 
@@ -249,6 +249,9 @@ const { reachable, witness } = await canReach(refundMachine, "denied", {
 
 `witness` is the sequence of chosen and applied events that reaches the state, which is the proof that it is reachable. It is absent when `reachable` is `false`.
 
+- The witness is a shortest one: no path within `maxDepth` reaches the target in fewer events. A recorded `xstate.error.actor.*` or `xstate.done.actor.*` entry counts as one event.
+- `canReach` searches breadth first to find it, so a retry loop never pads the witness. `explorePaths` stays depth first, and its terminal order is unchanged.
+
 `canReach` forwards `errors`, so a state that only a failure reaches is checkable the same way.
 
 ```ts
@@ -270,7 +273,7 @@ import { machine } from "./machine";
 assertAgentMachine(machine); // throws AgentLintError on error-severity findings
 ```
 
-For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. See [Machines as data](machines-as-data.md). Every check applies, including reachability. The lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.
+For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. See [Machines as data](machines-as-data.md). Every check applies, including reachability. The lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function. `verifyAgentConfig` runs validation, lowering, lint, and exploration in one call. See [Generating machines with an LLM](generate-machines.md).
 
 ## Related
 

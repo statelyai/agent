@@ -59,6 +59,8 @@ Rules the runtime enforces. Each one maps to a build error or a lint diagnostic:
 - Every path must reach a `"type": "final"` state, and each final state needs an `output` when `schemas.output` is declared.
 - Do not invent guard or action names. Only `"{{ }}"` guards, `assign`, and `emit` exist unless the host tells you which named guards/actions it implements.
 - Model refs are strings (`"openai/gpt-5.4-mini"`); the host resolves them.
+- To make a decision a closed choice, add `payloads` to the `agent.decide` input: one payload list per event type, without `type` (`"payloads": { "REFUND": [{ "amount": 20 }, { "amount": 50 }], "ESCALATE": [] }`). The model then picks one listed event instead of writing a payload. A type with no key is offered as `{ type }`; `[]` withholds it.
+- An idle human step can carry `meta.interaction` for the host to render with `getInteraction`: a `label`, `events` (one button per event type), `choices` (one button per full event, `{ "label": "Refund $20", "event": { "type": "REFUND", "amount": 20 } }`), `choicesFrom` (a context path holding such a list), and `textEvent` for free text. A bare `"textEvent": "REJECT"` puts the text in a `text` field; `{ "type": "REJECT", "field": "reason" }` names the field. `meta` is not template-evaluated.
 
 Reference config — decision, text request, idle human step, one final state:
 
@@ -285,11 +287,12 @@ import { runAgent } from "@statelyai/agent";
 import { createInMemoryEventLogStore } from "@statelyai/agent/log";
 
 const store = createInMemoryEventLogStore(); // tests only; implement AgentEventLogStore on your database
-const result = await runAgent(machine, { input, executors, store, threadId: `ticket-${ticketId}` });
+const result = await runAgent(machine, { input, executors, store, threadId: `tickets:${ticketId}` });
 ```
 
 - `threadId` is required with `store`. One thread per run.
-- The store does not list threads. Record each thread id with its scenario or ticket so an improver can find it.
+- Give thread ids a prefix an improver can list by, such as `tickets:<ticketId>`. `store.listThreads({ prefix, limit, cursor })` pages through them. It is optional on a custom `AgentEventLogStore`, so with a store that lacks it, record each thread id with its scenario or ticket.
+- Failed decision attempts are journaled on the entry they explain; `getDecisionAttempts(entries)` from `@statelyai/agent/log` reads them back.
 - `replay(machine, await store.read(threadId))` from `@statelyai/agent/log` rebuilds the final state with no model calls; `getUsageFromEvents(entries)` sums token usage.
 
 ## 7. Hand back

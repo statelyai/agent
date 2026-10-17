@@ -23,9 +23,14 @@
  *          APPROVE: { label: "Approve refund", style: "primary" },
  *          DENY: { label: "Deny", style: "danger" },
  *        },
+ *        // Payload choices: one button per full event ("Seat 2",
+ *        // "Refund $240"). `choicesFrom` names a context array of the same
+ *        // shape for choices computed at runtime.
+ *        choices: [{ label: "Seat 2", event: { type: "ACCUSE", seat: 2 } }],
  *        // Free chat text becomes this event (payload from its single
- *        // string field) — directly when it is the only thing text can
- *        // mean, else as one of the readings Jev chooses among.
+ *        // string field, or `{ type, field }` to name the field) — directly
+ *        // when it is the only thing text can mean, else as one of the
+ *        // readings Jev chooses among.
  *        textEvent: "REJECT",
  *        // Optional custom composer renderer for this state ("rating",
  *        // "cards"). Unknown names fall back to the schema form.
@@ -73,6 +78,15 @@ export type AcceptedEvent = {
   jsonSchema: JsonObject | null;
   /** True when sending this event needs user-provided payload fields. */
   needsPayload: boolean;
+  /** True when the state's payload choices cover this event type, so it gets no button of its own. */
+  coveredByChoices?: boolean;
+};
+
+/** One payload choice from `meta.interaction.choices` / `choicesFrom`: a button sending a full event. */
+export type InteractionChoice = {
+  label: string;
+  style: AcceptedEventStyle;
+  event: { type: string } & JsonObject;
 };
 
 /** One pending host-owned timer: the id to deliver back and its delay in ms. */
@@ -83,6 +97,12 @@ export type ChatIdle = {
   /** Human prompt from `meta.interaction.label`, if declared. */
   prompt: string | null;
   events: AcceptedEvent[];
+  /**
+   * Payload choices the snapshot accepts right now, from
+   * `meta.interaction.choices` and `choicesFrom`. Absent when the state
+   * declares none.
+   */
+  choices?: InteractionChoice[];
   /**
    * Event type that free chat text maps to while idle (its single string
    * field carries the text), from `meta.interaction.textEvent` or inferred

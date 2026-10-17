@@ -63,9 +63,9 @@ const result = await runAgent(machine, {
 });
 ```
 
-- Each run writes to its own thread. Keep a list of thread ids per scenario: the store reads one thread at a time and does not list threads.
+- Each run writes to its own thread. Name threads by split and scenario, such as `train:ticket-1001`, and `store.listThreads({ prefix: "train:" })` pages through one split. `listThreads` is optional on a custom store; without it, record the thread ids per scenario. See [Stores](event-log.md#stores).
 - `replay(machine, entries)` from `@statelyai/agent/log` rebuilds the state at the end of a thread, with no model calls. `getUsageFromEvents(entries)` sums its token usage.
-- The log holds what the machine consumed, not the decision attempts it did not accept. Each retry's `request.start` trace event carries those `attempts` with reasons. Persist trace events with `onTrace` and `serializeTraceEvent` when the improver needs them. See [Observability](observability.md).
+- The log also keeps the decision attempts the machine did not accept, on the entry they explain. `getDecisionAttempts(entries)` from `@statelyai/agent/log` lists them with their reasons, so the events the guards refused are countable from the log alone. A host that decides with `decideNext` passes its `attempts` with the event. See [Decision attempts](event-log.md#decision-attempts).
 - `createInMemoryEventLogStore` is for tests. In production, implement `AgentEventLogStore` against your database. See [Persistence](persistence.md).
 
 An objective reads the threads and scores them. This one counts correct terminal states, invariant violations, and tokens:
@@ -110,7 +110,7 @@ traces → objective → diagnose → propose a policy diff → verifyAgentConfi
 
 Each round changes the policy once, then measures it.
 
-1. **Diagnose.** Compute per-run outcomes and the objective. Group the failures by cause: the terminal state reached, guard rejections, loops, and cost hotspots.
+1. **Diagnose.** Compute per-run outcomes and the objective. Group the failures by cause: the terminal state reached, guard rejections (`getDecisionAttempts`), loops, and cost hotspots.
 2. **Propose.** A model writes the smallest policy change that addresses one cause, with its hypothesis written down.
 3. **Gate.** [`verifyAgentConfig`](generate-machines.md) runs `validate`, `vocabulary`, `lower`, `lint`, and `explore` on the candidate. A failing gate's `detail` is the repair prompt. Cap repairs at 3.
 4. **Replay.** Run the training scenarios with the candidate, then the held-out scenarios.

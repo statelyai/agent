@@ -188,5 +188,37 @@ export function createDurableObjectEventLogStore(
         );
       });
     },
+
+    async listThreads(listOptions = {}) {
+      const { prefix = "", limit, cursor } = listOptions;
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+        throw new Error(
+          `AgentEventLogStore.listThreads: limit must be a positive integer; got ${String(limit)}.`,
+        );
+      }
+      // The primary key's leading `thread_id` column serves DISTINCT in order.
+      // The cursor is the last id of the previous page; `substr` (not LIKE)
+      // keeps `%` and `_` in a prefix literal. One extra row says whether
+      // another page exists.
+      const rows = sql
+        .exec(
+          `SELECT DISTINCT thread_id FROM ${table}
+           WHERE substr(thread_id, 1, length(?)) = ? AND (? IS NULL OR thread_id > ?)
+           ORDER BY thread_id ASC
+           LIMIT ?`,
+          prefix,
+          prefix,
+          cursor ?? null,
+          cursor ?? null,
+          limit === undefined ? -1 : limit + 1,
+        )
+        .toArray()
+        .map((row) => String(row.thread_id));
+      if (limit === undefined || rows.length <= limit) {
+        return { threadIds: rows };
+      }
+      const page = rows.slice(0, limit);
+      return { threadIds: page, cursor: page[page.length - 1]! };
+    },
   };
 }
