@@ -109,6 +109,7 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 - [chatbot-simulation-eval](chatbot-simulation-eval): a simulated customer and the bot under test alternate under a `MAX_EXCHANGES` choice guard, the bot's request input provably omits the persona, and a Jev judge (a policy yes/no plus a quality score) runs inside the machine
 - [essay-grader](essay-grader): each pass is a Jev score over a five-level rubric; three choice states over exported score thresholds stop grading at the first weak pass, and the result names the stage it stopped after
 - [rank-candidates](rank-candidates): Jev decides, code sorts — a Jev score per candidate against a brief and a yes/no per shortlisted pair, while the threshold, sort, per-bucket quota and top-k cut-off are plain code, and every cut carries a reason
+- [self-improving-refunds](self-improving-refunds): the agent rewrites its own playbook, a JSON machine gated by validate, lint, `explorePaths`, and a replay before promotion, while the desk's business rules stay guards it cannot touch and an `illegallyIssued` sentinel stays provably unreachable
 
 ## Statechart policies
 

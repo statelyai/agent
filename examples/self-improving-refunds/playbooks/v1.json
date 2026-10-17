@@ -1,0 +1,193 @@
+{
+  "id": "refund-playbook-v1",
+  "description": "Choice ladder over the facts: every common step is decided by code-free routing; the only model call is one Jev judgment on intent once the order checks out.",
+  "schemas": {
+    "context": {
+      "type": "object",
+      "properties": {
+        "facts": {
+          "type": "object"
+        },
+        "classification": {
+          "type": ["object", "null"]
+        },
+        "proposal": {
+          "type": ["object", "null"]
+        }
+      },
+      "required": ["facts"]
+    }
+  },
+  "context": {
+    "facts": "{{ input }}",
+    "classification": null,
+    "proposal": null
+  },
+  "initial": "identity",
+  "states": {
+    "identity": {
+      "type": "choice",
+      "choice": [
+        {
+          "guard": "identityRejected",
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "ESCALATE",
+              "reason": "Identity verification failed."
+            }
+          }
+        },
+        {
+          "guard": "{{ context.facts.identityVerified }}",
+          "target": "order"
+        },
+        {
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "VERIFY_IDENTITY"
+            }
+          }
+        }
+      ]
+    },
+    "order": {
+      "type": "choice",
+      "choice": [
+        {
+          "guard": "{{ context.facts.order }}",
+          "target": "ownership"
+        },
+        {
+          "guard": "{{ context.facts.orderIdCandidates.0 }}",
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "LOOKUP_ORDER",
+              "orderId": "{{ context.facts.orderIdCandidates.0 }}"
+            }
+          }
+        },
+        {
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "ASK_CUSTOMER",
+              "question": "Which order number is this about?"
+            }
+          }
+        }
+      ]
+    },
+    "ownership": {
+      "type": "choice",
+      "choice": [
+        {
+          "guard": "orderBelongsToOtherCustomer",
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "ESCALATE",
+              "reason": "The order belongs to another customer."
+            }
+          }
+        },
+        {
+          "guard": "{{ context.facts.order.refunded }}",
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "CLOSE",
+              "reason": "This order was already refunded."
+            }
+          }
+        },
+        {
+          "target": "classifying"
+        }
+      ]
+    },
+    "classifying": {
+      "invoke": {
+        "id": "classify",
+        "src": "classifyTicket",
+        "input": {
+          "ticket": "{{ context.facts.ticket }}",
+          "customerReplies": "{{ context.facts.customerReplies }}"
+        },
+        "onDone": {
+          "target": "intent",
+          "assign": {
+            "classification": "{{ event.output }}"
+          }
+        },
+        "onError": {
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "ESCALATE",
+              "reason": "Could not classify the ticket."
+            }
+          }
+        }
+      }
+    },
+    "intent": {
+      "type": "choice",
+      "choice": [
+        {
+          "guard": "{{ context.classification.isRefundRequest }}",
+          "target": "amount"
+        },
+        {
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "CLOSE",
+              "reason": "Not a refund request."
+            }
+          }
+        }
+      ]
+    },
+    "amount": {
+      "type": "choice",
+      "choice": [
+        {
+          "guard": "{{ context.facts.approved }}",
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "ISSUE_REFUND",
+              "amount": "{{ context.facts.order.total }}"
+            }
+          }
+        },
+        {
+          "guard": "overThreshold",
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "REQUEST_APPROVAL",
+              "amount": "{{ context.facts.order.total }}"
+            }
+          }
+        },
+        {
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "ISSUE_REFUND",
+              "amount": "{{ context.facts.order.total }}"
+            }
+          }
+        }
+      ]
+    },
+    "done": {
+      "type": "final",
+      "output": "{{ context.proposal }}"
+    }
+  }
+}

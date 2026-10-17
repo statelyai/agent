@@ -322,6 +322,21 @@ export {
   rank,
   DEFAULTS as rankCandidatesDefaults,
 } from "./rank-candidates/index.js";
+export {
+  SCENARIOS,
+  createDeskArm,
+  createPlaybookDecide,
+  createWorld,
+  createWorldActors,
+  improvePlaybook,
+  loadPlaybook,
+  lowerPlaybook,
+  refundDeskMachine,
+  refundDeskSchemas,
+  runBatch,
+  runDeskEpisode,
+  runSelfImprovingRefundsExample,
+} from "./self-improving-refunds/index.js";
 
 // --- Statechart policies ----------------------------------------------------
 
