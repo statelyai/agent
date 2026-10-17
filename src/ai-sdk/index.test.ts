@@ -10,7 +10,7 @@ type LanguageModelStreamPart = MockStreamResult extends { stream: ReadableStream
   ? P
   : never;
 import { tool } from "ai";
-import type { AgentDecisionRequest } from "../decision.js";
+import { resolveDecision, type AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools } from "../types.js";
 import { createAiSdkExecutors, parseModelRef } from "./index.js";
@@ -1279,5 +1279,118 @@ describe("createAiSdkExecutors model sources", () => {
     expect(() => createAiSdkExecutors(bareMachine)).toThrow(
       /got a machine whose setupAgent\(\.\.\.\) declared no models/,
     );
+  });
+});
+
+describe("createAiSdkExecutors — decide over closed-choice options", () => {
+  test("presents one tool with an enum of option ids and maps the chosen id back", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "choose_option",
+            input: JSON.stringify({ option: "refund:20" }),
+          },
+        ],
+        finishReason: { unified: "tool-calls", raw: "tool_calls" },
+        usage: {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 1, text: 1, reasoning: 0 },
+        },
+        warnings: [],
+      },
+    });
+
+    const { decide } = createAiSdkExecutors({ models: { m: model } });
+    const result = await decide({
+      kind: "decision",
+      id: "d1",
+      model: "m",
+      prompt: "choose",
+      events: [
+        { type: "refund", toolName: "send_event_refund" },
+        { type: "escalate", toolName: "send_event_escalate" },
+      ],
+      options: [
+        { event: { type: "refund", amount: 20 }, description: "Refund $20" },
+        { event: { type: "escalate" }, description: "Hand to a person" },
+      ],
+      attempts: [],
+    });
+
+    const tools = model.doGenerateCalls[0]!.tools ?? [];
+    expect(tools).toHaveLength(1);
+    const [only] = tools as Array<{ name: string; description?: string; inputSchema: unknown }>;
+    expect(only!.name).toBe("choose_option");
+    expect(only!.description).toContain("refund:20: Refund $20");
+    expect(only!.description).toContain("escalate: Hand to a person");
+    expect(only!.inputSchema).toMatchObject({
+      properties: { option: { enum: ["refund:20", "escalate"] } },
+      required: ["option"],
+    });
+    expect(result.event).toEqual({ type: "refund", amount: 20 });
+  });
+
+  test("an id that is not offered, or another tool, is retried, not thrown", async () => {
+    const calls = [
+      { toolName: "choose_option", input: { option: "refund:99" } },
+      { toolName: "send_event_refund", input: { amount: 20 } },
+      { toolName: "choose_option", input: { option: "escalate" } },
+    ];
+    let call = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        const { toolName, input } = calls[call++]!;
+        return {
+          content: [
+            {
+              type: "tool-call" as const,
+              toolCallId: `call-${call}`,
+              toolName,
+              input: JSON.stringify(input),
+            },
+          ],
+          finishReason: { unified: "tool-calls" as const, raw: "tool_calls" },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 1, text: 1, reasoning: 0 },
+          },
+          warnings: [],
+        };
+      },
+    });
+    const { decide } = createAiSdkExecutors({ models: { m: model } });
+    const request: AgentDecisionRequest = {
+      kind: "decision",
+      id: "d1",
+      model: "m",
+      prompt: "choose",
+      events: [
+        { type: "refund", toolName: "send_event_refund" },
+        { type: "escalate", toolName: "send_event_escalate" },
+      ],
+      options: [{ event: { type: "refund", amount: 20 } }, { event: { type: "escalate" } }],
+      attempts: [],
+    };
+    const seen: AgentDecisionRequest[] = [];
+    const event = await resolveDecision(request, {
+      decide: (attempt, info) => (seen.push(attempt), decide(attempt, info)),
+    });
+
+    expect(event).toEqual({ type: "escalate" });
+    expect(seen[2]!.attempts.map((attempt) => [attempt.failure, attempt.reason])).toEqual([
+      [
+        "unknown-event",
+        `'option "refund:99" was not offered (valid ids: refund:20, escalate)' is not among ` +
+          "the currently allowed events: refund, escalate.",
+      ],
+      [
+        "unknown-event",
+        `'tool 'send_event_refund' was not offered (valid ids: refund:20, escalate)' is not ` +
+          "among the currently allowed events: refund, escalate.",
+      ],
+    ]);
   });
 });

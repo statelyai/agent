@@ -32,6 +32,7 @@ interface AgentLogEntry {
   causationId?: string;
   metadata?: Record<string, JsonValue>;
   verification?: { stateHash: string };
+  decision?: { attempts: DecisionAttempt[] };
 }
 ```
 
@@ -39,8 +40,9 @@ interface AgentLogEntry {
 - `machineVersion` is the machine's declared `version`, or its structural hash when none is declared.
 - `verification.stateHash` is the hash of the persisted snapshot after the entry is applied.
 - `metadata` is host-owned and stored verbatim. The init entry's `metadata.executionId` names the lineage; read it with `getLogExecutionId(entries)`.
+- `decision` holds the decision attempts the machine did not accept before this entry's event landed. Replay ignores it. See [Decision attempts](#decision-attempts).
 
-Entries are strict JSON. `createReplayEntry`, `initEntry`, and every store append reject values JSON would drop or coerce (`undefined`, functions, symbols, bigint, non-finite numbers, `Date`, `Map`, `Set`, class instances, cycles) with `NonSerializableAgentEventError`, which carries the offending `path`. `Error` payloads on `xstate.error.actor` are normalized to `{ name, message, cause? }`. Use `assertJsonSerializable` and `assertAgentLogEntry` at custom transport boundaries.
+Entries are strict JSON. `createReplayEntry`, `initEntry`, and every store append reject values JSON would drop or coerce (`undefined`, functions, symbols, bigint, non-finite numbers, `Date`, `Map`, `Set`, class instances, cycles) with `NonSerializableAgentEventError`, which carries the offending `path`. `Error` payloads on `xstate.error.actor` are normalized to `{ name, message, cause? }`; an `AgentDecisionExhaustedError` also keeps its `attempts`. Use `assertJsonSerializable` and `assertAgentLogEntry` at custom transport boundaries.
 
 ## Record a log
 
@@ -146,6 +148,50 @@ const branch = forkEventLog(entries, 8);
 
 `store.fork({ threadId, newThreadId, upToIndex })` does the same at the storage layer. To diverge, append different entries to the new thread.
 
+## Decision attempts
+
+A decider can need several tries: a choice the guard rejects, an option that was never offered, an unknown type, an invalid payload. Those failed attempts are what you improve a decider from, and the machine never consumed them, so they ride on the entry they explain:
+
+- An `agent.decide` invoke that lands after failed tries records them on the delivered event's entry as `entry.decision.attempts`.
+- A decision that exhausts its retries records its `xstate.error.actor` entry with `event.error.attempts`.
+- A first-try decision records nothing.
+
+Neither changes the fold: replay reads only `entry.event`, and the same log with the fields removed replays to the same state hash. Old logs without them replay unchanged, and `schemaVersion` stays `1`.
+
+`getDecisionAttempts(entries)` lists both, in log order:
+
+```ts no-check
+for (const { index, eventType, attempts } of getDecisionAttempts(await store.read(threadId))) {
+  console.log(
+    index,
+    eventType,
+    attempts.map((attempt) => attempt.reason),
+  );
+}
+```
+
+`eventType` is the delivered event's type, or an `xstate.error.actor.*` type for an exhausted decision.
+
+### Boundary decisions
+
+A host that decides with `decideNext` sends the event itself. Pass its `attempts` alongside the event, and the run journals them on that event's entry:
+
+```ts no-check
+const { event, attempts } = await decideNext(snapshot, { decide, model, events: "desk.*" });
+
+if (event) {
+  await runToQuiescence(createAgentRuntime(machine, { store, threadId }), {
+    event,
+    decision: { attempts },
+  });
+}
+```
+
+- `runAgent(machine, { event, decision })` takes the same pair. `decision` explains the opening `event` only, not an `onIdle` answer.
+- A host-owned loop passes the same option to `runtime.transition(state, event, { decision })`.
+- An empty `attempts` list records nothing.
+- A non-JSON `decision` throws `NonSerializableAgentEventError` before the machine moves.
+
 ## Usage totals
 
 `getUsageFromEvents(entries)` folds the `@agent.usage` entries into one cumulative total. The log is the source of truth, so the totals are a projection of it rather than a host-side accumulator. See [Usage and budgets](usage-and-budgets.md).
@@ -169,8 +215,22 @@ const next = await store.length("session-1"); // the next expectedIndex
 
 - `append` is atomic. A stale writer fails with `AgentEventLogConflictError`, carrying `threadId`, `expectedIndex`, and `actualIndex`, so two hosts resuming one thread resolve to exactly one winner. Entry indices must be contiguous from `expectedIndex`, and ids unique within the thread.
 - `createAgentRuntime(machine, { store, threadId })` drives all three: `read` to resume, `append` per entry, `read` again to check an explicit `events` log against the thread.
-- `read` and `length` are the only reads. Everything else about a thread is derived from its entries.
+- `read` and `length` are the per-thread reads. Everything else about a thread is derived from its entries.
 - `fork` copies a prefix onto a fresh thread.
+- `listThreads` is optional: it lists the threads that hold at least one entry, so a caller need not record thread ids itself.
+
+```ts no-check
+let cursor: string | undefined;
+do {
+  const page = await store.listThreads!({ prefix: "refunds:", limit: 100, cursor });
+  for (const threadId of page.threadIds) await improve(await store.read(threadId));
+  cursor = page.cursor;
+} while (cursor !== undefined);
+```
+
+- `prefix` filters thread ids; `limit` caps one page; `cursor` continues after the previous page.
+- `cursor` is opaque and present only when more ids remain. The order is stable across pages.
+- `createInMemoryEventLogStore()` implements it. A custom store may leave it out.
 
 `createInMemoryEventLogStore()` is the reference implementation. No SQLite or database store ships with the package: hosts own durability. An append-only table with a `(thread_id, index)` primary key maps onto any database.
 
@@ -180,7 +240,7 @@ const next = await store.length("session-1"); // the next expectedIndex
 await assertEventLogStoreConformance(() => createMyStore(), { describe, it });
 ```
 
-The suite runs a host-written store against the reference on races, isolation, ordering, and fork semantics. It drives any test runner, or a plain script.
+The suite runs a host-written store against the reference on races, isolation, ordering, and fork semantics, plus `listThreads` paging when the store implements it. It drives any test runner, or a plain script.
 
 ## Related
 

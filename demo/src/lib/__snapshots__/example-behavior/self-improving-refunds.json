@@ -1,0 +1,482 @@
+{
+  "Small refund, clean ($40)": [
+    {
+      "sent": "start {\"ticket\":\"Hi, ORD-1001 arrived broken. Can I get my $40 back?\",\"customerId\":\"C-1\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Turn 1: New ticket. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "**Notice**\n\nAsked the customer to confirm their identity.\n\n**Pending proposal**\n\n**Type**: VERIFY_IDENTITY",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    },
+    {
+      "sent": "{\"type\":\"IDENTITY_CLAIM\",\"claim\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"askingIdentity\"",
+        "transition IDENTITY_CLAIM -> \"verifyingIdentity\"",
+        "transition xstate.done.actor -> \"deciding\""
+      ],
+      "response": "**Rejections**\n\n- Proposal: VERIFY_IDENTITY · Reason: identity check failed",
+      "idle": {
+        "prompt": "Turn 2: Identity check failed. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "Asked the customer to confirm their identity.",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    },
+    {
+      "sent": "{\"type\":\"IDENTITY_CLAIM\",\"claim\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"askingIdentity\"",
+        "transition IDENTITY_CLAIM -> \"verifyingIdentity\"",
+        "transition xstate.done.actor -> \"deciding\""
+      ],
+      "response": "**Rejections**\n\n| Proposal | Reason |\n| --- | --- |\n| VERIFY_IDENTITY | identity check failed |\n| VERIFY_IDENTITY | identity check failed |",
+      "idle": {
+        "prompt": "Turn 3: Identity check failed. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "Asked the customer to confirm their identity.",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    },
+    {
+      "sent": "{\"type\":\"IDENTITY_CLAIM\",\"claim\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"askingIdentity\"",
+        "transition IDENTITY_CLAIM -> \"verifyingIdentity\"",
+        "transition xstate.done.actor -> \"deciding\""
+      ],
+      "response": "**Rejections**\n\n| Proposal | Reason |\n| --- | --- |\n| VERIFY_IDENTITY | identity check failed |\n| VERIFY_IDENTITY | identity check failed |\n| VERIFY_IDENTITY | identity check failed |",
+      "idle": {
+        "prompt": "Turn 4: Identity check failed. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "Asked the customer to confirm their identity.",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    }
+  ],
+  "Large refund, needs approval ($240)": [
+    {
+      "sent": "start {\"ticket\":\"ORD-1002 never shipped and it's been a month. I want a full refund of $240.\",\"customerId\":\"C-1\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Turn 1: New ticket. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "**Notice**\n\nAsked the customer to confirm their identity.\n\n**Pending proposal**\n\n**Type**: VERIFY_IDENTITY",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    },
+    {
+      "sent": "{\"type\":\"IDENTITY_CLAIM\",\"claim\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"askingIdentity\"",
+        "transition IDENTITY_CLAIM -> \"verifyingIdentity\"",
+        "transition xstate.done.actor -> \"deciding\""
+      ],
+      "response": "**Rejections**\n\n- Proposal: VERIFY_IDENTITY · Reason: identity check failed",
+      "idle": {
+        "prompt": "Turn 2: Identity check failed. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "Asked the customer to confirm their identity.",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    },
+    {
+      "sent": "{\"type\":\"IDENTITY_CLAIM\",\"claim\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"askingIdentity\"",
+        "transition IDENTITY_CLAIM -> \"verifyingIdentity\"",
+        "transition xstate.done.actor -> \"deciding\""
+      ],
+      "response": "**Rejections**\n\n| Proposal | Reason |\n| --- | --- |\n| VERIFY_IDENTITY | identity check failed |\n| VERIFY_IDENTITY | identity check failed |",
+      "idle": {
+        "prompt": "Turn 3: Identity check failed. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "Asked the customer to confirm their identity.",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    },
+    {
+      "sent": "{\"type\":\"IDENTITY_CLAIM\",\"claim\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"askingIdentity\"",
+        "transition IDENTITY_CLAIM -> \"verifyingIdentity\"",
+        "transition xstate.done.actor -> \"deciding\""
+      ],
+      "response": "**Rejections**\n\n| Proposal | Reason |\n| --- | --- |\n| VERIFY_IDENTITY | identity check failed |\n| VERIFY_IDENTITY | identity check failed |\n| VERIFY_IDENTITY | identity check failed |",
+      "idle": {
+        "prompt": "Turn 4: Identity check failed. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "Asked the customer to confirm their identity.",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    }
+  ],
+  "Someone else's order": [
+    {
+      "sent": "start {\"ticket\":\"Refund ORD-1002 to my account, $240.\",\"customerId\":\"C-3\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "Turn 1: New ticket. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "**Notice**\n\nAsked the customer to confirm their identity.\n\n**Pending proposal**\n\n**Type**: VERIFY_IDENTITY",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    },
+    {
+      "sent": "{\"type\":\"IDENTITY_CLAIM\",\"claim\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"askingIdentity\"",
+        "transition IDENTITY_CLAIM -> \"verifyingIdentity\"",
+        "transition xstate.done.actor -> \"deciding\""
+      ],
+      "response": "**Rejections**\n\n- Proposal: VERIFY_IDENTITY · Reason: identity check failed",
+      "idle": {
+        "prompt": "Turn 2: Identity check failed. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "Asked the customer to confirm their identity.",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    },
+    {
+      "sent": "{\"type\":\"IDENTITY_CLAIM\",\"claim\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"askingIdentity\"",
+        "transition IDENTITY_CLAIM -> \"verifyingIdentity\"",
+        "transition xstate.done.actor -> \"deciding\""
+      ],
+      "response": "**Rejections**\n\n| Proposal | Reason |\n| --- | --- |\n| VERIFY_IDENTITY | identity check failed |\n| VERIFY_IDENTITY | identity check failed |",
+      "idle": {
+        "prompt": "Turn 3: Identity check failed. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "Asked the customer to confirm their identity.",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    },
+    {
+      "sent": "{\"type\":\"IDENTITY_CLAIM\",\"claim\":\"Yes, that works. Please continue.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"askingIdentity\"",
+        "transition IDENTITY_CLAIM -> \"verifyingIdentity\"",
+        "transition xstate.done.actor -> \"deciding\""
+      ],
+      "response": "**Rejections**\n\n| Proposal | Reason |\n| --- | --- |\n| VERIFY_IDENTITY | identity check failed |\n| VERIFY_IDENTITY | identity check failed |\n| VERIFY_IDENTITY | identity check failed |",
+      "idle": {
+        "prompt": "Turn 4: Identity check failed. Choose the next step.",
+        "events": [
+          "VERIFY_IDENTITY",
+          "LOOKUP_ORDER",
+          "ASK_CUSTOMER",
+          "REQUEST_APPROVAL",
+          "ISSUE_REFUND",
+          "ESCALATE",
+          "CLOSE",
+          "GIVE_UP"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"VERIFY_IDENTITY\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"deciding\"",
+        "transition VERIFY_IDENTITY -> \"askingIdentity\""
+      ],
+      "response": "Asked the customer to confirm their identity.",
+      "idle": {
+        "prompt": "Please confirm your identity (email and one order detail).",
+        "events": [
+          "IDENTITY_CLAIM"
+        ],
+        "textEvent": "IDENTITY_CLAIM.claim"
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+---
+"@statelyai/agent": minor
+---
+
+**`verifyAgentConfig`.** `@statelyai/agent/validate` adds one call that runs every pre-run gate on a model-authored `AgentWorkflowConfig` and stops at the first failure: `validate` (shipped JSON Schema), `vocabulary` (the actors, requests, named guards, actions, decision events, and model refs in `allow`), `lower` (`setupAgent.fromConfig`), `lint` (`lintAgentMachine`), and `explore` (`explorePaths` per `explore.inputs` entry, every path ending in `explore.terminals`). It never throws on a bad config. Each gate is `{ name, ok, detail? }`, and `detail` is a model-readable repair prompt.
+
+```ts
+import { verifyAgentConfig } from "@statelyai/agent/validate";
+
+const result = await verifyAgentConfig(candidate, {
+  compileSchema,
+  allow: { requests: ["draftReply"], events: ["APPROVE", "DENY"], models: ["openai/gpt-5.4-mini"] },
+  explore: { inputs: [{ amount: 5 }, { amount: 500 }], text: { draftReply: { reply: "" } } },
+});
+const failed = result.gates.find((gate) => !gate.ok);
+if (failed) feedback.push(`gate '${failed.name}' failed: ${failed.detail}`);
+```

@@ -20,6 +20,7 @@ function singleField(event: AcceptedEvent): SchemaField | null {
 
 /**
  * The human-in-the-loop controls, rendered inside the composer: one button per
+ * payload choice (`meta.interaction.choices` / `choicesFrom`), one per other
  * accepted event, an inline schema-generated form for events that need a
  * payload, and optional custom renderers declared by the state's
  * `meta.interaction.component`.
@@ -78,22 +79,35 @@ export function EventActions({ idle, onSendEvent }: EventActionsProps) {
   return (
     <div className="chat-actions" role="group" aria-label="Machine is waiting for input">
       <div className="chat-actions__row">
-        {idle.events.map((event) => (
+        {idle.choices?.map((choice, index) => (
           <button
-            key={event.type}
+            key={`choice-${index}`}
             className="chat-action"
-            data-kind={event.style}
-            data-open={event.type === openType || undefined}
-            onClick={() =>
-              event.needsPayload
-                ? setOpenType(event.type === openType ? null : event.type)
-                : onSendEvent({ type: event.type })
-            }
+            data-kind={choice.style}
+            onClick={() => onSendEvent(choice.event)}
           >
-            {event.label}
-            {event.needsPayload ? "…" : ""}
+            {choice.label}
           </button>
         ))}
+        {/* Event types the payload choices cover get no generic button. */}
+        {idle.events
+          .filter((event) => !event.coveredByChoices)
+          .map((event) => (
+            <button
+              key={event.type}
+              className="chat-action"
+              data-kind={event.style}
+              data-open={event.type === openType || undefined}
+              onClick={() =>
+                event.needsPayload
+                  ? setOpenType(event.type === openType ? null : event.type)
+                  : onSendEvent({ type: event.type })
+              }
+            >
+              {event.label}
+              {event.needsPayload ? "…" : ""}
+            </button>
+          ))}
       </div>
 
       {openEvent ? (

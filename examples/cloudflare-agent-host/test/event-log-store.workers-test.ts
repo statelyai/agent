@@ -63,6 +63,35 @@ describe("durable object event log store", () => {
     });
   });
 
+  it("lists threads by prefix with a cursor, treating LIKE wildcards literally", async () => {
+    await runInDurableObject(stubFor("event-log-store-list-threads"), async (_i, state) => {
+      const store = createDurableObjectEventLogStore(state.storage, { table: "listed" });
+      for (const threadId of ["a%1", "a%2", "ab", "b"]) {
+        await store.append({
+          threadId,
+          expectedIndex: 0,
+          entries: [
+            {
+              schemaVersion: 1,
+              id: "evt_0",
+              index: 0,
+              recordedAt: "2026-01-01T00:00:00.000Z",
+              machineId: "host",
+              machineVersion: "v1",
+              event: { type: "start" },
+            },
+          ],
+        });
+      }
+      const first = await store.listThreads!({ prefix: "a%", limit: 1 });
+      expect(first).toEqual({ threadIds: ["a%1"], cursor: "a%1" });
+      expect(await store.listThreads!({ prefix: "a%", limit: 1, cursor: first.cursor })).toEqual({
+        threadIds: ["a%2"],
+      });
+      expect((await store.listThreads!()).threadIds).toEqual(["a%1", "a%2", "ab", "b"]);
+    });
+  });
+
   it("rejects an unusable table name", async () => {
     await runInDurableObject(stubFor("event-log-store-names"), (_i, state) => {
       expect(() =>

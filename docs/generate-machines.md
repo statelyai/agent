@@ -1,94 +1,105 @@
 ---
 title: Generating machines with an LLM
-description: Have a model author the agent workflow itself, then validate, lint, and simulate the generated config before a single model call runs inside it.
+description: Have a model author the agent workflow itself, then run the generated config through every pre-run gate before a single model call runs inside it.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-This page covers having a model author an agent machine config, then validating, linting, and simulating that config before it runs.
+This page covers having a model author an agent machine config, then checking that config with `verifyAgentConfig` before it runs.
 
 An agent machine is [data](machines-as-data.md), so a model can write one. A generated machine can be checked before it runs, at several gates.
 
 <!-- static lint diagnostics from src/verify.ts -->
 
 - The config's shape is fixed by a JSON Schema that ships with the package. Expressions are dot paths, not code, so a generated config cannot do anything a hand-authored machine could not do.
-- `validateAgentConfig` checks the config against that schema and returns diagnostics. It is exported from `@statelyai/agent/validate`, which uses `ajv` as an optional peer dependency, so install `ajv` to use it.
-- `lintAgentMachine` checks Agent-specific request wiring, decisions with no candidate events, and missing invoke error paths. Use [`canReach` and `explorePaths`](verify.md) to check reachability.
-- `simulateAgent` plays the machine through with canned responses and no API key, before it calls a model.
+- `verifyAgentConfig` runs every pre-run gate in one call and returns a record per gate. It is exported from `@statelyai/agent/validate`, which uses `ajv` as an optional peer dependency, so install `ajv` to use it.
+- The gates check the config's shape, the names it references, the lowering, Agent lint, and every explored path. Use [`canReach` and `explorePaths`](verify.md) directly for other reachability questions.
+- Replay against real scenarios and scoring are domain-specific. They stay with the caller, after the gates pass.
 
 ## The loop
 
 ```
-generate → validate (validateAgentConfig) → lower (fromConfig) → lint → simulate → run
+generate → verifyAgentConfig (validate → vocabulary → lower → lint → explore) → run
 ```
 
-<!-- viz: generation pipeline: generate -> validate (validateAgentConfig) -> lower (fromConfig) -> lint -> simulate -> run, with each failing gate feeding back into generate as a repair prompt, capped at 3 attempts -->
+<!-- viz: generation pipeline: generate -> verifyAgentConfig gates (validate -> vocabulary -> lower -> lint -> explore) -> run, with each failing gate feeding back into generate as a repair prompt, capped at 3 attempts -->
 
-| Step     | API                                          | Fails on                                                         |
-| -------- | -------------------------------------------- | ---------------------------------------------------------------- |
-| Generate | your model call                              | nothing; the model returns unvalidated text                      |
-| Validate | `validateAgentConfig`                        | malformed config shape                                           |
-| Lower    | `setupAgent.fromConfig`                      | unresolved named guards/actions, `onDone` on a decision          |
-| Lint     | `lintAgentMachine(machine, { throw: true })` | decisions with no handled events; direct unbound request sources |
-| Simulate | `simulateAgent`                              | the scripted path never settles, such as a machine that loops    |
-| Run      | `runToQuiescence`                            | runtime only                                                     |
+| Gate         | Checks with                                    | Fails on                                                                                  |
+| ------------ | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `validate`   | `validateAgentConfig`                          | malformed config shape                                                                    |
+| `vocabulary` | the `allow` lists                              | an invoke src, guard, action, `agent.decide` event, or model ref outside the vocabulary   |
+| `lower`      | `setupAgent.fromConfig`                        | unresolved named guards/actions, `onDone` on a decision                                   |
+| `lint`       | `lintAgentMachine`                             | decisions with no handled events; warnings too with `lint: { warnings: true }`            |
+| `explore`    | `explorePaths`, once per `explore.inputs` item | a path that ends outside `explore.terminals`, loops past `maxDepth`, or hits the path cap |
 
-Each gate runs on the config the model returned, in order:
+Run the gates on the config the model returned:
 
 ```ts no-check
-import { setupAgent } from "@statelyai/agent";
-import { lintAgentMachine, simulateAgent } from "@statelyai/agent/testing";
-import { validateAgentConfig } from "@statelyai/agent/validate";
+import { verifyAgentConfig } from "@statelyai/agent/validate";
 
-// 1. Validate the config shape against the JSON Schema.
-const { valid, errors } = validateAgentConfig(config);
-if (!valid) {
-  // Feed these back to the model as a repair prompt.
-  throw new Error(errors.map((e) => `${e.path}: ${e.message}`).join("\n"));
-}
-
-// 2. Lower the config into a machine. Throws on unresolved names and bad targets.
-const { machine } = setupAgent.fromConfig(config, { compileSchema });
-
-// 3. Lint the machine. `throw: true` raises on the first error-severity finding.
-lintAgentMachine(machine, { throw: true });
-
-// 4. Simulate a playthrough with no API key.
-const { status } = await simulateAgent(machine, {
-  input: { question: "refund?" },
-  script: { decisions: { "agent.decide": [{ type: "RESOLVE" }] } },
+const result = await verifyAgentConfig(candidate, {
+  compileSchema,
+  guards: { isLarge: ({ context }) => context.amount > 100 },
+  allow: {
+    actors: [],
+    requests: ["draftReply"],
+    guards: ["isLarge"],
+    actions: [],
+    events: ["APPROVE", "DENY"],
+    models: ["openai/gpt-5.4-mini"],
+  },
+  explore: {
+    inputs: [{ amount: 5 }, { amount: 500 }],
+    text: { draftReply: { reply: "stub" } },
+  },
 });
-if (status !== "done") {
-  throw new Error(`Generated machine settled as '${status}'`);
+
+if (!result.ok) {
+  const failed = result.gates.find((gate) => !gate.ok)!;
+  // Feed this back to the model as a repair prompt.
+  feedback.push(`gate '${failed.name}' failed: ${failed.detail}`);
 }
 ```
 
 `compileSchema` is the JSON Schema compiler `fromConfig` uses for the config's schemas. Build it from `ajv`. See [Machines as data](machines-as-data.md).
 
-The gates behave as follows.
+The result behaves as follows.
 
-- `validateAgentConfig(config)` returns `{ valid, errors }`. Each error is `{ severity, path, message, keyword }`, where `path` is a JSON Pointer into the config. It uses Ajv's 2020 build, which the `agent-workflow.json` dialect requires.
-- Validation checks shape only. `fromConfig` is what checks that named guards, actions, and actors are implemented.
-- Every gate except `run` works with no API key.
-- Each gate throws a message naming the offending field, state, or path. A failed gate can therefore be fed back to the model as a repair prompt instead of surfacing to a user.
+- `result.gates` lists the gates that ran, in order. Each is `{ name, ok, detail? }`. The gates stop at the first failure, so a failing gate is always the last entry.
+- `detail` names the offending path, state, or name, one problem per line. A passing `lint` gate carries its warnings in `detail`.
+- `result.config` is the typed config once `validate` passes. `result.machine` is the lowered machine once `lower` passes.
+- A config that throws while lowering is reported as a failed `lower` gate. `verifyAgentConfig` does not throw on a bad config.
+- An omitted `allow` key is unrestricted. Omit `allow` to skip the `vocabulary` gate, and omit `explore` to skip the `explore` gate.
+- `explore.terminals` defaults to `['done']`. Other `explore` keys, such as `text`, `invokes`, `errors`, `outputs`, `payloads`, `dedupeBy`, and `maxPaths`, pass through to `explorePaths`. See [Payloads and invoke outputs](verify.md#payloads-and-invoke-outputs).
+- `actors` are bound with `machine.provide({ actors })` after lowering. `guards` and `actions` go to `fromConfig`.
+- No gate needs an API key.
+- `validateAgentConfig(config)` runs the `validate` gate alone. It returns `{ valid, errors }`, and each error's `path` is a JSON Pointer into the config.
+
+## The repair loop
+
+A failed gate's `detail` is the repair prompt. Send it back to the model with the config it rejected, and run the gates again on the new config.
+
 - Cap the repair loop at about 3 attempts. A config that fails three schema-shaped repairs usually asks for something the data form cannot express. In that case, [author it in TypeScript](machines.md) instead.
+- Replay the passing config against your own scenarios before promoting it. `simulateAgent` plays one scripted path with canned responses and no API key.
 
 ## The skill
 
-The full authoring procedure ships as an agent skill. It covers the schema location, the rules a config must follow, a few-shot config, the Ajv adapter, the lint and simulate calls, and the repair loop.
+The full authoring procedure ships as an agent skill. It covers the environment and policy split, the schema location, the rules a config must follow, a few-shot config, the Ajv adapter, `verifyAgentConfig`, the repair loop, and persisting traces.
 
 **[`skills/generate-machine/SKILL.md`](https://github.com/statelyai/agent/blob/main/skills/generate-machine/SKILL.md)**
 
 Copy that directory into your coding agent's skills directory. For Claude Code this is `.claude/skills/`. Other harnesses use their own location. The agent then loads the skill on requests such as "author an agent machine for X" and runs the gates itself.
+
+To improve a generated policy from its run traces, use [`skills/improve-machine`](https://github.com/statelyai/agent/blob/main/skills/improve-machine/SKILL.md). See [Environment and policy](environment-and-policy.md).
 
 ## Limits
 
 Generated machines have these constraints.
 
 - Named guards and actions are resolved by the host. A config cannot carry functions. A model can emit `guard: "isReady"`, but the implementation lives in the `guards` option passed to `fromConfig(...)`, and an unresolved name throws at build time. List the names your host implements in the prompt, or forbid named references entirely.
-- Schema validity is not semantic validity. The schema constrains shape, not meaning. A config can validate and still reference a request that does not exist, or route to a state that does not make progress. The lint and simulate gates cover those cases.
-- A dry run covers one path. The simulation follows the script you gave it. Use `explorePaths` when the generated branch structure matters.
-- Model refs and tool names are unchecked strings. They resolve at run time, in the host. Generated machines carry string refs, so pass `createAiSdkExecutors({ resolveModel })`. See [Models and providers](models-and-providers.md). The ref `"openai/gpt-5.4-mini"` used on this page is illustrative. Substitute your provider's current models.
+- Schema validity is not semantic validity. The schema constrains shape, not meaning. A config can validate and still reference a request that does not exist, or route to a state that does not make progress. The `vocabulary`, `lint`, and `explore` gates cover those cases.
+- Exploration covers the inputs you give it. List inputs that reach every branch you care about in `explore.inputs`.
+- Model refs resolve at run time, in the host. `allow.models` restricts them to literal strings you list; tool names stay unchecked. Generated machines carry string refs, so pass `createAiSdkExecutors({ resolveModel })`. See [Models and providers](models-and-providers.md). The ref `"openai/gpt-5.4-mini"` used on this page is illustrative. Substitute your provider's current models.
 
 ## Related
 

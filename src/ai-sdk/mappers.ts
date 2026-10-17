@@ -1,4 +1,5 @@
 import {
+  jsonSchema,
   tool,
   type FinishReason,
   type FlexibleSchema,
@@ -14,10 +15,11 @@ import {
   type AgentTextRequest,
 } from "../text-logic.js";
 import { isStandardSchema } from "../utils.js";
-import { renderDecisionAttempts } from "../decision.js";
-import type { AgentDecisionRequest } from "../decision.js";
+import { decisionOptionIds, renderDecisionAttempts } from "../decision.js";
+import type { AgentDecisionOption, AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
-import type { AgentTools, StandardSchemaV1 } from "../types.js";
+import type { AgentTools, ChosenEvent, StandardSchemaV1 } from "../types.js";
+import { isRecord } from "../internal/is-record.js";
 
 /**
  * One call's usage as the adapter reports it: the AI SDK's `LanguageModelUsage`
@@ -267,13 +269,75 @@ export function toAiSdkEventTools(events: AgentEventDescriptor[]): ToolSet {
   );
 }
 
+/** Tool name of the single closed-choice tool {@link toAiSdkOptionTool} builds. */
+const OPTION_TOOL_NAME = "choose_option";
+
+/**
+ * A closed choice as ONE AI SDK tool: its input is `{ option }`, an enum of
+ * option ids (see core's `decisionOptionIds`), with each id's description in
+ * the tool description. Map the answer back with `ids.indexOf(input.option)`.
+ */
+export function toAiSdkOptionTool(options: readonly AgentDecisionOption[]): {
+  tools: ToolSet;
+  ids: string[];
+} {
+  const ids = decisionOptionIds(options);
+  const lines = options.map((option, index) =>
+    option.description ? `- ${ids[index]}: ${option.description}` : `- ${ids[index]}`,
+  );
+  return {
+    ids,
+    tools: {
+      [OPTION_TOOL_NAME]: tool({
+        description: `Choose exactly one option:\n${lines.join("\n")}`,
+        inputSchema: jsonSchema<{ option: string }>({
+          type: "object",
+          properties: {
+            option: { type: "string", enum: ids, description: "The id of the chosen option." },
+          },
+          required: ["option"],
+          additionalProperties: false,
+        }),
+      }),
+    },
+  };
+}
+
+/**
+ * The event a closed-choice tool call names: the offered option whose id is
+ * `input.option`. A call to another tool, or an id that is not offered, maps
+ * to {@link unofferedOption}, so the choice is retried instead of thrown.
+ */
+export function fromAiSdkOptionCall(
+  toolCall: { toolName: string; input: unknown },
+  options: readonly AgentDecisionOption[],
+  ids: readonly string[],
+): ChosenEvent {
+  if (toolCall.toolName !== OPTION_TOOL_NAME) {
+    return unofferedOption(`tool '${toolCall.toolName}'`, ids);
+  }
+  const id = isRecord(toolCall.input) ? toolCall.input.option : undefined;
+  const option = typeof id === "string" ? options[ids.indexOf(id)] : undefined;
+  return option ? option.event : unofferedOption(`option ${JSON.stringify(id)}`, ids);
+}
+
+/**
+ * A stand-in event for a closed-choice answer that names no offered option.
+ * Its `type` is no candidate event, so `resolveDecision` records it as a
+ * failed `'unknown-event'` attempt (the type, which names the answer and the
+ * valid ids, is the attempt's reason) and asks again.
+ */
+export function unofferedOption(answer: string, ids: readonly string[]): ChosenEvent {
+  return { type: `${answer} was not offered (valid ids: ${ids.join(", ") || "none"})` };
+}
+
 /**
  * Messages for a decision request, with prior failed `attempts` (§2.6)
  * rendered as appended user messages (via core's {@link renderDecisionAttempts})
  * so retries converge. Core never rewrites prompts — this is adapter business.
  */
 export function toDecisionMessages(
-  request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts">,
+  request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts" | "options">,
 ): ModelMessage[] | undefined {
   if (!request.messages && request.attempts.length === 0) {
     return undefined;

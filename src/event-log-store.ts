@@ -7,6 +7,24 @@
 import { AgentError } from "./errors.js";
 import { assertAgentLogEntry, type AgentLogEntry } from "./event-log.js";
 
+/** Options for {@link AgentEventLogStore.listThreads}. */
+export interface ListThreadsOptions {
+  /** Only thread ids that start with this string. */
+  prefix?: string;
+  /** At most this many ids per page (a positive integer). Omit for all. */
+  limit?: number;
+  /** The `cursor` of the previous page, to continue after it. */
+  cursor?: string;
+}
+
+/** One page of {@link AgentEventLogStore.listThreads}. */
+export interface ListThreadsResult {
+  /** Thread ids in a stable store-defined order (the reference sorts them). */
+  threadIds: string[];
+  /** Present when more ids remain: pass it back as `options.cursor`. Opaque. */
+  cursor?: string;
+}
+
 /**
  * An append-only event log: the authoritative durability artifact of a thread.
  * The journal of external inputs IS the source of truth — deterministic
@@ -55,6 +73,14 @@ export interface AgentEventLogStore {
     /** Exclusive index cutoff. */
     upToIndex?: number;
   }): Promise<void>;
+  /**
+   * Optional: list the threads that hold at least one entry, so a caller
+   * (an improver reading traces, a retention job) need not record thread ids
+   * itself. Pages with `limit` + `cursor`; the cursor is opaque and the order
+   * is stable across pages. Optional so existing stores keep compiling;
+   * `assertEventLogStoreConformance` checks it only when it is present.
+   */
+  listThreads?(options?: ListThreadsOptions): Promise<ListThreadsResult>;
 }
 
 /**
@@ -164,6 +190,26 @@ export function createInMemoryEventLogStore(): AgentEventLogStore {
         newThreadId,
         source.slice(0, upTo).map((entry) => clone(entry)),
       );
+    },
+
+    async listThreads(options = {}) {
+      const { prefix = "", limit, cursor } = options;
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+        throw new Error(
+          `AgentEventLogStore.listThreads: limit must be a positive integer; got ${String(limit)}.`,
+        );
+      }
+      // The cursor is the last id of the previous page; ids sort by code unit.
+      const ids = [...threads]
+        .filter(([id, list]) => list.length > 0 && id.startsWith(prefix))
+        .map(([id]) => id)
+        .filter((id) => cursor === undefined || id > cursor)
+        .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      if (limit === undefined || ids.length <= limit) {
+        return { threadIds: ids };
+      }
+      const page = ids.slice(0, limit);
+      return { threadIds: page, cursor: page[page.length - 1]! };
     },
   };
 }
