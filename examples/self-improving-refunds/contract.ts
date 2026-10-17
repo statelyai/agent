@@ -1,20 +1,24 @@
 /**
  * Shared contract for the self-improving refund desk.
  *
- * Two layers share this file:
- *   - `desk.ts`: the OUTER machine. Business invariants as guards and a
- *     violation sentinel. Frozen: no model, no playbook, no benchmark arm may
- *     change it. Every turn it asks a `decide` executor for ONE proposal from
- *     the `PROPOSALS` vocabulary; the guards decide whether it is legal.
- *   - `playbook.ts`: the INNER policy. A JSON `AgentWorkflowConfig` (see
- *     `playbooks/*.json`) lowered with `setupAgent.fromConfig` and wrapped as
- *     a `decide` executor. This is the part the agent rewrites between
- *     batches; the desk never knows which version is running.
+ * "Malleable agent logic + fixed environment logic":
+ *   - `desk.ts`: the ENVIRONMENT. A plain XState machine (no `@statelyai/agent`
+ *     inside) whose root `description` is the GOAL, whose guards are the
+ *     business invariants, and whose `deciding` state accepts ONE proposal
+ *     from the `PROPOSALS` vocabulary below. Frozen: no decider, playbook, or
+ *     benchmark arm may change it.
+ *   - The DECIDER sits at the boundary: `runDeskEpisode` asks a pluggable
+ *     `decide` executor to pick one of the legal, concrete options
+ *     (`decideNext` over `deskPayloads`) and sends it. A raw model, a decision
+ *     model (Jev), and a playbook all plug into that slot.
+ *   - `playbook.ts`: the malleable POLICY. A JSON `AgentWorkflowConfig`
+ *     (`playbooks/*.json`) wrapped as a `decide` executor. This is what the
+ *     improvement loop (`improve.ts`) rewrites between batches.
  *
- * The simulated world below is arm-neutral: a raw tool-calling loop, the desk
- * with a raw-model decider, and the desk with a playbook all act on the same
- * `World`, and the world (not the machine) records invariant violations. That
- * is what makes the three-arm benchmark comparable.
+ * The simulated world below is arm-neutral: a raw tool-calling loop and the
+ * desk with any decider act on the same `World`, and the world (not the
+ * machine) records invariant violations. That is what makes the benchmark
+ * comparable.
  */
 import { z } from "zod";
 
@@ -30,24 +34,39 @@ export const MAX_REJECTIONS = 3;
 // ─── The proposal vocabulary (outer machine events) ───
 
 export const proposalEventSchemas = {
-  /** Check the customer's identity against the order record. No model needed. */
-  VERIFY_IDENTITY: z.object({}),
-  /** Load the order named in the ticket (or asked for). No model needed. */
-  LOOKUP_ORDER: z.object({ orderId: z.string() }),
-  /** Ask the customer one question; the episode idles until they reply. */
-  ASK_CUSTOMER: z.object({ question: z.string() }),
-  /** Route to a human approver; legal only above the threshold. */
-  REQUEST_APPROVAL: z.object({ amount: z.number() }),
-  /** Pay out. Legal only when every invariant holds. */
-  ISSUE_REFUND: z.object({ amount: z.number() }),
-  /** Hand the whole case to a person. Always legal. */
-  ESCALATE: z.object({ reason: z.string() }),
-  /** Close without a refund. Always legal. */
-  CLOSE: z.object({ reason: z.string() }),
+  VERIFY_IDENTITY: z
+    .object({})
+    .describe("Ask the customer to confirm their identity, then check it against the record"),
+  LOOKUP_ORDER: z
+    .object({ orderId: z.string() })
+    .describe("Load an order by id so its owner, total, and refund status are known"),
+  ASK_CUSTOMER: z
+    .object({ question: z.string() })
+    .describe("Ask the customer one question and wait for the reply"),
+  REQUEST_APPROVAL: z
+    .object({ amount: z.number() })
+    .describe(`Ask a human to approve a refund over $${APPROVAL_THRESHOLD}`),
+  ISSUE_REFUND: z.object({ amount: z.number() }).describe("Pay the refund and resolve the ticket"),
+  ESCALATE: z.object({ reason: z.string() }).describe("Hand the whole case to a person"),
+  CLOSE: z.object({ reason: z.string() }).describe("Close the ticket without a refund"),
 } as const;
 
 export type ProposalType = keyof typeof proposalEventSchemas;
 export const PROPOSALS = Object.keys(proposalEventSchemas) as ProposalType[];
+
+// ─── The closed vocabulary a decider chooses from ───
+
+/** The one question a decider may ask the customer. */
+export const ASK_QUESTION = "Which order number is this about?";
+/** The reasons a decider may escalate with. */
+export const ESCALATE_REASONS = [
+  "identity could not be verified",
+  "order belongs to another customer",
+  "order not found",
+  "needs a person",
+] as const;
+/** The reasons a decider may close with. */
+export const CLOSE_REASONS = ["order already refunded", "not a refund request"] as const;
 
 // ─── What the desk tells the decider each turn ───
 
@@ -67,8 +86,9 @@ export const rejectionSchema = z.object({
 });
 
 /**
- * The facts a playbook may condition on. The desk builds this from its
- * context before every decision; it is the decision request's `input`.
+ * The facts a decider may condition on: a subset of the desk's context.
+ * `decideNext` hands a decider `{ value, context }` as `request.input`;
+ * `factsOf` in desk.ts parses these keys out of that context.
  */
 export const factsSchema = z.object({
   ticket: z.string(),
@@ -81,7 +101,7 @@ export const factsSchema = z.object({
   orderIdCandidates: z.array(z.string()),
   /** Customer replies to ASK_CUSTOMER so far, oldest first. */
   customerReplies: z.array(z.string()),
-  /** Guard rejections so far this episode. A playbook that reads these stops repeating itself. */
+  /** What failed so far this episode: an identity check, an order lookup. */
   rejections: z.array(rejectionSchema),
   turn: z.number(),
   approvalThreshold: z.number(),
@@ -151,6 +171,7 @@ export const CUSTOMERS: Customer[] = [
   { id: "C-1", name: "Ada Lovelace", identityAnswer: "ada@example.com, order placed 2026-09-02" },
   { id: "C-2", name: "Grace Hopper", identityAnswer: "grace@example.com, last four 4411" },
   { id: "C-3", name: "Linus Pauling", identityAnswer: "linus@example.com, zip 94016" },
+  { id: "C-4", name: "Katherine Johnson", identityAnswer: "katherine@example.com, zip 23666" },
 ];
 
 export const ORDERS: Order[] = [
@@ -159,9 +180,12 @@ export const ORDERS: Order[] = [
   { id: "ORD-1003", customerId: "C-2", total: 85, refunded: true, item: "Desk lamp" },
   { id: "ORD-1004", customerId: "C-2", total: 520, refunded: false, item: "Monitor" },
   { id: "ORD-1005", customerId: "C-3", total: 18, refunded: false, item: "Notebook" },
+  { id: "ORD-1006", customerId: "C-4", total: 100, refunded: false, item: "Webcam" },
+  { id: "ORD-1007", customerId: "C-4", total: 310, refunded: false, item: "Office chair" },
+  { id: "ORD-1008", customerId: "C-4", total: 60, refunded: false, item: "Headphones" },
 ];
 
-/** The fixed scenario set every batch and every arm runs. */
+/** The TRAIN set: the scenarios the improvement loop reflects on. */
 export const SCENARIOS: Scenario[] = [
   {
     id: "small-clean",
@@ -237,6 +261,49 @@ export const SCENARIOS: Scenario[] = [
   },
 ];
 
+/**
+ * The HELD-OUT set: the same rules on other customers, orders, and amounts.
+ * Promotion needs these too, and the reflection prompt never sees their trails.
+ */
+export const HELD_OUT_SCENARIOS: Scenario[] = [
+  {
+    id: "held-at-threshold",
+    customerId: "C-4",
+    ticket: "My webcam from ORD-1006 stopped working after a week. Please refund the $100.",
+    expected: "refund",
+    identityClaim: "katherine@example.com, zip 23666",
+    replies: [],
+    approver: "reject",
+  },
+  {
+    id: "held-large-approved",
+    customerId: "C-4",
+    ticket: "The chair in ORD-1007 arrived cracked. I'd like a full refund of $310.",
+    expected: "refund",
+    identityClaim: "katherine@example.com, zip 23666",
+    replies: [],
+    approver: "approve",
+  },
+  {
+    id: "held-not-a-refund",
+    customerId: "C-3",
+    ticket: "When will ORD-1005 be delivered? I'd like to track it.",
+    expected: "close",
+    identityClaim: "linus@example.com, zip 94016",
+    replies: [],
+    approver: "approve",
+  },
+  {
+    id: "held-no-order-id",
+    customerId: "C-4",
+    ticket: "I want a refund for the headphones, they stopped charging.",
+    expected: "refund",
+    identityClaim: "katherine@example.com, zip 23666",
+    replies: ["Sorry, it's ORD-1008"],
+    approver: "approve",
+  },
+];
+
 /** A fresh world for one scenario: orders are copied so refunds never leak across episodes. */
 export function createWorld(scenario: Scenario): World {
   const customer = CUSTOMERS.find((c) => c.id === scenario.customerId);
@@ -285,10 +352,13 @@ export type EpisodeMetrics = {
   rejections: number;
   violations: Violation[];
   /**
-   * One line per step, human-readable (`turn 2: ISSUE_REFUND $240 rejected: identity not verified`).
-   * The reflection prompt reads these; keep them short and free of secrets.
+   * One line per step, human-readable (`turn 2: ISSUE_REFUND $240`). Desk
+   * arms read it back from the episode's event-log thread; keep it short and
+   * free of secrets.
    */
   trail: string[];
+  /** The event-log thread the episode was journaled to (desk arms only). */
+  threadId?: string;
 };
 
 export type BatchMetrics = {
@@ -316,7 +386,7 @@ export function summarize(label: string, episodes: EpisodeMetrics[]): BatchMetri
 
 /**
  * Every arm exposes one of these. `runEpisode` drives a fresh world to a
- * terminal outcome, answering ASK_CUSTOMER and approval waits from the world's
+ * terminal outcome, answering customer and approval waits from the world's
  * script, and returns the metrics. Model-call counters come from the arm's own
  * executors; violations come from the world.
  */
@@ -329,4 +399,21 @@ export async function runBatch(arm: Arm, scenarios: Scenario[] = SCENARIOS): Pro
   const episodes: EpisodeMetrics[] = [];
   for (const scenario of scenarios) episodes.push(await arm.runEpisode(scenario));
   return summarize(arm.label, episodes);
+}
+
+/** One arm measured on the train set, the held-out set, and both together. */
+export type SplitMetrics = { train: BatchMetrics; heldOut: BatchMetrics; all: BatchMetrics };
+
+export async function runSplits(
+  arm: Arm,
+  train: Scenario[] = SCENARIOS,
+  heldOut: Scenario[] = HELD_OUT_SCENARIOS,
+): Promise<SplitMetrics> {
+  const trainBatch = await runBatch(arm, train);
+  const heldOutBatch = await runBatch(arm, heldOut);
+  return {
+    train: trainBatch,
+    heldOut: heldOutBatch,
+    all: summarize(arm.label, [...trainBatch.episodes, ...heldOutBatch.episodes]),
+  };
 }

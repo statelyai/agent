@@ -15,10 +15,18 @@
  * @module
  */
 import type { AnyActorLogic, AnyMachineSnapshot, AnyStateMachine } from "xstate";
-import type { ChosenEvent } from "./types.js";
+import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
 import { AgentError } from "./errors.js";
-import { getAcceptedEvents } from "./events.js";
-import { AgentDecisionExhaustedError, isDecisionLogic, resolveDecision } from "./decision.js";
+import { getAcceptedEvents, type AgentSchemas } from "./events.js";
+import {
+  acceptedDecisionOptions,
+  AgentDecisionExhaustedError,
+  isDecisionLogic,
+  resolveDecision,
+  type AgentDecisionOption,
+} from "./decision.js";
+import { isRecord } from "./internal/is-record.js";
+import { getJsonSchemaSync } from "./utils.js";
 import { isTextLogic, type AgentTextResult } from "./text-logic.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import {
@@ -177,6 +185,14 @@ function isAgentLogicNeedingBinding(src: object): boolean {
 // `z.custom` without the `jsonSchema` extension) or throws producing it. A
 // schema with no JSON Schema cannot be statically inspected at all, so lint
 // checks read this as "nothing to check".
+function safeJsonSchema(schema: StandardSchemaV1): Record<string, unknown> | undefined {
+  try {
+    return getJsonSchemaSync(schema);
+  } catch {
+    return undefined;
+  }
+}
+
 function checkDecideWithoutEvents(ctx: LintContext): AgentLintDiagnostic[] {
   const out: AgentLintDiagnostic[] = [];
   for (const node of ctx.index.values()) {
@@ -782,14 +798,22 @@ async function applyScriptedDecision(
     : resolveRegisteredDecisionLogic(machine, decisionSrc);
   const maxRetries = request.maxRetries ?? logic?.maxRetries;
 
+  // A closed choice (decide input `payloads`) offers only the options the
+  // snapshot accepts, as a live run does; a scripted event matching none of
+  // them is rejected and retried.
+  const can = (event: ChosenEvent): boolean =>
+    (step.snapshot as AnyMachineSnapshot).can(event as never);
+  const options = acceptedDecisionOptions(request, can);
+  const offered = options ? { ...request, options } : request;
+
   let chosen: ChosenEvent;
   try {
     chosen = await resolveDecision(
-      request,
+      offered,
       { decide },
       {
         maxRetries,
-        canTake: (event) => (step.snapshot as AnyMachineSnapshot).can(event as never),
+        canTake: can,
       },
     );
   } catch (error) {
@@ -916,6 +940,40 @@ export interface ExplorePathsOptions {
    * ends in an `error` terminal.
    */
   errors?: Record<string, unknown>;
+  /**
+   * Every output to try per src, keyed like `text`/`invokes`. A src with two
+   * or more outputs forks one branch per output (plus the `errors` branch when
+   * the src is listed there too), so a machine whose `onDone` branches on the
+   * output is explored down every arm. Each fork counts against `maxDepth`,
+   * and each branch records `{ type: 'xstate.done.actor.<id>', output }` in
+   * the path. An entry here replaces that src's `text`/`invokes` value. A
+   * one-element list is a plain canned output.
+   */
+  outputs?: Record<string, unknown[]>;
+  /**
+   * Payloads to try per event type at each branch point, given the settled
+   * snapshot there. At a decision or an idle wait, an event type with an
+   * entry forks once per payload as `{ ...payload, type }`; guard-rejected
+   * variants count in `prunedByGuard`. An entry here overrides the
+   * decision request's own `options` (from the decide input's `payloads`)
+   * for that type.
+   *
+   * A type with no entry and no request option is filled from its event
+   * schema when that schema exposes JSON Schema (Standard JSON Schema, e.g.
+   * Zod 4) and every required field is a finite domain (`enum`, `const`,
+   * `boolean`, `null`, or a union of those): it forks over the cartesian
+   * product, up to 64 combinations. Any other type is applied as `{ type }`.
+   */
+  payloads?: (snapshot: AnyMachineSnapshot) => Partial<Record<string, Record<string, unknown>[]>>;
+  /**
+   * A projection of the snapshot that determines its future. Settled
+   * snapshots with an equal key are explored once (again only when reached
+   * at a shallower depth), so payload and output branching that converges
+   * stays tractable. Return everything a guard, choice, or output reads:
+   * a key that drops a field the machine reads makes the search unsound.
+   * Without it, every path is explored in full.
+   */
+  dedupeBy?: (snapshot: AnyMachineSnapshot) => string;
 }
 
 /** A single explored path's terminal outcome. */
@@ -956,13 +1014,18 @@ export interface AgentPathReport {
 // that loops through invokes without ever branching or settling.
 const MAX_ADVANCE_STEPS = 1000;
 
-// An invoke that `options.errors` turns into a branch point: it can be
-// rejected, and — when the src also has a canned output — resolved.
+// An invoke that `options.errors` or `options.outputs` turns into a branch
+// point: it can be rejected (when the src is in `errors`), and resolved with
+// each of its outputs.
 interface InvokeFork {
   id: string;
-  src: string;
-  hasOutput: boolean;
-  output?: unknown;
+  /** The `errors` key for the failing branch, when there is one. */
+  errorKey?: string;
+  outputs: unknown[];
+  /** Text requests resolve to `{ result, messages }`, not the bare output. */
+  isText?: boolean;
+  /** Outputs came from `options.outputs`: each branch records a done event in the path. */
+  recordOutputs?: boolean;
   /**
    * A decision invoke has no canned output of its own — its success branch is
    * the per-candidate-event fork the branch-point logic already does. So the
@@ -972,10 +1035,54 @@ interface InvokeFork {
   isDecision?: boolean;
 }
 
-function invokeFork(id: string, src: string, outputs: Record<string, unknown>): InvokeFork {
-  return src in outputs
-    ? { id, src, hasOutput: true, output: outputs[src] }
-    : { id, src, hasOutput: false };
+// Cap on the cartesian product a schema's finite required fields expand to.
+const FINITE_PAYLOAD_CAP = 64;
+
+// Every value a JSON Schema admits when that set is finite and small: a
+// `const`, an `enum`, `boolean`, `null`, or a union of those. Else undefined.
+function finiteDomain(schema: unknown): unknown[] | undefined {
+  if (!isRecord(schema)) {
+    return undefined;
+  }
+  if ("const" in schema) {
+    return [schema["const"]];
+  }
+  if (Array.isArray(schema["enum"])) {
+    return schema["enum"];
+  }
+  const union = schema["anyOf"] ?? schema["oneOf"];
+  if (Array.isArray(union)) {
+    const parts = union.map(finiteDomain);
+    return parts.every((part) => part !== undefined) ? [...new Set(parts.flat())] : undefined;
+  }
+  const types: unknown[] = Array.isArray(schema["type"]) ? schema["type"] : [schema["type"]];
+  if (types.every((type) => type === "boolean" || type === "null")) {
+    return types.flatMap((type) => (type === "boolean" ? [true, false] : [null]));
+  }
+  return undefined;
+}
+
+// The payloads an object JSON Schema admits when every required field has a
+// finite domain and the product stays under the cap. Optional fields are left
+// out. Undefined when the schema does not qualify.
+function finitePayloads(jsonSchema: unknown): Record<string, unknown>[] | undefined {
+  if (!isRecord(jsonSchema)) {
+    return undefined;
+  }
+  const properties = isRecord(jsonSchema["properties"]) ? jsonSchema["properties"] : {};
+  const required = Array.isArray(jsonSchema["required"]) ? jsonSchema["required"] : [];
+  let product: Record<string, unknown>[] = [{}];
+  for (const key of required) {
+    if (typeof key !== "string" || key === "type") {
+      continue;
+    }
+    const domain = finiteDomain(properties[key]);
+    if (!domain || domain.length === 0 || product.length * domain.length > FINITE_PAYLOAD_CAP) {
+      return undefined;
+    }
+    product = product.flatMap((payload) => domain.map((value) => ({ ...payload, [key]: value })));
+  }
+  return product;
 }
 
 // Shared DFS engine for explorePaths/canReach. When `stopWhen` returns true for
@@ -990,6 +1097,66 @@ async function explore(
   const textScript = options.text ?? {};
   const invokeOutputs: Record<string, unknown> = { ...options.invokes };
   const errorScript = options.errors ?? {};
+  const outputScript = options.outputs ?? {};
+  // An agent machine's registered schemas, else a plain machine's own `schemas.events`.
+  const eventSchemas =
+    (getRegisteredAgentExecutionOptions(machine).schemas as AgentSchemas | undefined)?.events ??
+    (machine.schemas as AgentSchemas | undefined)?.events ??
+    {};
+
+  // Schema-derived payloads per event type, computed once per type.
+  const finiteCache = new Map<string, Record<string, unknown>[] | undefined>();
+  const schemaPayloads = (type: string): Record<string, unknown>[] | undefined => {
+    if (!finiteCache.has(type)) {
+      const schema = eventSchemas[type];
+      finiteCache.set(type, schema ? finitePayloads(safeJsonSchema(schema)) : undefined);
+    }
+    return finiteCache.get(type);
+  };
+
+  // The concrete events to try for one event type at a branch point: the
+  // explorer's `payloads`, else the decision request's own options, else the
+  // schema's finite domain, else the bare `{ type }`.
+  const variantsOf = (
+    type: string,
+    table: Partial<Record<string, Record<string, unknown>[]>>,
+    requestOptions?: AgentDecisionOption[],
+  ): ChosenEvent[] => {
+    const listed = table[type];
+    if (listed) {
+      return listed.map((payload) => ({ ...payload, type }));
+    }
+    const offered = requestOptions?.filter((option) => option.event.type === type);
+    if (offered && offered.length > 0) {
+      return offered.map((option) => option.event);
+    }
+    return (schemaPayloads(type) ?? [{}]).map((payload) => ({ ...payload, type }));
+  };
+
+  // How a text request or scripted invoke settles: resolved straight through
+  // with its single output, forked (an `errors` entry or several `outputs`),
+  // or blocked on a missing output.
+  const settleFor = (
+    id: string,
+    src: string,
+    single: Record<string, unknown>,
+    isText: boolean,
+  ): { fork: InvokeFork } | { output: unknown } | { blocked: true } => {
+    const fromOutputs = src in outputScript;
+    const outputs = fromOutputs ? (outputScript[src] ?? []) : src in single ? [single[src]] : [];
+    if (src in errorScript || outputs.length > 1) {
+      return {
+        fork: {
+          id,
+          ...(src in errorScript ? { errorKey: src } : {}),
+          outputs,
+          isText,
+          recordOutputs: fromOutputs,
+        },
+      };
+    }
+    return outputs.length === 1 ? { output: outputs[0] } : { blocked: true };
+  };
 
   const reachedStates = new Set<string>();
   const reachedValues: unknown[] = [];
@@ -999,6 +1166,8 @@ async function explore(
   let pathsExplored = 0;
   let hitPathCap = false;
   let witness: ChosenEvent[] | undefined;
+  // `dedupeBy` key → the shallowest depth it was explored at.
+  const visited = new Map<string, number>();
 
   const recordState = (snapshot: AnyMachineSnapshot): void => {
     const key = JSON.stringify(snapshot.value);
@@ -1034,18 +1203,14 @@ async function explore(
       }
       const request = current.requests[0] as AgentStepRequest | undefined;
       if (request && request.kind === "text") {
-        if (request.src in errorScript) {
-          return { step: current, fork: invokeFork(request.id, request.src, textScript) };
+        const settle = settleFor(request.id, request.src, textScript, true);
+        if ("fork" in settle) {
+          return { step: current, fork: settle.fork };
         }
-        if (!(request.src in textScript)) {
+        if ("blocked" in settle) {
           return { step: current, blockedSrc: request.src };
         }
-        current = resolveAgentStep(
-          machine,
-          current,
-          request,
-          asTextResult(textScript[request.src]),
-        );
+        current = resolveAgentStep(machine, current, request, asTextResult(settle.output));
         recordState(current.snapshot);
         continue;
       }
@@ -1063,20 +1228,21 @@ async function explore(
         return errorSrc !== undefined
           ? {
               step: current,
-              fork: { id: request.id, src: errorSrc, hasOutput: false, isDecision: true },
+              fork: { id: request.id, errorKey: errorSrc, outputs: [], isDecision: true },
             }
           : { step: current };
       }
       // No request: maybe a pending scripted invoke, else a wait.
       const [invoke] = pendingInvokes(current);
       if (invoke) {
-        if (invoke.src in errorScript) {
-          return { step: current, fork: invokeFork(invoke.id, invoke.src, invokeOutputs) };
+        const settle = settleFor(invoke.id, invoke.src, invokeOutputs, false);
+        if ("fork" in settle) {
+          return { step: current, fork: settle.fork };
         }
-        if (!(invoke.src in invokeOutputs)) {
+        if ("blocked" in settle) {
           return { step: current, blockedSrc: invoke.src };
         }
-        current = resolveAgentStep(machine, current, invoke.id, invokeOutputs[invoke.src]);
+        current = resolveAgentStep(machine, current, invoke.id, settle.output);
         recordState(current.snapshot);
         continue;
       }
@@ -1101,6 +1267,17 @@ async function explore(
       return;
     }
 
+    // A key already explored at this depth or shallower has nothing new
+    // below it. A shallower revisit explores again: it has more depth left.
+    if (options.dedupeBy) {
+      const key = options.dedupeBy(settled.snapshot as AnyMachineSnapshot);
+      const seenAt = visited.get(key);
+      if (seenAt !== undefined && seenAt <= depth) {
+        return;
+      }
+      visited.set(key, depth);
+    }
+
     if (fork) {
       if (depth >= maxDepth) {
         pathsExplored++;
@@ -1110,14 +1287,29 @@ async function explore(
       }
       // The failing branch first, so a canReach witness for an onError-only
       // state is the short one.
-      const failed = rejectAgentStep(machine, settled, fork.id, errorScript[fork.src]);
-      recordState(failed.snapshot);
-      await visit(failed, [...path, { type: `xstate.error.actor.${fork.id}` }], depth + 1);
+      if (fork.errorKey !== undefined) {
+        const failed = rejectAgentStep(machine, settled, fork.id, errorScript[fork.errorKey]);
+        recordState(failed.snapshot);
+        await visit(failed, [...path, { type: `xstate.error.actor.${fork.id}` }], depth + 1);
+      }
       if (!fork.isDecision) {
-        if (fork.hasOutput) {
-          const resolved = resolveAgentStep(machine, settled, fork.id, fork.output);
+        for (const output of fork.outputs) {
+          if (witness !== undefined || pathsExplored >= maxPaths) {
+            if (pathsExplored >= maxPaths) hitPathCap = true;
+            return;
+          }
+          const resolved = resolveAgentStep(
+            machine,
+            settled,
+            fork.id,
+            fork.isText ? asTextResult(output) : output,
+          );
           recordState(resolved.snapshot);
-          await visit(resolved, path, depth + 1);
+          await visit(
+            resolved,
+            fork.recordOutputs ? [...path, { type: `xstate.done.actor.${fork.id}`, output }] : path,
+            depth + 1,
+          );
         }
         return;
       }
@@ -1163,12 +1355,20 @@ async function explore(
     }
 
     // Branch point: a decision request's candidates, or an idle wait's
-    // externally-accepted events.
+    // externally-accepted events — each type expanded to its payload variants.
     const request = settled.requests[0] as AgentStepRequest | undefined;
+    const table = options.payloads?.(settled.snapshot as AnyMachineSnapshot) ?? {};
+    // A closed choice's options, rebuilt over the live candidates as a run
+    // does but not yet filtered: the loop below prunes them, so guard-rejected
+    // options count in `prunedByGuard`.
+    const requestOptions =
+      request?.kind === "decision" ? acceptedDecisionOptions(request, () => true) : undefined;
     const branchEvents: ChosenEvent[] =
       request?.kind === "decision"
-        ? request.events.map((descriptor) => ({ type: descriptor.type }))
-        : getAcceptedEvents(settled.snapshot).map((descriptor) => ({ type: descriptor.type }));
+        ? request.events.flatMap((descriptor) => variantsOf(descriptor.type, table, requestOptions))
+        : getAcceptedEvents(settled.snapshot).flatMap((descriptor) =>
+            variantsOf(descriptor.type, table),
+          );
 
     if (branchEvents.length === 0) {
       pathsExplored++;
@@ -1227,6 +1427,13 @@ async function explore(
  * `errors` forks an extra branch where that invoke is rejected, so states
  * behind an `onError` are explored too.
  *
+ * Events are applied as `{ type }` unless a payload is known: `payloads`
+ * forks a type once per listed payload, a decide input's own `payloads`
+ * become the branch set, and an event schema whose required fields are all
+ * finite (enums, booleans, consts) expands to their product. `outputs` forks
+ * an invoke once per listed output. `dedupeBy` explores each projected
+ * snapshot once, which keeps a large payload table tractable.
+ *
  * Combinatorics are bounded by `maxDepth` (default 8) and `maxPaths` (default
  * 200, reported via `hitPathCap`).
  *
@@ -1251,6 +1458,12 @@ export interface CanReachResult {
   target?: string;
   /** When reachable, the sequence of chosen/applied events that gets there. */
   witness?: ChosenEvent[];
+  /**
+   * False when exploration stopped early (the path cap was hit, or a path
+   * reached `maxDepth`) without finding the target. `reachable: false` is a
+   * proof of unreachability only when `complete` is true.
+   */
+  complete: boolean;
 }
 
 /** Thrown when a string reachability target is not a state in the machine. */
@@ -1283,7 +1496,8 @@ function resolveStateTarget(machine: AnyStateMachine, target: string): string {
  * form checks any property (a context invariant, a tag, a state+context
  * combination) without reifying a sentinel state for it. Returns
  * `{ reachable: true, witness }` with the event sequence that reaches it, or
- * `{ reachable: false }`.
+ * `{ reachable: false }`. Check `complete` before treating `reachable: false`
+ * as a proof: it is false when the path cap or `maxDepth` cut exploration short.
  *
  * @example
  * ```ts
@@ -1313,8 +1527,16 @@ export async function canReach(
       ? target
       : (snapshot: AnyMachineSnapshot): boolean =>
           snapshot.nodes.some((node) => node.id === resolvedTarget);
-  const { witness } = await explore(machine, options, stopWhen);
-  return witness !== undefined
-    ? { reachable: true, witness, ...(resolvedTarget ? { target: resolvedTarget } : {}) }
-    : { reachable: false, ...(resolvedTarget ? { target: resolvedTarget } : {}) };
+  const { witness, report } = await explore(machine, options, stopWhen);
+  if (witness !== undefined) {
+    return {
+      reachable: true,
+      witness,
+      complete: true,
+      ...(resolvedTarget ? { target: resolvedTarget } : {}),
+    };
+  }
+  const complete =
+    !report.hitPathCap && !report.terminals.some((terminal) => terminal.status === "max-depth");
+  return { reachable: false, complete, ...(resolvedTarget ? { target: resolvedTarget } : {}) };
 }

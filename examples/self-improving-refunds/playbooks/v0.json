@@ -1,6 +1,6 @@
 {
   "id": "refund-playbook-v0",
-  "description": "Naive playbook: one model decision over every proposal, with the desk's rules written into the prompt.",
+  "description": "Naive playbook: one model decision per turn over the offered options, with the desk's rules written into the prompt.",
   "schemas": {
     "context": {
       "type": "object",
@@ -32,8 +32,8 @@
         "input": {
           "name": "chooseProposal",
           "model": "openai/gpt-5.4-mini",
-          "system": "You run a refund desk. Each turn, choose exactly one next step. Rules: verify the customer's identity before any refund. Look up the order before acting on it. If you do not know the order number, ask the customer. Never refund an order that belongs to another customer; escalate instead. Never refund an order that was already refunded; close instead. Refunds above the approval threshold need a human approval first: request it, and refund only once approved. If the ticket is not a refund request, close it. If identity verification failed, escalate. Do not repeat a step the desk already rejected.",
-          "prompt": "Ticket: {{ context.facts.ticket }}\nCustomer: {{ context.facts.customerId }}\nIdentity verified: {{ context.facts.identityVerified }}\nOrder id candidates: {{ context.facts.orderIdCandidates }}\nLoaded order: {{ context.facts.order.id }} (customer {{ context.facts.order.customerId }}, total {{ context.facts.order.total }}, refunded {{ context.facts.order.refunded }})\nApproved: {{ context.facts.approved }}\nApproval threshold: {{ context.facts.approvalThreshold }}\nCustomer replies: {{ context.facts.customerReplies }}\nRejected so far: {{ context.facts.rejections.0.proposal }} {{ context.facts.rejections.0.reason }} {{ context.facts.rejections.1.proposal }} {{ context.facts.rejections.1.reason }}\nTurn: {{ context.facts.turn }}",
+          "system": "You run a refund desk. Each turn, choose exactly one of the offered next steps. Rules: verify the customer's identity before any refund. Look up the order before acting on it. If you do not know the order number, ask the customer. Never refund an order that belongs to another customer; escalate instead. Never refund an order that was already refunded; close instead. Refunds above the approval threshold need a human approval first: request it, and refund only once approved. If the ticket is not a refund request, close it. If identity verification failed, escalate.",
+          "prompt": "Ticket: {{ context.facts.ticket }}\nCustomer: {{ context.facts.customerId }}\nIdentity verified: {{ context.facts.identityVerified }}\nOrder id candidates: {{ context.facts.orderIdCandidates }}\nLoaded order: {{ context.facts.order.id }} (customer {{ context.facts.order.customerId }}, total {{ context.facts.order.total }}, refunded {{ context.facts.order.refunded }})\nApproved: {{ context.facts.approved }}\nApproval threshold: {{ context.facts.approvalThreshold }}\nCustomer replies: {{ context.facts.customerReplies }}\nFailed so far: {{ context.facts.rejections.0.proposal }} {{ context.facts.rejections.0.reason }} {{ context.facts.rejections.1.proposal }} {{ context.facts.rejections.1.reason }}\nTurn: {{ context.facts.turn }}",
           "allowedEvents": [
             "VERIFY_IDENTITY",
             "LOOKUP_ORDER",
@@ -43,6 +43,7 @@
             "ESCALATE",
             "CLOSE"
           ],
+          "payloads": "{{ context.facts.payloads }}",
           "maxRetries": 2
         },
         "onError": {
@@ -50,7 +51,7 @@
           "assign": {
             "proposal": {
               "type": "ESCALATE",
-              "reason": "The decision failed: {{ event.error.message }}"
+              "reason": "needs a person"
             }
           }
         }

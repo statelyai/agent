@@ -1,19 +1,23 @@
 /**
- * The INNER policy layer: a playbook is a JSON `AgentWorkflowConfig` that
- * takes the desk's `Facts` as input and ends in a final state whose output is
- * ONE proposal event (`{ type: <ProposalType>, ...payload }`). Wrapped by
- * `createPlaybookDecide`, it is the desk's `decide` executor.
+ * The malleable POLICY layer: a playbook is a JSON `AgentWorkflowConfig` that
+ * takes the desk's facts plus this turn's offered options as input and ends
+ * in a final state whose output is ONE proposal event
+ * (`{ type: <ProposalType>, ...payload }`). Wrapped by `createPlaybookDecide`,
+ * it is a `decide` executor the desk's boundary calls like any other.
+ *
+ * The output must be exactly one of the offered options: `decideNext`
+ * retries anything else, and the desk escalates when the retries run out.
  *
  * What a playbook may reference is a fixed vocabulary, injected here rather
  * than authored in the JSON:
- *   - input / events / output schemas: `Facts`, the proposal events, a proposal
+ *   - input / events / output schemas: `PlaybookInput`, the proposal events, a proposal
  *   - `classifyTicket` (actor): a Jev judgment, "is this a refund request?"
  *   - `draftQuestion` (text request): one question for the customer
- *   - `agent.decide` over a subset of the proposal events
+ *   - `agent.decide` over the proposal events, closed over `{{ context.facts.payloads }}`
  *   - the `playbookGuards` registry, for the checks the `{{ }}` template
  *     language cannot express (equality, comparison, array search)
  *
- * The playbook keeps the facts at `context.facts` (the guards read them
+ * The playbook keeps its input at `context.facts` (the guards read it
  * there), and its final state outputs the chosen proposal.
  */
 import { readFileSync } from "node:fs";
@@ -28,10 +32,12 @@ import {
   runToQuiescence,
   setupAgent,
   type AgentDecisionExecutor,
+  type AgentExecutorDecisionRequest,
   type AgentRequestExecutor,
   type AgentWorkflowActorConfig,
   type AgentWorkflowConfig,
   type AgentWorkflowRequestConfig,
+  type ChosenEvent,
   type SchemaCompiler,
   type StandardSchemaV1,
 } from "@statelyai/agent";
@@ -71,8 +77,18 @@ function toJsonSchema(schema: z.ZodType): Record<string, unknown> {
   return rest;
 }
 
-/** The playbook's input schema: the desk's `Facts`, generated from zod. */
-export const factsJsonSchema = toJsonSchema(factsSchema);
+/**
+ * A playbook's input: the desk's facts plus `payloads`, this turn's offered
+ * options grouped by proposal type (`{ ISSUE_REFUND: [{ amount: 40 }], CLOSE: [], ... }`;
+ * every type is present, empty when nothing of that type is legal).
+ */
+export const playbookInputSchema = factsSchema.extend({
+  payloads: z.record(z.string(), z.array(z.record(z.string(), z.unknown()))),
+});
+export type PlaybookInput = z.infer<typeof playbookInputSchema>;
+
+/** The playbook's input schema, generated from zod. */
+const playbookInputJsonSchema = toJsonSchema(playbookInputSchema);
 
 /** One proposal event, payload and `type` together. */
 export const proposalSchema = z.discriminatedUnion(
@@ -186,7 +202,7 @@ export function withPlaybookInterface(config: AgentWorkflowConfig): AgentWorkflo
     ...config,
     schemas: {
       ...config.schemas,
-      input: factsJsonSchema,
+      input: playbookInputJsonSchema,
       events: proposalEventJsonSchemas,
       output: toJsonSchema(proposalSchema),
     },
@@ -269,11 +285,44 @@ export type PlaybookDecide = AgentDecisionExecutor & {
   config: AgentWorkflowConfig;
 };
 
+/** The offered options of a closed choice, grouped by proposal type (every type present). */
+export function payloadsByType(
+  options: readonly { event: ChosenEvent }[],
+): Record<string, Record<string, unknown>[]> {
+  return Object.fromEntries(
+    PROPOSALS.map((type) => [
+      type,
+      options
+        .filter((option) => option.event.type === type)
+        .map(({ event: { type: _type, ...payload } }) => payload),
+    ]),
+  );
+}
+
 /**
- * Lowers `config` once and returns a decision executor that runs it per
- * call: the request's `input` (the desk's `Facts`) is the playbook's input,
- * with this turn's failed attempts (`request.attempts`) appended to
- * `rejections`. A run that does not end `done` with a valid proposal throws.
+ * A playbook's input for one `decideNext` request: the facts from
+ * `request.input.context`, this turn's failed attempts appended to
+ * `rejections`, and the offered options as `payloads`.
+ */
+export function playbookInputOf(request: AgentExecutorDecisionRequest): PlaybookInput {
+  const facts = factsSchema.parse((request.input as { context?: unknown } | undefined)?.context);
+  return {
+    ...facts,
+    rejections: [
+      ...facts.rejections,
+      ...request.attempts.map((attempt) => ({
+        proposal: attempt.event?.type ?? "(none)",
+        reason: attempt.reason,
+      })),
+    ],
+    payloads: payloadsByType(request.options ?? []),
+  };
+}
+
+/**
+ * Lowers `config` once and returns a decision executor that runs it per call
+ * on {@link playbookInputOf} the request. A run that does not end `done` with
+ * a valid proposal throws.
  */
 export function createPlaybookDecide(
   config: AgentWorkflowConfig,
@@ -298,17 +347,7 @@ export function createPlaybookDecide(
   );
 
   const run: AgentDecisionExecutor = async (request) => {
-    const facts = factsSchema.parse(request.input);
-    const input: Facts = {
-      ...facts,
-      rejections: [
-        ...facts.rejections,
-        ...request.attempts.map((attempt) => ({
-          proposal: attempt.event?.type ?? "(none)",
-          reason: attempt.reason,
-        })),
-      ],
-    };
+    const input = playbookInputOf(request);
     const result = await runToQuiescence(
       createAgentRuntime(machine, {
         executors: { generateText, decide },

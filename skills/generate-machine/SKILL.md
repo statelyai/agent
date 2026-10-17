@@ -1,15 +1,37 @@
 ---
 name: generate-machine
-description: Author a @statelyai/agent workflow as JSON and check it before it runs. Use when asked to generate or author an agent machine, create a workflow config, write an AgentWorkflowConfig, or produce an LLM-authored state machine for an agent — and when a generated config fails Ajv validation or agent lint and needs repair.
+description: Author a @statelyai/agent workflow as JSON and check it before it runs. Use when asked to generate or author an agent machine, create a workflow config, write an AgentWorkflowConfig, or produce an LLM-authored state machine for an agent — and when a generated config fails verifyAgentConfig, Ajv validation, or agent lint and needs repair.
 ---
 
 # Generate an agent machine
 
-An agent machine is data. You author a JSON `AgentWorkflowConfig`, then run it through gates that all work with no API key: Ajv → `fromConfig` → lint → simulate. Do not hand back a config that has not passed all four.
+An agent machine is data. You author a JSON `AgentWorkflowConfig`, then run it through `verifyAgentConfig`, whose gates all work with no API key: validate → vocabulary → lower → lint → explore. Do not hand back a config that has not passed every gate.
 
 ```
-author → validate (validateAgentConfig) → lower (fromConfig) → lint (lintAgentMachine) → simulate → hand back
+split environment/policy → author (description = goal) → verifyAgentConfig → repair (≤ 3) → persist traces → hand back
 ```
+
+To improve an existing policy from its traces, use the `improve-machine` skill instead.
+
+## 0. Split environment and policy
+
+Decide what is fixed before you write any JSON.
+
+- **Environment** (TypeScript, fixed): the rules of the world and the business invariants, as states and guards. People author it and verify it with `canReach` / `explorePaths` from `@statelyai/agent/testing`. You never generate it, and no generated config may change it.
+- **Policy** (JSON, generated): how the agent works toward the goal: which step next, which tool, when to ask a person, cheap judgment vs model call. This is the `AgentWorkflowConfig` you author.
+- The policy plugs into the environment at its decision points and outputs one event; the environment's guards decide whether to accept it.
+- No split needed for a single judgment inside a fixed workflow, or for a workflow where every step is dictated by rules. Author one machine.
+
+If the request asks you to generate a business rule (an approval threshold, a payout limit), stop: that belongs in the environment, in TypeScript, reviewed by a person. Say so.
+
+Before editing an existing machine, read it as text:
+
+```ts
+import { describeMachine } from "@statelyai/agent";
+const text = describeMachine(machine); // "Machine <id>", then "Goal: …", states, transitions, events
+```
+
+Pass `{ snapshot }` to mark the active states with `*`. Concept page: `docs/environment-and-policy.md`.
 
 ## 1. Read the schema
 
@@ -19,6 +41,12 @@ The config shape is fixed by a shipped JSON Schema. Read it first; it is the con
 - In the `statelyai/agent` repo: `schemas/agent-workflow.json`
 
 ## 2. Author the config
+
+Start with the root `description`: it is the machine's **goal**, the overall objective plus measurable success criteria. `describeMachine` renders it first as `Goal: …`, and an improver later climbs toward it. Write criteria a scorer can compute from outcomes (terminal states, effects in the world, cost), not "be helpful":
+
+```json
+"description": "Resolve each support ticket in one session. Success: escalations only for tickets that need a human; every reply approved before sending; at most 2 model calls per ticket."
+```
 
 Rules the runtime enforces. Each one maps to a build error or a lint diagnostic:
 
@@ -37,6 +65,7 @@ Reference config — decision, text request, idle human step, one final state:
 ```json
 {
   "id": "support-ticket",
+  "description": "Resolve each support ticket in one session. Success: escalations only for tickets that need a human; every reply approved before sending; at most 2 model calls per ticket.",
   "schemas": {
     "input": {
       "type": "object",
@@ -132,36 +161,27 @@ Reference config — decision, text request, idle human step, one final state:
 }
 ```
 
-## 3. Validate with `validateAgentConfig`
+## 3. Verify with `verifyAgentConfig`
 
-`validateAgentConfig` from `@statelyai/agent/validate` checks a candidate against the shipped workflow schema with Ajv 2020 built in. It needs `ajv` installed (an optional peer of the package). Run it before anything else touches the config.
+`verifyAgentConfig(config, options)` from `@statelyai/agent/validate` runs every pre-run gate and stops at the first failure. It never throws on a bad config; each gate is a record `{ name, ok, detail? }`. It needs `ajv` installed (an optional peer of the package).
 
-```ts
-import { validateAgentConfig } from "@statelyai/agent/validate";
-import type { AgentWorkflowConfig } from "@statelyai/agent";
+| Gate         | Checks with                            | Fails on                                                                                             |
+| ------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `validate`   | `validateAgentConfig` (shipped schema) | malformed config shape                                                                               |
+| `vocabulary` | `allow` lists                          | an invoke src, named guard, named action, `agent.decide` event, or model ref not listed              |
+| `lower`      | `setupAgent.fromConfig`                | unresolved named guard/action, `onDone` on an `agent.decide` invoke                                  |
+| `lint`       | `lintAgentMachine`                     | error findings (warnings too with `lint: { warnings: true }`)                                        |
+| `explore`    | `explorePaths`, once per input         | a path ending outside `explore.terminals` (default `['done']`), a loop past `maxDepth`, the path cap |
 
-function validateGeneratedConfig(candidate: unknown): AgentWorkflowConfig {
-  const result = validateAgentConfig(candidate);
-  if (result.valid) return candidate as AgentWorkflowConfig;
-  throw new Error(
-    result.errors.map((error) => `${error.path || "(root)"} ${error.message}`).join("\n"),
-  );
-}
-```
-
-Each error carries a JSON Pointer `path`, so a repair prompt can name the exact bad field.
-
-## 4. Lower with `fromConfig`
-
-`fromConfig` needs a `compileSchema` that turns the JSON Schemas _inside_ the config into Standard Schema validators. Two engines, two jobs: the 2020 build above checks the config document; this one compiles the per-field schemas. The library bundles no JSON Schema engine, by design.
+`compileSchema` turns the JSON Schemas _inside_ the config into Standard Schema validators for `fromConfig`. The library bundles no JSON Schema engine:
 
 ```ts
 import Ajv from "ajv";
-import { setupAgent, type SchemaCompiler, type StandardSchemaV1 } from "@statelyai/agent";
+import type { SchemaCompiler, StandardSchemaV1 } from "@statelyai/agent";
 
 const ajv = new Ajv({ strict: false });
 
-export const ajvCompileSchema: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 => {
+export const compileSchema: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 => {
   const validate = ajv.compile(jsonSchema);
   return {
     "~standard": {
@@ -175,87 +195,126 @@ export const ajvCompileSchema: SchemaCompiler = (jsonSchema, name): StandardSche
                 message: `${name}${e.instancePath} ${e.message}`,
               })),
             },
-      // Expose the source JSON Schema so lint's serializability checks can read the shape.
+      // Expose the source JSON Schema so lint and describeMachine can read the shape.
       jsonSchema: { input: () => jsonSchema },
     },
   };
 };
-
-const { machine, schemas } = setupAgent.fromConfig(config, { compileSchema: ajvCompileSchema });
 ```
 
-Lowering is itself a gate: it throws on an unresolved named guard/action and on an `onDone` attached to an `agent.decide` invoke.
-
-## 5. Lint
+Run the gates. List the host's real names in `allow`; an omitted key is unrestricted:
 
 ```ts
-import { lintAgentMachine } from "@statelyai/agent/testing";
-const diagnostics = lintAgentMachine(machine);
-lintAgentMachine(machine, { throw: true }); // throws AgentLintError on error-severity findings
+import { verifyAgentConfig } from "@statelyai/agent/validate";
+
+const result = await verifyAgentConfig(candidate, {
+  compileSchema,
+  allow: {
+    actors: [],
+    requests: ["draftReply"],
+    guards: [],
+    actions: [],
+    events: ["ESCALATE", "REPLY", "APPROVE", "REJECT"],
+    models: ["openai/gpt-5.4-mini"],
+  },
+  explore: {
+    inputs: [{ ticket: "Export downloads a 0-byte CSV on Safari." }],
+    text: { draftReply: { reply: "" } },
+  },
+});
+// result.ok, result.gates, result.config (after validate), result.machine (after lower)
 ```
 
-Every check applies to config-built machines, reachability included — the lowering keeps the config's transition targets, so `unreachable-state` and `missing-final` read the real graph. Do not disable checks.
+- Exploration forks past idle waits on every event the waiting state accepts, so a human step still ends `done`. Add `terminals: ["done", "idle"]` only when a path may legitimately stop at a wait with nothing to accept.
+- `guards` / `actions`: named implementations, passed to `fromConfig`. `actors`: bound with `machine.provide({ actors })` after lowering.
+- `explore` keys other than `inputs` and `terminals` pass through to `explorePaths`: `text` (canned request outputs), `invokes` (canned actor outputs), `errors` (fork a rejected branch per src), `outputs` (fork one branch per listed output), `payloads` (fork one branch per payload at decisions and idle waits), `dedupeBy` (explore each snapshot key once; the key must cover every field a guard reads), `maxDepth` (default 8), `maxPaths` (default 200).
+- Stub each request's output from its declared `output` schema (`""` for string, `0` for number, `[]` for array, recurse on `properties`). Add an `errors` entry for every src whose `onError` path matters.
+- Pick `explore.inputs` that reach every branch the goal cares about. Exploration covers only the inputs you give it.
+- A passing `lint` gate carries its warnings in `detail`. Report them.
 
-The one that bites most often is `decide-without-events`: an `allowedEvents` list with no matching `on` transitions produces a decision the machine can never deliver.
+## 4. Repair loop
 
-## 6. Simulate a dry run
-
-Lint is structural. A dry run proves a path actually settles. No API key needed.
+A failed gate's `detail` names the offending path, state, or name, one problem per line. Feed it back verbatim with the rejected config, and run the gates again:
 
 ```ts
-import { simulateAgent } from "@statelyai/agent/testing";
+let prompt = originalTask;
+for (let attempt = 0; attempt < 3; attempt++) {
+  const candidate = await author({ system, prompt });
+  const result = await verifyAgentConfig(candidate, verifyOptions);
+  if (result.ok) return result;
+  const failed = result.gates.find((gate) => !gate.ok)!;
+  prompt = `${originalTask}\n\nYour previous config:\n${JSON.stringify(candidate)}\n\nGate '${failed.name}' failed:\n${failed.detail}\nReturn a corrected config.`;
+}
+```
+
+Keep the cap at 3. A config that fails three repairs is usually asking for something the data form cannot express: author it in TypeScript with `setupAgent` instead, or report that the vocabulary is missing something.
+
+## 5. Manual fallback
+
+Without `verifyAgentConfig` (older package, or a gate you need to run alone), run the same gates by hand:
+
+```ts
+import { setupAgent } from "@statelyai/agent";
+import { validateAgentConfig } from "@statelyai/agent/validate";
+import { explorePaths, lintAgentMachine, simulateAgent } from "@statelyai/agent/testing";
+
+const validation = validateAgentConfig(candidate); // { valid, errors: [{ path, message }] }, path is a JSON Pointer
+const { machine } = setupAgent.fromConfig(config, { compileSchema }); // throws on unresolved names
+lintAgentMachine(machine, { throw: true }); // throws AgentLintError on error findings
 const dryRun = await simulateAgent(machine, {
   input: { ticket: "" },
   script: {
     decisions: { "agent.decide": [{ type: "REPLY" }] },
     text: { draftReply: [{ reply: "" }] },
   },
+}); // dryRun.status: 'done' | 'idle' | 'exhausted' ('exhausted' = loops, reject)
+const report = await explorePaths(machine, {
+  input: { ticket: "" },
+  text: { draftReply: { reply: "" } },
 });
-// dryRun.status: 'done' | 'idle' | 'exhausted'
 ```
 
-Derive the script from the config rather than guessing: take the first entry of each decision's `allowedEvents`, and stub each request's output from its declared `output` schema (`""` for string, `0` for number, `[]` for array, recurse on `properties`).
+The lint check that bites most often is `decide-without-events`: an `allowedEvents` list with no matching `on` transitions. Do not disable checks.
 
-- `'exhausted'` → the machine loops. Reject it.
-- `'idle'` → it stopped at a human step. Expected when the config has one.
-- To cover every branch instead of one path, use `explorePaths` / `canReach` (its result is `{ reachable, witness }`).
+## 6. Persist traces from day one
 
-## 7. Repair loop
-
-Every gate throws with a message naming the offending field, state, or path. Feed that message back verbatim and regenerate:
+An improver needs data. Wire an event log store and a thread id per run before the first real run, so every run is a trace:
 
 ```ts
-for (let attempt = 0; attempt < 3; attempt++) {
-  try {
-    return buildAndVet(await author({ system, prompt }));
-  } catch (error) {
-    prompt = `${originalTask}\n\nYour previous config was rejected:\n${(error as Error).message}\nReturn a corrected config.`;
-  }
-}
+import { runAgent } from "@statelyai/agent";
+import { createInMemoryEventLogStore } from "@statelyai/agent/log";
+
+const store = createInMemoryEventLogStore(); // tests only; implement AgentEventLogStore on your database
+const result = await runAgent(machine, { input, executors, store, threadId: `ticket-${ticketId}` });
 ```
 
-Keep the cap at ~3. A config that fails three schema-shaped repairs is usually asking for something the data form cannot express — author it in TypeScript with `setupAgent` instead.
+- `threadId` is required with `store`. One thread per run.
+- The store does not list threads. Record each thread id with its scenario or ticket so an improver can find it.
+- `replay(machine, await store.read(threadId))` from `@statelyai/agent/log` rebuilds the final state with no model calls; `getUsageFromEvents(entries)` sums token usage.
 
-## 8. Hand back
+## 7. Hand back
 
 Deliver the config JSON plus how to run it:
 
 ```ts
-import { runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-const result = await runToQuiescence(
-  createAgentRuntime(machine, { executors: createAiSdkExecutors({ resolveModel }) }),
-  { input: { ticket: "Export downloads a 0-byte CSV on Safari." } },
-);
+const run = await runAgent(result.machine!, {
+  input: { ticket: "Export downloads a 0-byte CSV on Safari." },
+  executors: createAiSdkExecutors({ resolveModel }),
+  store,
+  threadId,
+});
 ```
 
-Say which gates passed, list any warning-severity lint diagnostics, and report the dry-run status. Model refs are strings, so the host supplies `resolveModel`.
+Say which gates passed (list `result.gates`), list any lint warnings, state the goal and its success criteria, and say where traces are written. Model refs are strings, so the host supplies `resolveModel`.
 
 ## Known limits
 
 - **Named guards and actions are host-resolved.** A config carries no functions. `guard: "isReady"` only works if the host passes an `isReady` implementation to `fromConfig`; an unresolved name is a build-time throw. Either list the host's names in the prompt or forbid named guards/actions entirely.
 - **Expressions are dot-path templates only.** `"{{ context.a.b }}"` — no comparisons, no arithmetic, no method calls, no partial interpolation inside a larger string.
-- **Ajv validity is not semantic validity.** A config can validate and still invoke a request that does not exist or route to a state that solves nothing. That is what lint and simulate are for.
-- **A dry run covers one path.** Use `explorePaths` when the branch structure matters.
-- **Model refs and tool names are unchecked strings.** They resolve at run time, in the host.
+- **Ajv validity is not semantic validity.** A config can validate and still invoke a request that does not exist or route to a state that solves nothing. That is what the `vocabulary`, `lint`, and `explore` gates are for.
+- **Exploration covers the inputs you give it.** A branch no `explore.inputs` entry reaches is unverified.
+- **Model refs are checked only with `allow.models`.** Tool names stay unchecked strings that resolve at run time, in the host.
+- **The gates check structure, not quality.** Whether a config is better than another is measured by replaying scenarios against an objective. See the `improve-machine` skill.

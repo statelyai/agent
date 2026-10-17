@@ -390,6 +390,48 @@ Declare emitted event payloads under `schemas.emitted`. Hosts receive them throu
 `createAgentRuntime(machine, { on: { SCORED: handler } })`, the same as for
 hand-authored machines that use `enq.emit(...)`.
 
+## Machine descriptions for models
+
+<!-- describeMachine from src/describe-machine.ts -->
+
+`describeMachine(machine, { snapshot? })` renders any machine, from a config or from TypeScript, as plain text a model can read. Use it as the prompt for a model that proposes an improved machine, or as extra context for a decider.
+
+```ts
+import { describeMachine } from "@statelyai/agent";
+
+const prompt = `Propose an improved machine for this goal.\n\n${describeMachine(machine)}`;
+```
+
+The machine's `description` is its goal, so it leads the text. An excerpt:
+
+```text
+Machine ticket
+Goal: Answer the customer's ticket so they never write back.
+States (initial: triaging):
+  triaging — Decide how to handle the ticket
+      on ESCALATE → escalated
+      on REPLY → drafting; sets tone — Draft a reply
+      invoke agent.decide
+        error → escalated
+  checking (choice)
+      choice if context.approved → sent
+      choice if isRetryable → drafting
+      choice else → escalated
+  sent (final) [tags: done]
+  escalated (final) — A human owns it now
+Events:
+  REPLY — Answer the ticket directly
+    tone: "formal" | "casual" — Reply tone
+```
+
+- **States:** one line each, indented by depth, with the type, tags, `meta.interaction.label`, and description. Pass `snapshot` to mark the active states with `*`.
+- **Transitions:** one line each under the state they leave: `on`, `always`, `after`, invoke `done` and `error`, and `choice` branches. Each line shows the guard (`if …`), the target, and the context keys it sets (`sets tone`).
+- **Events:** each event schema's description and fields. Event descriptions come from the schema's JSON Schema, so a `compileSchema` must implement the Standard Schema JSON Schema extension for a config's event descriptions to appear.
+- **Config machines:** read from the lowered config, so every target, guard, and context patch is known.
+- **Transition functions:** read from their source. A function shows the targets its source names, marked `(conditional)` when it can return no transition or one of several. It shows `(stays)` when its source has no `target`, and `→ ?` when the target is computed.
+
+The output is deterministic. The same machine always produces the same text.
+
 ## Limits of the data form
 
 The data form is narrower than TypeScript authoring.

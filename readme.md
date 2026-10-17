@@ -10,15 +10,22 @@ Stately Agent adds model requests and decisions to XState:
 - Your application chooses the model, runs the requests, and stores the state.
 - The model proposes an event; the machine decides whether it is allowed and what happens next.
 
+Environment and policy:
+
+- The environment is code you own and can verify; the policy is something a model can write inside it.
+- The environment holds the rules and invariants as TypeScript states and guards, fixed and checked with `canReach`.
+- The policy is a JSON machine a model can author and improve from traces, gated before it runs and promoted only on a measured gain. See [Environment and policy](docs/environment-and-policy.md).
+
 Stately Agent 2 is in alpha. APIs may change before the stable release.
 
 [Documentation](https://stately.ai/docs/packages/agent) · [Examples](examples/README.md) · [XState](https://github.com/statelyai/xstate)
 
-## Three starting points
+## Four starting points
 
 - **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runAgent`, test it with no API key, then use it in any framework or runtime with zero machine changes. See the [Quickstart](docs/quickstart.md) and [Use in any stack](docs/any-stack.md).
 - **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](docs/from-a-loop.md).
 - **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, and more, each a single runnable file you lift in 60 seconds. See [Agent patterns](docs/patterns.md).
+- **Let an agent improve its own logic.** Keep the rules in a fixed TypeScript environment and let a model rewrite the JSON policy inside it, gated by `verifyAgentConfig` and promoted only when held-out scenarios improve. See [Environment and policy](docs/environment-and-policy.md) and the [`improve-machine` skill](skills/improve-machine/SKILL.md).
 
 ## Install
 

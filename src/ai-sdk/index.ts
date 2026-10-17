@@ -33,9 +33,13 @@ import {
   toAiSdkCallSettings,
   toAiSdkGenerationSettings,
   toAiSdkEventTools,
+  toAiSdkOptionTool,
+  fromAiSdkOptionCall,
   toDecisionMessages,
   type AiSdkCallUsage,
 } from "./mappers.js";
+
+export { createDecisionModelDecide, type DecisionModelDecideOptions } from "./decision-model.js";
 
 // Multi-step tool loops: the request's typed `maxSteps` bounds the AI SDK
 // tool-call loop; default stays single-step. Shared by generateText and
@@ -429,7 +433,10 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
 
   const decide = async (request: AgentDecisionRequest, info?: AgentRequestExecutorInfo) => {
     const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
-    const tools = toAiSdkEventTools(request.events);
+    // A closed choice (`request.options`) is ONE tool over an enum of option
+    // ids; otherwise one tool per candidate event.
+    const choice = request.options ? toAiSdkOptionTool(request.options) : undefined;
+    const tools = choice ? choice.tools : toAiSdkEventTools(request.events);
     const messages = toDecisionMessages(request);
 
     const result = await aiGenerateText({
@@ -450,6 +457,13 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const toolCall = result.toolCalls[0];
     if (!toolCall) {
       throw new Error("createAiSdkExecutors: decide — model did not call an event tool.");
+    }
+    if (choice) {
+      return {
+        event: fromAiSdkOptionCall(toolCall, request.options!, choice.ids),
+        usage: toAgentCallUsage(result.usage),
+        finishReason: result.finishReason,
+      } satisfies AiSdkDecideResult;
     }
     const chosenEvent = request.events.find((event) => event.toolName === toolCall.toolName);
     if (!chosenEvent) {

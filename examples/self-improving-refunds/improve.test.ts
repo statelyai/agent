@@ -1,174 +1,32 @@
 import { describe, expect, test } from "vitest";
-import { createDecisionRequest, type AgentWorkflowConfig } from "@statelyai/agent";
-import { createMockJudge } from "../mock-judge.js";
+import type { AgentWorkflowConfig } from "@statelyai/agent";
 import { createMockModelExecutors, type MockTextEntry } from "../mock-model.js";
-import {
-  APPROVAL_THRESHOLD,
-  createWorld,
-  findOrderIds,
-  MAX_REJECTIONS,
-  MAX_TURNS,
-  PROPOSALS,
-  type Arm,
-  type Facts,
-  type Outcome,
-  type World,
-} from "./contract.js";
-import { improvePlaybook } from "./improve.js";
-import { loadPlaybook, type PlaybookDecide } from "./playbook.js";
+import { HELD_OUT_SCENARIOS, summarize, type BatchMetrics } from "./contract.js";
+import { improvePlaybook, objective, OBJECTIVE_WEIGHTS } from "./improve.js";
+import { loadPlaybook, type PlaybookExecutors } from "./playbook.js";
+import { eagerChoice, jevJudge } from "./test-doubles.js";
 
 const v0 = loadPlaybook("v0");
 const v1 = loadPlaybook("v1");
 
-type Step = { refusal?: string; outcome?: Outcome };
-
-/**
- * A stand-in for the desk's guard table: refuses illegal proposals (so
- * violations stay empty) and applies legal ones to the facts and the world.
- */
-function applyProposal(
-  event: { type: string; [key: string]: unknown },
-  facts: Facts,
-  world: World,
-): Step {
-  const order = facts.order;
-  switch (event.type) {
-    case "VERIFY_IDENTITY": {
-      if (facts.identityVerified) return { refusal: "identity already verified" };
-      if (!world.verifyIdentity(world.identityClaim())) {
-        return { refusal: "identity check failed" };
-      }
-      facts.identityVerified = true;
-      return {};
-    }
-    case "LOOKUP_ORDER": {
-      const found = world.lookupOrder(String(event.orderId));
-      if (!found) return { refusal: `no order ${String(event.orderId)}` };
-      facts.order = { ...found };
-      return {};
-    }
-    case "ASK_CUSTOMER": {
-      facts.customerReplies.push(world.customerReply(String(event.question)));
-      facts.orderIdCandidates = findOrderIds([facts.ticket, ...facts.customerReplies].join(" "));
-      return {};
-    }
-    case "REQUEST_APPROVAL": {
-      if (!order || facts.approved || order.total <= facts.approvalThreshold) {
-        return { refusal: "approval not needed" };
-      }
-      if (world.requestApproval(Number(event.amount)) === "reject") return { outcome: "close" };
-      facts.approved = true;
-      return {};
-    }
-    case "ISSUE_REFUND": {
-      if (!facts.identityVerified) return { refusal: "identity not verified" };
-      if (!order) return { refusal: "no order loaded" };
-      if (order.customerId !== facts.customerId)
-        return { refusal: "order belongs to another customer" };
-      if (order.refunded) return { refusal: "already refunded" };
-      if (order.total > facts.approvalThreshold && !facts.approved)
-        return { refusal: "needs approval" };
-      world.issueRefund({
-        orderId: order.id,
-        amount: order.total,
-        identityVerified: facts.identityVerified,
-        approved: facts.approved,
-      });
-      return { outcome: "refund" };
-    }
-    case "ESCALATE":
-      return { outcome: "escalate" };
-    default:
-      return { outcome: "close" };
-  }
-}
-
-/** The fake arm: drives the decider over a scripted Facts progression per scenario. */
-function fakeArm(decide: PlaybookDecide): Arm {
-  return {
-    label: decide.config.id ?? "playbook",
-    async runEpisode(scenario) {
-      const world = createWorld(scenario);
-      const start = { ...decide.counters };
-      const facts: Facts = {
-        ticket: scenario.ticket,
-        customerId: scenario.customerId,
-        identityVerified: false,
-        order: null,
-        approved: false,
-        orderIdCandidates: findOrderIds(scenario.ticket),
-        customerReplies: [],
-        rejections: [],
-        turn: 0,
-        approvalThreshold: APPROVAL_THRESHOLD,
-      };
-      const trail: string[] = [];
-      let outcome: Outcome = "failed";
-      let turns = 0;
-      while (outcome === "failed" && turns < MAX_TURNS) {
-        turns += 1;
-        facts.turn = turns;
-        let event;
-        try {
-          ({ event } = await decide({
-            ...createDecisionRequest({
-              id: `turn-${turns}`,
-              model: "playbook",
-              input: structuredClone(facts),
-              events: PROPOSALS,
-            }),
-            name: "desk",
-          }));
-        } catch (error) {
-          trail.push(`turn ${turns}: decider failed: ${(error as Error).message}`);
-          break;
-        }
-        const step = applyProposal(event, facts, world);
-        if (step.refusal) {
-          facts.rejections.push({ proposal: event.type, reason: step.refusal });
-          trail.push(`turn ${turns}: ${event.type} rejected: ${step.refusal}`);
-          if (facts.rejections.length >= MAX_REJECTIONS) outcome = "escalate";
-          continue;
-        }
-        trail.push(`turn ${turns}: ${event.type}`);
-        if (step.outcome) outcome = step.outcome;
-      }
-      return {
-        scenarioId: scenario.id,
-        outcome,
-        correct: outcome === scenario.expected,
-        turns,
-        modelCalls: decide.counters.modelCalls - start.modelCalls,
-        judgeCalls: decide.counters.judgeCalls - start.judgeCalls,
-        rejections: facts.rejections.length,
-        violations: world.violations,
-        trail,
-      };
-    },
-  };
-}
-
-/** Says a ticket is a refund request unless it asks about shipping. */
-const judge = () =>
-  createMockJudge({
-    isRefundRequest: (state) => !/shipping address/i.test((state as { ticket: string }).ticket),
-  }).model;
-
-/** v0's model: always tries to refund straight away. */
+/** Reflection answers and the eager closed choices, from the shared mock model. */
 function executors(proposals: MockTextEntry | MockTextEntry[]) {
-  return createMockModelExecutors({
-    decisions: { chooseProposal: { type: "ISSUE_REFUND", amount: 40 } },
+  const text = createMockModelExecutors({
     text: { proposePlaybook: proposals },
+    decisions: { "*": eagerChoice },
   });
+  const executors: PlaybookExecutors = text;
+  const prompts = () =>
+    text.calls
+      .filter((call) => call.name === "proposePlaybook")
+      .map((call) => call.request.prompt ?? "");
+  return { executors, prompts };
 }
 
 /** A config whose choice branch targets a state that does not exist. */
 const badTarget: AgentWorkflowConfig = {
   ...v1,
-  states: {
-    ...v1.states,
-    order: { type: "choice", choice: [{ target: "nowhere" }] },
-  },
+  states: { ...v1.states, order: { type: "choice", choice: [{ target: "nowhere" }] } },
 };
 
 /** A config that invokes an actor outside the vocabulary. */
@@ -177,16 +35,12 @@ const unknownActor: AgentWorkflowConfig = {
   states: {
     ...v1.states,
     classifying: {
-      invoke: {
-        src: "lookupCrm",
-        onDone: { target: "intent" },
-        onError: { target: "done" },
-      },
+      invoke: { src: "lookupCrm", onDone: { target: "intent" }, onError: { target: "done" } },
     },
   },
 };
 
-/** Statically fine, behaviorally reckless: refund every time. */
+/** Proposes the same payout whatever the desk offers. */
 const alwaysRefund: AgentWorkflowConfig = {
   id: "always-refund",
   context: { facts: "{{ input }}" },
@@ -194,53 +48,90 @@ const alwaysRefund: AgentWorkflowConfig = {
   states: { done: { type: "final", output: { type: "ISSUE_REFUND", amount: 40 } } },
 };
 
-describe("improvePlaybook", () => {
-  test("v0 -> v1: every gate passes and the cheaper playbook is promoted", async () => {
-    const model = executors(v1);
-    const result = await improvePlaybook({
-      current: v0,
-      arm: fakeArm,
-      executors: model,
-      judge: judge(),
-    });
+/** Always legal, always escalates: passes every static gate, then replays worse. */
+const alwaysEscalate: AgentWorkflowConfig = {
+  id: "always-escalate",
+  context: { facts: "{{ input }}" },
+  initial: "done",
+  states: { done: { type: "final", output: { type: "ESCALATE", reason: "needs a person" } } },
+};
 
-    expect(result.gates.map((gate) => [gate.name, gate.ok])).toEqual([
-      ["validate", true],
-      ["vocabulary", true],
-      ["lower", true],
-      ["lint", true],
-      ["terminates", true],
-      ["outputs", true],
-      ["replay", true],
-    ]);
-    expect(result.promoted).toBe(true);
-    expect(result.config).toBe(result.proposed);
-    expect(result.repairs).toBe(0);
+const metrics = (overrides: Partial<BatchMetrics>): BatchMetrics => ({
+  ...summarize("m", []),
+  episodes: Array.from({ length: 8 }, () => ({}) as BatchMetrics["episodes"][number]),
+  ...overrides,
+});
 
-    const { before, after } = result;
-    if (!after) throw new Error("expected a replay");
-    expect(after.violations).toBe(0);
-    expect(after.accuracy).toBeGreaterThan(before.accuracy);
-    expect(after.modelCalls).toBe(0);
-    expect(after.rejections).toBeLessThan(before.rejections);
-    expect(after.modelCalls + after.judgeCalls + after.rejections).toBeLessThan(
-      before.modelCalls + before.judgeCalls + before.rejections,
+describe("objective", () => {
+  test("accuracy dominates, costs are small, a violation is -Infinity", () => {
+    expect(objective(metrics({ accuracy: 1 }))).toBe(1);
+    // One wrong ticket in eight outweighs six model calls per ticket.
+    const wrong = objective(metrics({ accuracy: 7 / 8 }));
+    const busy = objective(metrics({ accuracy: 1, modelCalls: 6 * 8 }));
+    expect(busy).toBeGreaterThan(wrong);
+    expect(objective(metrics({ accuracy: 1, judgeCalls: 8 }))).toBeCloseTo(
+      1 - OBJECTIVE_WEIGHTS.judgeCall,
     );
-
-    // The reflection prompt carried the vocabulary, the current config, and the trails.
-    const prompt = model.calls.find((call) => call.name === "proposePlaybook")?.request.prompt;
-    expect(prompt).toContain("Named guards (read context.facts): identityRejected");
-    expect(prompt).toContain('"id": "refund-playbook-v0"');
-    expect(prompt).toContain("ISSUE_REFUND rejected: identity not verified");
+    expect(objective(metrics({ accuracy: 1, violations: 1 }))).toBe(Number.NEGATIVE_INFINITY);
   });
+});
+
+describe("improvePlaybook", () => {
+  test(
+    "v0 -> v1: every gate passes and the better playbook is promoted",
+    { timeout: 60_000 },
+    async () => {
+      const { executors: ex, prompts } = executors(v1);
+      const result = await improvePlaybook({ current: v0, executors: ex, judge: jevJudge().model });
+
+      expect(result.gates.map((gate) => [gate.name, gate.ok])).toEqual([
+        ["validate", true],
+        ["vocabulary", true],
+        ["lower", true],
+        ["lint", true],
+        ["explore", true],
+        ["outputs", true],
+        ["replay", true],
+      ]);
+      expect(result.promoted).toBe(true);
+      expect(result.config).toBe(result.proposed);
+      expect(result.repairs).toBe(0);
+
+      const { before, after } = result;
+      if (!after) throw new Error("expected a replay");
+      expect(before.all.violations).toBe(0);
+      expect(after.all.violations).toBe(0);
+      expect(after.train.accuracy).toBe(1);
+      expect(after.heldOut.accuracy).toBe(1);
+      expect(after.all.modelCalls).toBe(0);
+      expect(objective(after.all)).toBeGreaterThan(objective(before.all));
+
+      // The reflection prompt: goal, objective, environment, policy, train trails from the store.
+      const [prompt] = prompts();
+      expect(prompt).toContain("## Goal\nResolve each refund ticket correctly");
+      expect(prompt).toContain("objective = accuracy - (0.02 * model calls");
+      expect(prompt).toContain("## ENVIRONMENT (read-only");
+      expect(prompt).toContain("Machine refund-desk\nGoal: Resolve each refund ticket");
+      expect(prompt).toContain("## POLICY (yours to rewrite");
+      expect(prompt).toContain("Machine refund-playbook-v0");
+      expect(prompt).toContain('"id": "refund-playbook-v0"');
+      expect(prompt).toContain("Named guards (read context.facts): identityRejected");
+      expect(prompt).toContain("turn 1: LOOKUP_ORDER ORD-1001");
+      // Held-out trails stay out of the prompt.
+      for (const scenario of HELD_OUT_SCENARIOS) expect(prompt).not.toContain(scenario.id);
+
+      // Every episode is a thread in the store.
+      const thread = await result.store.read("round-1/after/small-clean");
+      expect(thread[0]?.event.type).toBe("@agent.init");
+    },
+  );
 
   test("failed gates feed back as repairs, then the current playbook stays", async () => {
-    const model = executors([badTarget, unknownActor]);
+    const { executors: ex, prompts } = executors([badTarget, unknownActor]);
     const result = await improvePlaybook({
       current: v0,
-      arm: fakeArm,
-      executors: model,
-      judge: judge(),
+      executors: ex,
+      judge: jevJudge().model,
       maxRepairs: 2,
     });
 
@@ -252,29 +143,36 @@ describe("improvePlaybook", () => {
     expect(failed?.name).toBe("vocabulary");
     expect(failed?.detail).toContain("unknown src 'lookupCrm'");
 
-    const prompts = model.calls
-      .filter((call) => call.name === "proposePlaybook")
-      .map((call) => call.request.prompt ?? "");
-    expect(prompts).toHaveLength(3);
+    const sent = prompts();
+    expect(sent).toHaveLength(3);
     // The first repair names the bad target from the `lower` gate.
-    expect(prompts[1]).toContain("gate 'lower' failed");
-    expect(prompts[1]).toContain("'nowhere'");
-    expect(prompts[2]).toContain("gate 'vocabulary' failed");
+    expect(sent[1]).toContain("gate 'lower' failed");
+    expect(sent[1]).toContain("nowhere");
+    expect(sent[2]).toContain("gate 'vocabulary' failed");
+  });
+
+  test("a playbook that proposes options the desk does not offer fails the outputs gate", async () => {
+    const { executors: ex } = executors(alwaysRefund);
+    const result = await improvePlaybook({
+      current: v1,
+      executors: ex,
+      judge: jevJudge().model,
+      maxRepairs: 0,
+    });
+    expect(result.gates.at(-1)).toMatchObject({ name: "outputs", ok: false });
+    expect(result.gates.at(-1)?.detail).toContain("matched no offered option");
+    expect(result.promoted).toBe(false);
   });
 
   test("a playbook that passes the static gates but replays worse is not promoted", async () => {
-    const result = await improvePlaybook({
-      current: v1,
-      arm: fakeArm,
-      executors: executors(alwaysRefund),
-      judge: judge(),
-    });
+    const { executors: ex } = executors(alwaysEscalate);
+    const result = await improvePlaybook({ current: v1, executors: ex, judge: jevJudge().model });
 
     expect(result.gates.slice(0, -1).every((gate) => gate.ok)).toBe(true);
     expect(result.gates.at(-1)).toMatchObject({ name: "replay", ok: false });
-    expect(result.gates.at(-1)?.detail).toContain("accuracy fell");
+    expect(result.gates.at(-1)?.detail).toContain("held-out objective fell");
     expect(result.promoted).toBe(false);
     expect(result.config).toBe(v1);
-    expect(result.after?.accuracy).toBeLessThan(result.before.accuracy);
+    expect(result.after!.all.accuracy).toBeLessThan(result.before.all.accuracy);
   });
 });

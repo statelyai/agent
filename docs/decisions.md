@@ -179,6 +179,150 @@ applying: { always: { target: 'planning' } },
 
 Every step runs the validation and retry loop described above. For the full example, see [examples/todo-nl/index.ts](../examples/todo-nl/index.ts).
 
+## Closed choices
+
+By default the model writes the event payload. A **closed choice** lists the concrete events instead, and the model picks one.
+
+- Pass `payloads` on the `agent.decide` input: one payload list per event type, without `type`.
+- Each payload becomes one option on `request.options`.
+- An event type in `allowedEvents` with no `payloads` key is offered bare, as `{ type }`. An empty list offers nothing for that type. To withhold a type, give it `[]`: `payloads: { refund: [{ amount: 20 }], escalate: [] }`.
+- The runtime keeps only the options `snapshot.can(event)` accepts right now.
+- The chosen event must equal one offered option, type and payload. Any other choice is retried as a `rejected-by-guard` attempt.
+
+```ts
+import { createAgentSchemas, setupAgent } from "@statelyai/agent";
+import { z } from "zod";
+
+const agent = setupAgent({
+  schemas: createAgentSchemas({
+    context: z.object({ limit: z.number() }),
+    events: { refund: z.object({ amount: z.number() }), escalate: z.object({}) },
+  }),
+});
+
+agent.createMachine({
+  context: { limit: 50 },
+  initial: "deciding",
+  states: {
+    deciding: {
+      invoke: {
+        src: "agent.decide",
+        input: {
+          model: "quick",
+          allowedEvents: ["refund", "escalate"],
+          // The model sees refund 20 and escalate. The machine does not accept refund 80.
+          payloads: { refund: [{ amount: 20 }, { amount: 80 }] },
+        },
+      },
+      on: {
+        refund: ({ context, event }) =>
+          event.amount <= context.limit ? { target: "refunded" } : undefined,
+        escalate: { target: "escalated" },
+      },
+    },
+    refunded: {},
+    escalated: {},
+  },
+});
+```
+
+### Closed choices with the AI SDK
+
+- `createAiSdkExecutors` presents a closed choice as ONE tool, `choose_option`, instead of one tool per event.
+- Its input is `{ option }`, an enum of option ids such as `refund:20` and `escalate`. The tool description lists each id with its description.
+- The chosen id maps back to that option's event.
+- An id that is not offered, or a call to another tool, is retried as an `unknown-event` attempt. Its reason names the answer and lists the valid ids.
+
+### Decision models
+
+`createDecisionModelDecide` from `@statelyai/agent/ai-sdk` backs `decide` with an AI SDK decision model, such as TypeSafe's Jev, through `experimental_decide`.
+
+- It asks one `choice` question. Each option id is a label, and its description is the criterion.
+- The state is `request.input`, or the result of the `state` option.
+- A label that is not an option is retried as an `unknown-event` attempt, like any failed choice.
+- With `minConfidence`, a choice below that confidence throws a low-confidence error instead of answering. The throw is the escalation signal, not a retry: route it through the invoke's `onError`, or catch it at the boundary.
+- A request without options throws: a decision model answers closed choices only.
+
+```ts
+import { createDecisionModelDecide } from "@statelyai/agent/ai-sdk";
+import type { Experimental_DecisionModel } from "ai";
+
+declare const judge: Experimental_DecisionModel;
+
+const decide = createDecisionModelDecide(judge, { minConfidence: 0.6 });
+```
+
+## Decisions at the boundary of a plain machine
+
+A machine does not have to know about AI. `decideNext` asks a model to pick one event that a plain XState machine accepts right now, built with `createMachine` or `setup`, with no `agent.*` invoke anywhere.
+
+- `events`: exact types or wildcards such as `'desk.*'`. Candidates are the matching events an active state handles.
+- `payloads` (optional): a function of the snapshot returning payloads per event type, as in a closed choice. A candidate type with no key is offered bare, as `{ type }`. An empty list offers nothing for that type, so `{ "desk.escalate": [] }` withholds it.
+- Options are kept only where `snapshot.can(event)` is true. Each one is described by its transition's `description`, else its event schema's description.
+- `lookahead` (optional): appends what each option changes, computed with xstate's pure `transition()`: the state value and the changed top-level context keys.
+  - `true` reports every changed key, each value cut at 120 characters.
+  - `{ keys, maxLength }` reports only the listed context keys, each value cut at `maxLength`. A state value change is always reported.
+- With no options, it returns `{ event: null }` without calling the executor.
+- It never sends. The host sends the event, after checking `can` again, because the actor may have moved while the model was choosing.
+
+```ts
+import { decideNext } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { openai } from "@ai-sdk/openai";
+import { createActor, createMachine } from "xstate";
+import { z } from "zod";
+
+const desk = createMachine({
+  schemas: {
+    context: z.object({ requested: z.number(), limit: z.number() }),
+    events: {
+      "desk.refund": z.object({ amount: z.number() }),
+      "desk.escalate": z.object({}).describe("Hand the case to a person"),
+    },
+  },
+  context: { requested: 20, limit: 50 },
+  initial: "reviewing",
+  states: {
+    reviewing: {
+      on: {
+        "desk.refund": {
+          description: "Refund the customer",
+          to: ({ context, event }) =>
+            event.amount <= context.limit ? { target: "refunded" } : undefined,
+        },
+        "desk.escalate": { target: "escalated" },
+      },
+    },
+    refunded: {},
+    escalated: {},
+  },
+});
+
+const { decide } = createAiSdkExecutors({ models: { quick: openai("gpt-5.4-mini") } });
+const actor = createActor(desk);
+
+let busy = false;
+actor.subscribe(async (snapshot) => {
+  if (busy || !snapshot.matches("reviewing")) return;
+  busy = true;
+  try {
+    const { event } = await decideNext(snapshot, {
+      decide,
+      model: "quick",
+      events: "desk.*",
+      payloads: (s) => ({ "desk.refund": [{ amount: s.context.requested }] }),
+      lookahead: true,
+    });
+    if (event && actor.getSnapshot().can(event)) actor.send(event);
+  } finally {
+    busy = false;
+  }
+});
+actor.start();
+```
+
+The result also carries `attempts`, the failed choices before the one that landed, and the `request` the executor saw. Exhausting retries throws `AgentDecisionExhaustedError`.
+
 ## Related
 
 - Read more about [Agent machines](machines.md), including transitions, guards, and event schemas.

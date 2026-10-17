@@ -13,9 +13,13 @@
  * Entries for a name are consumed in order; the last one repeats. `"*"` is the
  * fallback name. A text entry is the request's output value (a string, or the
  * object a structured request declares); a decision entry is the chosen event.
+ * For a closed choice (`request.options`) the mock answers `choose_option`
+ * with the id of the option equal to that event, or with an id that is not
+ * offered when none is, which the run retries.
  * Either may be a function of the agent request (and the AI SDK call options)
  * for answers that depend on the prompt or on a decision's prior attempts.
  */
+import { isDeepStrictEqual } from "node:util";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 import type { AgentDecisionRequest, AgentTextRequest } from "@statelyai/agent";
 import { createAiSdkExecutors, type AiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -68,6 +72,16 @@ const usage = {
   inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 0, text: 0, reasoning: 0 },
 };
+
+/** The adapter's one closed-choice tool. */
+const OPTION_TOOL = "choose_option";
+
+/** The option ids a `choose_option` tool offers: its `option` enum. */
+function optionIdsOf(tool: NonNullable<CallOptions["tools"]>[number] | undefined): string[] {
+  const schema = tool && "inputSchema" in tool ? tool.inputSchema : undefined;
+  const option = schema?.properties?.["option"];
+  return typeof option === "object" && Array.isArray(option.enum) ? (option.enum as string[]) : [];
+}
 
 /** Mirrors the adapter's event → tool-name mapping for the common case. */
 function eventToolName(type: string): string {
@@ -139,15 +153,31 @@ export function createMockModelExecutors(script: MockModelScript): MockModelExec
         options,
       );
       const { type, ...payload } = event;
-      const wanted = eventToolName(type);
-      const toolName = (options.tools ?? []).find((tool) => tool.name === wanted)?.name ?? wanted;
+      const offered = (request as AgentDecisionRequest).options;
+      let toolName: string;
+      let input: unknown;
+      if (offered) {
+        // A closed choice offers one `choose_option` tool over an enum of
+        // option ids, in `request.options` order. Pick the scripted event's id;
+        // an event no option equals gets an id outside the enum, so the run
+        // takes the retry path.
+        const tool = (options.tools ?? []).find((candidate) => candidate.name === OPTION_TOOL);
+        const ids = optionIdsOf(tool);
+        const index = offered.findIndex((option) => isDeepStrictEqual(option.event, event));
+        toolName = OPTION_TOOL;
+        input = { option: ids[index] ?? `${JSON.stringify(event)} (not offered)` };
+      } else {
+        const wanted = eventToolName(type);
+        toolName = (options.tools ?? []).find((tool) => tool.name === wanted)?.name ?? wanted;
+        input = payload;
+      }
       return {
         content: [
           {
             type: "tool-call" as const,
             toolCallId: `call-${calls.length}`,
             toolName,
-            input: JSON.stringify(payload),
+            input: JSON.stringify(input),
           },
         ],
         finishReason: { unified: "tool-calls" as const, raw: "tool_calls" },

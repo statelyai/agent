@@ -16,6 +16,14 @@ they happen to call.
 - [json-agent](json-agent): the whole workflow authored as a `.json` file and lowered to the same machine
 - [triage](triage): Jev classifies category and sentiment and escalates when unsure, with one retry when the draft fails
 
+## Environment and policy
+
+[self-improving-refunds](self-improving-refunds) is the worked example of [Environment and policy](../docs/environment-and-policy.md): a refund desk whose rules are fixed guards, and a JSON playbook the agent improves between batches.
+
+- Environment only: [verification](verification), [booking-compensation](booking-compensation), [human-in-the-loop](human-in-the-loop)
+- Policy with a judgment inside: [triage](triage), [joke](joke)
+- Both: [self-improving-refunds](self-improving-refunds)
+
 ## Control flow a loop can't express
 
 Each entry names the construct that makes the behavior structural rather than a

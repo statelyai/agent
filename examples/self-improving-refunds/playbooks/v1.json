@@ -34,7 +34,7 @@
           "assign": {
             "proposal": {
               "type": "ESCALATE",
-              "reason": "Identity verification failed."
+              "reason": "identity could not be verified"
             }
           }
         },
@@ -89,7 +89,7 @@
           "assign": {
             "proposal": {
               "type": "ESCALATE",
-              "reason": "The order belongs to another customer."
+              "reason": "order belongs to another customer"
             }
           }
         },
@@ -99,7 +99,7 @@
           "assign": {
             "proposal": {
               "type": "CLOSE",
-              "reason": "This order was already refunded."
+              "reason": "order already refunded"
             }
           }
         },
@@ -127,7 +127,7 @@
           "assign": {
             "proposal": {
               "type": "ESCALATE",
-              "reason": "Could not classify the ticket."
+              "reason": "needs a person"
             }
           }
         }
@@ -145,7 +145,7 @@
           "assign": {
             "proposal": {
               "type": "CLOSE",
-              "reason": "Not a refund request."
+              "reason": "not a refund request"
             }
           }
         }

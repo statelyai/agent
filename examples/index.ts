@@ -323,6 +323,8 @@ export {
   DEFAULTS as rankCandidatesDefaults,
 } from "./rank-candidates/index.js";
 export {
+  DESK_GOAL,
+  HELD_OUT_SCENARIOS,
   SCENARIOS,
   createDeskArm,
   createPlaybookDecide,
@@ -331,6 +333,7 @@ export {
   improvePlaybook,
   loadPlaybook,
   lowerPlaybook,
+  objective,
   refundDeskMachine,
   refundDeskSchemas,
   runBatch,

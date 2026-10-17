@@ -1,49 +1,98 @@
 /**
- * The self-improvement loop: the agent rewrites its own way of working (the
- * playbook JSON), never the desk.
+ * The self-improvement loop: the agent rewrites its POLICY (the playbook
+ * JSON), never its ENVIRONMENT (the desk).
  *
- *   run a batch with the current playbook  → before
- *   reflect: one `proposePlaybook` text request → a candidate config
- *   gates (each recorded): validate → vocabulary → lower → lint → terminates → outputs
- *     a failing gate feeds its message back as a repair prompt (≤ maxRepairs)
- *   replay: the same batch with the candidate → after
- *   promote iff no violations, accuracy no worse, and strictly cheaper
- *     (model calls + judge calls + guard rejections)
+ *   run train + held-out with the current playbook       → before (traces in the store)
+ *   reflect: one `proposePlaybook` text request          → a candidate config
+ *     the prompt: the goal, the objective, the environment and policy as
+ *     `describeMachine` text, the train metrics, and each train episode's
+ *     trail read back from its event-log thread
+ *   gates: verifyAgentConfig (validate → vocabulary → lower → lint → explore),
+ *     then `outputs` (the candidate answers the real desk boundary from probe states)
+ *     a failing gate's `detail` goes back as a repair prompt (≤ maxRepairs)
+ *   replay: train + held-out with the candidate         → after
+ *   promote iff zero violations on both splits, the held-out objective is no
+ *     worse, and the combined objective is strictly better
  */
 import { z } from "zod";
 import type { Experimental_DecisionModel } from "ai";
 import {
-  createDecisionRequest,
   createTextLogic,
+  describeMachine,
+  type AgentEventLogStore,
   type AgentWorkflowConfig,
   type ChosenEvent,
 } from "@statelyai/agent";
-import { explorePaths, lintAgentMachine } from "@statelyai/agent/testing";
-import { validateAgentConfig } from "@statelyai/agent/validate";
-import type { AnyStateMachine } from "xstate";
+import { createInMemoryEventLogStore } from "@statelyai/agent/log";
+import { verifyAgentConfig, type AgentConfigGate } from "@statelyai/agent/validate";
 import {
   APPROVAL_THRESHOLD,
+  HELD_OUT_SCENARIOS,
   PROPOSALS,
-  runBatch,
+  runSplits,
   SCENARIOS,
   type Arm,
   type BatchMetrics,
   type Facts,
   type Scenario,
+  type SplitMetrics,
 } from "./contract.js";
 import {
+  DESK_GOAL,
+  createDeskArm,
+  decideDeskStep,
+  deskSnapshotAt,
+  readTrail,
+  refundDeskMachine,
+  type DeskContext,
+} from "./desk.js";
+import {
+  ajvCompileSchema,
   createPlaybookDecide,
   lowerPlaybook,
-  PLAYBOOK_DECIDE_SRC,
   PLAYBOOK_MODEL,
   playbookActorNames,
   playbookGuards,
+  playbookInputOf,
   playbookRequestNames,
+  withPlaybookInterface,
   type PlaybookDecide,
   type PlaybookExecutors,
 } from "./playbook.js";
 
-export type Gate = { name: string; ok: boolean; detail?: string };
+// ─── The objective (from the goal's success criteria) ───
+
+/** What each unit of cost takes off the objective, per episode. */
+export const OBJECTIVE_WEIGHTS = { modelCall: 0.02, judgeCall: 0.01, rejection: 0.02 };
+
+/**
+ * The goal as a number: accuracy, minus a small cost per model call, judge
+ * call, and rejected step (averaged per episode). Accuracy dominates: one
+ * wrong ticket in eight (0.125) outweighs six model calls per ticket. Any
+ * invariant violation is `-Infinity`.
+ */
+export function objective(metrics: BatchMetrics): number {
+  if (metrics.violations > 0) return Number.NEGATIVE_INFINITY;
+  const episodes = Math.max(metrics.episodes.length, 1);
+  const w = OBJECTIVE_WEIGHTS;
+  const cost =
+    w.modelCall * metrics.modelCalls +
+    w.judgeCall * metrics.judgeCalls +
+    w.rejection * metrics.rejections;
+  return metrics.accuracy - cost / episodes;
+}
+
+const OBJECTIVE_TEXT =
+  `objective = accuracy - (${OBJECTIVE_WEIGHTS.modelCall} * model calls + ` +
+  `${OBJECTIVE_WEIGHTS.judgeCall} * judge calls + ${OBJECTIVE_WEIGHTS.rejection} * rejections) / episodes; ` +
+  "any invariant violation makes it -Infinity. Higher is better.";
+
+// ─── Options and result ───
+
+export type Gate = AgentConfigGate | { name: "outputs" | "replay"; ok: boolean; detail?: string };
+
+/** What a batch run gets: where to journal, and a thread prefix unique to this batch. */
+export type BatchRun = { store: AgentEventLogStore; threadPrefix: string };
 
 export type ImprovementResult = {
   promoted: boolean;
@@ -51,24 +100,42 @@ export type ImprovementResult = {
   config: AgentWorkflowConfig;
   /** The last candidate the model proposed. */
   proposed?: AgentWorkflowConfig;
-  before: BatchMetrics;
+  before: SplitMetrics;
   /** Only set when a candidate passed every static gate and was replayed. */
-  after?: BatchMetrics;
+  after?: SplitMetrics;
   /** The gates the last candidate went through, in order. */
   gates: Gate[];
   /** Repair prompts sent after a failed gate. */
   repairs: number;
+  /** Where every batch was journaled. */
+  store: AgentEventLogStore;
 };
 
 export type ImproveOptions = {
   current: AgentWorkflowConfig;
-  /** Builds the arm that runs a batch with a given decider (the desk, in the real loop). */
-  arm: (decide: PlaybookDecide) => Arm;
   executors: PlaybookExecutors;
   judge?: Experimental_DecisionModel;
-  scenarios?: Scenario[];
+  /** Builds the arm that runs a batch with a decider. Default: the real desk. */
+  arm?: (decide: PlaybookDecide, run: BatchRun) => Arm;
+  train?: Scenario[];
+  heldOut?: Scenario[];
   maxRepairs?: number;
+  /** Where episodes are journaled. Default: a fresh in-memory store. */
+  store?: AgentEventLogStore;
+  /** Prefix for this round's threads (`<runId>/before/<scenario>`). Default `'round-1'`. */
+  runId?: string;
 };
+
+const deskArm = (decide: PlaybookDecide, run: BatchRun): Arm =>
+  createDeskArm({
+    label: decide.config.id ?? "playbook",
+    name: "playbook",
+    decide,
+    store: run.store,
+    threadPrefix: run.threadPrefix,
+    // A copy: the arm diffs two readings, and `decide.counters` mutates in place.
+    counters: () => ({ ...decide.counters }),
+  });
 
 // ─── Reflection ───
 
@@ -84,51 +151,78 @@ export const proposePlaybook = createTextLogic({
   },
   model: PLAYBOOK_MODEL,
   system:
-    "You improve the playbook a refund desk uses to pick its next step. You return a " +
-    "complete playbook: a JSON agent workflow config. The desk's guards are fixed and " +
-    "will refuse illegal steps; your goal is a playbook that is right on every scenario " +
-    "and cheaper: fewer text-model calls, fewer judge calls, fewer refused proposals.",
+    "You improve the POLICY a refund desk uses to pick its next step: a JSON agent workflow " +
+    "config (a playbook). The ENVIRONMENT (the desk machine) is fixed: it offers only legal " +
+    "steps and refuses everything else. Return a complete playbook that scores higher on the " +
+    "objective: right on every ticket, with fewer model calls, judge calls, and rejections.",
   prompt: ({ input }) => input.prompt,
 });
 
 const RULES = [
-  'Input is the desk\'s Facts. Keep them in context: `"context": { "facts": "{{ input }}", ... }`.',
-  'End in a `type: final` state whose `output` is ONE proposal: `{ "type": <proposal>, ...payload }`, usually `"{{ context.proposal }}"`.',
-  `Proposals and payloads: VERIFY_IDENTITY {}, LOOKUP_ORDER { orderId }, ASK_CUSTOMER { question }, REQUEST_APPROVAL { amount }, ISSUE_REFUND { amount }, ESCALATE { reason }, CLOSE { reason }.`,
+  'Input is the desk\'s facts plus `payloads`, this turn\'s legal options per proposal type (an empty list when none). Keep them in context: `"context": { "facts": "{{ input }}", ... }`.',
+  'End in a `type: final` state whose `output` is ONE proposal: `{ "type": <proposal>, ...payload }`, usually `"{{ context.proposal }}"`. It must equal one of the offered options exactly, or the desk refuses it.',
+  `Offered payloads: VERIFY_IDENTITY {}, LOOKUP_ORDER { orderId } per order id candidate, ASK_CUSTOMER { question: "Which order number is this about?" }, REQUEST_APPROVAL and ISSUE_REFUND { amount: the order total } once an order is loaded, ESCALATE and CLOSE { reason } from a fixed list (see the environment).`,
   "Values are JSON literals or `{{ dot.path }}` templates over input/context/event. A whole-string template keeps the value's type (numbers stay numbers). Array items are paths too: `{{ context.facts.orderIdCandidates.0 }}`.",
   "Guards are `{{ path }}` (truthy test only: no comparisons, operators, or negation) or one of the named guards below. Use `type: choice` states with a first-match `choice` list; the last branch has no guard.",
   `Named guards (read context.facts): ${Object.keys(playbookGuards).join(", ")}.`,
-  `Actors: classifyTicket (input { ticket, customerReplies }; onDone reads {{ event.output.isRefundRequest }}). One judge call each.`,
-  `Requests: draftQuestion (input { ticket, missing }; onDone reads {{ event.output.result.question }}). One text-model call each.`,
-  `agent.decide: input { name, model: "${PLAYBOOK_MODEL}", system, prompt, allowedEvents: subset of proposals }. Handle every allowed event in the state's \`on\` (assign "{{ event }}" to proposal, target the final state). No onDone on agent.decide. One text-model call each.`,
+  "Actors: classifyTicket (input { ticket, customerReplies }; onDone reads {{ event.output.isRefundRequest }}). One judge call each.",
+  "Requests: draftQuestion (input { ticket, missing }; onDone reads {{ event.output.result.question }}). One text-model call each.",
+  `agent.decide: input { name, model: "${PLAYBOOK_MODEL}", system, prompt, allowedEvents: subset of proposals, payloads: "{{ context.facts.payloads }}" }. Handle every allowed event in the state's \`on\` (assign "{{ event }}" to proposal, target the final state). No onDone on agent.decide. One text-model call each.`,
   "Give every invoke an onError. Do not declare schemas.input/events/output, requests, or actors: the host injects them. No named actions.",
 ].map((rule) => `- ${rule}`);
 
-function reflectionPrompt(
-  current: AgentWorkflowConfig,
-  before: BatchMetrics,
-  feedback: string[],
-): string {
-  const episodes = before.episodes.map((episode) =>
-    [
-      `### ${episode.scenarioId}: ${episode.outcome} (${episode.correct ? "correct" : "WRONG"}), ` +
-        `${episode.modelCalls} model, ${episode.judgeCalls} judge, ${episode.rejections} rejected` +
-        (episode.violations.length
-          ? `, VIOLATIONS: ${episode.violations.map((v) => v.rule).join(", ")}`
-          : ""),
-      ...episode.trail.map((line) => `  ${line}`),
-    ].join("\n"),
+const fmt = (value: number) => (Number.isFinite(value) ? value.toFixed(3) : String(value));
+
+function metricsLine(metrics: BatchMetrics): string {
+  return (
+    `accuracy ${metrics.accuracy}, violations ${metrics.violations}, model calls ${metrics.modelCalls}, ` +
+    `judge calls ${metrics.judgeCalls}, rejections ${metrics.rejections}, objective ${fmt(objective(metrics))}`
   );
+}
+
+async function reflectionPrompt(
+  current: AgentWorkflowConfig,
+  before: SplitMetrics,
+  store: AgentEventLogStore,
+  feedback: string[],
+): Promise<string> {
+  const episodes: string[] = [];
+  for (const episode of before.train.episodes) {
+    const trail = episode.threadId ? await readTrail(store, episode.threadId) : episode.trail;
+    episodes.push(
+      [
+        `### ${episode.scenarioId}: ${episode.outcome} (${episode.correct ? "correct" : "WRONG"}), ` +
+          `${episode.modelCalls} model, ${episode.judgeCalls} judge, ${episode.rejections} rejected` +
+          (episode.violations.length
+            ? `, VIOLATIONS: ${episode.violations.map((v) => v.rule).join(", ")}`
+            : ""),
+        ...trail.map((line) => `  ${line}`),
+      ].join("\n"),
+    );
+  }
   return [
+    "## Goal",
+    DESK_GOAL,
+    "",
+    "## Objective",
+    OBJECTIVE_TEXT,
+    "",
+    "## ENVIRONMENT (read-only: the desk; you cannot change it)",
+    describeMachine(refundDeskMachine),
+    "",
+    "## POLICY (yours to rewrite: the current playbook)",
+    describeMachine(lowerPlaybook(current)),
+    "",
+    "### Current playbook JSON",
+    JSON.stringify(current, null, 2),
+    "",
     "## Playbook rules",
     ...RULES,
     "",
-    "## Current playbook",
-    JSON.stringify(current, null, 2),
-    "",
-    `## Last batch: accuracy ${before.accuracy}, violations ${before.violations}, ` +
-      `model calls ${before.modelCalls}, judge calls ${before.judgeCalls}, rejections ${before.rejections}`,
+    `## Last batch (train): ${metricsLine(before.train)}`,
     ...episodes,
+    "",
+    `## Held-out (trails withheld): objective ${fmt(objective(before.heldOut))}`,
     ...(feedback.length
       ? ["", "## Your previous proposals were rejected", ...feedback.map((f) => `- ${f}`)]
       : []),
@@ -139,115 +233,6 @@ function reflectionPrompt(
 
 // ─── Gates ───
 
-type StateWalk = { path: string; state: Record<string, unknown> };
-
-function walkStates(states: unknown, prefix = ""): StateWalk[] {
-  if (!states || typeof states !== "object") return [];
-  return Object.entries(states as Record<string, Record<string, unknown>>).flatMap(
-    ([key, state]) => {
-      const path = prefix ? `${prefix}.${key}` : key;
-      return [{ path, state }, ...walkStates(state?.states, path)];
-    },
-  );
-}
-
-type ConfigNode = Record<string, unknown>;
-
-/** A config's `T | T[]` field as a list of objects. */
-const nodes = (value: unknown): ConfigNode[] =>
-  (value === undefined ? [] : Array.isArray(value) ? value : [value]) as ConfigNode[];
-
-/** Every transition config on a state: `on`, `always`, `choice`, `after`, `onDone`, and invoke done/error. */
-function transitionsOf(state: ConfigNode): ConfigNode[] {
-  const invokes = nodes(state.invoke);
-  return [
-    ...Object.values((state.on ?? {}) as Record<string, unknown>).flatMap(nodes),
-    ...Object.values((state.after ?? {}) as Record<string, unknown>).flatMap(nodes),
-    ...nodes(state.always),
-    ...nodes(state.choice),
-    ...nodes(state.onDone),
-    ...invokes.flatMap((invoke) => [...nodes(invoke.onDone), ...nodes(invoke.onError)]),
-  ];
-}
-
-const hasTemplate = (value: unknown) => typeof value === "string" && value.includes("{{");
-
-/**
- * The vocabulary gate: only the fixed actor/request names, `agent.decide`
- * over proposals with a string model, the `playbookGuards` registry, and no
- * named actions. Returns one line per problem.
- */
-export function checkVocabulary(config: AgentWorkflowConfig): string[] {
-  const problems: string[] = [];
-  const srcs = [PLAYBOOK_DECIDE_SRC, ...playbookActorNames, ...playbookRequestNames];
-  for (const key of Object.keys(config.requests ?? {})) {
-    if (!(playbookRequestNames as readonly string[]).includes(key)) {
-      problems.push(
-        `request '${key}' is not in the vocabulary (${playbookRequestNames.join(", ")})`,
-      );
-    }
-  }
-  for (const key of Object.keys(config.actors ?? {})) {
-    if (!(playbookActorNames as readonly string[]).includes(key)) {
-      problems.push(`actor '${key}' is not in the vocabulary (${playbookActorNames.join(", ")})`);
-    }
-  }
-  for (const { path, state } of walkStates(config.states)) {
-    for (const invoke of nodes(state.invoke)) {
-      const src = String(invoke.src);
-      if (!srcs.includes(src)) {
-        problems.push(`state '${path}' invokes unknown src '${src}'; allowed: ${srcs.join(", ")}`);
-        continue;
-      }
-      if (src !== PLAYBOOK_DECIDE_SRC) continue;
-      const input = (invoke.input ?? {}) as Record<string, unknown>;
-      if (typeof input.model !== "string" || hasTemplate(input.model)) {
-        problems.push(`state '${path}': agent.decide needs a literal string model ref`);
-      }
-      const allowed = input.allowedEvents;
-      if (!Array.isArray(allowed) || allowed.length === 0) {
-        problems.push(`state '${path}': agent.decide needs a non-empty allowedEvents list`);
-      } else {
-        for (const type of allowed) {
-          if (!(PROPOSALS as readonly unknown[]).includes(type)) {
-            problems.push(
-              `state '${path}': allowedEvents entry '${String(type)}' is not a proposal`,
-            );
-          }
-        }
-      }
-    }
-    for (const transition of transitionsOf(state)) {
-      const guard = transition.guard;
-      if (typeof guard === "string" && !hasTemplate(guard) && !(guard in playbookGuards)) {
-        problems.push(
-          `state '${path}' uses unknown named guard '${guard}'; allowed: ${Object.keys(playbookGuards).join(", ")}`,
-        );
-      }
-      for (const action of nodes(transition.actions)) {
-        if (action.type !== undefined) {
-          problems.push(`state '${path}' uses named action '${String(action.type)}'; none exist`);
-        }
-      }
-    }
-    for (const key of ["entry", "exit"] as const) {
-      for (const action of nodes(state[key])) {
-        if (action.type !== undefined) {
-          problems.push(
-            `state '${path}' ${key} uses named action '${String(action.type)}'; none exist`,
-          );
-        }
-      }
-    }
-  }
-  return problems;
-}
-
-/**
- * Facts that walk every branch v1 cares about, so the dry-run gates see more
- * than the happy path: unverified, identity refused, no order with and
- * without a candidate, wrong customer, refunded, small, large, approved.
- */
 const ORDER = { id: "ORD-1001", customerId: "C-1", total: 40, refunded: false, item: "cable" };
 const BASE: Facts = {
   ticket: "ORD-1001 arrived broken, refund please.",
@@ -261,6 +246,12 @@ const BASE: Facts = {
   turn: 1,
   approvalThreshold: APPROVAL_THRESHOLD,
 };
+
+/**
+ * Desk states that walk every branch v1 cares about, so the gates see more
+ * than the happy path: unverified, identity refused, no order with and
+ * without a candidate, wrong customer, refunded, small, large, approved.
+ */
 export const PROBE_FACTS: Facts[] = [
   { ...BASE, identityVerified: false, order: null },
   {
@@ -277,81 +268,25 @@ export const PROBE_FACTS: Facts[] = [
   { ...BASE, order: { ...ORDER, total: 240 }, approved: true },
 ];
 
-const STUB_PAYLOADS: Record<string, Record<string, unknown>> = {
-  VERIFY_IDENTITY: {},
-  LOOKUP_ORDER: { orderId: "ORD-1001" },
-  ASK_CUSTOMER: { question: "stub?" },
-  REQUEST_APPROVAL: { amount: 240 },
-  ISSUE_REFUND: { amount: 40 },
-  ESCALATE: { reason: "stub" },
-  CLOSE: { reason: "stub" },
-};
+const probeSnapshot = (facts: Facts) =>
+  deskSnapshotAt({
+    ...facts,
+    pendingProposal: null,
+    identityClaim: "",
+    stopReason: "",
+    notice: "",
+  } satisfies DeskContext);
 
-/**
- * "terminates": `explorePaths` from each probe, forking every `agent.decide`
- * over its candidates and `classifyTicket` both ways. Every terminal must be
- * `done` (no idle wait, no loop past maxDepth, no unknown src, no unhandled
- * error).
- */
-async function checkTerminates(machine: AnyStateMachine): Promise<string[]> {
-  const problems: string[] = [];
-  for (const [index, input] of PROBE_FACTS.entries()) {
-    for (const isRefundRequest of [true, false]) {
-      const report = await explorePaths(machine, {
-        input,
-        maxDepth: 6,
-        invokes: { classifyTicket: { isRefundRequest, confidence: 0.9 } },
-        text: { draftQuestion: { question: "stub?" } },
-      });
-      for (const terminal of report.terminals) {
-        if (terminal.status !== "done") {
-          problems.push(
-            `probe ${index} (refund=${isRefundRequest}): path [${terminal.path.map((e) => e.type).join(", ")}] ` +
-              `ends '${terminal.status}' in ${JSON.stringify(terminal.state)}` +
-              (terminal.missingSrc ? ` (no output for '${terminal.missingSrc}')` : ""),
-          );
-        }
-      }
-      if (report.hitPathCap) problems.push(`probe ${index}: too many paths to explore`);
-    }
-  }
-  return problems;
-}
-
-/**
- * "outputs": runs the real decider from each probe with stub executors (each
- * decision answered by its k-th candidate, k over every proposal) and a stub
- * judge both ways. Every run must end `done` with an output that parses as a
- * proposal; `createPlaybookDecide` throws otherwise.
- */
-async function checkOutputs(config: AgentWorkflowConfig): Promise<string[]> {
-  const problems = new Set<string>();
-  for (const isRefundRequest of [true, false]) {
-    let k = 0;
-    const decide = createPlaybookDecide(config, {
-      executors: {
-        generateText: async () => ({ result: { question: "stub?" } }),
-        decide: async (request) => {
-          const type = request.events[k % request.events.length]!.type;
-          return { event: { type, ...STUB_PAYLOADS[type] } as ChosenEvent };
-        },
-      },
-      judge: stubJudge(isRefundRequest),
+/** The real desk's closed choice at each probe, as the playbook's input. */
+async function probeInputs(): Promise<unknown[]> {
+  const inputs: unknown[] = [];
+  for (const facts of PROBE_FACTS) {
+    const { request } = await decideDeskStep(probeSnapshot(facts), {
+      decide: async (r) => ({ event: r.options![0]!.event }),
     });
-    for (const [index, input] of PROBE_FACTS.entries()) {
-      for (k = 0; k < PROPOSALS.length; k++) {
-        try {
-          await decide({
-            ...createDecisionRequest({ model: "playbook", input, events: PROPOSALS }),
-            name: "probe",
-          });
-        } catch (error) {
-          problems.add(`probe ${index} (refund=${isRefundRequest}): ${errorMessage(error)}`);
-        }
-      }
-    }
+    inputs.push(playbookInputOf({ ...request, name: "probe", attempts: [] }));
   }
-  return [...problems];
+  return inputs;
 }
 
 function stubJudge(isRefundRequest: boolean): Experimental_DecisionModel {
@@ -376,61 +311,110 @@ function stubJudge(isRefundRequest: boolean): Experimental_DecisionModel {
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** Runs the static gates in order and stops at the first failure. */
-async function staticGates(candidate: unknown): Promise<Gate[]> {
-  const gates: Gate[] = [];
-  const record = (name: string, problems: string[]) => {
-    gates.push(
-      problems.length ? { name, ok: false, detail: problems.join("\n") } : { name, ok: true },
-    );
-    return problems.length === 0;
-  };
-
-  const validation = validateAgentConfig(candidate);
-  if (
-    !record(
-      "validate",
-      validation.errors.map(
-        (e: { path: string; message: string }) => `${e.path || "(root)"} ${e.message}`,
-      ),
-    )
-  ) {
-    return gates;
+/**
+ * "outputs": the candidate at the REAL boundary. From each probe desk state,
+ * `decideDeskStep` asks it to choose, with stub executors (each inner
+ * decision answered by its k-th option) and a stub judge both ways. Every
+ * call must land on an offered option; a playbook that throws, idles, or
+ * proposes anything else fails here instead of in a replay.
+ */
+async function checkOutputs(config: AgentWorkflowConfig): Promise<string[]> {
+  const problems = new Set<string>();
+  for (const isRefundRequest of [true, false]) {
+    let k = 0;
+    const decide = createPlaybookDecide(config, {
+      executors: {
+        generateText: async () => ({ result: { question: "stub?" } }),
+        decide: async (request) => {
+          const options = request.options ?? [];
+          const event: ChosenEvent = options.length
+            ? options[k % options.length]!.event
+            : { type: request.events[k % request.events.length]!.type };
+          return { event };
+        },
+      },
+      judge: stubJudge(isRefundRequest),
+    });
+    for (const [index, facts] of PROBE_FACTS.entries()) {
+      for (k = 0; k < PROPOSALS.length; k++) {
+        try {
+          await decideDeskStep(probeSnapshot(facts), { decide, name: "probe" });
+        } catch (error) {
+          const attempts = (error as { attempts?: { reason: string }[] }).attempts;
+          const why = attempts?.length ? attempts.at(-1)!.reason : errorMessage(error);
+          problems.add(`probe ${index} (refund=${isRefundRequest}): ${why}`);
+        }
+      }
+    }
   }
-  const config = candidate as AgentWorkflowConfig;
-  if (!record("vocabulary", checkVocabulary(config))) return gates;
-
-  let machine: AnyStateMachine;
-  try {
-    machine = lowerPlaybook(config);
-    record("lower", []);
-  } catch (error) {
-    record("lower", [errorMessage(error)]);
-    return gates;
-  }
-  try {
-    lintAgentMachine(machine, { throw: true });
-    record("lint", []);
-  } catch (error) {
-    record("lint", [errorMessage(error)]);
-    return gates;
-  }
-  if (!record("terminates", await checkTerminates(machine))) return gates;
-  record("outputs", await checkOutputs(config));
-  return gates;
+  return [...problems];
 }
 
-const cost = (metrics: BatchMetrics) =>
-  metrics.modelCalls + metrics.judgeCalls + metrics.rejections;
+/** verifyAgentConfig over the playbook vocabulary, then the outputs probe. Stops at the first failure. */
+async function staticGates(candidate: unknown): Promise<Gate[]> {
+  const isObject = !!candidate && typeof candidate === "object" && !Array.isArray(candidate);
+  const verified = await verifyAgentConfig(
+    isObject ? withPlaybookInterface(candidate as AgentWorkflowConfig) : candidate,
+    {
+      compileSchema: ajvCompileSchema,
+      guards: playbookGuards,
+      allow: {
+        actors: [...playbookActorNames],
+        requests: [...playbookRequestNames],
+        guards: Object.keys(playbookGuards),
+        actions: [],
+        events: [...PROPOSALS],
+        models: [PLAYBOOK_MODEL],
+      },
+      explore: {
+        inputs: await probeInputs(),
+        maxDepth: 6,
+        outputs: {
+          classifyTicket: [
+            { isRefundRequest: true, confidence: 0.9 },
+            { isRefundRequest: false, confidence: 0.9 },
+          ],
+        },
+        text: { draftQuestion: { question: "stub?" } },
+      },
+    },
+  );
+  const gates: Gate[] = [...verified.gates];
+  if (!verified.ok) return gates;
+  const problems = await checkOutputs(candidate as AgentWorkflowConfig);
+  gates.push(
+    problems.length
+      ? { name: "outputs", ok: false, detail: problems.join("\n") }
+      : { name: "outputs", ok: true },
+  );
+  return gates;
+}
 
 // ─── The loop ───
 
 export async function improvePlaybook(options: ImproveOptions): Promise<ImprovementResult> {
-  const { current, arm, executors, judge, scenarios = SCENARIOS, maxRepairs = 3 } = options;
-  const decider = (config: AgentWorkflowConfig) =>
-    createPlaybookDecide(config, { executors, judge });
+  const {
+    current,
+    executors,
+    judge,
+    arm = deskArm,
+    train = SCENARIOS,
+    heldOut = HELD_OUT_SCENARIOS,
+    maxRepairs = 3,
+    store = createInMemoryEventLogStore(),
+    runId = "round-1",
+  } = options;
+  const measure = (config: AgentWorkflowConfig, phase: "before" | "after") =>
+    runSplits(
+      arm(createPlaybookDecide(config, { executors, judge }), {
+        store,
+        threadPrefix: `${runId}/${phase}`,
+      }),
+      train,
+      heldOut,
+    );
 
-  const before = await runBatch(arm(decider(current)), scenarios);
+  const before = await measure(current, "before");
 
   const feedback: string[] = [];
   let repairs = 0;
@@ -439,7 +423,7 @@ export async function improvePlaybook(options: ImproveOptions): Promise<Improvem
 
   for (let attempt = 0; ; attempt++) {
     const { result } = await proposePlaybook.execute(
-      { prompt: reflectionPrompt(current, before, feedback) },
+      { prompt: await reflectionPrompt(current, before, store, feedback) },
       executors,
     );
     proposed = result as unknown as AgentWorkflowConfig;
@@ -447,19 +431,26 @@ export async function improvePlaybook(options: ImproveOptions): Promise<Improvem
     const failed = gates.find((gate) => !gate.ok);
     if (!failed) break;
     if (attempt >= maxRepairs) {
-      return { promoted: false, config: current, proposed, before, gates, repairs };
+      return { promoted: false, config: current, proposed, before, gates, repairs, store };
     }
-    feedback.push(`gate '${failed.name}' failed: ${failed.detail}`);
+    feedback.push(`gate '${failed.name}' failed: ${failed.detail ?? "(no detail)"}`);
     repairs += 1;
   }
 
-  const after = await runBatch(arm(decider(proposed)), scenarios);
+  const after = await measure(proposed, "after");
+  const [beforeHeldOut, afterHeldOut] = [objective(before.heldOut), objective(after.heldOut)];
+  const [beforeAll, afterAll] = [objective(before.all), objective(after.all)];
   const reasons = [
-    after.violations === 0 ? undefined : `${after.violations} violations`,
-    after.accuracy >= before.accuracy
+    after.train.violations === 0 ? undefined : `${after.train.violations} violations on train`,
+    after.heldOut.violations === 0
       ? undefined
-      : `accuracy fell ${before.accuracy} -> ${after.accuracy}`,
-    cost(after) < cost(before) ? undefined : `cost did not fall ${cost(before)} -> ${cost(after)}`,
+      : `${after.heldOut.violations} violations on held-out`,
+    afterHeldOut >= beforeHeldOut
+      ? undefined
+      : `held-out objective fell ${fmt(beforeHeldOut)} -> ${fmt(afterHeldOut)}`,
+    afterAll > beforeAll
+      ? undefined
+      : `combined objective did not rise ${fmt(beforeAll)} -> ${fmt(afterAll)}`,
   ].filter((reason): reason is string => reason !== undefined);
   const promoted = reasons.length === 0;
   gates.push(
@@ -467,7 +458,7 @@ export async function improvePlaybook(options: ImproveOptions): Promise<Improvem
       ? {
           name: "replay",
           ok: true,
-          detail: `accuracy ${before.accuracy} -> ${after.accuracy}, cost ${cost(before)} -> ${cost(after)}`,
+          detail: `objective ${fmt(beforeAll)} -> ${fmt(afterAll)} (held-out ${fmt(beforeHeldOut)} -> ${fmt(afterHeldOut)})`,
         }
       : { name: "replay", ok: false, detail: reasons.join("; ") },
   );
@@ -480,5 +471,6 @@ export async function improvePlaybook(options: ImproveOptions): Promise<Improvem
     after,
     gates,
     repairs,
+    store,
   };
 }

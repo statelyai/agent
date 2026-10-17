@@ -55,6 +55,7 @@ import {
   AgentDecisionExhaustedError,
   isDecisionLogic,
   resolveDecision,
+  acceptedDecisionOptions,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
   type DecisionLogic,
@@ -1367,6 +1368,12 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
         input,
         events,
       };
+      // A closed choice offers only the options the snapshot accepts right
+      // now; resolveDecision rejects a choice matching none of them.
+      const options = acceptedDecisionOptions(request, (event) =>
+        actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true,
+      );
+      if (options) request.options = options;
 
       const chosen = await resolveDecision(
         request,
