@@ -772,14 +772,15 @@ async function applyScriptedDecision(
   };
 
   // Mirror bindDecisionLogic (the runtime path): the attempt budget is the
-  // decision logic's maxRetries. The invoke's own logic wins (covers
-  // direct-object srcs), then the registered actors, then `sources.actors`
-  // (which survives `machine.provide(...)`, whose product the registry may
-  // not know).
+  // invoke input's own `maxRetries` (lowered onto the request by
+  // logic.request), else the decision logic's. For the logic: the invoke's
+  // own logic wins (covers direct-object srcs), then the registered actors,
+  // then `sources.actors` (which survives `machine.provide(...)`, whose
+  // product the registry may not know).
   const logic = isDecisionLogic(invokeLogic)
     ? invokeLogic
     : resolveRegisteredDecisionLogic(machine, decisionSrc);
-  const maxRetries = logic?.maxRetries;
+  const maxRetries = request.maxRetries ?? logic?.maxRetries;
 
   let chosen: ChosenEvent;
   try {
