@@ -167,13 +167,13 @@ Reference config — decision, text request, idle human step, one final state:
 
 `verifyAgentConfig(config, options)` from `@statelyai/agent/validate` runs every pre-run gate and stops at the first failure. It never throws on a bad config; each gate is a record `{ name, ok, detail? }`. It needs `ajv` installed (an optional peer of the package).
 
-| Gate         | Checks with                            | Fails on                                                                                             |
-| ------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `validate`   | `validateAgentConfig` (shipped schema) | malformed config shape                                                                               |
-| `vocabulary` | `allow` lists                          | an invoke src, named guard, named action, `agent.decide` event, or model ref not listed              |
-| `lower`      | `setupAgent.fromConfig`                | unresolved named guard/action, `onDone` on an `agent.decide` invoke                                  |
-| `lint`       | `lintAgentMachine`                     | error findings (warnings too with `lint: { warnings: true }`)                                        |
-| `explore`    | `explorePaths`, once per input         | a path ending outside `explore.terminals` (default `['done']`), a loop past `maxDepth`, the path cap |
+| Gate         | Checks with                            | Fails on                                                                                                                                                   |
+| ------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate`   | `validateAgentConfig` (shipped schema) | malformed config shape                                                                                                                                     |
+| `vocabulary` | `allow` lists                          | an invoke src, named guard, named action, `agent.decide` event, or model ref not listed                                                                    |
+| `lower`      | `setupAgent.fromConfig`                | unresolved named guard/action, `onDone` on an `agent.decide` invoke                                                                                        |
+| `lint`       | `lintAgentMachine`                     | error findings (warnings too with `lint: { warnings: true }`)                                                                                              |
+| `explore`    | `explorePaths`, once per input         | a path ending outside `explore.terminals` (default `['done']`), a loop past `maxDepth`, a `maxPaths`/`maxNodes` cap, untried payloads (`unexpandedEvents`) |
 
 `compileSchema` turns the JSON Schemas _inside_ the config into Standard Schema validators for `fromConfig`. The library bundles no JSON Schema engine:
 
@@ -229,7 +229,7 @@ const result = await verifyAgentConfig(candidate, {
 
 - Exploration forks past idle waits on every event the waiting state accepts, so a human step still ends `done`. Add `terminals: ["done", "idle"]` only when a path may legitimately stop at a wait with nothing to accept.
 - `guards` / `actions`: named implementations, passed to `fromConfig`. `actors`: bound with `machine.provide({ actors })` after lowering.
-- `explore` keys other than `inputs` and `terminals` pass through to `explorePaths`: `text` (canned request outputs), `invokes` (canned actor outputs), `errors` (fork a rejected branch per src), `outputs` (fork one branch per listed output), `payloads` (fork one branch per payload at decisions and idle waits), `dedupeBy` (explore each snapshot key once; the key must cover every field a guard reads), `maxDepth` (default 8), `maxPaths` (default 200).
+- `explore` keys other than `inputs` and `terminals` pass through to `explorePaths`: `text` (canned request outputs), `invokes` (canned actor outputs), `errors` (fork a rejected branch per src), `outputs` (fork one branch per listed output), `payloads` (fork one branch per payload at decisions and idle waits), `dedupeBy` (explore each snapshot key once; the key must cover every field a guard reads), `maxDepth` (default 8), `maxPaths` (default 200), `maxNodes` (default 100,000).
 - Stub each request's output from its declared `output` schema (`""` for string, `0` for number, `[]` for array, recurse on `properties`). Add an `errors` entry for every src whose `onError` path matters.
 - Pick `explore.inputs` that reach every branch the goal cares about. Exploration covers only the inputs you give it.
 - A passing `lint` gate carries its warnings in `detail`. Report them.
@@ -256,12 +256,16 @@ Keep the cap at 3. A config that fails three repairs is usually asking for somet
 Without `verifyAgentConfig` (older package, or a gate you need to run alone), run the same gates by hand:
 
 ```ts
-import { setupAgent } from "@statelyai/agent";
+import { setupAgent, type AgentWorkflowConfig } from "@statelyai/agent";
 import { validateAgentConfig } from "@statelyai/agent/validate";
 import { explorePaths, lintAgentMachine, simulateAgent } from "@statelyai/agent/testing";
 
 const validation = validateAgentConfig(candidate); // { valid, errors: [{ path, message }] }, path is a JSON Pointer
-const { machine } = setupAgent.fromConfig(config, { compileSchema }); // throws on unresolved names
+if (!validation.valid) {
+  // Stop here: feed the errors back as the repair prompt. Never lower an invalid config.
+  throw new Error(validation.errors.map((e) => `${e.path} ${e.message}`).join("\n"));
+}
+const { machine } = setupAgent.fromConfig(candidate as AgentWorkflowConfig, { compileSchema }); // throws on unresolved names
 lintAgentMachine(machine, { throw: true }); // throws AgentLintError on error findings
 const dryRun = await simulateAgent(machine, {
   input: { ticket: "" },
@@ -287,13 +291,18 @@ import { runAgent } from "@statelyai/agent";
 import { createInMemoryEventLogStore } from "@statelyai/agent/log";
 
 const store = createInMemoryEventLogStore(); // tests only; implement AgentEventLogStore on your database
-const result = await runAgent(machine, { input, executors, store, threadId: `tickets:${ticketId}` });
+const result = await runAgent(machine, {
+  input,
+  executors,
+  store,
+  threadId: `tickets:${ticketId}`,
+});
 ```
 
 - `threadId` is required with `store`. One thread per run.
 - Give thread ids a prefix an improver can list by, such as `tickets:<ticketId>`. `store.listThreads({ prefix, limit, cursor })` pages through them. It is optional on a custom `AgentEventLogStore`, so with a store that lacks it, record each thread id with its scenario or ticket.
 - Failed decision attempts are journaled on the entry they explain; `getDecisionAttempts(entries)` from `@statelyai/agent/log` reads them back.
-- `replay(machine, await store.read(threadId))` from `@statelyai/agent/log` rebuilds the final state with no model calls; `getUsageFromEvents(entries)` sums token usage.
+- `replay(machine, await store.read(threadId))` from `@statelyai/agent/log` rebuilds the final state with no model calls. Pass the machine that recorded the thread: with an environment and a policy, the environment; `getUsageFromEvents(entries)` sums token usage.
 
 ## 7. Hand back
 

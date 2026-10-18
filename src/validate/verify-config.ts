@@ -28,11 +28,23 @@ export interface AgentConfigGate {
 /**
  * The names a config may reference. An omitted key is unrestricted; a listed
  * key restricts that kind of reference to exactly these names.
+ *
+ * Invoke srcs: a config can only invoke an `agent.*` builtin or a key it
+ * declares under `requests` or `actors`; any other src fails the `lower` gate
+ * (`Missing actor source`), so a host-provided `actors` binding never adds a
+ * src. `requests` limits the declared `requests` keys and `actors` the declared
+ * `actors` keys. With `actors` listed, every non-builtin src must also be in
+ * `actors` or in `requests` (the declared request keys when `requests` is
+ * omitted).
+ *
+ * Raw xstate expression slots (`{ "@expr": ... }`) fail the gate anywhere in
+ * the config: xstate evaluates one in place of its literal siblings, which
+ * would hide a model ref or `allowedEvents` from these checks.
  */
 export interface AgentConfigVocabulary {
-  /** Invoke srcs (besides `agent.*` builtins) and `actors` keys. */
+  /** Declared `actors` keys, and (when listed) the non-request invoke srcs. */
   actors?: string[];
-  /** Invoke srcs (besides `agent.*` builtins) and `requests` keys. */
+  /** Declared `requests` keys. */
   requests?: string[];
   /** Named guard references (`guard: "isReady"`, not `{{ }}` templates). */
   guards?: string[];
@@ -46,7 +58,7 @@ export interface AgentConfigVocabulary {
 
 /** The `explore` options of {@link verifyAgentConfig}. Other keys pass through to `explorePaths`. */
 export interface VerifyAgentConfigExploreOptions extends Omit<ExplorePathsOptions, "input"> {
-  /** One `explorePaths` run per input. */
+  /** One `explorePaths` run per input. An empty list fails the gate. */
   inputs: unknown[];
   /** Terminal statuses every explored path must end in. Default `['done']`. */
   terminals?: Array<"done" | "idle">;
@@ -96,7 +108,8 @@ const MAX_DETAIL_LINES = 10;
  * - `lower`: `setupAgent.fromConfig` (unresolved guards/actions, bad targets).
  * - `lint`: `lintAgentMachine` (errors fail; warnings fail with `lint.warnings`).
  * - `explore`: `explorePaths` from each `explore.inputs` entry; every terminal
- *   must be one of `explore.terminals`.
+ *   must be one of `explore.terminals`, no cap (`maxPaths`, `maxNodes`) may cut
+ *   it short, and every event's payloads must be tried (`unexpandedEvents`).
  *
  * @example
  * ```ts
@@ -207,8 +220,28 @@ function transitionsOf(state: ConfigNode): ConfigNode[] {
   ];
 }
 
+/**
+ * Paths of raw xstate expression slots (`{ "@expr": ... }`, `{ "@code": ... }`).
+ * xstate evaluates such an object whole, ignoring its literal siblings, so a
+ * slot would hide the model ref or `allowedEvents` the checks below read.
+ */
+function rawExpressionPaths(value: unknown, path: string): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => rawExpressionPaths(item, `${path}[${index}]`));
+  }
+  if (!value || typeof value !== "object") return [];
+  const node = value as ConfigNode;
+  if (typeof node["@expr"] === "string" || typeof node["@code"] === "string") return [path];
+  return Object.entries(node).flatMap(([key, item]) =>
+    rawExpressionPaths(item, path ? `${path}.${key}` : key),
+  );
+}
+
 function checkVocabulary(config: AgentWorkflowConfig, allow: AgentConfigVocabulary): string[] {
-  const problems: string[] = [];
+  const problems: string[] = rawExpressionPaths(config, "").map(
+    (path) =>
+      `${path || "(root)"} uses a raw '@expr' slot, which the vocabulary cannot check; write {{ }} templates instead`,
+  );
   const checkModel = (where: string, model: unknown) => {
     if (!allow.models) return;
     if (typeof model !== "string" || hasTemplate(model)) {
@@ -312,6 +345,9 @@ async function checkExplore(
   options: VerifyAgentConfigExploreOptions,
 ): Promise<string[]> {
   const { inputs, terminals = ["done"], ...rest } = options;
+  if (inputs.length === 0) {
+    return ["explore.inputs is empty, so no path was explored; give at least one input"];
+  }
   const allowed: readonly string[] = terminals;
   const maxDepth = options.maxDepth ?? 8;
   const problems = new Set<string>();
@@ -352,7 +388,12 @@ async function checkExplore(
     }
     if (report.hitPathCap) {
       problems.add(
-        `${at}hit the path cap (${options.maxPaths ?? 200} paths) before exploring every path; the workflow branches too much to verify`,
+        `${at}a cap (maxPaths ${options.maxPaths ?? 200} or maxNodes ${options.maxNodes ?? 100_000}) cut exploration short; the workflow branches too much to verify`,
+      );
+    }
+    if (report.unexpandedEvents.length > 0) {
+      problems.add(
+        `${at}explore did not try every payload of: ${report.unexpandedEvents.join(", ")}; add explore.payloads entries for them`,
       );
     }
   }

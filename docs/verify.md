@@ -170,7 +170,7 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 ## Branch exploration
 
-`explorePaths(machine, { input, maxDepth?, maxPaths?, text?, invokes?, errors?, outputs?, payloads?, dedupeBy? })` enumerates decision and external-event branches without a model, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, text?, invokes?, errors?, outputs?, payloads?, dedupeBy? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - At an idle wait, it forks one branch per externally accepted event.
@@ -193,7 +193,13 @@ const report = await explorePaths(refundMachine, {
 // report.reachedStates → ['deciding', 'awaitingHuman', 'refunded', 'denied']
 ```
 
-Exploration is bounded by `maxDepth`, which defaults to 8, and `maxPaths`, which defaults to 200. `report.hitPathCap` is true when the report is partial.
+Exploration is bounded by three limits:
+
+- `maxDepth`: branch points along any path. Default 8.
+- `maxPaths`: terminals in the report. Default 200.
+- `maxNodes`: branch points expanded in total. Default 100,000. It bounds work and memory on a loopy machine, which expands many nodes per terminal.
+
+`report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short, so the report is partial.
 
 A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id.
 
@@ -212,7 +218,8 @@ By default, events are applied as `{ type }`. A guard that reads the payload, su
 - `payloads` is a function of the snapshot at each branch point. It returns payloads per event type. A type with an entry forks once per payload as `{ ...payload, type }`, at decisions and idle waits alike.
 - Guard-rejected variants count in `prunedByGuard`.
 - A decide input's own `payloads` become that decision's branch set. An explorer `payloads` entry for the same type overrides them.
-- A type with no entry is filled from its event schema when every required field is an `enum`, `const`, `boolean`, `null`, or a union of those. The schema is the agent machine's, or a plain XState machine's own `schemas.events`. Exploration forks over their product, up to 64 combinations. The schema must expose JSON Schema through Standard JSON Schema, as Zod 4 does. Any other type stays `{ type }`.
+- A type with no entry is filled from its event schema. Each field that is an `enum`, `const`, `boolean`, `null`, or a union of those contributes its values, and an optional one also contributes the omitted case. Exploration forks over their product, up to 64 combinations. The schema is the agent machine's, or a plain XState machine's own `schemas.events`, and must expose JSON Schema through Standard JSON Schema, as Zod 4 does.
+- A type the fill cannot enumerate is listed in `report.unexpandedEvents`: a required field with no finite domain, a product over 64, or a schema with no JSON Schema is applied as `{ type }`, and an optional field with no finite domain is left out. Add a `payloads` entry for each listed type. A type with no schema at all stays `{ type }` and is not listed.
 - `outputs` lists every output to try per src. Two or more outputs fork one branch each, and an `errors` entry for the same src adds the failing branch. Each branch records `{ type: 'xstate.done.actor.<id>', output }` in the path. An `outputs` entry replaces that src's `text` or `invokes` value.
 - `dedupeBy` projects a settled snapshot to a key. Each key is explored once, or again when reached at a shallower depth. The key must include every field a guard, choice, or `onDone` reads, or the search misses paths.
 
@@ -237,7 +244,14 @@ Pick boundary values for numeric payloads: each guard threshold on both sides. V
 `canReach(machine, target, opts)` wraps `explorePaths` to answer whether a state
 path or state-node ID is reachable, with a witness path when it is.
 
-`reachable: false` proves unreachability only when `complete` is true. `complete` is false when the path cap or `maxDepth` stopped the search before it covered every branch. Raise `maxPaths`, add `dedupeBy`, or narrow the payload tables until it is true.
+`reachable: false` proves unreachability only when `complete` is true. `complete` is false when the search left a branch it could not rule out:
+
+- `maxPaths` or `maxNodes` cut the search short.
+- A path reached `maxDepth`.
+- A branch stopped on a `needs-output` terminal, with no canned output for its src.
+- An event type was not expanded to all its payload variants, as `explorePaths` lists in `unexpandedEvents`.
+
+Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.
 
 ```ts
 import { canReach } from "@statelyai/agent/testing";

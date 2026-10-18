@@ -589,3 +589,167 @@ describe("canReach — shortest witness", () => {
     });
   });
 });
+
+describe("canReach — proof soundness", () => {
+  test("a branch stopped on a missing output is not a proof", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      actors: { lookup: createAsyncLogic<boolean>({ run: async () => true }) },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "lookingUp",
+      states: {
+        lookingUp: {
+          invoke: {
+            id: "lookup",
+            src: "lookup",
+            onDone: { target: "found" },
+            onError: { target: "failed" },
+          },
+        },
+        found: { type: "final" },
+        failed: { type: "final" },
+      },
+    });
+    // No canned output: the branch stops `needs-output` before `found` is ever tried.
+    expect(await canReach(machine, "found")).toMatchObject({ reachable: false, complete: false });
+    expect(await canReach(machine, "found", { invokes: { lookup: true } })).toMatchObject({
+      reachable: true,
+    });
+  });
+
+  function createOptionalMachine() {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: {
+        SET: z.object({
+          tier: z.enum(["basic", "gold"]).optional(),
+          confirmed: z.boolean(),
+        }),
+        NOTE: z.object({ note: z.string().optional() }),
+        NAMED: z.object({ name: z.string() }),
+        WIDE: z.object({
+          a: z.enum(["1", "2", "3", "4", "5", "6", "7", "8", "9"]),
+          b: z.enum(["1", "2", "3", "4", "5", "6", "7", "8", "9"]),
+        }),
+      },
+    });
+    return agent.createMachine({
+      context: {},
+      initial: "idle",
+      states: {
+        idle: {
+          on: {
+            SET: ({ event }) =>
+              event.tier === "gold" && event.confirmed
+                ? { target: "gold" }
+                : event.tier === undefined
+                  ? { target: "unset" }
+                  : undefined,
+            NOTE: ({ event }) => (event.note === "x" ? { target: "noted" } : undefined),
+            NAMED: ({ event }) => (event.name === "x" ? { target: "named" } : undefined),
+            WIDE: ({ event }) =>
+              event.a === "9" && event.b === "9" ? { target: "wide" } : undefined,
+          },
+        },
+        gold: { type: "final" },
+        unset: { type: "final" },
+        noted: { type: "final" },
+        named: { type: "final" },
+        wide: { type: "final" },
+      },
+    });
+  }
+
+  test("an optional finite field is explored omitted and with each value", async () => {
+    const machine = createOptionalMachine();
+    const payloads = () => ({ NOTE: [{}, { note: "x" }], NAMED: [{ name: "x" }] });
+    const gold = await canReach(machine, "gold", { payloads });
+    expect(gold.witness).toEqual([{ type: "SET", tier: "gold", confirmed: true }]);
+    expect((await canReach(machine, "unset", { payloads })).reachable).toBe(true);
+  });
+
+  test("a type applied as a bare `{ type }` it could never be leaves the search incomplete", async () => {
+    const machine = createOptionalMachine();
+    const report = await explorePaths(machine);
+    // NOTE's string is optional, NAMED's required, WIDE's product is 81 > 64.
+    expect([...report.unexpandedEvents].sort()).toEqual(["NAMED", "NOTE", "WIDE"]);
+    expect(report.unexplored).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^unexpanded: event 'NAMED'/)]),
+    );
+    expect(await canReach(machine, "named")).toMatchObject({ reachable: false, complete: false });
+
+    // A payloads entry for each unexpanded type makes the proof honest again.
+    const payloads = () => ({
+      NOTE: [{}, { note: "y" }],
+      NAMED: [{ name: "y" }],
+      WIDE: [{ a: "1", b: "1" }],
+    });
+    expect((await explorePaths(machine, { payloads })).unexpandedEvents).toEqual([]);
+    expect(await canReach(machine, "named", { payloads })).toMatchObject({
+      reachable: false,
+      complete: true,
+    });
+  });
+
+  // Every event loops back, so terminals are rare: only `maxDepth` ends a path.
+  const spin = createMachine({
+    initial: "spin",
+    states: {
+      spin: { on: { A: { target: "spin" }, B: { target: "spin" }, C: { target: "spin" } } },
+      never: {},
+    },
+  });
+
+  test("the node budget bounds a loopy search before any path cap applies", async () => {
+    let branchPoints = 0;
+    const counted = (): Record<string, never> => {
+      branchPoints++;
+      return {};
+    };
+    const result = await canReach(spin, "never", {
+      maxDepth: 30,
+      maxPaths: 1_000_000,
+      maxNodes: 500,
+      payloads: counted,
+    });
+    expect(result).toMatchObject({ reachable: false, complete: false });
+    expect(branchPoints).toBeLessThanOrEqual(500);
+
+    branchPoints = 0;
+    const report = await explorePaths(spin, {
+      maxDepth: 30,
+      maxPaths: 1_000_000,
+      maxNodes: 500,
+      payloads: counted,
+    });
+    expect(report.hitPathCap).toBe(true);
+    expect(branchPoints).toBeLessThanOrEqual(500);
+  });
+
+  test("the default node budget stops a loopy search quickly and reports it incomplete", async () => {
+    const started = performance.now();
+    const result = await canReach(spin, "never", { maxDepth: 30, maxPaths: 1_000_000 });
+    expect(result).toMatchObject({ reachable: false, complete: false });
+    expect(performance.now() - started).toBeLessThan(20_000);
+  }, 30_000);
+
+  test("a search within the node budget is still complete", async () => {
+    expect(await canReach(spin, "never", { maxDepth: 3, maxNodes: 40 })).toMatchObject({
+      reachable: false,
+      complete: false, // maxDepth cut it, not the budget
+    });
+    const fork = createMachine({
+      initial: "start",
+      states: {
+        start: { on: { A: { target: "a" }, B: { target: "b" } } },
+        a: { type: "final" },
+        b: { type: "final" },
+        never: {},
+      },
+    });
+    expect(await canReach(fork, "never", { maxNodes: 3 })).toMatchObject({ complete: true });
+    expect(await canReach(fork, "never", { maxNodes: 2 })).toMatchObject({ complete: false });
+  });
+});

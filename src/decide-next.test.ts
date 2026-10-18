@@ -6,6 +6,7 @@ import {
   AgentDecisionExhaustedError,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
+  resolveDecision,
 } from "./decision.js";
 import { createAgentRuntime, runToQuiescence } from "./run-agent.js";
 import { createAgentSchemas, setupAgent } from "./setup-agent.js";
@@ -257,6 +258,55 @@ describe("agent.decide with payloads under the runtime", () => {
     expect(result.snapshot.context.refunded).toBe(20);
   });
 
+  test("fails to onError without a model call when no offered option is accepted", async () => {
+    const noOptions = setupAgent({ schemas }).createMachine({
+      context: { limit: 50, refunded: 0 },
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: {
+            src: "agent.decide",
+            input: {
+              model: "quick",
+              allowedEvents: ["refund", "escalate"],
+              // The only refund is over the limit; escalate is withheld.
+              payloads: { refund: [{ amount: 80 }], escalate: [] },
+            },
+            onError: {
+              target: "failed",
+              context: ({ context, event }) => ({
+                ...context,
+                error: (event.error as Error).message,
+                code: (event.error as { code?: string }).code,
+              }),
+            },
+          },
+          on: {
+            refund: ({ context, event }) =>
+              event.amount <= context.limit ? { target: "refunded" } : undefined,
+            escalate: { target: "escalated" },
+          },
+        },
+        refunded: { type: "final" },
+        escalated: { type: "final" },
+        failed: { type: "final" },
+      },
+    });
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+    const result = await runToQuiescence(
+      createAgentRuntime(noOptions, {
+        executors: { generateText: async () => ({ result: {} }), decide },
+      }),
+      { input: {} },
+    );
+
+    expect(requests).toHaveLength(0);
+    expect(result.snapshot.value).toBe("failed");
+    const context = result.snapshot.context as { code?: string; error?: string };
+    expect(context.code).toBe("decision-exhausted");
+    expect(context.error).toContain("no offered option");
+  });
+
   test("rejects a choice that matches no offered option", async () => {
     const { decide, requests } = scripted([() => ({ type: "refund", amount: 30 })]);
     const result = await runToQuiescence(
@@ -269,5 +319,29 @@ describe("agent.decide with payloads under the runtime", () => {
     expect(result.snapshot.value).toBe("failed");
     expect(requests).toHaveLength(2);
     expect(requests[1]!.attempts[0]!.reason).toContain("matched no offered option");
+  });
+});
+
+describe("resolveDecision with an empty closed choice", () => {
+  test("fails without calling the executor", async () => {
+    let calls = 0;
+    const decide: AgentDecisionExecutor = async () => {
+      calls += 1;
+      return { event: { type: "X" } };
+    };
+    await expect(
+      resolveDecision(
+        {
+          kind: "decision",
+          id: "d",
+          model: "m",
+          events: [{ type: "X", toolName: "send_event_X" }],
+          options: [],
+          attempts: [],
+        },
+        { decide },
+      ),
+    ).rejects.toBeInstanceOf(AgentDecisionExhaustedError);
+    expect(calls).toBe(0);
   });
 });

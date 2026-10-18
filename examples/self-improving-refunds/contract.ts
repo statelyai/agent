@@ -130,7 +130,7 @@ export type Scenario = {
   expected: "refund" | "close" | "escalate";
   /** What the customer says when asked to confirm their identity. */
   identityClaim: string;
-  /** Scripted replies to ASK_CUSTOMER, in order; the last one repeats. */
+  /** Scripted replies to ASK_CUSTOMER, in order; the last one repeats. Empty: a fallback reply. */
   replies: string[];
   /** What a human approver says when asked. */
   approver: "approve" | "reject";
@@ -304,6 +304,9 @@ export const HELD_OUT_SCENARIOS: Scenario[] = [
   },
 ];
 
+/** The customer's reply when the scenario scripts none. */
+const NO_REPLY = "I'm not sure, sorry.";
+
 /** A fresh world for one scenario: orders are copied so refunds never leak across episodes. */
 export function createWorld(scenario: Scenario): World {
   const customer = CUSTOMERS.find((c) => c.id === scenario.customerId);
@@ -329,7 +332,8 @@ export function createWorld(scenario: Scenario): World {
     },
     identityClaim: () => scenario.identityClaim,
     customerReply: () => {
-      const reply = scenario.replies[Math.min(replyIndex, scenario.replies.length - 1)]!;
+      // A scenario with no scripted replies still answers: a real model may ask anyway.
+      const reply = scenario.replies[Math.min(replyIndex, scenario.replies.length - 1)] ?? NO_REPLY;
       replyIndex += 1;
       return reply;
     },

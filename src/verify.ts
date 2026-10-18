@@ -914,6 +914,12 @@ export interface ExplorePathsOptions {
   /** Total path cap before exploration stops (reported via `hitPathCap`). Default 200. */
   maxPaths?: number;
   /**
+   * Total branch points expanded before exploration stops (reported via
+   * `hitPathCap`). Default 100,000. It bounds work and memory where
+   * `maxPaths` cannot: a loopy machine expands many nodes per terminal.
+   */
+  maxNodes?: number;
+  /**
    * Canned output for each text request, keyed by src (the
    * `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`).
    * One value per src, reused every time that src is reached. A missing src
@@ -960,9 +966,13 @@ export interface ExplorePathsOptions {
    *
    * A type with no entry and no request option is filled from its event
    * schema when that schema exposes JSON Schema (Standard JSON Schema, e.g.
-   * Zod 4) and every required field is a finite domain (`enum`, `const`,
-   * `boolean`, `null`, or a union of those): it forks over the cartesian
-   * product, up to 64 combinations. Any other type is applied as `{ type }`.
+   * Zod 4) and its fields are finite domains (`enum`, `const`, `boolean`,
+   * `null`, or a union of those): it forks over the cartesian product, up to
+   * 64 combinations, each optional field also omitted. A type with a required
+   * non-finite field, or a product over the cap, is applied as `{ type }`; an
+   * optional non-finite field is left out. Either way the type's real variants
+   * were not all tried, so it is listed in `unexpandedEvents`. A type with no
+   * schema at all is applied as `{ type }`.
    */
   payloads?: (snapshot: AnyMachineSnapshot) => Partial<Record<string, Record<string, unknown>[]>>;
   /**
@@ -1005,8 +1015,14 @@ export interface AgentPathReport {
   unexplored: string[];
   /** Total paths explored. */
   pathsExplored: number;
-  /** True when the total-paths cap was hit (report is partial). */
+  /** True when a cap (`maxPaths` or `maxNodes`) cut exploration short (report is partial). */
   hitPathCap: boolean;
+  /**
+   * Event types whose payload variants were not all tried: their schema has
+   * a non-finite field or a product over the fill cap, and `payloads` has no
+   * entry for them. Add a `payloads` entry for each to cover them.
+   */
+  unexpandedEvents: string[];
 }
 
 // Safety bound on the deterministic advance between two branch points: each
@@ -1035,8 +1051,11 @@ interface InvokeFork {
   isDecision?: boolean;
 }
 
-// Cap on the cartesian product a schema's finite required fields expand to.
+// Cap on the cartesian product a schema's finite fields expand to.
 const FINITE_PAYLOAD_CAP = 64;
+
+// Default cap on branch points expanded per exploration.
+const DEFAULT_MAX_NODES = 100_000;
 
 // Every value a JSON Schema admits when that set is finite and small: a
 // `const`, an `enum`, `boolean`, `null`, or a union of those. Else undefined.
@@ -1062,27 +1081,52 @@ function finiteDomain(schema: unknown): unknown[] | undefined {
   return undefined;
 }
 
-// The payloads an object JSON Schema admits when every required field has a
-// finite domain and the product stays under the cap. Optional fields are left
-// out. Undefined when the schema does not qualify.
-function finitePayloads(jsonSchema: unknown): Record<string, unknown>[] | undefined {
-  if (!isRecord(jsonSchema)) {
-    return undefined;
+const OMITTED = Symbol("omitted");
+
+// The payloads an object JSON Schema admits: the product over its finite
+// fields, each optional one also omitted. `complete` is false when that is not
+// every variant: an optional non-finite field is left out, and a required
+// non-finite field, a product over the cap, or a non-object schema falls back
+// to the bare `{}`.
+function finitePayloads(jsonSchema: unknown): {
+  payloads: Record<string, unknown>[];
+  complete: boolean;
+} {
+  const bare = { payloads: [{}], complete: false };
+  if (
+    !isRecord(jsonSchema) ||
+    (jsonSchema["type"] !== "object" && !isRecord(jsonSchema["properties"]))
+  ) {
+    return bare;
   }
   const properties = isRecord(jsonSchema["properties"]) ? jsonSchema["properties"] : {};
-  const required = Array.isArray(jsonSchema["required"]) ? jsonSchema["required"] : [];
+  const required = new Set(Array.isArray(jsonSchema["required"]) ? jsonSchema["required"] : []);
+  if ([...required].some((key) => key !== "type" && !(key in properties))) {
+    return bare;
+  }
   let product: Record<string, unknown>[] = [{}];
-  for (const key of required) {
-    if (typeof key !== "string" || key === "type") {
+  let complete = true;
+  for (const [key, schema] of Object.entries(properties)) {
+    if (key === "type") {
       continue;
     }
-    const domain = finiteDomain(properties[key]);
-    if (!domain || domain.length === 0 || product.length * domain.length > FINITE_PAYLOAD_CAP) {
-      return undefined;
+    const domain = finiteDomain(schema);
+    if (!domain || domain.length === 0) {
+      if (required.has(key)) {
+        return bare;
+      }
+      complete = false;
+      continue;
     }
-    product = product.flatMap((payload) => domain.map((value) => ({ ...payload, [key]: value })));
+    const choices: unknown[] = required.has(key) ? domain : [OMITTED, ...domain];
+    if (product.length * choices.length > FINITE_PAYLOAD_CAP) {
+      return bare;
+    }
+    product = product.flatMap((payload) =>
+      choices.map((value) => (value === OMITTED ? payload : { ...payload, [key]: value })),
+    );
   }
-  return product;
+  return { payloads: product, complete };
 }
 
 // A pending branch point: the step to advance, the events that led to it, and
@@ -1104,6 +1148,7 @@ function explore(
 ): { report: AgentPathReport; witness?: ChosenEvent[] } {
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 200;
+  const maxNodes = options.maxNodes ?? DEFAULT_MAX_NODES;
   const textScript = options.text ?? {};
   const invokeOutputs: Record<string, unknown> = { ...options.invokes };
   const errorScript = options.errors ?? {};
@@ -1114,14 +1159,23 @@ function explore(
     (machine.schemas as AgentSchemas | undefined)?.events ??
     {};
 
-  // Schema-derived payloads per event type, computed once per type.
-  const finiteCache = new Map<string, Record<string, unknown>[] | undefined>();
-  const schemaPayloads = (type: string): Record<string, unknown>[] | undefined => {
-    if (!finiteCache.has(type)) {
+  // Schema-derived payloads per event type, computed once per type. A type
+  // with no schema is applied bare, and that is all it can be.
+  const finiteCache = new Map<string, { payloads: Record<string, unknown>[]; complete: boolean }>();
+  const schemaPayloads = (type: string): Record<string, unknown>[] => {
+    let fill = finiteCache.get(type);
+    if (!fill) {
       const schema = eventSchemas[type];
-      finiteCache.set(type, schema ? finitePayloads(safeJsonSchema(schema)) : undefined);
+      fill = schema ? finitePayloads(safeJsonSchema(schema)) : { payloads: [{}], complete: true };
+      finiteCache.set(type, fill);
     }
-    return finiteCache.get(type);
+    if (!fill.complete && !unexpanded.has(type)) {
+      unexpanded.add(type);
+      unexplored.push(
+        `unexpanded: event '${type}' has payload fields the schema fill cannot enumerate; add a payloads entry for it`,
+      );
+    }
+    return fill.payloads;
   };
 
   // The concrete events to try for one event type at a branch point: the
@@ -1143,7 +1197,7 @@ function explore(
         .filter((option) => option.event.type === type)
         .map((option) => option.event);
     }
-    return (schemaPayloads(type) ?? [{}]).map((payload) => ({ ...payload, type }));
+    return schemaPayloads(type).map((payload) => ({ ...payload, type }));
   };
 
   // How a text request or scripted invoke settles: resolved straight through
@@ -1175,9 +1229,18 @@ function explore(
   const reachedValues: unknown[] = [];
   const terminals: AgentPathTerminal[] = [];
   const unexplored: string[] = [];
+  const unexpanded = new Set<string>();
   let prunedByGuard = 0;
   let pathsExplored = 0;
+  let nodesExpanded = 0;
   let hitPathCap = false;
+  // True, and recorded, once either cap leaves a node unexpanded.
+  const capped = (): boolean => {
+    if (pathsExplored >= maxPaths || nodesExpanded >= maxNodes) {
+      hitPathCap = true;
+    }
+    return hitPathCap;
+  };
   let witness: ChosenEvent[] | undefined;
   // `dedupeBy` key → the shallowest depth it was explored at.
   const visited = new Map<string, number>();
@@ -1270,13 +1333,10 @@ function explore(
   // the state left by the previous child's subtree.
   function* expand({ step, path, depth: startDepth }: ExploreNode): Generator<ExploreNode> {
     let depth = startDepth;
-    if (witness !== undefined) {
+    if (witness !== undefined || capped()) {
       return;
     }
-    if (pathsExplored >= maxPaths) {
-      hitPathCap = true;
-      return;
-    }
+    nodesExpanded++;
 
     const { step: settled, blockedSrc, hit, fork } = advance(step);
     if (hit) {
@@ -1318,8 +1378,7 @@ function explore(
       }
       if (!fork.isDecision) {
         for (const output of fork.outputs) {
-          if (witness !== undefined || pathsExplored >= maxPaths) {
-            if (pathsExplored >= maxPaths) hitPathCap = true;
+          if (witness !== undefined || capped()) {
             return;
           }
           const resolved = resolveAgentStep(
@@ -1410,8 +1469,7 @@ function explore(
     }
 
     for (const event of branchEvents) {
-      if (witness !== undefined || pathsExplored >= maxPaths) {
-        if (pathsExplored >= maxPaths) hitPathCap = true;
+      if (witness !== undefined || capped()) {
         return;
       }
       // Guard legality: a type-legal-but-guard-rejected candidate is a pruned branch.
@@ -1463,6 +1521,7 @@ function explore(
       unexplored,
       pathsExplored,
       hitPathCap,
+      unexpandedEvents: [...unexpanded],
     },
     witness,
   };
@@ -1481,13 +1540,16 @@ function explore(
  *
  * Events are applied as `{ type }` unless a payload is known: `payloads`
  * forks a type once per listed payload, a decide input's own `payloads`
- * become the branch set, and an event schema whose required fields are all
- * finite (enums, booleans, consts) expands to their product. `outputs` forks
- * an invoke once per listed output. `dedupeBy` explores each projected
- * snapshot once, which keeps a large payload table tractable.
+ * become the branch set, and an event schema whose fields are finite (enums,
+ * booleans, consts) expands to their product, each optional field also
+ * omitted. A type that could not be fully expanded is listed in
+ * `unexpandedEvents`. `outputs` forks an invoke once per listed output.
+ * `dedupeBy` explores each projected snapshot once, which keeps a large
+ * payload table tractable.
  *
- * Combinatorics are bounded by `maxDepth` (default 8) and `maxPaths` (default
- * 200, reported via `hitPathCap`).
+ * Combinatorics are bounded by `maxDepth` (default 8), `maxPaths` (default
+ * 200), and `maxNodes` (default 100,000), the last two reported via
+ * `hitPathCap`.
  *
  * @example
  * ```ts
@@ -1511,9 +1573,12 @@ export interface CanReachResult {
   /** When reachable, the sequence of chosen/applied events that gets there. */
   witness?: ChosenEvent[];
   /**
-   * False when exploration stopped early (the path cap was hit, or a path
-   * reached `maxDepth`) without finding the target. `reachable: false` is a
-   * proof of unreachability only when `complete` is true.
+   * False when the search left a branch it could not rule out unexplored: a
+   * cap (`maxPaths` or `maxNodes`) cut it short, a path reached `maxDepth`, a
+   * branch stopped `needs-output` on a missing canned output, or an event type
+   * was not expanded to all its payload variants (`unexpandedEvents` in the
+   * {@link explorePaths} report). `reachable: false` is a proof of
+   * unreachability only when `complete` is true.
    */
   complete: boolean;
 }
@@ -1549,7 +1614,9 @@ function resolveStateTarget(machine: AnyStateMachine, target: string): string {
  * combination) without reifying a sentinel state for it. Returns
  * `{ reachable: true, witness }` with the event sequence that reaches it, or
  * `{ reachable: false }`. Check `complete` before treating `reachable: false`
- * as a proof: it is false when the path cap or `maxDepth` cut exploration short.
+ * as a proof: it is false when a cap or `maxDepth` cut exploration short, a
+ * branch needed a canned output it did not have, or an event's payloads were
+ * not all tried.
  *
  * @example
  * ```ts
@@ -1588,7 +1655,14 @@ export async function canReach(
       ...(resolvedTarget ? { target: resolvedTarget } : {}),
     };
   }
+  // `done`, `idle`, and `error` end a branch the machine itself ended; any
+  // other terminal stopped a branch the search did not explore.
   const complete =
-    !report.hitPathCap && !report.terminals.some((terminal) => terminal.status === "max-depth");
+    !report.hitPathCap &&
+    report.unexpandedEvents.length === 0 &&
+    report.terminals.every(
+      (terminal) =>
+        terminal.status === "done" || terminal.status === "idle" || terminal.status === "error",
+    );
   return { reachable: false, complete, ...(resolvedTarget ? { target: resolvedTarget } : {}) };
 }

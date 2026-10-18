@@ -189,6 +189,7 @@ By default the model writes the event payload. A **closed choice** lists the con
 - An event type in `allowedEvents` with no `payloads` key is offered bare, as `{ type }`. An empty list offers nothing for that type. To withhold a type, give it `[]`: `payloads: { refund: [{ amount: 20 }], escalate: [] }`.
 - The runtime keeps only the options `snapshot.can(event)` accepts right now.
 - The chosen event must equal one offered option, type and payload. Any other choice is retried as a `rejected-by-guard` attempt.
+- When the snapshot accepts none of the options, the decision fails at once with `AgentDecisionExhaustedError` and no model call. Handle it with the invoke's `onError`.
 
 ```ts
 import { createAgentSchemas, setupAgent } from "@statelyai/agent";

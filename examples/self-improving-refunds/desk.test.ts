@@ -334,6 +334,21 @@ describe("the decider at the boundary", () => {
     ]);
   });
 
+  test("asking a customer with no scripted replies gets a fallback reply, not a crash", async () => {
+    const s = scenario("small-clean");
+    expect(s.replies).toEqual([]);
+    const prompts: string[] = [];
+    const episode = await runDeskEpisode(s, {
+      decide: async (request) => {
+        prompts.push(String(request.prompt));
+        const pick = (type: string) => request.options!.find(({ event }) => event.type === type)!;
+        return { event: (prompts.length === 1 ? pick("ASK_CUSTOMER") : pick("ESCALATE")).event };
+      },
+    });
+    expect(episode.outcome).toBe("escalate");
+    expect(prompts[1]).toContain("Customer replies: I'm not sure, sorry.");
+  });
+
   test("the decider is only ever offered legal options", async () => {
     const seen: string[][] = [];
     await runDeskEpisode(scenario("large-approved"), {

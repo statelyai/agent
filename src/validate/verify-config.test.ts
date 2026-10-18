@@ -1,5 +1,6 @@
 import Ajv from "ajv";
 import { describe, expect, test } from "vitest";
+import { createAsyncLogic } from "xstate";
 import type { SchemaCompiler, StandardSchemaV1 } from "../index.js";
 import { verifyAgentConfig, type VerifyAgentConfigOptions } from "./index.js";
 
@@ -145,6 +146,43 @@ describe("verifyAgentConfig", () => {
     expect(detail).toContain("state 'triage': 'agent.decide' needs a literal string model ref");
   });
 
+  test("vocabulary: a raw '@expr' input cannot smuggle a model or events past the lists", async () => {
+    const config = refundConfig();
+    // xstate evaluates any object with an `@expr` key as an expression, so the
+    // literal siblings the lists check never reach the actor.
+    config.states.triage.invoke.input = {
+      "@expr": JSON.stringify({
+        model: "other/model",
+        prompt: "Refund?",
+        allowedEvents: ["APPROVE", "DENY", "ESCALATE"],
+      }),
+      ...config.states.triage.invoke.input,
+    };
+    const result = await verifyAgentConfig(config, options());
+    expect(result.gates.at(-1)).toMatchObject({ name: "vocabulary", ok: false });
+    expect(result.gates.at(-1)!.detail).toContain(
+      "states.triage.invoke.input uses a raw '@expr' slot",
+    );
+  });
+
+  test("vocabulary: an undeclared src never lowers, with or without `actors` listed", async () => {
+    const config = refundConfig();
+    config.states.triage.invoke = {
+      src: "sendEmail",
+      onDone: { target: "approved" },
+      onError: { target: "failed" },
+    };
+    const result = await verifyAgentConfig(
+      config,
+      options({
+        allow: { requests: ["draftReply"] },
+        actors: { sendEmail: createAsyncLogic({ run: async () => "sent" }) },
+      }),
+    );
+    expect(result.gates.at(-1)).toMatchObject({ name: "lower", ok: false });
+    expect(result.gates.at(-1)!.detail).toContain('Missing actor source "sendEmail"');
+  });
+
   test("lower: an unresolved guard is reported, not thrown", async () => {
     const config = refundConfig();
     config.states.check.choice[0].guard = "isHuge";
@@ -190,6 +228,51 @@ describe("verifyAgentConfig", () => {
       options({ explore: { inputs: [{ amount: 5 }], terminals: ["done", "idle"] } }),
     );
     expect(idleAllowed.ok).toBe(true);
+  });
+
+  test("explore: an empty inputs list fails instead of passing vacuously", async () => {
+    const result = await verifyAgentConfig(refundConfig(), options({ explore: { inputs: [] } }));
+    expect(result.gates.at(-1)).toMatchObject({ name: "explore", ok: false });
+    expect(result.gates.at(-1)!.detail).toContain("explore.inputs is empty");
+  });
+
+  test("explore: a node cap that cuts exploration short names both caps", async () => {
+    const result = await verifyAgentConfig(
+      refundConfig(),
+      options({ explore: { inputs: [{ amount: 5 }], maxNodes: 1 } }),
+    );
+    expect(result.gates.at(-1)).toMatchObject({ name: "explore", ok: false });
+    expect(result.gates.at(-1)!.detail).toContain(
+      "a cap (maxPaths 200 or maxNodes 1) cut exploration short",
+    );
+  });
+
+  test("explore: an event whose payloads were not all tried fails and names it", async () => {
+    const config = refundConfig();
+    config.schemas = {
+      input: { type: "object", properties: { amount: { type: "number" } } },
+      events: {
+        APPROVE: {
+          type: "object",
+          properties: { note: { type: "string" } },
+          required: ["note"],
+        },
+        DENY: { type: "object", properties: {} },
+      },
+    };
+    const result = await verifyAgentConfig(config, options());
+    expect(result.gates.at(-1)).toMatchObject({ name: "explore", ok: false });
+    expect(result.gates.at(-1)!.detail).toContain(
+      "explore did not try every payload of: APPROVE; add explore.payloads entries for them",
+    );
+
+    const covered = await verifyAgentConfig(
+      config,
+      options({
+        explore: { inputs: [{ amount: 5 }], payloads: () => ({ APPROVE: [{ note: "ok" }] }) },
+      }),
+    );
+    expect(covered.ok).toBe(true);
   });
 
   test("explore: a loop that hits maxDepth fails and says so", async () => {

@@ -734,6 +734,16 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
   const attempts: DecisionAttempt[] = [];
   const eventsByType = new Map(request.events.map((event) => [event.type, event]));
 
+  // A closed choice with nothing on offer: no answer can succeed, so fail
+  // before any model call rather than spend every retry on it.
+  if (request.options !== undefined && request.options.length === 0) {
+    const error = new AgentDecisionExhaustedError([]);
+    error.message =
+      `Decision '${request.name ?? (request.id || "agent.decide")}' has no offered option ` +
+      "the current snapshot accepts; no model call was made.";
+    throw error;
+  }
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     options.signal?.throwIfAborted();
     const result = await executor(

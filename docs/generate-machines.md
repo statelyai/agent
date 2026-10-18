@@ -24,13 +24,13 @@ generate → verifyAgentConfig (validate → vocabulary → lower → lint → e
 
 <!-- viz: generation pipeline: generate -> verifyAgentConfig gates (validate -> vocabulary -> lower -> lint -> explore) -> run, with each failing gate feeding back into generate as a repair prompt, capped at 3 attempts -->
 
-| Gate         | Checks with                                    | Fails on                                                                                  |
-| ------------ | ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `validate`   | `validateAgentConfig`                          | malformed config shape                                                                    |
-| `vocabulary` | the `allow` lists                              | an invoke src, guard, action, `agent.decide` event, or model ref outside the vocabulary   |
-| `lower`      | `setupAgent.fromConfig`                        | unresolved named guards/actions, `onDone` on a decision                                   |
-| `lint`       | `lintAgentMachine`                             | decisions with no handled events; warnings too with `lint: { warnings: true }`            |
-| `explore`    | `explorePaths`, once per `explore.inputs` item | a path that ends outside `explore.terminals`, loops past `maxDepth`, or hits the path cap |
+| Gate         | Checks with                                    | Fails on                                                                                                                              |
+| ------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate`   | `validateAgentConfig`                          | malformed config shape                                                                                                                |
+| `vocabulary` | the `allow` lists                              | an invoke src, guard, action, `agent.decide` event, or model ref outside the vocabulary                                               |
+| `lower`      | `setupAgent.fromConfig`                        | unresolved named guards/actions, `onDone` on a decision                                                                               |
+| `lint`       | `lintAgentMachine`                             | decisions with no handled events; warnings too with `lint: { warnings: true }`                                                        |
+| `explore`    | `explorePaths`, once per `explore.inputs` item | a path ending outside `explore.terminals`, a loop past `maxDepth`, a `maxPaths`/`maxNodes` cap, untried payloads (`unexpandedEvents`) |
 
 Run the gates on the config the model returned:
 
@@ -69,8 +69,10 @@ The result behaves as follows.
 - `detail` names the offending path, state, or name, one problem per line. A passing `lint` gate carries its warnings in `detail`.
 - `result.config` is the typed config once `validate` passes. `result.machine` is the lowered machine once `lower` passes.
 - A config that throws while lowering is reported as a failed `lower` gate. `verifyAgentConfig` does not throw on a bad config.
-- An omitted `allow` key is unrestricted. Omit `allow` to skip the `vocabulary` gate, and omit `explore` to skip the `explore` gate.
-- `explore.terminals` defaults to `['done']`. Other `explore` keys, such as `text`, `invokes`, `errors`, `outputs`, `payloads`, `dedupeBy`, and `maxPaths`, pass through to `explorePaths`. See [Payloads and invoke outputs](verify.md#payloads-and-invoke-outputs).
+- An omitted `allow` key is unrestricted. Omit `allow` to skip the `vocabulary` gate, and omit `explore` to skip the `explore` gate. An empty `explore.inputs` list fails the `explore` gate.
+- An invoke can name only an `agent.*` builtin or a key the config declares under `requests` or `actors`. Any other src fails the `lower` gate, even when `actors` binds it. `allow.requests` limits the declared request keys, and `allow.actors` limits the declared actor keys. With `allow.actors` listed, every non-builtin src must be in `allow.actors` or `allow.requests`, or be a declared request when `allow.requests` is omitted.
+- With `allow` given, a raw xstate expression slot (`{ "@expr": ... }`) anywhere in the config fails the `vocabulary` gate. xstate evaluates the slot in place of its literal siblings, so it could hide a model ref or `allowedEvents`. Write `{{ }}` templates instead.
+- `explore.terminals` defaults to `['done']`. Other `explore` keys, such as `text`, `invokes`, `errors`, `outputs`, `payloads`, `dedupeBy`, `maxPaths`, and `maxNodes`, pass through to `explorePaths`. See [Payloads and invoke outputs](verify.md#payloads-and-invoke-outputs).
 - `actors` are bound with `machine.provide({ actors })` after lowering. `guards` and `actions` go to `fromConfig`.
 - No gate needs an API key.
 - `validateAgentConfig(config)` runs the `validate` gate alone. It returns `{ valid, errors }`, and each error's `path` is a JSON Pointer into the config.

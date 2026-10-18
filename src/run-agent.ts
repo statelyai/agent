@@ -1384,6 +1384,15 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
         actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true,
       );
       if (options) request.options = options;
+      // Nothing to choose from: fail without a model call, the same way
+      // exhausted retries fail, so the invoke's onError handles it.
+      if (options?.length === 0) {
+        const error = new AgentDecisionExhaustedError([]);
+        error.message =
+          `Decision '${request.name}' has no offered option the current snapshot accepts; ` +
+          "no model call was made.";
+        throw error;
+      }
 
       // The last attempt's `request.attempts` are the failures before the
       // choice that landed: journaled with the delivered event below.

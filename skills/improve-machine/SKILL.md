@@ -72,7 +72,7 @@ const rows = [];
 for (const threadId of threadIds) {
   const scenario = scenarioOf(threadId);
   const entries = await store.read(threadId);
-  const { snapshot } = replay(environment, entries); // pure fold, no model calls
+  const { snapshot } = replay(environment, entries); // the recording machine; pure fold, no model calls
   rows.push({
     threadId,
     expected: scenario.expected,
@@ -89,7 +89,7 @@ for (const threadId of threadIds) {
 - `store.listThreads({ prefix, limit, cursor })` pages through the threads that hold at least one entry. `cursor` is present only while more ids remain. It is optional on a custom `AgentEventLogStore`; `createInMemoryEventLogStore` implements it. Without it, use the thread ids recorded with each scenario.
 - Prefix thread ids with the split and version so a `listThreads` prefix returns one version's training runs and never a held-out thread. `scenarioOf` is your mapping from a thread id back to its scenario.
 - `store.read(threadId)` returns a thread's entries in log order.
-- `replay` throws `AgentMachineVersionMismatchError` on a thread recorded by a different environment version. Score each thread with the version that recorded it.
+- `replay(machine, entries)` needs the machine, at the version, that recorded the thread. Here that is the environment: its runtime records every thread, and the policy runs only as a decider at its boundary, so never replay with the policy machine. A thread recorded by a different environment version throws `AgentMachineVersionMismatchError`. Score each thread with the version that recorded it.
 - `getDecisionAttempts(entries)` returns `{ index, eventType, attempts }` for each entry whose decision needed retries: the failed tries before the event landed, or every try of an exhausted decision (`eventType` is then `xstate.error.actor.*`). Each attempt has `failure` (`unknown-event`, `invalid-payload`, or `rejected-by-guard`), `reason`, and the attempted `event` when there was one. A first-try decision records nothing.
 - `agent.decide` invokes journal their attempts on their own. With `decideNext` at the boundary, the host must pass them with the event, `runToQuiescence(runtime, { event, decision: { attempts } })` or `runtime.transition(state, event, { decision: { attempts } })`, or they never reach the log.
 - Compute the objective over the rows. This is the baseline for the round.

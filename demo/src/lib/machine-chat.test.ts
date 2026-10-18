@@ -487,6 +487,28 @@ describe("meta.interaction payload choices", () => {
     expect(idle.events.find((event) => event.type === "PASS")?.coveredByChoices).toBeUndefined();
   });
 
+  test("a type whose choices are all refused keeps its generic form", () => {
+    const refused = setup({
+      schemas: { events: { ACCUSE: z.object({ seat: z.number() }) }, meta: interactionMetaSchema },
+    }).createMachine({
+      initial: "voting",
+      states: {
+        voting: {
+          meta: {
+            interaction: { choices: [{ label: "Seat 9", event: { type: "ACCUSE", seat: 9 } }] },
+          },
+          on: { ACCUSE: ({ event }) => (event.seat <= 3 ? { target: "done" } : undefined) },
+        },
+        done: { type: "final" },
+      },
+    });
+    const refusedIdle = describeIdle(refused, createActor(refused).start().getSnapshot() as never);
+    expect(refusedIdle.choices).toEqual([]);
+    expect(
+      refusedIdle.events.find((event) => event.type === "ACCUSE")?.coveredByChoices,
+    ).toBeUndefined();
+  });
+
   test("the textEvent field form names the field free text fills", () => {
     expect(idle.textEvent).toEqual({ type: "SAY", field: "message" });
   });

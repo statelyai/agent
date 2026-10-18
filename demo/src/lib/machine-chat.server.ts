@@ -450,28 +450,6 @@ function fixedFields(hints: InteractionHints, type: string): Record<string, unkn
   return fixed && typeof fixed === "object" && !Array.isArray(fixed) ? fixed : {};
 }
 
-/** Event types the state's payload choices name, accepted right now or not. */
-function choiceTypes(hints: InteractionHints, context: unknown): Set<string> {
-  const fromContext = hints.choicesFrom
-    ? hints.choicesFrom
-        .split(".")
-        .reduce<unknown>(
-          (current, key) =>
-            current && typeof current === "object"
-              ? (current as Record<string, unknown>)[key]
-              : undefined,
-          context,
-        )
-    : undefined;
-  const declared = [...(hints.choices ?? []), ...(Array.isArray(fromContext) ? fromContext : [])];
-  return new Set(
-    declared.flatMap((choice) => {
-      const type = (choice as { event?: { type?: unknown } } | null)?.event?.type;
-      return typeof type === "string" ? [type] : [];
-    }),
-  );
-}
-
 /**
  * The payload schema minus the fields the interaction fixes, so a choice whose
  * whole payload is fixed (`APPROVE { requestId }` with the id declared in
@@ -541,7 +519,20 @@ function activeDescription(snapshot: AnyMachineSnapshot): string | null {
 export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnapshot): ChatIdle {
   const schemas = machineSchemas(machine);
   const hints = interactionHints(snapshot);
-  const covered = choiceTypes(hints, snapshot.context);
+
+  // Payload choices, resolved and filtered through `snapshot.can` by the
+  // library: each is a full event, so it renders as a plain button.
+  const interaction =
+    hints.choices !== undefined || hints.choicesFrom !== undefined
+      ? getInteraction(snapshot)
+      : undefined;
+  const choices: InteractionChoice[] | undefined = interaction?.choices?.map((choice) => ({
+    label: choice.label,
+    style: choice.style === "primary" || choice.style === "danger" ? choice.style : "default",
+    event: choice.event as InteractionChoice["event"],
+  }));
+  // Only a type with at least one offered choice drops its generic form.
+  const covered = new Set(choices?.map((choice) => choice.event.type));
 
   const events: AcceptedEvent[] = getAcceptedEvents(snapshot, {
     events: schemas.events as never,
@@ -573,18 +564,6 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
         event.needsPayload ||
         snapshot.can({ ...fixedFields(hints, event.type), type: event.type } as never),
     );
-
-  // Payload choices, resolved and filtered through `snapshot.can` by the
-  // library: each is a full event, so it renders as a plain button.
-  const interaction =
-    hints.choices !== undefined || hints.choicesFrom !== undefined
-      ? getInteraction(snapshot)
-      : undefined;
-  const choices: InteractionChoice[] | undefined = interaction?.choices?.map((choice) => ({
-    label: choice.label,
-    style: choice.style === "primary" || choice.style === "danger" ? choice.style : "default",
-    event: choice.event as InteractionChoice["event"],
-  }));
 
   // Free text maps to the declared textEvent (its named field, else its single
   // string field), or — when unambiguous — the one accepted event whose
