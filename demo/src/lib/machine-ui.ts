@@ -24,8 +24,8 @@
  *          DENY: { label: "Deny", style: "danger" },
  *        },
  *        // Payload choices: one button per full event ("Seat 2",
- *        // "Refund $240"). `choicesFrom` names a context array of the same
- *        // shape for choices computed at runtime.
+ *        // "Refund $240"). A string instead names a context array of the
+ *        // same shape for choices computed at runtime.
  *        choices: [{ label: "Seat 2", event: { type: "ACCUSE", seat: 2 } }],
  *        // Free chat text becomes this event (payload from its single
  *        // string field, or `{ type, field }` to name the field) — directly
@@ -82,7 +82,7 @@ export type AcceptedEvent = {
   coveredByChoices?: boolean;
 };
 
-/** One payload choice from `meta.interaction.choices` / `choicesFrom`: a button sending a full event. */
+/** One payload choice from `meta.interaction.choices`: a button sending a full event. */
 export type InteractionChoice = {
   label: string;
   style: AcceptedEventStyle;
@@ -99,8 +99,7 @@ export type ChatIdle = {
   events: AcceptedEvent[];
   /**
    * Payload choices the snapshot accepts right now, from
-   * `meta.interaction.choices` and `choicesFrom`. Absent when the state
-   * declares none.
+   * `meta.interaction.choices`. Absent when the state declares none.
    */
   choices?: InteractionChoice[];
   /**

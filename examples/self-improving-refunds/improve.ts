@@ -25,7 +25,7 @@ import {
   type ChosenEvent,
 } from "@statelyai/agent";
 import { createInMemoryEventLogStore } from "@statelyai/agent/log";
-import { verifyAgentConfig, type AgentConfigGate } from "@statelyai/agent/validate";
+import { verifyAgentConfig, type VerifyAgentConfigResult } from "@statelyai/agent/validate";
 import {
   APPROVAL_THRESHOLD,
   HELD_OUT_SCENARIOS,
@@ -92,7 +92,9 @@ const OBJECTIVE_TEXT =
 
 // ─── Options and result ───
 
-export type Gate = AgentConfigGate | { name: "outputs" | "replay"; ok: boolean; detail?: string };
+export type Gate =
+  | VerifyAgentConfigResult["gates"][number]
+  | { name: "outputs" | "replay"; ok: boolean; detail?: string };
 
 /** What a batch run gets: where to journal, and a thread prefix unique to this batch. */
 export type BatchRun = { store: AgentEventLogStore; threadPrefix: string };
@@ -399,8 +401,8 @@ async function staticGates(candidate: unknown): Promise<Gate[]> {
             { isRefundRequest: true, confidence: 0.9 },
             { isRefundRequest: false, confidence: 0.9 },
           ],
+          draftQuestion: [{ question: "stub?" }],
         },
-        text: { draftQuestion: { question: "stub?" } },
       },
     },
   );

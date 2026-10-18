@@ -50,7 +50,7 @@ const result = await verifyAgentConfig(candidate, {
   },
   explore: {
     inputs: [{ amount: 5 }, { amount: 500 }],
-    text: { draftReply: { reply: "stub" } },
+    outputs: { draftReply: [{ reply: "stub" }] },
   },
 });
 
@@ -72,7 +72,7 @@ The result behaves as follows.
 - An omitted `allow` key is unrestricted. Omit `allow` to skip the `vocabulary` gate, and omit `explore` to skip the `explore` gate. An empty `explore.inputs` list fails the `explore` gate.
 - An invoke can name only an `agent.*` builtin or a key the config declares under `requests` or `actors`. Any other src fails the `lower` gate, even when `actors` binds it. `allow.requests` limits the declared request keys, and `allow.actors` limits the declared actor keys. With `allow.actors` listed, every non-builtin src must be in `allow.actors` or `allow.requests`, or be a declared request when `allow.requests` is omitted.
 - With `allow` given, a raw xstate expression slot (`{ "@expr": ... }`) anywhere in the config fails the `vocabulary` gate. xstate evaluates the slot in place of its literal siblings, so it could hide a model ref or `allowedEvents`. Write `{{ }}` templates instead.
-- `explore.terminals` defaults to `['done']`. Other `explore` keys, such as `text`, `invokes`, `errors`, `outputs`, `payloads`, `dedupeBy`, `maxPaths`, and `maxNodes`, pass through to `explorePaths`. See [Payloads and invoke outputs](verify.md#payloads-and-invoke-outputs).
+- `explore.terminals` defaults to `['done']`. Other `explore` keys, such as `outputs`, `errors`, `payloads`, `dedupeBy`, `maxPaths`, and `maxNodes`, pass through to `explorePaths`. Script text requests and invoked actors with `outputs`. See [Payloads and invoke outputs](verify.md#payloads-and-invoke-outputs).
 - `actors` are bound with `machine.provide({ actors })` after lowering. `guards` and `actions` go to `fromConfig`.
 - No gate needs an API key.
 - `validateAgentConfig(config)` runs the `validate` gate alone. It returns `{ valid, errors }`, and each error's `path` is a JSON Pointer into the config.

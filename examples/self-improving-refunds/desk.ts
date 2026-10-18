@@ -30,7 +30,7 @@
  *
  * Every episode is journaled to an event-log store, one thread per scenario
  * and arm, and each proposal's entry carries the decider's refused attempts
- * (`entry.decision`). Those threads are the traces the improvement loop reads.
+ * (`entry.attempts`). Those threads are the traces the improvement loop reads.
  *
  * The tool actors default to a shared sample world (the sample customers and
  * orders, fresh per actor system), so the plain machine runs end to end in
@@ -144,7 +144,7 @@ const metaSchema = z.object({
           }),
         )
         .optional(),
-      choicesFrom: z.string().optional(),
+      choices: z.string().optional(),
     })
     .optional(),
 });
@@ -337,7 +337,7 @@ export const refundDeskMachine = deskSetup.createMachine({
       meta: {
         interaction: {
           label: "Turn {turn}: {notice} Choose the next step.",
-          choicesFrom: "choices",
+          choices: "choices",
         },
       },
       on: {
@@ -746,7 +746,7 @@ function isFailedCheck(event: ChosenEvent & Record<string, unknown>): boolean {
  * journaled input (`turn 2: VERIFY_IDENTITY`, `turn 2: identity verified`),
  * preceded on each turn by the proposals the desk refused
  * (`turn 1: refused ISSUE_REFUND $40 (rejected-by-guard)`), read from
- * `entry.decision`. The log is the source of truth; this is a view of it.
+ * `entry.attempts`. The log is the source of truth; this is a view of it.
  */
 export function trailFromLog(entries: readonly AgentLogEntry[]): string[] {
   const refused = new Map(getDecisionAttempts(entries).map((e) => [e.index, e.attempts]));
@@ -828,13 +828,13 @@ export function decideDeskStep(
     decide: options.decide,
     model: "desk",
     name: options.name ?? "desk",
-    events: PROPOSALS,
+    allowedEvents: PROPOSALS,
     payloads: deskPayloads,
     system: DESK_SYSTEM_PROMPT,
     prompt: factsPrompt(toFacts(snapshot.context)),
     // Report the facts the guards read, not bookkeeping (pendingProposal, notice).
     lookahead: options.lookahead
-      ? { keys: ["identityVerified", "order", "approved", "customerReplies"] }
+      ? ["identityVerified", "order", "approved", "customerReplies"]
       : false,
     // MAX_REJECTIONS choices in all: the last miss gives up.
     maxRetries: MAX_REJECTIONS - 1,
@@ -911,7 +911,7 @@ export async function runDeskEpisode(
           : `the decider failed: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
-    result = await run({ event, decision: { attempts } });
+    result = await run({ event, attempts });
   }
   if (result.status !== "done") {
     const why = result.status === "error" ? `: ${String(result.error)}` : "";

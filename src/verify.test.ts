@@ -674,14 +674,14 @@ describe("canReach — reachability with a witness path", () => {
         last: { type: "final" },
       },
     });
-    const text = { "agent.generateText": "canned" };
+    const outputs = { "agent.generateText": ["canned"] };
 
-    const byPath = await canReach(machine, "middle", { text });
+    const byPath = await canReach(machine, "middle", { outputs });
     expect(byPath.reachable).toBe(true);
     expect(byPath.witness).toEqual([]);
 
     const byPredicate = await canReach(machine, (snapshot) => snapshot.matches("middle"), {
-      text,
+      outputs,
     });
     expect(byPredicate.reachable).toBe(true);
   });
@@ -778,12 +778,14 @@ describe("scripted key taxonomy — invokes", () => {
     expect(result.snapshot.context.feedback).toBe("fine");
   });
 
-  test("explorePaths reads text requests from `text`", async () => {
+  test("explorePaths reads text requests and invokes from `outputs`", async () => {
     const report = await explorePaths(jokeMachine, {
       input: { topic: "state machines" },
-      text: { tellJoke: "Why did the state cross the transition?" },
-      // The critic is a Jev judgment actor, so its answer is an invoke output.
-      invokes: { rateJoke: jevRating(1) },
+      outputs: {
+        tellJoke: ["Why did the state cross the transition?"],
+        // The critic is a Jev judgment actor, so its answer is an invoke output.
+        rateJoke: [jevRating(1)],
+      },
     });
     expect(report.terminals.some((terminal) => terminal.status === "needs-output")).toBe(false);
   });
@@ -1106,7 +1108,7 @@ describe("explorePaths — scripted invoke failures fork a branch", () => {
 
   test("a src with both an error and an output explores both branches", async () => {
     const report = await explorePaths(createParsingMachine(), {
-      text: { parse: { total: 1 } },
+      outputs: { parse: [{ total: 1 }] },
       errors: { parse: new Error("bad json") },
     });
 
@@ -1125,7 +1127,7 @@ describe("explorePaths — scripted invoke failures fork a branch", () => {
 
   test("that state is unreachable without a scripted error", async () => {
     const { reachable } = await canReach(createParsingMachine(), "failed", {
-      text: { parse: { total: 1 } },
+      outputs: { parse: [{ total: 1 }] },
     });
 
     expect(reachable).toBe(false);
@@ -1280,7 +1282,7 @@ describe("concurrent invokes — every pending invoke stays visible", () => {
 
   test("explorePaths forks per invoke, reaching both the join and the failure branch", async () => {
     const report = await explorePaths(createFanOutMachine(), {
-      text: { draft: "one" },
+      outputs: { draft: ["one"] },
       errors: { draft: new Error("truncated") },
     });
 

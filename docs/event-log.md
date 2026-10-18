@@ -32,7 +32,7 @@ interface AgentLogEntry {
   causationId?: string;
   metadata?: Record<string, JsonValue>;
   verification?: { stateHash: string };
-  decision?: { attempts: DecisionAttempt[] };
+  attempts?: DecisionAttempt[];
 }
 ```
 
@@ -40,7 +40,7 @@ interface AgentLogEntry {
 - `machineVersion` is the machine's declared `version`, or its structural hash when none is declared.
 - `verification.stateHash` is the hash of the persisted snapshot after the entry is applied.
 - `metadata` is host-owned and stored verbatim. The init entry's `metadata.executionId` names the lineage; read it with `getLogExecutionId(entries)`.
-- `decision` holds the decision attempts the machine did not accept before this entry's event landed. Replay ignores it. See [Decision attempts](#decision-attempts).
+- `attempts` holds the decision attempts the machine did not accept before this entry's event landed. Replay ignores it. See [Decision attempts](#decision-attempts).
 
 Entries are strict JSON. `createReplayEntry`, `initEntry`, and every store append reject values JSON would drop or coerce (`undefined`, functions, symbols, bigint, non-finite numbers, `Date`, `Map`, `Set`, class instances, cycles) with `NonSerializableAgentEventError`, which carries the offending `path`. `Error` payloads on `xstate.error.actor` are normalized to `{ name, message, cause? }`; an `AgentDecisionExhaustedError` also keeps its `attempts`. Use `assertJsonSerializable` and `assertAgentLogEntry` at custom transport boundaries.
 
@@ -152,7 +152,7 @@ const branch = forkEventLog(entries, 8);
 
 A decider can need several tries: a choice the guard rejects, an option that was never offered, an unknown type, an invalid payload. Those failed attempts are what you improve a decider from, and the machine never consumed them, so they ride on the entry they explain:
 
-- An `agent.decide` invoke that lands after failed tries records them on the delivered event's entry as `entry.decision.attempts`.
+- An `agent.decide` invoke that lands after failed tries records them on the delivered event's entry as `entry.attempts`.
 - A decision that exhausts its retries records its `xstate.error.actor` entry with `event.error.attempts`.
 - A first-try decision records nothing.
 
@@ -177,20 +177,20 @@ for (const { index, eventType, attempts } of getDecisionAttempts(await store.rea
 A host that decides with `decideNext` sends the event itself. Pass its `attempts` alongside the event, and the run journals them on that event's entry:
 
 ```ts no-check
-const { event, attempts } = await decideNext(snapshot, { decide, model, events: "desk.*" });
+const { event, attempts } = await decideNext(snapshot, { decide, model, allowedEvents: "desk.*" });
 
 if (event) {
   await runToQuiescence(createAgentRuntime(machine, { store, threadId }), {
     event,
-    decision: { attempts },
+    attempts,
   });
 }
 ```
 
-- `runAgent(machine, { event, decision })` takes the same pair. `decision` explains the opening `event` only, not an `onIdle` answer.
-- A host-owned loop passes the same option to `runtime.transition(state, event, { decision })`.
+- `runAgent(machine, { event, attempts })` takes the same pair. `attempts` explain the opening `event` only, not an `onIdle` answer.
+- A host-owned loop passes the same option to `runtime.transition(state, event, { attempts })`.
 - An empty `attempts` list records nothing.
-- A non-JSON `decision` throws `NonSerializableAgentEventError` before the machine moves.
+- Non-JSON `attempts` throw `NonSerializableAgentEventError` before the machine moves.
 
 ## Usage totals
 

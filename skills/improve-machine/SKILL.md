@@ -91,7 +91,7 @@ for (const threadId of threadIds) {
 - `store.read(threadId)` returns a thread's entries in log order.
 - `replay(machine, entries)` needs the machine, at the version, that recorded the thread. Here that is the environment: its runtime records every thread, and the policy runs only as a decider at its boundary, so never replay with the policy machine. A thread recorded by a different environment version throws `AgentMachineVersionMismatchError`. Score each thread with the version that recorded it.
 - `getDecisionAttempts(entries)` returns `{ index, eventType, attempts }` for each entry whose decision needed retries: the failed tries before the event landed, or every try of an exhausted decision (`eventType` is then `xstate.error.actor.*`). Each attempt has `failure` (`unknown-event`, `invalid-payload`, or `rejected-by-guard`), `reason`, and the attempted `event` when there was one. A first-try decision records nothing.
-- `agent.decide` invokes journal their attempts on their own. With `decideNext` at the boundary, the host must pass them with the event, `runToQuiescence(runtime, { event, decision: { attempts } })` or `runtime.transition(state, event, { decision: { attempts } })`, or they never reach the log.
+- `agent.decide` invokes journal their attempts on their own. With `decideNext` at the boundary, the host must pass them with the event, `runToQuiescence(runtime, { event, attempts })` or `runtime.transition(state, event, { attempts })`, or they never reach the log.
 - Compute the objective over the rows. This is the baseline for the round.
 
 ## 3. Diagnose
@@ -130,7 +130,7 @@ const verified = await verifyAgentConfig(candidate, {
   explore: {
     inputs: probeInputs,
     terminals: ["done"],
-    invokes: { classifyTicket: { isRefundRequest: true, confidence: 0.9 } },
+    outputs: { classifyTicket: [{ isRefundRequest: true, confidence: 0.9 }] },
     errors: { classifyTicket: new Error("down") },
   },
 });
@@ -139,7 +139,7 @@ const failed = verified.gates.find((gate) => !gate.ok);
 
 - Gates run in order and stop at the first failure: `validate`, `vocabulary`, `lower`, `lint`, `explore`.
 - A failed gate's `detail` names the offending path, state, or name. Send it back verbatim with the rejected config and regenerate. Cap repairs at 3. After 3, discard the candidate, record it, and move to the next cause.
-- `explore` keys besides `inputs` and `terminals` pass through to `explorePaths`: `text`, `invokes`, `errors`, `outputs` (one branch per listed output), `payloads` (one branch per payload), `dedupeBy` (explore each snapshot key once; the key must cover every field a guard reads), `maxDepth`, `maxPaths`.
+- `explore` keys besides `inputs` and `terminals` pass through to `explorePaths`: `outputs` (output lists per src: one element is a canned output, two or more fork one branch each), `errors`, `payloads` (one branch per payload), `dedupeBy` (explore each snapshot key once; the key must cover every field a guard reads), `maxDepth`, `maxPaths`.
 - The environment's own `canReach` proofs cover every policy, because the environment's guards judge every proposed event. You did not change the environment, so you do not re-prove it.
 
 ## 6. Replay

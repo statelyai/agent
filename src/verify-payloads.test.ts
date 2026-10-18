@@ -304,12 +304,22 @@ describe("explorePaths — invoke outcome branching", () => {
     expect(report.terminals.map((t) => t.state)).toEqual(["failed", "found", "missing"]);
   });
 
-  test("a one-element list is a plain canned output, and outputs replace invokes", async () => {
+  test("a one-element list is a plain canned output", async () => {
     const report = await explorePaths(createLookupMachine(), {
-      invokes: { lookup: { found: true } },
       outputs: { lookup: [{ found: false }] },
     });
     expect(report.terminals).toEqual([{ status: "done", path: [], state: "missing" }]);
+  });
+
+  test("outputs is the only canned-output key", async () => {
+    const report = await explorePaths(createLookupMachine(), {
+      // @ts-expect-error -- `invokes` was removed; script invoke outputs with `outputs`
+      invokes: { lookup: { found: true } },
+    });
+    expect(report.terminals).toMatchObject([{ status: "needs-output", missingSrc: "lookup" }]);
+    expect(report.unexplored).toEqual([
+      "needs-output: no `outputs` entry for src 'lookup' at path []",
+    ]);
   });
 
   test("text requests branch over outputs too, resolving as text results", async () => {
@@ -337,6 +347,10 @@ describe("explorePaths — invoke outcome branching", () => {
       outputs: { "agent.generateText": ["yes", "no"] },
     });
     expect(report.terminals.map((t) => t.state)).toEqual(["yes", "no"]);
+
+    // A one-element list resolves straight through, still as `{ result, messages }`.
+    const canned = await explorePaths(machine, { outputs: { "agent.generateText": ["yes"] } });
+    expect(canned.terminals).toEqual([{ status: "done", path: [], state: "yes" }]);
   });
 });
 
@@ -527,31 +541,24 @@ describe("canReach — shortest witness", () => {
     const agent = setupAgent({
       context: z.object({}),
       events: { LONG: z.object({}), SHORT: z.object({}), GO: z.object({}) },
-      actors: { check: createAsyncLogic({ run: async () => "ok" }) },
     });
     const machine = agent.createMachine({
       context: {},
       initial: "start",
       states: {
-        // SHORT reaches `hub` first by path length (one event) but spends three
-        // depth on it: each check's success branch is an unrecorded fork. LONG
-        // reaches it second, at depth 2, with enough depth left to finish.
-        start: { on: { LONG: { target: "l1" }, SHORT: { target: "c1" } } },
-        c1: {
+        // SHORT and LONG both reach `hub` in two events, SHORT first, but
+        // SHORT spends three depth on it: the decision's rejection fork costs
+        // a level its success branch records no event for. LONG reaches it
+        // second, at depth 2, with enough depth left to finish.
+        start: { on: { SHORT: { target: "deciding" }, LONG: { target: "l1" } } },
+        deciding: {
           invoke: {
-            id: "c1",
-            src: "check",
-            onDone: { target: "c2" },
+            id: "decide",
+            src: "agent.decide",
+            input: () => ({ model: "quick", prompt: "Go?", allowedEvents: ["GO"] as const }),
             onError: { target: "failed" },
           },
-        },
-        c2: {
-          invoke: {
-            id: "c2",
-            src: "check",
-            onDone: { target: "hub" },
-            onError: { target: "failed" },
-          },
+          on: { GO: { target: "hub" } },
         },
         l1: { on: { GO: { target: "hub" } } },
         hub: { on: { GO: { target: "h1" } } },
@@ -561,8 +568,7 @@ describe("canReach — shortest witness", () => {
       },
     });
     const { witness } = await canReach(machine, "goal", {
-      invokes: { check: "ok" },
-      errors: { check: new Error("down") },
+      errors: { "agent.decide": new Error("down") },
       maxDepth: 4,
       dedupeBy: (snapshot) => JSON.stringify(snapshot.value),
     });
@@ -612,9 +618,9 @@ describe("canReach — proof soundness", () => {
         failed: { type: "final" },
       },
     });
-    // No canned output: the branch stops `needs-output` before `found` is ever tried.
+    // No `outputs` entry: the branch stops `needs-output` before `found` is ever tried.
     expect(await canReach(machine, "found")).toMatchObject({ reachable: false, complete: false });
-    expect(await canReach(machine, "found", { invokes: { lookup: true } })).toMatchObject({
+    expect(await canReach(machine, "found", { outputs: { lookup: [true] } })).toMatchObject({
       reachable: true,
     });
   });

@@ -60,7 +60,7 @@ Rules the runtime enforces. Each one maps to a build error or a lint diagnostic:
 - Do not invent guard or action names. Only `"{{ }}"` guards, `assign`, and `emit` exist unless the host tells you which named guards/actions it implements.
 - Model refs are strings (`"openai/gpt-5.4-mini"`); the host resolves them.
 - To make a decision a closed choice, add `payloads` to the `agent.decide` input: one payload list per event type, without `type` (`"payloads": { "REFUND": [{ "amount": 20 }, { "amount": 50 }], "ESCALATE": [] }`). The model then picks one listed event instead of writing a payload. A type with no key is offered as `{ type }`; `[]` withholds it.
-- An idle human step can carry `meta.interaction` for the host to render with `getInteraction`: a `label`, `events` (one button per event type), `choices` (one button per full event, `{ "label": "Refund $20", "event": { "type": "REFUND", "amount": 20 } }`), `choicesFrom` (a context path holding such a list), and `textEvent` for free text. A bare `"textEvent": "REJECT"` puts the text in a `text` field; `{ "type": "REJECT", "field": "reason" }` names the field. `meta` is not template-evaluated.
+- An idle human step can carry `meta.interaction` for the host to render with `getInteraction`: a `label`, `events` (one button per event type), `choices` (one button per full event, `{ "label": "Refund $20", "event": { "type": "REFUND", "amount": 20 } }`, or a context path string holding such a list), and `textEvent` for free text. A bare `"textEvent": "REJECT"` puts the text in a `text` field; `{ "type": "REJECT", "field": "reason" }` names the field. `meta` is not template-evaluated.
 
 Reference config — decision, text request, idle human step, one final state:
 
@@ -221,7 +221,7 @@ const result = await verifyAgentConfig(candidate, {
   },
   explore: {
     inputs: [{ ticket: "Export downloads a 0-byte CSV on Safari." }],
-    text: { draftReply: { reply: "" } },
+    outputs: { draftReply: [{ reply: "" }] },
   },
 });
 // result.ok, result.gates, result.config (after validate), result.machine (after lower)
@@ -229,7 +229,7 @@ const result = await verifyAgentConfig(candidate, {
 
 - Exploration forks past idle waits on every event the waiting state accepts, so a human step still ends `done`. Add `terminals: ["done", "idle"]` only when a path may legitimately stop at a wait with nothing to accept.
 - `guards` / `actions`: named implementations, passed to `fromConfig`. `actors`: bound with `machine.provide({ actors })` after lowering.
-- `explore` keys other than `inputs` and `terminals` pass through to `explorePaths`: `text` (canned request outputs), `invokes` (canned actor outputs), `errors` (fork a rejected branch per src), `outputs` (fork one branch per listed output), `payloads` (fork one branch per payload at decisions and idle waits), `dedupeBy` (explore each snapshot key once; the key must cover every field a guard reads), `maxDepth` (default 8), `maxPaths` (default 200), `maxNodes` (default 100,000).
+- `explore` keys other than `inputs` and `terminals` pass through to `explorePaths`: `outputs` (output lists per request or actor src: one element is a canned output, two or more fork one branch each), `errors` (fork a failing branch per src), `payloads` (fork one branch per payload at decisions and idle waits), `dedupeBy` (explore each snapshot key once; the key must cover every field a guard reads), `maxDepth` (default 8), `maxPaths` (default 200), `maxNodes` (default 100,000).
 - Stub each request's output from its declared `output` schema (`""` for string, `0` for number, `[]` for array, recurse on `properties`). Add an `errors` entry for every src whose `onError` path matters.
 - Pick `explore.inputs` that reach every branch the goal cares about. Exploration covers only the inputs you give it.
 - A passing `lint` gate carries its warnings in `detail`. Report them.
@@ -276,7 +276,7 @@ const dryRun = await simulateAgent(machine, {
 }); // dryRun.status: 'done' | 'idle' | 'exhausted' ('exhausted' = loops, reject)
 const report = await explorePaths(machine, {
   input: { ticket: "" },
-  text: { draftReply: { reply: "" } },
+  outputs: { draftReply: [{ reply: "" }] },
 });
 ```
 

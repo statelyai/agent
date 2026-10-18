@@ -4,9 +4,11 @@
 
 **Payload and output branching in `explorePaths` and `canReach`.** Exploration no longer applies every event as a bare `{ type }`, so guards that read the payload are explored too.
 
+**Breaking:** `explorePaths` and `canReach` no longer take `text` or `invokes`. Move each canned value into a one-element `outputs` list: `text: { parse: { total: 42 } }` becomes `outputs: { parse: [{ total: 42 }] }`. `simulateAgent`'s `script.text` and `script.invokes` queues are unchanged.
+
 - `payloads(snapshot)`: payloads per event type at each branch point. A type with an entry forks once per payload, at decisions and idle waits; guard-rejected variants count in `prunedByGuard`. A decide input's own `payloads` become that decision's branch set.
 - A type with no entry is filled from its event schema: each finite field (`enum`, `const`, `boolean`, `null`, or a union of those) contributes its values, and an optional one also the omitted case, up to 64 combinations. Plain XState machines are filled from their own `schemas.events`. A type the fill cannot enumerate (a non-finite field, or over 64) is listed in the new `report.unexpandedEvents`, so you know which `payloads` entries to add.
-- `outputs`: every output to try per src. Two or more fork one branch each, so `onDone` branching on the output is explored down every arm.
+- `outputs`: every output to try per src, for text requests and invoked actors alike. A one-element list is a canned output. Two or more fork one branch each, so `onDone` branching on the output is explored down every arm. Each forked branch records `{ type: 'xstate.done.actor.<id>', output }` in the path.
 - `dedupeBy(snapshot)`: a key for settled snapshots, each explored once, so converging branches stay tractable.
 - `maxNodes` (default 100,000) caps the branch points expanded, bounding work and memory on loopy machines where `maxPaths` alone cannot. `hitPathCap` is true when either cap cut exploration short.
 - `canReach` results carry `complete`. It is false when a cap or `maxDepth` cut the search short, a branch stopped `needs-output`, or an event type was not fully expanded, so `reachable: false` is a proof only when `complete` is true.

@@ -920,16 +920,21 @@ export interface ExplorePathsOptions {
    */
   maxNodes?: number;
   /**
-   * Canned output for each text request, keyed by src (the
-   * `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`).
-   * One value per src, reused every time that src is reached. A missing src
-   * halts that branch with a `needs-output` terminal.
+   * Every output to try per src: a text request's src (the
+   * `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`)
+   * or any other invoked actor's src. A one-element list is a canned output,
+   * reused every time that src is reached; a text request resolves with it as
+   * its `result` (`{ result, messages: [] }`). A src with two or more outputs
+   * forks one branch per output (plus the `errors` branch when the src is
+   * listed there too), so a machine whose `onDone` branches on the output is
+   * explored down every arm. Each fork counts against `maxDepth`, and each
+   * forked branch records `{ type: 'xstate.done.actor.<id>', output }` in the
+   * path. A src with no entry (and no `errors` entry) halts that branch with a
+   * `needs-output` terminal.
    */
-  text?: Record<string, unknown>;
-  /** Canned output for scripted invokes, keyed by src. Same one-value-per-src rule as `text`. */
-  invokes?: Record<string, unknown>;
+  outputs?: Record<string, unknown[]>;
   /**
-   * A canned failure per src, keyed like `text`/`invokes`. A src listed here
+   * A canned failure per src, keyed like `outputs`. A src listed here
    * forks an extra branch at that invoke, where the invoke is rejected and the
    * machine takes its `onError` — so states reachable only through a failure
    * are explored. When the src also has an output, both branches are explored;
@@ -946,16 +951,6 @@ export interface ExplorePathsOptions {
    * ends in an `error` terminal.
    */
   errors?: Record<string, unknown>;
-  /**
-   * Every output to try per src, keyed like `text`/`invokes`. A src with two
-   * or more outputs forks one branch per output (plus the `errors` branch when
-   * the src is listed there too), so a machine whose `onDone` branches on the
-   * output is explored down every arm. Each fork counts against `maxDepth`,
-   * and each branch records `{ type: 'xstate.done.actor.<id>', output }` in
-   * the path. An entry here replaces that src's `text`/`invokes` value. A
-   * one-element list is a plain canned output.
-   */
-  outputs?: Record<string, unknown[]>;
   /**
    * Payloads to try per event type at each branch point, given the settled
    * snapshot there. At a decision or an idle wait, an event type with an
@@ -997,7 +992,7 @@ export interface AgentPathTerminal {
   path: ChosenEvent[];
   /** The final state value on this path. */
   state: unknown;
-  /** For `needs-output`: the src whose canned output was missing. */
+  /** For `needs-output`: the src with no `outputs` entry. */
   missingSrc?: string;
   /** For `error`: the failure value that errored the machine. */
   error?: unknown;
@@ -1040,8 +1035,6 @@ interface InvokeFork {
   outputs: unknown[];
   /** Text requests resolve to `{ result, messages }`, not the bare output. */
   isText?: boolean;
-  /** Outputs came from `options.outputs`: each branch records a done event in the path. */
-  recordOutputs?: boolean;
   /**
    * A decision invoke has no canned output of its own — its success branch is
    * the per-candidate-event fork the branch-point logic already does. So the
@@ -1149,8 +1142,6 @@ function explore(
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 200;
   const maxNodes = options.maxNodes ?? DEFAULT_MAX_NODES;
-  const textScript = options.text ?? {};
-  const invokeOutputs: Record<string, unknown> = { ...options.invokes };
   const errorScript = options.errors ?? {};
   const outputScript = options.outputs ?? {};
   // An agent machine's registered schemas, else a plain machine's own `schemas.events`.
@@ -1206,20 +1197,12 @@ function explore(
   const settleFor = (
     id: string,
     src: string,
-    single: Record<string, unknown>,
     isText: boolean,
   ): { fork: InvokeFork } | { output: unknown } | { blocked: true } => {
-    const fromOutputs = src in outputScript;
-    const outputs = fromOutputs ? (outputScript[src] ?? []) : src in single ? [single[src]] : [];
+    const outputs = outputScript[src] ?? [];
     if (src in errorScript || outputs.length > 1) {
       return {
-        fork: {
-          id,
-          ...(src in errorScript ? { errorKey: src } : {}),
-          outputs,
-          isText,
-          recordOutputs: fromOutputs,
-        },
+        fork: { id, ...(src in errorScript ? { errorKey: src } : {}), outputs, isText },
       };
     }
     return outputs.length === 1 ? { output: outputs[0] } : { blocked: true };
@@ -1279,7 +1262,7 @@ function explore(
       }
       const request = current.requests[0] as AgentStepRequest | undefined;
       if (request && request.kind === "text") {
-        const settle = settleFor(request.id, request.src, textScript, true);
+        const settle = settleFor(request.id, request.src, true);
         if ("fork" in settle) {
           return { step: current, fork: settle.fork };
         }
@@ -1311,7 +1294,7 @@ function explore(
       // No request: maybe a pending scripted invoke, else a wait.
       const [invoke] = pendingInvokes(current);
       if (invoke) {
-        const settle = settleFor(invoke.id, invoke.src, invokeOutputs, false);
+        const settle = settleFor(invoke.id, invoke.src, false);
         if ("fork" in settle) {
           return { step: current, fork: settle.fork };
         }
@@ -1346,9 +1329,9 @@ function explore(
 
     // A key already explored at this depth or shallower has nothing new
     // below it. A shallower revisit explores again: it has more depth left.
-    // Breadth-first order is by path length, not depth (an unrecorded output
-    // fork or a decision's rejection spends depth without adding the same
-    // number of events), so the rule holds for both walks.
+    // Breadth-first order is by path length, not depth (a decision's
+    // rejection spends depth without adding the same number of events), so
+    // the rule holds for both walks.
     if (options.dedupeBy) {
       const key = options.dedupeBy(settled.snapshot as AnyMachineSnapshot);
       const seenAt = visited.get(key);
@@ -1390,9 +1373,7 @@ function explore(
           recordState(resolved.snapshot);
           yield {
             step: resolved,
-            path: fork.recordOutputs
-              ? [...path, { type: `xstate.done.actor.${fork.id}`, output }]
-              : path,
+            path: [...path, { type: `xstate.done.actor.${fork.id}`, output }],
             depth: depth + 1,
           };
         }
@@ -1415,7 +1396,7 @@ function explore(
         missingSrc: blockedSrc,
       });
       unexplored.push(
-        `needs-output: no canned output for src '${blockedSrc}' at path [${path.map((e) => e.type).join(", ")}]`,
+        `needs-output: no \`outputs\` entry for src '${blockedSrc}' at path [${path.map((e) => e.type).join(", ")}]`,
       );
       return;
     }
@@ -1486,8 +1467,7 @@ function explore(
   const root: ExploreNode = { step: initial, path: [], depth: 0 };
   if (witness === undefined && stopWhen) {
     // Breadth-first by path length, so the first witness found is a shortest
-    // one. A fork that records no event (an unrecorded output) keeps its
-    // child at the parent's length, so it joins the level being drained.
+    // one.
     const levels: (ExploreNode | undefined)[][] = [[root]];
     search: for (let length = 0; length < levels.length; length++) {
       const level = levels[length] ?? [];
@@ -1532,9 +1512,11 @@ function explore(
  * depth, model-free, and reports which states are reached and how each path
  * terminates. At each decision request it forks one branch per candidate event
  * (guard-rejected candidates are counted in `prunedByGuard`, not explored); at
- * an idle wait it forks per externally-accepted event. Text requests resolve
- * from `text`, other invokes from `invokes` — all by-src canned-output maps, and a missing src halts
- * that branch with a `needs-output` terminal rather than throwing. A src in
+ * an idle wait it forks per externally-accepted event. Text requests and other
+ * invokes resolve from `outputs`, a by-src map of outputs to try (a
+ * one-element list is a canned output; several fork one branch each), and a
+ * missing src halts that branch with a `needs-output` terminal rather than
+ * throwing. A src in
  * `errors` forks an extra branch where that invoke is rejected, so states
  * behind an `onError` are explored too.
  *
@@ -1543,7 +1525,7 @@ function explore(
  * become the branch set, and an event schema whose fields are finite (enums,
  * booleans, consts) expands to their product, each optional field also
  * omitted. A type that could not be fully expanded is listed in
- * `unexpandedEvents`. `outputs` forks an invoke once per listed output.
+ * `unexpandedEvents`.
  * `dedupeBy` explores each projected snapshot once, which keeps a large
  * payload table tractable.
  *
@@ -1575,7 +1557,7 @@ export interface CanReachResult {
   /**
    * False when the search left a branch it could not rule out unexplored: a
    * cap (`maxPaths` or `maxNodes`) cut it short, a path reached `maxDepth`, a
-   * branch stopped `needs-output` on a missing canned output, or an event type
+   * branch stopped `needs-output` on a src with no `outputs` entry, or an event type
    * was not expanded to all its payload variants (`unexpandedEvents` in the
    * {@link explorePaths} report). `reachable: false` is a proof of
    * unreachability only when `complete` is true.
@@ -1615,7 +1597,7 @@ function resolveStateTarget(machine: AnyStateMachine, target: string): string {
  * `{ reachable: true, witness }` with the event sequence that reaches it, or
  * `{ reachable: false }`. Check `complete` before treating `reachable: false`
  * as a proof: it is false when a cap or `maxDepth` cut exploration short, a
- * branch needed a canned output it did not have, or an event's payloads were
+ * branch needed an `outputs` entry it did not have, or an event's payloads were
  * not all tried.
  *
  * @example

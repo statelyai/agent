@@ -56,13 +56,17 @@ export interface AgentConfigVocabulary {
   models?: string[];
 }
 
-/** The `explore` options of {@link verifyAgentConfig}. Other keys pass through to `explorePaths`. */
+/**
+ * The `explore` options of {@link verifyAgentConfig}. Every other
+ * {@link ExplorePathsOptions} key (`outputs`, `errors`, `payloads`, caps)
+ * passes through to `explorePaths`; script text requests and invoked actors
+ * with `outputs`.
+ */
 export interface VerifyAgentConfigExploreOptions extends Omit<ExplorePathsOptions, "input"> {
   /** One `explorePaths` run per input. An empty list fails the gate. */
   inputs: unknown[];
   /** Terminal statuses every explored path must end in. Default `['done']`. */
   terminals?: Array<"done" | "idle">;
-  [key: string]: unknown;
 }
 
 /** Options for {@link verifyAgentConfig}. */
@@ -109,7 +113,8 @@ const MAX_DETAIL_LINES = 10;
  * - `lint`: `lintAgentMachine` (errors fail; warnings fail with `lint.warnings`).
  * - `explore`: `explorePaths` from each `explore.inputs` entry; every terminal
  *   must be one of `explore.terminals`, no cap (`maxPaths`, `maxNodes`) may cut
- *   it short, and every event's payloads must be tried (`unexpandedEvents`).
+ *   it short, every event's payloads must be tried (`unexpandedEvents`), and
+ *   every reached text request or invoke needs an `explore.outputs` entry.
  *
  * @example
  * ```ts
@@ -355,7 +360,7 @@ async function checkExplore(
     const at = inputs.length > 1 ? `input ${index}: ` : "";
     let report;
     try {
-      report = await explorePaths(machine, { ...rest, input } as ExplorePathsOptions);
+      report = await explorePaths(machine, { ...rest, input });
     } catch (error) {
       problems.add(`${at}exploration threw: ${errorMessage(error)}`);
       continue;
@@ -372,7 +377,7 @@ async function checkExplore(
           break;
         case "needs-output":
           problems.add(
-            `${at}${trail} reached '${terminal.missingSrc}' in state ${state}, which has no canned output to explore with`,
+            `${at}${trail} reached '${terminal.missingSrc}' in state ${state}, which has no output to explore with; add an explore.outputs entry for it`,
           );
           break;
         case "error":

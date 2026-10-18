@@ -64,7 +64,7 @@ describe("decideNext on a plain machine", () => {
     const result = await decideNext(snapshot, {
       decide,
       model: "quick",
-      events: "desk.*",
+      allowedEvents: "desk.*",
       payloads,
     });
 
@@ -87,7 +87,7 @@ describe("decideNext on a plain machine", () => {
     await decideNext(snapshot, {
       decide,
       model: "quick",
-      events: "desk.*",
+      allowedEvents: "desk.*",
       payloads,
       lookahead: true,
     });
@@ -98,7 +98,7 @@ describe("decideNext on a plain machine", () => {
     expect(requests[0]!.options![1]!.description).toContain('state: "reviewing" → "escalated"');
   });
 
-  test("lookahead keys limit the reported context keys; maxLength cuts each value", async () => {
+  test("a lookahead array limits the reported context keys; each value is cut", async () => {
     const machine = createMachine({
       context: { note: "", turn: 0 },
       initial: "idle",
@@ -119,7 +119,7 @@ describe("decideNext on a plain machine", () => {
       lookahead: NonNullable<Parameters<typeof decideNext>[1]["lookahead"]>,
     ) => {
       const { decide, requests } = scripted([(request) => request.options![0]!.event]);
-      await decideNext(snapshot, { decide, model: "quick", events: "GO", lookahead });
+      await decideNext(snapshot, { decide, model: "quick", allowedEvents: "GO", lookahead });
       return requests[0]!.options![0]!.description!;
     };
 
@@ -127,8 +127,8 @@ describe("decideNext on a plain machine", () => {
     expect(all).toContain("turn: 0 → 1");
     expect(all).toContain(`→ "${"x".repeat(118)}…`);
 
-    const limited = await effectOf({ keys: ["note"], maxLength: 10 });
-    expect(limited).toBe(`GO. Then: state: "idle" → "done"; note: "" → "xxxxxxxx…`);
+    const limited = await effectOf(["note"]);
+    expect(limited).toBe(`GO. Then: state: "idle" → "done"; note: "" → "${"x".repeat(118)}…`);
   });
 
   test("a type with no payloads key is offered bare; an empty list withholds it", async () => {
@@ -138,7 +138,7 @@ describe("decideNext on a plain machine", () => {
     await decideNext(snapshot, {
       decide,
       model: "quick",
-      events: "desk.*",
+      allowedEvents: "desk.*",
       payloads: () => ({ "desk.refund": [] }),
     });
 
@@ -154,7 +154,7 @@ describe("decideNext on a plain machine", () => {
     const error = await decideNext(snapshot, {
       decide,
       model: "quick",
-      events: "desk.*",
+      allowedEvents: "desk.*",
       payloads,
       maxRetries: 1,
     }).catch((caught: unknown) => caught);
@@ -177,7 +177,7 @@ describe("decideNext on a plain machine", () => {
     const result = await decideNext(snapshot, {
       decide,
       model: "quick",
-      events: "desk.*",
+      allowedEvents: "desk.*",
       payloads,
     });
 
@@ -192,7 +192,7 @@ describe("decideNext on a plain machine", () => {
     const result = await decideNext(snapshot, {
       decide,
       model: "quick",
-      events: "desk.refund",
+      allowedEvents: "desk.refund",
       payloads: () => ({ "desk.refund": [{ amount: 80 }] }),
     });
 

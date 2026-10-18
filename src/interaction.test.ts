@@ -447,6 +447,8 @@ describe("payload choices", () => {
     context: {
       round: 2,
       seats: [
+        { label: "Seat 1", event: { type: "ACCUSE", seat: 1 }, style: "primary" },
+        { label: "Pass", event: { type: "PASS" } },
         { label: "Seat 2 (round {round})", event: { type: "ACCUSE", seat: 2 } },
         { label: "Seat 3", event: { type: "ACCUSE", seat: 3 }, style: "danger" },
         // Refused by the guard below.
@@ -461,11 +463,8 @@ describe("payload choices", () => {
         meta: {
           interaction: {
             label: "Who is it?",
-            choices: [
-              { label: "Seat 1", event: { type: "ACCUSE", seat: 1 }, style: "primary" },
-              { label: "Pass", event: { type: "PASS" } },
-            ],
-            choicesFrom: "seats",
+            // A context path: the choices are computed at runtime.
+            choices: "seats",
           },
         },
         on: {
@@ -478,12 +477,36 @@ describe("payload choices", () => {
   });
   const snapshot = createActor(machine).getSnapshot();
 
-  test("resolves static choices, then choicesFrom, keeping only accepted events", () => {
+  test("a choices string reads the context array, keeping only accepted events", () => {
     expect(getInteraction(snapshot)?.choices).toEqual([
       { label: "Seat 1", event: { type: "ACCUSE", seat: 1 }, style: "primary" },
       { label: "Pass", event: { type: "PASS" } },
       { label: "Seat 2 (round 2)", event: { type: "ACCUSE", seat: 2 } },
       { label: "Seat 3", event: { type: "ACCUSE", seat: 3 }, style: "danger" },
+    ]);
+  });
+
+  test("a choices array is authored inline", () => {
+    const inline = agent.createMachine({
+      context: { round: 1, seats: [] },
+      initial: "voting",
+      states: {
+        voting: {
+          meta: {
+            interaction: {
+              label: "?",
+              choices: [
+                { label: "Seat {round}", event: { type: "ACCUSE", seat: 1 } },
+                { label: "Seat 9", event: { type: "ACCUSE", seat: 9 } },
+              ],
+            },
+          },
+          on: { ACCUSE: ({ event }) => (event.seat <= 3 ? { target: "voting" } : undefined) },
+        },
+      },
+    });
+    expect(getInteraction(createActor(inline).getSnapshot())?.choices).toEqual([
+      { label: "Seat 1", event: { type: "ACCUSE", seat: 1 } },
     ]);
   });
 
@@ -525,13 +548,13 @@ describe("payload choices", () => {
     expect(actor.getSnapshot().status).toBe("done");
   });
 
-  test("ignores a choicesFrom path that holds no array", () => {
+  test("ignores a choices path that holds no array", () => {
     const missing = agent.createMachine({
       context: { round: 1, seats: [] },
       initial: "voting",
       states: {
         voting: {
-          meta: { interaction: { label: "?", choicesFrom: "nowhere" } },
+          meta: { interaction: { label: "?", choices: "nowhere" } },
           on: { PASS: { target: "voting" } },
         },
       },
@@ -539,12 +562,11 @@ describe("payload choices", () => {
     expect(getInteraction(createActor(missing).getSnapshot())?.choices).toEqual([]);
   });
 
-  test("interactionMetaSchema checks choices, choicesFrom, and the textEvent field form", () => {
+  test("interactionMetaSchema checks choices (array or path) and the textEvent field form", () => {
     const validate = (value: unknown) => interactionMetaSchema["~standard"].validate(value);
     const meta = {
       interaction: {
         choices: [{ label: "Seat 1", event: { type: "ACCUSE", seat: 1 } }],
-        choicesFrom: "seats",
         textEvent: { type: "SAY", field: "message" },
       },
     };
@@ -552,8 +574,11 @@ describe("payload choices", () => {
     expect(validate({ interaction: { choices: [{ label: "x", event: {} }] } })).toMatchObject({
       issues: [{ path: ["interaction", "choices", 0, "event"] }],
     });
-    expect(validate({ interaction: { choicesFrom: 1 } })).toMatchObject({
-      issues: [{ path: ["interaction", "choicesFrom"] }],
+    expect(validate({ interaction: { choices: "seats" } })).toEqual({
+      value: { interaction: { choices: "seats" } },
+    });
+    expect(validate({ interaction: { choices: 1 } })).toMatchObject({
+      issues: [{ path: ["interaction", "choices"] }],
     });
     expect(validate({ interaction: { textEvent: { type: "SAY" } } })).toMatchObject({
       issues: [{ path: ["interaction", "textEvent"] }],

@@ -449,7 +449,7 @@ prompting: {
 }
 ```
 
-A choice or `textEvent` naming an event the machine never declared is a compile error. `textEvent: { type, field }` names another field, and `choices` / `choicesFrom` offer one button per payload. See [Human in the loop](human-in-the-loop.md#payload-choices). A machine with other metadata declares its own `meta` schema on `setupAgent`, which replaces the default. See [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts).
+A choice or `textEvent` naming an event the machine never declared is a compile error. `textEvent: { type, field }` names another field, and `choices` (an array, or a context path) offers one button per payload. See [Human in the loop](human-in-the-loop.md#payload-choices). A machine with other metadata declares its own `meta` schema on `setupAgent`, which replaces the default. See [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts).
 
 ## Delayed transitions
 

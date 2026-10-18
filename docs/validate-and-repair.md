@@ -209,8 +209,7 @@ One queued answer per invoke: the fan-out makes three `generateConfig` calls, so
 ```ts no-check
 const canned = {
   input: { prompt: "a turnstile" },
-  text: { generateConfig: VALID, repairConfig: VALID },
-  invokes: { parseConfig: PARSED },
+  outputs: { generateConfig: [VALID], repairConfig: [VALID], parseConfig: [PARSED] },
 };
 
 // The parser rejects every candidate and every repair: the budget runs out.

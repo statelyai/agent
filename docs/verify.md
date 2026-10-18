@@ -170,13 +170,12 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 ## Branch exploration
 
-`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, text?, invokes?, errors?, outputs?, payloads?, dedupeBy? })` enumerates decision and external-event branches without a model, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, outputs?, errors?, payloads?, dedupeBy? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - At an idle wait, it forks one branch per externally accepted event.
-- `text` is a map of canned outputs for text requests, keyed by src. One value per src is reused every time that src is reached.
-- `invokes` is the same map for scripted invokes.
-- A src with no canned output halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
+- `outputs` is a map of output lists, keyed by src: a text request's src or any other invoked actor's src. A one-element list is a canned output, reused every time that src is reached. A text request resolves with it as its `result`. A longer list forks one branch per output. See [Payloads and invoke outputs](#payloads-and-invoke-outputs).
+- A src with no `outputs` entry halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
 - `errors` is a map of one canned failure per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates.
 - A rejection that reaches no `onError` errors the machine, and that path ends in an `error` terminal carrying the failure value on `error`.
 - Every invoke a state is still waiting on counts as work, concurrent ones included. They are settled one per branch, in invoke-id order, and a src in `errors` forks per invoke.
@@ -201,11 +200,11 @@ Exploration is bounded by three limits:
 
 `report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short, so the report is partial.
 
-A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id.
+A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor.<id>', output }`.
 
 ```ts
 const report = await explorePaths(machine, {
-  text: { parse: { total: 42 } },
+  outputs: { parse: [{ total: 42 }] },
   errors: { parse: new Error("truncated response") },
 });
 // report.terminals → one path per branch: the parsed state and the onError state
@@ -220,7 +219,7 @@ By default, events are applied as `{ type }`. A guard that reads the payload, su
 - A decide input's own `payloads` become that decision's branch set. An explorer `payloads` entry for the same type overrides them.
 - A type with no entry is filled from its event schema. Each field that is an `enum`, `const`, `boolean`, `null`, or a union of those contributes its values, and an optional one also contributes the omitted case. Exploration forks over their product, up to 64 combinations. The schema is the agent machine's, or a plain XState machine's own `schemas.events`, and must expose JSON Schema through Standard JSON Schema, as Zod 4 does.
 - A type the fill cannot enumerate is listed in `report.unexpandedEvents`: a required field with no finite domain, a product over 64, or a schema with no JSON Schema is applied as `{ type }`, and an optional field with no finite domain is left out. Add a `payloads` entry for each listed type. A type with no schema at all stays `{ type }` and is not listed.
-- `outputs` lists every output to try per src. Two or more outputs fork one branch each, and an `errors` entry for the same src adds the failing branch. Each branch records `{ type: 'xstate.done.actor.<id>', output }` in the path. An `outputs` entry replaces that src's `text` or `invokes` value.
+- `outputs` lists every output to try per src. Two or more outputs fork one branch each, and an `errors` entry for the same src adds the failing branch. Each forked branch records `{ type: 'xstate.done.actor.<id>', output }` in the path.
 - `dedupeBy` projects a settled snapshot to a key. Each key is explored once, or again when reached at a shallower depth. The key must include every field a guard, choice, or `onDone` reads, or the search misses paths.
 
 ```ts
@@ -248,7 +247,7 @@ path or state-node ID is reachable, with a witness path when it is.
 
 - `maxPaths` or `maxNodes` cut the search short.
 - A path reached `maxDepth`.
-- A branch stopped on a `needs-output` terminal, with no canned output for its src.
+- A branch stopped on a `needs-output` terminal, with no `outputs` entry for its src.
 - An event type was not expanded to all its payload variants, as `explorePaths` lists in `unexpandedEvents`.
 
 Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.

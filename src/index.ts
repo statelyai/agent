@@ -47,7 +47,6 @@ export { eventFromInteraction, getInteraction, interactionMetaSchema } from "./i
 export type {
   AgentInteraction,
   AgentInteractionChoice,
-  AgentInteractionChoiceMeta,
   AgentInteractionDescriptor,
   AgentInteractionEvent,
   AgentInteractionEventMeta,
@@ -92,15 +91,14 @@ export type {
 } from "./text-logic.js";
 export type { AgentRequest, AgentStepRequest } from "./steps.js";
 export { AGENT_USAGE_EVENT_TYPE } from "./usage.js";
-export { describeMachine, type DescribeMachineOptions } from "./describe-machine.js";
+export { describeMachine } from "./describe-machine.js";
 export { decideNext } from "./decide-next.js";
-export type { DecideNextOptions, DecideNextResult } from "./decide-next.js";
 export type { AgentUsageEvent } from "./usage.js";
 // The event log itself (replay, forking, hand-built entries, stores) lives in
 // `@statelyai/agent/log`. The root keeps only what the agent runtime reads and
 // returns, and the errors it can throw.
 export { AgentMachineVersionMismatchError } from "./event-log.js";
-export type { AgentLogDecision, AgentLogEntry } from "./event-log.js";
+export type { AgentLogEntry } from "./event-log.js";
 export { AgentEventLogConflictError } from "./event-log-store.js";
 export type { AgentEventLogStore } from "./event-log-store.js";
 export {
@@ -124,7 +122,6 @@ export type {
   AgentRuntimeOptions,
   AgentTimerEvent,
   AgentTimerScheduler,
-  AgentTransitionOptions,
 } from "./run-agent.js";
 export type {
   AgentInputFrom,

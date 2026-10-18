@@ -20,7 +20,7 @@ function singleField(event: AcceptedEvent): SchemaField | null {
 
 /**
  * The human-in-the-loop controls, rendered inside the composer: one button per
- * payload choice (`meta.interaction.choices` / `choicesFrom`), one per other
+ * payload choice (`meta.interaction.choices`), one per other
  * accepted event, an inline schema-generated form for events that need a
  * payload, and optional custom renderers declared by the state's
  * `meta.interaction.component`.

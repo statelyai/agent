@@ -67,10 +67,10 @@ const alwaysUnknown = async (): Promise<{ event: ChosenEvent }> => ({
   event: { type: "BOGUS" },
 });
 
-// A log as an older writer produced it: no `decision`, no exhausted `attempts`.
+// A log as an older writer produced it: no entry `attempts`, no exhausted `attempts`.
 function stripDecisionData(entries: readonly AgentLogEntry[]): AgentLogEntry[] {
   return entries.map((entry) => {
-    const { decision: _decision, ...rest } = structuredClone(entry);
+    const { attempts: _attempts, ...rest } = structuredClone(entry);
     const error = (rest.event as { error?: { attempts?: unknown } }).error;
     if (error && typeof error === "object") delete error.attempts;
     return rest as AgentLogEntry;
@@ -95,32 +95,30 @@ describe("decision attempts in the event log", () => {
 
     expect(result.status).toBe("done");
     const attack = result.events.find((entry) => entry.event.type === "ATTACK")!;
-    expect(attack.decision).toEqual({
-      attempts: [
-        {
-          event: { type: "HEAL" },
-          failure: "rejected-by-guard",
-          reason: "'HEAL' is not currently takeable (guard rejected it).",
-        },
-      ],
-    });
+    expect(attack.attempts).toEqual([
+      {
+        event: { type: "HEAL" },
+        failure: "rejected-by-guard",
+        reason: "'HEAL' is not currently takeable (guard rejected it).",
+      },
+    ]);
     // Only the entry the attempts explain carries them.
-    expect(result.events.filter((entry) => entry.decision !== undefined)).toHaveLength(1);
+    expect(result.events.filter((entry) => entry.attempts !== undefined)).toHaveLength(1);
     // The store round-trips the field verbatim.
     const stored = await store.read("moves-1");
-    expect(stored.find((entry) => entry.event.type === "ATTACK")!.decision).toEqual(
-      attack.decision,
+    expect(stored.find((entry) => entry.event.type === "ATTACK")!.attempts).toEqual(
+      attack.attempts,
     );
   });
 
-  test("a first-try decision journals no decision field", async () => {
+  test("a first-try decision journals no attempts field", async () => {
     const result = await runToQuiescence(
       createAgentRuntime(guardedMoveMachine(), {
         executors: { decide: async () => ({ event: { type: "ATTACK", target: "orc" } }) },
       }),
       { input: {} },
     );
-    expect(result.events.some((entry) => entry.decision !== undefined)).toBe(false);
+    expect(result.events.some((entry) => entry.attempts !== undefined)).toBe(false);
   });
 
   test("replay ignores decision attempts: the same state hash with the field stripped", async () => {
@@ -158,7 +156,7 @@ describe("decision attempts in the event log", () => {
     expect(() => replay(machine, result.events, { verify: "strict" })).not.toThrow();
   });
 
-  test("an old-format log (no decision, error without attempts) still replays to the same state", async () => {
+  test("an old-format log (no entry attempts, error without attempts) still replays to the same state", async () => {
     const machine = guardedMoveMachine();
     for (const decide of [healThenAttack(), alwaysUnknown]) {
       const result = await runToQuiescence(createAgentRuntime(machine, { executors: { decide } }), {
@@ -202,7 +200,7 @@ describe("decision attempts in the event log", () => {
     expect(getDecisionAttempts(stripDecisionData(landed.events))).toEqual([]);
   });
 
-  test("assertAgentLogEntry rejects a malformed decision field", () => {
+  test("assertAgentLogEntry rejects a malformed attempts field", () => {
     const base: AgentLogEntry = {
       schemaVersion: AGENT_EVENT_SCHEMA_VERSION,
       id: "evt_1",
@@ -215,13 +213,13 @@ describe("decision attempts in the event log", () => {
     expect(() =>
       assertAgentLogEntry({
         ...base,
-        decision: { attempts: [{ failure: "unknown-event", reason: "nope" }] },
+        attempts: [{ failure: "unknown-event", reason: "nope" }],
       }),
     ).not.toThrow();
-    expect(() => assertAgentLogEntry({ ...base, decision: { attempts: "nope" } })).toThrow(
+    expect(() => assertAgentLogEntry({ ...base, attempts: "nope" as never })).toThrow(
       AgentEventLogError,
     );
-    expect(() => assertAgentLogEntry({ ...base, decision: { attempts: [{}] } })).toThrow(
+    expect(() => assertAgentLogEntry({ ...base, attempts: [{}] as never })).toThrow(
       AgentEventLogError,
     );
   });
@@ -254,7 +252,7 @@ const desk = createMachine({
 });
 
 describe("boundary decisions (decideNext) journaled by the host", () => {
-  test("runToQuiescence({ event, decision }) records decideNext's attempts on the event's entry", async () => {
+  test("runToQuiescence({ event, attempts }) records decideNext's attempts on the event's entry", async () => {
     const store = createInMemoryEventLogStore();
     const threadId = "desk-1";
     const opened = await runToQuiescence(createAgentRuntime(desk, { store, threadId }), {});
@@ -271,36 +269,36 @@ describe("boundary decisions (decideNext) journaled by the host", () => {
     const { event, attempts } = await decideNext(createActor(desk).start().getSnapshot(), {
       decide,
       model: "quick",
-      events: "desk.*",
+      allowedEvents: "desk.*",
       payloads: () => ({ "desk.refund": [{ amount: 20 }] }),
     });
     expect(attempts).toHaveLength(1);
 
     const result = await runToQuiescence(createAgentRuntime(desk, { store, threadId }), {
       event: event!,
-      decision: { attempts },
+      attempts,
     });
 
     expect(result.status).toBe("done");
     const stored = await store.read(threadId);
     const refund = stored[stored.length - 1]!;
     expect(refund.event).toEqual({ type: "desk.refund", amount: 20 });
-    expect(refund.decision).toEqual({ attempts });
+    expect(refund.attempts).toEqual(attempts);
     expect(getDecisionAttempts(stored)).toEqual([
       { index: refund.index, eventType: "desk.refund", attempts },
     ]);
     expect(finalHash(desk, stripDecisionData(stored))).toBe(finalHash(desk, stored));
   });
 
-  test("an empty attempts list journals no decision field", async () => {
+  test("an empty attempts list journals no attempts field", async () => {
     const result = await runToQuiescence(createAgentRuntime(desk), {
       event: { type: "desk.escalate" },
-      decision: { attempts: [] },
+      attempts: [],
     });
-    expect(result.events.some((entry) => "decision" in entry)).toBe(false);
+    expect(result.events.some((entry) => "attempts" in entry)).toBe(false);
   });
 
-  test("runtime.transition rejects a non-JSON decision before the machine moves", async () => {
+  test("runtime.transition rejects non-JSON attempts before the machine moves", async () => {
     const runtime = createAgentRuntime(desk);
     const [state] = await runtime.start({});
     expect(() =>
@@ -308,11 +306,9 @@ describe("boundary decisions (decideNext) journaled by the host", () => {
         state,
         { type: "desk.escalate" },
         {
-          decision: {
-            attempts: [
-              { failure: "unknown-event", reason: "x", event: { type: "X", at: new Date() } },
-            ],
-          },
+          attempts: [
+            { failure: "unknown-event", reason: "x", event: { type: "X", at: new Date() } },
+          ],
         },
       ),
     ).toThrow(/not JSON-serializable/);

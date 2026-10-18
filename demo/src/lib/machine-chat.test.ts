@@ -451,6 +451,7 @@ describe("meta.interaction payload choices", () => {
   }).createMachine({
     context: {
       seats: [
+        { label: "Seat 1", event: { type: "ACCUSE", seat: 1 }, style: "danger" },
         { label: "Seat 2", event: { type: "ACCUSE", seat: 2 } },
         // The guard below refuses seat 9.
         { label: "Seat 9", event: { type: "ACCUSE", seat: 9 } },
@@ -462,8 +463,7 @@ describe("meta.interaction payload choices", () => {
         meta: {
           interaction: {
             label: "Who is it?",
-            choices: [{ label: "Seat 1", event: { type: "ACCUSE", seat: 1 }, style: "danger" }],
-            choicesFrom: "seats",
+            choices: "seats",
             textEvent: { type: "SAY", field: "message" },
           },
         },

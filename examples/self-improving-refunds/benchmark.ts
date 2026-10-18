@@ -23,7 +23,7 @@ import type {
   AgentEventLogStore,
   AgentWorkflowConfig,
 } from "@statelyai/agent";
-import { createAiSdkExecutors, createDecisionModelDecide } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { createInMemoryEventLogStore } from "@statelyai/agent/log";
 import {
   HELD_OUT_SCENARIOS,
@@ -41,6 +41,8 @@ import { createRawLoopArm } from "./raw-loop.js";
 export { createRawLoopArm };
 
 type DeskArmOptions = { store?: AgentEventLogStore; label?: string };
+/** A decision model object; a string in the models map would be a language model id. */
+type Judge = Exclude<Experimental_DecisionModel, string>;
 
 /** Arm B: the desk with a model decider, each decide call counted as a model call. */
 export function createModelDeskArm(
@@ -62,18 +64,17 @@ export function createModelDeskArm(
 }
 
 /**
- * Arms J and J−: the desk with a decision model judging the closed choice.
- * `lookahead` adds each option's machine-derived effect (`Then: state: …`) to
- * its criterion; each decide call is one judge call.
+ * Arms J and J−: the desk with a decision model judging the closed choice. The
+ * judge is the desk's model in the models map, so `createAiSdkExecutors` asks
+ * it through `experimental_decide`. `lookahead` adds each option's
+ * machine-derived effect (`Then: state: …`) to its criterion; each decide call
+ * is one judge call.
  */
 export function createJudgeDeskArm(
-  judge: Experimental_DecisionModel,
-  options: DeskArmOptions & { lookahead: boolean; minConfidence?: number },
+  judge: Judge,
+  options: DeskArmOptions & { lookahead: boolean },
 ): Arm {
-  const decide = createDecisionModelDecide(
-    judge,
-    options.minConfidence === undefined ? {} : { minConfidence: options.minConfidence },
-  );
+  const { decide } = createAiSdkExecutors({ models: { desk: judge } });
   let judgeCalls = 0;
   return createDeskArm({
     label: options.label ?? (options.lookahead ? "J: desk + Jev" : "J−: desk + Jev, no lookahead"),
@@ -93,7 +94,7 @@ export type BenchmarkOptions = {
   /** Arm A's model, arm B's model, and the model behind the default executors. */
   textModel: LanguageModel;
   /** The decision model behind arms J/J− and the playbooks' `classifyTicket`. */
-  judge: Experimental_DecisionModel;
+  judge: Judge;
   /** The `proposePlaybook` reflection model. Defaults to the executors' model. */
   reflectionModel?: LanguageModel;
   /** Executors for arm B and the playbooks. Defaults to `createAiSdkExecutors` over `textModel`. */

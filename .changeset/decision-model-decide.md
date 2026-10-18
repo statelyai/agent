@@ -2,18 +2,20 @@
 "@statelyai/agent": minor
 ---
 
-**`createDecisionModelDecide`.** `@statelyai/agent/ai-sdk` adds a `decide` executor backed by an AI SDK decision model, such as TypeSafe's Jev, through `experimental_decide`. It asks one `choice` question over the request's closed-choice `options` and maps the answer back to the option's event.
+**Decision models in the models map.** `createAiSdkExecutors` accepts an AI SDK decision model, such as TypeSafe's Jev, as a `models` entry next to the language models. A decide request whose model ref names a decision model is answered through `experimental_decide`.
 
-- `instructions` defaults to the request's `system` and `prompt`; `state` defaults to `request.input`.
+- The request must be a closed choice: `payloads` on `agent.decide`, or `decideNext`. A request without `options` throws.
+- It asks one `choice` question. Each option id is a label, and its criterion is the option's description, or the event as JSON when it has none. The instructions are the request's `system` and `prompt`, and the state is the request's `input`.
 - A label that is not an option is retried like any failed choice.
-- `minConfidence` throws below that confidence: the escalation signal. Route it through the invoke's `onError`, or catch it at the boundary.
-- A request without `options` throws. Pass `payloads` on `agent.decide`, or use `decideNext`.
+- The result carries `confidence` when the model reports it. Branch on it in your own code.
+- A text request on a decision model throws.
 
 ```ts
+import { openai } from "@ai-sdk/openai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
-import { createDecisionModelDecide } from "@statelyai/agent/ai-sdk";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-const decide = createDecisionModelDecide(typeSafeAi.decisionModel("jev-latest"), {
-  minConfidence: 0.6,
+const executors = createAiSdkExecutors({
+  models: { desk: openai("gpt-5.4-mini"), judge: typeSafeAi.decisionModel("jev-latest") },
 });
 ```

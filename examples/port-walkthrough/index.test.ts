@@ -86,8 +86,7 @@ test("no path sends an email without approval", async () => {
   // The loop's approval is an if inside the tool switch; no test can enumerate the paths around it.
   const everyPath = {
     input: { request },
-    text: { assist: "Draft." },
-    invokes: { sendEmail: { id: "msg_a@b.co" } },
+    outputs: { assist: ["Draft."], sendEmail: [{ id: "msg_a@b.co" }] },
     // MAX_STEPS rounds, each a decision plus an approval: deep and wide enough for every path.
     maxDepth: 2 * MAX_STEPS,
     maxPaths: 1000,

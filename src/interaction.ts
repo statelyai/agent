@@ -28,8 +28,8 @@ export interface AgentInteraction<TEvent extends EventObject = EventObject> {
   label: string;
   events: AgentInteractionEvent<TEvent["type"]>[];
   /**
-   * Payload choices from `choices` and `choicesFrom`, each a full event the
-   * snapshot accepts right now. Present when the state declares either.
+   * Payload choices from `choices`, each a full event the snapshot accepts
+   * right now. Present when the state declares `choices`.
    */
   choices?: AgentInteractionChoice<TEvent>[];
   /** Event type used for a free-text response. */
@@ -38,7 +38,7 @@ export interface AgentInteraction<TEvent extends EventObject = EventObject> {
   textField?: string;
 }
 
-/** One payload choice as authored in `meta.interaction.choices` or the `choicesFrom` context array. */
+/** One payload choice as authored in `meta.interaction.choices`, inline or in a context array. */
 export interface AgentInteractionChoiceMeta<TEvent extends string = string> {
   /** Button text. `{path.to.field}` interpolates from the context. */
   label: string;
@@ -69,10 +69,12 @@ export interface AgentInteractionDescriptor<TEvent extends string = string> {
   /** Label text, or a function of the machine context. `{path.to.field}` interpolates. */
   label?: string | ((args: { context: any }) => string);
   events?: { [K in TEvent]?: AgentInteractionEventMeta };
-  /** Payload choices: one button per full event, such as one per seat or per amount. */
-  choices?: AgentInteractionChoiceMeta<TEvent>[];
-  /** A context path holding an array of payload choices computed at runtime. */
-  choicesFrom?: string;
+  /**
+   * Payload choices: one button per full event, such as one per seat or per
+   * amount. A string is a context path to an array of the same shape,
+   * computed at runtime.
+   */
+  choices?: AgentInteractionChoiceMeta<TEvent>[] | string;
   /**
    * The free-text event. A bare type puts the text in a `text` field;
    * `{ type, field }` names the field.
@@ -144,8 +146,8 @@ function validateChoice(value: unknown, path: (string | number)[]) {
  * A {@link StandardSchemaV1} for the state metadata {@link getInteraction}
  * reads: an object whose optional `interaction` declares a `label` (a string
  * with `{context.path}` interpolation, or a function of the context), an
- * `events` map of choices, payload `choices` and a `choicesFrom` context path,
- * and a `textEvent` (a type, or `{ type, field }`) for free-text answers. This is
+ * `events` map of choices, payload `choices` (an array, or a context path to
+ * one), and a `textEvent` (a type, or `{ type, field }`) for free-text answers. This is
  * the default `meta` type `setupAgent` gives a machine; pass it to
  * `createAgentSchemas({ meta: interactionMetaSchema })` only when building a
  * schema pack by hand.
@@ -182,20 +184,19 @@ export const interactionMetaSchema: StandardSchemaV1<AgentInteractionMeta> = {
         }
       }
       const choices = descriptor["choices"];
-      if (choices !== undefined) {
+      if (choices !== undefined && typeof choices !== "string") {
         if (!Array.isArray(choices)) {
-          issues.push(issue("Expected an array of choices", ["interaction", "choices"]));
+          issues.push(
+            issue("Expected an array of choices or a context path string", [
+              "interaction",
+              "choices",
+            ]),
+          );
         } else {
           choices.forEach((choice, index) => {
             issues.push(...validateChoice(choice, ["interaction", "choices", index]));
           });
         }
-      }
-      if (
-        descriptor["choicesFrom"] !== undefined &&
-        typeof descriptor["choicesFrom"] !== "string"
-      ) {
-        issues.push(issue("Expected a context path string", ["interaction", "choicesFrom"]));
       }
       const textEvent = descriptor["textEvent"];
       if (
@@ -320,16 +321,12 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
   // Payload choices carry their whole event, so each one is judged exactly:
   // a payload the schema refuses, or an event the machine would not take
   // right now, is left out.
-  const declaresChoices =
-    interaction.choices !== undefined || interaction.choicesFrom !== undefined;
-  const fromContext =
-    interaction.choicesFrom === undefined
-      ? []
-      : readPath(snapshot.context, interaction.choicesFrom);
-  const choices = [
-    ...(interaction.choices ?? []),
-    ...(Array.isArray(fromContext) ? fromContext : []),
-  ]
+  const declaresChoices = interaction.choices !== undefined;
+  const declared =
+    typeof interaction.choices === "string"
+      ? readPath(snapshot.context, interaction.choices)
+      : interaction.choices;
+  const choices = (Array.isArray(declared) ? (declared as unknown[]) : [])
     .filter(isChoice)
     .filter((choice) => {
       try {

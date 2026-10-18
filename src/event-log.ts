@@ -61,17 +61,6 @@ export interface AgentLogVerification {
 }
 
 /**
- * The decision attempts the machine did NOT accept before the entry's event
- * landed: guard rejections, non-offered options, unknown types, invalid
- * payloads. Diagnostic data for improving a decider from its traces; `replay`
- * never reads it.
- */
-export interface AgentLogDecision {
-  /** Failed attempts, in the order they were made. The runtime omits the field when there are none. */
-  attempts: DecisionAttempt[];
-}
-
-/**
  * One journaled external input, JSON-safe and stored verbatim.
  */
 export interface AgentLogEntry {
@@ -95,11 +84,14 @@ export interface AgentLogEntry {
   /** Recorded projection hash used by replay verification. */
   verification?: AgentLogVerification;
   /**
-   * The rejected decision attempts that preceded this entry's event, when a
-   * decider (`agent.decide`, or a host using `decideNext`) needed more than one
-   * try. Replay-ignored: it explains the entry, it does not change the fold.
+   * The decision attempts the machine did NOT accept before this entry's
+   * event landed (guard rejections, non-offered options, unknown types,
+   * invalid payloads), in the order they were made, when a decider
+   * (`agent.decide`, or a host using `decideNext`) needed more than one try.
+   * Omitted when there are none. Replay-ignored: it explains the entry, it
+   * does not change the fold.
    */
-  decision?: AgentLogDecision;
+  attempts?: DecisionAttempt[];
 }
 
 /** The payload of the reserved {@link AGENT_INIT_EVENT_TYPE} first entry. */
@@ -331,17 +323,13 @@ export function assertAgentLogEntry(entry: unknown): asserts entry is AgentLogEn
       "Agent event entry.verification requires a non-empty stateHash string.",
     );
   }
-  if (candidate.decision !== undefined) {
-    assertLogDecision(candidate.decision);
+  if (candidate.attempts !== undefined) {
+    assertLogAttempts(candidate.attempts);
   }
 }
 
-function assertLogDecision(decision: unknown): asserts decision is AgentLogDecision {
-  const attempts = (decision as { attempts?: unknown } | null)?.attempts;
+function assertLogAttempts(attempts: unknown): asserts attempts is DecisionAttempt[] {
   if (
-    decision === null ||
-    typeof decision !== "object" ||
-    Array.isArray(decision) ||
     !Array.isArray(attempts) ||
     !attempts.every(
       (attempt) =>
@@ -352,7 +340,7 @@ function assertLogDecision(decision: unknown): asserts decision is AgentLogDecis
     )
   ) {
     throw new AgentEventLogError(
-      "Agent event entry.decision requires an attempts array of { failure, reason } objects.",
+      "Agent event entry.attempts requires an array of { failure, reason } objects.",
     );
   }
 }
@@ -581,7 +569,7 @@ export interface CreateReplayEntryOptions {
   causationId?: string;
   metadata?: Record<string, JsonValue>;
   /** Rejected decision attempts that preceded `event`; omitted when empty. */
-  decision?: AgentLogDecision;
+  attempts?: DecisionAttempt[];
   /** Record `verification.stateHash` (default `true`). */
   verification?: boolean;
   /**
@@ -642,8 +630,8 @@ export function createReplayEntry(
     event: normalizeDoneActorEvent(normalizeEventErrors(event) as EventObject),
     ...(options.causationId !== undefined ? { causationId: options.causationId } : {}),
     ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
-    ...(options.decision !== undefined && options.decision.attempts.length > 0
-      ? { decision: options.decision }
+    ...(options.attempts !== undefined && options.attempts.length > 0
+      ? { attempts: options.attempts }
       : {}),
   };
   assertAgentLogEntry(entry);
@@ -930,7 +918,7 @@ export interface AgentLogDecisionAttempts {
  * The decision attempts a log recorded but the machine never accepted, in log
  * order — the input for improving a decider from its traces. Two sources:
  *
- * - `entry.decision.attempts`: the failed tries before the entry's event landed.
+ * - `entry.attempts`: the failed tries before the entry's event landed.
  * - An `xstate.error.actor.*` entry whose `error` kept a decision-exhausted
  *   error's `attempts`: every try failed.
  *
@@ -940,8 +928,8 @@ export function getDecisionAttempts(entries: readonly AgentLogEntry[]): AgentLog
   const found: AgentLogDecisionAttempts[] = [];
   for (const entry of entries) {
     const { type } = entry.event;
-    if (entry.decision !== undefined && entry.decision.attempts.length > 0) {
-      found.push({ index: entry.index, eventType: type, attempts: entry.decision.attempts });
+    if (entry.attempts !== undefined && entry.attempts.length > 0) {
+      found.push({ index: entry.index, eventType: type, attempts: entry.attempts });
       continue;
     }
     if (type.startsWith(ERROR_ACTOR_EVENT_TYPE)) {

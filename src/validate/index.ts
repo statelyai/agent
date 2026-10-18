@@ -8,11 +8,4 @@
 export { validateAgentConfig } from "./validate-config.js";
 export type { AgentConfigDiagnostic, AgentConfigValidationResult } from "./validate-config.js";
 export { verifyAgentConfig } from "./verify-config.js";
-export type {
-  AgentConfigGate,
-  AgentConfigGateName,
-  AgentConfigVocabulary,
-  VerifyAgentConfigExploreOptions,
-  VerifyAgentConfigOptions,
-  VerifyAgentConfigResult,
-} from "./verify-config.js";
+export type { VerifyAgentConfigOptions, VerifyAgentConfigResult } from "./verify-config.js";

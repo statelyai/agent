@@ -425,9 +425,8 @@ type InteractionHints = {
   label?: string | ((args: { context: unknown }) => string);
   /** A bare label string, or a descriptor (see `AgentInteractionEventMeta`). */
   events?: Record<string, string | InteractionEventHint>;
-  /** Payload choices: full events, statically or from a context array (see `AgentInteractionChoiceMeta`). */
-  choices?: { event?: { type?: unknown } }[];
-  choicesFrom?: string;
+  /** Payload choices: full events, inline or a context path to an array of them. */
+  choices?: { event?: { type?: unknown } }[] | string;
   /** An event type (text fills its single string field), or `{ type, field }`. */
   textEvent?: string | { type: string; field: string };
   /** Custom composer renderer for this state ("rating", "cards", …). */
@@ -522,10 +521,7 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
 
   // Payload choices, resolved and filtered through `snapshot.can` by the
   // library: each is a full event, so it renders as a plain button.
-  const interaction =
-    hints.choices !== undefined || hints.choicesFrom !== undefined
-      ? getInteraction(snapshot)
-      : undefined;
+  const interaction = hints.choices !== undefined ? getInteraction(snapshot) : undefined;
   const choices: InteractionChoice[] | undefined = interaction?.choices?.map((choice) => ({
     label: choice.label,
     style: choice.style === "primary" || choice.style === "danger" ? choice.style : "default",

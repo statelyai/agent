@@ -19,7 +19,7 @@ export interface DecideNextOptions<TSnapshot extends AnyMachineSnapshot = AnyMac
   /** Model ref, passed through to the executor. */
   model: string;
   /** Event types the model may choose: exact types or wildcards (`'desk.*'`, `'*'`). */
-  events: string | readonly string[];
+  allowedEvents: string | readonly string[];
   /**
    * Concrete payloads per event type, without `type`. One option per payload.
    * A candidate type with no key is offered bare, as `{ type }`; an empty list
@@ -34,10 +34,10 @@ export interface DecideNextOptions<TSnapshot extends AnyMachineSnapshot = AnyMac
   /**
    * Describe what each option changes: the state value and the changed
    * top-level context keys, computed with xstate's pure `transition()`.
-   * `keys` limits which context keys are reported (a state value change is
-   * always reported); `maxLength` cuts each value. Default `120`.
+   * An array limits which context keys are reported (a state value change is
+   * always reported). Each reported value is cut to 120 characters.
    */
-  lookahead?: boolean | { keys?: readonly string[]; maxLength?: number };
+  lookahead?: boolean | readonly string[];
   /** Retries after a failed choice. Default `2`. */
   maxRetries?: number;
   signal?: AbortSignal;
@@ -56,7 +56,7 @@ export interface DecideNextResult<TEvent = ChosenEvent> {
 /**
  * Asks a model to choose the next event for ANY XState snapshot, including a
  * machine built with plain `createMachine`/`setup` that knows nothing about AI.
- * The candidates are the `events` an active state handles, one option per
+ * The candidates are the `allowedEvents` an active state handles, one option per
  * payload, kept only where `snapshot.can(event)` is true. Each option is
  * described from the transition's `description`, else the event schema's,
  * plus (with `lookahead`) what it changes. The chosen event must equal one
@@ -77,7 +77,7 @@ export interface DecideNextResult<TEvent = ChosenEvent> {
  *     const { event } = await decideNext(snapshot, {
  *       decide,
  *       model: 'quick',
- *       events: 'desk.*',
+ *       allowedEvents: 'desk.*',
  *       payloads: (s) => ({ 'desk.refund': [{ amount: s.context.requested }] }),
  *       lookahead: true,
  *     });
@@ -92,7 +92,8 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
   snapshot: TSnapshot,
   options: DecideNextOptions<TSnapshot>,
 ): Promise<DecideNextResult<EventFromSnapshot<TSnapshot>>> {
-  const patterns = typeof options.events === "string" ? [options.events] : options.events;
+  const patterns =
+    typeof options.allowedEvents === "string" ? [options.allowedEvents] : options.allowedEvents;
   const schemas = snapshot.machine.schemas?.events as Record<string, StandardSchemaV1> | undefined;
   const events = getAcceptedEvents(snapshot, { events: schemas, eventTypes: patterns }).filter(
     (event) => !isEventPattern(event.type),
@@ -147,14 +148,12 @@ function safeCan(snapshot: AnyMachineSnapshot, event: ChosenEvent): boolean {
   }
 }
 
-type Lookahead = Exclude<DecideNextOptions["lookahead"], boolean | undefined>;
-
 // `what (field: value; …). Then: state: "a" → "b"; key: 1 → 2`
 function describeOption(
   snapshot: AnyMachineSnapshot,
   event: ChosenEvent,
   schema: StandardSchemaV1 | undefined,
-  lookahead: boolean | Lookahead | undefined,
+  lookahead: boolean | readonly string[] | undefined,
 ): string {
   const what =
     getNextTransitions(snapshot).find(
@@ -167,7 +166,7 @@ function describeOption(
     .map(([key, value]) => `${key}: ${short(value)}`);
   const base = fields.length ? `${what} (${fields.join("; ")})` : what;
   const effect = lookahead
-    ? describeEffect(snapshot, event, lookahead === true ? {} : lookahead)
+    ? describeEffect(snapshot, event, lookahead === true ? undefined : lookahead)
     : undefined;
   return effect ? `${base}. Then: ${effect}` : base;
 }
@@ -191,8 +190,9 @@ function schemaDescription(schema: StandardSchemaV1 | undefined): string | undef
 function describeEffect(
   snapshot: AnyMachineSnapshot,
   event: ChosenEvent,
-  { keys, maxLength = 120 }: Lookahead,
+  keys: readonly string[] | undefined,
 ): string | undefined {
+  const maxLength = 120;
   let next: AnyMachineSnapshot;
   try {
     [next] = transition(snapshot.machine, snapshot, event as never);

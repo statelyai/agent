@@ -79,7 +79,6 @@ import {
   replay,
   validateReplayEntries,
   assertJsonSerializable,
-  type AgentLogDecision,
   type AgentLogEntry,
   type AgentLogInit,
   type AgentPersistedSnapshot,
@@ -1035,7 +1034,7 @@ interface RunAgentBindContext {
    * entry for that same event object, if it reaches the root. Unset off the
    * runtime path.
    */
-  noteDecision?: (event: object, decision: AgentLogDecision) => void;
+  noteDecision?: (event: object, attempts: DecisionAttempt[]) => void;
 }
 
 /**
@@ -1424,7 +1423,7 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       // `run` — not a re-evaluated transition function — so it fires exactly
       // once regardless of v6-alpha transition re-evaluation.
       if (priorAttempts.length > 0) {
-        runCtx.noteDecision?.(chosen, { attempts: priorAttempts });
+        runCtx.noteDecision?.(chosen, priorAttempts);
       }
       actorRef?.send(chosen as never);
       // Let the applied transition commit (and let xstate cancel this invoke if
@@ -1882,13 +1881,14 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
   start(init?: AgentRunStart<TMachine>): Promise<[SnapshotFrom<TMachine>, AgentEffects]>;
   /**
    * Applies one event: journals it, traces it, and returns the next state plus
-   * its effects. `options.decision` records the failed attempts of a decider
-   * the host ran itself (e.g. `decideNext`'s `attempts`) on the event's entry.
+   * its effects. `options.attempts` records the failed attempts of a decider
+   * the host ran itself (e.g. `decideNext`'s `attempts`) on the event's entry
+   * as `entry.attempts`. Replay ignores them; an empty list is not journaled.
    */
   transition(
     state: SnapshotFrom<TMachine>,
     event: EventFromLogic<TMachine> | AgentTimerEvent,
-    options?: AgentTransitionOptions,
+    options?: { attempts?: DecisionAttempt[] },
   ): [SnapshotFrom<TMachine>, AgentEffects];
   /** Starts the effects' work and returns once it is accepted, not once it finishes. */
   execute(effects: AgentEffects): Promise<void>;
@@ -1896,15 +1896,6 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
   nextEvent(): Promise<EventFromLogic<TMachine> | undefined>;
   /** Settles the run: stops what is still running and returns the outcome. */
   finish(): Promise<AgentRunResult<TMachine>>;
-}
-
-/** Options for {@link AgentRuntime.transition}. */
-export interface AgentTransitionOptions {
-  /**
-   * The failed attempts of the decider that chose this event, journaled on its
-   * entry as `entry.decision`. Replay ignores it. Omitted when `attempts` is empty.
-   */
-  decision?: AgentLogDecision;
 }
 
 /** How {@link runToQuiescence} opens a run: {@link AgentRunStart} plus one event to deliver. */
@@ -1922,9 +1913,9 @@ export interface AgentRunInit<TMachine extends AnyStateMachine> extends AgentRun
   /**
    * The failed attempts of the decider the host ran to choose `event` (e.g.
    * `decideNext`'s `attempts`), journaled on `event`'s entry as
-   * `entry.decision`. Replay ignores it.
+   * `entry.attempts`. Replay ignores them.
    */
-  decision?: AgentLogDecision;
+  attempts?: DecisionAttempt[];
 }
 
 /**
@@ -1943,7 +1934,7 @@ export async function runToQuiescence<TMachine extends AnyStateMachine>(
     [state, effects] = runtime.transition(
       state,
       init.event,
-      init.decision !== undefined ? { decision: init.decision } : undefined,
+      init.attempts !== undefined ? { attempts: init.attempts } : undefined,
     );
     await runtime.execute(effects);
   }
@@ -2011,8 +2002,8 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   // left, since every runtime counts only its own calls.
   const maxModelCalls = rest.maxModelCalls ?? 100;
   let modelCalls = result.usage.modelCalls;
-  // `decision` explains the opening `event` only, never an `onIdle` answer.
-  const { input: _input, events: _events, decision: _decision, ...resumeOptions } = rest;
+  // `attempts` explain the opening `event` only, never an `onIdle` answer.
+  const { input: _input, events: _events, attempts: _attempts, ...resumeOptions } = rest;
   // An ignored event (the opening `event`, or an answer) leaves the run where
   // it was; it is reported, not retried from the same snapshot.
   while (result.status === "idle" && result.ignored === undefined) {
@@ -2269,12 +2260,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // Failed attempts an in-run decision noted for the event it then sent,
   // keyed by that event object: the mailbox hands the same object to
   // `transition`, which journals them on its entry.
-  const decisionsByEvent = new WeakMap<object, AgentLogDecision>();
+  const attemptsByEvent = new WeakMap<object, DecisionAttempt[]>();
 
   const appendLogEntry = (
     event: EventObject,
     snapshot?: AnyMachineSnapshot | AgentPersistedSnapshot,
-    decision?: AgentLogDecision,
+    attempts?: DecisionAttempt[],
   ): AgentLogEntry | undefined => {
     if (!loggingEnabled) {
       return undefined;
@@ -2282,7 +2273,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     const entry = createReplayEntry(logMachine, logEntries, event, {
       machineVersion,
       verification: verificationEnabled,
-      ...(decision !== undefined ? { decision } : {}),
+      ...(attempts !== undefined ? { attempts } : {}),
       // With no snapshot, `createReplayEntry` re-folds the whole prefix to get
       // the hash. Every applied transition has one to hand, so that fallback
       // is reserved for the rare out-of-band append (see `usageEntrySnapshot`).
@@ -2411,15 +2402,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     awaitJournal,
     runId,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
-    noteDecision: (event, decision) => {
+    noteDecision: (event, attempts) => {
       // Model-produced attempts that are not strict JSON are dropped rather
       // than failing the entry for the event that did land.
       try {
-        assertJsonSerializable(decision, "decision");
+        assertJsonSerializable(attempts, "attempts");
       } catch {
         return;
       }
-      decisionsByEvent.set(event, decision);
+      attemptsByEvent.set(event, attempts);
     },
   };
 
@@ -3050,11 +3041,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       if (stopReason !== undefined) {
         return [state, []];
       }
-      // A host-supplied decision is checked before the machine moves, so a
+      // Host-supplied attempts are checked before the machine moves, so a
       // non-JSON value fails loudly without leaving a half-applied event.
-      const decision = transitionOptions?.decision ?? decisionsByEvent.get(event as object);
-      if (transitionOptions?.decision !== undefined) {
-        assertJsonSerializable(transitionOptions.decision, "decision");
+      const attempts = transitionOptions?.attempts ?? attemptsByEvent.get(event as object);
+      if (transitionOptions?.attempts !== undefined) {
+        assertJsonSerializable(transitionOptions.attempts, "attempts");
       }
       const [next, effects] = execution.transition(state, event as EventFromLogic<TMachine>) as [
         AnyMachineSnapshot,
@@ -3070,7 +3061,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       ) {
         ignoredEvent = event as EventObject;
       }
-      appendLogEntry(event as EventObject, next, decision);
+      appendLogEntry(event as EventObject, next, attempts);
       commit(next, event as EventObject);
       return [next as SnapshotFrom<TMachine>, effects];
     },

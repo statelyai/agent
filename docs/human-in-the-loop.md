@@ -49,7 +49,7 @@ agentSetup.createMachine({
 });
 ```
 
-The descriptor is an optional `interaction` with a `label` (a string with `{context.path}` interpolation, or a function of the context), an `events` map of choices, payload `choices` and a `choicesFrom` context path, and a `textEvent`. A machine that declares its own `meta` schema replaces the default; `interactionMetaSchema` is the runtime schema for the interaction shape when you build a schema pack by hand with `createAgentSchemas`.
+The descriptor is an optional `interaction` with a `label` (a string with `{context.path}` interpolation, or a function of the context), an `events` map of choices, payload `choices` (an array, or a context path), and a `textEvent`. A machine that declares its own `meta` schema replaces the default; `interactionMetaSchema` is the runtime schema for the interaction shape when you build a schema pack by hand with `createAgentSchemas`.
 
 ## Payload choices
 
@@ -71,7 +71,7 @@ voting: {
 }
 ```
 
-When the choices depend on context, keep them in a context array of the same shape and name its path with `choicesFrom`. The refund desk computes this turn's proposals on entry to `deciding`:
+When the choices depend on context, keep them in a context array of the same shape and set `choices` to its path. The refund desk computes this turn's proposals on entry to `deciding`:
 
 ```ts no-check
 deciding: {
@@ -79,17 +79,17 @@ deciding: {
   meta: {
     interaction: {
       label: "Turn {turn}: {notice} Choose the next step.",
-      choicesFrom: "choices" // [{ label: "Refund $240", event: { type: "ISSUE_REFUND", amount: 240 } }, ...]
+      choices: "choices" // [{ label: "Refund $240", event: { type: "ISSUE_REFUND", amount: 240 } }, ...]
     }
   }
 }
 ```
 
-`getInteraction(snapshot).choices` lists static `choices` first, then the `choicesFrom` array:
+`getInteraction(snapshot).choices` lists the declared choices, inline or read from the context path:
 
 - Labels interpolate `{context.path}` like the interaction label.
 - Each event is checked against the machine's event schema and `snapshot.can(event)`. Only the choices the machine takes right now are listed.
-- `choices` is present only when the state declares `choices` or `choicesFrom`. The `events` list is unchanged.
+- `choices` is present only when the state declares `choices`. The `events` list is unchanged.
 
 Convert a pressed button back with its index in `choices`, or its label:
 
