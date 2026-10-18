@@ -364,8 +364,10 @@ function isJsonSerializable(value: unknown): boolean {
  * error code: `decision.ts` imports this module, so importing the class here
  * would be a cycle.
  */
+const DECISION_EXHAUSTED_CODE = "decision-exhausted";
+
 function exhaustedAttemptsOf(error: Error): unknown[] | undefined {
-  if ((error as { code?: unknown }).code !== "decision-exhausted") return undefined;
+  if ((error as { code?: unknown }).code !== DECISION_EXHAUSTED_CODE) return undefined;
   const attempts = (error as { attempts?: unknown }).attempts;
   return Array.isArray(attempts) && isJsonSerializable(attempts) ? attempts : undefined;
 }
@@ -373,7 +375,7 @@ function exhaustedAttemptsOf(error: Error): unknown[] | undefined {
 /**
  * Replaces `Error` instances with plain `{ name, message, cause? }` objects so
  * an `xstate.error.actor` payload survives the log's JSON round-trip. A
- * decision-exhausted error also keeps its `attempts`. Cycles
+ * decision-exhausted error also keeps its `code` and `attempts`. Cycles
  * are preserved by identity; non-plain objects are left alone (and are then
  * rejected by {@link assertJsonSerializable}).
  */
@@ -388,8 +390,12 @@ function normalizeEventErrors(
     };
     seen.set(value, normalized);
     if (value.cause !== undefined) normalized.cause = normalizeEventErrors(value.cause, seen);
-    const attempts = exhaustedAttemptsOf(value);
-    if (attempts !== undefined) normalized.attempts = structuredClone(attempts);
+    if ((value as { code?: unknown }).code === DECISION_EXHAUSTED_CODE) {
+      // The discriminator getDecisionAttempts requires before it reads `attempts`.
+      normalized.code = DECISION_EXHAUSTED_CODE;
+      const attempts = exhaustedAttemptsOf(value);
+      if (attempts !== undefined) normalized.attempts = structuredClone(attempts);
+    }
     return normalized;
   }
   if (value === null || typeof value !== "object") return value;
@@ -635,6 +641,9 @@ export function createReplayEntry(
       : {}),
   };
   assertAgentLogEntry(entry);
+  // Copied once validated as JSON: a host that later mutates its array must
+  // not change the journaled entry.
+  if (entry.attempts !== undefined) entry.attempts = structuredClone(entry.attempts);
   if (options.verification !== false) {
     const persisted = options.snapshot
       ? toPersisted(machine, options.snapshot)
@@ -919,8 +928,9 @@ export interface AgentLogDecisionAttempts {
  * order — the input for improving a decider from its traces. Two sources:
  *
  * - `entry.attempts`: the failed tries before the entry's event landed.
- * - An `xstate.error.actor.*` entry whose `error` kept a decision-exhausted
- *   error's `attempts`: every try failed.
+ * - An `xstate.error.actor.*` entry whose `error` is a decision-exhausted
+ *   error (`code: "decision-exhausted"`) that kept its `attempts`: every try
+ *   failed. Another actor error's `attempts` field is not read.
  *
  * Entries with neither are skipped.
  */
@@ -934,10 +944,14 @@ export function getDecisionAttempts(entries: readonly AgentLogEntry[]): AgentLog
     }
     if (type.startsWith(ERROR_ACTOR_EVENT_TYPE)) {
       const error = (entry.event as { error?: unknown }).error as
-        | { attempts?: unknown }
+        | { code?: unknown; attempts?: unknown }
         | null
         | undefined;
-      if (Array.isArray(error?.attempts) && error.attempts.length > 0) {
+      if (
+        error?.code === DECISION_EXHAUSTED_CODE &&
+        Array.isArray(error.attempts) &&
+        error.attempts.length > 0
+      ) {
         found.push({
           index: entry.index,
           eventType: type,

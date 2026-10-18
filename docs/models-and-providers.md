@@ -109,7 +109,7 @@ const executors = createAiSdkExecutors({
 - The request must be a closed choice: `payloads` on `agent.decide`, or `decideNext`. A request without `options` throws.
 - The adapter asks one `choice` question. Each option id is a label, and its criterion is the option's description, or the event as JSON when it has none. The instructions are the request's `system` and `prompt`, and the state is the request's `input`.
 - The result carries the chosen option's event, the call's usage, and `confidence` when the model reports it.
-- A label that is not an option is a failed attempt, retried like any other.
+- A label that is not an option is a failed attempt, retried like any other. A retry appends each earlier attempt's reason to the instructions.
 - A text request on a decision model throws. Host `settings` apply to language models only.
 - `resolveModel` may return a decision model too.
 

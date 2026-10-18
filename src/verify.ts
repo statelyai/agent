@@ -14,7 +14,12 @@
  *
  * @module
  */
-import type { AnyActorLogic, AnyMachineSnapshot, AnyStateMachine } from "xstate";
+import {
+  getNextTransitions,
+  type AnyActorLogic,
+  type AnyMachineSnapshot,
+  type AnyStateMachine,
+} from "xstate";
 import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
 import { AgentError } from "./errors.js";
 import { getAcceptedEvents, type AgentSchemas } from "./events.js";
@@ -1122,6 +1127,20 @@ function finitePayloads(jsonSchema: unknown): {
   return { payloads: product, complete };
 }
 
+// True when a transition for `type` at this snapshot could read the event's
+// payload: a function transition, a guard, a `matches` pattern, or a context
+// mapper. An object transition with none of these cannot.
+function mayReadPayload(snapshot: AnyMachineSnapshot, type: string): boolean {
+  return getNextTransitions(snapshot).some(
+    (transition) =>
+      transition.eventType === type &&
+      (transition.to !== undefined ||
+        transition.guard !== undefined ||
+        transition.matches !== undefined ||
+        typeof transition.context === "function"),
+  );
+}
+
 // A pending branch point: the step to advance, the events that led to it, and
 // how many branch points it has spent against `maxDepth`.
 interface ExploreNode {
@@ -1151,19 +1170,28 @@ function explore(
     {};
 
   // Schema-derived payloads per event type, computed once per type. A type
-  // with no schema is applied bare, and that is all it can be.
+  // with no schema is applied bare. That covers it only when no transition
+  // for it at this snapshot can read the payload: a function transition, a
+  // guard, a `matches` pattern, or a context mapper could, so such a type
+  // is unexpanded.
   const finiteCache = new Map<string, { payloads: Record<string, unknown>[]; complete: boolean }>();
-  const schemaPayloads = (type: string): Record<string, unknown>[] => {
+  const schemaPayloads = (
+    type: string,
+    snapshot: AnyMachineSnapshot,
+  ): Record<string, unknown>[] => {
+    const schema = eventSchemas[type];
     let fill = finiteCache.get(type);
-    if (!fill) {
-      const schema = eventSchemas[type];
-      fill = schema ? finitePayloads(safeJsonSchema(schema)) : { payloads: [{}], complete: true };
+    if (schema && !fill) {
+      fill = finitePayloads(safeJsonSchema(schema));
       finiteCache.set(type, fill);
     }
+    fill ??= { payloads: [{}], complete: !mayReadPayload(snapshot, type) };
     if (!fill.complete && !unexpanded.has(type)) {
       unexpanded.add(type);
       unexplored.push(
-        `unexpanded: event '${type}' has payload fields the schema fill cannot enumerate; add a payloads entry for it`,
+        schema
+          ? `unexpanded: event '${type}' has payload fields the schema fill cannot enumerate; add a payloads entry for it`
+          : `unexpanded: event '${type}' has no schema and a transition that may read its payload; add a payloads entry for it`,
       );
     }
     return fill.payloads;
@@ -1174,6 +1202,7 @@ function explore(
   // schema's finite domain, else the bare `{ type }`.
   const variantsOf = (
     type: string,
+    snapshot: AnyMachineSnapshot,
     table: Partial<Record<string, Record<string, unknown>[]>>,
     requestOptions?: AgentDecisionOption[],
   ): ChosenEvent[] => {
@@ -1188,7 +1217,7 @@ function explore(
         .filter((option) => option.event.type === type)
         .map((option) => option.event);
     }
-    return schemaPayloads(type).map((payload) => ({ ...payload, type }));
+    return schemaPayloads(type, snapshot).map((payload) => ({ ...payload, type }));
   };
 
   // How a text request or scripted invoke settles: resolved straight through
@@ -1314,8 +1343,7 @@ function explore(
   // dedupe revisit, and yield its children lazily. The DFS driver visits each
   // child before resuming, so the cap and witness checks between children see
   // the state left by the previous child's subtree.
-  function* expand({ step, path, depth: startDepth }: ExploreNode): Generator<ExploreNode> {
-    let depth = startDepth;
+  function* expand({ step, path, depth }: ExploreNode): Generator<ExploreNode> {
     if (witness !== undefined || capped()) {
       return;
     }
@@ -1328,10 +1356,9 @@ function explore(
     }
 
     // A key already explored at this depth or shallower has nothing new
-    // below it. A shallower revisit explores again: it has more depth left.
-    // Breadth-first order is by path length, not depth (a decision's
-    // rejection spends depth without adding the same number of events), so
-    // the rule holds for both walks.
+    // below it. A shallower revisit explores again: it has more depth left
+    // (the depth-first walk can reach a key deep before it reaches it
+    // shallow).
     if (options.dedupeBy) {
       const key = options.dedupeBy(settled.snapshot as AnyMachineSnapshot);
       const seenAt = visited.get(key);
@@ -1379,9 +1406,8 @@ function explore(
         }
         return;
       }
-      // A decision's success branch is the per-candidate-event fork below.
-      // The rejection already spent a level, so the branching starts a level in.
-      depth += 1;
+      // A decision's success branch is the per-candidate-event fork below, a
+      // sibling of the error branch: it spends its own level, not a second one.
       if (witness !== undefined) {
         return;
       }
@@ -1423,7 +1449,8 @@ function explore(
     // Branch point: a decision request's candidates, or an idle wait's
     // externally-accepted events — each type expanded to its payload variants.
     const request = settled.requests[0] as AgentStepRequest | undefined;
-    const table = options.payloads?.(settled.snapshot as AnyMachineSnapshot) ?? {};
+    const snapshot = settled.snapshot as AnyMachineSnapshot;
+    const table = options.payloads?.(snapshot) ?? {};
     // A closed choice's options, rebuilt over the live candidates as a run
     // does but not yet filtered: the loop below prunes them, so guard-rejected
     // options count in `prunedByGuard`.
@@ -1431,12 +1458,16 @@ function explore(
       request?.kind === "decision" ? acceptedDecisionOptions(request, () => true) : undefined;
     const branchEvents: ChosenEvent[] =
       request?.kind === "decision"
-        ? request.events.flatMap((descriptor) => variantsOf(descriptor.type, table, requestOptions))
-        : getAcceptedEvents(settled.snapshot).flatMap((descriptor) =>
-            variantsOf(descriptor.type, table),
+        ? request.events.flatMap((descriptor) =>
+            variantsOf(descriptor.type, snapshot, table, requestOptions),
+          )
+        : getAcceptedEvents(snapshot).flatMap((descriptor) =>
+            variantsOf(descriptor.type, snapshot, table),
           );
 
-    if (branchEvents.length === 0) {
+    // An idle wait with nothing to accept ends the branch. A decision with
+    // nothing to choose does not: it exhausts, below.
+    if (branchEvents.length === 0 && request?.kind !== "decision") {
       pathsExplored++;
       terminals.push({ status: "idle", path, state: settled.snapshot.value });
       return;
@@ -1449,18 +1480,42 @@ function explore(
       return;
     }
 
+    let taken = 0;
     for (const event of branchEvents) {
       if (witness !== undefined || capped()) {
         return;
       }
       // Guard legality: a type-legal-but-guard-rejected candidate is a pruned branch.
-      if (!(settled.snapshot as AnyMachineSnapshot).can(event)) {
+      if (!snapshot.can(event)) {
         prunedByGuard++;
         continue;
       }
+      taken++;
       const next = transitionAgentStep(machine, settled, event);
       recordState(next.snapshot);
       yield { step: next, path: [...path, event], depth: depth + 1 };
+    }
+
+    // A decision none of whose candidates the snapshot takes fails at run time
+    // after its retries (or at once, for an empty closed choice) with
+    // AgentDecisionExhaustedError, and the invoke's onError runs. Explore that
+    // branch the same way; with no onError it errors the machine, an `error`
+    // terminal.
+    if (request?.kind === "decision" && taken === 0) {
+      if (witness !== undefined || capped()) {
+        return;
+      }
+      const exhausted = new AgentDecisionExhaustedError([]);
+      exhausted.message =
+        `Decision '${request.name ?? request.id}' has no candidate the current snapshot ` +
+        "accepts (explored, no model call).";
+      const failed = rejectAgentStep(machine, settled, request.id, exhausted);
+      recordState(failed.snapshot);
+      yield {
+        step: failed,
+        path: [...path, { type: `xstate.error.actor.${request.id}` }],
+        depth: depth + 1,
+      };
     }
   }
 
@@ -1511,8 +1566,10 @@ function explore(
  * Enumerates a machine's decision and external-event branches to a bounded
  * depth, model-free, and reports which states are reached and how each path
  * terminates. At each decision request it forks one branch per candidate event
- * (guard-rejected candidates are counted in `prunedByGuard`, not explored); at
- * an idle wait it forks per externally-accepted event. Text requests and other
+ * (guard-rejected candidates are counted in `prunedByGuard`, not explored); a
+ * decision with no takeable candidate exhausts as it does live, taking its
+ * `onError` (an `error` terminal without one). At an idle wait it forks per
+ * externally-accepted event. Text requests and other
  * invokes resolve from `outputs`, a by-src map of outputs to try (a
  * one-element list is a canned output; several fork one branch each), and a
  * missing src halts that branch with a `needs-output` terminal rather than
@@ -1525,7 +1582,8 @@ function explore(
  * become the branch set, and an event schema whose fields are finite (enums,
  * booleans, consts) expands to their product, each optional field also
  * omitted. A type that could not be fully expanded is listed in
- * `unexpandedEvents`.
+ * `unexpandedEvents`, as is a type with no schema whose transition could read
+ * the payload (a function transition, guard, `matches`, or context mapper).
  * `dedupeBy` explores each projected snapshot once, which keeps a large
  * payload table tractable.
  *

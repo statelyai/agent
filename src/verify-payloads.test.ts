@@ -537,7 +537,7 @@ describe("canReach — shortest witness", () => {
     expect(witness).toEqual([{ type: "ADD", n: 2 }]);
   });
 
-  test("with dedupeBy, a key reached again with more depth left is explored again", async () => {
+  test("with dedupeBy, a decision's error fork costs its success branch no depth", async () => {
     const agent = setupAgent({
       context: z.object({}),
       events: { LONG: z.object({}), SHORT: z.object({}), GO: z.object({}) },
@@ -546,10 +546,10 @@ describe("canReach — shortest witness", () => {
       context: {},
       initial: "start",
       states: {
-        // SHORT and LONG both reach `hub` in two events, SHORT first, but
-        // SHORT spends three depth on it: the decision's rejection fork costs
-        // a level its success branch records no event for. LONG reaches it
-        // second, at depth 2, with enough depth left to finish.
+        // SHORT and LONG both reach `hub` in two events, SHORT first. The
+        // decision's error fork is a sibling of its success branch, so
+        // SHORT reaches `hub` at depth 2, not 3, and finishes within
+        // maxDepth; LONG's revisit of `hub` at the same depth is skipped.
         start: { on: { SHORT: { target: "deciding" }, LONG: { target: "l1" } } },
         deciding: {
           invoke: {
@@ -572,7 +572,7 @@ describe("canReach — shortest witness", () => {
       maxDepth: 4,
       dedupeBy: (snapshot) => JSON.stringify(snapshot.value),
     });
-    expect(witness?.map((event) => event.type)).toEqual(["LONG", "GO", "GO", "GO"]);
+    expect(witness?.map((event) => event.type)).toEqual(["SHORT", "GO", "GO", "GO"]);
   });
 
   test("a path cap is reported only when it cut a branch", async () => {
@@ -757,5 +757,160 @@ describe("canReach — proof soundness", () => {
     });
     expect(await canReach(fork, "never", { maxNodes: 3 })).toMatchObject({ complete: true });
     expect(await canReach(fork, "never", { maxNodes: 2 })).toMatchObject({ complete: false });
+  });
+});
+
+describe("explorePaths — a decision with nothing it can take", () => {
+  // A refund desk whose closed choice offers only a refund over the limit:
+  // its guard refuses every option, so a live run exhausts the decision.
+  function createExhaustedDesk({ onError = true, open = false } = {}) {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: {
+        refund: z.object({ amount: z.number() }),
+        escalate: z.object({}),
+      },
+    });
+    return agent.createMachine({
+      context: {},
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: {
+            id: "decide",
+            src: "agent.decide",
+            input: () => ({
+              model: "quick",
+              prompt: "Refund?",
+              allowedEvents: ["refund", "escalate"] as const,
+              ...(open ? {} : { payloads: { refund: [{ amount: 80 }], escalate: [] } }),
+            }),
+            ...(onError ? { onError: { target: "failed" } } : {}),
+          },
+          on: {
+            refund: ({ event }) => (event.amount <= 50 ? { target: "refunded" } : undefined),
+            // Open choice: escalation is closed too, so no candidate is takeable.
+            escalate: () => (open ? undefined : { target: "escalated" }),
+          },
+        },
+        refunded: { type: "final" },
+        escalated: { type: "final" },
+        failed: { type: "final" },
+      },
+    });
+  }
+
+  test("a closed choice whose guards refuse every option reaches onError, as a live run does", async () => {
+    const machine = createExhaustedDesk();
+    expect(await canReach(machine, "failed")).toMatchObject({
+      reachable: true,
+      witness: [{ type: "xstate.error.actor.decide" }],
+    });
+    const report = await explorePaths(machine);
+    expect(report.prunedByGuard).toBe(1);
+    expect(report.terminals).toEqual([
+      expect.objectContaining({ status: "done", state: "failed" }),
+    ]);
+  });
+
+  test("an open choice whose guards refuse every candidate reaches onError", async () => {
+    const machine = createExhaustedDesk({ open: true });
+    expect(
+      await canReach(machine, "failed", { payloads: () => ({ refund: [{ amount: 80 }] }) }),
+    ).toMatchObject({ reachable: true, witness: [{ type: "xstate.error.actor.decide" }] });
+  });
+
+  test("with no onError, the exhausted decision is an error terminal", async () => {
+    const report = await explorePaths(createExhaustedDesk({ onError: false }));
+    expect(report.terminals).toEqual([
+      expect.objectContaining({ status: "error", path: [{ type: "xstate.error.actor.decide" }] }),
+    ]);
+  });
+
+  test("with an errors entry, the success branch spends one level, not two", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { GO: z.object({}) },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: {
+            id: "decide",
+            src: "agent.decide",
+            input: () => ({ model: "quick", prompt: "Go?", allowedEvents: ["GO"] as const }),
+            onError: { target: "failed" },
+          },
+          on: { GO: { target: "gone" } },
+        },
+        gone: { type: "final" },
+        failed: { type: "final" },
+      },
+    });
+    const report = await explorePaths(machine, {
+      errors: { "agent.decide": new Error("down") },
+      maxDepth: 1,
+    });
+    expect(report.terminals.map(({ status, state }) => ({ status, state }))).toEqual([
+      { status: "done", state: "failed" },
+      { status: "done", state: "gone" },
+    ]);
+  });
+});
+
+describe("explorePaths — event types with no schema", () => {
+  // A plain machine: no event schemas, so a type is applied as a bare `{ type }`.
+  function createPlainMachine(transition: "function" | "context" | "object") {
+    return createMachine({
+      initial: "idle",
+      states: {
+        idle: {
+          on: {
+            PAY:
+              transition === "function"
+                ? ({ event }: { event: { type: string; amount?: number } }) =>
+                    (event.amount ?? 0) > 0 ? { target: "paid" } : undefined
+                : transition === "context"
+                  ? {
+                      target: "paid",
+                      context: ({ event }: { event: { type: string; amount?: number } }) => ({
+                        amount: event.amount,
+                      }),
+                    }
+                  : { target: "paid" },
+          },
+        },
+        paid: { type: "final" },
+        never: {},
+      },
+    } as never);
+  }
+
+  test("a function transition could read the payload: the type is unexpanded", async () => {
+    const machine = createPlainMachine("function");
+    const report = await explorePaths(machine);
+    expect(report.unexpandedEvents).toEqual(["PAY"]);
+    expect(report.unexplored).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^unexpanded: event 'PAY' has no schema/)]),
+    );
+    expect(await canReach(machine, "paid")).toMatchObject({ reachable: false, complete: false });
+    // A payloads entry settles it.
+    expect(
+      await canReach(machine, "paid", { payloads: () => ({ PAY: [{ amount: 5 }] }) }),
+    ).toMatchObject({ reachable: true, witness: [{ type: "PAY", amount: 5 }] });
+  });
+
+  test("a context mapper could store the payload for a later guard: the type is unexpanded", async () => {
+    const report = await explorePaths(createPlainMachine("context"));
+    expect(report.unexpandedEvents).toEqual(["PAY"]);
+  });
+
+  test("an unguarded object transition cannot depend on the payload: complete", async () => {
+    const machine = createPlainMachine("object");
+    const report = await explorePaths(machine);
+    expect(report.unexpandedEvents).toEqual([]);
+    expect(await canReach(machine, "never")).toMatchObject({ reachable: false, complete: true });
   });
 });

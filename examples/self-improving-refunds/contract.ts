@@ -96,6 +96,7 @@ export const factsSchema = z.object({
   identityVerified: z.boolean(),
   /** null until LOOKUP_ORDER succeeds. */
   order: orderSchema.nullable(),
+  /** True when a human approved a refund of the loaded order's total. */
   approved: z.boolean(),
   /** Order ids that look like order ids in the ticket, pre-parsed by code. */
   orderIdCandidates: z.array(z.string()),

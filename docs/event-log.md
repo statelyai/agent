@@ -153,7 +153,7 @@ const branch = forkEventLog(entries, 8);
 A decider can need several tries: a choice the guard rejects, an option that was never offered, an unknown type, an invalid payload. Those failed attempts are what you improve a decider from, and the machine never consumed them, so they ride on the entry they explain:
 
 - An `agent.decide` invoke that lands after failed tries records them on the delivered event's entry as `entry.attempts`.
-- A decision that exhausts its retries records its `xstate.error.actor` entry with `event.error.attempts`.
+- A decision that exhausts its retries records its `xstate.error.actor` entry with `event.error.code: "decision-exhausted"` and `event.error.attempts`. `getDecisionAttempts` reads `attempts` only from an error with that code.
 - A first-try decision records nothing.
 
 Neither changes the fold: replay reads only `entry.event`, and the same log with the fields removed replays to the same state hash. Old logs without them replay unchanged, and `schemaVersion` stays `1`.

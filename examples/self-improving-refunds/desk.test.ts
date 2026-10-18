@@ -26,12 +26,13 @@ import {
   answerFromWorld,
   createDeskArm,
   createWorldActors,
+  deskSnapshotAt,
   factsOf,
   refundDeskMachine,
   refundDeskSchemas,
   runDeskEpisode,
 } from "./desk.js";
-import { rightPath } from "./test-doubles.js";
+import { facts, rightPath } from "./test-doubles.js";
 
 const scenario = (id: string): Scenario => SCENARIOS.find((s) => s.id === id)!;
 const inputOf = (s: Scenario) => ({ ticket: s.ticket, customerId: s.customerId });
@@ -47,7 +48,8 @@ const inputOf = (s: Scenario) => ({ ticket: s.ticket, customerId: s.customerId }
 // possible world, not only the sample one.
 //
 // `dedupeBy` explores each guard-relevant projection once: state, identity,
-// order, approval, turn, and customer. Every guard and choice reads only those
+// order, approval (`approved` is derived from approval and order), turn, and
+// customer. Every guard and choice reads only those
 // fields plus the proposal's own amount, which the monitor reads in the same
 // macrostep the guard admitted it (`checkingIssue` is a transient choice
 // state). So two snapshots with the same projection have the same futures,
@@ -56,11 +58,13 @@ const inputOf = (s: Scenario) => ({ ticket: s.ticket, customerId: s.customerId }
 // Every boundary the guards compare against: zero, the threshold on both
 // sides, and sample order totals on both sides.
 const AMOUNTS = [0, 1, 40, APPROVAL_THRESHOLD, APPROVAL_THRESHOLD + 0.01, 240, 240.01, 520, 10_000];
-const ORDER_IDS = ["ORD-1001", "ORD-1004", "ORD-9999"];
+const ORDER_IDS = ["ORD-1001", "ORD-1002", "ORD-1004", "ORD-9999"];
 
-// One order per guard-relevant class: under the threshold, over it, refunded.
+// One order per guard-relevant class: under the threshold, refunded, and two
+// over it, so an approval for one over-threshold order can meet the other.
+// The owner copies below give every customer both over-threshold orders.
 const SEARCH_ORDERS = ORDERS.filter((order) =>
-  ["ORD-1001", "ORD-1003", "ORD-1004"].includes(order.id),
+  ["ORD-1001", "ORD-1002", "ORD-1003", "ORD-1004"].includes(order.id),
 );
 const ORDER_OUTCOMES: (Order | null)[] = [
   null,
@@ -93,7 +97,7 @@ const projection = (snapshot: AnyMachineSnapshot) => {
     snapshot.value,
     c.identityVerified,
     c.order,
-    c.approved,
+    c.approval,
     c.turn,
     c.customerId,
   ]);
@@ -136,6 +140,42 @@ const brokenDesk = () => {
             !context.order.refunded &&
             event.amount > 0 &&
             event.amount <= context.order.total
+              ? {
+                  target: "checkingIssue",
+                  context: { pendingProposal: { type: "ISSUE_REFUND", amount: event.amount } },
+                }
+              : undefined,
+        },
+      },
+    },
+  } as never);
+};
+
+/**
+ * A copy of the desk whose ISSUE_REFUND guard checks the approved amount but
+ * not the order it was given for: the pre-fix bug, where an approval on one
+ * over-threshold order also paid out a second one.
+ */
+const anyOrderApprovalDesk = () => {
+  const config = refundDeskMachine.config as Record<string, any>;
+  return createMachine({
+    ...config,
+    schemas: refundDeskSchemas,
+    actors: createWorldActors({} as never),
+    states: {
+      ...config.states,
+      deciding: {
+        ...config.states.deciding,
+        on: {
+          ...config.states.deciding.on,
+          ISSUE_REFUND: ({ context, event }: { context: any; event: any }) =>
+            context.identityVerified &&
+            context.order &&
+            context.order.customerId === context.customerId &&
+            !context.order.refunded &&
+            event.amount > 0 &&
+            event.amount <= context.order.total &&
+            (event.amount <= context.approvalThreshold || context.approval?.amount === event.amount)
               ? {
                   target: "checkingIssue",
                   context: { pendingProposal: { type: "ISSUE_REFUND", amount: event.amount } },
@@ -216,6 +256,54 @@ describe("refund desk (the environment)", () => {
     },
     SEARCH_TIMEOUT_MS,
   );
+
+  test(
+    "a guard copy that accepts an approval given for another order IS caught",
+    async () => {
+      const leak = await canReach(
+        anyOrderApprovalDesk(),
+        "illegallyIssued",
+        proofOptions({ ticket: "Refund ORD-1002 please", customerId: "C-1" }),
+      );
+      expect(leak.reachable).toBe(true);
+      console.log(`any-order-approval witness: ${formatPath(leak.witness!)}`);
+      const types = leak.witness!.map((event) => event.type);
+      expect(types).toContain("APPROVE");
+      expect(types.filter((type) => type === "LOOKUP_ORDER")).toHaveLength(2);
+      expect(types.at(-1)).toBe("ISSUE_REFUND");
+    },
+    SEARCH_TIMEOUT_MS,
+  );
+
+  test("an approval covers only the order and amount it was given for", () => {
+    const second: Order = {
+      id: "ORD-1009",
+      customerId: "C-1",
+      total: 310,
+      refunded: false,
+      item: "Desk",
+    };
+    const at = (overrides: Partial<Parameters<typeof deskSnapshotAt>[0]>) =>
+      deskSnapshotAt({
+        ...facts({ order: second, orderIdCandidates: ["ORD-1002", "ORD-1009"] }),
+        pendingProposal: null,
+        identityClaim: "",
+        stopReason: "",
+        notice: "",
+        ...overrides,
+      });
+
+    // Approved for ORD-1002, now on ORD-1009: a stale `approved` fact pays nothing.
+    const elsewhere = at({ approved: true, approval: { orderId: "ORD-1002", amount: 240 } });
+    expect(elsewhere.can({ type: "ISSUE_REFUND", amount: 310 })).toBe(false);
+    expect(elsewhere.can({ type: "REQUEST_APPROVAL", amount: 310 })).toBe(true);
+
+    // Approved for ORD-1009 at $310: that payout only.
+    const here = at({ approved: true, approval: { orderId: "ORD-1009", amount: 310 } });
+    expect(here.can({ type: "ISSUE_REFUND", amount: 310 })).toBe(true);
+    expect(here.can({ type: "ISSUE_REFUND", amount: 200 })).toBe(false);
+    expect(here.can({ type: "REQUEST_APPROVAL", amount: 310 })).toBe(false);
+  });
 
   test(
     "issued IS reachable for small-clean, with a witness",

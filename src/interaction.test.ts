@@ -679,3 +679,42 @@ describe("getInteraction on a plain XState machine", () => {
     );
   });
 });
+
+describe("eventFromInteraction — choice labels", () => {
+  const machine = setup({
+    schemas: {
+      events: { PICK: z.object({ seat: z.number() }) },
+      meta: interactionMetaSchema,
+    },
+  }).createMachine({
+    initial: "waiting",
+    states: {
+      waiting: {
+        meta: {
+          interaction: {
+            label: "Pick",
+            choices: [
+              { label: "Window", event: { type: "PICK", seat: 1 } },
+              { label: "Window", event: { type: "PICK", seat: 2 } },
+              { label: "Aisle", event: { type: "PICK", seat: 3 } },
+            ],
+          },
+        },
+        on: { PICK: { target: "done" } },
+      },
+      done: { type: "final" },
+    },
+  });
+  const snapshot = createActor(machine).getSnapshot();
+
+  test("a repeated label throws, asking for an index", () => {
+    expect(() => eventFromInteraction(snapshot, { choice: "Window" })).toThrow(
+      /2 choices are labeled "Window" \(indexes 0, 1\); pass \{ choice: <index> \}/,
+    );
+    expect(eventFromInteraction(snapshot, { choice: 1 })).toEqual({ type: "PICK", seat: 2 });
+  });
+
+  test("a unique label still picks its choice", () => {
+    expect(eventFromInteraction(snapshot, { choice: "Aisle" })).toEqual({ type: "PICK", seat: 3 });
+  });
+});

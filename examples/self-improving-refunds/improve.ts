@@ -47,7 +47,7 @@ import {
   refundDeskMachine,
   rejectionsFromLog,
   trailFromLog,
-  type DeskContext,
+  type DeskProbeContext,
 } from "./desk.js";
 import {
   ajvCompileSchema,
@@ -302,7 +302,7 @@ const probeSnapshot = (facts: Facts) =>
     identityClaim: "",
     stopReason: "",
     notice: "",
-  } satisfies DeskContext);
+  } satisfies DeskProbeContext);
 
 /** The real desk's closed choice at each probe, as the playbook's input. */
 async function probeInputs(): Promise<unknown[]> {

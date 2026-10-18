@@ -5,7 +5,7 @@
 **Decision attempts in the event log.** The log now keeps the decision attempts the machine did not accept, on the entry they explain, so a decider can be improved from its traces:
 
 - An `agent.decide` invoke that lands after failed tries records them on the delivered event's entry as `entry.attempts`.
-- A decision that exhausts its retries keeps `attempts` on its `xstate.error.actor` entry's normalized `error`.
+- A decision that exhausts its retries keeps `code: "decision-exhausted"` and `attempts` on its `xstate.error.actor` entry's normalized `error`.
 - A host that decides with `decideNext` passes its `attempts` with the event: `runToQuiescence(runtime, { event, attempts })` (or `runAgent(machine, { event, attempts })`), or `runtime.transition(state, event, { attempts })` in a host-owned loop.
 - `getDecisionAttempts(entries)` in `@statelyai/agent/log` lists them as `{ index, eventType, attempts }[]`.
 

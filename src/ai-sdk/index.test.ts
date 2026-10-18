@@ -1501,6 +1501,21 @@ describe("createAiSdkExecutors — decision models in the models map", () => {
     ]);
   });
 
+  test("a retry renders the prior attempts into the question's instructions", async () => {
+    const { model, calls } = judge(["refund:99", "escalate"]);
+    const { decide } = createAiSdkExecutors({ models: { judge: model } });
+    const seen: AgentDecisionRequest[] = [];
+    await resolveDecision(request, {
+      decide: (attempt, info) => (seen.push(attempt), decide(attempt, info)),
+    });
+
+    const instructionsOf = (call: DecideCall) =>
+      (Object.values(call.questions)[0] as { instructions: string }).instructions;
+    expect(instructionsOf(calls[0]!)).toBe("You run a refund desk.\n\nWhat should the desk do?");
+    expect(instructionsOf(calls[1]!)).toContain(seen[1]!.attempts[0]!.reason);
+    expect(instructionsOf(calls[1]!)).toContain("Choose again from: refund:20, escalate");
+  });
+
   test("a request without options throws: decision models need a closed choice", async () => {
     const { model, calls } = judge("escalate");
     const { decide } = createAiSdkExecutors({ models: { judge: model } });

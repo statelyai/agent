@@ -98,7 +98,18 @@ const choiceSchema = z.object({
   style: z.string().optional(),
 });
 
+const approvalSchema = z
+  .object({ orderId: z.string(), amount: z.number() })
+  .nullable()
+  .describe("The human approval: the order and amount it was given for, or null");
+
 const contextSchema = factsSchema.extend({
+  /**
+   * What a human approved: one refund of `amount` on `orderId`. The guards
+   * read this, never `approved`, which is the decider-facing summary of it
+   * for the loaded order.
+   */
+  approval: approvalSchema,
   /** The proposal being carried out, read by the invoke and choice states. */
   pendingProposal: pendingProposalSchema,
   /** The identity claim awaiting verification. */
@@ -253,9 +264,24 @@ const sampleActors = createToolActors(sampleWorldOf);
 // ─── The invariants, as blocker functions (undefined = legal) ───
 
 type GuardFacts = Pick<
-  Facts,
-  "identityVerified" | "order" | "customerId" | "approved" | "approvalThreshold"
+  DeskContext,
+  "identityVerified" | "order" | "customerId" | "approval" | "approvalThreshold"
 >;
+
+/** True when the human approval is for the loaded order and exactly `amount`. */
+function approvalCovers(facts: Pick<GuardFacts, "order" | "approval">, amount: number): boolean {
+  return (
+    facts.order !== null &&
+    facts.approval !== null &&
+    facts.approval.orderId === facts.order.id &&
+    facts.approval.amount === amount
+  );
+}
+
+/** The `approved` fact: the approval covers a refund of the loaded order's total. */
+function approvedFact(facts: Pick<GuardFacts, "order" | "approval">): boolean {
+  return facts.order !== null && approvalCovers(facts, facts.order.total);
+}
 
 /** Why VERIFY_IDENTITY is illegal now, or undefined. */
 export function verifyBlocker(facts: GuardFacts): string | undefined {
@@ -266,7 +292,7 @@ export function verifyBlocker(facts: GuardFacts): string | undefined {
 export function approvalBlocker(facts: GuardFacts, amount: number): string | undefined {
   if (!facts.order) return "no order loaded";
   if (facts.order.customerId !== facts.customerId) return "order belongs to another customer";
-  if (facts.approved) return "already approved";
+  if (approvalCovers(facts, amount)) return "already approved";
   if (!(amount > facts.approvalThreshold)) {
     return `$${amount} is not over the $${facts.approvalThreshold} approval threshold`;
   }
@@ -281,8 +307,8 @@ export function issueBlocker(facts: GuardFacts, amount: number): string | undefi
   if (facts.order.refunded) return "order already refunded";
   if (!(amount > 0)) return "amount must be positive";
   if (amount > facts.order.total) return `$${amount} exceeds the $${facts.order.total} order total`;
-  if (amount > facts.approvalThreshold && !facts.approved) {
-    return `$${amount} is over $${facts.approvalThreshold} and not approved`;
+  if (amount > facts.approvalThreshold && !approvalCovers(facts, amount)) {
+    return `$${amount} is over $${facts.approvalThreshold} and not approved for ${facts.order.id}`;
   }
   return undefined;
 }
@@ -300,6 +326,7 @@ export const refundDeskMachine = deskSetup.createMachine({
     identityVerified: false,
     order: null,
     approved: false,
+    approval: null,
     orderIdCandidates: findOrderIds(input.ticket),
     customerReplies: [],
     rejections: [],
@@ -459,11 +486,19 @@ export const refundDeskMachine = deskSetup.createMachine({
           const orderId = context.pendingProposal?.orderId ?? "";
           const order = output ? orderSchema.parse(output) : null;
           return order
-            ? { target: "checkingBudget", context: { order, notice: `Loaded ${order.id}.` } }
+            ? {
+                target: "checkingBudget",
+                context: {
+                  order,
+                  approved: approvedFact({ order, approval: context.approval }),
+                  notice: `Loaded ${order.id}.`,
+                },
+              }
             : {
                 target: "checkingBudget",
                 context: {
                   order: null,
+                  approved: false,
                   rejections: [
                     ...context.rejections,
                     { proposal: "LOOKUP_ORDER", reason: `order ${orderId} not found` },
@@ -516,11 +551,21 @@ export const refundDeskMachine = deskSetup.createMachine({
         },
       },
       on: {
-        // The only writer of `approved`.
-        APPROVE: () => ({
-          target: "checkingBudget",
-          context: { approved: true, notice: "A human approved the refund." },
-        }),
+        // The only writer of `approval`: bound to the order and amount asked for.
+        APPROVE: ({ context }) => {
+          const approval = {
+            orderId: context.order?.id ?? "",
+            amount: context.pendingProposal?.amount ?? 0,
+          };
+          return {
+            target: "checkingBudget",
+            context: {
+              approval,
+              approved: approvedFact({ order: context.order, approval }),
+              notice: "A human approved the refund.",
+            },
+          };
+        },
         REJECT: ({ event }) => ({
           target: "closed",
           context: {
@@ -543,7 +588,10 @@ export const refundDeskMachine = deskSetup.createMachine({
           order !== null &&
           order.customerId === context.customerId &&
           !order.refunded &&
-          (amount <= context.approvalThreshold || context.approved);
+          (amount <= context.approvalThreshold ||
+            (context.approval !== null &&
+              context.approval.orderId === order.id &&
+              context.approval.amount === amount));
         return legal ? { target: "issuing" } : { target: "illegallyIssued" };
       },
     },
@@ -555,7 +603,7 @@ export const refundDeskMachine = deskSetup.createMachine({
           orderId: context.order?.id ?? "",
           amount: context.pendingProposal?.amount ?? 0,
           identityVerified: context.identityVerified,
-          approved: context.approved,
+          approved: approvalCovers(context, context.pendingProposal?.amount ?? 0),
         }),
         onDone: ({ context }) => ({
           target: "issued",
@@ -805,8 +853,25 @@ export function rejectionsFromLog(entries: readonly AgentLogEntry[]): number {
   return refused + failedChecks;
 }
 
-/** A desk snapshot idle in `deciding` with `context`: a probe for gates and tests. */
-export function deskSnapshotAt(context: DeskContext): DeskSnapshot {
+/** A probe's context: `approval` may be left out when `approved` says what it is. */
+export type DeskProbeContext = Omit<DeskContext, "approval"> &
+  Partial<Pick<DeskContext, "approval">>;
+
+/**
+ * A desk snapshot idle in `deciding` with `context`: a probe for gates and
+ * tests. Without an `approval`, `approved: true` stands for an approval of the
+ * loaded order's total.
+ */
+export function deskSnapshotAt(probe: DeskProbeContext): DeskSnapshot {
+  const context: DeskContext = {
+    ...probe,
+    approval:
+      probe.approval !== undefined
+        ? probe.approval
+        : probe.approved && probe.order
+          ? { orderId: probe.order.id, amount: probe.order.total }
+          : null,
+  };
   // resolveState runs no entry actions, so fill in this turn's choices here.
   return refundDeskMachine.resolveState({
     value: "deciding",

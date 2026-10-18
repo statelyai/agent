@@ -6,6 +6,7 @@ import {
   createDecisionLogic,
   type AgentDecisionExecutor,
   type AgentDecisionRequest,
+  type DecisionAttempt,
 } from "./decision.js";
 import {
   AGENT_EVENT_SCHEMA_VERSION,
@@ -315,5 +316,52 @@ describe("boundary decisions (decideNext) journaled by the host", () => {
     const result = await runtime.finish();
     expect(result.snapshot.value).toBe("reviewing");
     expect(result.events).toHaveLength(1);
+  });
+
+  test("runtime.transition copies attempts: mutating the caller's array leaves the entry", async () => {
+    const runtime = createAgentRuntime(desk);
+    const [state] = await runtime.start({});
+    const attempts: DecisionAttempt[] = [
+      {
+        failure: "unknown-event",
+        reason: "not offered",
+        event: { type: "desk.refund", amount: 999 },
+      },
+    ];
+    runtime.transition(state, { type: "desk.escalate" }, { attempts });
+    attempts.push({ failure: "unknown-event", reason: "added later", event: { type: "X" } });
+    attempts[0]!.reason = "rewritten";
+    (attempts[0]!.event as unknown as { amount: number }).amount = 1;
+
+    const result = await runtime.finish();
+    expect(result.events[result.events.length - 1]!.attempts).toEqual([
+      {
+        failure: "unknown-event",
+        reason: "not offered",
+        event: { type: "desk.refund", amount: 999 },
+      },
+    ]);
+  });
+
+  test("getDecisionAttempts ignores an unrelated actor error that carries attempts", () => {
+    const entries = [
+      {
+        schemaVersion: AGENT_EVENT_SCHEMA_VERSION,
+        id: "evt_00000001",
+        index: 1,
+        recordedAt: "2026-01-01T00:00:00.000Z",
+        machineId: "desk",
+        machineVersion: "1",
+        event: {
+          type: "xstate.error.actor.upload",
+          error: {
+            name: "UploadError",
+            message: "retry budget spent",
+            attempts: [{ failure: "unknown-event", reason: "not a decision" }],
+          },
+        },
+      },
+    ] as unknown as AgentLogEntry[];
+    expect(getDecisionAttempts(entries)).toEqual([]);
   });
 });

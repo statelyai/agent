@@ -52,7 +52,7 @@ Rules the runtime enforces. Each one maps to a build error or a lint diagnostic:
 
 - Every value is a JSON literal or a whole-string `"{{ }}"` expression reading a dot path on `input`, `context`, or `event`. No JavaScript.
 - Guard expressions are truthy-only: no comparisons, operators, or negation.
-- A model call is either a named `requests` entry invoked with `src: "<requestName>"`, or an inline invoke with `src: "agent.decide"` plus an `allowedEvents` list.
+- A model call is either a named `requests` entry invoked with `src: "<requestName>"`, or an inline invoke with `src: "agent.decide"` plus an `allowedEvents` list. A `requests` entry's templates read only its own `input` (`"{{ input.ticket }}"`); the invoke's `input` maps context into it.
 - A state invoking `agent.decide` MUST handle every allowed event in its `on`.
 - An `agent.decide` invoke has no `onDone` (a decision produces no output). Use `onError` for the retries-exhausted path.
 - A request invoke resolves with `{ result, messages }`, so `onDone.assign` reads its result from `"{{ event.output.result.<field> }}"` (`"{{ event.output.result }}"` for a plain-text request). A non-request `actors` invoke reads `"{{ event.output.<field> }}"` directly.
@@ -104,7 +104,7 @@ Reference config — decision, text request, idle human step, one final state:
     "draftReply": {
       "model": "openai/gpt-5.4-mini",
       "system": "Draft a short, courteous support reply.",
-      "prompt": "{{ context.ticket }}",
+      "prompt": "{{ input.ticket }}",
       "input": {
         "type": "object",
         "properties": { "ticket": { "type": "string" } },
@@ -222,6 +222,8 @@ const result = await verifyAgentConfig(candidate, {
   explore: {
     inputs: [{ ticket: "Export downloads a 0-byte CSV on Safari." }],
     outputs: { draftReply: [{ reply: "" }] },
+    // ESCALATE's `reason` is a free-form string: give exploration one to try.
+    payloads: () => ({ ESCALATE: [{ reason: "needs a human" }] }),
   },
 });
 // result.ok, result.gates, result.config (after validate), result.machine (after lower)
@@ -277,7 +279,8 @@ const dryRun = await simulateAgent(machine, {
 const report = await explorePaths(machine, {
   input: { ticket: "" },
   outputs: { draftReply: [{ reply: "" }] },
-});
+  payloads: () => ({ ESCALATE: [{ reason: "needs a human" }] }),
+}); // report.unexpandedEvents lists types that still need a payloads entry
 ```
 
 The lint check that bites most often is `decide-without-events`: an `allowedEvents` list with no matching `on` transitions. Do not disable checks.

@@ -130,7 +130,13 @@ const verified = await verifyAgentConfig(candidate, {
   explore: {
     inputs: probeInputs,
     terminals: ["done"],
-    outputs: { classifyTicket: [{ isRefundRequest: true, confidence: 0.9 }] },
+    // Both outcomes, so the branches on either side of the classifier are probed.
+    outputs: {
+      classifyTicket: [
+        { isRefundRequest: true, confidence: 0.9 },
+        { isRefundRequest: false, confidence: 0.9 },
+      ],
+    },
     errors: { classifyTicket: new Error("down") },
   },
 });

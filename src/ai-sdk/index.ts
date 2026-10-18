@@ -26,7 +26,11 @@ import {
   type ProviderStructuredOutput,
 } from "../text-logic.js";
 import { AgentTruncatedError } from "../errors.js";
-import { decisionOptionIds, type AgentDecisionRequest } from "../decision.js";
+import {
+  decisionOptionIds,
+  renderDecisionAttempts,
+  type AgentDecisionRequest,
+} from "../decision.js";
 import { isRecord } from "../internal/is-record.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
 import {
@@ -563,9 +567,12 @@ async function decideWithDecisionModel(
       option.description ?? JSON.stringify(option.event),
     ]),
   );
-  const instructions =
+  // A retry carries the earlier failures, so the model can choose differently.
+  const instructions = [
     [request.system, request.prompt].filter(Boolean).join("\n\n") ||
-    "Which option should happen next?";
+      "Which option should happen next?",
+    ...renderDecisionAttempts(request).map((message) => message.content as string),
+  ].join("\n\n");
 
   const ask = () =>
     experimental_decide({

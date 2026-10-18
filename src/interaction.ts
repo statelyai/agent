@@ -365,7 +365,7 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
  *   metadata win over user fields.
  * - `{ text }` — free text, placed in the `textEvent` field.
  * - `{ choice }` — a payload choice, by its index in `getInteraction(snapshot).choices`
- *   or by its label.
+ *   or by its label. A label that several choices share throws; pass the index.
  */
 export function eventFromInteraction<TSnapshot extends AnyMachineSnapshot>(
   snapshot: TSnapshot,
@@ -386,8 +386,19 @@ export function eventFromInteraction<TSnapshot extends AnyMachineSnapshot>(
   if (!("type" in choice) && "choice" in choice) {
     const choices = interaction.choices ?? [];
     const key = choice.choice;
-    const picked =
-      typeof key === "number" ? choices[key] : choices.find(({ label }) => label === key);
+    const labeled =
+      typeof key === "number"
+        ? []
+        : choices.flatMap((candidate, index) => (candidate.label === key ? [index] : []));
+    if (labeled.length > 1) {
+      throw new AgentInvalidEventPayloadError(
+        "(choice)",
+        `${labeled.length} choices are labeled ${JSON.stringify(key)} (indexes ${labeled.join(
+          ", ",
+        )}); pass { choice: <index> } to pick one.`,
+      );
+    }
+    const picked = typeof key === "number" ? choices[key] : choices[labeled[0] ?? -1];
     if (!picked) {
       throw new AgentInvalidEventPayloadError(
         "(choice)",

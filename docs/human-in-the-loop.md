@@ -91,7 +91,7 @@ deciding: {
 - Each event is checked against the machine's event schema and `snapshot.can(event)`. Only the choices the machine takes right now are listed.
 - `choices` is present only when the state declares `choices`. The `events` list is unchanged.
 
-Convert a pressed button back with its index in `choices`, or its label:
+Convert a pressed button back with its index in `choices`, or its label. A label that several listed choices share throws; pass the index instead:
 
 ```ts no-check
 const first = eventFromInteraction(paused.snapshot, { choice: 0 });
