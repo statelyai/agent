@@ -19,6 +19,7 @@ generating ─▶ verifying ─────────────────�
 - **Objective** (`bench.ts`), scored from the final state: shipped with hidden tests passing = 1 (a person's approval counts as a ship, so its hidden tests run too), a correctly escalated novel task = 1, an escalated resolvable task = 0.5 (a person's reject or no answer scores as the escalation), shipped with hidden tests failing = 0, minus 0.05 per round.
 - **Tasks** (`tasks.ts`, `fixtures/`): eight tiny modules (`clamp`, `slugify`, `chunk`, `parse-duration`, `round-half`, `truncate`, `capitalize-words`, `merge-config`), each with visible tests (run every round) and hidden tests (run only by the objective). `round-half` and `merge-config` have a spec that contradicts their visible tests, so the right move is to escalate.
 - **Improve** (`improve.ts`): reflect on the train traces, gate the candidate with `verifyAgentConfig` and a probe of the real triage boundary, replay train and held-out, and promote only on a strict objective gain with no violation.
+- **Before** (`before.ts`): the same factory as a hand-rolled `while` loop, the starting point of [Part 2 of Migrating from a hand-rolled loop](../../docs/from-a-loop.md#part-2-a-factory-loop-that-improves).
 
 ## Tests
 
