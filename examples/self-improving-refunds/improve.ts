@@ -198,7 +198,13 @@ async function trainTraces(
   if (!store.listThreads) {
     throw new Error("improvePlaybook: the event-log store must implement listThreads.");
   }
-  const { threadIds } = await store.listThreads({ prefix });
+  const threadIds: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await store.listThreads({ prefix, ...(cursor ? { cursor } : {}) });
+    threadIds.push(...page.threadIds);
+    cursor = page.cursor;
+  } while (cursor);
   const episodes: string[] = [];
   for (const threadId of threadIds) {
     const entries = await store.read(threadId);
