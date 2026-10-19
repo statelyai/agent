@@ -1461,9 +1461,19 @@ function explore(
         ? request.events.flatMap((descriptor) =>
             variantsOf(descriptor.type, snapshot, table, requestOptions),
           )
-        : getAcceptedEvents(snapshot).flatMap((descriptor) =>
-            variantsOf(descriptor.type, snapshot, table),
-          );
+        : getAcceptedEvents(snapshot).flatMap((descriptor) => {
+            // An explorer table that lists no payload for a type the wait
+            // accepts skips that type: the search no longer covers it.
+            if (table[descriptor.type]?.length === 0) {
+              unexpanded.add(descriptor.type);
+              unexplored.push(
+                `skipped: payloads lists no ${descriptor.type} at path [${path
+                  .map((e) => e.type)
+                  .join(", ")}], so its branches were not explored`,
+              );
+            }
+            return variantsOf(descriptor.type, snapshot, table);
+          });
 
     // An idle wait with nothing to accept ends the branch. A decision with
     // nothing to choose does not: it exhausts, below.
@@ -1494,6 +1504,23 @@ function explore(
       const next = transitionAgentStep(machine, settled, event);
       recordState(next.snapshot);
       yield { step: next, path: [...path, event], depth: depth + 1 };
+    }
+
+    // An idle wait whose every offered event the guards refuse: a live run
+    // would sit here, but more likely the payload table offered nothing the
+    // machine accepts. Record the wait and list the types as unexpanded, so
+    // the search is not a proof until the table covers an accepted payload.
+    if (request?.kind !== "decision" && taken === 0 && witness === undefined && !capped()) {
+      pathsExplored++;
+      terminals.push({ status: "idle", path, state: settled.snapshot.value });
+      const refused = [...new Set(branchEvents.map((event) => event.type))];
+      for (const type of refused) unexpanded.add(type);
+      unexplored.push(
+        `stuck: every offered ${refused.join(", ")} event at path [${path
+          .map((e) => e.type)
+          .join(", ")}] was refused by the machine's guards; add a payloads entry it accepts`,
+      );
+      return;
     }
 
     // A decision none of whose candidates the snapshot takes fails at run time

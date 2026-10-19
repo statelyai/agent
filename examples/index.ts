@@ -340,6 +340,17 @@ export {
   runDeskEpisode,
   runSelfImprovingRefundsExample,
 } from "./self-improving-refunds/index.js";
+export {
+  codeReviewLoopMachine,
+  improvePolicy as improveCodeReviewPolicy,
+  runCodeReviewLoopExample,
+} from "./code-review-loop/index.js";
+export {
+  improvePolicy as improveTicTacToePolicy,
+  provePolicy as proveTicTacToePolicy,
+  runTicTacToeExample,
+  ticTacToeMachine,
+} from "./tic-tac-toe/index.js";
 
 // --- Statechart policies ----------------------------------------------------
 

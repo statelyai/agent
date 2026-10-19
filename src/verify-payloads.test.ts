@@ -914,3 +914,53 @@ describe("explorePaths — event types with no schema", () => {
     expect(await canReach(machine, "never")).toMatchObject({ reachable: false, complete: true });
   });
 });
+
+describe("explorePaths — a wait whose every offered event is refused", () => {
+  const board = createMachine({
+    context: { taken: [0] as number[] },
+    initial: "waiting",
+    states: {
+      waiting: {
+        on: {
+          PLAY: ({ context, event }) =>
+            context.taken.includes((event as unknown as { cell: number }).cell)
+              ? undefined
+              : { target: "lost" },
+        },
+      },
+      lost: { type: "final" },
+    },
+  });
+
+  test("is recorded and leaves the proof incomplete", async () => {
+    const result = await canReach(board, "lost", { payloads: () => ({ PLAY: [{ cell: 0 }] }) });
+    expect(result).toMatchObject({ reachable: false, complete: false });
+    const report = await explorePaths(board, { payloads: () => ({ PLAY: [{ cell: 0 }] }) });
+    expect(report.unexpandedEvents).toEqual(["PLAY"]);
+    expect(report.terminals).toEqual([expect.objectContaining({ status: "idle" })]);
+  });
+
+  test("an accepted payload alongside a refused one is a normal search", async () => {
+    const result = await canReach(board, "lost", {
+      payloads: () => ({ PLAY: [{ cell: 0 }, { cell: 1 }] }),
+    });
+    expect(result).toMatchObject({ reachable: true, complete: true });
+  });
+});
+
+describe("explorePaths — an explorer payload list that is empty at a wait", () => {
+  const machine = createMachine({
+    initial: "waiting",
+    states: {
+      waiting: { on: { PLAY: { target: "played" } } },
+      played: { type: "final" },
+    },
+  });
+
+  test("skips the type and leaves the proof incomplete", async () => {
+    const result = await canReach(machine, "played", { payloads: () => ({ PLAY: [] }) });
+    expect(result).toMatchObject({ reachable: false, complete: false });
+    const report = await explorePaths(machine, { payloads: () => ({ PLAY: [] }) });
+    expect(report.unexpandedEvents).toEqual(["PLAY"]);
+  });
+});

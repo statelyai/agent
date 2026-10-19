@@ -1,0 +1,33 @@
+{
+  "id": "review-policy-v0",
+  "description": "Naive policy: RETRY with all the feedback whenever a retry is offered, until the round cap; escalate only when a retry is not offered.",
+  "schemas": {
+    "context": {
+      "type": "object",
+      "properties": {
+        "facts": { "type": "object" },
+        "proposal": { "type": ["object", "null"] }
+      },
+      "required": ["facts"]
+    }
+  },
+  "context": { "facts": "{{ input }}", "proposal": null },
+  "initial": "triage",
+  "states": {
+    "triage": {
+      "type": "choice",
+      "choice": [
+        {
+          "guard": "{{ context.facts.retry.all }}",
+          "target": "done",
+          "assign": { "proposal": "{{ context.facts.retry.all }}" }
+        },
+        {
+          "target": "done",
+          "assign": { "proposal": { "type": "ESCALATE", "reason": "repeated failures" } }
+        }
+      ]
+    },
+    "done": { "type": "final", "output": "{{ context.proposal }}" }
+  }
+}
