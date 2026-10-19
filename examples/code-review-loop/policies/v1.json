@@ -1,0 +1,89 @@
+{
+  "id": "review-policy-v1",
+  "description": "Escalate early when the review says the task itself is broken (classifyIssue), retry with targeted feedback otherwise: the failing tests when checks failed, the review when they passed.",
+  "schemas": {
+    "context": {
+      "type": "object",
+      "properties": {
+        "facts": { "type": "object" },
+        "novel": { "type": "boolean" },
+        "proposal": { "type": ["object", "null"] }
+      },
+      "required": ["facts"]
+    }
+  },
+  "context": { "facts": "{{ input }}", "novel": false, "proposal": null },
+  "initial": "triage",
+  "states": {
+    "triage": {
+      "type": "choice",
+      "choice": [
+        { "guard": "{{ context.facts.retry.all }}", "target": "inspecting" },
+        {
+          "guard": "{{ context.facts.unattributedFailure }}",
+          "target": "done",
+          "assign": { "proposal": { "type": "ESCALATE", "reason": "repeated failures" } }
+        },
+        {
+          "target": "done",
+          "assign": {
+            "proposal": { "type": "ESCALATE", "reason": "spec is ambiguous or contradictory" }
+          }
+        }
+      ]
+    },
+    "inspecting": {
+      "type": "choice",
+      "choice": [
+        { "guard": "{{ context.facts.issues.0 }}", "target": "classifying" },
+        { "target": "retrying" }
+      ]
+    },
+    "classifying": {
+      "invoke": {
+        "id": "classify",
+        "src": "classifyIssue",
+        "input": {
+          "issues": "{{ context.facts.issues }}",
+          "concerns": "{{ context.facts.concerns }}",
+          "failingTests": "{{ context.facts.failingTests }}"
+        },
+        "onDone": { "target": "routing", "assign": { "novel": "{{ event.output.novel }}" } },
+        "onError": { "target": "retrying" }
+      }
+    },
+    "routing": {
+      "type": "choice",
+      "choice": [
+        {
+          "guard": "{{ context.novel }}",
+          "target": "done",
+          "assign": {
+            "proposal": { "type": "ESCALATE", "reason": "spec is ambiguous or contradictory" }
+          }
+        },
+        { "target": "retrying" }
+      ]
+    },
+    "retrying": {
+      "type": "choice",
+      "choice": [
+        {
+          "guard": "{{ context.facts.retry.tests }}",
+          "target": "done",
+          "assign": { "proposal": "{{ context.facts.retry.tests }}" }
+        },
+        {
+          "guard": "{{ context.facts.retry.review }}",
+          "target": "done",
+          "assign": { "proposal": "{{ context.facts.retry.review }}" }
+        },
+        {
+          "target": "done",
+          "assign": { "proposal": "{{ context.facts.retry.all }}" }
+        }
+      ]
+    },
+    "done": { "type": "final", "output": "{{ context.proposal }}" }
+  }
+}

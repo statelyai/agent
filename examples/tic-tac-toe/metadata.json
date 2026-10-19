@@ -1,0 +1,21 @@
+{
+  "name": "tic-tac-toe",
+  "title": "Tic-tac-toe (a policy climbs to a never-lose proof)",
+  "kind": "evaluation",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository after the jevspresso pattern (the machine knows nothing about AI; an agent plugs in at the boundary and picks among accepted events): a plain XState game, player O decided by decideNext over the empty cells, a JSON policy over low-level board features, canReach proving the policy never loses to any opponent, and a gated hill climb from 'first empty cell' to a proven policy.",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["raw LLM player", "LLM self-play evals", "hand-coded minimax"],
+    "purpose": "The game is a plain XState machine with no agent code; O plays at the boundary through decideNext, offered only empty cells. O's strategy is a JSON policy over low-level board features, and canReach over every X move proves whether it can ever lose: v0 (first empty cell) is refuted with a five-move witness, and the climb's last policy is proven with complete: true in tens of milliseconds. Each round reflects on the shortest losing games and the journaled match, passes verifyAgentConfig and a feature allow-list, and is promoted only when the objective (losing lines, then wins, then size) rises. In the demo a person plays both sides, one button per empty cell."
+  },
+  "starters": [
+    {
+      "label": "New game (you play X and O)",
+      "input": {}
+    }
+  ],
+  "machine": "ticTacToeMachine"
+}

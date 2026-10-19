@@ -1,0 +1,20 @@
+{
+  "name": "code-review-loop",
+  "title": "Code-review loop (environment fixed, triage policy learned)",
+  "kind": "evaluation",
+  "origin": {
+    "type": "stately-agent",
+    "source": "Created in this repository from a maintainer's diagram: generate, self-verify in parallel with an independent review, run automated checks, then ship, retry, or ask a person. The loop is a fixed machine with a sentinel proven unreachable; the triage decision is a JSON policy improved from event-log traces against a ground-truth objective with hidden tests. Runs on Claude Code headless.",
+    "url": null
+  },
+  "comparison": {
+    "targets": ["raw agent loop", "LangGraph"],
+    "purpose": "An author writes a file, then self-checks it while a separate reviewer reviews it, and the task's visible tests run. A patch ships only when the checks pass and the reviewer approves, which canReach proves for every author, reviewer, and test result. Otherwise a JSON policy picks one legal option: retry with targeted feedback, or escalate. Escalated tasks wait for a person to ship as-is, request changes, or reject. Try the contradictory spec to see escalation."
+  },
+  "starters": [
+    { "label": "clamp (simple)", "input": { "taskId": "clamp" } },
+    { "label": "slugify (needs a retry)", "input": { "taskId": "slugify" } },
+    { "label": "round-half (spec contradicts its tests)", "input": { "taskId": "round-half" } }
+  ],
+  "machine": "codeReviewLoopMachine"
+}

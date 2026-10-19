@@ -1,0 +1,4 @@
+# Traces written by run.ts, one directory per run.
+.traces/
+# A policy promoted locally by `run.ts --improve`.
+policies/current.json

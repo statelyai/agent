@@ -1,0 +1,17 @@
+{
+  "id": "ttt-policy-v0",
+  "description": "Naive policy: play the first empty cell.",
+  "context": { "facts": "{{ input }}" },
+  "initial": "choosing",
+  "states": {
+    "choosing": {
+      "type": "choice",
+      "choice": [{ "target": "firstEmpty" }]
+    },
+    "firstEmpty": {
+      "type": "final",
+      "description": "The lowest empty cell.",
+      "output": { "type": "O.play", "cell": "{{ context.facts.empty.0 }}" }
+    }
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "id": "ttt-policy-optimal",
+  "description": "Hand-written reference (Newell and Simon order): win, block, fork, force a block away from their fork, block their fork, center, opposite corner, corner, edge. Tests only: never shown to the improver.",
+  "context": {
+    "facts": "{{ input }}"
+  },
+  "initial": "choosing",
+  "states": {
+    "choosing": {
+      "type": "choice",
+      "choice": [
+        {
+          "guard": "{{ context.facts.completesMyLine.length }}",
+          "target": "win"
+        },
+        {
+          "guard": "{{ context.facts.completesTheirLine.length }}",
+          "target": "block"
+        },
+        {
+          "guard": "{{ context.facts.createsMyFork.length }}",
+          "target": "fork"
+        },
+        {
+          "guard": "{{ context.facts.forcesSafeBlock.length }}",
+          "target": "force"
+        },
+        {
+          "guard": "{{ context.facts.createsTheirFork.length }}",
+          "target": "blockFork"
+        },
+        {
+          "guard": "{{ context.facts.center.length }}",
+          "target": "center"
+        },
+        {
+          "guard": "{{ context.facts.oppositeCornerOfTheirs.length }}",
+          "target": "oppositeCorner"
+        },
+        {
+          "guard": "{{ context.facts.corners.length }}",
+          "target": "corner"
+        },
+        {
+          "guard": "{{ context.facts.edges.length }}",
+          "target": "edge"
+        },
+        {
+          "target": "firstEmpty"
+        }
+      ]
+    },
+    "win": {
+      "type": "final",
+      "description": "Complete my line.",
+      "output": {
+        "type": "O.play",
+        "cell": "{{ context.facts.completesMyLine.0 }}"
+      }
+    },
+    "block": {
+      "type": "final",
+      "description": "Block their line.",
+      "output": {
+        "type": "O.play",
+        "cell": "{{ context.facts.completesTheirLine.0 }}"
+      }
+    },
+    "fork": {
+      "type": "final",
+      "description": "Make two threats at once.",
+      "output": {
+        "type": "O.play",
+        "cell": "{{ context.facts.createsMyFork.0 }}"
+      }
+    },
+    "force": {
+      "type": "final",
+      "description": "Block a fork by forcing: make a threat whose block gives them no fork.",
+      "output": {
+        "type": "O.play",
+        "cell": "{{ context.facts.forcesSafeBlock.0 }}"
+      }
+    },
+    "blockFork": {
+      "type": "final",
+      "description": "Take their fork cell.",
+      "output": {
+        "type": "O.play",
+        "cell": "{{ context.facts.createsTheirFork.0 }}"
+      }
+    },
+    "center": {
+      "type": "final",
+      "description": "Take the center.",
+      "output": {
+        "type": "O.play",
+        "cell": "{{ context.facts.center.0 }}"
+      }
+    },
+    "oppositeCorner": {
+      "type": "final",
+      "description": "Take the corner opposite theirs.",
+      "output": {
+        "type": "O.play",
+        "cell": "{{ context.facts.oppositeCornerOfTheirs.0 }}"
+      }
+    },
+    "corner": {
+      "type": "final",
+      "description": "Take an empty corner.",
+      "output": {
+        "type": "O.play",
+        "cell": "{{ context.facts.corners.0 }}"
+      }
+    },
+    "edge": {
+      "type": "final",
+      "description": "Take an empty edge.",
+      "output": {
+        "type": "O.play",
+        "cell": "{{ context.facts.edges.0 }}"
+      }
+    },
+    "firstEmpty": {
+      "type": "final",
+      "description": "The lowest empty cell.",
+      "output": {
+        "type": "O.play",
+        "cell": "{{ context.facts.empty.0 }}"
+      }
+    }
+  }
+}
