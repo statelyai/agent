@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { createActor, createMachine, type AnyStateMachine } from "xstate";
+import { createActor, createMachine, setup, type AnyStateMachine } from "xstate";
+import { interactionMetaSchema } from "@statelyai/agent";
 import { z } from "zod";
 import { startScenarioRun } from "./agent-runner";
 import { getExampleMachine } from "./example-library.server";
@@ -433,5 +434,92 @@ describe("run limits (cancel + time budget)", () => {
       controller.signal,
     );
     expect(result.status).toBe("error");
+  });
+});
+
+describe("meta.interaction payload choices", () => {
+  const machine = setup({
+    schemas: {
+      context: z.object({ seats: z.array(z.unknown()) }),
+      events: {
+        ACCUSE: z.object({ seat: z.number() }),
+        PASS: z.object({}),
+        SAY: z.object({ message: z.string(), loud: z.boolean().optional() }),
+      },
+      meta: interactionMetaSchema,
+    },
+  }).createMachine({
+    context: {
+      seats: [
+        { label: "Seat 1", event: { type: "ACCUSE", seat: 1 }, style: "danger" },
+        { label: "Seat 2", event: { type: "ACCUSE", seat: 2 } },
+        // The guard below refuses seat 9.
+        { label: "Seat 9", event: { type: "ACCUSE", seat: 9 } },
+      ],
+    },
+    initial: "voting",
+    states: {
+      voting: {
+        meta: {
+          interaction: {
+            label: "Who is it?",
+            choices: "seats",
+            textEvent: { type: "SAY", field: "message" },
+          },
+        },
+        on: {
+          ACCUSE: ({ event }) => (event.seat <= 3 ? { target: "done" } : undefined),
+          PASS: { target: "done" },
+          SAY: { target: "voting" },
+        },
+      },
+      done: { type: "final" },
+    },
+  });
+  const idle = describeIdle(machine, createActor(machine).start().getSnapshot() as never);
+
+  test("lists accepted choices as full events and marks the types they cover", () => {
+    expect(idle.choices).toEqual([
+      { label: "Seat 1", style: "danger", event: { type: "ACCUSE", seat: 1 } },
+      { label: "Seat 2", style: "default", event: { type: "ACCUSE", seat: 2 } },
+    ]);
+    expect(idle.events.find((event) => event.type === "ACCUSE")?.coveredByChoices).toBe(true);
+    expect(idle.events.find((event) => event.type === "PASS")?.coveredByChoices).toBeUndefined();
+  });
+
+  test("a type whose choices are all refused keeps its generic form", () => {
+    const refused = setup({
+      schemas: { events: { ACCUSE: z.object({ seat: z.number() }) }, meta: interactionMetaSchema },
+    }).createMachine({
+      initial: "voting",
+      states: {
+        voting: {
+          meta: {
+            interaction: { choices: [{ label: "Seat 9", event: { type: "ACCUSE", seat: 9 } }] },
+          },
+          on: { ACCUSE: ({ event }) => (event.seat <= 3 ? { target: "done" } : undefined) },
+        },
+        done: { type: "final" },
+      },
+    });
+    const refusedIdle = describeIdle(refused, createActor(refused).start().getSnapshot() as never);
+    expect(refusedIdle.choices).toEqual([]);
+    expect(
+      refusedIdle.events.find((event) => event.type === "ACCUSE")?.coveredByChoices,
+    ).toBeUndefined();
+  });
+
+  test("the textEvent field form names the field free text fills", () => {
+    expect(idle.textEvent).toEqual({ type: "SAY", field: "message" });
+  });
+
+  test("states without choices carry none", () => {
+    const plain = createMachine({
+      initial: "waiting",
+      states: { waiting: { meta: { interaction: { label: "?" } }, on: { GO: "waiting" } } },
+    } as never) as AnyStateMachine;
+    expect(describeIdle(plain, createActor(plain).start().getSnapshot() as never).choices).toBe(
+      undefined,
+    );
   });
 });

@@ -67,3 +67,69 @@ describe("createInMemoryEventLogStore", () => {
     ).rejects.toThrowError(/RFC 3339/);
   });
 });
+
+describe("createInMemoryEventLogStore listThreads", () => {
+  async function storeWith(threadIds: string[]) {
+    const store = createInMemoryEventLogStore();
+    for (const threadId of threadIds) {
+      await store.append({ threadId, expectedIndex: 0, entries: [testEntry(0, "start")] });
+    }
+    return store;
+  }
+
+  test("lists non-empty threads sorted, with no cursor when nothing remains", async () => {
+    const store = await storeWith(["b", "a", "c"]);
+    await store.fork({ threadId: "a", newThreadId: "a-fork" });
+    expect(await store.listThreads!()).toEqual({ threadIds: ["a", "a-fork", "b", "c"] });
+  });
+
+  test("filters by prefix", async () => {
+    const store = await storeWith(["refunds:1", "refunds:2", "billing:1"]);
+    expect((await store.listThreads!({ prefix: "refunds:" })).threadIds).toEqual([
+      "refunds:1",
+      "refunds:2",
+    ]);
+    expect((await store.listThreads!({ prefix: "nope" })).threadIds).toEqual([]);
+  });
+
+  test("pages with limit and cursor", async () => {
+    const store = await storeWith(["t1", "t2", "t3", "t4", "t5"]);
+    const first = await store.listThreads!({ limit: 2 });
+    expect(first.threadIds).toEqual(["t1", "t2"]);
+    const second = await store.listThreads!({ limit: 2, cursor: first.cursor });
+    expect(second.threadIds).toEqual(["t3", "t4"]);
+    const third = await store.listThreads!({ limit: 2, cursor: second.cursor });
+    expect(third).toEqual({ threadIds: ["t5"] });
+  });
+
+  test("a thread appended after a page was read still shows up on a later page", async () => {
+    const store = await storeWith(["a", "c"]);
+    const first = await store.listThreads!({ limit: 1 });
+    await store.append({ threadId: "b", expectedIndex: 0, entries: [testEntry(0, "start")] });
+    expect((await store.listThreads!({ cursor: first.cursor })).threadIds).toEqual(["b", "c"]);
+  });
+
+  test("rejects a non-positive or fractional limit", async () => {
+    const store = await storeWith(["a"]);
+    await expect(store.listThreads!({ limit: 0 })).rejects.toThrowError(/positive integer/);
+    await expect(store.listThreads!({ limit: 1.5 })).rejects.toThrowError(/positive integer/);
+  });
+
+  test("conformance passes for a store without the optional listThreads", async () => {
+    const withoutListThreads = () => {
+      const { listThreads: _listThreads, ...rest } = createInMemoryEventLogStore();
+      return rest;
+    };
+    await expect(assertEventLogStoreConformance(withoutListThreads)).resolves.toBeUndefined();
+  });
+
+  test("conformance fails a listThreads that ignores limit", async () => {
+    const ignoresLimit = () => {
+      const store = createInMemoryEventLogStore();
+      return { ...store, listThreads: () => store.listThreads!() };
+    };
+    await expect(assertEventLogStoreConformance(ignoresLimit)).rejects.toThrowError(
+      /must honor limit 2/,
+    );
+  });
+});

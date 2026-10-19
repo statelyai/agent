@@ -1,11 +1,15 @@
 import {
+  experimental_decide,
   generateText as aiGenerateText,
+  InvalidResponseDataError,
   NoObjectGeneratedError,
   Output,
   streamText as aiStreamText,
   stepCountIs,
+  type Experimental_DecisionModel,
   type FinishReason,
   type FlexibleSchema,
+  type JSONValue,
   type LanguageModel,
   type ModelMessage,
   type ToolSet,
@@ -22,7 +26,12 @@ import {
   type ProviderStructuredOutput,
 } from "../text-logic.js";
 import { AgentTruncatedError } from "../errors.js";
-import type { AgentDecisionRequest } from "../decision.js";
+import {
+  decisionOptionIds,
+  renderDecisionAttempts,
+  type AgentDecisionRequest,
+} from "../decision.js";
+import { isRecord } from "../internal/is-record.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
 import {
   defined,
@@ -33,7 +42,10 @@ import {
   toAiSdkCallSettings,
   toAiSdkGenerationSettings,
   toAiSdkEventTools,
+  toAiSdkOptionTool,
+  fromAiSdkOptionCall,
   toDecisionMessages,
+  unofferedOption,
   type AiSdkCallUsage,
 } from "./mappers.js";
 
@@ -48,14 +60,30 @@ function maxStepsSetting(request: AgentTextRequest): { stopWhen?: ReturnType<typ
 // ─── createAiSdkExecutors ───
 
 /**
- * One entry in an {@link AiSdkModelMap}: a bare `LanguageModel`, or a model
- * paired with the {@link AiSdkCallSettings} that ref always runs with. The
- * paired form is how a host gives a ref a persona — `deep` thinks harder than
- * `quick` — without the machine naming a provider knob.
+ * One entry in an {@link AiSdkModelMap}: a bare `LanguageModel`, a model
+ * paired with the {@link AiSdkCallSettings} that ref always runs with, or an
+ * AI SDK decision model. The paired form is how a host gives a ref a persona —
+ * `deep` thinks harder than `quick` — without the machine naming a provider knob.
+ *
+ * A decision model (such as `typeSafeAi.decisionModel('jev-latest')`) answers
+ * `decide` requests that carry a closed choice (`options`) through
+ * `experimental_decide`. Text requests need a language model.
  */
 export type AiSdkModelEntry =
   | LanguageModel
+  | AiSdkDecisionModel
   | { model: LanguageModel; settings?: AiSdkCallSettings };
+
+// A decision model object (`doDecide`, or the deprecated `doEvaluate`). A
+// string entry stays a language model id.
+type AiSdkDecisionModel = Exclude<Experimental_DecisionModel, string>;
+
+function isDecisionModel(model: unknown): model is AiSdkDecisionModel {
+  return (
+    isRecord(model) &&
+    (typeof model.doDecide === "function" || typeof model.doEvaluate === "function")
+  );
+}
 
 /**
  * Splits a portable `"provider/model-id"` model ref (the convention JSON
@@ -124,11 +152,11 @@ export type CreateAiSdkExecutorsOptions<TModels extends AiSdkModelMap = AiSdkMod
 } & (
   | {
       models: TModels;
-      resolveModel?: (modelRef: keyof TModels & string) => LanguageModel;
+      resolveModel?: (modelRef: keyof TModels & string) => LanguageModel | AiSdkDecisionModel;
     }
   | {
       models?: TModels;
-      resolveModel: (modelRef: string) => LanguageModel;
+      resolveModel: (modelRef: string) => LanguageModel | AiSdkDecisionModel;
     }
 );
 
@@ -141,11 +169,11 @@ function callSettings<TModels extends AiSdkModelMap>(
   return (typeof settings === "function" ? settings(request) : settings) ?? {};
 }
 
-// Resolves a text/decision request's `model` ref to an AI SDK LanguageModel via `resolveModel` (if given) or a `models` lookup.
+// Resolves a text/decision request's `model` ref to an AI SDK model via `resolveModel` (if given) or a `models` lookup.
 function resolveAiSdkModel<TModels extends AiSdkModelMap>(
   options: CreateAiSdkExecutorsOptions<TModels>,
   modelRef: string,
-): { model: LanguageModel; settings?: AiSdkCallSettings } {
+): { model: LanguageModel | AiSdkDecisionModel; settings?: AiSdkCallSettings } {
   if (options.resolveModel) {
     return { model: options.resolveModel(modelRef as keyof TModels & string) };
   }
@@ -162,12 +190,32 @@ function resolveAiSdkModel<TModels extends AiSdkModelMap>(
   return isModelWithSettings(entry) ? entry : { model: entry };
 }
 
+// A text request's language model. A decision model cannot write text.
+function resolveLanguageModel<TModels extends AiSdkModelMap>(
+  options: CreateAiSdkExecutorsOptions<TModels>,
+  request: AgentTextRequest,
+): { model: LanguageModel; settings?: AiSdkCallSettings } {
+  const { model, settings } = resolveAiSdkModel(options, request.model);
+  if (isDecisionModel(model)) {
+    throw new Error(
+      `createAiSdkExecutors: model '${request.model}' is a decision model, which only answers ` +
+        `decide requests with options; text request '${request.name ?? "(unnamed)"}' needs a ` +
+        "language model.",
+    );
+  }
+  return { model, ...(settings ? { settings } : {}) };
+}
+
 /**
  * The `LanguageModel` inside a map entry, whichever form it takes. `AiSdkModelMap`
  * widens its return to {@link AiSdkModelMap}, so reading an entry out of the map
- * to hand to a raw AI SDK call needs this to get past the union.
+ * to hand to a raw AI SDK call needs this to get past the union. Throws for a
+ * decision model.
  */
 export function toLanguageModel(entry: AiSdkModelEntry): LanguageModel {
+  if (isDecisionModel(entry)) {
+    throw new TypeError("toLanguageModel: the entry is a decision model, not a language model.");
+  }
   return isModelWithSettings(entry) ? entry.model : entry;
 }
 
@@ -249,7 +297,10 @@ export type AiSdkDecideResult = {
   event: ChosenEvent;
   /** This attempt's usage; aggregated into the run result's `AgentUsage`. */
   usage: AiSdkCallUsage;
+  /** `'stop'` for a decision model, which reports no finish reason. */
   finishReason: FinishReason;
+  /** A decision model's confidence in the chosen option, when it reports one. */
+  confidence?: number;
 };
 
 /** `createAiSdkExecutors` always populates all three slots (unlike the
@@ -326,7 +377,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,
   ): Promise<AiSdkGenerateResult> => {
-    const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
+    const { model, settings: modelSettings } = resolveLanguageModel(options, request);
     const common = {
       model,
       abortSignal: info?.signal,
@@ -404,7 +455,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,
   ) => {
-    const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
+    const { model, settings: modelSettings } = resolveLanguageModel(options, request);
     const result = aiStreamText({
       model,
       abortSignal: info?.signal,
@@ -429,7 +480,11 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
 
   const decide = async (request: AgentDecisionRequest, info?: AgentRequestExecutorInfo) => {
     const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
-    const tools = toAiSdkEventTools(request.events);
+    if (isDecisionModel(model)) return decideWithDecisionModel(model, request, info);
+    // A closed choice (`request.options`) is ONE tool over an enum of option
+    // ids; otherwise one tool per candidate event.
+    const choice = request.options ? toAiSdkOptionTool(request.options) : undefined;
+    const tools = choice ? choice.tools : toAiSdkEventTools(request.events);
     const messages = toDecisionMessages(request);
 
     const result = await aiGenerateText({
@@ -450,6 +505,13 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const toolCall = result.toolCalls[0];
     if (!toolCall) {
       throw new Error("createAiSdkExecutors: decide — model did not call an event tool.");
+    }
+    if (choice) {
+      return {
+        event: fromAiSdkOptionCall(toolCall, request.options!, choice.ids),
+        usage: toAgentCallUsage(result.usage),
+        finishReason: result.finishReason,
+      } satisfies AiSdkDecideResult;
     }
     const chosenEvent = request.events.find((event) => event.toolName === toolCall.toolName);
     if (!chosenEvent) {
@@ -474,4 +536,115 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
   };
 
   return { generateText, streamText, decide };
+}
+
+// ─── Decision models ───
+
+/** The question id a decision model's closed choice is asked under. */
+const DECISION_QUESTION_ID = "next";
+
+// Asks a decision model ONE `choice` question over the request's options: each
+// option id is a label, its description the criterion (the event as JSON when
+// it has none). The answer maps back to `option.event`. Host `settings` apply
+// to language models only.
+async function decideWithDecisionModel(
+  model: AiSdkDecisionModel,
+  request: AgentDecisionRequest,
+  info: AgentRequestExecutorInfo | undefined,
+): Promise<AiSdkDecideResult> {
+  const offered = request.options;
+  if (!offered?.length) {
+    throw new Error(
+      `createAiSdkExecutors: decision '${request.name ?? "(unnamed)"}' uses decision model ` +
+        `'${request.model}', which needs a closed choice: pass \`payloads\` on agent.decide, ` +
+        "or use decideNext.",
+    );
+  }
+  const ids = decisionOptionIds(offered);
+  const criteria = Object.fromEntries(
+    offered.map((option, index) => [
+      ids[index]!,
+      option.description ?? JSON.stringify(option.event),
+    ]),
+  );
+  // A retry carries the earlier failures, so the model can choose differently.
+  const instructions = [
+    [request.system, request.prompt].filter(Boolean).join("\n\n") ||
+      "Which option should happen next?",
+    ...renderDecisionAttempts(request).map((message) => message.content as string),
+  ].join("\n\n");
+
+  const ask = () =>
+    experimental_decide({
+      model,
+      state: toDecisionState(request.input),
+      questions: { [DECISION_QUESTION_ID]: { type: "choice" as const, instructions, criteria } },
+      ...(info?.signal ? { abortSignal: info.signal } : {}),
+    });
+  let result: Awaited<ReturnType<typeof ask>>;
+  try {
+    result = await ask();
+  } catch (error) {
+    // The SDK throws on a label that is not an option; answer with an event
+    // no candidate has instead, so the choice is retried.
+    const chosen = unofferedChoice(error, ids);
+    if (chosen === undefined) throw error;
+    return decisionResult(unofferedOption(`option ${JSON.stringify(chosen)}`, ids));
+  }
+
+  const answer = result.answers[DECISION_QUESTION_ID]!;
+  const option = offered[ids.indexOf(answer.choice)];
+  if (!option) {
+    return decisionResult(unofferedOption(`option ${JSON.stringify(answer.choice)}`, ids));
+  }
+  const reported = (
+    result.providerMetadata?.typesafe?.confidence as Record<string, unknown> | undefined
+  )?.[DECISION_QUESTION_ID];
+  const confidence =
+    typeof reported === "number" ? reported : answer.probabilities?.[answer.choice];
+  return decisionResult(option.event, result.usage, confidence);
+}
+
+function decisionResult(
+  event: ChosenEvent,
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } = {},
+  confidence?: number,
+): AiSdkDecideResult {
+  return {
+    event,
+    usage: toAgentCallUsage({
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens: usage.totalTokens,
+      inputTokenDetails: {
+        noCacheTokens: undefined,
+        cacheReadTokens: undefined,
+        cacheWriteTokens: undefined,
+      },
+      outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+    }),
+    finishReason: "stop",
+    ...(confidence !== undefined ? { confidence } : {}),
+  };
+}
+
+// The label of an `InvalidResponseDataError` whose choice is not an offered id.
+function unofferedChoice(error: unknown, ids: readonly string[]): string | undefined {
+  if (!InvalidResponseDataError.isInstance(error) || !isRecord(error.data)) return undefined;
+  const answer = error.data[DECISION_QUESTION_ID];
+  const choice = isRecord(answer) ? answer.choice : undefined;
+  return typeof choice === "string" && !ids.includes(choice) ? choice : undefined;
+}
+
+type JSONObject = { [key: string]: JSONValue };
+
+// A decision model takes a string or a JSON object as its state.
+function toDecisionState(value: unknown): string | JSONObject {
+  if (typeof value === "string") return value;
+  try {
+    const json: unknown = JSON.parse(JSON.stringify(value ?? {}));
+    return isRecord(json) ? (json as JSONObject) : { value: json as JSONValue };
+  } catch {
+    return String(value);
+  }
 }

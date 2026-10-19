@@ -1,4 +1,4 @@
-import type { AnyMachineSnapshot, EventObject } from "xstate";
+import type { AnyMachineSnapshot, AnyStateMachine, EventObject } from "xstate";
 import {
   AgentInvalidEventPayloadError,
   getAcceptedEvents,
@@ -17,11 +17,34 @@ export interface AgentInteractionEvent<TType extends string = string> {
   event?: Record<string, unknown>;
 }
 
+/** One payload choice {@link getInteraction} resolved: a label and the full event it sends. */
+export interface AgentInteractionChoice<TEvent extends EventObject = EventObject> {
+  label: string;
+  event: TEvent;
+  style?: string;
+}
+
 export interface AgentInteraction<TEvent extends EventObject = EventObject> {
   label: string;
   events: AgentInteractionEvent<TEvent["type"]>[];
+  /**
+   * Payload choices from `choices`, each a full event the snapshot accepts
+   * right now. Present when the state declares `choices`.
+   */
+  choices?: AgentInteractionChoice<TEvent>[];
   /** Event type used for a free-text response. */
   textEvent?: TEvent["type"];
+  /** The `textEvent` field the text fills, when it is not `text`. */
+  textField?: string;
+}
+
+/** One payload choice as authored in `meta.interaction.choices`, inline or in a context array. */
+export interface AgentInteractionChoiceMeta<TEvent extends string = string> {
+  /** Button text. `{path.to.field}` interpolates from the context. */
+  label: string;
+  /** The full event the choice sends. */
+  event: { type: TEvent; [key: string]: unknown };
+  style?: string;
 }
 
 /**
@@ -46,7 +69,17 @@ export interface AgentInteractionDescriptor<TEvent extends string = string> {
   /** Label text, or a function of the machine context. `{path.to.field}` interpolates. */
   label?: string | ((args: { context: any }) => string);
   events?: { [K in TEvent]?: AgentInteractionEventMeta };
-  textEvent?: TEvent;
+  /**
+   * Payload choices: one button per full event, such as one per seat or per
+   * amount. A string is a context path to an array of the same shape,
+   * computed at runtime.
+   */
+  choices?: AgentInteractionChoiceMeta<TEvent>[] | string;
+  /**
+   * The free-text event. A bare type puts the text in a `text` field;
+   * `{ type, field }` names the field.
+   */
+  textEvent?: TEvent | { type: TEvent; field: string };
 }
 
 /**
@@ -84,11 +117,37 @@ function validateEventMeta(value: unknown, path: (string | number)[]) {
   return issues;
 }
 
+// Validates one payload choice, authored statically or read from context.
+function validateChoice(value: unknown, path: (string | number)[]) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [issue("Expected a { label, event } choice", path)];
+  }
+  const choice = value as Record<string, unknown>;
+  const issues = [];
+  if (typeof choice["label"] !== "string") {
+    issues.push(issue("Expected a string", [...path, "label"]));
+  }
+  if (choice["style"] !== undefined && typeof choice["style"] !== "string") {
+    issues.push(issue("Expected a string", [...path, "style"]));
+  }
+  const event = choice["event"];
+  if (
+    !event ||
+    typeof event !== "object" ||
+    Array.isArray(event) ||
+    typeof (event as { type?: unknown }).type !== "string"
+  ) {
+    issues.push(issue("Expected an event object with a string `type`", [...path, "event"]));
+  }
+  return issues;
+}
+
 /**
  * A {@link StandardSchemaV1} for the state metadata {@link getInteraction}
  * reads: an object whose optional `interaction` declares a `label` (a string
  * with `{context.path}` interpolation, or a function of the context), an
- * `events` map of choices, and a `textEvent` for free-text answers. This is
+ * `events` map of choices, payload `choices` (an array, or a context path to
+ * one), and a `textEvent` (a type, or `{ type, field }`) for free-text answers. This is
  * the default `meta` type `setupAgent` gives a machine; pass it to
  * `createAgentSchemas({ meta: interactionMetaSchema })` only when building a
  * schema pack by hand.
@@ -124,8 +183,33 @@ export const interactionMetaSchema: StandardSchemaV1<AgentInteractionMeta> = {
           }
         }
       }
-      if (descriptor["textEvent"] !== undefined && typeof descriptor["textEvent"] !== "string") {
-        issues.push(issue("Expected a string", ["interaction", "textEvent"]));
+      const choices = descriptor["choices"];
+      if (choices !== undefined && typeof choices !== "string") {
+        if (!Array.isArray(choices)) {
+          issues.push(
+            issue("Expected an array of choices or a context path string", [
+              "interaction",
+              "choices",
+            ]),
+          );
+        } else {
+          choices.forEach((choice, index) => {
+            issues.push(...validateChoice(choice, ["interaction", "choices", index]));
+          });
+        }
+      }
+      const textEvent = descriptor["textEvent"];
+      if (
+        textEvent !== undefined &&
+        typeof textEvent !== "string" &&
+        !(
+          textEvent &&
+          typeof textEvent === "object" &&
+          typeof (textEvent as { type?: unknown }).type === "string" &&
+          typeof (textEvent as { field?: unknown }).field === "string"
+        )
+      ) {
+        issues.push(issue("Expected a string or { type, field }", ["interaction", "textEvent"]));
       }
       return issues.length > 0 ? { issues } : { value: value as AgentInteractionMeta };
     },
@@ -159,6 +243,20 @@ function interpolate(label: string, context: unknown, preserveWhitespace: boolea
   return preserveWhitespace ? interpolated : interpolated.replace(/\s+/g, " ").trim();
 }
 
+// The event schemas to judge payloads with: the pack `setupAgent` registered,
+// else a plain machine's own `schemas.events`.
+function eventSchemasOf(snapshot: AnyMachineSnapshot) {
+  const machine = (snapshot as { machine?: AnyStateMachine }).machine;
+  return (getAgentExecutionOptions(machine)?.schemas?.events ??
+    (machine?.schemas as { events?: Record<string, StandardSchemaV1> } | undefined)?.events) as
+    | Record<string, StandardSchemaV1>
+    | undefined;
+}
+
+function isChoice(value: unknown): value is AgentInteractionChoiceMeta {
+  return validateChoice(value, []).length === 0;
+}
+
 /** Reads the active state's interaction metadata and filters it through the
  * events XState currently accepts. Returns `undefined` when none is declared. */
 export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
@@ -170,9 +268,9 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
   if (!interaction) return undefined;
 
   const preserveWhitespace = options.preserveWhitespace ?? false;
-  // The event schemas `setupAgent` registered on this machine, so a choice's
-  // fixed payload can be judged complete before the guard is consulted.
-  const schemas = getAgentExecutionOptions((snapshot as { machine?: object }).machine)?.schemas;
+  // The machine's event schemas, so a choice's fixed payload can be judged
+  // complete before the guard is consulted.
+  const eventSchemas = eventSchemasOf(snapshot);
   const accepted = new Set(getAcceptedEvents(snapshot).map((event) => event.type));
   const label =
     typeof interaction.label === "function"
@@ -198,7 +296,11 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
     // its payload is not known yet.
     .filter(([type, descriptor]) => {
       try {
-        const complete = parseAgentEvent(snapshot, { ...descriptor.event, type }, { schemas });
+        const complete = parseAgentEvent(
+          snapshot,
+          { ...descriptor.event, type },
+          { events: eventSchemas },
+        );
         return snapshot.can(complete as never);
       } catch {
         // Either the payload is incomplete for the schema, or no schema is
@@ -216,20 +318,61 @@ export function getInteraction<TSnapshot extends AnyMachineSnapshot>(
       };
     });
 
+  // Payload choices carry their whole event, so each one is judged exactly:
+  // a payload the schema refuses, or an event the machine would not take
+  // right now, is left out.
+  const declaresChoices = interaction.choices !== undefined;
+  const declared =
+    typeof interaction.choices === "string"
+      ? readPath(snapshot.context, interaction.choices)
+      : interaction.choices;
+  const choices = (Array.isArray(declared) ? (declared as unknown[]) : [])
+    .filter(isChoice)
+    .filter((choice) => {
+      try {
+        const event = parseAgentEvent(snapshot, choice.event, { events: eventSchemas });
+        return snapshot.can(event as never);
+      } catch {
+        return false;
+      }
+    })
+    .map((choice) => ({
+      label: interpolate(choice.label, snapshot.context, preserveWhitespace),
+      event: choice.event,
+      ...(choice.style ? { style: choice.style } : {}),
+    }));
+
+  const text =
+    typeof interaction.textEvent === "string"
+      ? { type: interaction.textEvent, field: "text" }
+      : interaction.textEvent;
+
   return {
     label: interpolate(label, snapshot.context, preserveWhitespace),
     events,
-    ...(interaction.textEvent && accepted.has(interaction.textEvent)
-      ? { textEvent: interaction.textEvent }
+    ...(declaresChoices ? { choices } : {}),
+    ...(text && accepted.has(text.type)
+      ? { textEvent: text.type, ...(text.field !== "text" ? { textField: text.field } : {}) }
       : {}),
   } as AgentInteraction<EventFromSnapshot<TSnapshot>>;
 }
 
-/** Converts a rendered interaction choice back into a schema-validated machine
- * event. Fixed fields declared in metadata are merged before user fields. */
+/**
+ * Converts a rendered interaction answer back into a schema-validated machine
+ * event:
+ *
+ * - `{ type, ...fields }` — an `events` choice; fixed fields declared in
+ *   metadata win over user fields.
+ * - `{ text }` — free text, placed in the `textEvent` field.
+ * - `{ choice }` — a payload choice, by its index in `getInteraction(snapshot).choices`
+ *   or by its label. A label that several choices share throws; pass the index.
+ */
 export function eventFromInteraction<TSnapshot extends AnyMachineSnapshot>(
   snapshot: TSnapshot,
-  choice: ({ type: string } & Record<string, unknown>) | { text: string },
+  choice:
+    | ({ type: string } & Record<string, unknown>)
+    | { text: string }
+    | { choice: number | string },
 ): EventFromSnapshot<TSnapshot> {
   const interaction = getInteraction(snapshot);
   if (!interaction) {
@@ -240,7 +383,32 @@ export function eventFromInteraction<TSnapshot extends AnyMachineSnapshot>(
   }
 
   let event: { type: string } & Record<string, unknown>;
-  if ("text" in choice) {
+  if (!("type" in choice) && "choice" in choice) {
+    const choices = interaction.choices ?? [];
+    const key = choice.choice;
+    const labeled =
+      typeof key === "number"
+        ? []
+        : choices.flatMap((candidate, index) => (candidate.label === key ? [index] : []));
+    if (labeled.length > 1) {
+      throw new AgentInvalidEventPayloadError(
+        "(choice)",
+        `${labeled.length} choices are labeled ${JSON.stringify(key)} (indexes ${labeled.join(
+          ", ",
+        )}); pass { choice: <index> } to pick one.`,
+      );
+    }
+    const picked = typeof key === "number" ? choices[key] : choices[labeled[0] ?? -1];
+    if (!picked) {
+      throw new AgentInvalidEventPayloadError(
+        "(choice)",
+        `this interaction offers no choice ${JSON.stringify(key)}. Choices: ${
+          choices.map(({ label }) => JSON.stringify(label)).join(", ") || "(none)"
+        }.`,
+      );
+    }
+    event = { ...picked.event };
+  } else if ("text" in choice) {
     if (!interaction.textEvent) {
       throw new AgentInvalidEventPayloadError(
         "(text)",
@@ -249,7 +417,7 @@ export function eventFromInteraction<TSnapshot extends AnyMachineSnapshot>(
         }.`,
       );
     }
-    event = { type: interaction.textEvent, text: choice.text };
+    event = { type: interaction.textEvent, [interaction.textField ?? "text"]: choice.text };
   } else {
     const descriptor = interaction.events.find(({ type }) => type === choice.type);
     if (!descriptor) {
@@ -263,5 +431,7 @@ export function eventFromInteraction<TSnapshot extends AnyMachineSnapshot>(
     event = { ...choice, ...descriptor.event, type: choice.type };
   }
 
-  return parseAgentEvent(snapshot, event) as EventFromSnapshot<TSnapshot>;
+  return parseAgentEvent(snapshot, event, {
+    events: eventSchemasOf(snapshot),
+  }) as EventFromSnapshot<TSnapshot>;
 }

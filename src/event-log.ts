@@ -24,6 +24,7 @@ import {
   type Snapshot,
   type SnapshotFrom,
 } from "xstate";
+import type { DecisionAttempt } from "./decision.js";
 import { AgentError } from "./errors.js";
 import { AGENT_USAGE_EVENT_TYPE } from "./usage.js";
 import { AGENT_USAGE_TOKEN_FIELDS, type AgentCallUsage } from "./text-logic.js";
@@ -82,6 +83,15 @@ export interface AgentLogEntry {
   metadata?: Record<string, JsonValue>;
   /** Recorded projection hash used by replay verification. */
   verification?: AgentLogVerification;
+  /**
+   * The decision attempts the machine did NOT accept before this entry's
+   * event landed (guard rejections, non-offered options, unknown types,
+   * invalid payloads), in the order they were made, when a decider
+   * (`agent.decide`, or a host using `decideNext`) needed more than one try.
+   * Omitted when there are none. Replay-ignored: it explains the entry, it
+   * does not change the fold.
+   */
+  attempts?: DecisionAttempt[];
 }
 
 /** The payload of the reserved {@link AGENT_INIT_EVENT_TYPE} first entry. */
@@ -313,11 +323,59 @@ export function assertAgentLogEntry(entry: unknown): asserts entry is AgentLogEn
       "Agent event entry.verification requires a non-empty stateHash string.",
     );
   }
+  if (candidate.attempts !== undefined) {
+    assertLogAttempts(candidate.attempts);
+  }
+}
+
+function assertLogAttempts(attempts: unknown): asserts attempts is DecisionAttempt[] {
+  if (
+    !Array.isArray(attempts) ||
+    !attempts.every(
+      (attempt) =>
+        attempt !== null &&
+        typeof attempt === "object" &&
+        typeof (attempt as { failure?: unknown }).failure === "string" &&
+        typeof (attempt as { reason?: unknown }).reason === "string",
+    )
+  ) {
+    throw new AgentEventLogError(
+      "Agent event entry.attempts requires an array of { failure, reason } objects.",
+    );
+  }
+}
+
+/**
+ * Whether `value` survives the log's JSON rules. Diagnostic fields the runtime
+ * records on its own (decision attempts) are dropped rather than failing the
+ * entry they explain.
+ */
+function isJsonSerializable(value: unknown): boolean {
+  try {
+    assertJsonSerializable(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The decision-exhausted error's `attempts`, when JSON-safe. Duck-typed on the
+ * error code: `decision.ts` imports this module, so importing the class here
+ * would be a cycle.
+ */
+const DECISION_EXHAUSTED_CODE = "decision-exhausted";
+
+function exhaustedAttemptsOf(error: Error): unknown[] | undefined {
+  if ((error as { code?: unknown }).code !== DECISION_EXHAUSTED_CODE) return undefined;
+  const attempts = (error as { attempts?: unknown }).attempts;
+  return Array.isArray(attempts) && isJsonSerializable(attempts) ? attempts : undefined;
 }
 
 /**
  * Replaces `Error` instances with plain `{ name, message, cause? }` objects so
- * an `xstate.error.actor` payload survives the log's JSON round-trip. Cycles
+ * an `xstate.error.actor` payload survives the log's JSON round-trip. A
+ * decision-exhausted error also keeps its `code` and `attempts`. Cycles
  * are preserved by identity; non-plain objects are left alone (and are then
  * rejected by {@link assertJsonSerializable}).
  */
@@ -332,6 +390,12 @@ function normalizeEventErrors(
     };
     seen.set(value, normalized);
     if (value.cause !== undefined) normalized.cause = normalizeEventErrors(value.cause, seen);
+    if ((value as { code?: unknown }).code === DECISION_EXHAUSTED_CODE) {
+      // The discriminator getDecisionAttempts requires before it reads `attempts`.
+      normalized.code = DECISION_EXHAUSTED_CODE;
+      const attempts = exhaustedAttemptsOf(value);
+      if (attempts !== undefined) normalized.attempts = structuredClone(attempts);
+    }
     return normalized;
   }
   if (value === null || typeof value !== "object") return value;
@@ -510,6 +574,8 @@ export interface CreateReplayEntryOptions {
   recordedAt?: string;
   causationId?: string;
   metadata?: Record<string, JsonValue>;
+  /** Rejected decision attempts that preceded `event`; omitted when empty. */
+  attempts?: DecisionAttempt[];
   /** Record `verification.stateHash` (default `true`). */
   verification?: boolean;
   /**
@@ -570,8 +636,14 @@ export function createReplayEntry(
     event: normalizeDoneActorEvent(normalizeEventErrors(event) as EventObject),
     ...(options.causationId !== undefined ? { causationId: options.causationId } : {}),
     ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
+    ...(options.attempts !== undefined && options.attempts.length > 0
+      ? { attempts: options.attempts }
+      : {}),
   };
   assertAgentLogEntry(entry);
+  // Copied once validated as JSON: a host that later mutates its array must
+  // not change the journaled entry.
+  if (entry.attempts !== undefined) entry.attempts = structuredClone(entry.attempts);
   if (options.verification !== false) {
     const persisted = options.snapshot
       ? toPersisted(machine, options.snapshot)
@@ -837,6 +909,58 @@ export function getUsageFromEvents(
     }
   }
   return totals;
+}
+
+/** One entry's rejected decision attempts, as {@link getDecisionAttempts} returns them. */
+export interface AgentLogDecisionAttempts {
+  /** The entry's `index` in the log. */
+  index: number;
+  /**
+   * The entry's event type: the event the attempts preceded, or an
+   * `xstate.error.actor.*` type when the decision exhausted its retries.
+   */
+  eventType: string;
+  attempts: DecisionAttempt[];
+}
+
+/**
+ * The decision attempts a log recorded but the machine never accepted, in log
+ * order — the input for improving a decider from its traces. Two sources:
+ *
+ * - `entry.attempts`: the failed tries before the entry's event landed.
+ * - An `xstate.error.actor.*` entry whose `error` is a decision-exhausted
+ *   error (`code: "decision-exhausted"`) that kept its `attempts`: every try
+ *   failed. Another actor error's `attempts` field is not read.
+ *
+ * Entries with neither are skipped.
+ */
+export function getDecisionAttempts(entries: readonly AgentLogEntry[]): AgentLogDecisionAttempts[] {
+  const found: AgentLogDecisionAttempts[] = [];
+  for (const entry of entries) {
+    const { type } = entry.event;
+    if (entry.attempts !== undefined && entry.attempts.length > 0) {
+      found.push({ index: entry.index, eventType: type, attempts: entry.attempts });
+      continue;
+    }
+    if (type.startsWith(ERROR_ACTOR_EVENT_TYPE)) {
+      const error = (entry.event as { error?: unknown }).error as
+        | { code?: unknown; attempts?: unknown }
+        | null
+        | undefined;
+      if (
+        error?.code === DECISION_EXHAUSTED_CODE &&
+        Array.isArray(error.attempts) &&
+        error.attempts.length > 0
+      ) {
+        found.push({
+          index: entry.index,
+          eventType: type,
+          attempts: error.attempts as DecisionAttempt[],
+        });
+      }
+    }
+  }
+  return found;
 }
 
 // --- Replay ----------------------------------------------------------------

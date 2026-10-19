@@ -7,12 +7,13 @@
  * - Payload schemas are converted to JSON Schema (Standard Schema
  *   `~standard.jsonSchema`, falling back to Zod's `z.toJSONSchema`) so the
  *   client can generate a form.
- * - Optional `meta.interaction` hints (label / events / textEvent) refine the
+ * - Optional `meta.interaction` hints (label / events / choices / textEvent) refine the
  *   presentation — see `machine-ui.ts` for the convention.
  */
 import {
   getAcceptedEvents,
   getAgentSchemas,
+  getInteraction,
   getStateMeta,
   parseAgentEvent,
   createAgentRuntime,
@@ -35,6 +36,7 @@ import {
   singleStringField,
   type AcceptedEvent,
   type ChatIdle,
+  type InteractionChoice,
   type Json,
   type JsonObject,
   type PendingTimer,
@@ -423,7 +425,10 @@ type InteractionHints = {
   label?: string | ((args: { context: unknown }) => string);
   /** A bare label string, or a descriptor (see `AgentInteractionEventMeta`). */
   events?: Record<string, string | InteractionEventHint>;
-  textEvent?: string;
+  /** Payload choices: full events, inline or a context path to an array of them. */
+  choices?: { event?: { type?: unknown } }[] | string;
+  /** An event type (text fills its single string field), or `{ type, field }`. */
+  textEvent?: string | { type: string; field: string };
   /** Custom composer renderer for this state ("rating", "cards", …). */
   component?: string;
 };
@@ -514,6 +519,17 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
   const schemas = machineSchemas(machine);
   const hints = interactionHints(snapshot);
 
+  // Payload choices, resolved and filtered through `snapshot.can` by the
+  // library: each is a full event, so it renders as a plain button.
+  const interaction = hints.choices !== undefined ? getInteraction(snapshot) : undefined;
+  const choices: InteractionChoice[] | undefined = interaction?.choices?.map((choice) => ({
+    label: choice.label,
+    style: choice.style === "primary" || choice.style === "danger" ? choice.style : "default",
+    event: choice.event as InteractionChoice["event"],
+  }));
+  // Only a type with at least one offered choice drops its generic form.
+  const covered = new Set(choices?.map((choice) => choice.event.type));
+
   const events: AcceptedEvent[] = getAcceptedEvents(snapshot, {
     events: schemas.events as never,
   })
@@ -531,6 +547,7 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
         style: hint.style === "primary" || hint.style === "danger" ? hint.style : "default",
         jsonSchema,
         needsPayload: schemaNeedsPayload(jsonSchema),
+        ...(covered.has(descriptor.type) ? { coveredByChoices: true } : {}),
       } satisfies AcceptedEvent;
     })
     // `getAcceptedEvents` lists the transitions a state declares; it does not
@@ -544,14 +561,18 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
         snapshot.can({ ...fixedFields(hints, event.type), type: event.type } as never),
     );
 
-  // Free text maps to the declared textEvent, or — when unambiguous — the one
-  // accepted event whose payload is exactly one string field.
-  const declared = hints.textEvent
-    ? events.find((event) => event.type === hints.textEvent)
+  // Free text maps to the declared textEvent (its named field, else its single
+  // string field), or — when unambiguous — the one accepted event whose
+  // payload is exactly one string field.
+  const declaredText =
+    typeof hints.textEvent === "string" ? { type: hints.textEvent, field: null } : hints.textEvent;
+  const declared = declaredText
+    ? events.find((event) => event.type === declaredText.type)
     : undefined;
   const inferable = events.filter((event) => singleStringField(event.jsonSchema));
   const chosen = declared ?? (inferable.length === 1 ? inferable[0] : undefined);
-  const field = chosen ? singleStringField(chosen.jsonSchema) : null;
+  const field =
+    (declared && declaredText?.field) || (chosen ? singleStringField(chosen.jsonSchema) : null);
 
   // Prompt: the interaction label, else the active state node's description.
   // Both go through resolveLabel so `{key}` placeholders resolve either way.
@@ -565,6 +586,7 @@ export function describeIdle(machine: AnyStateMachine, snapshot: AnyMachineSnaps
   return {
     prompt: rawPrompt ? resolveLabel(rawPrompt, snapshot.context) : null,
     events,
+    ...(choices ? { choices } : {}),
     textEvent: chosen && field ? { type: chosen.type, field } : null,
     component: typeof hints.component === "string" && hints.component ? hints.component : null,
   };

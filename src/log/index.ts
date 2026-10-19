@@ -20,6 +20,7 @@ export {
   assertJsonSerializable,
   createReplayEntry,
   forkEventLog,
+  getDecisionAttempts,
   getLogExecutionId,
   getSnapshotStateHash,
   getUsageFromEvents,

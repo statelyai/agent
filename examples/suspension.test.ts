@@ -93,6 +93,7 @@ describe("example human waits", () => {
       "retrofit#supportMachine",
       "review-tool-calls#reviewToolCallsMachine",
       "review-tool-calls#toolCallingMachine",
+      "self-improving-refunds#refundDeskMachine",
       "sql-agent#sqlAgentMachine",
       "swarm-handoff#swarmHandoffMachine",
       "todo-nl#todoMachine",

@@ -127,17 +127,18 @@ const request = createDecisionRequest({
 
 Each attempt runs three checks in order. Each failure is typed and fed back to the model on the next attempt:
 
-| Failure             | Cause                                                                       |
-| ------------------- | --------------------------------------------------------------------------- |
-| `unknown-event`     | The event type is not among the candidate events.                           |
-| `invalid-payload`   | The payload does not match that event's schema.                             |
-| `rejected-by-guard` | The type and payload are valid, but `snapshot.can(event)` returned `false`. |
+| Failure             | Cause                                                                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `unknown-event`     | The event type is not among the candidate events.                                                                                                      |
+| `invalid-payload`   | The payload does not match that event's schema.                                                                                                        |
+| `rejected-by-guard` | The type and payload are valid, but `snapshot.can(event)` returned `false`, or the event matches none of a [closed choice](#closed-choices)'s options. |
 
 Retry behavior:
 
 - The default is 2 retries, so up to 3 attempts. Set `maxRetries` on the decide input to change it.
 - Prior failed attempts are carried on `request.attempts`, so the host can render the previous failure into the next call. Core does not rewrite the prompt itself. See [Hosts](hosts.md).
 - Exhausting retries throws `AgentDecisionExhaustedError`, which carries the attempts list and is caught by the invoke's `onError`.
+- The run's [event log](event-log.md) keeps the failed attempts on the entry they explain. `getDecisionAttempts` reads them back. See [Decision attempts](event-log.md#decision-attempts).
 
 ## Coercion
 
@@ -178,6 +179,154 @@ applying: { always: { target: 'planning' } },
 ```
 
 Every step runs the validation and retry loop described above. For the full example, see [examples/todo-nl/index.ts](../examples/todo-nl/index.ts).
+
+## Closed choices
+
+By default the model writes the event payload. A **closed choice** lists the concrete events instead, and the model picks one.
+
+- Pass `payloads` on the `agent.decide` input: one payload list per event type, without `type`.
+- Each payload becomes one option on `request.options`.
+- An event type in `allowedEvents` with no `payloads` key is offered bare, as `{ type }`. An empty list offers nothing for that type. To withhold a type, give it `[]`: `payloads: { refund: [{ amount: 20 }], escalate: [] }`.
+- The runtime keeps only the options `snapshot.can(event)` accepts right now.
+- The chosen event must equal one offered option, type and payload. Any other choice is retried as a `rejected-by-guard` attempt.
+- When the snapshot accepts none of the options, the decision fails at once with `AgentDecisionExhaustedError` and no model call. Handle it with the invoke's `onError`.
+
+```ts
+import { createAgentSchemas, setupAgent } from "@statelyai/agent";
+import { z } from "zod";
+
+const agent = setupAgent({
+  schemas: createAgentSchemas({
+    context: z.object({ limit: z.number() }),
+    events: { refund: z.object({ amount: z.number() }), escalate: z.object({}) },
+  }),
+});
+
+agent.createMachine({
+  context: { limit: 50 },
+  initial: "deciding",
+  states: {
+    deciding: {
+      invoke: {
+        src: "agent.decide",
+        input: {
+          model: "quick",
+          allowedEvents: ["refund", "escalate"],
+          // The model sees refund 20 and escalate. The machine does not accept refund 80.
+          payloads: { refund: [{ amount: 20 }, { amount: 80 }] },
+        },
+      },
+      on: {
+        refund: ({ context, event }) =>
+          event.amount <= context.limit ? { target: "refunded" } : undefined,
+        escalate: { target: "escalated" },
+      },
+    },
+    refunded: {},
+    escalated: {},
+  },
+});
+```
+
+### Closed choices with the AI SDK
+
+- `createAiSdkExecutors` presents a closed choice as ONE tool, `choose_option`, instead of one tool per event.
+- Its input is `{ option }`, an enum of option ids such as `refund:20` and `escalate`. The tool description lists each id with its description.
+- The chosen id maps back to that option's event.
+- An id that is not offered, or a call to another tool, is retried as an `unknown-event` attempt. Its reason names the answer and lists the valid ids.
+
+### Decision models
+
+An AI SDK decision model, such as TypeSafe's Jev, goes in the same `createAiSdkExecutors` models map as the language models. A decide request whose model ref names it is answered through `experimental_decide`.
+
+- The request must be a closed choice: `payloads` on `agent.decide`, or `decideNext`. A request without options throws.
+- It asks one `choice` question. Each option id is a label, and its criterion is the option's description, or the event as JSON when it has none.
+- A label that is not an option is retried as an `unknown-event` attempt, like any failed choice.
+- The result carries `confidence` when the model reports it. Branch on it in your own code.
+
+```ts
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { openai } from "@ai-sdk/openai";
+import { typeSafeAi } from "@ai-sdk/typesafe-ai";
+
+const { decide } = createAiSdkExecutors({
+  models: { desk: openai("gpt-5.4-mini"), judge: typeSafeAi.decisionModel("jev-latest") },
+});
+```
+
+See [Decision models](models-and-providers.md#decision-models).
+
+## Decisions at the boundary of a plain machine
+
+A machine does not have to know about AI. `decideNext` asks a model to pick one event that a plain XState machine accepts right now, built with `createMachine` or `setup`, with no `agent.*` invoke anywhere.
+
+- `allowedEvents`: exact types or wildcards such as `'desk.*'`. Candidates are the matching events an active state handles.
+- `payloads` (optional): a function of the snapshot returning payloads per event type, as in a closed choice. A candidate type with no key is offered bare, as `{ type }`. An empty list offers nothing for that type, so `{ "desk.escalate": [] }` withholds it.
+- Options are kept only where `snapshot.can(event)` is true. Each one is described by its transition's `description`, else its event schema's description.
+- `lookahead` (optional): appends what each option changes, computed with xstate's pure `transition()`: the state value and the changed top-level context keys.
+  - `true` reports every changed key.
+  - An array of context keys reports only those keys. A state value change is always reported.
+  - Each reported value is cut at 120 characters.
+- With no options, it returns `{ event: null }` without calling the executor.
+- It never sends. The host sends the event, after checking `can` again, because the actor may have moved while the model was choosing.
+
+```ts
+import { decideNext } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+import { openai } from "@ai-sdk/openai";
+import { createActor, createMachine } from "xstate";
+import { z } from "zod";
+
+const desk = createMachine({
+  schemas: {
+    context: z.object({ requested: z.number(), limit: z.number() }),
+    events: {
+      "desk.refund": z.object({ amount: z.number() }),
+      "desk.escalate": z.object({}).describe("Hand the case to a person"),
+    },
+  },
+  context: { requested: 20, limit: 50 },
+  initial: "reviewing",
+  states: {
+    reviewing: {
+      on: {
+        "desk.refund": {
+          description: "Refund the customer",
+          to: ({ context, event }) =>
+            event.amount <= context.limit ? { target: "refunded" } : undefined,
+        },
+        "desk.escalate": { target: "escalated" },
+      },
+    },
+    refunded: {},
+    escalated: {},
+  },
+});
+
+const { decide } = createAiSdkExecutors({ models: { quick: openai("gpt-5.4-mini") } });
+const actor = createActor(desk);
+
+let busy = false;
+actor.subscribe(async (snapshot) => {
+  if (busy || !snapshot.matches("reviewing")) return;
+  busy = true;
+  try {
+    const { event } = await decideNext(snapshot, {
+      decide,
+      model: "quick",
+      allowedEvents: "desk.*",
+      payloads: (s) => ({ "desk.refund": [{ amount: s.context.requested }] }),
+      lookahead: true,
+    });
+    if (event && actor.getSnapshot().can(event)) actor.send(event);
+  } finally {
+    busy = false;
+  }
+});
+actor.start();
+```
+
+The result also carries `attempts`, the failed choices before the one that landed, and the `request` the executor saw. Exhausting retries throws `AgentDecisionExhaustedError`. To journal `attempts`, pass them with the event to the run that delivers it. See [Boundary decisions](event-log.md#boundary-decisions).
 
 ## Related
 

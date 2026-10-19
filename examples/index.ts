@@ -322,6 +322,24 @@ export {
   rank,
   DEFAULTS as rankCandidatesDefaults,
 } from "./rank-candidates/index.js";
+export {
+  DESK_GOAL,
+  HELD_OUT_SCENARIOS,
+  SCENARIOS,
+  createDeskArm,
+  createPlaybookDecide,
+  createWorld,
+  createWorldActors,
+  improvePlaybook,
+  loadPlaybook,
+  lowerPlaybook,
+  objective,
+  refundDeskMachine,
+  refundDeskSchemas,
+  runBatch,
+  runDeskEpisode,
+  runSelfImprovingRefundsExample,
+} from "./self-improving-refunds/index.js";
 
 // --- Statechart policies ----------------------------------------------------
 

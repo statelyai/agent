@@ -18,27 +18,29 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 
 ## Core APIs
 
-| API                                         | Purpose                                               |
-| ------------------------------------------- | ----------------------------------------------------- |
-| `setupAgent`                                | Schema-first XState setup with Agent request actors   |
-| `createAgentRuntime`                        | Bind executors and expose one durable transition loop |
-| `runToQuiescence`                           | Drive a runtime to done, idle, or error               |
-| `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                |
-| `isAgentIdle`                               | Distinguish a human wait from a stuck settled machine |
-| `ContextOf` / `EventOf` / other `*Of` types | Extract setup and machine types                       |
+| API                                         | Purpose                                                  |
+| ------------------------------------------- | -------------------------------------------------------- |
+| `setupAgent`                                | Schema-first XState setup with Agent request actors      |
+| `createAgentRuntime`                        | Bind executors and expose one durable transition loop    |
+| `runToQuiescence`                           | Drive a runtime to done, idle, or error                  |
+| `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                   |
+| `decideNext`                                | Ask a model for one event a plain XState machine accepts |
+| `describeMachine`                           | Render a machine as plain text for a model               |
+| `isAgentIdle`                               | Distinguish a human wait from a stuck settled machine    |
+| `ContextOf` / `EventOf` / other `*Of` types | Extract setup and machine types                          |
 
 ## Entry points
 
-| Entry                          | Purpose                                                                       |
-| ------------------------------ | ----------------------------------------------------------------------------- |
-| `@statelyai/agent`             | Authoring, running, human interaction, and the executor contract              |
-| `@statelyai/agent/testing`     | `lintAgentMachine`, `simulateAgent`, `canReach`, trajectories, seams          |
-| `@statelyai/agent/log`         | The event log: `replay`, `forkEventLog`, hand-built entries, stores           |
-| `@statelyai/agent/ai-sdk`      | `createAiSdkExecutors`, the Vercel AI SDK adapter                             |
-| `@statelyai/agent/openai`      | Executors over the raw `openai` package                                       |
-| `@statelyai/agent/tanstack-ai` | `createTanStackAiExecutors`, the TanStack AI adapter                          |
-| `@statelyai/agent/machines`    | Preset machines: tool loop, sequential, parallel, router, supervisor, handoff |
-| `@statelyai/agent/otel`        | OpenTelemetry trace handler                                                   |
-| `@statelyai/agent/validate`    | JSON workflow config validation                                               |
+| Entry                          | Purpose                                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------------------ |
+| `@statelyai/agent`             | Authoring, running, human interaction, and the executor contract                           |
+| `@statelyai/agent/testing`     | `lintAgentMachine`, `simulateAgent`, `canReach`, trajectories, seams                       |
+| `@statelyai/agent/log`         | The event log: `replay`, `forkEventLog`, `getDecisionAttempts`, hand-built entries, stores |
+| `@statelyai/agent/ai-sdk`      | `createAiSdkExecutors`: the Vercel AI SDK adapter, for language and decision models        |
+| `@statelyai/agent/openai`      | Executors over the raw `openai` package                                                    |
+| `@statelyai/agent/tanstack-ai` | `createTanStackAiExecutors`, the TanStack AI adapter                                       |
+| `@statelyai/agent/machines`    | Preset machines: tool loop, sequential, parallel, router, supervisor, handoff              |
+| `@statelyai/agent/otel`        | OpenTelemetry trace handler                                                                |
+| `@statelyai/agent/validate`    | JSON workflow config validation and `verifyAgentConfig` pre-run gates                      |
 
 Core has no runtime dependency on the AI SDK.

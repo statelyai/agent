@@ -105,6 +105,8 @@ This script keys by invoke **src**, not by request name. Executors that run the 
 - `invokes` holds answers for scripted invokes, keyed by invoke src.
 - `errors` holds failure values that reject a request instead of resolving it, keyed by the same srcs the other channels use.
 
+A decide input with `payloads` is a closed choice. A scripted decision that matches none of the options the snapshot accepts is rejected and retried, as in a live run.
+
 Pending work is read off the snapshot's live invoked actors, not off the last transition. A state that invokes several actors at once keeps every one of them pending until it settles, including when an invoke's `onDone` targets nothing. `simulateAgent` settles one invoke per step, in invoke-id order, and keeps going until none are left, so an `always` join that waits on all of them fires.
 
 ```ts
@@ -168,14 +170,14 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 ## Branch exploration
 
-`explorePaths(machine, { input, maxDepth?, maxPaths?, text?, invokes?, errors? })` enumerates decision and external-event branches without a model, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, outputs?, errors?, payloads?, dedupeBy? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
+- A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor.<id>' }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
 - At an idle wait, it forks one branch per externally accepted event.
-- `text` is a map of canned outputs for text requests, keyed by src. One value per src is reused every time that src is reached.
-- `invokes` is the same map for scripted invokes.
-- A src with no canned output halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
-- `errors` is a map of one canned failure per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates.
+- `outputs` is a map of output lists, keyed by src: a text request's src or any other invoked actor's src. A one-element list is a canned output, reused every time that src is reached. A text request resolves with it as its `result`. A longer list forks one branch per output. See [Payloads and invoke outputs](#payloads-and-invoke-outputs).
+- A src with no `outputs` entry halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
+- `errors` is a map of one canned failure per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates. The failure and the candidates are sibling branches: each spends one level of `maxDepth`.
 - A rejection that reaches no `onError` errors the machine, and that path ends in an `error` terminal carrying the failure value on `error`.
 - Every invoke a state is still waiting on counts as work, concurrent ones included. They are settled one per branch, in invoke-id order, and a src in `errors` forks per invoke.
 
@@ -191,17 +193,49 @@ const report = await explorePaths(refundMachine, {
 // report.reachedStates → ['deciding', 'awaitingHuman', 'refunded', 'denied']
 ```
 
-Exploration is bounded by `maxDepth`, which defaults to 8, and `maxPaths`, which defaults to 200. `report.hitPathCap` is true when the report is partial.
+Exploration is bounded by three limits:
 
-A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id.
+- `maxDepth`: branch points along any path. Default 8.
+- `maxPaths`: terminals in the report. Default 200.
+- `maxNodes`: branch points expanded in total. Default 100,000. It bounds work and memory on a loopy machine, which expands many nodes per terminal.
+
+`report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short, so the report is partial.
+
+A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor.<id>', output }`.
 
 ```ts
 const report = await explorePaths(machine, {
-  text: { parse: { total: 42 } },
+  outputs: { parse: [{ total: 42 }] },
   errors: { parse: new Error("truncated response") },
 });
 // report.terminals → one path per branch: the parsed state and the onError state
 ```
+
+### Payloads and invoke outputs
+
+By default, events are applied as `{ type }`. A guard that reads the payload, such as `event.amount <= 100`, rejects every such event, so its target is never explored. Supply payloads to explore it.
+
+- `payloads` is a function of the snapshot at each branch point. It returns payloads per event type. A type with an entry forks once per payload as `{ ...payload, type }`, at decisions and idle waits alike.
+- Guard-rejected variants count in `prunedByGuard`.
+- A decide input's own `payloads` become that decision's branch set. An explorer `payloads` entry for the same type overrides them.
+- A type with no entry is filled from its event schema. Each field that is an `enum`, `const`, `boolean`, `null`, or a union of those contributes its values, and an optional one also contributes the omitted case. Exploration forks over their product, up to 64 combinations. The schema is the agent machine's, or a plain XState machine's own `schemas.events`, and must expose JSON Schema through Standard JSON Schema, as Zod 4 does.
+- A type the fill cannot enumerate is listed in `report.unexpandedEvents`: a required field with no finite domain, a product over 64, or a schema with no JSON Schema is applied as `{ type }`, and an optional field with no finite domain is left out. Add a `payloads` entry for each listed type. A type with no schema at all stays `{ type }`. It is listed too when a transition for it in the active states could read the payload: a function transition, a guard, a `matches` pattern, or a `context` mapper. An object transition with none of these cannot, so the type is not listed.
+- `outputs` lists every output to try per src. Two or more outputs fork one branch each, and an `errors` entry for the same src adds the failing branch. Each forked branch records `{ type: 'xstate.done.actor.<id>', output }` in the path.
+- `dedupeBy` projects a settled snapshot to a key. Each key is explored once, or again when reached at a shallower depth. The key must include every field a guard, choice, or `onDone` reads, or the search misses paths.
+
+```ts
+const amounts = [0, 1, 100, 100.01, 500];
+const violation = await canReach(refundMachine, "illegallyIssued", {
+  payloads: () => ({ ISSUE: amounts.map((amount) => ({ amount })) }),
+  outputs: { lookupOrder: [{ found: true }, { found: false }] },
+  errors: { lookupOrder: new Error("down") },
+  dedupeBy: (snapshot) => JSON.stringify([snapshot.value, snapshot.context]),
+});
+// violation.reachable → false across every amount and lookup outcome
+// violation.complete → true, so the false is a proof, not a cut-off search
+```
+
+Pick boundary values for numeric payloads: each guard threshold on both sides. Values between two boundaries take the same branch as one of them.
 
 ## Reachability checks
 
@@ -209,6 +243,15 @@ const report = await explorePaths(machine, {
 
 `canReach(machine, target, opts)` wraps `explorePaths` to answer whether a state
 path or state-node ID is reachable, with a witness path when it is.
+
+`reachable: false` proves unreachability only when `complete` is true. `complete` is false when the search left a branch it could not rule out:
+
+- `maxPaths` or `maxNodes` cut the search short.
+- A path reached `maxDepth`.
+- A branch stopped on a `needs-output` terminal, with no `outputs` entry for its src.
+- An event type was not expanded to all its payload variants, as `explorePaths` lists in `unexpandedEvents`.
+
+Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.
 
 ```ts
 import { canReach } from "@statelyai/agent/testing";
@@ -219,6 +262,9 @@ const { reachable, witness } = await canReach(refundMachine, "denied", {
 ```
 
 `witness` is the sequence of chosen and applied events that reaches the state, which is the proof that it is reachable. It is absent when `reachable` is `false`.
+
+- The witness is a shortest one: no path within `maxDepth` reaches the target in fewer events. A recorded `xstate.error.actor.*` or `xstate.done.actor.*` entry counts as one event.
+- `canReach` searches breadth first to find it, so a retry loop never pads the witness. `explorePaths` stays depth first, and its terminal order is unchanged.
 
 `canReach` forwards `errors`, so a state that only a failure reaches is checkable the same way.
 
@@ -241,7 +287,7 @@ import { machine } from "./machine";
 assertAgentMachine(machine); // throws AgentLintError on error-severity findings
 ```
 
-For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. See [Machines as data](machines-as-data.md). Every check applies, including reachability. The lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function.
+For machines authored as data, validate the config with `validateAgentConfig(config)` from `@statelyai/agent/validate` first, then compile it and lint the machine: `assertAgentMachine(setupAgent.fromConfig(config, { compileSchema }).machine)`. See [Machines as data](machines-as-data.md). Every check applies, including reachability. The lowering keeps the config's transition targets, so `unreachable-state` reads the real graph even where the JSON layer folds a target into a resolver function. `verifyAgentConfig` runs validation, lowering, lint, and exploration in one call. See [Generating machines with an LLM](generate-machines.md).
 
 ## Related
 

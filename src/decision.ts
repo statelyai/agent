@@ -18,6 +18,8 @@ import {
 } from "./text-logic.js";
 import { isEventPattern, sanitizeEventToolName, type AgentEventDescriptor } from "./events.js";
 import { executorBoundLogics } from "./internal/registry.js";
+import { isRecord } from "./internal/is-record.js";
+import { canonicalEventJson } from "./event-log.js";
 
 /**
  * Inline input for the `agent.decide` builtin actor — the zero-config
@@ -38,6 +40,14 @@ export interface AgentDecisionInput<
   /** Framework-native messages, passed through without conversion. */
   messages?: any[];
   allowedEvents?: AllowedEvents<TEvent>;
+  /**
+   * Concrete payloads per event type, without `type`. When given, the
+   * decision is a closed choice: the request carries one
+   * {@link AgentDecisionOption} per payload whose event the snapshot accepts,
+   * and the decider picks one instead of writing a payload. Event types in
+   * `allowedEvents` with no entry here are offered as `{ type }`.
+   */
+  payloads?: Partial<Record<TEvent, Record<string, unknown>[]>>;
   maxRetries?: number;
   temperature?: number;
   maxOutputTokens?: number;
@@ -46,6 +56,78 @@ export interface AgentDecisionInput<
   seed?: number;
   stopSequences?: string[];
   metadata?: TMetadata;
+}
+
+// One option per payload; event types without payloads are offered bare.
+// Unfiltered: snapshot-aware hosts drop the options `snapshot.can()` refuses.
+function optionsFromPayloads(
+  eventTypes: readonly string[],
+  payloads: Partial<Record<string, Record<string, unknown>[]>>,
+): AgentDecisionOption[] {
+  return eventTypes
+    .filter((type) => !isEventPattern(type))
+    .flatMap((type) =>
+      (payloads[type] ?? [{}]).map((payload) => ({ event: { ...payload, type } })),
+    );
+}
+
+/**
+ * The options a snapshot-aware host offers for a closed-choice request: rebuilt
+ * over the request's snapshot-resolved candidate `events` when the decide input
+ * carried `payloads` (so wildcard or omitted `allowedEvents` still get theirs),
+ * then narrowed to the events `can` accepts. `undefined` when the request is
+ * not a closed choice. Pass the result as the request's `options`;
+ * {@link resolveDecision} then rejects a choice that matches none of them.
+ * @internal
+ */
+export function acceptedDecisionOptions(
+  request: Pick<AgentDecisionRequest, "events" | "input" | "options">,
+  can: (event: ChosenEvent) => boolean,
+): AgentDecisionOption[] | undefined {
+  if (!request.options) return undefined;
+  const payloads = isRecord(request.input) ? request.input.payloads : undefined;
+  const options = isRecord(payloads)
+    ? optionsFromPayloads(
+        request.events.map((event) => event.type),
+        payloads as Partial<Record<string, Record<string, unknown>[]>>,
+      )
+    : request.options;
+  return options.filter((option) => {
+    try {
+      return can(option.event);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** The offered option equal to `event` (type and payload, key order ignored). @internal */
+export function findDecisionOption(
+  options: readonly AgentDecisionOption[],
+  event: ChosenEvent,
+): AgentDecisionOption | undefined {
+  const key = canonicalEventJson(event);
+  return options.find((option) => canonicalEventJson(option.event) === key);
+}
+
+/**
+ * Stable, readable ids for options, one per option in order: `type`, then each
+ * payload value (`refund:40`). Duplicates get a `#n` suffix. Adapters use them
+ * as the labels of a single closed choice and map the answer back by index.
+ * @internal
+ */
+export function decisionOptionIds(options: readonly AgentDecisionOption[]): string[] {
+  const taken = new Set<string>();
+  return options.map(({ event }) => {
+    const base = Object.entries(event)
+      .filter(([key]) => key !== "type")
+      .map(([, value]) => (typeof value === "object" ? JSON.stringify(value) : String(value)))
+      .reduce((id, value) => `${id}:${value}`, event.type);
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}#${n}`;
+    taken.add(id);
+    return id;
+  });
 }
 
 // Lowers `agent.decide` inline input into an AgentDecisionRequest (id filled in by the caller).
@@ -69,6 +151,7 @@ function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest
         type,
         toolName: sanitizeEventToolName(type),
       })),
+    ...(input.payloads ? { options: optionsFromPayloads(allowedEventTypes, input.payloads) } : {}),
     attempts: [],
     temperature: input.temperature,
     maxOutputTokens: input.maxOutputTokens,
@@ -376,6 +459,14 @@ export interface AgentDecisionRequest {
   /** Candidate events: declared `allowedEvents` ∩ snapshot-legal events. */
   events: AgentEventDescriptor[];
   /**
+   * Concrete choices, present when the host enumerated payloads
+   * (`payloads` on the decide input, or `decideNext`). A snapshot-aware host
+   * keeps only options the snapshot accepts. An executor that sees options
+   * should choose one of them; a chosen event matching no option is
+   * rejected and retried like a guard rejection.
+   */
+  options?: AgentDecisionOption[];
+  /**
    * Prior failed attempts for THIS decision. Empty on the first attempt.
    * Adapters render these into the provider request so retries converge.
    * Core never rewrites prompts/messages — attempts are data on the request.
@@ -477,6 +568,13 @@ function dedupeToolNames<T extends { toolName?: string }>(candidates: T[]): T[] 
 /** Decision request after core has resolved its semantic identity. */
 export type AgentExecutorDecisionRequest = AgentDecisionRequest & { name: string };
 
+/** One concrete event a decider may choose, with an optional description for the model. */
+export interface AgentDecisionOption {
+  event: ChosenEvent;
+  /** What choosing this does, in words; lookahead text when the host computed it. */
+  description?: string;
+}
+
 /**
  * A single failed decision attempt, recorded by {@link resolveDecision} and
  * fed back to the executor on the next attempt via
@@ -484,7 +582,7 @@ export type AgentExecutorDecisionRequest = AgentDecisionRequest & { name: string
  * choice: `'unknown-event'` (not among the candidate `events`),
  * `'invalid-payload'` (failed the event's schema), or `'rejected-by-guard'`
  * (failed the `canTake` check — type/payload were legal, but the machine's
- * guard rejected it at apply time).
+ * guard rejected it at apply time — or matched none of `request.options`).
  */
 export interface DecisionAttempt {
   event?: ChosenEvent;
@@ -528,11 +626,15 @@ export class AgentDecisionExhaustedError extends AgentError {
  * ```
  */
 export function renderDecisionAttempts(
-  request: Pick<AgentDecisionRequest, "events" | "attempts">,
+  request: Pick<AgentDecisionRequest, "events" | "attempts" | "options">,
 ): AgentMessage[] {
-  const types = request.events.map((event) => event.type).join(", ") || "(none)";
+  const choices =
+    (request.options
+      ? decisionOptionIds(request.options)
+      : request.events.map((event) => event.type)
+    ).join(", ") || "(none)";
   return request.attempts.map((attempt) =>
-    userMessage(`Your previous choice failed: ${attempt.reason}. Choose again from: ${types}`),
+    userMessage(`Your previous choice failed: ${attempt.reason}. Choose again from: ${choices}`),
   );
 }
 
@@ -599,6 +701,8 @@ export interface ResolveDecisionOptions<TEvent extends ChosenEvent = ChosenEvent
  * event's schema), or `'rejected-by-guard'` (passes both checks but
  * `options.canTake` returns `false` — a type/payload-legal event the
  * machine's guard rejects right now; omit `canTake` to skip this check).
+ * When the request carries `options`, a choice matching none of them (type and
+ * payload, deep-equal) also fails as `'rejected-by-guard'`.
  * Every prior failed attempt for this call is fed back to the executor on
  * the next attempt via `request.attempts`, so an adapter can render "your
  * last choice failed because X — try again" into the next model call; core
@@ -629,6 +733,16 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
   const maxRetries = options.maxRetries ?? 2;
   const attempts: DecisionAttempt[] = [];
   const eventsByType = new Map(request.events.map((event) => [event.type, event]));
+
+  // A closed choice with nothing on offer: no answer can succeed, so fail
+  // before any model call rather than spend every retry on it.
+  if (request.options !== undefined && request.options.length === 0) {
+    const error = new AgentDecisionExhaustedError([]);
+    error.message =
+      `Decision '${request.name ?? (request.id || "agent.decide")}' has no offered option ` +
+      "the current snapshot accepts; no model call was made.";
+    throw error;
+  }
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     options.signal?.throwIfAborted();
@@ -692,6 +806,21 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
         });
         continue;
       }
+    }
+
+    if (
+      request.options &&
+      !findDecisionOption(request.options, event) &&
+      !findDecisionOption(request.options, validatedEvent)
+    ) {
+      attempts.push({
+        event: validatedEvent,
+        failure: "rejected-by-guard",
+        reason: `${JSON.stringify(validatedEvent)} matched no offered option: ${
+          decisionOptionIds(request.options).join(", ") || "(none)"
+        }.`,
+      });
+      continue;
     }
 
     if (options.canTake?.(validatedEvent as TEvent) === false) {

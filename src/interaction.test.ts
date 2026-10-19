@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
-import { createActor } from "xstate";
+import { createActor, setup } from "xstate";
 import { z } from "zod";
 import {
   AgentInvalidEventPayloadError,
@@ -431,5 +431,290 @@ describe("getInteraction on a runAgent result snapshot", () => {
       "PICK",
       "END",
     ]);
+  });
+});
+
+describe("payload choices", () => {
+  const agent = setupAgent({
+    context: z.object({
+      round: z.number(),
+      seats: z.array(z.object({ label: z.string(), event: z.any(), style: z.string().optional() })),
+    }),
+    events: { ACCUSE: z.object({ seat: z.number() }), PASS: z.object({}) },
+    meta: interactionMetaSchema,
+  });
+  const machine = agent.createMachine({
+    context: {
+      round: 2,
+      seats: [
+        { label: "Seat 1", event: { type: "ACCUSE", seat: 1 }, style: "primary" },
+        { label: "Pass", event: { type: "PASS" } },
+        { label: "Seat 2 (round {round})", event: { type: "ACCUSE", seat: 2 } },
+        { label: "Seat 3", event: { type: "ACCUSE", seat: 3 }, style: "danger" },
+        // Refused by the guard below.
+        { label: "Seat 9", event: { type: "ACCUSE", seat: 9 } },
+        // Refused by the schema.
+        { label: "Seat ?", event: { type: "ACCUSE", seat: "two" } },
+      ],
+    },
+    initial: "voting",
+    states: {
+      voting: {
+        meta: {
+          interaction: {
+            label: "Who is it?",
+            // A context path: the choices are computed at runtime.
+            choices: "seats",
+          },
+        },
+        on: {
+          ACCUSE: ({ event }) => (event.seat <= 3 ? { target: "done" } : undefined),
+          PASS: { target: "done" },
+        },
+      },
+      done: { type: "final" },
+    },
+  });
+  const snapshot = createActor(machine).getSnapshot();
+
+  test("a choices string reads the context array, keeping only accepted events", () => {
+    expect(getInteraction(snapshot)?.choices).toEqual([
+      { label: "Seat 1", event: { type: "ACCUSE", seat: 1 }, style: "primary" },
+      { label: "Pass", event: { type: "PASS" } },
+      { label: "Seat 2 (round 2)", event: { type: "ACCUSE", seat: 2 } },
+      { label: "Seat 3", event: { type: "ACCUSE", seat: 3 }, style: "danger" },
+    ]);
+  });
+
+  test("a choices array is authored inline", () => {
+    const inline = agent.createMachine({
+      context: { round: 1, seats: [] },
+      initial: "voting",
+      states: {
+        voting: {
+          meta: {
+            interaction: {
+              label: "?",
+              choices: [
+                { label: "Seat {round}", event: { type: "ACCUSE", seat: 1 } },
+                { label: "Seat 9", event: { type: "ACCUSE", seat: 9 } },
+              ],
+            },
+          },
+          on: { ACCUSE: ({ event }) => (event.seat <= 3 ? { target: "voting" } : undefined) },
+        },
+      },
+    });
+    expect(getInteraction(createActor(inline).getSnapshot())?.choices).toEqual([
+      { label: "Seat 1", event: { type: "ACCUSE", seat: 1 } },
+    ]);
+  });
+
+  test("leaves the events map untouched and omits choices when none are declared", () => {
+    expect(getInteraction(snapshot)?.events).toEqual([]);
+    const plain = agent.createMachine({
+      context: { round: 1, seats: [] },
+      initial: "voting",
+      states: {
+        voting: {
+          meta: { interaction: { label: "?", events: { PASS: "Pass" } } },
+          on: { PASS: { target: "voting" } },
+        },
+      },
+    });
+    expect(getInteraction(createActor(plain).getSnapshot())).toEqual({
+      label: "?",
+      events: [{ type: "PASS", label: "Pass" }],
+    });
+  });
+
+  test("eventFromInteraction picks a choice by index or label", () => {
+    expect(eventFromInteraction(snapshot, { choice: 0 })).toEqual({ type: "ACCUSE", seat: 1 });
+    expect(eventFromInteraction(snapshot, { choice: "Seat 2 (round 2)" })).toEqual({
+      type: "ACCUSE",
+      seat: 2,
+    });
+    expect(() => eventFromInteraction(snapshot, { choice: "Seat 9" })).toThrow(
+      AgentInvalidEventPayloadError,
+    );
+    expect(() => eventFromInteraction(snapshot, { choice: 7 })).toThrow(
+      AgentInvalidEventPayloadError,
+    );
+  });
+
+  test("the chosen event drives the machine", () => {
+    const actor = createActor(machine).start();
+    actor.send(eventFromInteraction(actor.getSnapshot(), { choice: "Seat 3" }));
+    expect(actor.getSnapshot().status).toBe("done");
+  });
+
+  test("ignores a choices path that holds no array", () => {
+    const missing = agent.createMachine({
+      context: { round: 1, seats: [] },
+      initial: "voting",
+      states: {
+        voting: {
+          meta: { interaction: { label: "?", choices: "nowhere" } },
+          on: { PASS: { target: "voting" } },
+        },
+      },
+    });
+    expect(getInteraction(createActor(missing).getSnapshot())?.choices).toEqual([]);
+  });
+
+  test("interactionMetaSchema checks choices (array or path) and the textEvent field form", () => {
+    const validate = (value: unknown) => interactionMetaSchema["~standard"].validate(value);
+    const meta = {
+      interaction: {
+        choices: [{ label: "Seat 1", event: { type: "ACCUSE", seat: 1 } }],
+        textEvent: { type: "SAY", field: "message" },
+      },
+    };
+    expect(validate(meta)).toEqual({ value: meta });
+    expect(validate({ interaction: { choices: [{ label: "x", event: {} }] } })).toMatchObject({
+      issues: [{ path: ["interaction", "choices", 0, "event"] }],
+    });
+    expect(validate({ interaction: { choices: "seats" } })).toEqual({
+      value: { interaction: { choices: "seats" } },
+    });
+    expect(validate({ interaction: { choices: 1 } })).toMatchObject({
+      issues: [{ path: ["interaction", "choices"] }],
+    });
+    expect(validate({ interaction: { textEvent: { type: "SAY" } } })).toMatchObject({
+      issues: [{ path: ["interaction", "textEvent"] }],
+    });
+  });
+});
+
+describe("textEvent field form", () => {
+  const agent = setupAgent({
+    context: z.object({}),
+    events: { SAY: z.object({ message: z.string() }), REPLY: z.object({ text: z.string() }) },
+    meta: interactionMetaSchema,
+  });
+
+  test("names the field the text fills", () => {
+    const machine = agent.createMachine({
+      context: {},
+      initial: "chatting",
+      states: {
+        chatting: {
+          meta: {
+            interaction: { label: "Say something", textEvent: { type: "SAY", field: "message" } },
+          },
+          on: { SAY: { target: "chatting" } },
+        },
+      },
+    });
+    const snapshot = createActor(machine).getSnapshot();
+    expect(getInteraction(snapshot)).toEqual({
+      label: "Say something",
+      events: [],
+      textEvent: "SAY",
+      textField: "message",
+    });
+    expect(eventFromInteraction(snapshot, { text: "hi" })).toEqual({ type: "SAY", message: "hi" });
+  });
+
+  test("the bare form still fills `text`", () => {
+    const machine = agent.createMachine({
+      context: {},
+      initial: "chatting",
+      states: {
+        chatting: {
+          meta: { interaction: { label: "Reply", textEvent: "REPLY" } },
+          on: { REPLY: { target: "chatting" } },
+        },
+      },
+    });
+    const snapshot = createActor(machine).getSnapshot();
+    expect(getInteraction(snapshot)).toEqual({ label: "Reply", events: [], textEvent: "REPLY" });
+    expect(eventFromInteraction(snapshot, { text: "ok" })).toEqual({ type: "REPLY", text: "ok" });
+  });
+});
+
+describe("getInteraction on a plain XState machine", () => {
+  // No setupAgent: the event schemas live on the machine's own `schemas.events`.
+  const machine = setup({
+    schemas: {
+      events: { PICK: z.object({ seat: z.number() }), END: z.object({}) },
+      meta: interactionMetaSchema,
+    },
+  }).createMachine({
+    initial: "waiting",
+    states: {
+      waiting: {
+        meta: {
+          interaction: {
+            label: "Pick",
+            events: { PICK: "Pick a seat", END: "End" },
+            choices: [
+              { label: "Seat 1", event: { type: "PICK", seat: 1 } },
+              { label: "Seat ?", event: { type: "PICK", seat: "one" } },
+            ],
+          },
+        },
+        on: {
+          PICK: ({ event }) => (event.seat >= 0 ? { target: "done" } : undefined),
+          END: { target: "done" },
+        },
+      },
+      done: { type: "final" },
+    },
+  });
+  const snapshot = createActor(machine).getSnapshot();
+
+  test("judges choices with the machine's own event schemas", () => {
+    const interaction = getInteraction(snapshot);
+    // The schema says PICK needs a seat, so its guard is not run against `undefined`.
+    expect(interaction?.events.map((event) => event.type)).toEqual(["PICK", "END"]);
+    // The schema refuses `seat: "one"`, so that choice is left out.
+    expect(interaction?.choices?.map((choice) => choice.label)).toEqual(["Seat 1"]);
+  });
+
+  test("eventFromInteraction validates against the machine's own event schemas", () => {
+    expect(eventFromInteraction(snapshot, { choice: "Seat 1" })).toEqual({ type: "PICK", seat: 1 });
+    expect(() => eventFromInteraction(snapshot, { type: "PICK", seat: "one" })).toThrow(
+      AgentInvalidEventPayloadError,
+    );
+  });
+});
+
+describe("eventFromInteraction — choice labels", () => {
+  const machine = setup({
+    schemas: {
+      events: { PICK: z.object({ seat: z.number() }) },
+      meta: interactionMetaSchema,
+    },
+  }).createMachine({
+    initial: "waiting",
+    states: {
+      waiting: {
+        meta: {
+          interaction: {
+            label: "Pick",
+            choices: [
+              { label: "Window", event: { type: "PICK", seat: 1 } },
+              { label: "Window", event: { type: "PICK", seat: 2 } },
+              { label: "Aisle", event: { type: "PICK", seat: 3 } },
+            ],
+          },
+        },
+        on: { PICK: { target: "done" } },
+      },
+      done: { type: "final" },
+    },
+  });
+  const snapshot = createActor(machine).getSnapshot();
+
+  test("a repeated label throws, asking for an index", () => {
+    expect(() => eventFromInteraction(snapshot, { choice: "Window" })).toThrow(
+      /2 choices are labeled "Window" \(indexes 0, 1\); pass \{ choice: <index> \}/,
+    );
+    expect(eventFromInteraction(snapshot, { choice: 1 })).toEqual({ type: "PICK", seat: 2 });
+  });
+
+  test("a unique label still picks its choice", () => {
+    expect(eventFromInteraction(snapshot, { choice: "Aisle" })).toEqual({ type: "PICK", seat: 3 });
   });
 });

@@ -339,6 +339,61 @@ const cases: Array<{ name: string; run: (create: CreateStore) => Promise<void> }
       }
     },
   },
+  {
+    name: "listThreads (optional) pages by prefix, limit, and cursor",
+    async run(create) {
+      const store = await create();
+      // An optional capability: a store without it passes this case.
+      if (store.listThreads === undefined) return;
+      assertJsonEqual(
+        (await store.listThreads()).threadIds,
+        [],
+        "listThreads on an empty store must list nothing",
+      );
+      for (const threadId of ["user:b", "user:a", "admin:x", "user:c"]) {
+        await store.append({ threadId, expectedIndex: 0, entries: [entry(0, "start")] });
+      }
+      await store.fork({ threadId: "user:a", newThreadId: "user:d" });
+
+      const all = await store.listThreads();
+      assertJsonEqual(
+        [...all.threadIds].sort(),
+        ["admin:x", "user:a", "user:b", "user:c", "user:d"],
+        "listThreads must list every non-empty thread, forks included",
+      );
+      if (all.cursor !== undefined) {
+        fail("listThreads without a limit must return no cursor");
+      }
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const page = await store.listThreads({
+          prefix: "user:",
+          limit: 2,
+          ...(cursor !== undefined ? { cursor } : {}),
+        });
+        if (page.threadIds.length > 2) {
+          fail(`listThreads must honor limit 2, got ${page.threadIds.length} ids`);
+        }
+        seen.push(...page.threadIds);
+        cursor = page.cursor;
+        if (++pages > 10) fail("listThreads paging must terminate");
+      } while (cursor !== undefined);
+      assertJsonEqual(
+        [...seen].sort(),
+        ["user:a", "user:b", "user:c", "user:d"],
+        "paging listThreads by prefix must return each matching thread exactly once",
+      );
+      if (seen.length !== new Set(seen).size) {
+        fail("paging listThreads must not repeat a thread");
+      }
+      if (pages !== 2) {
+        fail(`4 matching threads at limit 2 must take exactly 2 pages, took ${pages}`);
+      }
+    },
+  },
 ];
 
 /**
@@ -347,7 +402,8 @@ const cases: Array<{ name: string; run: (create: CreateStore) => Promise<void> }
  * stale-`expectedIndex` conflict with correct fields; an interleaved concurrent
  * append race (exactly one winner); entry-id uniqueness; `read({ from })`
  * incremental correctness; thread isolation; metadata round-trip; deep-copy
- * isolation on append and read; and the full fork contract.
+ * isolation on append and read; the full fork contract; and, when the store
+ * implements the optional `listThreads`, its prefix/limit/cursor paging.
  *
  * Without a `harness`, every case runs in sequence and the first violation
  * throws. With one, each case is registered as its own test:

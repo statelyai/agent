@@ -1,0 +1,109 @@
+{
+  "id": "refund-playbook-v0",
+  "description": "Naive playbook: one model decision per turn over the offered options, with the desk's rules written into the prompt.",
+  "schemas": {
+    "context": {
+      "type": "object",
+      "properties": {
+        "facts": {
+          "type": "object"
+        },
+        "classification": {
+          "type": ["object", "null"]
+        },
+        "proposal": {
+          "type": ["object", "null"]
+        }
+      },
+      "required": ["facts"]
+    }
+  },
+  "context": {
+    "facts": "{{ input }}",
+    "classification": null,
+    "proposal": null
+  },
+  "initial": "deciding",
+  "states": {
+    "deciding": {
+      "invoke": {
+        "id": "chooseProposal",
+        "src": "agent.decide",
+        "input": {
+          "name": "chooseProposal",
+          "model": "openai/gpt-5.4-mini",
+          "system": "You run a refund desk. Each turn, choose exactly one of the offered next steps. Rules: verify the customer's identity before any refund. Look up the order before acting on it. If you do not know the order number, ask the customer. Never refund an order that belongs to another customer; escalate instead. Never refund an order that was already refunded; close instead. Refunds above the approval threshold need a human approval first: request it, and refund only once approved. If the ticket is not a refund request, close it. If identity verification failed, escalate.",
+          "prompt": "Ticket: {{ context.facts.ticket }}\nCustomer: {{ context.facts.customerId }}\nIdentity verified: {{ context.facts.identityVerified }}\nOrder id candidates: {{ context.facts.orderIdCandidates }}\nLoaded order: {{ context.facts.order.id }} (customer {{ context.facts.order.customerId }}, total {{ context.facts.order.total }}, refunded {{ context.facts.order.refunded }})\nApproved: {{ context.facts.approved }}\nApproval threshold: {{ context.facts.approvalThreshold }}\nCustomer replies: {{ context.facts.customerReplies }}\nFailed so far: {{ context.facts.rejections.0.proposal }} {{ context.facts.rejections.0.reason }} {{ context.facts.rejections.1.proposal }} {{ context.facts.rejections.1.reason }}\nTurn: {{ context.facts.turn }}",
+          "allowedEvents": [
+            "VERIFY_IDENTITY",
+            "LOOKUP_ORDER",
+            "ASK_CUSTOMER",
+            "REQUEST_APPROVAL",
+            "ISSUE_REFUND",
+            "ESCALATE",
+            "CLOSE"
+          ],
+          "payloads": "{{ context.facts.payloads }}",
+          "maxRetries": 2
+        },
+        "onError": {
+          "target": "done",
+          "assign": {
+            "proposal": {
+              "type": "ESCALATE",
+              "reason": "needs a person"
+            }
+          }
+        }
+      },
+      "on": {
+        "VERIFY_IDENTITY": {
+          "target": "done",
+          "assign": {
+            "proposal": "{{ event }}"
+          }
+        },
+        "LOOKUP_ORDER": {
+          "target": "done",
+          "assign": {
+            "proposal": "{{ event }}"
+          }
+        },
+        "ASK_CUSTOMER": {
+          "target": "done",
+          "assign": {
+            "proposal": "{{ event }}"
+          }
+        },
+        "REQUEST_APPROVAL": {
+          "target": "done",
+          "assign": {
+            "proposal": "{{ event }}"
+          }
+        },
+        "ISSUE_REFUND": {
+          "target": "done",
+          "assign": {
+            "proposal": "{{ event }}"
+          }
+        },
+        "ESCALATE": {
+          "target": "done",
+          "assign": {
+            "proposal": "{{ event }}"
+          }
+        },
+        "CLOSE": {
+          "target": "done",
+          "assign": {
+            "proposal": "{{ event }}"
+          }
+        }
+      }
+    },
+    "done": {
+      "type": "final",
+      "output": "{{ context.proposal }}"
+    }
+  }
+}

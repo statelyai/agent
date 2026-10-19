@@ -229,7 +229,7 @@ Each alternate form handles one specific need:
 | `createAgentSchemas` pack, passed as `setupAgent({ schemas })`                                                   | You share one schema set across several machines or the [step helpers](steps.md).                                                                                                                                                                                                                   |
 | String model refs with `resolveModel` (`model: 'openai/gpt-5.4-mini'`, `createAiSdkExecutors({ resolveModel })`) | The machine must not name concrete models, for portability or for refs loaded from JSON [config](machines-as-data.md).                                                                                                                                                                              |
 | `createTextLogic`, a standalone request value                                                                    | A request is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).                                                                                                                              |
-| `logic.withExecutor(...)`                                                                                        | You bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runToQuiescence`](hosts.md#writing-your-own-executors)'s executor slots. Registered dynamic spawns inherit through `actors`. See [Multi-agent composition](multi-agent.md#dynamic-binding). |
+| `logic.withExecutor(...)`                                                                                        | You bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runToQuiescence`](hosts.md#write-your-own-host-loop)'s executor slots. Registered dynamic spawns inherit through `actors`. See [Multi-agent composition](multi-agent.md#collecting-dynamic-children). |
 
 ## Machine creation
 
@@ -432,7 +432,7 @@ When the root declares no `output` and exactly one final state does, `createMach
 
 <!-- typed meta protocol from examples/email-drafter/agent-logic.ts -->
 
-The `meta` field attaches typed data to a state or transition. By default `setupAgent` types it as the shipped interaction protocol, keyed by the machine's declared events, and hosts read it through `getInteraction(snapshot)` instead of `Record<string, unknown>`. A `label` names the wait, `events` maps choice events to labels, and `textEvent` names the free-text event whose payload is `{ text }`:
+The `meta` field attaches typed data to a state or transition. By default `setupAgent` types it as the shipped interaction protocol, keyed by the machine's declared events, and hosts read it through `getInteraction(snapshot)` instead of `Record<string, unknown>`. A `label` names the wait, `events` maps choice events to labels, and `textEvent` names the free-text event, whose text fills a `text` field by default:
 
 ```ts no-check
 // inside states: { ... }
@@ -449,7 +449,7 @@ prompting: {
 }
 ```
 
-A choice or `textEvent` naming an event the machine never declared is a compile error. A machine with other metadata declares its own `meta` schema on `setupAgent`, which replaces the default. See [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts).
+A choice or `textEvent` naming an event the machine never declared is a compile error. `textEvent: { type, field }` names another field, and `choices` (an array, or a context path) offers one button per payload. See [Human in the loop](human-in-the-loop.md#payload-choices). A machine with other metadata declares its own `meta` schema on `setupAgent`, which replaces the default. See [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts).
 
 ## Delayed transitions
 

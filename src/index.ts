@@ -34,6 +34,7 @@ export type {
   AgentExecutorDecisionRequest,
   AgentDecisionRequest,
   AgentDecisionExecutor,
+  AgentDecisionOption,
   DecisionAttempt,
   // Return type of `createDecisionLogic`, so declaration emit can name it.
   DecisionLogic,
@@ -45,6 +46,7 @@ export { AgentInvalidEventPayloadError, getAcceptedEvents, parseAgentEvent } fro
 export { eventFromInteraction, getInteraction, interactionMetaSchema } from "./interaction.js";
 export type {
   AgentInteraction,
+  AgentInteractionChoice,
   AgentInteractionDescriptor,
   AgentInteractionEvent,
   AgentInteractionEventMeta,
@@ -89,6 +91,8 @@ export type {
 } from "./text-logic.js";
 export type { AgentRequest, AgentStepRequest } from "./steps.js";
 export { AGENT_USAGE_EVENT_TYPE } from "./usage.js";
+export { describeMachine } from "./describe-machine.js";
+export { decideNext } from "./decide-next.js";
 export type { AgentUsageEvent } from "./usage.js";
 // The event log itself (replay, forking, hand-built entries, stores) lives in
 // `@statelyai/agent/log`. The root keeps only what the agent runtime reads and

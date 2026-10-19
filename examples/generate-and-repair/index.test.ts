@@ -163,8 +163,7 @@ test("the machine is structurally sound", async () => {
   // first settles and the walk gets past `generating`.
   const canned = {
     input: { prompt: "a turnstile" },
-    text: { generateConfig: VALID, repairConfig: VALID },
-    invokes: { parseConfig: PARSED },
+    outputs: { generateConfig: [VALID], repairConfig: [VALID], parseConfig: [PARSED] },
   };
 
   // Every candidate and every repair is rejected by the parser: the budget runs
