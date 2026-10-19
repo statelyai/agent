@@ -1072,6 +1072,36 @@ export function replay<TMachine extends AnyStateMachine>(
   entries: readonly AgentLogEntry[],
   options: ReplayOptions = {},
 ): ReplayResult<TMachine> {
+  const fold = foldLog(machine, entries, options);
+  return {
+    snapshot: fold.snapshot as SnapshotFrom<TMachine>,
+    persistedSnapshot: fold.persistedSnapshot,
+  };
+}
+
+/**
+ * {@link replay} kept open: the fold of a log that later entries extend one at
+ * a time. @internal
+ */
+export interface LogFold {
+  readonly snapshot: AnyMachineSnapshot;
+  readonly persistedSnapshot: AgentPersistedSnapshot;
+  /** Folds `entry`, appended after everything folded so far, without verifying it. */
+  apply(entry: AgentLogEntry): AgentPersistedSnapshot;
+}
+
+/**
+ * {@link replay}, returning a {@link LogFold} that further entries can be
+ * folded onto in exactly the way `replay` would fold them. A live run records
+ * each entry's hash from this fold, never from its own snapshot: a live
+ * snapshot also holds what the log cannot reproduce (a sibling child that
+ * already settled while its completion waits in the mailbox). @internal
+ */
+export function foldLog(
+  machine: AnyStateMachine,
+  entries: readonly AgentLogEntry[],
+  options: ReplayOptions = {},
+): LogFold {
   const machineVersion = options.machineVersion ?? resolveMachineVersion(machine);
   validateReplayEntries(entries, { machine, machineVersion });
   if (entries.length === 0) {
@@ -1093,16 +1123,27 @@ export function replay<TMachine extends AnyStateMachine>(
   verifyEntry(entries[0]!, persisted, options.verify);
 
   const sessions = new Map<string, string>();
-  for (let index = 1; index < entries.length; index++) {
-    const entry = entries[index]!;
+  const apply = (entry: AgentLogEntry): AgentPersistedSnapshot => {
     const event = restoreDoneActorOutput(rebindActorSession(entry.event, snapshot, sessions));
     [snapshot] = transition(machine, snapshot as never, event as never) as [
       AnyMachineSnapshot,
       unknown,
     ];
     persisted = machine.getPersistedSnapshot(snapshot) as AgentPersistedSnapshot;
-    verifyEntry(entry, persisted, options.verify);
+    return persisted;
+  };
+  for (let index = 1; index < entries.length; index++) {
+    const entry = entries[index]!;
+    verifyEntry(entry, apply(entry), options.verify);
   }
 
-  return { snapshot: snapshot as SnapshotFrom<TMachine>, persistedSnapshot: persisted };
+  return {
+    get snapshot() {
+      return snapshot;
+    },
+    get persistedSnapshot() {
+      return persisted;
+    },
+    apply,
+  };
 }

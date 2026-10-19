@@ -4777,6 +4777,123 @@ describe("runAgent write-ahead store", () => {
   });
 });
 
+describe("parallel invokes: recorded hashes are what replay reproduces", () => {
+  // `second` settles right after `first`, before the root has taken
+  // `first`'s completion from the mailbox. The live snapshot at that entry
+  // holds `second` already `done`; replay never starts children, so it holds
+  // `second` active. The recorded hash must be replay's.
+  const makeMachine = () => {
+    const firstSettled = deferred();
+    return setupAgent({
+      context: z.object({ order: z.array(z.string()) }),
+      actors: {
+        first: createAsyncLogic({
+          run: async () => {
+            firstSettled.resolve();
+            return "first";
+          },
+        }),
+        second: createAsyncLogic({
+          run: async () => {
+            await firstSettled.promise;
+            return "second";
+          },
+        }),
+      },
+    }).createMachine({
+      id: "parallelInvokes",
+      context: { order: [] },
+      initial: "verifying",
+      states: {
+        verifying: {
+          type: "parallel",
+          // Declared opposite to settle order.
+          states: {
+            b: {
+              initial: "running",
+              states: {
+                running: {
+                  invoke: {
+                    id: "second",
+                    src: "second",
+                    onDone: ({ context, event }) => ({
+                      target: "done",
+                      context: { order: [...context.order, event.output as string] },
+                    }),
+                  },
+                },
+                done: { type: "final" },
+              },
+            },
+            a: {
+              initial: "running",
+              states: {
+                running: {
+                  invoke: {
+                    id: "first",
+                    src: "first",
+                    onDone: ({ context, event }) => ({
+                      target: "done",
+                      context: { order: [...context.order, event.output as string] },
+                    }),
+                  },
+                },
+                done: { type: "final" },
+              },
+            },
+          },
+          onDone: { target: "waiting" },
+        },
+        waiting: { on: { GO: { target: "finished" } } },
+        finished: { type: "final" },
+      },
+    });
+  };
+  const executors = { generateText: async () => ({ result: "" }) };
+
+  test("resuming an idle run from the store alone replays and verifies", async () => {
+    const machine = makeMachine();
+    const store = createInMemoryEventLogStore();
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, { store, threadId: "t", executors }),
+      { input: undefined },
+    );
+    expect(first.status).toBe("idle");
+    expect(first.snapshot.context.order).toEqual(["first", "second"]);
+
+    const log = await store.read("t");
+    // Journaled in delivery order, not declaration order.
+    expect(
+      log
+        .filter((entry) => entry.event.type === "xstate.done.actor")
+        .map((entry) => (entry.event as { actorId?: string }).actorId),
+    ).toEqual(["first", "second"]);
+    expect(() => replay(machine, log, { verify: "strict" })).not.toThrow();
+
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, { store, threadId: "t", executors }),
+      { event: { type: "GO" } },
+    );
+    expect(second.status).toBe("done");
+    const resumedLog = await store.read("t");
+    expect(() => replay(machine, resumedLog, { verify: "strict" })).not.toThrow();
+  });
+
+  test("a snapshot cache taken at idle is still trusted against the log", async () => {
+    const machine = makeMachine();
+    const store = createInMemoryEventLogStore();
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, { store, threadId: "t", executors }),
+      { input: undefined },
+    );
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, { store, threadId: "t", executors }),
+      { snapshot: first.persist(), event: { type: "GO" } },
+    );
+    expect(second.status).toBe("done");
+  });
+});
+
 describe("wire events: parse at the boundary, ignore what the state does not handle", () => {
   const agent = setupAgent({
     context: z.object({ reason: z.string() }),

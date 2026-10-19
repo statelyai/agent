@@ -38,7 +38,7 @@ interface AgentLogEntry {
 
 - `recordedAt` is acceptance metadata, not machine time. A transition that needs time takes it from the event.
 - `machineVersion` is the machine's declared `version`, or its structural hash when none is declared.
-- `verification.stateHash` is the hash of the persisted snapshot after the entry is applied.
+- `verification.stateHash` is the hash of the persisted snapshot `replay` folds to after the entry is applied. A run records replay's fold, not its live snapshot: replay never starts children, so a live child that already settled while its completion waits to be delivered is not part of the hash.
 - `metadata` is host-owned and stored verbatim. The init entry's `metadata.executionId` names the lineage; read it with `getLogExecutionId(entries)`.
 - `attempts` holds the decision attempts the machine did not accept before this entry's event landed. Replay ignores it. See [Decision attempts](#decision-attempts).
 
