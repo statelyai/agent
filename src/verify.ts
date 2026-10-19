@@ -1496,6 +1496,23 @@ function explore(
       yield { step: next, path: [...path, event], depth: depth + 1 };
     }
 
+    // An idle wait whose every offered event the guards refuse: a live run
+    // would sit here, but more likely the payload table offered nothing the
+    // machine accepts. Record the wait and list the types as unexpanded, so
+    // the search is not a proof until the table covers an accepted payload.
+    if (request?.kind !== "decision" && taken === 0 && witness === undefined && !capped()) {
+      pathsExplored++;
+      terminals.push({ status: "idle", path, state: settled.snapshot.value });
+      const refused = [...new Set(branchEvents.map((event) => event.type))];
+      for (const type of refused) unexpanded.add(type);
+      unexplored.push(
+        `stuck: every offered ${refused.join(", ")} event at path [${path
+          .map((e) => e.type)
+          .join(", ")}] was refused by the machine's guards; add a payloads entry it accepts`,
+      );
+      return;
+    }
+
     // A decision none of whose candidates the snapshot takes fails at run time
     // after its retries (or at once, for an empty closed choice) with
     // AgentDecisionExhaustedError, and the invoke's onError runs. Explore that
