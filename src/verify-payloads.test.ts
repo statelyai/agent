@@ -947,3 +947,20 @@ describe("explorePaths — a wait whose every offered event is refused", () => {
     expect(result).toMatchObject({ reachable: true, complete: true });
   });
 });
+
+describe("explorePaths — an explorer payload list that is empty at a wait", () => {
+  const machine = createMachine({
+    initial: "waiting",
+    states: {
+      waiting: { on: { PLAY: { target: "played" } } },
+      played: { type: "final" },
+    },
+  });
+
+  test("skips the type and leaves the proof incomplete", async () => {
+    const result = await canReach(machine, "played", { payloads: () => ({ PLAY: [] }) });
+    expect(result).toMatchObject({ reachable: false, complete: false });
+    const report = await explorePaths(machine, { payloads: () => ({ PLAY: [] }) });
+    expect(report.unexpandedEvents).toEqual(["PLAY"]);
+  });
+});

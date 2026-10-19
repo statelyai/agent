@@ -1461,9 +1461,19 @@ function explore(
         ? request.events.flatMap((descriptor) =>
             variantsOf(descriptor.type, snapshot, table, requestOptions),
           )
-        : getAcceptedEvents(snapshot).flatMap((descriptor) =>
-            variantsOf(descriptor.type, snapshot, table),
-          );
+        : getAcceptedEvents(snapshot).flatMap((descriptor) => {
+            // An explorer table that lists no payload for a type the wait
+            // accepts skips that type: the search no longer covers it.
+            if (table[descriptor.type]?.length === 0) {
+              unexpanded.add(descriptor.type);
+              unexplored.push(
+                `skipped: payloads lists no ${descriptor.type} at path [${path
+                  .map((e) => e.type)
+                  .join(", ")}], so its branches were not explored`,
+              );
+            }
+            return variantsOf(descriptor.type, snapshot, table);
+          });
 
     // An idle wait with nothing to accept ends the branch. A decision with
     // nothing to choose does not: it exhausts, below.
