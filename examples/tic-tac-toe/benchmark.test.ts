@@ -81,4 +81,19 @@ describe("runBenchmark", () => {
       expect(lines).toHaveLength(report.arms.length);
     },
   );
+
+  test("rounds: 0 still reports the P0 baseline arm", { timeout: 30_000 }, async () => {
+    const model = createMockModelExecutors({ decisions: { player: centerThenFirst } });
+    const report = await runBenchmark({
+      modelDecide: model.decide,
+      reflection: model,
+      rounds: 0,
+    });
+    expect(report.improvement.rounds).toEqual([]);
+    expect(report.arms.map((arm) => arm.label)).toEqual(["M: raw model", "P0: ttt-policy-v0"]);
+    const [, p0] = report.arms;
+    expect(p0!.proof).toBe("refuted");
+    expect(p0!.match.games).toHaveLength(45);
+    expect(Number.isFinite(p0!.objective)).toBe(true);
+  });
 });

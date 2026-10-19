@@ -11,7 +11,7 @@
         "transition xstate.done.actor -> \"deciding\"",
         "transition ESCALATE -> \"humanReview\""
       ],
-      "response": "**Notice**\n\nRound 1: checks failed.\n\n**Patch**\n\nMock reply to: ## Spec  \nImplement `clamp(value, min, max)` in `clamp.mjs`.\n\n**Checks**\n\n**Passed**: no  \n**Failing tests**: visible-tests.mjs\n\n**Output**\n\nfile:///private/var/folders/3h/zr4gbk510rs9n4vblththn000000gn/T/code-review-loop-clamp-pRWEej/clamp.mjs:1  \nSyntaxError: Unexpected identifier 'reply'  \nnot ok - visible-tests.mjs  \n  'test failed'",
+      "response": "**Notice**\n\nRound 1: checks failed.\n\n**Patch**\n\nMock reply to: ## Spec  \nImplement `clamp(value, min, max)` in `clamp.mjs`.\n\n**Checks**\n\n**Passed**: no  \n**Failing tests**: visible-tests.mjs\n\n**Output**\n\nnot ok - visible-tests.mjs  \n  SyntaxError: Unexpected identifier 'reply'",
       "idle": {
         "prompt": "Escalated: spec is ambiguous or contradictory. After round 1: ship the patch as it is, type the changes you want, or reject the task.",
         "events": [
@@ -44,7 +44,7 @@
         "transition xstate.done.actor -> \"deciding\"",
         "transition ESCALATE -> \"humanReview\""
       ],
-      "response": "**Notice**\n\nRound 1: checks failed.\n\n**Patch**\n\nMock reply to: ## Spec  \nImplement `slugify(text)` in `slugify.mjs`.\n\n- Lower\n\n**Checks**\n\n**Passed**: no  \n**Failing tests**: visible-tests.mjs\n\n**Output**\n\nfile:///private/var/folders/3h/zr4gbk510rs9n4vblththn000000gn/T/code-review-loop-slugify-wRRJn3/slugify.mjs:1  \nSyntaxError: Unexpected identifier 'reply'  \nnot ok - visible-tests.mjs  \n  'test failed'",
+      "response": "**Notice**\n\nRound 1: checks failed.\n\n**Patch**\n\nMock reply to: ## Spec  \nImplement `slugify(text)` in `slugify.mjs`.\n\n- Lower\n\n**Checks**\n\n**Passed**: no  \n**Failing tests**: visible-tests.mjs\n\n**Output**\n\nnot ok - visible-tests.mjs  \n  SyntaxError: Unexpected identifier 'reply'",
       "idle": {
         "prompt": "Escalated: spec is ambiguous or contradictory. After round 1: ship the patch as it is, type the changes you want, or reject the task.",
         "events": [
@@ -77,7 +77,7 @@
         "transition xstate.done.actor -> \"deciding\"",
         "transition ESCALATE -> \"humanReview\""
       ],
-      "response": "**Notice**\n\nRound 1: checks failed.\n\n**Patch**\n\nMock reply to: ## Spec  \nImplement `roundHalf(x)` in `round-half.mjs`.\n\n- Rou\n\n**Checks**\n\n**Passed**: no  \n**Failing tests**: visible-tests.mjs\n\n**Output**\n\nfile:///private/var/folders/3h/zr4gbk510rs9n4vblththn000000gn/T/code-review-loop-round-half-XhjV7S/round-half.mjs:1  \nSyntaxError: Unexpected identifier 'reply'  \nnot ok - visible-tests.mjs  \n  'test failed'",
+      "response": "**Notice**\n\nRound 1: checks failed.\n\n**Patch**\n\nMock reply to: ## Spec  \nImplement `roundHalf(x)` in `round-half.mjs`.\n\n- Rou\n\n**Checks**\n\n**Passed**: no  \n**Failing tests**: visible-tests.mjs\n\n**Output**\n\nnot ok - visible-tests.mjs  \n  SyntaxError: Unexpected identifier 'reply'",
       "idle": {
         "prompt": "Escalated: spec is ambiguous or contradictory. After round 1: ship the patch as it is, type the changes you want, or reject the task.",
         "events": [

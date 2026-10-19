@@ -153,7 +153,13 @@ function matchLines(match: MatchResult): string[] {
 /** The current policy's lost games, read back from the store: every thread under `prefix`. */
 async function lostGames(store: AgentEventLogStore, prefix: string, match: MatchResult, keep = 5) {
   if (!store.listThreads) throw new Error("improvePolicy: the store must implement listThreads.");
-  const { threadIds } = await store.listThreads({ prefix });
+  const threadIds: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await store.listThreads({ prefix, ...(cursor ? { cursor } : {}) });
+    threadIds.push(...page.threadIds);
+    cursor = page.cursor;
+  } while (cursor !== undefined);
   const lost = new Set(match.games.filter((g) => g.outcome === "loss").map((g) => g.threadId));
   const games: string[] = [];
   for (const threadId of threadIds) {

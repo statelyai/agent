@@ -9,6 +9,7 @@ import { runBatch } from "./bench.js";
 import { codeReviewLoopMachine } from "./environment.js";
 import { triageRequestAt, probeContext, PROBE_CONTEXTS } from "./improve.js";
 import {
+  type IssueClassifier,
   createPolicyDecide,
   judgeClassifier,
   loadPolicy,
@@ -111,5 +112,37 @@ describe("policies", () => {
     expect(novel.retry).toEqual({});
     expect(novel.retryBlocked).toMatch(/novel/);
     expect(codeReviewLoopMachine.id).toBe("code-review-loop");
+  });
+
+  test("aborting the outer decide aborts a pending classifyIssue call", async () => {
+    let classifierSignal: AbortSignal | undefined;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => (markStarted = resolve));
+    // Never answers on its own: it settles only when its signal aborts.
+    const hanging: IssueClassifier = (_input, signal) => {
+      classifierSignal = signal;
+      markStarted();
+      return new Promise((_, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+    const decide = createPolicyDecide(v1, { classify: hanging });
+    const outer = new AbortController();
+    const pending = Promise.resolve(
+      decide(triageRequestAt(probeContext(PROBE_CONTEXTS[0]!)), { signal: outer.signal }),
+    );
+    pending.catch(() => {});
+    await started;
+    expect(classifierSignal?.aborted).toBe(false);
+    outer.abort(new Error("run cancelled"));
+    const settled = await Promise.race([
+      pending.then(
+        () => "resolved",
+        () => "rejected",
+      ),
+      new Promise((resolve) => setTimeout(() => resolve("still pending"), 1_000)),
+    ]);
+    expect(settled).toBe("rejected");
+    expect(classifierSignal?.aborted).toBe(true);
   });
 });

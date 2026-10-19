@@ -16,7 +16,7 @@ generating ─▶ verifying ─────────────────�
 - **Environment** (`environment.ts`): the machine above. Shipping is computed, never chosen. The policy can only pick one of the offered RETRY or ESCALATE options. RETRY is refused at the round cap (3), when the reviewer marked an issue `novel`, and when the checks failed outside every visible test. `checkingShip` re-checks every ship; `illegallyShipped` is proven unreachable with `canReach`.
 - **Policy** (`policy.ts`, `policies/*.json`): a JSON `AgentWorkflowConfig` run as the decide executor for model `"triage"`. `v0` always retries until the cap. `v1` asks `classifyIssue` whether the review says the task itself is broken and escalates early, and otherwise retries with targeted feedback (the failing tests, or the review).
 - **Traces** (`file-store.ts`): every task run is a thread `<split>/<policyVersion>/<taskId>`, one JSONL file per thread.
-- **Objective** (`bench.ts`): shipped with hidden tests passing = 1, a correctly escalated novel task = 1, an escalated resolvable task = 0.5, shipped with hidden tests failing = 0, minus 0.05 per round.
+- **Objective** (`bench.ts`), scored from the final state: shipped with hidden tests passing = 1 (a person's approval counts as a ship, so its hidden tests run too), a correctly escalated novel task = 1, an escalated resolvable task = 0.5 (a person's reject or no answer scores as the escalation), shipped with hidden tests failing = 0, minus 0.05 per round.
 - **Tasks** (`tasks.ts`, `fixtures/`): eight tiny modules (`clamp`, `slugify`, `chunk`, `parse-duration`, `round-half`, `truncate`, `capitalize-words`, `merge-config`), each with visible tests (run every round) and hidden tests (run only by the objective). `round-half` and `merge-config` have a spec that contradicts their visible tests, so the right move is to escalate.
 - **Improve** (`improve.ts`): reflect on the train traces, gate the candidate with `verifyAgentConfig` and a probe of the real triage boundary, replay train and held-out, and promote only on a strict objective gain with no violation.
 
@@ -43,9 +43,22 @@ pnpm exec tsx examples/code-review-loop/run.ts --split train --policy v1
 - `--split train|held-out|all`: default `all`.
 - `--policy <name>`: `policies/<name>.json`. `current` (the default) is the last promoted policy, else `v0`.
 - `--model <alias>`: the Claude Code model for every call, such as `sonnet` or `haiku`.
+- `--reviewer-model <alias>`: a different model for the reviewer only. Default: the same model as the author. One model keeps cost and setup simple, but then the reviewer is independent only by its prompt and shares the author's blind spots; a different model catches more of the author's mistakes at the cost of a second model's price and behavior.
 - `--no-human`: leave escalated tasks waiting. Without it, an escalated task asks on stdin: `a` ships as-is, `r <notes>` requests changes, `x` rejects.
 
 Traces land in `examples/code-review-loop/.traces/<timestamp>/` (gitignored). The run prints a scorecard: outcome, rounds, hidden tests, and score per task, the objective per split, and the call count, cost, and wall time.
+
+## Running generated code
+
+The checks run model-written patches with `node --test`. Each run gets a fresh temp workspace and runs under Node's permission model (Node 22.18+, the repo's floor):
+
+- `--permission` with `--allow-fs-read` and `--allow-fs-write` limited to the workspace. Child processes, worker threads, native addons, and WASI are denied.
+- `--test-isolation=none` (`--experimental-test-isolation=none` on Node versions without the stable flag), so the test file runs in the same process instead of a subprocess the permission model would refuse.
+- An env holding only `PATH`: no API keys, tokens, or `NODE_OPTIONS` from your shell.
+- A 20 s timeout, then `SIGKILL`.
+- A run passes only after the reporter prints its results, so a patch that calls `process.exit(0)` fails.
+
+This is not a sandbox. On Node 22 and 24 the permission model does not restrict the network. A patch runs in the same process as its tests, so it can tamper with them. It can also use CPU and memory until the timeout. Run untrusted output in a container or VM.
 
 ## Improve the policy
 

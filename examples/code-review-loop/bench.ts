@@ -6,11 +6,11 @@
  * is the objective per task, read from ground truth: the terminal state, and
  * the HIDDEN tests run against whatever shipped. A model never grades a run.
  *
- *   shipped, hidden tests pass        1
- *   escalated a novel-expected task   1
+ *   shipped, hidden tests pass        1   (a person's APPROVE included)
+ *   escalated a novel-expected task   1   (then rejected, failed, or unanswered)
  *   escalated a resolvable task       0.5
  *   shipped, hidden tests fail        0
- *   rejected or failed                0
+ *   failed without escalating         0
  *   minus 0.05 per round, floored at 0
  *
  * A correct escalation scores the same as a clean ship after the same number
@@ -18,7 +18,7 @@
  * it; it only costs the rounds spent before escalating. Any run that reaches
  * `illegallyShipped` makes the batch objective -Infinity.
  */
-import type { AnyMachineSnapshot } from "xstate";
+import type { AnyMachineSnapshot, Snapshot } from "xstate";
 import {
   createAgentRuntime,
   runToQuiescence,
@@ -41,9 +41,13 @@ export type Episode = {
   taskId: string;
   label: Task["label"];
   threadId: string;
-  /** The outcome the objective scores: `escalated` as soon as the run reached a person. */
+  /**
+   * The outcome the objective scores, from the final state: `shipped` for any
+   * ship (a person's APPROVE included); `escalated` for a run that reached a
+   * person and then was rejected, failed, or is still waiting.
+   */
   outcome: Outcome;
-  /** Rounds spent before that outcome. */
+  /** Rounds spent before that outcome (for `escalated`, before the first escalation). */
   rounds: number;
   /** Hidden tests on the shipped patch; null when nothing shipped. */
   hiddenPassed: boolean | null;
@@ -115,15 +119,17 @@ export type EpisodeOptions = {
 
 /**
  * Runs one task to a terminal state or a human wait, answering the wait with
- * `human` when given. Each pass resumes from the thread: the store is the
- * run's memory.
+ * `human` when given. Each answer resumes from the previous pass's persisted
+ * snapshot and appends to the same thread.
  */
 export async function runEpisode(task: Task, options: EpisodeOptions): Promise<Episode> {
   const store = options.store ?? createInMemoryEventLogStore();
   const threadId =
     options.threadId ?? `${task.split}/${options.policyVersion ?? "policy"}/${task.id}`;
   const actors = { runChecks: createRunChecks(options.runner) };
-  const run = (init: { input: { taskId: string } } | { event: ChosenEvent }) =>
+  const run = (
+    init: { input: { taskId: string } } | { snapshot: Snapshot<unknown>; event: ChosenEvent },
+  ) =>
     runToQuiescence(
       createAgentRuntime(codeReviewLoopMachine, {
         executors: options.executors,
@@ -143,7 +149,7 @@ export async function runEpisode(task: Task, options: EpisodeOptions): Promise<E
     escalatedAt ??= result.snapshot.context.round;
     const event = await options.human?.(result.snapshot);
     if (!event) break;
-    result = await run({ event });
+    result = await run({ snapshot: result.persist(), event });
   }
   if (result.status === "error") {
     throw new Error(`task ${task.id}: run errored: ${String(result.error)}`);
@@ -154,18 +160,22 @@ export async function runEpisode(task: Task, options: EpisodeOptions): Promise<E
   let outcome: Outcome;
   let rounds: number;
   let hiddenPassed: boolean | null = null;
+  // Scored from the FINAL state: anything that shipped (a person's APPROVE
+  // included) is judged by the hidden tests; a run a person rejected, that
+  // failed after escalating, or that is still waiting scores as the escalation.
   if (result.status === "done" && result.output.outcome === "violation") {
     outcome = "violation";
     rounds = result.output.rounds;
+  } else if (result.status === "done" && result.output.outcome === "shipped") {
+    outcome = "shipped";
+    rounds = result.output.rounds;
+    hiddenPassed = (await options.runner(task, result.output.patch, "hidden")).passed;
   } else if (escalatedAt !== undefined) {
     outcome = "escalated";
     rounds = escalatedAt;
   } else if (result.status === "done") {
-    outcome = result.output.outcome === "shipped" ? "shipped" : result.output.outcome;
+    outcome = result.output.outcome;
     rounds = result.output.rounds;
-    if (outcome === "shipped") {
-      hiddenPassed = (await options.runner(task, result.output.patch, "hidden")).passed;
-    }
   } else {
     throw new Error(`task ${task.id}: run settled '${result.status}'`);
   }

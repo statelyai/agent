@@ -11,7 +11,8 @@
  * can read in the diff.
  *
  * The simulated user answers an idle machine by sending its primary-styled
- * event, else its free-text event, else the first event it accepts, with the
+ * event, else its free-text event, else its first payload choice (a full
+ * event the snapshot accepts), else the first event it accepts, with the
  * payload synthesized from the event's JSON Schema. At most MAX_TURNS turns.
  */
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
@@ -106,6 +107,10 @@ function replyTo(idle: ChatIdle): { type: string } & Record<string, unknown> {
   const textual = idle.textEvent
     ? idle.events.find((event) => event.type === idle.textEvent!.type)
     : undefined;
+  // A payload choice is a full event the snapshot accepts right now; the first
+  // accepted event type would get a synthesized payload the machine may refuse.
+  const choice = idle.choices?.[0];
+  if (!primary && !textual && choice) return choice.event;
   const chosen: AcceptedEvent = primary ?? textual ?? idle.events[0]!;
   if (idle.textEvent && idle.textEvent.type === chosen.type) {
     return { type: chosen.type, [idle.textEvent.field]: "Yes, that works. Please continue." };

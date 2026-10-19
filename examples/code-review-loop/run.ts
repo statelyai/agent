@@ -11,6 +11,7 @@
  *   --split train|held-out|all    default all
  *   --policy v0|v1|current        default current (policies/current.json, else v0)
  *   --model <alias>               Claude Code model for every call (default: the CLI's)
+ *   --reviewer-model <alias>      a different model for the reviewer only (default: --model)
  *   --no-human                    leave escalated tasks waiting instead of asking on stdin
  *   --improve                     one improvement round from --policy over train + held-out;
  *                                 a promoted policy is written to policies/current.json
@@ -20,18 +21,17 @@
  * the terminal state, and the hidden tests run on whatever shipped.
  */
 import { existsSync, writeFileSync } from "node:fs";
-import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { AgentWorkflowConfig, ChosenEvent } from "@statelyai/agent";
-import { runEpisode, summarize, type Episode, type HumanReviewer } from "./bench.js";
+import type { AgentWorkflowConfig } from "@statelyai/agent";
+import { runEpisode, summarize, type Episode } from "./bench.js";
 import { nodeTestRunner } from "./checks.js";
 import { createClaudeCodeExecutors, type ClaudeCodeCall } from "./claude-code.js";
-import type { ReviewContext } from "./environment.js";
 import { createFileEventLogStore } from "./file-store.js";
 import { improvePolicy, metricsLine } from "./improve.js";
 import { createPolicyDecide, loadPolicy, withPolicy } from "./policy.js";
 import { ALL_TASKS, HELD_OUT_TASKS, TRAIN_TASKS, getTask, type Task } from "./tasks.js";
+import { createTerminalReviewer } from "./terminal-reviewer.js";
 
 const here = (file: string) => fileURLToPath(new URL(file, import.meta.url));
 const CURRENT_POLICY = here("./policies/current.json");
@@ -45,28 +45,18 @@ function resolvePolicy(name: string): AgentWorkflowConfig {
   return loadPolicy(name);
 }
 
-/** Asks on stdin: ship as-is, request changes, or reject. */
-function stdinReviewer(): HumanReviewer & { close(): void } {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const ask = async (snapshot: { context: unknown }): Promise<ChosenEvent | undefined> => {
-    const context = snapshot.context as ReviewContext;
-    console.log(`\n── ${context.task.id} needs a person ── ${context.escalation}`);
-    for (const issue of context.review?.issues ?? [])
-      console.log(`  reviewer [${issue.severity}] ${issue.note}`);
-    if (context.checks && !context.checks.passed) console.log(`  checks: ${context.checks.output}`);
-    console.log(`  patch (${context.task.file}):\n${context.patch.replace(/^/gm, "    | ")}`);
-    const answer = (
-      await rl.question(
-        "  [a]pprove as-is, [r] <notes> request changes, [x] reject, [enter] leave waiting: ",
-      )
-    ).trim();
-    if (answer === "a") return { type: "APPROVE" };
-    if (answer.startsWith("r"))
-      return { type: "REQUEST_CHANGES", notes: answer.slice(1).trim() || "Try again." };
-    if (answer === "x") return { type: "REJECT", reason: "rejected at the terminal" };
-    return undefined;
+/**
+ * Claude Code models per machine ref. `--reviewer-model` puts the reviewer
+ * (model ref "reviewer") on its own model; everything else uses `--model`.
+ */
+export function modelOptions(values: { model?: string; "reviewer-model"?: string }): {
+  defaultModel?: string;
+  models?: Record<string, string>;
+} {
+  return {
+    ...(values.model ? { defaultModel: values.model } : {}),
+    ...(values["reviewer-model"] ? { models: { reviewer: values["reviewer-model"] } } : {}),
   };
-  return Object.assign(ask, { close: () => rl.close() });
 }
 
 function printScorecard(episodes: Episode[], calls: ClaudeCodeCall[], startedAt: number) {
@@ -105,6 +95,7 @@ async function main() {
       split: { type: "string", default: "all" },
       policy: { type: "string", default: "current" },
       model: { type: "string" },
+      "reviewer-model": { type: "string" },
       "no-human": { type: "boolean", default: false },
       improve: { type: "boolean", default: false },
     },
@@ -114,7 +105,7 @@ async function main() {
   const store = createFileEventLogStore(tracesDir);
   const calls: ClaudeCodeCall[] = [];
   const cli = createClaudeCodeExecutors({
-    ...(values.model ? { defaultModel: values.model } : {}),
+    ...modelOptions(values),
     onCall: (call) => {
       calls.push(call);
       console.log(
@@ -157,7 +148,7 @@ async function main() {
       : values.split === "held-out"
         ? HELD_OUT_TASKS
         : ALL_TASKS;
-  const human = !values["no-human"] && process.stdin.isTTY ? stdinReviewer() : undefined;
+  const human = !values["no-human"] && process.stdin.isTTY ? createTerminalReviewer() : undefined;
   const decide = createPolicyDecide(policy, {
     classify: cli.classify,
     executors: { decide: cli.decide },
@@ -183,7 +174,10 @@ async function main() {
   printScorecard(episodes, calls, startedAt);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+// Run directly (`tsx run.ts`); skipped when a test imports this module.
+if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
+}

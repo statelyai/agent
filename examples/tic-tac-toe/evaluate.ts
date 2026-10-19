@@ -4,7 +4,7 @@
  * outside improver (a person, or Claude Code with the improve-machine skill)
  * runs on each candidate.
  *
- * Run: pnpm exec tsx examples/tic-tac-toe/evaluate.ts examples/tic-tac-toe/policies/v1.json [current.json]
+ * Run: pnpm exec tsx examples/tic-tac-toe/evaluate.ts examples/tic-tac-toe/policies/v0.json [current.json]
  *
  * With a second file, the objective applies the never-lose constraint when
  * that current policy is proven, and the last line says whether the

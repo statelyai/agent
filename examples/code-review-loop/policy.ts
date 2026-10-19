@@ -267,11 +267,14 @@ export function createPolicyDecide(
     }),
   };
 
-  const run: AgentDecisionExecutor = async (request) => {
+  // The outer run's signal aborts the nested policy run, which stops its
+  // actors: `classifyIssue` and the policy's own model calls see the abort.
+  const run: AgentDecisionExecutor = async (request, info) => {
     const result = await runToQuiescence(
       createAgentRuntime(machine, {
         executors: { decide, ...(inner.generateText ? { generateText: inner.generateText } : {}) },
         actors,
+        ...(info?.signal ? { signal: info.signal } : {}),
       }),
       { input: policyInputOf(request) },
     );

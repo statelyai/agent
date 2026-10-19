@@ -54,8 +54,10 @@ import {
 import { HELD_OUT_TASKS, TRAIN_TASKS, briefOf, getTask, type Task } from "./tasks.js";
 
 export const OBJECTIVE_TEXT =
-  "Per task: shipped and the hidden tests pass = 1; escalated a novel-expected task = 1; " +
-  `escalated a resolvable task = 0.5; shipped but the hidden tests fail = 0; minus ${ROUND_COST} ` +
+  "Per task, from the final state: shipped (a person's approval included) and the hidden tests " +
+  "pass = 1; escalated a novel-expected task = 1; escalated a resolvable task = 0.5 (an " +
+  "escalated task a person rejects or leaves waiting keeps its escalation score); shipped but " +
+  `the hidden tests fail = 0; minus ${ROUND_COST} ` +
   "per round, floored at 0. The objective is the mean over tasks; any run that reaches " +
   "illegallyShipped makes it -Infinity. Higher is better. A correct escalation scores the same " +
   "as a clean ship after the same number of rounds.";

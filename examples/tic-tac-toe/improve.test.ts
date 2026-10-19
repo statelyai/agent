@@ -174,4 +174,20 @@ describe("improvePolicy (the hill climb)", () => {
     expect(result.rounds[0]!.candidate!.objective).toBe(Number.NEGATIVE_INFINITY);
     expect(result.rounds[0]!.promoted).toBe(false);
   });
+
+  test("lost games are read across every page of a store that pages listThreads", async () => {
+    const lostLines = (prompt: string) => prompt.split("\n").filter((l) => /^- \w+\/\d+: /.test(l));
+    const plain = reflection([CLIMB.v1]);
+    await improvePolicy({ current: v0, executors: plain.executors });
+
+    // A store whose pages hold one thread id unless the caller asks for more.
+    const inner = createInMemoryEventLogStore();
+    const paged = { ...inner, listThreads: (o = {}) => inner.listThreads!({ limit: 1, ...o }) };
+    const pagedRun = reflection([CLIMB.v1]);
+    await improvePolicy({ current: v0, executors: pagedRun.executors, store: paged });
+
+    const expected = lostLines(plain.prompts()[0]!);
+    expect(expected).toHaveLength(5);
+    expect(lostLines(pagedRun.prompts()[0]!)).toEqual(expected);
+  });
 });

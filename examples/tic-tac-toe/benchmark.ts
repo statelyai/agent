@@ -10,7 +10,8 @@
  * Policy arms also carry the proof verdict and the objective; model arms
  * cannot be proven (a model is not a deterministic program) and show "—".
  * Every arm journals to one event-log store: `<arm>/<opponent>/<game>` for
- * the model arms, `round-<n>/...` for the policies (improve.ts).
+ * the model arms, `round-<n>/...` for the policies (improve.ts), and
+ * `P0/...` for the baseline when no round ran (`rounds: 0`).
  *
  * Run: OPENAI_API_KEY=... pnpm exec tsx examples/tic-tac-toe/benchmark.ts
  *      (add TYPESAFE_AI_API_KEY=... for the Jev arm)
@@ -25,7 +26,13 @@ import type {
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { createInMemoryEventLogStore } from "@statelyai/agent/log";
-import { improvePolicy, objective, type Evaluation, type ImprovementResult } from "./improve.js";
+import {
+  evaluatePolicy,
+  improvePolicy,
+  objective,
+  type Evaluation,
+  type ImprovementResult,
+} from "./improve.js";
 import type { OpponentName } from "./opponents.js";
 import { PLAYER_MODEL, playMatch, type MatchResult } from "./play.js";
 import { loadPolicy } from "./policy.js";
@@ -98,15 +105,13 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     });
   }
 
-  const improvement = await improvePolicy({
-    current: loadPolicy("v0"),
-    executors: reflection,
-    rounds,
-    store,
-  });
-  const [first] = improvement.rounds;
-  if (first) record(policyRow(`P0: ${first.current.id ?? "v0"}`, first.evaluation, false));
-  let required = first?.evaluation.proof.neverLoses ?? false;
+  const v0 = loadPolicy("v0");
+  const improvement = await improvePolicy({ current: v0, executors: reflection, rounds, store });
+  // The baseline arm always shows: round 1 already evaluated v0; with no rounds, evaluate it here.
+  const baseline =
+    improvement.rounds[0]?.evaluation ?? (await evaluatePolicy(v0, { store, threadPrefix: "P0" }));
+  record(policyRow(`P0: ${v0.id ?? "v0"}`, baseline, false));
+  let required = baseline.proof.neverLoses;
   for (const round of improvement.rounds) {
     if (!round.promoted || !round.candidate || !round.proposed) continue;
     record(
