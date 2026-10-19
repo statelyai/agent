@@ -8,7 +8,7 @@
  *   generating ─▶ verifying ─────────────────────▶ checking ─▶ triaging
  *    ▲  (writePatch)  ├ selfCheck (selfCheckPatch)  (runChecks)     │
  *    │                └ review    (reviewPatch)                     │
- *    │                                                              ├─ checks ∧ approved ∧ self-check ok ─▶ checkingShip ─▶ shipped
+ *    │                                                              ├─ checks ∧ approved ∧ self-check ok ∧ no novel issue ─▶ checkingShip ─▶ shipped
  *    │                                                              ├─ round cap ──────────────────────────▶ humanReview
  *    │                                                              └─▶ deciding (agent.decide, model "triage": the policy)
  *    ├──────────── RETRY {feedback, focus} ◀──────────────────────────────┤
@@ -159,16 +159,30 @@ export function retryBlocker(facts: Facts): string | undefined {
   if (facts.round >= facts.roundLimit) {
     return `round cap reached (${facts.round} of ${facts.roundLimit})`;
   }
-  if (facts.review?.issues.some((issue) => issue.severity === "novel")) {
+  if (hasNovelIssue(facts)) {
     return "the reviewer marked an issue novel";
   }
   if (unattributedFailure(facts)) return "the checks failed outside every visible test";
   return undefined;
 }
 
-/** True when the loop may ship on its own: checks passed, reviewer approved, self-check ok. */
+/** The reviewer flagged an issue no retry can fix (a contradictory spec, say). */
+function hasNovelIssue(facts: Pick<Facts, "review">): boolean {
+  return !!facts.review?.issues.some((issue) => issue.severity === "novel");
+}
+
+/**
+ * True when the loop may ship on its own: checks passed, reviewer approved,
+ * self-check ok, and no novel issue. An approval that still flags a novel
+ * issue goes to a person.
+ */
 export function autoShippable(facts: Facts): boolean {
-  return !!facts.checks?.passed && !!facts.review?.approved && !!facts.selfCheck?.ok;
+  return (
+    !!facts.checks?.passed &&
+    !!facts.review?.approved &&
+    !!facts.selfCheck?.ok &&
+    !hasNovelIssue(facts)
+  );
 }
 
 // ─── What the policy sees and may choose ───
@@ -602,7 +616,7 @@ export const codeReviewLoopMachine = reviewLoop.createMachine({
       choice: ({ context }) => {
         const checked = context.checks !== null && context.checks.passed;
         const approved = context.review !== null && context.review.approved;
-        return context.humanApproved || (checked && approved)
+        return context.humanApproved || (checked && approved && !hasNovelIssue(context))
           ? { target: "shipped" }
           : { target: "illegallyShipped" };
       },

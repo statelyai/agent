@@ -302,13 +302,16 @@ while (round < 3) {
   ]);
   const checks = await deps.runChecks({ taskId: task.id, file: task.file, patch });
 
-  if (checks.passed && review.approved && self.ok) {
-    return { outcome: "shipped", rounds: round, humanApproved: false, patch };
-  }
   if (review.issues.some((issue) => issue.severity === "novel")) {
     return escalate("the reviewer marked an issue novel");
   }
-  // feedback = the failing tests, the review issues, and the self-check concerns
+  if (checks.passed && review.approved && self.ok) {
+    return { outcome: "shipped", rounds: round, humanApproved: false, patch };
+  }
+  if (!checks.passed && !checks.failingTests.some((name) => task.visibleTestNames.includes(name))) {
+    return escalate("the checks failed outside every visible test");
+  }
+  // feedback = the failing tests with their output, the review issues, and the self-check concerns
 }
 return escalate("round cap");
 ```
@@ -361,7 +364,7 @@ Split what must always hold from what a model can learn:
 
 | Kind     | In the loop                                | In the machine                                                                       |
 | -------- | ------------------------------------------ | ------------------------------------------------------------------------------------ |
-| Rule     | Ship only with passing checks and approval | `autoShippable` in `triaging`, re-checked by `checkingShip`; or a person's `APPROVE` |
+| Rule     | Ship only with passing checks, approval and no novel issue | `autoShippable` in `triaging`, re-checked by `checkingShip`; or a person's `APPROVE` |
 | Rule     | At most 3 rounds                           | `roundLimit`, read by `triaging` and `retryBlocker`                                  |
 | Rule     | A novel issue is not retried               | `retryBlocker`, the guard on `RETRY`                                                 |
 | Judgment | Fixed: retry until the cap                 | `deciding`: `RETRY` with which feedback, or `ESCALATE` with which reason             |
@@ -373,7 +376,7 @@ export function retryBlocker(facts: Facts): string | undefined {
   if (facts.round >= facts.roundLimit) {
     return `round cap reached (${facts.round} of ${facts.roundLimit})`;
   }
-  if (facts.review?.issues.some((issue) => issue.severity === "novel")) {
+  if (hasNovelIssue(facts)) {
     return "the reviewer marked an issue novel";
   }
   if (unattributedFailure(facts)) return "the checks failed outside every visible test";

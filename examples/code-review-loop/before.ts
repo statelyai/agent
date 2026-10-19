@@ -61,14 +61,24 @@ export async function runFactory(task: TaskBrief, deps: FactoryDeps): Promise<Fa
     ]);
     const checks = await deps.runChecks({ taskId: task.id, file: task.file, patch });
 
-    if (checks.passed && review.approved && self.ok) {
-      return { outcome: "shipped", rounds: round, humanApproved: false, patch };
-    }
+    // A novel issue goes to a person even when the reviewer approved.
     if (review.issues.some((issue) => issue.severity === "novel")) {
       return escalate("the reviewer marked an issue novel");
     }
+    if (checks.passed && review.approved && self.ok) {
+      return { outcome: "shipped", rounds: round, humanApproved: false, patch };
+    }
+    // A failure outside every visible test (a crash, a timeout) is not retried.
+    if (
+      !checks.passed &&
+      !checks.failingTests.some((name) => task.visibleTestNames.includes(name))
+    ) {
+      return escalate("the checks failed outside every visible test");
+    }
     feedback = [
-      checks.passed ? "" : `Failing visible tests: ${checks.failingTests.join(", ")}`,
+      checks.passed
+        ? ""
+        : `Failing visible tests: ${checks.failingTests.join(", ")}\n${checks.output}`,
       ...review.issues.map((issue) => `Reviewer [${issue.severity}]: ${issue.note}`),
       ...self.concerns.map((concern) => `Self-check: ${concern}`),
     ]

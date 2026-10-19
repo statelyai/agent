@@ -120,3 +120,42 @@ describe("the hand-rolled loop", () => {
     expect(result.snapshot.context).toMatchObject({ round: 2, patch: reference("slugify") });
   });
 });
+
+describe("the hand-rolled loop follows the machine's rules", () => {
+  const askedWith: string[] = [];
+  const recordAsk: FactoryDeps["askHuman"] = async ({ reason }) => {
+    askedWith.push(reason);
+    return { type: "REJECT", reason: "no" };
+  };
+
+  test("an approval that flags a novel issue goes to a person, not to ship", async () => {
+    askedWith.length = 0;
+    const result = await runFactory(
+      briefOf(getTask("clamp")),
+      fakes({
+        reviewPatch: async () => ({
+          approved: true,
+          issues: [{ severity: "novel", note: "the spec contradicts the tests" }],
+        }),
+        askHuman: recordAsk,
+      }),
+    );
+    expect(result.outcome).not.toBe("shipped");
+    expect(askedWith).toEqual(["the reviewer marked an issue novel"]);
+  });
+
+  test("a failure outside every visible test is escalated, not retried", async () => {
+    askedWith.length = 0;
+    const writePatch = vi.fn<FactoryDeps["writePatch"]>(async ({ task }) => reference(task.id)!);
+    await runFactory(
+      briefOf(getTask("clamp")),
+      fakes({
+        writePatch,
+        runChecks: async () => ({ passed: false, failingTests: [], output: "timed out" }),
+        askHuman: recordAsk,
+      }),
+    );
+    expect(writePatch).toHaveBeenCalledTimes(1);
+    expect(askedWith).toEqual(["the checks failed outside every visible test"]);
+  });
+});

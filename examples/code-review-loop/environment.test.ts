@@ -18,6 +18,7 @@ import { canReach, lintAgentMachine, type ExplorePathsOptions } from "@statelyai
 import {
   MAX_ROUNDS,
   MAX_TOTAL_ROUNDS,
+  autoShippable,
   codeReviewLoopMachine,
   createRunChecks,
   retryBlocker,
@@ -368,6 +369,18 @@ describe("the RETRY rules", () => {
     };
     expect(deciding(context).can(retry)).toBe(false);
     expect(triagePayloads(reviewContext(context)).RETRY).toEqual([]);
+  });
+
+  test("an approval that still flags a novel issue does not ship on its own", () => {
+    const passing = { passed: true, failingTests: [], output: "" };
+    const selfCheck = { ok: true, concerns: [] };
+    const clean = { approved: true, issues: [] };
+    const novel = {
+      approved: true,
+      issues: [{ severity: "novel" as const, note: "spec contradicts tests" }],
+    };
+    expect(autoShippable(reviewContext({ checks: passing, selfCheck, review: clean }))).toBe(true);
+    expect(autoShippable(reviewContext({ checks: passing, selfCheck, review: novel }))).toBe(false);
   });
 
   test("refused when the checks failed outside every visible test (a crash)", () => {
