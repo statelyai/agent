@@ -16,6 +16,8 @@
  * Run: OPENAI_API_KEY=... pnpm exec tsx examples/tic-tac-toe/benchmark.ts
  *      (add TYPESAFE_AI_API_KEY=... for the Jev arm)
  */
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { openai } from "@ai-sdk/openai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import type { Experimental_DecisionModel, LanguageModel } from "ai";
@@ -166,7 +168,10 @@ export function formatReport(report: Pick<BenchmarkReport, "arms" | "improvement
 }
 
 // Run directly (`tsx benchmark.ts`); skipped when a test imports this module.
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+// Run directly: compare canonical file URLs, so a path with `#`, `?` or a
+// symlink still matches.
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(realpathSync(entry)).href) {
   if (!process.env.OPENAI_API_KEY) {
     console.error("Set OPENAI_API_KEY to run the benchmark (and TYPESAFE_AI_API_KEY for Jev).");
     process.exit(1);

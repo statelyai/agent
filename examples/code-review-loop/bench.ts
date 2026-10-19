@@ -18,7 +18,7 @@
  * it; it only costs the rounds spent before escalating. Any run that reaches
  * `illegallyShipped` makes the batch objective -Infinity.
  */
-import type { AnyMachineSnapshot, Snapshot } from "xstate";
+import type { AnyMachineSnapshot } from "xstate";
 import {
   createAgentRuntime,
   runToQuiescence,
@@ -127,9 +127,7 @@ export async function runEpisode(task: Task, options: EpisodeOptions): Promise<E
   const threadId =
     options.threadId ?? `${task.split}/${options.policyVersion ?? "policy"}/${task.id}`;
   const actors = { runChecks: createRunChecks(options.runner) };
-  const run = (
-    init: { input: { taskId: string } } | { snapshot: Snapshot<unknown>; event: ChosenEvent },
-  ) =>
+  const run = (init: { input: { taskId: string } } | { event: ChosenEvent }) =>
     runToQuiescence(
       createAgentRuntime(codeReviewLoopMachine, {
         executors: options.executors,
@@ -149,7 +147,8 @@ export async function runEpisode(task: Task, options: EpisodeOptions): Promise<E
     escalatedAt ??= result.snapshot.context.round;
     const event = await options.human?.(result.snapshot);
     if (!event) break;
-    result = await run({ snapshot: result.persist(), event });
+    // Resume from the thread in the store: the log is the source of truth.
+    result = await run({ event });
   }
   if (result.status === "error") {
     throw new Error(`task ${task.id}: run errored: ${String(result.error)}`);

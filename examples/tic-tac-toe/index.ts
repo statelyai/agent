@@ -30,6 +30,8 @@
  *
  * Run: OPENAI_API_KEY=... pnpm exec tsx examples/tic-tac-toe/index.ts
  */
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { openai } from "@ai-sdk/openai";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
@@ -88,7 +90,10 @@ export async function runTicTacToeExample(
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+// Run directly: compare canonical file URLs, so a path with `#`, `?` or a
+// symlink still matches.
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(realpathSync(entry)).href) {
   if (!process.env.OPENAI_API_KEY) {
     console.error("Set OPENAI_API_KEY to run this example.");
     process.exit(1);

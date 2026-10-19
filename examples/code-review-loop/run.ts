@@ -20,8 +20,8 @@
  * (`<split>/<policyVersion>/<taskId>`). The scorecard reads ground truth:
  * the terminal state, and the hidden tests run on whatever shipped.
  */
-import { existsSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { existsSync, writeFileSync, realpathSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import type { AgentWorkflowConfig } from "@statelyai/agent";
 import { runEpisode, summarize, type Episode } from "./bench.js";
@@ -175,7 +175,10 @@ async function main() {
 }
 
 // Run directly (`tsx run.ts`); skipped when a test imports this module.
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+// Run directly: compare canonical file URLs, so a path with `#`, `?` or a
+// symlink still matches.
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(realpathSync(entry)).href) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

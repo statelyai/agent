@@ -39,6 +39,8 @@
  *
  * Run: pnpm exec tsx examples/code-review-loop/index.ts   (needs the `claude` CLI, logged in)
  */
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import type { AgentDecisionExecutor, AgentRequestExecutor } from "@statelyai/agent";
 import { runBatch, type BatchMetrics } from "./bench.js";
@@ -109,7 +111,10 @@ export async function runCodeReviewLoopExample(
 }
 
 // Run directly (`tsx index.ts`); skipped when a test imports this module.
-if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
+// Run directly: compare canonical file URLs, so a path with `#`, `?` or a
+// symlink still matches.
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(realpathSync(entry)).href) {
   if (spawnSync("claude", ["--version"]).status !== 0) {
     console.error("Install and log in to the Claude Code CLI (`claude`) to run this example.");
     process.exit(1);
