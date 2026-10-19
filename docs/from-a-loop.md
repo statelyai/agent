@@ -1,13 +1,15 @@
 ---
 title: Migrating from a hand-rolled loop
-description: Convert a while-loop tool-calling agent into an agent machine one step at a time.
+description: Convert a while-loop agent into an agent machine one step at a time, then improve a factory loop's triage from its traces.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-This page ports a working `while`-loop agent to an agent machine without rewriting your model calls. Your SDK calls, tools, and retry logic become the [executors](hosts.md). The machine replaces only the control flow. The page ends on the tests the port makes possible.
+This page ports a working `while`-loop agent to an agent machine without rewriting your model calls. Your SDK calls, tools, and retry logic become the [executors](hosts.md). The machine replaces only the control flow.
 
-The code is in `examples/port-walkthrough`:
+Part 1 (Steps 1–5) ports a support agent and ends on the tests the port makes possible. [Part 2](#part-2-a-factory-loop-that-improves) (Steps 6–11) ports a software-factory loop and improves its triage from traces without loosening its rules.
+
+Part 1's code is in `examples/port-walkthrough`:
 
 - [`before.ts`](../examples/port-walkthrough/before.ts): the loop, runnable with `OPENAI_API_KEY=... npx tsx examples/port-walkthrough/before.ts`.
 - [`index.ts`](../examples/port-walkthrough/index.ts): the machine, and a `runSupportAgent` with the loop's signature and result type.
@@ -275,8 +277,239 @@ expect(sendsUnapproved.reachable).toBe(false);
 
 `everyPath` scripts the `assist` text and the `sendEmail` output, and sets `maxDepth` and `maxPaths` high enough that all 766 paths through the eight rounds are explored. The loop's approval was an `if` inside the tool loop, and no test could list the paths around it. Here the claim holds for every path. See [Testing and verification](verify.md) for `explorePaths`, `simulateAgent`, and `lintAgentMachine`.
 
+## Part 2: a factory loop that improves
+
+Part 2 starts from a working software factory. An author writes a patch, a self-check and an independent review run in parallel, and the task's visible tests run. Then the loop ships, retries, or asks a person.
+
+The loop works. Part 2 makes its triage improve from its own runs, and keeps its rules fixed: nothing ships without passing checks and approval, three autonomous rounds at most, and a task whose spec is broken goes to a person.
+
+The code is in `examples/code-review-loop`:
+
+- [`before.ts`](../examples/code-review-loop/before.ts): the factory as a `while` loop with plain injectable dependencies. [`before.test.ts`](../examples/code-review-loop/before.test.ts) runs it with fakes.
+- [`environment.ts`](../examples/code-review-loop/environment.ts): the same factory as a machine.
+- [`policies/`](../examples/code-review-loop/policies): the triage policy versions, as JSON configs. [`policy.ts`](../examples/code-review-loop/policy.ts) runs one as the triage decider.
+- [`run.ts`](../examples/code-review-loop/run.ts): runs the tasks on Claude Code in headless mode. `--improve` runs one improvement round.
+
+The loop's body is this:
+
+```ts no-check
+while (round < 3) {
+  patch = await deps.writePatch({ task, round, previous: patch, feedback });
+  round++;
+  const [self, review] = await Promise.all([
+    deps.selfCheck({ task, patch }),
+    deps.reviewPatch({ task, patch }),
+  ]);
+  const checks = await deps.runChecks({ taskId: task.id, file: task.file, patch });
+
+  if (review.issues.some((issue) => issue.severity === "novel")) {
+    return escalate("the reviewer marked an issue novel");
+  }
+  if (checks.passed && review.approved && self.ok) {
+    return { outcome: "shipped", rounds: round, humanApproved: false, patch };
+  }
+  if (!checks.passed && !checks.failingTests.some((name) => task.visibleTestNames.includes(name))) {
+    return escalate("the checks failed outside every visible test");
+  }
+  // feedback = the failing tests with their output, the review issues, and the self-check concerns
+}
+return escalate("round cap");
+```
+
+Each dependency takes the input and returns the output of the matching machine request or actor. `escalate` calls `askHuman` and returns the person's answer as the result.
+
+This loop has three problems:
+
+- The rules and the triage share one function. To change when the loop escalates, you edit the function that holds the ship rule, and no test lists the paths around it.
+- A thrown dependency ends the whole run. In `before.test.ts`, a reviewer outage in round 2 throws out of `runFactory`. The patch and the feedback lived in local variables, and no person is asked.
+- `escalate` blocks the process on `askHuman`, as `approve` did in Part 1.
+
+## Step 6: the factory as a machine
+
+Port the loop as in Steps 1–4. Each line of `before.ts` becomes one construct in `environment.ts`:
+
+| In `before.ts`                                          | In `codeReviewLoopMachine`                                                            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `await deps.writePatch(...)`                            | The `generating` state, which invokes the `writePatch` request                        |
+| `await Promise.all([selfCheck(...), reviewPatch(...)])` | The `verifying` parallel state: one region per invoke, and `onDone` after both        |
+| `await deps.runChecks(...)`                             | The `checking` state, which invokes the `runChecks` actor                             |
+| `while (round < 3)`                                     | `MAX_ROUNDS` as `context.roundLimit`, read by `triaging` and `retryBlocker`           |
+| `if (checks.passed && review.approved && self.ok)`      | The `triaging` choice state, through `autoShippable`                                  |
+| `if (review.issues.some(... "novel"))`                  | `retryBlocker`, the guard on `RETRY`                                                  |
+| `feedback = ...`                                        | The `feedback` of a `RETRY` event, built by `triagePayloads`                          |
+| `await deps.askHuman(...)`                              | The idle `humanReview` state, with `meta.interaction`                                 |
+| `return { outcome: ... }`                               | The final states `shipped`, `rejected`, `failed`, and the `illegallyShipped` sentinel |
+
+The ship check is a choice state. It runs before any model is asked to triage:
+
+```ts no-check
+triaging: {
+  type: "choice",
+  choice: ({ context }) => {
+    if (autoShippable(context)) return { target: "checkingShip" };
+    if (context.round >= context.roundLimit) {
+      return { target: "humanReview", context: { escalation: `Round cap: ...` } };
+    }
+    return { target: "deciding" };
+  },
+},
+```
+
+- An invoke failure is a transition. A failed review records `approved: false` with a `novel` issue, so the same outage leaves the run idle in `humanReview` with the round-2 patch. The last test in `before.test.ts` runs the outage through both.
+- `checkingShip` checks the ship rule a second time, written independently of `autoShippable`. A ship that breaks it lands in `illegallyShipped`, a final state that exists to be proven unreachable in Step 10.
+
+## Step 7: rules as guards, judgment as a decision
+
+Split what must always hold from what a model can learn:
+
+| Kind     | In the loop                                | In the machine                                                                       |
+| -------- | ------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Rule     | Ship only with passing checks, approval and no novel issue | `autoShippable` in `triaging`, re-checked by `checkingShip`; or a person's `APPROVE` |
+| Rule     | At most 3 rounds                           | `roundLimit`, read by `triaging` and `retryBlocker`                                  |
+| Rule     | A novel issue is not retried               | `retryBlocker`, the guard on `RETRY`                                                 |
+| Judgment | Fixed: retry until the cap                 | `deciding`: `RETRY` with which feedback, or `ESCALATE` with which reason             |
+
+`retryBlocker` returns why `RETRY` is refused, or `undefined`:
+
+```ts no-check
+export function retryBlocker(facts: Facts): string | undefined {
+  if (facts.round >= facts.roundLimit) {
+    return `round cap reached (${facts.round} of ${facts.roundLimit})`;
+  }
+  if (hasNovelIssue(facts)) {
+    return "the reviewer marked an issue novel";
+  }
+  if (unattributedFailure(facts)) return "the checks failed outside every visible test";
+  return undefined;
+}
+```
+
+The decision is a [closed choice](decisions.md#closed-choices). `triageInput` passes model `"triage"`, `allowedEvents: ["RETRY", "ESCALATE"]`, and `payloads` from `triagePayloads`: one `RETRY` per feedback focus, none while `retryBlocker` refuses it, and one `ESCALATE` per fixed reason. The `RETRY` transition checks the guard again:
+
+```ts no-check
+deciding: {
+  invoke: { id: "triage", src: "agent.decide", input: ({ context }) => triageInput(context) },
+  on: {
+    RETRY: ({ context, event }) =>
+      retryBlocker(context)
+        ? undefined
+        : { target: "generating", context: { feedback: event.feedback } },
+    ESCALATE: ({ event }) => ({
+      target: "humanReview",
+      context: { escalation: `Escalated: ${event.reason}.` },
+    }),
+  },
+},
+```
+
+- Shipping is not an event the decider can pick. No triage answer ships a patch.
+- Model `"triage"` resolves to the policy: a JSON `AgentWorkflowConfig` that `createPolicyDecide` runs as the decide executor. `v0` retries until the cap. `v1` asks a `classifyIssue` judgment whether the task itself is broken and escalates early. See [Environment and policy](environment-and-policy.md).
+
+## Step 8: the goal and the score
+
+The goal is the machine's `description`. [`describeMachine`](machines-as-data.md#machine-descriptions-for-models) renders it first, so a model that proposes a policy reads the goal before the states.
+
+```ts no-check
+description: REVIEW_GOAL, // "Ship a patch for each coding task that passes its visible checks, ..."
+```
+
+The objective is `scoreEpisode` in `bench.ts`. It reads ground truth: the final state, and hidden tests that run only on what shipped.
+
+| Outcome                                                   | Score |
+| --------------------------------------------------------- | ----- |
+| Shipped, hidden tests pass (a person's approval included) | 1     |
+| Escalated a task labeled `novel-expected`                 | 1     |
+| Escalated a task labeled `resolvable`                     | 0.5   |
+| Shipped, hidden tests fail                                | 0     |
+| Failed without escalating                                 | 0     |
+
+Each round subtracts 0.05, floored at 0. A batch with any run in `illegallyShipped` scores `-Infinity`.
+
+- Escalating a novel task scores the same as a clean ship after the same number of rounds. A policy is never penalized for asking a person; it pays only for the rounds it spent first.
+- People write the task labels and the hidden tests. No model grades a run.
+
+## Step 9: one trace per task
+
+Pass a store and a thread id to the runtime. `runEpisode` in `bench.ts` names each thread `<split>/<policyVersion>/<taskId>`:
+
+```ts no-check
+createAgentRuntime(codeReviewLoopMachine, {
+  executors: options.executors,
+  actors,
+  store, // run.ts passes createFileEventLogStore(tracesDir): one JSONL file per thread
+  threadId, // `${task.split}/${policyVersion}/${task.id}`
+});
+```
+
+- Every model output, check result, and human answer is an entry in the thread. A person's answer resumes the run from the thread.
+- `getDecisionAttempts(entries)` lists the triage answers the machine refused before one landed. See [Decision attempts](event-log.md#decision-attempts).
+- `listThreads({ prefix: "train/<version>/" })` returns one split. The improvement round reads train threads only. See [Stores](event-log.md#stores).
+
+## Step 10: the ship proof
+
+`canReach` searches every path to the `illegallyShipped` sentinel. The proof in `environment.test.ts` forks every invoke over a table of outputs and a failure, every triage answer, and every human answer:
+
+```ts no-check
+const violation = await canReach(codeReviewLoopMachine, "illegallyShipped", {
+  input: { taskId: "slugify" },
+  payloads: () => ({
+    RETRY: [{ feedback: "explore", focus: "all" }] /* REQUEST_CHANGES, REJECT */,
+  }),
+  outputs: {
+    reviewPatch: [
+      { approved: true, issues: [] },
+      { approved: false, issues: [issue("major")] },
+      { approved: true, issues: [issue("novel")] },
+      // ...
+    ],
+    runChecks: [/* passed, a visible test failed, an unknown test failed, a crash */],
+  },
+  errors: { reviewPatch: failure, runChecks: failure, "agent.decide": failure /* ... */ },
+  dedupeBy: projection,
+  maxDepth: 6 * MAX_TOTAL_ROUNDS + 6,
+});
+
+expect(violation).toMatchObject({ reachable: false, complete: true });
+```
+
+- The outputs are not tied to a patch, so the proof covers every author, reviewer, and test result in the table, not only the fixtures. `complete: true` makes `reachable: false` a proof within the round ceiling. See [Reachability checks](verify.md#reachability-checks).
+- The machine's guards judge every event a policy proposes, so the proof holds for every policy. A promoted policy needs no new proof.
+- A copy of the machine whose ship check forgets the reviewer fails the same search, with a witness path that ends in a passing `runChecks`. The loop's `if` has no such test.
+
+## Step 11: an improvement round
+
+Improvement is an explicit step. No policy changes while tasks run. Run one round:
+
+```bash
+pnpm exec tsx examples/code-review-loop/run.ts --improve --policy v0
+```
+
+`improvePolicy` in `improve.ts` runs these steps:
+
+1. Run the train and held-out tasks with the current policy. The traces go to the store.
+2. Reflect: one `proposePolicy` request with the goal, the objective, both machines as `describeMachine` text, and the train trails. It returns one candidate config.
+3. Gate: `verifyAgentConfig` runs `validate`, `vocabulary`, `lower`, `lint`, and `explore`. An `outputs` probe then checks that every answer is an offered option. A failing gate's `detail` goes back as a repair prompt, up to 3 times.
+4. Replay the train and held-out tasks with the candidate.
+5. Promote only with zero violations on both splits, a held-out objective no lower than before, and a combined objective strictly higher. `run.ts` writes a promoted policy to `policies/current.json`.
+
+Inside Claude Code, the [`improve-machine` skill](https://github.com/statelyai/agent/blob/main/skills/improve-machine/SKILL.md) runs the same round with Claude Code as the improver:
+
+```bash
+mkdir -p .claude/skills && cp -R skills/improve-machine .claude/skills/
+pnpm exec tsx examples/code-review-loop/run.ts --policy v0 --no-human
+claude -p "Use the improve-machine skill on examples/code-review-loop. ..."
+```
+
+The full prompt and its allowed tools are in the [example's README](../examples/code-review-loop/README.md#inside-claude-code-with-the-improve-machine-skill).
+
+- One change per round. People own the environment, the goal, the objective, and the task split.
+- With the mock executors in `improve.test.ts`, one round from `v0` promotes `v1`: the combined objective rises from 0.900 to 0.925, and the held-out objective from 0.900 to 0.933.
+
 ## Related
 
 - [retrofit](../examples/retrofit/index.ts): a larger loop refactored one step at a time, in the order `before.ts`, `step1.ts`, `step2.ts`, `step3.ts`, and `index.ts`.
 - [Overview](index.md): what the machine gives you over the loop.
 - [Human in the loop](human-in-the-loop.md): idle states, `meta.interaction`, and resuming.
+- [Environment and policy](environment-and-policy.md): the fixed environment, the generated policy, the objective, and the improvement loop.
+- [code-review-loop](../examples/code-review-loop): Part 2's factory: `before.ts`, the machine, the policies, and the improvement round on Claude Code.
+- [`skills/improve-machine`](https://github.com/statelyai/agent/blob/main/skills/improve-machine/SKILL.md): one improvement round from traces, run by an agent.

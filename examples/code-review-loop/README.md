@@ -13,12 +13,13 @@ generating ─▶ verifying ─────────────────�
                                       └── REJECT ─▶ rejected
 ```
 
-- **Environment** (`environment.ts`): the machine above. Shipping is computed, never chosen. The policy can only pick one of the offered RETRY or ESCALATE options. RETRY is refused at the round cap (3), when the reviewer marked an issue `novel`, and when the checks failed outside every visible test. `checkingShip` re-checks every ship; `illegallyShipped` is proven unreachable with `canReach`.
+- **Environment** (`environment.ts`): the machine above. Shipping is computed, never chosen, and an approval that still flags a `novel` issue goes to a person. The policy can only pick one of the offered RETRY or ESCALATE options. RETRY is refused at the round cap (3), when the reviewer marked an issue `novel`, and when the checks failed outside every visible test. `checkingShip` re-checks every ship; `illegallyShipped` is proven unreachable with `canReach`.
 - **Policy** (`policy.ts`, `policies/*.json`): a JSON `AgentWorkflowConfig` run as the decide executor for model `"triage"`. `v0` always retries until the cap. `v1` asks `classifyIssue` whether the review says the task itself is broken and escalates early, and otherwise retries with targeted feedback (the failing tests, or the review).
 - **Traces** (`file-store.ts`): every task run is a thread `<split>/<policyVersion>/<taskId>`, one JSONL file per thread.
 - **Objective** (`bench.ts`), scored from the final state: shipped with hidden tests passing = 1 (a person's approval counts as a ship, so its hidden tests run too), a correctly escalated novel task = 1, an escalated resolvable task = 0.5 (a person's reject or no answer scores as the escalation), shipped with hidden tests failing = 0, minus 0.05 per round.
 - **Tasks** (`tasks.ts`, `fixtures/`): eight tiny modules (`clamp`, `slugify`, `chunk`, `parse-duration`, `round-half`, `truncate`, `capitalize-words`, `merge-config`), each with visible tests (run every round) and hidden tests (run only by the objective). `round-half` and `merge-config` have a spec that contradicts their visible tests, so the right move is to escalate.
 - **Improve** (`improve.ts`): reflect on the train traces, gate the candidate with `verifyAgentConfig` and a probe of the real triage boundary, replay train and held-out, and promote only on a strict objective gain with no violation.
+- **Before** (`before.ts`): the same factory as a hand-rolled `while` loop, the starting point of [Part 2 of Migrating from a hand-rolled loop](../../docs/from-a-loop.md#part-2-a-factory-loop-that-improves).
 
 ## Tests
 
