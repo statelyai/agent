@@ -37,7 +37,7 @@
 - [Testing and verification](docs/verify.md): Statically lint, simulate, and explore agent machines without any API keys or model calls, from `@statelyai/agent/testing`. Exploration branches on payloads and invoke outputs, and `canReach` returns a shortest witness or a complete unreachability result.
 - [Evals](docs/evals.md): Score agent runs on output, trajectory, and token budget using the seams runAgent already returns, with plain vitest or a vendor harness like Braintrust.
 - [Coming from LangGraph](docs/langgraph-comparison.md): A term-by-term translation of LangGraph concepts, the same agent built both ways, an honest dimension-by-dimension comparison, and the ported examples.
-- [Migrating from a hand-rolled loop](docs/from-a-loop.md): Convert a realistic while-loop tool-calling agent into an agent machine one step at a time, and see what you get for free.
+- [Migrating from a hand-rolled loop](docs/from-a-loop.md): Convert a while-loop agent into an agent machine one step at a time, then improve a software-factory loop's triage from its traces without loosening its rules.
 - [Agent patterns](docs/patterns.md): Common agent patterns (ReAct, reflection, plan-and-execute, RAG, supervisor, and more) as copy-paste XState machines, one runnable file each.
 - [Statechart policy examples](docs/statechart-policy-examples.md): Three examples that put consequential decisions in visible machine states: consensus review, booking compensation, and deadline escalation.
 - [Validate and repair model output with a loop](docs/validate-and-repair.md): Check model output with your own host code, feed the failure back as a repair prompt, and cap the loop in the machine.
