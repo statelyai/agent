@@ -923,7 +923,7 @@ describe("explorePaths — a wait whose every offered event is refused", () => {
       waiting: {
         on: {
           PLAY: ({ context, event }) =>
-            context.taken.includes((event as { cell: number }).cell)
+            context.taken.includes((event as unknown as { cell: number }).cell)
               ? undefined
               : { target: "lost" },
         },
