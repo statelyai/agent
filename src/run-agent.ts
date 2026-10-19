@@ -72,6 +72,7 @@ import {
   AgentMachineVersionMismatchError,
   agentCallOccurrence,
   createReplayEntry,
+  foldLog,
   getLogExecutionId,
   getSnapshotStateHash,
   getUsageFromEvents,
@@ -80,6 +81,7 @@ import {
   validateReplayEntries,
   assertJsonSerializable,
   type AgentLogEntry,
+  type LogFold,
   type AgentLogInit,
   type AgentPersistedSnapshot,
   type JsonValue as AgentLogJsonValue,
@@ -2262,9 +2264,19 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // `transition`, which journals them on its entry.
   const attemptsByEvent = new WeakMap<object, DecisionAttempt[]>();
 
+  // The pure fold of `logEntries` — the state `replay` reaches — advanced
+  // with every append. Each entry's `verification.stateHash` is taken from
+  // HERE, never from the live snapshot: a live snapshot also holds what the
+  // log cannot reproduce. Two parallel invokes whose calls both settled before
+  // the first completion was delivered leave the second child `done` (output
+  // and all) in the live snapshot while its own completion still waits in the
+  // mailbox; replay never starts children, so it holds that child `active`.
+  // Built lazily from the log so far; `null` once the log cannot be folded,
+  // and later entries go unverified rather than failing the run.
+  let logFold: LogFold | null | undefined;
+
   const appendLogEntry = (
     event: EventObject,
-    snapshot?: AnyMachineSnapshot | AgentPersistedSnapshot,
     attempts?: DecisionAttempt[],
   ): AgentLogEntry | undefined => {
     if (!loggingEnabled) {
@@ -2272,32 +2284,21 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     }
     const entry = createReplayEntry(logMachine, logEntries, event, {
       machineVersion,
-      verification: verificationEnabled,
+      verification: false,
       ...(attempts !== undefined ? { attempts } : {}),
-      // With no snapshot, `createReplayEntry` re-folds the whole prefix to get
-      // the hash. Every applied transition has one to hand, so that fallback
-      // is reserved for the rare out-of-band append (see `usageEntrySnapshot`).
-      ...(verificationEnabled && snapshot !== undefined ? { snapshot } : {}),
     });
+    if (verificationEnabled && logFold !== null) {
+      try {
+        logFold ??= foldLog(logMachine, logEntries, { machineVersion, verify: false });
+        entry.verification = { stateHash: getSnapshotStateHash(logFold.apply(entry)) };
+      } catch {
+        logFold = null;
+      }
+    }
     logEntries.push(entry);
     journalEntry(entry);
     options.onEvent?.(entry);
     return entry;
-  };
-
-  // The snapshot an `@agent.usage` entry that was NOT delivered folds to.
-  // Replay feeds every journaled entry through `transition`, so the recorded
-  // hash must be the POST-transition state. When the live configuration
-  // declares no `@agent.usage` transition (the common case) that transition is
-  // a no-op and the current snapshot is exactly right. Otherwise the event was
-  // withheld from a machine that would have reacted (a guard, or a straggler
-  // after finish), so the current snapshot is NOT what replay produces — fall
-  // back to `createReplayEntry`'s own fold, which is correct by construction.
-  const usageEntrySnapshot = (): AnyMachineSnapshot | undefined => {
-    if (current && (current.status !== "active" || !declaresUsageTransition(current))) {
-      return current;
-    }
-    return undefined;
   };
 
   // Reserved `@agent.usage` delivery — the seam that puts a settled call's
@@ -2329,7 +2330,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       },
     );
     if (!delivered) {
-      appendLogEntry(event, usageEntrySnapshot());
+      appendLogEntry(event);
     }
   };
   // Run-scoped, and a pure projection of the log: fold the `@agent.usage`
@@ -2872,10 +2873,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
                 throw new AgentSnapshotDivergedError(expected, actual, cachedIndex);
               }
             }
-            effectiveSnapshot = replay(logMachine, resumeEvents, {
-              machineVersion,
-              verify: true,
-            }).persistedSnapshot as Snapshot<unknown>;
+            logFold = foldLog(logMachine, resumeEvents, { machineVersion, verify: true });
+            effectiveSnapshot = logFold.persistedSnapshot as Snapshot<unknown>;
           }
         } else {
           // Version bridge. Without a snapshot there is nothing to migrate FROM.
@@ -3061,7 +3060,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       ) {
         ignoredEvent = event as EventObject;
       }
-      appendLogEntry(event as EventObject, next, attempts);
+      appendLogEntry(event as EventObject, attempts);
       commit(next, event as EventObject);
       return [next as SnapshotFrom<TMachine>, effects];
     },
