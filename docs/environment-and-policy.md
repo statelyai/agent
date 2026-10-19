@@ -149,3 +149,5 @@ The split pays off when there is a policy worth learning. Skip it in these cases
 - [Event log](event-log.md) and [Persistence](persistence.md): stores, threads, and replay.
 - Agent skills: [`skills/generate-machine`](https://github.com/statelyai/agent/blob/main/skills/generate-machine/SKILL.md) authors a policy config, and [`skills/improve-machine`](https://github.com/statelyai/agent/blob/main/skills/improve-machine/SKILL.md) improves one from traces.
 - [examples/self-improving-refunds](../examples/self-improving-refunds): a refund desk as the environment, JSON playbooks as the policy, an improvement loop, and a benchmark against a raw tool loop.
+- [examples/code-review-loop](../examples/code-review-loop): review gates as the environment, a triage policy improved from traces against hidden tests, run with Claude Code in headless mode.
+- [examples/tic-tac-toe](../examples/tic-tac-toe): a game as the environment, a policy over board features, and a `canReach` proof that it never loses as the bar for promotion.

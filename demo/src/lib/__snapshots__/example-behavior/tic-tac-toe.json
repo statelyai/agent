@@ -1,0 +1,131 @@
+{
+  "New game (you play X and O)": [
+    {
+      "sent": "start {}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"xTurn\""
+      ],
+      "response": "",
+      "idle": {
+        "prompt": "X to move. Board: . . . / . . . / . . .",
+        "events": [
+          "X.play"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"cell\":8,\"type\":\"X.play\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"xTurn\"",
+        "transition X.play -> \"oTurn\""
+      ],
+      "response": "**Board**\n\n```json\n[\n  null,\n  null,\n  null,\n  null,\n  null,\n  null,\n  null,\n  null,\n  \"X\"\n]\n```\n\n**Moves**\n\n- Player: X · Cell: 8",
+      "idle": {
+        "prompt": "O to move. Board: . . . / . . . / . . X",
+        "events": [
+          "O.play"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"cell\":8,\"type\":\"O.play\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"oTurn\"",
+        "transition O.play -> \"oTurn\""
+      ],
+      "response": "\"O.play\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "O to move. Board: . . . / . . . / . . X",
+        "events": [
+          "O.play"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"cell\":8,\"type\":\"O.play\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"oTurn\"",
+        "transition O.play -> \"oTurn\""
+      ],
+      "response": "\"O.play\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "O to move. Board: . . . / . . . / . . X",
+        "events": [
+          "O.play"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"cell\":8,\"type\":\"O.play\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"oTurn\"",
+        "transition O.play -> \"oTurn\""
+      ],
+      "response": "\"O.play\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "O to move. Board: . . . / . . . / . . X",
+        "events": [
+          "O.play"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"cell\":8,\"type\":\"O.play\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"oTurn\"",
+        "transition O.play -> \"oTurn\""
+      ],
+      "response": "\"O.play\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "O to move. Board: . . . / . . . / . . X",
+        "events": [
+          "O.play"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"cell\":8,\"type\":\"O.play\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"oTurn\"",
+        "transition O.play -> \"oTurn\""
+      ],
+      "response": "\"O.play\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "O to move. Board: . . . / . . . / . . X",
+        "events": [
+          "O.play"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"cell\":8,\"type\":\"O.play\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"oTurn\"",
+        "transition O.play -> \"oTurn\""
+      ],
+      "response": "\"O.play\" isn't an accepted event in this state, so nothing happened.",
+      "idle": {
+        "prompt": "O to move. Board: . . . / . . . / . . X",
+        "events": [
+          "O.play"
+        ],
+        "textEvent": null
+      }
+    }
+  ]
+}

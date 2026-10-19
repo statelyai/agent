@@ -22,7 +22,12 @@ they happen to call.
 
 - Environment only: [verification](verification), [booking-compensation](booking-compensation), [human-in-the-loop](human-in-the-loop)
 - Policy with a judgment inside: [triage](triage), [joke](joke)
-- Both: [self-improving-refunds](self-improving-refunds)
+- Both: [self-improving-refunds](self-improving-refunds), [code-review-loop](code-review-loop), [tic-tac-toe](tic-tac-toe)
+
+Two more examples improve a policy the same way:
+
+- [code-review-loop](code-review-loop): the review gates are the environment and the triage policy is the part that improves. It runs on Claude Code in headless mode.
+- [tic-tac-toe](tic-tac-toe): the game knows nothing about AI, the agent plays O at its boundary, and each promoted strategy must be proven never to lose.
 
 ## Control flow a loop can't express
 
@@ -117,6 +122,8 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 - [chatbot-simulation-eval](chatbot-simulation-eval): a simulated customer and the bot under test alternate under a `MAX_EXCHANGES` choice guard, the bot's request input provably omits the persona, and a Jev judge (a policy yes/no plus a quality score) runs inside the machine
 - [essay-grader](essay-grader): each pass is a Jev score over a five-level rubric; three choice states over exported score thresholds stop grading at the first weak pass, and the result names the stage it stopped after
 - [rank-candidates](rank-candidates): Jev decides, code sorts — a Jev score per candidate against a brief and a yes/no per shortlisted pair, while the threshold, sort, per-bucket quota and top-k cut-off are plain code, and every cut carries a reason
+- [code-review-loop](code-review-loop): generate, then a self-check and an independent review in parallel, then checks, then ship, retry, or ask a person. The loop is a fixed machine, and `canReach` proves it never ships without passing checks and approval. The triage policy is JSON improved from event-log traces against hidden tests, and it runs on Claude Code in headless mode
+- [tic-tac-toe](tic-tac-toe): a plain XState game where `decideNext` picks O's move. A JSON policy over low-level board features climbs from "first empty cell" to a policy `canReach` proves never loses to any opponent, gated by `verifyAgentConfig` and an objective that counts losing lines first
 - [self-improving-refunds](self-improving-refunds): the agent rewrites its own playbook, a JSON machine gated by `verifyAgentConfig` and a held-out replay before promotion, while the desk's business rules stay guards it cannot touch and an `illegallyIssued` sentinel stays provably unreachable
 
 ## Statechart policies
