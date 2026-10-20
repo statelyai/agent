@@ -47,3 +47,5 @@ export type {
   SeamSlice,
   SeamTurn,
 } from "../seam.js";
+export { foldTraces } from "../fold-traces.js";
+export type { FoldTracesOptions, StateStats } from "../fold-traces.js";

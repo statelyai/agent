@@ -35,6 +35,33 @@ environment (TypeScript, fixed)          policy (JSON, generated)
 
 The environment can be a plain XState machine. [`decideNext`](decisions.md#decisions-at-the-boundary-of-a-plain-machine) asks a model to pick one event that a plain XState machine accepts right now, and [closed choices](decisions.md#closed-choices) list the concrete events a decider may pick.
 
+### The event vocabulary
+
+The keys of `machine.schemas.events` are the machine's event vocabulary: every event type it declares, in any state. `schemas` is optional in the machine type, so read it with `?.`.
+
+```ts
+import { createMachine } from "xstate";
+import { z } from "zod";
+
+const refundDesk = createMachine({
+  schemas: {
+    events: {
+      "desk.refund": z.object({ amount: z.number() }),
+      "desk.escalate": z.object({}),
+    },
+  },
+  initial: "reviewing",
+  states: { reviewing: {} },
+});
+
+const vocabulary = Object.keys(refundDesk.schemas?.events ?? {});
+// ["desk.refund", "desk.escalate"]
+```
+
+- `getAcceptedEvents(snapshot)` lists what one snapshot accepts. The vocabulary is machine-wide and needs no snapshot.
+- Gate a policy to it: pass it as `allow.events` to `verifyAgentConfig`, and a candidate whose `agent.decide` lists any other event fails the `vocabulary` gate.
+- A `setupAgent` machine also declares the reserved `@agent.usage` event. Drop it with `.filter((type) => !type.startsWith("@agent."))`.
+
 ## The goal and the objective
 
 A policy is improved toward something. The machine's `description` states that goal.
@@ -110,7 +137,7 @@ traces → objective → diagnose → propose a policy diff → verifyAgentConfi
 
 Each round changes the policy once, then measures it.
 
-1. **Diagnose.** Compute per-run outcomes and the objective. Group the failures by cause: the terminal state reached, guard rejections (`getDecisionAttempts`), loops, and cost hotspots.
+1. **Diagnose.** Compute per-run outcomes and the objective. Group the failures by cause: the terminal state reached, guard rejections (`getDecisionAttempts`), loops, and cost hotspots. [`foldTraces`](evals.md#per-state-stats) counts visits, failures, and withheld options per state across runs.
 2. **Propose.** A model writes the smallest policy change that addresses one cause, with its hypothesis written down.
 3. **Gate.** [`verifyAgentConfig`](generate-machines.md) runs `validate`, `vocabulary`, `lower`, `lint`, and `explore` on the candidate. A failing gate's `detail` is the repair prompt. Cap repairs at 3.
 4. **Replay.** Run the training scenarios with the candidate, then the held-out scenarios.

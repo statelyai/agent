@@ -16,6 +16,7 @@ import {
   type OutputFrom,
   type Snapshot,
   type SnapshotFrom,
+  type StateValue,
 } from "xstate";
 import { createDurable, type DurableExecution } from "xstate/durable";
 import type {
@@ -211,6 +212,13 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
   | { type: "stream.chunk"; request: AgentRequest; chunk: string }
   | {
       type: "machine.transition";
+      /**
+       * Where the event arrived: the state value before this transition. The
+       * first transition of a stream (the init event, or the restore on
+       * resume) has no earlier state, so its `from.value` is its own
+       * `snapshot.value`. An object so more of the prior snapshot can join it.
+       */
+      from: { value: StateValue };
       snapshot: SnapshotFrom<TMachine>;
       event: EventFromLogic<TMachine>;
     }
@@ -1380,11 +1388,23 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
         events,
       };
       // A closed choice offers only the options the snapshot accepts right
-      // now; resolveDecision rejects a choice matching none of them.
-      const options = acceptedDecisionOptions(request, (event) =>
-        actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true,
-      );
-      if (options) request.options = options;
+      // now; resolveDecision rejects a choice matching none of them. The rest
+      // ride along as `withheld`, for traces.
+      const withheld: ChosenEvent[] = [];
+      const options = acceptedDecisionOptions(request, (event) => {
+        let accepted: boolean;
+        try {
+          accepted = actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true;
+        } catch {
+          accepted = false;
+        }
+        if (!accepted) withheld.push(event);
+        return accepted;
+      });
+      if (options) {
+        request.options = options;
+        request.withheld = withheld;
+      }
       // Nothing to choose from: fail without a model call, the same way
       // exhausted retries fail, so the invoke's onError handles it.
       if (options?.length === 0) {
@@ -2690,9 +2710,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         : "machine";
 
   const commit = (snapshot: AnyMachineSnapshot, event: EventObject): void => {
+    const from = { value: (current ?? snapshot).value };
     current = snapshot;
     onTrace({
       type: "machine.transition",
+      from,
       snapshot: snapshot as SnapshotFrom<TMachine>,
       event: event as EventFromLogic<TMachine>,
     });
@@ -3253,7 +3275,8 @@ export function inspectTransitions(
  * ```
  *
  * Only ROOT-actor transitions are traced (matching the runtime's
- * `machine.transition`); child-actor transitions are ignored. Attribute the
+ * `machine.transition`); child-actor transitions are ignored. Each event's
+ * `from.value` is the root's previous state value, tracked per root actor. Attribute the
  * event via its envelope `runId`.
  *
  * By design this path has NO `run.start`/`run.end` events: `createActor` has no
@@ -3266,6 +3289,8 @@ export function inspectTransitions(
 export function traceTransitions<TMachine extends AnyStateMachine = AnyStateMachine>(
   onTrace: (event: AgentTraceEvent<TMachine>) => void,
 ): (inspectionEvent: InspectionEvent) => void {
+  // Each root's last state value: the `from` of its next transition.
+  const lastValue = new WeakMap<object, StateValue>();
   return (inspectionEvent: InspectionEvent) => {
     if (inspectionEvent.type !== "@xstate.transition") {
       return;
@@ -3276,10 +3301,14 @@ export function traceTransitions<TMachine extends AnyStateMachine = AnyStateMach
       return;
     }
     const root = actorRef as unknown as AnyActorRef;
+    const snapshot = inspectionEvent.snapshot as AnyMachineSnapshot;
+    const from = { value: lastValue.get(root) ?? snapshot.value };
+    lastValue.set(root, snapshot.value);
     onTrace(
       stampRootTrace(root, {
         type: "machine.transition",
-        snapshot: inspectionEvent.snapshot as SnapshotFrom<TMachine>,
+        from,
+        snapshot: snapshot as SnapshotFrom<TMachine>,
         event: inspectionEvent.event as EventFromLogic<TMachine>,
       }) as AgentTraceEvent<TMachine>,
     );

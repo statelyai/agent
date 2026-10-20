@@ -49,15 +49,22 @@ export interface DecideNextResult<TEvent = ChosenEvent> {
   event: TEvent | null;
   /** Failed attempts before the choice landed. */
   attempts: DecisionAttempt[];
-  /** The request built for the executor, with the offered `options`. */
+  /** The request built for the executor, with the offered `options` and the same `withheld`. */
   request: AgentDecisionRequest;
+  /**
+   * The candidates the snapshot rejected: every `allowedEvents` type × payload,
+   * built the same way as the offered options, where `snapshot.can(event)` was
+   * false. Never offered to the model. Filled when nothing is offered too.
+   */
+  withheld: ChosenEvent[];
 }
 
 /**
  * Asks a model to choose the next event for ANY XState snapshot, including a
  * machine built with plain `createMachine`/`setup` that knows nothing about AI.
  * The candidates are the `allowedEvents` an active state handles, one option per
- * payload, kept only where `snapshot.can(event)` is true. Each option is
+ * payload, kept only where `snapshot.can(event)` is true; the rest come back as
+ * `withheld`. Each option is
  * described from the transition's `description`, else the event schema's,
  * plus (with `lookahead`) what it changes. The chosen event must equal one
  * offered option; anything else is retried.
@@ -100,13 +107,19 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
   );
   const payloads = options.payloads?.(snapshot) ?? {};
 
-  const offered: AgentDecisionOption[] = events
-    .flatMap(({ type }) => (payloads[type] ?? [{}]).map((payload) => ({ ...payload, type })))
-    .filter((event) => safeCan(snapshot, event))
-    .map((event) => ({
-      event,
-      description: describeOption(snapshot, event, schemas?.[event.type], options.lookahead),
-    }));
+  const accepted: ChosenEvent[] = [];
+  const withheld: ChosenEvent[] = [];
+  for (const { type } of events) {
+    for (const payload of payloads[type] ?? [{}]) {
+      const event = { ...payload, type };
+      (safeCan(snapshot, event) ? accepted : withheld).push(event);
+    }
+  }
+
+  const offered: AgentDecisionOption[] = accepted.map((event) => ({
+    event,
+    description: describeOption(snapshot, event, schemas?.[event.type], options.lookahead),
+  }));
 
   const request = createDecisionRequest({
     name: options.name ?? "decideNext",
@@ -116,10 +129,11 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
     input: { value: snapshot.value, context: snapshot.context },
     events,
     options: offered,
+    withheld,
   });
 
   if (offered.length === 0) {
-    return { event: null, attempts: [], request };
+    return { event: null, attempts: [], request, withheld };
   }
 
   let attempts: DecisionAttempt[] = [];
@@ -137,7 +151,7 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
       canTake: (chosen) => safeCan(snapshot, chosen),
     },
   );
-  return { event: event as EventFromSnapshot<TSnapshot>, attempts, request };
+  return { event: event as EventFromSnapshot<TSnapshot>, attempts, request, withheld };
 }
 
 function safeCan(snapshot: AnyMachineSnapshot, event: ChosenEvent): boolean {

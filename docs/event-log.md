@@ -86,6 +86,52 @@ const result = await runToQuiescence(
 );
 ```
 
+### `recordLog`: a plain actor
+
+A plain `createActor` run has no runtime to journal it. `recordLog(actor)` records it as the same entries: the init entry, then every event the root machine processed, with invoke outputs inline. Attach it before `actor.start()`.
+
+```ts
+import { createActor, createAsyncLogic, createMachine, toPromise } from "xstate";
+import { recordLog, replay } from "@statelyai/agent/log";
+import { z } from "zod";
+
+const orderMachine = createMachine({
+  schemas: { input: z.object({ orderId: z.string() }) },
+  context: ({ input }) => ({ orderId: input.orderId, total: 0 }),
+  initial: "idle",
+  states: {
+    idle: { on: { LOOKUP: { target: "lookingUp" } } },
+    lookingUp: {
+      invoke: {
+        src: createAsyncLogic({ run: async () => 42 }),
+        onDone: ({ context, event }) => ({
+          target: "found",
+          context: { ...context, total: event.output as number },
+        }),
+      },
+    },
+    found: { type: "final" },
+  },
+});
+
+const actor = createActor(orderMachine, { input: { orderId: "o1" } });
+const log = recordLog(actor);
+actor.start();
+actor.send({ type: "LOOKUP" });
+await toPromise(actor);
+log.stop();
+
+log.entries.map((entry) => entry.event.type);
+// ["@agent.init", "LOOKUP", "xstate.done.actor"]
+
+const { snapshot } = replay(orderMachine, log.entries);
+// snapshot.value === "found", snapshot.context.total === 42; the lookup did not run again
+```
+
+- An actor created from a `snapshot` starts its log from that snapshot.
+- Each entry carries `verification.stateHash`, so `replay` verifies the fold.
+- Attached after `start()`, it misses the init event, and reading `log.entries` throws `AgentEventLogError`. An event that cannot be journaled (a payload that is not JSON) stops the recording the same way.
+
 To build entries yourself, use `initEntry` for index 0 and `createReplayEntry` for each subsequent external input.
 
 ## Replay

@@ -26,6 +26,7 @@ export {
   getUsageFromEvents,
   initEntry,
   rebindActorSession,
+  recordLog,
   replay,
   validateReplayEntries,
 } from "../event-log.js";
@@ -37,6 +38,7 @@ export type {
   AgentPersistedSnapshot,
   CreateReplayEntryOptions,
   JsonValue,
+  LogRecorder,
   ReplayOptions,
   ReplayResult,
 } from "../event-log.js";

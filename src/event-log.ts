@@ -18,6 +18,7 @@
 import {
   initialTransition,
   transition,
+  type Actor,
   type AnyMachineSnapshot,
   type AnyStateMachine,
   type EventObject,
@@ -1145,5 +1146,85 @@ export function foldLog(
       return persisted;
     },
     apply,
+  };
+}
+
+/** A log being recorded from a plain actor. See {@link recordLog}. */
+export interface LogRecorder {
+  /**
+   * The entries so far, init entry first, in the shape {@link replay} folds.
+   * Throws the recording's error if an event could not be journaled.
+   */
+  readonly entries: AgentLogEntry[];
+  /** Stops recording. Entries recorded so far stay readable. */
+  stop(): void;
+}
+
+/**
+ * Records a plain `createActor` run as an event log, with no
+ * `createAgentRuntime`: the init entry (the actor's `input`, or the snapshot
+ * it was created from), then every event the root machine processed, invoke
+ * completions with their outputs inline. Attach it before `actor.start()`.
+ *
+ * @example
+ * ```ts no-check
+ * const actor = createActor(machine, { input });
+ * const log = recordLog(actor);
+ * actor.start();
+ * // ...later
+ * const { snapshot } = replay(machine, log.entries); // no actor runs
+ * ```
+ */
+export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
+  const machine = actor.logic;
+  const machineVersion = resolveMachineVersion(machine);
+  const entries: AgentLogEntry[] = [];
+  let fold: LogFold | undefined;
+  let failure: unknown;
+
+  const record = (event: EventObject): void => {
+    if (fold === undefined) {
+      if (event.type !== "@xstate.init") {
+        throw new AgentEventLogError(
+          "recordLog must be attached before actor.start(): it missed the init event.",
+        );
+      }
+      const restored = actor.options.snapshot as AgentPersistedSnapshot | undefined;
+      const init: AgentLogInit = restored
+        ? { snapshot: restored }
+        : { input: (event as { input?: unknown }).input };
+      entries.push(initEntry(machine, init, { machineVersion }));
+      fold = foldLog(machine, entries, { machineVersion, verify: false });
+      return;
+    }
+    const entry = createReplayEntry(machine, entries, event, {
+      machineVersion,
+      verification: false,
+    });
+    entry.verification = { stateHash: getSnapshotStateHash(fold.apply(entry)) };
+    entries.push(entry);
+  };
+
+  const subscription = actor.system.inspect((inspectionEvent) => {
+    if (
+      failure !== undefined ||
+      inspectionEvent.type !== "@xstate.transition" ||
+      inspectionEvent.actorRef !== actor
+    ) {
+      return;
+    }
+    try {
+      record(inspectionEvent.event);
+    } catch (error) {
+      failure = error;
+    }
+  });
+
+  return {
+    get entries() {
+      if (failure !== undefined) throw failure;
+      return [...entries];
+    },
+    stop: () => subscription.unsubscribe(),
   };
 }
