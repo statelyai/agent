@@ -17,6 +17,7 @@ import {
   type Snapshot,
   type SnapshotFrom,
   type StateValue,
+  type TimerKey,
 } from "xstate";
 import { createDurable, type DurableExecution } from "xstate/durable";
 import type {
@@ -1840,6 +1841,19 @@ export interface AgentTimerEvent {
   id: string;
 }
 
+// XState keys a timer by a `TimerKey` object; hosts see it as an opaque `id`.
+const timerId = (timer: TimerKey): string => JSON.stringify(timer);
+
+// A host's `{ type: "xstate.timer", id }` becomes the firing input XState
+// expects, `{ type: "xstate.timer", ...timer }`. Anything else passes through.
+function toTimerInput(event: EventObject): EventObject {
+  const id = (event as { id?: unknown }).id;
+  if (event.type !== "xstate.timer" || typeof id !== "string" || !id.startsWith("{")) {
+    return event;
+  }
+  return { type: "xstate.timer", ...(JSON.parse(id) as TimerKey) };
+}
+
 /** How {@link AgentRuntime.start} opens a run. */
 export interface AgentRunStart<TMachine extends AnyStateMachine> {
   /**
@@ -2509,9 +2523,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   const armTimer = (
     source: AnyActorRef | undefined,
     isRoot: boolean,
-    id: string,
+    timer: TimerKey,
     delay: number,
   ) => {
+    const id = timerId(timer);
     if (isRoot && !inProcessTimers) {
       (options.timers as Exclude<AgentTimerScheduler, "in-process">).schedule({ id, delay });
       return;
@@ -2522,7 +2537,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       key,
       setTimeout(() => {
         timerHandles.delete(key);
-        const timerEvent = { type: "xstate.timer", id } as EventObject;
+        const timerEvent = { type: "xstate.timer", ...timer } as EventObject;
         if (isRoot) {
           enqueue(timerEvent);
         } else {
@@ -2673,12 +2688,13 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         source._emit?.(event);
       }
     },
-    scheduleTimer: (source: AnyActorRef, id: string, delay: number) => {
+    scheduleTimer: (source: AnyActorRef, timer: TimerKey, delay: number) => {
       // A restored checkpoint's timers arrive here with what is left of
       // their delay: XState keeps their deadlines across persistence.
-      armTimer(source, (source as AnyActor).address === execution.rootAddress, id, delay);
+      armTimer(source, (source as AnyActor).address === execution.rootAddress, timer, delay);
     },
-    cancelTimer: (source: AnyActorRef, id: string) => {
+    cancelTimer: (source: AnyActorRef, timer: TimerKey) => {
+      const id = timerId(timer);
       const isRoot = (source as { address?: string }).address === execution.rootAddress;
       if (isRoot && !inProcessTimers) {
         (options.timers as Exclude<AgentTimerScheduler, "in-process">).cancel(id);
@@ -3062,6 +3078,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       if (stopReason !== undefined) {
         return [state, []];
       }
+      event = toTimerInput(event as EventObject) as typeof event;
       // Host-supplied attempts are checked before the machine moves, so a
       // non-JSON value fails loudly without leaving a half-applied event.
       const attempts = transitionOptions?.attempts ?? attemptsByEvent.get(event as object);

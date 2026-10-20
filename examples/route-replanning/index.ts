@@ -108,7 +108,7 @@ export const roadNetwork = networkSetup.createMachine({
         },
       },
     ]),
-  ) as never,
+  ) as unknown as Record<Location, {}>,
 });
 
 /** The traversal tries a `GO` to every location; the guards reject the rest. */

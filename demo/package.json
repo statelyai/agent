@@ -36,7 +36,7 @@
     "tailwind-merge": "^3.7.0",
     "tw-shimmer": "^0.4.13",
     "ws": "^8.22.0",
-    "xstate": "6.0.0-alpha.64",
+    "xstate": "6.0.0-alpha.69",
     "zod": "^4.6.5",
     "zustand": "^5.0.15"
   },

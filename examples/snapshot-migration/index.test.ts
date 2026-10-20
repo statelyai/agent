@@ -22,7 +22,7 @@ async function persistedV1Snapshot(orderId = "ORD-1", total = 812.5) {
 
 test("XState's persisted snapshot carries the machine version", async () => {
   const persisted = await pauseOnV1({ orderId: "ORD-1", total: 812.5 });
-  expect((persisted as { version?: string }).version).toBe(V1);
+  expect((persisted as { machine?: { version?: string } }).machine?.version).toBe(V1);
   expect((persisted as { value?: unknown }).value).toBe("reviewing");
 });
 

@@ -12,7 +12,7 @@ import {
   type AnyActorLogic,
   type AnyMachineSnapshot,
   type EventFromLogic,
-  type ExecutableActionObjectFromLogic,
+  type ExecutableEffectFrom,
   type EventObject,
   type SnapshotFrom,
 } from "xstate";
@@ -299,7 +299,7 @@ export function transitionResult<TLogic extends AnyActorLogic>(
   request: Pick<AgentRequest, "id"> | string,
   output: unknown,
   outcome: "output" | "error" = "output",
-): [SnapshotFrom<TLogic>, ExecutableActionObjectFromLogic<TLogic>[]] {
+): [SnapshotFrom<TLogic>, ExecutableEffectFrom<TLogic>[]] {
   const event =
     outcome === "error"
       ? errorEvent(snapshot as AnyMachineSnapshot, request, output)
