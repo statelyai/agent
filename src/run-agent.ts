@@ -1413,6 +1413,9 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
         error.message =
           `Decision '${request.name}' has no offered option the current snapshot accepts; ` +
           "no model call was made.";
+        // No model call, but trace the request so its `withheld` options count.
+        runCtx.emitTrace?.({ type: "request.start", request }, self);
+        runCtx.emitTrace?.({ type: "request.error", request, error }, self);
         throw error;
       }
 

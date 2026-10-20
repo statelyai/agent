@@ -83,4 +83,23 @@ describe("recordLog", () => {
 
     expect(() => log.entries).toThrow(AgentEventLogError);
   });
+
+  test("attaching after start errors even before the next transition", () => {
+    const { machine } = setup();
+    const actor = createActor(machine, { input: { orderId: "o1" } });
+    actor.start();
+    const log = recordLog(actor);
+
+    expect(() => log.entries).toThrow(AgentEventLogError);
+  });
+
+  test("attaching to a finished actor throws at once", async () => {
+    const { machine } = setup();
+    const actor = createActor(machine, { input: { orderId: "o1" } });
+    actor.start();
+    actor.send({ type: "LOOKUP" });
+    await toPromise(actor);
+
+    expect(() => recordLog(actor)).toThrow(AgentEventLogError);
+  });
 });

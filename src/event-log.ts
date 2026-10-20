@@ -1153,7 +1153,8 @@ export function foldLog(
 export interface LogRecorder {
   /**
    * The entries so far, init entry first, in the shape {@link replay} folds.
-   * Throws the recording's error if an event could not be journaled.
+   * Throws the recording's error if an event could not be journaled, and
+   * throws when there is no init entry yet (not started, or attached late).
    */
   readonly entries: AgentLogEntry[];
   /** Stops recording. Entries recorded so far stay readable. */
@@ -1176,6 +1177,11 @@ export interface LogRecorder {
  * ```
  */
 export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
+  if (actor.getSnapshot().status !== "active") {
+    throw new AgentEventLogError(
+      "recordLog must be attached before actor.start(): the actor has already finished.",
+    );
+  }
   const machine = actor.logic;
   const machineVersion = resolveMachineVersion(machine);
   const entries: AgentLogEntry[] = [];
@@ -1223,6 +1229,11 @@ export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
   return {
     get entries() {
       if (failure !== undefined) throw failure;
+      if (entries.length === 0) {
+        throw new AgentEventLogError(
+          "recordLog has no init entry: the actor has not started, or recordLog was attached after actor.start().",
+        );
+      }
       return [...entries];
     },
     stop: () => subscription.unsubscribe(),

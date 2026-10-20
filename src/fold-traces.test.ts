@@ -82,6 +82,22 @@ describe("foldTraces", () => {
     ]);
   });
 
+  test("rows come back in first-visited order", () => {
+    const trace = [
+      { type: "machine.transition", from: { value: "idle" }, snapshot: { value: "idle" } },
+      { type: "machine.transition", from: { value: "idle" }, snapshot: { value: "deciding" } },
+      {
+        type: "request.start",
+        request: { kind: "decision", attempts: [], withheld: [{ type: "refund" }] },
+      },
+    ];
+
+    expect(foldTraces([trace], { failed: () => false }).map((row) => row.state)).toEqual([
+      "idle",
+      "deciding",
+    ]);
+  });
+
   test("folds serialized traces the same way", async () => {
     const traces = [await run("refund"), await run("escalate")];
     const failed = (trace: readonly { type: string; snapshot?: unknown }[]) =>

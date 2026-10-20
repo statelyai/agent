@@ -331,14 +331,26 @@ describe("agent.decide with payloads under the runtime", () => {
       },
     });
     const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+    const traced: string[] = [];
+    const starts: AgentDecisionRequest[] = [];
     const result = await runToQuiescence(
       createAgentRuntime(noOptions, {
         executors: { generateText: async () => ({ result: {} }), decide },
+        onTrace: (event) => {
+          if (event.type === "request.start" || event.type === "request.error") {
+            if (event.request.kind !== "decision") return;
+            traced.push(event.type);
+            if (event.type === "request.start") starts.push(event.request);
+          }
+        },
       }),
       { input: {} },
     );
 
     expect(requests).toHaveLength(0);
+    // The blocked options still reach the trace, so foldTraces counts them.
+    expect(traced).toEqual(["request.start", "request.error"]);
+    expect(starts.map((request) => request.withheld)).toEqual([[{ amount: 80, type: "refund" }]]);
     expect(result.snapshot.value).toBe("failed");
     const context = result.snapshot.context as { code?: string; error?: string };
     expect(context.code).toBe("decision-exhausted");

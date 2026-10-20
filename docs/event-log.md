@@ -88,7 +88,7 @@ const result = await runToQuiescence(
 
 ### `recordLog`: a plain actor
 
-A plain `createActor` run has no runtime to journal it. `recordLog(actor)` records it as the same entries: the init entry, then every event the root machine processed, with invoke outputs inline. Attach it before `actor.start()`.
+A plain `createActor` run has no runtime to journal it. `recordLog(actor)` records it as the same entries: the init entry, then every event the root machine processed, with invoke outputs inline. Attach it before `actor.start()`. Attaching to a finished actor throws, and reading `entries` before an init entry exists (not started yet, or attached after start) throws `AgentEventLogError` rather than returning a partial log.
 
 ```ts
 import { createActor, createAsyncLogic, createMachine, toPromise } from "xstate";

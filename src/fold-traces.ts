@@ -57,11 +57,15 @@ export function foldTraces<TTrace extends readonly { readonly type: string }[]>(
   for (const trace of traces) {
     const visited = new Set<string>();
     let current: string[] = [];
+    const visit = (state: string): void => {
+      statsFor(state);
+      visited.add(state);
+    };
     for (const event of trace as readonly Record<string, unknown>[]) {
       if (event.type === "machine.transition") {
-        for (const state of statePaths(valueOf(event.from))) visited.add(state);
+        for (const state of statePaths(valueOf(event.from))) visit(state);
         current = statePaths(valueOf(event.snapshot));
-        for (const state of current) visited.add(state);
+        for (const state of current) visit(state);
       } else if (event.type === "request.start" && isFirstDecision(event.request)) {
         const withheld = event.request.withheld;
         if (!Array.isArray(withheld)) continue;

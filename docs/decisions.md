@@ -326,7 +326,7 @@ actor.subscribe(async (snapshot) => {
 actor.start();
 ```
 
-The result also carries `attempts`, the failed choices before the one that landed, and the `request` the executor saw. `withheld` lists the candidates the snapshot rejected: each `allowedEvents` type and payload, built like the options, where `snapshot.can(event)` was false. The model never sees them; `request.withheld` holds the same list. A closed choice under the runtime sets `request.withheld` the same way. Exhausting retries throws `AgentDecisionExhaustedError`. To journal `attempts`, pass them with the event to the run that delivers it. See [Boundary decisions](event-log.md#boundary-decisions).
+The result also carries `attempts`, the failed choices before the one that landed, and the `request` the executor saw. `withheld` lists the candidates the snapshot rejected: each `allowedEvents` type and payload, built like the options, where `snapshot.can(event)` was false. The model never sees them; `request.withheld` holds the same list. A closed choice under the runtime sets `request.withheld` the same way, and traces it even when every option is withheld and no model call is made. Exhausting retries throws `AgentDecisionExhaustedError`. To journal `attempts`, pass them with the event to the run that delivers it. See [Boundary decisions](event-log.md#boundary-decisions).
 
 ## Related
 
