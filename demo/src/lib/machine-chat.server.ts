@@ -665,15 +665,36 @@ export function createTimerRecorder(): {
   };
 }
 
+type PersistedTimer = {
+  id?: string;
+  seq?: number;
+  delay?: unknown;
+  event?: { type: string; delay?: unknown; stateId?: unknown; actorId?: unknown };
+};
+
+// The scheduler `id` the runtime hands a host for this timer: its XState
+// `TimerKey`, as JSON. Built-in timers are keyed by their event's identity.
+function timerId(timer: PersistedTimer): string {
+  if (timer.id !== undefined) return JSON.stringify({ id: timer.id });
+  if (timer.seq !== undefined) return JSON.stringify({ seq: timer.seq });
+  const event = timer.event!;
+  const identity =
+    event.type === "xstate.after"
+      ? { type: event.type, delay: event.delay, stateId: event.stateId }
+      : event.type === "xstate.timeout.state"
+        ? { type: event.type, stateId: event.stateId }
+        : event.type === "xstate.timeout.actor"
+          ? { type: event.type, actorId: event.actorId }
+          : event;
+  return JSON.stringify({ event: identity });
+}
+
 /** The root timers a persisted snapshot holds — what a restore would re-arm. */
 function snapshotTimers(snapshot: unknown): PendingTimer[] {
   const timers = (snapshot as { timers?: unknown } | null)?.timers;
-  if (!timers || typeof timers !== "object") return [];
-  return Object.entries(timers as Record<string, { id?: unknown; delay?: unknown }>).flatMap(
-    ([key, timer]) =>
-      typeof timer?.delay === "number"
-        ? [{ id: typeof timer.id === "string" ? timer.id : key, delay: timer.delay }]
-        : [],
+  if (!Array.isArray(timers)) return [];
+  return (timers as PersistedTimer[]).flatMap((timer) =>
+    typeof timer?.delay === "number" ? [{ id: timerId(timer), delay: timer.delay }] : [],
   );
 }
 

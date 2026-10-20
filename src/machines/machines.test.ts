@@ -140,7 +140,9 @@ describe("createToolLoopMachine", () => {
     );
 
     expect(new Set(events)).toEqual(new Set(["1"]));
-    expect(result.persist()).toEqual(expect.objectContaining({ version: "1" }));
+    expect(result.persist()).toEqual(
+      expect.objectContaining({ machine: expect.objectContaining({ version: "1" }) }),
+    );
   });
 
   test("the machine's own version is the single source (no machineVersion option)", async () => {

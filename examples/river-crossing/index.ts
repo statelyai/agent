@@ -272,7 +272,7 @@ export function shortestRoute(from: WorldState): string[] | null {
     .filter((path) => allOnRight(path.state.context))
     .sort((a, b) => a.steps.length - b.steps.length)[0];
   if (!solved) return null;
-  return solved.steps.map((step) => step.event.type).filter((type) => !type.startsWith("@"));
+  return solved.steps.map((step) => step.event.type).filter((type) => !type.startsWith("xstate."));
 }
 
 /**

@@ -12,7 +12,7 @@
  * hand-authored one.
  */
 import {
-  createMachineFromConfig,
+  machineFromJSON,
   type AnyActorLogic,
   type AnyStateMachine,
   type AsyncActorLogic,
@@ -337,7 +337,7 @@ function createActorPlaceholdersFromWorkflowConfig(config: AgentWorkflowConfig) 
 // ---------------------------------------------------------------------------
 // AgentWorkflowConfig → MachineJSON translation.
 //
-// The config is lowered onto xstate's own JSON layer (`createMachineFromConfig`)
+// The config is lowered onto xstate's own JSON layer (`machineFromJSON`)
 // rather than a hand-rolled interpreter: named guards/actions resolve through
 // `sources` (missing refs throw at build time), and every
 // template-bearing value becomes one `@expr` slot resolved by the evaluator
@@ -842,7 +842,7 @@ function collectTranslatedFinalOutputs(
 }
 
 // Translates a whole AgentWorkflowConfig into the MachineJSON accepted by
-// xstate's createMachineFromConfig.
+// xstate's machineFromJSON.
 function translateWorkflowConfig(
   config: AgentWorkflowConfig,
   translation: WorkflowTranslation,
@@ -880,7 +880,7 @@ function translateWorkflowConfig(
   return json as unknown as MachineJSON;
 }
 
-// Implementation backing the public `setupAgent.fromConfig(...)` namespace member (see setup-agent.ts) — translates an AgentWorkflowConfig into MachineJSON and builds the machine through xstate's createMachineFromConfig.
+// Implementation backing the public `setupAgent.fromConfig(...)` namespace member (see setup-agent.ts) — translates an AgentWorkflowConfig into MachineJSON and builds the machine through xstate's machineFromJSON.
 export function setupAgentFromConfig(
   config: AgentWorkflowConfig,
   options: FromConfigOptions,
@@ -911,7 +911,7 @@ export function setupAgentFromConfig(
   };
   const json = translateWorkflowConfig(config, translation);
 
-  const machine = createMachineFromConfig(json, {
+  const machine = machineFromJSON(json, {
     guards: Object.fromEntries(
       Object.entries({
         ...translation.guards,

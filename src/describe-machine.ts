@@ -2,7 +2,7 @@
  * A machine, described in plain text for a model to read: the prompt for a
  * model that proposes an improved machine, or extra context for a decider.
  *
- * The text is read from the machine's own definition (`serializeMachine`):
+ * The text is read from the machine's own definition (`machineToJSON`):
  * for a `setupAgent.fromConfig(...)` machine that is the lowered JSON config,
  * so every target, guard and context patch is data; for a TS-authored machine,
  * transitions written as functions are read from their source.
@@ -10,7 +10,7 @@
  * @module
  */
 import {
-  serializeMachine,
+  machineToJSON,
   type AnyMachineSnapshot,
   type AnyStateMachine,
   type AnyStateNode,
@@ -372,7 +372,7 @@ export function describeMachine(
   machine: AnyStateMachine,
   options: DescribeMachineOptions = {},
 ): string {
-  const json = serializeMachine(machine);
+  const json = machineToJSON(machine) as Json;
   const delays = isObject(json.delays) ? json.delays : {};
   const active = new Set(options.snapshot?.nodes.map((node) => node.id) ?? []);
   const root = machine.root;
