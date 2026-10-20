@@ -1184,7 +1184,7 @@ export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
 
   const record = (event: EventObject): void => {
     if (fold === undefined) {
-      if (event.type !== "@xstate.init") {
+      if (event.type !== "xstate.init") {
         throw new AgentEventLogError(
           "recordLog must be attached before actor.start(): it missed the init event.",
         );
