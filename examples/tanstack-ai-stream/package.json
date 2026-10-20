@@ -15,7 +15,7 @@
     "@tanstack/ai-react": "^0.30.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "xstate": "6.0.0-alpha.64",
+    "xstate": "6.0.0-alpha.69",
     "zod": "^4.6.5"
   },
   "devDependencies": {

@@ -502,7 +502,7 @@ export function maybeCreateRunInspection(
       // The runtime stops the root actor between turns (idle waits, persisted
       // snapshot). That stop is a runtime detail, not the session ending:
       // keep the root on its last live snapshot so it never reads as stopped.
-      if (id === ROOT_ID && event.event?.type === "@xstate.stop") return;
+      if (id === ROOT_ID && event.event?.type === "xstate.stop") return;
       if (id === ROOT_ID) {
         room.rootChildIds = new Set(
           Object.keys((event.snapshot as { children?: object } | undefined)?.children ?? {}),
@@ -513,7 +513,7 @@ export function maybeCreateRunInspection(
       // it at the same address, so it stays on screen as it was.
       if (
         id !== ROOT_ID &&
-        event.event?.type === "@xstate.stop" &&
+        event.event?.type === "xstate.stop" &&
         room.rootChildIds?.has(String(actorRef.id))
       ) {
         return;

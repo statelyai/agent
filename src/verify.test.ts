@@ -829,7 +829,7 @@ describe("invoke-without-on-error", () => {
     const machine = agent.createMachine({
       context: { topic: "otters" },
       initial: "drafting",
-      on: { "xstate.error.actor.*": { target: ".failed" } },
+      on: { "xstate.error.actor": { target: ".failed" } },
       states: {
         drafting: {
           invoke: {
@@ -869,7 +869,7 @@ describe("invoke-without-on-error", () => {
       findings(
         makeMachine({
           drafting: {
-            on: { "xstate.error.actor.*": { target: "failed" } },
+            on: { "xstate.error.actor": { target: "failed" } },
             initial: "working",
             states: {
               working: {

@@ -177,7 +177,7 @@
     "twoslash": "^0.3.9",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3",
-    "xstate": "6.0.0-alpha.64",
+    "xstate": "6.0.0-alpha.69",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
@@ -186,7 +186,7 @@
     "ai": "^7.0.0",
     "ajv": "^8.20.0",
     "openai": ">=5.0.0 <8",
-    "xstate": "6.0.0-alpha.64"
+    "xstate": "6.0.0-alpha.69"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/api": {

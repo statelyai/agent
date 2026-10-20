@@ -2,7 +2,7 @@
  * Loads an XState v5-style machine config (the JSON `createMachine` takes,
  * or a Stately Studio export) as an XState v6 machine.
  *
- * v6's `createMachineFromConfig` reads almost the same JSON. The differences
+ * v6's `machineFromJSON` reads almost the same JSON. The differences
  * this bridges:
  *
  *   - Shorthands: v5 allows `"onError": "failed"`, `"actions": "save"` and
@@ -18,7 +18,7 @@
  *     agent runtime can still bind its executors to the requests.
  */
 import {
-  createMachineFromConfig,
+  machineFromJSON,
   type AnyActorLogic,
   type AnyStateMachine,
   type MachineJSON,
@@ -90,7 +90,7 @@ export function fromV5Config(config: object, impl: V5Implementations): AnyStateM
   });
 
   const actors = impl.actors ?? {};
-  return createMachineFromConfig({ ...state(config), "@exprLang": LANG } as MachineJSON, {
+  return machineFromJSON({ ...state(config), "@exprLang": LANG } as MachineJSON, {
     // Invokes keep their string srcs, so the agent runtime can bind them.
     actors,
     guards: impl.guards as never,

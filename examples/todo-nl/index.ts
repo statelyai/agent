@@ -307,10 +307,10 @@ export const todoMachine = agentSetup.createMachine({
 
         // The explicit loop exit: the command is fully handled, so stop
         // deciding and settle idle for the next command.
-        DONE: {
+        DONE: () => ({
           target: "awaitingCommand",
           context: { pendingCommand: null, applied: [] },
-        },
+        }),
 
         QUIT: {
           target: "done",
