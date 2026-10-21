@@ -7,6 +7,7 @@ import { getExampleMachine } from "./example-library.server";
 import {
   createTraceRecorder,
   describeIdle,
+  ignoredEventNote,
   describeMachineInput,
   jsonSchemaOf,
   runSignal,
@@ -521,5 +522,30 @@ describe("meta.interaction payload choices", () => {
     expect(describeIdle(plain, createActor(plain).start().getSnapshot() as never).choices).toBe(
       undefined,
     );
+  });
+});
+
+describe("ignoredEventNote", () => {
+  const machine = createMachine({
+    initial: "waiting",
+    context: { revisions: 2 },
+    states: {
+      waiting: {
+        on: {
+          REVISE: ({ context }) => (context.revisions < 2 ? { target: "waiting" } : undefined),
+        },
+      },
+    },
+  });
+  const snapshot = createActor(machine).getSnapshot();
+
+  test("says a guard refused an event the state handles", () => {
+    expect(ignoredEventNote(snapshot, { type: "REVISE" })).toContain(
+      "refused by this state's rules",
+    );
+  });
+
+  test("says an event the state never handles isn't accepted", () => {
+    expect(ignoredEventNote(snapshot, { type: "SEND" })).toContain("isn't an accepted event");
   });
 });

@@ -209,6 +209,29 @@ describe("nothing said twice", () => {
     expect(renderOutput({ messages, turns: 1 })).toContain("**Assistant:** Hello! How can I help?");
   });
 
+  test("a chat reply still leads when the turn also changed other prose (context-compaction)", () => {
+    const messages = [
+      { role: "user", content: "What do the three lights mean?" },
+      { role: "assistant", content: "Red stops, amber warns, green goes." },
+    ];
+    const text = renderIdleWork(
+      { messages, summary: "The user asked about traffic lights earlier." },
+      ["messages", "summary"],
+    )!;
+    expect(text.indexOf("Red stops")).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("Red stops")).toBeLessThan(text.indexOf("traffic lights earlier"));
+  });
+
+  test("multi-line text the collapsed prompt already says is not repeated", () => {
+    const question = "Explain hashing.\n\nIn your own words.";
+    expect(
+      renderIdleWork({ question }, ["question"], [], "Explain hashing. In your own words."),
+    ).toBeNull();
+    expect(
+      renderIdleWork({ id: "WELCOME-emp-001" }, ["id"], [], "Sent WELCOME-emp-001."),
+    ).toBeNull();
+  });
+
   test("identical strings render once", () => {
     const text = renderOutput({ reply: "Thanks, we reset it.", draft: "Thanks, we reset it." });
     expect(text).toBe("Thanks, we reset it.");

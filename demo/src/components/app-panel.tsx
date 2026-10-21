@@ -262,8 +262,12 @@ export function AppPanel({
   const loading = turns.some((turn) => turn.status === "loading");
   const started = turns.length > 0;
   const lastReady = [...turns].reverse().find((turn) => turn.status === "ready")?.result;
+  // A run that failed or was cancelled with no wait to return to is over too;
+  // otherwise the composer stays open and every message is ignored.
+  const lastSettled = [...turns].reverse().find((turn) => turn.status !== "ignored");
+  const stopped = lastSettled?.status === "error" || lastSettled?.status === "cancelled";
   const finished = Boolean(
-    !pendingIdle && !loading && started && lastReady && lastReady.status !== "idle",
+    !pendingIdle && !loading && started && (stopped || (lastReady && lastReady.status !== "idle")),
   );
   const messages = messagesFromTurns(turns, liveSteps, liveText);
   const hydrated = useHydrated();

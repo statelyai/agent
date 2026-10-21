@@ -4,6 +4,7 @@ import { readRunStream, streamRun, type RunChunk } from "./run-stream";
 import { createShellStore } from "./shell-store";
 import { messagesFromTurns } from "@/components/app-panel";
 import { traceSteps, type TraceStep } from "./trace-view";
+import type { ChatIdle } from "./machine-ui";
 
 type Request = { id: string; src: unknown };
 
@@ -179,5 +180,32 @@ describe("a cancelled turn", () => {
       "Once upon a",
       "Run cancelled.",
     ]);
+  });
+});
+
+describe("a failed resume", () => {
+  test("brings back the wait it was resumed from, so the person can retry", () => {
+    const store = createShellStore({ type: "example", id: "joke" });
+    const idle: ChatIdle = { prompt: "Approve?", events: [], textEvent: null, component: null };
+    store.trigger.turnPushed({ id: 1, input: "cats", role: "user", status: "loading" });
+    const { epoch } = store.getSnapshot().context;
+    store.trigger.turnSettled({
+      epoch,
+      id: 1,
+      result: { status: "idle", trace: [], response: "", idle: { ...idle, snapshot: {} } },
+    });
+    store.trigger.turnPushed({ id: 2, input: "Approve", role: "action", status: "loading" });
+    expect(store.getSnapshot().context.pendingIdle).toBeNull();
+
+    store.trigger.turnFailed({ epoch, id: 2, message: "Network error" });
+    expect(store.getSnapshot().context.pendingIdle).toEqual(idle);
+  });
+
+  test("a failed start has no wait to return to", () => {
+    const store = createShellStore({ type: "example", id: "joke" });
+    store.trigger.turnPushed({ id: 1, input: "cats", role: "user", status: "loading" });
+    const { epoch } = store.getSnapshot().context;
+    store.trigger.turnFailed({ epoch, id: 1, message: "Network error" });
+    expect(store.getSnapshot().context.pendingIdle).toBeNull();
   });
 });
