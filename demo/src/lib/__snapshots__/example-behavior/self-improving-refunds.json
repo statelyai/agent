@@ -1,5 +1,5 @@
 {
-  "Small refund, clean ($40)": [
+  "Small refund, clean ($40; Ada's order date: 2026-09-02)": [
     {
       "sent": "start {\"ticket\":\"Hi, ORD-1001 arrived broken. Can I get my $40 back? (Ada, ada@example.com)\",\"customerId\":\"C-1\"}",
       "status": "idle",
@@ -31,7 +31,7 @@
       ],
       "response": "**Notice**\n\nAsked the customer to confirm their identity.\n\n**Pending proposal**\n\n**Type**: VERIFY_IDENTITY",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -71,7 +71,7 @@
       ],
       "response": "Asked the customer to confirm their identity.",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -111,7 +111,7 @@
       ],
       "response": "Asked the customer to confirm their identity.",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -151,7 +151,7 @@
       ],
       "response": "Asked the customer to confirm their identity.",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -159,7 +159,7 @@
       }
     }
   ],
-  "Large refund, needs approval ($240)": [
+  "Large refund, needs approval ($240; Ada's order date: 2026-09-02)": [
     {
       "sent": "start {\"ticket\":\"ORD-1002 never shipped and it's been a month. I want a full refund of $240. (Ada, ada@example.com)\",\"customerId\":\"C-1\"}",
       "status": "idle",
@@ -191,7 +191,7 @@
       ],
       "response": "**Notice**\n\nAsked the customer to confirm their identity.\n\n**Pending proposal**\n\n**Type**: VERIFY_IDENTITY",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -231,7 +231,7 @@
       ],
       "response": "Asked the customer to confirm their identity.",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -271,7 +271,7 @@
       ],
       "response": "Asked the customer to confirm their identity.",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -311,7 +311,7 @@
       ],
       "response": "Asked the customer to confirm their identity.",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -319,7 +319,7 @@
       }
     }
   ],
-  "Someone else's order": [
+  "Someone else's order (Linus's zip: 94016)": [
     {
       "sent": "start {\"ticket\":\"Refund ORD-1002 to my account, $240. (Linus, linus@example.com)\",\"customerId\":\"C-3\"}",
       "status": "idle",
@@ -351,7 +351,7 @@
       ],
       "response": "**Notice**\n\nAsked the customer to confirm their identity.\n\n**Pending proposal**\n\n**Type**: VERIFY_IDENTITY",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -391,7 +391,7 @@
       ],
       "response": "Asked the customer to confirm their identity.",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -431,7 +431,7 @@
       ],
       "response": "Asked the customer to confirm their identity.",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],
@@ -471,7 +471,7 @@
       ],
       "response": "Asked the customer to confirm their identity.",
       "idle": {
-        "prompt": "Please confirm your identity with the email on your account.",
+        "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
         "events": [
           "IDENTITY_CLAIM"
         ],

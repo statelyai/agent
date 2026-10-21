@@ -256,6 +256,8 @@ describe("just-one", () => {
     expect(struck("box", "boxes")).toEqual([true, true, false]);
     expect(struck("berry", "berries")).toEqual([true, true, false]);
     expect(struck("glass", "glasses")).toEqual([true, true, false]);
+    expect(struck("bus", "buses")).toEqual([true, true, false]);
+    expect(struck("house", "houses")).toEqual([true, true, false]);
     expect(struck("bee", "beehive")).toEqual([false, false, false]);
   });
 

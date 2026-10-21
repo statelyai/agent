@@ -172,12 +172,21 @@ describe("the plain desk on the sample world (what the demo runs)", () => {
     const result = await play("ORD-1001 arrived broken. Can I get my $40 back?", [
       { choice: "Look up ORD-1001" },
       { choice: "Verify identity" },
-      // The sample world wants the email on file, as a person would type it.
-      { text: "It's ada@example.com" },
+      // The sample world wants the private detail on file, in a person's words.
+      { text: "My order was placed on 2026-09-02" },
       { choice: "Refund $40" },
     ]);
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output.outcome).toBe("refund");
+  });
+
+  test("the email on the ticket does not verify identity", async () => {
+    const result = await play("ORD-1001 arrived broken. (Ada, ada@example.com)", [
+      { choice: "Verify identity" },
+      { text: "It's ada@example.com" },
+    ]);
+    expect(result.status).toBe("idle");
+    expect(result.status === "idle" && result.snapshot.context.identityVerified).toBe(false);
   });
 
   test("a customer reply typed as free text lands in the reply field", async () => {

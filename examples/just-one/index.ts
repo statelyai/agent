@@ -186,13 +186,16 @@ export function normalizeWord(raw: string): string {
 }
 
 /**
- * Naive de-inflection so "keys"/"key", "bees"/"bee", and "boxes"/"box"
- * collide. "-es" comes off only after a sibilant or an "o"; any other plural
- * just drops its "s" (a bare "-es" strip would turn "bees" into "be").
+ * Naive de-inflection so "keys"/"key", "bees"/"bee", "boxes"/"box" and
+ * "buses"/"bus" collide. "-es" comes off only after a sibilant or an "o"; any
+ * other plural just drops its "s" (a bare "-es" strip would turn "bees" into
+ * "be"). A final "-se" loses its "e", so "house" and "houses" still meet once
+ * "-ses" has come off.
  */
 function singularize(word: string): string {
   if (word.length > 4 && word.endsWith("ies")) return `${word.slice(0, -3)}y`;
-  if (word.length > 4 && /(ss|sh|ch|x|z|o)es$/.test(word)) return word.slice(0, -2);
+  if (word.length > 4 && /(s|sh|ch|x|z|o)es$/.test(word)) return word.slice(0, -2);
+  if (word.length > 3 && word.endsWith("se")) return word.slice(0, -1);
   return word.length > 3 && word.endsWith("s") && !word.endsWith("ss") ? word.slice(0, -1) : word;
 }
 

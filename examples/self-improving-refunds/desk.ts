@@ -227,18 +227,20 @@ export function createWorldActors(world: World) {
 
 /**
  * The sample world the default actors use: the sample customers and a fresh
- * copy of the sample orders. A claim verifies when it mentions the email in
- * the customer's identity answer on file, so a person typing in the demo can
- * pass it (the benchmark's worlds want the whole answer). It records no
- * violations; the per-episode worlds from `createWorld` do.
+ * copy of the sample orders. A claim verifies when it contains the private
+ * detail on file (an order date, a card's last four, a zip), in any wording,
+ * so a person typing in the demo can pass it (the benchmark's worlds want the
+ * whole answer). The email alone never verifies: a ticket arrives with it. It
+ * records no violations; the per-episode worlds from `createWorld` do.
  */
 function createSampleWorld(): DeskTools {
   const orders = new Map(ORDERS.map((order) => [order.id, { ...order }]));
   return {
     verifyIdentity: ({ customerId, claim }) => {
       const customer = CUSTOMERS.find((c) => c.id === customerId);
-      const email = customer?.identityAnswer.split(",")[0]!.trim().toLowerCase();
-      return !!email && claim.toLowerCase().includes(email);
+      const detail = customer?.identityAnswer.split(",")[1]?.match(/[\d-]+$/)?.[0];
+      const digits = (text: string) => text.replace(/\D/g, "");
+      return !!detail && digits(claim).includes(digits(detail));
     },
     lookupOrder: (orderId) => {
       const order = orders.get(orderId);
@@ -437,7 +439,8 @@ export const refundDeskMachine = deskSetup.createMachine({
       tags: ["waiting"],
       meta: {
         interaction: {
-          label: "Please confirm your identity with the email on your account.",
+          label:
+            "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
           textEvent: { type: "IDENTITY_CLAIM", field: "claim" },
           events: { IDENTITY_CLAIM: { label: "Confirm identity" } },
         },
