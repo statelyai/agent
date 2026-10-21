@@ -370,11 +370,8 @@ function plannerOutput(context: PlannerContext, onTime: boolean) {
     ? `Plan for "${context.goal}": ${context.projectDays} day(s), deadline ${context.deadlineDays}.`
     : `${context.failure ?? "Planning failed."}`;
   return {
-    summary: [
-      header,
-      ...(plan ? renderGantt(plan.tasks, plan.schedule) : []),
-      ...(context.mitigation ? [`Risk: ${context.risk}. Mitigation: ${context.mitigation}`] : []),
-    ].join("\n"),
+    // Risk and mitigation are their own fields, not repeated in the summary.
+    summary: [header, ...(plan ? renderGantt(plan.tasks, plan.schedule) : [])].join("\n"),
     projectDays: plan?.projectDays ?? null,
     deadlineDays: context.deadlineDays,
     risk: context.risk,
@@ -655,6 +652,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     });
     console.log(`\n[${result.outcome}]\n`);
     console.log(result.summary);
+    if (result.mitigation) console.log(`Risk: ${result.risk}. Mitigation: ${result.mitigation}`);
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

@@ -24,7 +24,7 @@ test("quick model's call validates: no fallback", async () => {
   const result = await runModelFallbackExample({ generateText: executors.generateText });
 
   expect(result).toMatchObject({ outcome: "done", modelUsed: "quick", fallbacks: 0 });
-  expect(result.toolCalls).toBe("quick: get_weather(San Francisco, Boston, Tokyo) accepted");
+  expect(result.toolCalls).toEqual(["quick: get_weather(San Francisco, Boston, Tokyo) accepted"]);
   expect(result.progress).toEqual([
     "draftingQuick",
     "validating",
@@ -51,7 +51,7 @@ test("quick call rejected → strong model's call validates", async () => {
   });
 
   expect(result).toMatchObject({ outcome: "done", modelUsed: "strong", fallbacks: 1 });
-  expect(result.toolCalls.split("\n\n")).toEqual([
+  expect(result.toolCalls).toEqual([
     "quick: get_weather(SF, Boston) rejected (get_weather rejects cities: SF)",
     "strong: get_weather(San Francisco, Boston) accepted",
   ]);
@@ -82,10 +82,10 @@ test("both rungs rejected → failed after MAX_FALLBACKS", async () => {
     fallbacks: MAX_FALLBACKS,
   });
   expect(result.answer).toContain("Both models' calls were rejected.");
-  expect(result.toolCalls).toContain(
+  expect(result.toolCalls.join("\n")).toContain(
     "quick: get_weather(Gotham) rejected (get_weather rejects cities: Gotham)",
   );
-  expect(result.toolCalls).toContain("strong: get_weather(Atlantis) rejected");
+  expect(result.toolCalls.join("\n")).toContain("strong: get_weather(Atlantis) rejected");
   expect(result.progress).not.toContain("runningTool");
   expect(executors.calls.filter((c) => c.name === "draftToolCallStrong")).toHaveLength(
     MAX_FALLBACKS,
@@ -101,7 +101,9 @@ test("a quick-model error falls back; a strong-model error is failed", async () 
       .generateText,
   });
   expect(recovered).toMatchObject({ outcome: "done", modelUsed: "strong", fallbacks: 1 });
-  expect(recovered.toolCalls).toContain("quick: (no call) rejected (draftToolCall failed");
+  expect(recovered.toolCalls.join("\n")).toContain(
+    "quick: (no call) rejected (draftToolCall failed",
+  );
 
   const failed = await runModelFallbackExample({
     generateText: scripted({ draftToolCall: [call("Gotham")], draftToolCallStrong: [boom] })
@@ -129,8 +131,8 @@ test("an empty city list is a malformed call: the schema requires at least one c
   expect(JSON.stringify(sentSchema)).toContain('"minItems":1');
   // An empty call never reaches the tool; it fails parsing and falls back.
   expect(result).toMatchObject({ outcome: "done", modelUsed: "strong", fallbacks: 1 });
-  expect(result.toolCalls).toContain("quick: (no call) rejected (draftToolCall failed");
-  expect(result.toolCalls).not.toContain("get_weather()");
+  expect(result.toolCalls.join("\n")).toContain("quick: (no call) rejected (draftToolCall failed");
+  expect(result.toolCalls.join("\n")).not.toContain("get_weather()");
 });
 
 test("the answer puts each line in its own paragraph", async () => {

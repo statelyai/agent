@@ -14,6 +14,10 @@
   "starters": [
     "What is the combined population of France and Germany?",
     "How much larger is Japan's GDP than France's GDP?",
-    "What percentage of Japan's population lives in Tokyo?"
+    "What percentage of Japan's population lives in Tokyo?",
+    {
+      "label": "Brazil's population divided by Canada's (not in the sample facts, so MAX_REPLANS decides when to stop)",
+      "input": { "question": "What is Brazil's population divided by Canada's?" }
+    }
   ]
 }

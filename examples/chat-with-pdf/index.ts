@@ -360,6 +360,8 @@ export const chatWithPdfSchemas = createAgentSchemas({
     refreshEvery: z.number().default(3),
   }),
   output: z.object({
+    /** The score in a sentence, plus the final verdict when nothing showed it yet. */
+    summary: z.string(),
     documentId: z.string(),
     correct: z.number(),
     answered: z.number(),
@@ -485,11 +487,21 @@ function renderGrade(grade: z.infer<typeof gradeSchema>): string {
 
 /**
  * The passage the grade was grounded on, quoted in one line with its page.
- * The learner sees the evidence, not just the verdict.
+ * The learner sees the evidence, not just the verdict: the quoted sentence is
+ * the one that shares the most words with `expected`, else the first.
  */
-function citeSource(pageNumber: number, sourceText: string): string {
+function citeSource(pageNumber: number, sourceText: string, expected = ""): string {
   const text = sourceText.trim();
-  const sentence = text.split(/(?<=[.!?])\s+/)[0] ?? text;
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const words = expected.toLowerCase().match(/[a-z0-9]{3,}/g) ?? [];
+  const overlap = (candidate: string) =>
+    words.filter((word) => candidate.toLowerCase().includes(word)).length;
+  const sentence =
+    sentences.reduce<string | undefined>(
+      (best, candidate) =>
+        best === undefined || overlap(candidate) > overlap(best) ? candidate : best,
+      undefined,
+    ) ?? text;
   const snippet = sentence.length > 160 ? `${sentence.slice(0, 159)}…` : sentence;
   return `Source (page ${pageNumber}): "${snippet}"`;
 }
@@ -500,6 +512,26 @@ function renderQuestion(question: z.infer<typeof questionSchema>, pageNumber: nu
     ? "\n" + question.choices.map((choice, i) => `${"ABCD"[i]}) ${choice}`).join("\n")
     : "";
   return `${question.question}${choices}\n(Hint: see page ${pageNumber})`;
+}
+
+/**
+ * The closing line. A quiz that ends on its budget ends right after grading,
+ * so the last verdict was never shown above a next question: it goes here.
+ */
+function renderScore(context: {
+  documentTitle: string;
+  results: Array<{ correct: boolean }>;
+  question: string;
+  lastGrade: z.infer<typeof gradedAnswerSchema> | null;
+  exhausted: boolean;
+}): string {
+  const correct = context.results.filter((result) => result.correct).length;
+  const score =
+    `You got ${correct} of ${context.results.length} right` +
+    (context.documentTitle ? ` on ${context.documentTitle}.` : ".") +
+    (context.exhausted ? " No fresh pages were left in range." : "");
+  if (context.question !== "" || !context.lastGrade) return score;
+  return `${score}\n\nLast answer: ${renderGrade(context.lastGrade)}`;
 }
 
 const PICKER_PROMPT =
@@ -567,11 +599,15 @@ export const chatWithPdfMachine = agentSetup.createMachine({
       on: {
         // An unrecognized choice returns `undefined`: the transition is illegal,
         // the machine stays put, and no retrieval runs against a guessed id.
+        // Typed chat ("the statecharts one") names the document inside a
+        // sentence, so a choice matches when it contains exactly one id or title.
         SELECT_DOCUMENT: ({ event }) => {
           const wanted = event.documentId.trim().toLowerCase();
-          const match = SAMPLE_LIBRARY.find(
-            (entry) => entry.id.toLowerCase() === wanted || entry.title.toLowerCase() === wanted,
+          const named = SAMPLE_LIBRARY.filter(
+            (entry) =>
+              wanted.includes(entry.id.toLowerCase()) || wanted.includes(entry.title.toLowerCase()),
           );
+          const match = named.length === 1 ? named[0] : undefined;
           return match
             ? {
                 target: "retrieving",
@@ -655,7 +691,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
           label: ({ context }) =>
             [
               context.lastGrade
-                ? `${renderGrade(context.lastGrade)}\n${citeSource(context.lastGrade.pageNumber, context.lastGrade.sourceText)}`
+                ? `${renderGrade(context.lastGrade)}\n${citeSource(context.lastGrade.pageNumber, context.lastGrade.sourceText, context.lastGrade.expected)}`
                 : "",
               context.question,
             ]
@@ -781,6 +817,7 @@ export const chatWithPdfMachine = agentSetup.createMachine({
     summary: {
       type: "final",
       output: ({ context }) => ({
+        summary: renderScore(context),
         documentId: context.documentId ?? "",
         correct: context.results.filter((result) => result.correct).length,
         answered: context.results.length,

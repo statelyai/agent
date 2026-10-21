@@ -7,7 +7,14 @@ import {
   runToQuiescence,
 } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
-import { type GuesserEvent, idlePrompt, justOneMachine, PERSONAS } from "./index.js";
+import {
+  type GuesserEvent,
+  idlePrompt,
+  isCorrectGuess,
+  judgeClues,
+  justOneMachine,
+  PERSONAS,
+} from "./index.js";
 
 /** The `writeClue` request input, as the executor receives it. */
 const clueRequestInput = z.object({
@@ -238,6 +245,26 @@ describe("just-one", () => {
         'Round 1 — secret "volcano". Clues: lava (Iris), crater (Milo), Vesuvius (Nadia).\n' +
         'Guessed "volcano" — correct.',
     );
+  });
+
+  test("plurals collide with their singular, whatever the plural ending", () => {
+    const struck = (a: string, b: string) =>
+      judgeClues("honey", [{ clue: a }, { clue: b }, { clue: "Winnie" }]).map(
+        (clue) => clue.struck,
+      );
+    expect(struck("bee", "bees")).toEqual([true, true, false]);
+    expect(struck("box", "boxes")).toEqual([true, true, false]);
+    expect(struck("berry", "berries")).toEqual([true, true, false]);
+    expect(struck("glass", "glasses")).toEqual([true, true, false]);
+    expect(struck("bee", "beehive")).toEqual([false, false, false]);
+  });
+
+  test("a typed guess may be a sentence, but must name the word whole", () => {
+    expect(isCorrectGuess("piano", "piano")).toBe(true);
+    expect(isCorrectGuess("Is it a piano?", "piano")).toBe(true);
+    expect(isCorrectGuess("pianos", "piano")).toBe(true);
+    expect(isCorrectGuess("pianist", "piano")).toBe(false);
+    expect(isCorrectGuess("a keyboard", "piano")).toBe(false);
   });
 
   test("PASS advances the round, and a mid-guess snapshot round-trips", async () => {

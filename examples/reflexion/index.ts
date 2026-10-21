@@ -227,7 +227,7 @@ function renderResults(rounds: SearchRound[]): string {
 }
 
 /** Draft, searches and revisions, one line each — rendered, never stored. */
-function renderTrail(context: ReflexionContext): string {
+function renderTrail(context: ReflexionContext): string[] {
   const lines: string[] = [];
   context.attempts.forEach((attempt, index) => {
     const label = index === 0 ? "Draft" : `Revision ${index}`;
@@ -236,13 +236,13 @@ function renderTrail(context: ReflexionContext): string {
       ? ` (dropped unretrieved: ${attempt.dropped.join(", ")})`
       : "";
     lines.push(`${label}${cites}${dropped} — missing: ${attempt.missing}`);
-    lines.push(`  next queries: ${attempt.queries.join(" | ")}`);
+    lines.push(`Next queries: ${attempt.queries.join(" | ")}`);
     const search = context.searches[index];
     if (search)
       lines.push(`Search ${index + 1}: ${search.length ? search.join(", ") : "no passages"}`);
   });
   if (context.failure) lines.push(`Failed: ${context.failure}`);
-  return lines.join("\n");
+  return lines;
 }
 
 /** The cited passages, rendered. */
@@ -260,7 +260,9 @@ const agentSetup = setupAgent({
     answer: z.string(),
     references: z.array(z.string()),
     revisions: z.number(),
-    trail: z.string(),
+    // Lines, not one string: the answer is the output's prose, and the trail
+    // (often longer) reads after it as a list.
+    trail: z.array(z.string()),
   }),
   actors: { searchWeb },
   requests: {
@@ -450,7 +452,7 @@ export interface ReflexionResult {
   answer: string;
   references: string[];
   revisions: number;
-  trail: string;
+  trail: string[];
   /** Every state the run settled in; the last one is `done` or `failed`. */
   progress: string[];
 }
@@ -498,7 +500,9 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     const result = await runReflexionExample({
       onProgress: (state) => console.log(`  → ${state}`),
     });
-    console.log(`\n${result.trail}\n\n${result.answer}\n\n${result.references.join("\n")}`);
+    console.log(
+      `\n${result.trail.join("\n")}\n\n${result.answer}\n\n${result.references.join("\n")}`,
+    );
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

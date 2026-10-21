@@ -27,7 +27,7 @@
         "transition KEEP -> \"travelTurn\"",
         "transition xstate.done.actor -> \"waiting\""
       ],
-      "response": "Mock reply to: Yes, that works. Please continue.",
+      "response": "Mock reply to: Conversation so far:  \n[user] I want a 3-day trip to Lisbon.  \n[",
       "idle": {
         "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
         "events": [
@@ -114,7 +114,7 @@
         "transition KEEP -> \"travelTurn\"",
         "transition xstate.done.actor -> \"waiting\""
       ],
-      "response": "Mock reply to: Yes, that works. Please continue.",
+      "response": "Mock reply to: Conversation so far:  \n[user] Find me flights and a hotel for",
       "idle": {
         "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
         "events": [

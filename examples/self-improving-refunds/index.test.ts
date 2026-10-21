@@ -115,7 +115,9 @@ describe("the demo contract", () => {
     const interaction = getInteraction(idle.snapshot);
     // One button per concrete proposal the desk accepts, computed from context.
     expect(interaction?.choices?.map((choice) => choice.label)).toContain("Look up ORD-1001");
-    expect(interaction?.label).toBe("Turn 1: New ticket. Choose the next step.");
+    expect(interaction?.label).toBe(
+      `Ticket from C-1: "${scenario.ticket}" Turn 1: New ticket. Choose the next step.`,
+    );
 
     const persist = (result: { persist(): unknown }) =>
       JSON.parse(JSON.stringify(result.persist()));
@@ -170,7 +172,8 @@ describe("the plain desk on the sample world (what the demo runs)", () => {
     const result = await play("ORD-1001 arrived broken. Can I get my $40 back?", [
       { choice: "Look up ORD-1001" },
       { choice: "Verify identity" },
-      { text: ada.identityAnswer },
+      // The sample world wants the email on file, as a person would type it.
+      { text: "It's ada@example.com" },
       { choice: "Refund $40" },
     ]);
     expect(result.status).toBe("done");

@@ -112,6 +112,24 @@ test("a field missing everywhere spends MAX_LOOPS and ends in `failed` with the 
   expect(result.summary).toContain("Search budget spent");
 });
 
+test("a search that finds nothing new skips extraction (no model call for no passages)", async () => {
+  const { generateText, judge } = scripted();
+  const calls: string[] = [];
+  const result = await runDataEnrichmentExample({
+    company: "Acme Widgets",
+    generateText: (request, options) => {
+      calls.push(request.name ?? "");
+      return generateText(request, options);
+    },
+    judge,
+  });
+  expect(result.finalState).toBe("failed");
+  expect(result.loops).toBe(MAX_LOOPS);
+  expect(result.progress).not.toContain("extracting");
+  expect(calls.filter((name) => name === "planSearch")).toHaveLength(MAX_LOOPS);
+  expect(calls.filter((name) => name === "extractRecord")).toHaveLength(0);
+});
+
 test("requesting fewer fields changes what counts as complete", async () => {
   const result = await runDataEnrichmentExample({
     company: "Cedar Grid Energy",

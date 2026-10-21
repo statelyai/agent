@@ -4,9 +4,10 @@
  * and a solver composes the final answer from the accumulated evidence map.
  *
  * The point of the example is the budget: `MAX_STEPS` caps how many plan steps
- * the loop will run, and when the planner hands back more steps than the budget
- * allows, the run ends in `failed` — "I could not execute this plan" — instead
- * of quietly truncating the plan and dressing a partial answer up as `done`.
+ * a run may take on, and when the planner hands back more steps than the budget
+ * allows, the run ends in `failed` as soon as the plan arrives — no worker
+ * calls spent — instead of quietly truncating the plan and dressing a partial
+ * answer up as `done`.
  * (Contrast deep-research, which fans out in parallel and *reflects* its way to
  * an answer; this one runs a fixed plan in order and can honestly run out.)
  *
@@ -25,10 +26,11 @@
  * renderer that leads with the longest string field shows the
  * plan/progress/answer summary, not a wall of evidence prose.
  *
- * Bounded: the `executing` choice state is a three-way decision — gather the
- * next step, solve because the plan finished, or fail because the budget ran
- * out mid-plan. A request that errors also ends the run in `failed` rather than
- * quietly producing an empty answer.
+ * Bounded: `planning` checks the plan against `MAX_STEPS` before any step
+ * runs, so an over-budget plan fails up front; the `executing` choice state
+ * then only decides between gathering the next step and solving. A request
+ * that errors also ends the run in `failed` rather than quietly producing an
+ * empty answer.
  *
  * Dual-mode: `runPlanAndExecuteExample(options?)` takes injectable executors
  * (the test passes mocks — CI with no API key); the direct run below uses real models.
@@ -112,12 +114,11 @@ const agentSetup = setupAgent({
   context: planAndExecuteContextSchema,
   input: z.object({ goal: z.string() }),
   // One leading human-readable string (plan + collapsed progress + answer);
-  // the full evidence map stays nested so it never becomes the lead.
+  // the full evidence map stays nested so it never becomes the lead. The plan
+  // and answer live only in `summary`: a copy beside it renders twice.
   output: z.object({
     summary: z.string(),
     details: z.object({
-      answer: z.string(),
-      steps: z.array(stepSchema),
       evidence: z.record(z.string(), z.string()),
     }),
   }),
@@ -135,8 +136,12 @@ const agentSetup = setupAgent({
       },
       model: "planner",
       system:
-        "You are a planner. Break the goal into exactly 2 ordered research " +
-        'sub-questions, each one short line. Give each a short id like "E1", "E2".',
+        "You are a planner. Break the goal into the ordered research " +
+        "sub-questions it needs: one per distinct fact to look up (usually 2 or 3), " +
+        "never merging separate lookups into one step. Each is one short, " +
+        "self-contained line: a worker answers it without seeing the goal, so " +
+        'name the subject (the city, the product) instead of saying "this" or "each". ' +
+        'Give each a short id like "E1", "E2".',
       prompt: ({ input }) => input.goal,
     },
     gatherEvidence: {
@@ -147,7 +152,8 @@ const agentSetup = setupAgent({
       model: "worker",
       system:
         "You are a research worker. Answer the sub-question in at most two short " +
-        "sentences of plain facts. No preamble, no lists.",
+        "sentences of plain facts. If it asks about specifics you cannot know, " +
+        "give the typical figures instead. No preamble, no lists.",
       prompt: ({ input }) => input.question,
     },
     solveTask: {
@@ -189,7 +195,21 @@ export const planAndExecuteMachine = agentSetup.createMachine({
         id: "planTask",
         src: "planTask",
         input: ({ context }) => ({ goal: context.goal }),
-        onDone: ({ output }) => ({ target: "executing", context: { steps: output.result.steps } }),
+        // The budget is checked as the plan arrives: a plan that needs more
+        // than MAX_STEPS steps fails here, before any worker call is spent,
+        // rather than running part of it and composing an answer from that.
+        onDone: ({ output }) =>
+          output.result.steps.length > MAX_STEPS
+            ? {
+                target: "failed",
+                context: {
+                  steps: output.result.steps,
+                  failure:
+                    `plan needs ${output.result.steps.length} steps; ` +
+                    `the budget is ${MAX_STEPS}`,
+                },
+              }
+            : { target: "executing", context: { steps: output.result.steps } },
         // A planner that errors ends the run in `failed` — an empty answer in
         // `done` would look like a successful run that had nothing to say.
         onError: ({ event }) => ({
@@ -198,34 +218,16 @@ export const planAndExecuteMachine = agentSetup.createMachine({
         }),
       },
     },
-    // Explicit index/guard loop with a THREE-way decision, which is the whole
-    // point of this example: gather the next step, solve because the plan is
-    // finished, or give up because the step budget ran out mid-plan.
-    //
-    // The budget is not a silent truncation. A planner that returns fifty steps
-    // costs at most MAX_STEPS worker calls AND lands in `failed` — the run
-    // never composes an answer from a plan it only partly executed and passes
-    // it off as `done`.
+    // Explicit index/guard loop: gather the next step, or solve because the
+    // plan is finished. `planning` already rejected any plan over MAX_STEPS,
+    // so the loop runs at most MAX_STEPS times.
     executing: {
       type: "choice",
-      choice: ({ context }) => {
-        if (context.stepIndex >= context.steps.length) {
-          // Every planned step ran (or was skipped): the plan is complete.
-          return { target: "solving" };
-        }
-        if (context.stepIndex >= MAX_STEPS) {
-          // Budget exhausted with plan steps still unrun.
-          return {
-            target: "failed",
-            context: {
-              failure:
-                `step budget exhausted: ran ${MAX_STEPS} of ${context.steps.length} ` +
-                `planned steps (MAX_STEPS=${MAX_STEPS})`,
-            },
-          };
-        }
-        return { target: "gathering" };
-      },
+      choice: ({ context }) =>
+        context.stepIndex >= context.steps.length
+          ? // Every planned step ran (or was skipped): the plan is complete.
+            { target: "solving" }
+          : { target: "gathering" },
     },
     gathering: {
       invoke: {
@@ -286,11 +288,7 @@ export const planAndExecuteMachine = agentSetup.createMachine({
           "Answer",
           context.answer,
         ].join("\n"),
-        details: {
-          answer: context.answer,
-          steps: context.steps,
-          evidence: context.evidence,
-        },
+        details: { evidence: context.evidence },
       }),
     },
     // A distinct terminal for "the run could not produce an answer", so a
@@ -308,7 +306,7 @@ export const planAndExecuteMachine = agentSetup.createMachine({
           "Failed",
           context.failure ?? "unknown failure",
         ].join("\n"),
-        details: { answer: "", steps: context.steps, evidence: context.evidence },
+        details: { evidence: context.evidence },
       }),
     },
   },

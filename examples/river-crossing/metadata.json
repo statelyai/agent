@@ -10,7 +10,7 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr"],
-    "purpose": "The machine is ground truth for a constraint puzzle: the model only proposes crossings, guards reject illegal ones, and the run narrates every move bank by bank."
+    "purpose": "The machine is ground truth for a constraint puzzle: the model only proposes crossings and guards reject illegal ones. Instead of searching itself, the model can send REQUEST_PLAN and the machine solves itself by graph traversal over the same guards. A move budget ends the run in failed when it runs out, and the run narrates every move bank by bank."
   },
   "starters": [
     {

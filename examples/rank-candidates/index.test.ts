@@ -91,7 +91,7 @@ describe("rank-candidates", () => {
     const pairCalls = judge.calls.filter((call) => "same" in call.questions);
     expect(fitCalls).toHaveLength(10);
     expect(pairCalls).toHaveLength(21);
-    expect(result.summary.split("\n")[0]).toBe("Ranked 4 of 10 candidates.");
+    expect(result.summary).toBe("Ranked 4 of 10 candidates. Cut 6, each with its reason.");
   });
 
   test("a duplicate is cut only when its better twin was chosen", async () => {

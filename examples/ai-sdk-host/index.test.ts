@@ -50,6 +50,8 @@ describe("combat machine", () => {
     expect(result.output.outcome).toBe("continue");
     // Readable narration, not a bare data dump: one line per beat.
     expect(result.output.summary).toContain("You face a goblin");
+    // The legal move set is computed from HP and shown: no HEAL at full health.
+    expect(result.output.summary).toContain("Legal moves: ATTACK, DEFEND, FLEE.");
     expect(result.output.summary).toContain("You attack the goblin for 6 (goblin HP 15 → 9).");
     // The machine, not the narrator, resolved the goblin's counter.
     expect(result.output.summary).toContain("The goblin hits back for 4 (your HP 20 → 16).");

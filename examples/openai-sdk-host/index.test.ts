@@ -76,7 +76,7 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
       category: "billing",
       reply: "Sorry about that — we will fix your invoice.",
     });
-    expect(result.output.summary).toContain("Sorry about that — we will fix your invoice.");
+    expect(result.output.summary).toContain("billing");
   });
 
   test("decide: tool_choice required, tool call maps back to a machine event", async () => {

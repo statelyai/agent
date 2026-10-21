@@ -53,10 +53,12 @@
  *     one line per plan step, so the result reads as an explanation.
  *   - The plan is a list of steps, not a JSON object. The paper's structure
  *     is JSON with empty values; here the model returns one string per step
- *     and the machine numbers them, so the plan reads as text wherever it is
- *     shown. The worked reasoning is a list too, one entry per step, and every
- *     entry is flattened to one plain line (`plainStep`) so no step can turn
- *     into a markdown heading, quote, or rule when rendered.
+ *     and the machine numbers them for the reason step. The output keeps the
+ *     plan and the adapted modules as lists, so the answer is the one piece
+ *     of prose and leads wherever the result is shown. The worked reasoning
+ *     is a list too, one entry per step, and every entry (plan steps and
+ *     adapted modules included) is flattened to one plain line (`plainStep`)
+ *     so none can turn into a markdown heading, quote, or rule when rendered.
  *   - Every invoke has an `onError` that lands in `failed` with whatever stages
  *     completed.
  *   - `REASONING_MODULES` is 16 of the paper's 39 modules, shortened, to keep
@@ -197,8 +199,11 @@ const selfDiscoverContextSchema = z.object({
   task: z.string(),
   // The modules that cleared the threshold (empty when none did).
   selectedModules: z.array(z.string()),
-  adaptedModules: z.string().nullable(),
-  reasoningStructure: z.string().nullable(),
+  // One entry per selected module. A list, not one string: the answer is the
+  // output's prose, and the plan reads after it.
+  adaptedModules: z.array(z.string()).nullable(),
+  // The plan's steps, plain text; numbered when handed to `solveTask`.
+  reasoningStructure: z.array(z.string()).nullable(),
   answer: z.string().nullable(),
   // The worked steps, as prose, written before the answer.
   reasoning: z.string().nullable(),
@@ -214,9 +219,9 @@ const agentSetup = setupAgent({
   }),
   output: z.object({
     answer: z.string(),
-    reasoningStructure: z.string(),
+    reasoningStructure: z.array(z.string()),
     selectedModules: z.array(z.string()),
-    adaptedModules: z.string(),
+    adaptedModules: z.array(z.string()),
   }),
   // `done` is only reachable through every stage in order, so each stage's
   // result is set there.
@@ -224,8 +229,8 @@ const agentSetup = setupAgent({
     done: {
       schemas: {
         context: selfDiscoverContextSchema.extend({
-          adaptedModules: z.string(),
-          reasoningStructure: z.string(),
+          adaptedModules: z.array(z.string()),
+          reasoningStructure: z.array(z.string()),
           answer: z.string(),
           reasoning: z.string(),
         }),
@@ -241,7 +246,11 @@ const agentSetup = setupAgent({
     adaptModules: {
       schemas: {
         input: z.object({ task: z.string(), modules: z.array(z.string()) }),
-        output: z.object({ adapted: z.string() }),
+        output: z.object({
+          adapted: z
+            .array(z.string())
+            .describe("One entry per selected module, rephrased for this task. Plain text."),
+        }),
       },
       model: "reasoner",
       system:
@@ -354,7 +363,7 @@ export const selfDiscoverMachine = agentSetup.createMachine({
         input: ({ context }) => ({ task: context.task, modules: context.selectedModules }),
         onDone: ({ output }) => ({
           target: "structuring",
-          context: { adaptedModules: output.result.adapted },
+          context: { adaptedModules: output.result.adapted.map(plainStep).filter(Boolean) },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -365,10 +374,13 @@ export const selfDiscoverMachine = agentSetup.createMachine({
     structuring: {
       invoke: {
         src: "structurePlan",
-        input: ({ context }) => ({ task: context.task, adapted: context.adaptedModules ?? "" }),
+        input: ({ context }) => ({
+          task: context.task,
+          adapted: (context.adaptedModules ?? []).map((module) => `- ${module}`).join("\n"),
+        }),
         onDone: ({ output }) => ({
           target: "reasoning",
-          context: { reasoningStructure: numberedSteps(output.result.steps) },
+          context: { reasoningStructure: output.result.steps.map(plainStep).filter(Boolean) },
         }),
         onError: ({ event }) => ({
           target: "failed",
@@ -381,7 +393,7 @@ export const selfDiscoverMachine = agentSetup.createMachine({
         src: "solveTask",
         input: ({ context }) => ({
           task: context.task,
-          structure: context.reasoningStructure ?? "",
+          structure: numberedSteps(context.reasoningStructure ?? []),
         }),
         onDone: ({ context, output }) =>
           context.adaptedModules !== null && context.reasoningStructure !== null
@@ -417,9 +429,9 @@ export const selfDiscoverMachine = agentSetup.createMachine({
       type: "final",
       output: ({ context }) => ({
         answer: `No answer. Stopped: ${context.failure ?? "unknown failure"}.`,
-        reasoningStructure: context.reasoningStructure ?? "",
+        reasoningStructure: context.reasoningStructure ?? [],
         selectedModules: context.selectedModules,
-        adaptedModules: context.adaptedModules ?? "",
+        adaptedModules: context.adaptedModules ?? [],
       }),
     },
   },
@@ -437,9 +449,9 @@ export interface RunSelfDiscoverOptions {
 
 export interface SelfDiscoverResult {
   answer: string;
-  reasoningStructure: string;
+  reasoningStructure: string[];
   selectedModules: string[];
-  adaptedModules: string;
+  adaptedModules: string[];
   /** `done`, or `failed` when no module cleared the threshold or a call failed. */
   finalState: string;
   progress: string[];
@@ -494,7 +506,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     });
 
     console.log("\nSelected modules:\n-", result.selectedModules.join("\n- "));
-    console.log("\nReasoning structure:\n", result.reasoningStructure);
+    console.log("\nReasoning structure:\n", numberedSteps(result.reasoningStructure));
     console.log(`\nAnswer (${result.finalState}):\n`, result.answer);
   })().catch((error) => {
     console.error(error);

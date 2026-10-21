@@ -185,10 +185,15 @@ export function normalizeWord(raw: string): string {
     .trim();
 }
 
-/** Naive de-inflection so "keys" and "key" collide. */
+/**
+ * Naive de-inflection so "keys"/"key", "bees"/"bee", and "boxes"/"box"
+ * collide. "-es" comes off only after a sibilant or an "o"; any other plural
+ * just drops its "s" (a bare "-es" strip would turn "bees" into "be").
+ */
 function singularize(word: string): string {
-  if (word.length > 3 && word.endsWith("es")) return word.slice(0, -2);
-  return word.length > 3 && word.endsWith("s") ? word.slice(0, -1) : word;
+  if (word.length > 4 && word.endsWith("ies")) return `${word.slice(0, -3)}y`;
+  if (word.length > 4 && /(ss|sh|ch|x|z|o)es$/.test(word)) return word.slice(0, -2);
+  return word.length > 3 && word.endsWith("s") && !word.endsWith("ss") ? word.slice(0, -1) : word;
 }
 
 /** The comparison key: two clues collide iff their keys are equal. */
@@ -241,9 +246,20 @@ export function judgeClues(secretWord: string, drafts: (ClueDraft | null)[]): Ju
   });
 }
 
-/** `true` when the guess matches the secret word after normalization. */
+/**
+ * `true` when the guess names the secret word after normalization. Typed chat
+ * often wraps the guess in a sentence ("is it a piano?"), so any one word of it
+ * may match; the secret still has to be named whole, not inside a longer word.
+ */
 export function isCorrectGuess(guess: string, secretWord: string): boolean {
-  return clueKey(guess) === clueKey(secretWord) && clueKey(secretWord) !== "";
+  const secretKey = clueKey(secretWord);
+  if (secretKey === "") return false;
+  return (
+    clueKey(guess) === secretKey ||
+    normalizeWord(guess)
+      .split(" ")
+      .some((word) => clueKey(word) === secretKey)
+  );
 }
 
 /**

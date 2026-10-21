@@ -44,6 +44,8 @@ const agent = setupAgent({
   output: z.object({
     bookingId: z.string(),
     outcome: z.enum(["booked", "cancelled", "compensated", "manualRecovery", "failed"]),
+    /** What happened, in one sentence: the outcome alone hides that a reference was cancelled. */
+    summary: z.string(),
     flightReference: z.string().nullable(),
     hotelReference: z.string().nullable(),
     itinerary: z.string(),
@@ -91,6 +93,17 @@ function renderItinerary(plan: z.infer<typeof itinerary>): string {
   return `Flight: ${plan.flight}\n\nHotel: ${plan.hotel}`;
 }
 
+type Outcome = "booked" | "cancelled" | "compensated" | "manualRecovery" | "failed";
+
+const SUMMARIES: Record<Outcome, string> = {
+  booked: "Reserved the flight and the hotel.",
+  cancelled: "Cancelled before anything was reserved.",
+  compensated: "The hotel was unavailable, so the flight reservation was cancelled.",
+  manualRecovery:
+    "Stopped for manual recovery: a reservation's outcome is uncertain. Reconcile by booking id.",
+  failed: "Planning failed, so nothing was reserved.",
+};
+
 /** Every final state reports the same shape; only the outcome differs. */
 function bookingOutput(
   context: {
@@ -99,11 +112,12 @@ function bookingOutput(
     hotelReference: string | null;
     itinerary: z.infer<typeof itinerary> | null;
   },
-  outcome: "booked" | "cancelled" | "compensated" | "manualRecovery" | "failed",
+  outcome: Outcome,
 ) {
   return {
     bookingId: context.bookingId,
     outcome,
+    summary: SUMMARIES[outcome],
     flightReference: context.flightReference,
     hotelReference: context.hotelReference,
     itinerary: context.itinerary ? renderItinerary(context.itinerary) : "(no itinerary)",

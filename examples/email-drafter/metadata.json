@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr"],
-    "purpose": "Shows an XState-authored agent with reusable text logic, a Jev judgment for whether the request is complete, message history, human review, and typed outputs."
+    "purpose": "Drafts an email from your request. A Jev judgment checks the request is complete before anything is drafted, nothing is sent until you click Send, and after two revision rounds the machine offers only Send."
   },
   "starters": [
     "Email Priya to reschedule Thursday's design review to Friday at 10am.",

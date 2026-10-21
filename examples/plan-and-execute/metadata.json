@@ -9,11 +9,17 @@
   },
   "comparison": {
     "targets": ["plan-and-execute", "ReWOO"],
-    "purpose": "Bounded plan execution: a planner writes out the steps, each is worked through in order under a MAX_STEPS budget, and a solver composes the answer. If the plan needs more steps than the budget allows, the run ends in `failed` rather than answering from a plan it only partly executed."
+    "purpose": "Bounded plan execution: a planner writes out the steps, each is worked through in order under a MAX_STEPS budget, and a solver composes the answer. If the plan needs more steps than the budget allows, the run ends in `failed` as soon as the plan arrives, with no worker calls spent, rather than answering from a plan it only partly executed."
   },
   "starters": [
     "Plan a 3-day food tour of Tokyo on a $200 budget.",
     "Figure out how many tennis balls fit inside a school bus.",
-    "Work out whether a heat pump makes sense for a 1920s house."
+    "Work out whether a heat pump makes sense for a 1920s house.",
+    {
+      "label": "Plan bigger than the budget (expect failed)",
+      "input": {
+        "goal": "Look up the population, median rent, and average January temperature of Lisbon, Berlin, and Austin."
+      }
+    }
   ]
 }

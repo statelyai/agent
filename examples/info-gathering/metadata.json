@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Asks the user for a prompt's objective, variables, constraints and requirements one question at a time, then writes the prompt template. The model only extracts what it heard; a choice state checks that all four slots are filled, forces one confirmation turn, and ends in failed after MAX_TURNS answers instead of trusting the model to decide when it has enough."
+    "purpose": "Asks the user for a prompt's objective, variables, constraints and requirements one question at a time, then writes the prompt template. The model only extracts what it heard; a choice state checks that all four slots are filled, always asks at least once (so an opener that fills every slot is confirmed before a prompt is written), and ends in failed after MAX_TURNS answers instead of trusting the model to decide when it has enough."
   },
   "starters": [
     "I need a prompt that extracts invoice fields from emails",

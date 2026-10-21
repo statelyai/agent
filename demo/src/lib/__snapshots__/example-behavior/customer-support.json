@@ -22,5 +22,17 @@
       ],
       "response": "Could not answer this question.\n\n- Resolution: failed"
     }
+  ],
+  "Move me to a later flight.": [
+    {
+      "sent": "start {\"query\":\"Move me to a later flight.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.error.actor -> \"failed\""
+      ],
+      "response": "Could not answer this question.\n\n- Resolution: failed"
+    }
   ]
 }

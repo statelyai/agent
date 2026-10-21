@@ -50,9 +50,9 @@ test("three batches of 4 → generate on batch 0, update on batches 1 and 2, rev
 
   expect(result.finalState).toBe("done");
   expect(result.batches).toEqual([
-    [0, 1, 2, 3],
-    [4, 5, 6, 7],
-    [8, 9, 10, 11],
+    "Batch 1: chats 1–4",
+    "Batch 2: chats 5–8",
+    "Batch 3: chats 9–12",
   ]);
   expect(path(result.progress)).toEqual([
     "summarizing",
@@ -100,6 +100,7 @@ test("batch size 1 → one update per later document", async () => {
 
   expect(result.finalState).toBe("done");
   expect(result.batches).toHaveLength(SAMPLE_DOCUMENTS.length);
+  expect(result.batches[0]).toBe("Batch 1: chat 1");
   expect(calls("updateTaxonomy")).toHaveLength(SAMPLE_DOCUMENTS.length - 1);
   expect(calls("reviewTaxonomy")).toHaveLength(1);
 });

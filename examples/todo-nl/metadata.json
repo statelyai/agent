@@ -9,7 +9,11 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr"],
-    "purpose": "Turns one free-text command into a sequence of typed machine events via an explicit decide loop, pausing on an idle state for the next thing you say."
+    "purpose": "Turns one free-text command into a sequence of typed machine events, one legal event per step of an explicit decide loop, then pauses on an idle state for the next thing you say. Guards refuse a toggle or delete on an id that is not in the list, and a per-command step budget leaves only DONE or QUIT legal, so the loop always ends."
   },
-  "starters": ["add milk and eggs", "mark the first one done", "delete anything about groceries"]
+  "starters": [
+    "add milk, eggs, and call the dentist",
+    "add pay rent and buy stamps, then mark pay rent done",
+    "add milk, eggs, and fix the bike, then delete the grocery items"
+  ]
 }

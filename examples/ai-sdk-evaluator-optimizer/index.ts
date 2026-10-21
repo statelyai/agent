@@ -154,6 +154,30 @@ function reviewLine(evaluation: TranslationEvaluation) {
   return `Score ${evaluation.qualityScore}/10${issues ? ` — ${issues}` : " — reads naturally"}`;
 }
 
+/** Which rule ended the loop: the pass bar, the grade budget, or a failed request. */
+function verdictLine(context: z.infer<typeof contextSchema>) {
+  if (translationPasses(context.evaluation)) {
+    return `Passed: ${PASSING_QUALITY}/10 or better with tone, nuance, and cultural accuracy all held.`;
+  }
+  return context.iterations >= context.maxIterations
+    ? `Did not pass. Stopped at the budget of ${context.maxIterations} grade${context.maxIterations === 1 ? "" : "s"}; this is the last draft, not an approved one.`
+    : "Did not pass. A request failed before the loop could finish; this is the last draft.";
+}
+
+/** The grade without the critique: the issues already read in the summary. */
+const gradeSchema = translationEvaluationSchema.pick({
+  qualityScore: true,
+  preservesTone: true,
+  preservesNuance: true,
+  culturallyAccurate: true,
+});
+
+function toGrade(evaluation: TranslationEvaluation | null) {
+  if (!evaluation) return null;
+  const { qualityScore, preservesTone, preservesNuance, culturallyAccurate } = evaluation;
+  return { qualityScore, preservesTone, preservesNuance, culturallyAccurate };
+}
+
 const agentSetup = setupAgent({
   models,
   actors: {
@@ -175,7 +199,7 @@ const agentSetup = setupAgent({
     detail: z.object({
       firstDraft: z.string(),
       translation: z.string(),
-      evaluation: translationEvaluationSchema.nullable(),
+      evaluation: gradeSchema.nullable(),
     }),
   }),
   emitted: {
@@ -395,14 +419,14 @@ export const aiSdkEvaluatorOptimizerMachine = agentSetup.createMachine({
             context.revisedIssues?.length
               ? `\n\nRevised to fix: ${context.revisedIssues.join("; ")}`
               : ""
-          }`,
+          }\n\n${verdictLine(context)}`,
         ].join("\n\n"),
         qualityScore: context.evaluation?.qualityScore ?? 0,
         iterations: context.iterations,
         detail: {
           firstDraft: context.firstDraft ?? "",
           translation: context.translation,
-          evaluation: context.evaluation,
+          evaluation: toGrade(context.evaluation),
         },
       }),
     },

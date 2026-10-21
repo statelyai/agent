@@ -11,5 +11,5 @@
     "targets": ["LangGraph"],
     "purpose": "Writes a joke, checks in plain code that it has a punchline (a \"?\" or \"!\"), then improves and polishes it in two more model calls. A failed check regenerates at most twice before the run ends in failed with the last joke, where LangGraph just ends."
   },
-  "starters": ["cats", "the office printer", "time zones"]
+  "starters": ["cats", "the office printer", "deadpan one-liners that end in a flat period"]
 }

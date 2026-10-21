@@ -8,7 +8,7 @@
         "transition xstate.done.actor -> \"deduping\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Ranked 1 of 9 candidates.  \n1. What we learned from 400 failed runs [reliability] (p01, fit 3.00)  \nCut 8:  \n- p09: outside the best 8 considered  \n- p02: duplicate of p01  \n- p03: duplicate of p01  \n- p04: duplicate of p01  \n- p05: duplicate of p01  \n- p06: duplicate of p01  \n- p07: duplicate of p01  \n- p08: duplicate of p01\n\n**Ranked**\n\n- Id: p01 · Title: What we learned from 400 failed runs · Bucket: reliability · Score: 3\n\n**Cut**\n\n| Id | Reason |\n| --- | --- |\n| p09 | outside the best 8 considered |\n| p02 | duplicate of p01 |\n| p03 | duplicate of p01 |\n| p04 | duplicate of p01 |\n| p05 | duplicate of p01 |\n| p06 | duplicate of p01 |\n| p07 | duplicate of p01 |\n| p08 | duplicate of p01 |"
+      "response": "Ranked 1 of 9 candidates. Cut 8, each with its reason.\n\n**Ranked**\n\n- Id: p01 · Title: What we learned from 400 failed runs · Bucket: reliability · Score: 3\n\n**Cut**\n\n| Id | Reason |\n| --- | --- |\n| p09 | outside the best 8 considered |\n| p02 | duplicate of p01 |\n| p03 | duplicate of p01 |\n| p04 | duplicate of p01 |\n| p05 | duplicate of p01 |\n| p06 | duplicate of p01 |\n| p07 | duplicate of p01 |\n| p08 | duplicate of p01 |"
     }
   ],
   "Reading list — 8 articles, top 4, two per kind": [
@@ -20,7 +20,7 @@
         "transition xstate.done.actor -> \"deduping\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Ranked 1 of 8 candidates.  \n1. Designing robust and predictable APIs with idempotency [guide] (a1, fit 3.00)  \nCut 7:  \n- a7: outside the best 6 considered  \n- a8: outside the best 6 considered  \n- a2: duplicate of a1  \n- a3: duplicate of a1  \n- a4: duplicate of a1  \n- a5: duplicate of a1  \n- a6: duplicate of a1\n\n**Ranked**\n\n- Id: a1 · Title: Designing robust and predictable APIs with idempotency · Bucket: guide · Score: 3\n\n**Cut**\n\n| Id | Reason |\n| --- | --- |\n| a7 | outside the best 6 considered |\n| a8 | outside the best 6 considered |\n| a2 | duplicate of a1 |\n| a3 | duplicate of a1 |\n| a4 | duplicate of a1 |\n| a5 | duplicate of a1 |\n| a6 | duplicate of a1 |"
+      "response": "Ranked 1 of 8 candidates. Cut 7, each with its reason.\n\n**Ranked**\n\n- Id: a1 · Title: Designing robust and predictable APIs with idempotency · Bucket: guide · Score: 3\n\n**Cut**\n\n| Id | Reason |\n| --- | --- |\n| a7 | outside the best 6 considered |\n| a8 | outside the best 6 considered |\n| a2 | duplicate of a1 |\n| a3 | duplicate of a1 |\n| a4 | duplicate of a1 |\n| a5 | duplicate of a1 |\n| a6 | duplicate of a1 |"
     }
   ],
   "Weeknight dinners — 7 recipes, defaults": [
@@ -32,7 +32,7 @@
         "transition xstate.done.actor -> \"deduping\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Ranked 1 of 7 candidates.  \n1. Lemon garlic spaghetti [pasta] (r1, fit 3.00)  \nCut 6:  \n- r2: duplicate of r1  \n- r3: duplicate of r1  \n- r4: duplicate of r1  \n- r5: duplicate of r1  \n- r6: duplicate of r1  \n- r7: duplicate of r1\n\n**Ranked**\n\n- Id: r1 · Title: Lemon garlic spaghetti · Bucket: pasta · Score: 3\n\n**Cut**\n\n| Id | Reason |\n| --- | --- |\n| r2 | duplicate of r1 |\n| r3 | duplicate of r1 |\n| r4 | duplicate of r1 |\n| r5 | duplicate of r1 |\n| r6 | duplicate of r1 |\n| r7 | duplicate of r1 |"
+      "response": "Ranked 1 of 7 candidates. Cut 6, each with its reason.\n\n**Ranked**\n\n- Id: r1 · Title: Lemon garlic spaghetti · Bucket: pasta · Score: 3\n\n**Cut**\n\n| Id | Reason |\n| --- | --- |\n| r2 | duplicate of r1 |\n| r3 | duplicate of r1 |\n| r4 | duplicate of r1 |\n| r5 | duplicate of r1 |\n| r6 | duplicate of r1 |\n| r7 | duplicate of r1 |"
     }
   ]
 }

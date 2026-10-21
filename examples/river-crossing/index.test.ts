@@ -37,12 +37,12 @@ describe("river-crossing", () => {
     if (result.status !== "done") throw new Error("expected done");
     expect(result.output.solved).toBe(true);
     expect(result.output.moves).toBe(7);
-    expect(result.output.log).toHaveLength(7);
+    expect(result.snapshot.context.log).toHaveLength(7);
     // Each log line narrates the crossing and the resulting bank contents.
-    expect(result.output.log[0]).toBe(
+    expect(result.snapshot.context.log[0]).toBe(
       "Farmer crosses left → right with the goat. Left: wolf, cabbage | Right: farmer, goat",
     );
-    expect(result.output.log.at(-1)).toBe(
+    expect(result.snapshot.context.log.at(-1)).toBe(
       "Farmer crosses left → right with the goat. Left: (empty) | Right: farmer, wolf, goat, cabbage",
     );
 
@@ -88,7 +88,7 @@ describe("river-crossing", () => {
     expect(requestsSeen[1]!.attempts.at(-1)!.failure).toBe("rejected-by-guard");
     expect(result.output.solved).toBe(true);
     // The rejected opener never made it into the narration.
-    expect(result.output.log[0]).toContain("left → right with the goat");
+    expect(result.snapshot.context.log[0]).toContain("left → right with the goat");
     expect(result.output.summary).not.toContain("1. Farmer crosses left → right alone");
   });
 

@@ -299,9 +299,11 @@ export const codeAssistantMachine = agentSetup.createMachine({
           context: {
             code: output.result.code,
             explanation: output.result.explanation,
-            // Repairs are the interesting case: say what the rewrite was for.
+            // Repairs are the interesting case: say what the rewrite was for,
+            // naming the failing checks that forced it.
             repairSummary: context.attempts
-              ? `Repair after attempt ${context.attempts}: ${output.result.explanation}`
+              ? `Repair after attempt ${context.attempts} (${context.failures.join("; ")}): ` +
+                output.result.explanation
               : "",
           },
         }),

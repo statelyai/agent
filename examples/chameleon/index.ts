@@ -58,14 +58,14 @@ export const PLAYERS = ["Ada", "Bruno", "Cleo", "Dev"] as const;
 const spokenWordSchema = z.object({
   player: z.string(),
   word: z.string(),
-  reasoning: z.string(),
 });
 type SpokenWord = z.infer<typeof spokenWordSchema>;
 
-const wordDraftSchema = z.object({
-  word: z.string(),
-  reasoning: z.string(),
-});
+/**
+ * Just the word. No `reasoning` field: the detective watches the round, and
+ * the chameleon's reasoning ("tentacles and ink point to…") would name it.
+ */
+const wordDraftSchema = z.object({ word: z.string() });
 
 const guessDraftSchema = z.object({
   guess: z.string(),
@@ -211,7 +211,7 @@ const KNOWING_SYSTEM_PROMPT = [
   "On your turn you say exactly ONE word related to the secret word. Players speak in order and hear every word said before them.",
   "Your word has to walk a line: specific enough that the other knowing players believe you know the secret, vague enough that the chameleon cannot deduce the secret from it.",
   "Saying the secret word, a spelling of it, or something that only makes sense for it hands the chameleon the game. Saying something that fits the whole category equally well makes YOU look like the chameleon.",
-  "Never mention the secret word itself. Reason briefly, then commit to one word.",
+  "Never mention the secret word itself. Commit to one word.",
 ].join(" ");
 
 const CHAMELEON_SYSTEM_PROMPT = [
@@ -222,7 +222,7 @@ const CHAMELEON_SYSTEM_PROMPT = [
   "Never say a member of the category itself (if the category is a kind of animal, name no animal at all), and never your guess at the secret: players who know the secret never say it or name a rival candidate, so naming one marks you as the chameleon, and it spends the guess you may need later.",
   "Especially avoid the most obvious member of the category; the secret is often the first one anybody would think of.",
   "Too vague and you look like someone covering for not knowing; too specific and you are wrong out loud. If you speak early with little to go on, pick a word that stays defensible across several candidate secrets.",
-  "After everyone has spoken the table votes. Reason briefly, then commit to one word.",
+  "After everyone has spoken the table votes. Commit to one word.",
 ].join(" ");
 
 const agentSetup = setupAgent({
@@ -350,11 +350,7 @@ export const chameleonMachine = agentSetup.createMachine({
               context: {
                 words: [
                   ...context.words,
-                  {
-                    player: PLAYERS[context.turnIndex] ?? "",
-                    word: output.result.word.trim(),
-                    reasoning: output.result.reasoning,
-                  },
+                  { player: PLAYERS[context.turnIndex] ?? "", word: output.result.word.trim() },
                 ],
               },
             }),
@@ -363,10 +359,7 @@ export const chameleonMachine = agentSetup.createMachine({
             onError: ({ context }) => ({
               target: "advancing",
               context: {
-                words: [
-                  ...context.words,
-                  { player: PLAYERS[context.turnIndex] ?? "", word: "", reasoning: "" },
-                ],
+                words: [...context.words, { player: PLAYERS[context.turnIndex] ?? "", word: "" }],
               },
             }),
           },
@@ -375,10 +368,7 @@ export const chameleonMachine = agentSetup.createMachine({
           always: ({ context }) =>
             context.turnIndex + 1 < PLAYERS.length
               ? { target: "turn", context: { turnIndex: context.turnIndex + 1 } }
-              : {
-                  target: "spoken",
-                  context: { log: [...context.log, `Words — ${renderWords(context.words)}.`] },
-                },
+              : { target: "spoken" },
         },
         spoken: { type: "final" },
       },
@@ -403,7 +393,13 @@ export const chameleonMachine = agentSetup.createMachine({
           target: "reveal",
           context: {
             accusedIndex: event.seat,
-            log: [...context.log, `You accused ${PLAYERS[event.seat]}.`],
+            // The words join the log only now: while the vote is open the
+            // label already lists them, and the log would say it twice.
+            log: [
+              ...context.log,
+              `Words — ${renderWords(context.words)}.`,
+              `You accused ${PLAYERS[event.seat]}.`,
+            ],
           },
         }),
       },

@@ -134,7 +134,11 @@ export const supportLoopMachine = agentSetup.createMachine({
           name: "chooseAction",
           system:
             "Reply to the customer with your draft, look further, or propose an email to send.",
-          prompt: `Request: ${context.request}\nDraft so far: ${context.reply}`,
+          // The loop's model saw the sendEmail result in its messages; this
+          // prompt says so, or the model proposes the same email again.
+          prompt:
+            `Request: ${context.request}\nDraft so far: ${context.reply}` +
+            (context.sent ? "\nThe approved email has already been sent." : ""),
           allowedEvents: ["REPLY", "CONTINUE", "SEND_EMAIL"],
         }),
       },

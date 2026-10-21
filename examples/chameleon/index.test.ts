@@ -42,7 +42,7 @@ function createPlayers(script: Script, captured: CapturedRequest[] = []) {
     }
     const word = script.words[turn] ?? "";
     turn += 1;
-    return { result: { word, reasoning: `seat ${turn}` } };
+    return { result: { word } };
   };
   return { executor, captured };
 }

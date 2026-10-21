@@ -156,6 +156,8 @@ test("uncertain flight outcome retains the booking identity even without provide
     expect(result.output).toEqual({
       bookingId: "trip-1",
       outcome: "manualRecovery",
+      summary:
+        "Stopped for manual recovery: a reservation's outcome is uncertain. Reconcile by booking id.",
       flightReference: null,
       hotelReference: null,
       itinerary: "Flight: Flight to Lisbon\n\nHotel: Lisbon hotel",

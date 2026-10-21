@@ -21,9 +21,10 @@ import {
   type FeynmanHumanEvent,
 } from "./index.js";
 
-const checkpoints = [
-  { title: "Two keys", keyIdea: "A public key encrypts; only the private key decrypts." },
-  { title: "Signatures", keyIdea: "Signing with a private key proves who sent a message." },
+const checkpoints = [{ title: "Two keys" }, { title: "Signatures" }];
+const keyIdeas = [
+  "A public key encrypts; only the private key decrypts.",
+  "Signing with a private key proves who sent a message.",
 ];
 
 const explain = (text: string): FeynmanHumanEvent => ({ type: "EXPLAIN", text });
@@ -39,6 +40,7 @@ function executors() {
     text: {
       planCheckpoints: [{ checkpoints }],
       introduceCheckpoint: [{ context: "Here is why this matters." }],
+      distillKeyIdea: keyIdeas.map((keyIdea) => ({ keyIdea })),
       explainSimply: [
         { explanation: "Think of a mailbox: anyone can drop mail in, only you open it." },
       ],
@@ -71,9 +73,11 @@ test("every explanation passes: one idle turn per checkpoint, then done", async 
     "planningCheckpoints",
     "presenting",
     "awaitingExplanation",
+    "distilling",
     "verifying",
     "presenting",
     "awaitingExplanation",
+    "distilling",
     "verifying",
     "done",
   ]);
@@ -104,10 +108,12 @@ test("a weak explanation is re-taught, then passes", async () => {
   expect(prompts[1]).toContain(`Not yet (score ${weakScore}/100, need ${PASS_SCORE})`);
   expect(prompts[1]).toContain(UNDERSTANDING_LEVELS[weak]);
   expect(prompts[1]).toContain("mailbox");
-  expect(result.progress.slice(0, 7)).toEqual([
+  // The answer key is distilled once per checkpoint: the retry reuses it.
+  expect(result.progress.slice(0, 8)).toEqual([
     "planningCheckpoints",
     "presenting",
     "awaitingExplanation",
+    "distilling",
     "verifying",
     "teaching",
     "awaitingExplanation",
@@ -187,16 +193,47 @@ test("idle → persist() → resume round-trips through JSON", async () => {
   expect(second.snapshot.context.results).toHaveLength(1);
 });
 
+test("no key idea is in context before the learner explains", async () => {
+  const scripted = executors();
+  const first = await runToQuiescence(
+    createAgentRuntime(feynmanTutorMachine, {
+      executors: scripted,
+      actors: { verifyExplanation: createVerifyExplanation(grader([weak]).model) },
+    }),
+    { input: { topic: "RSA" } },
+  );
+  if (first.status !== "idle") throw new Error("expected idle");
+  // A host renders changed context: the plan is titles only, the answer key unset.
+  expect(first.snapshot.context.checkpoints).toEqual(checkpoints);
+  expect(first.snapshot.context.keyIdea).toBeNull();
+  expect(JSON.stringify(first.snapshot.context)).not.toContain(keyIdeas[0]);
+  expect(scripted.calls.map((call) => call.name)).not.toContain("distillKeyIdea");
+
+  // The first explanation distills it from the intro the learner was shown.
+  const second = await runToQuiescence(
+    createAgentRuntime(feynmanTutorMachine, {
+      executors: scripted,
+      actors: { verifyExplanation: createVerifyExplanation(grader([weak]).model) },
+    }),
+    { snapshot: first.persist(), event: explain("private encrypts?") },
+  );
+  if (second.status !== "idle") throw new Error("expected idle");
+  expect(second.snapshot.context.keyIdea).toBe(keyIdeas[0]);
+  const distill = scripted.calls.find((call) => call.name === "distillKeyIdea")!;
+  expect(distill.input).toEqual({
+    title: "Two keys",
+    lesson: "Checkpoint 1/2: Two keys\n\nHere is why this matters.",
+  });
+});
+
 test("planner caps checkpoints at MAX_CHECKPOINTS; zero checkpoints ends in failed", async () => {
-  const many = Array.from({ length: MAX_CHECKPOINTS + 2 }, (_, i) => ({
-    title: `C${i}`,
-    keyIdea: "x",
-  }));
+  const many = Array.from({ length: MAX_CHECKPOINTS + 2 }, (_, i) => ({ title: `C${i}` }));
   const capped = await runFeynmanTutorExample({
     generateText: createMockModelExecutors({
       text: {
         planCheckpoints: [{ checkpoints: many }],
         introduceCheckpoint: [{ context: "intro" }],
+        distillKeyIdea: [{ keyIdea: "x" }],
       },
     }).generateText,
     judge: grader([pass]).model,
@@ -228,6 +265,7 @@ test("numbered planner titles are stripped; the machine numbers checkpoints itse
       text: {
         planCheckpoints: [{ checkpoints: numbered }],
         introduceCheckpoint: [{ context: "intro" }],
+        distillKeyIdea: [{ keyIdea: "x" }],
       },
     }).generateText,
     judge: grader([pass]).model,
@@ -245,6 +283,7 @@ test("a model error lands in failed with the checkpoints finished so far", async
       text: {
         planCheckpoints: [{ checkpoints }],
         introduceCheckpoint: [{ context: "intro" }],
+        distillKeyIdea: [{ keyIdea: "x" }],
       },
     }).generateText,
     judge: grader([
@@ -295,14 +334,14 @@ test("verifying asks Jev one five-level score over the checkpoint, and PASS_SCOR
   const call = jev.calls[0]!;
   expect(call.state).toEqual({
     checkpoint: "Two keys",
-    keyIdea: checkpoints[0]!.keyIdea,
+    keyIdea: keyIdeas[0],
     explanation: "private decrypts",
   });
   expect(Object.keys(call.questions)).toEqual(["understanding"]);
   const question = call.questions.understanding!;
   expect(question.type).toBe("score");
   expect(question.type === "score" && question.criteria).toEqual([...UNDERSTANDING_LEVELS]);
-  expect(result.progress.slice(3, 5)).toEqual(["verifying", "teaching"]);
+  expect(result.progress.slice(4, 6)).toEqual(["verifying", "teaching"]);
   expect(result.checkpoints[0]).toMatchObject({ status: "passed", score: 75, reteaches: 1 });
 });
 

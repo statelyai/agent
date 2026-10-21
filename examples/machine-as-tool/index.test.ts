@@ -169,3 +169,9 @@ test("the policy check asks Jev one boolean question over the refund and the pol
   const paused = await startTool({ amount: 129.99, orderId: "ORD-4471" }, justUnder);
   expect(paused.status).toBe("pending");
 });
+
+test("over the limit pauses even when the judge calls it valid: the limit is a code guard", async () => {
+  const lenient = optionsWith(() => true).options;
+  const started = await startTool({ amount: 780, orderId: "ORD-9002" }, lenient);
+  expect(started.status).toBe("pending");
+});

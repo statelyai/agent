@@ -34,8 +34,9 @@
  * Runs autonomously: no human input. The output's headline is
  * `summary`, a readable move-by-move narration ("Farmer crosses left → right
  * with the goat. Left: wolf, cabbage | Right: farmer, goat"), built from the
- * `log: string[]` the machine appends to on every applied move. `solved`,
- * `moves`, and `log` ride along as structured fields.
+ * `log: string[]` the machine appends to on every applied move. `solved` and
+ * `moves` ride along as structured fields; the raw `log` stays in context, so
+ * the narration is not shown twice.
  *
  * Run: OPENAI_API_KEY=... npx tsx examples/river-crossing/index.ts
  */
@@ -92,7 +93,6 @@ export const riverCrossingSchemas = createAgentSchemas({
     summary: z.string(),
     solved: z.boolean(),
     moves: z.number(),
-    log: z.array(z.string()),
   }),
   events: {
     TAKE_WOLF: z.object({ reasoning: z.string() }),
@@ -433,7 +433,6 @@ export const riverCrossingMachine = agentSetup.createMachine({
     summary: narrate(context),
     solved: allOnRight(context),
     moves: context.moves,
-    log: context.log,
   }),
   initial: "deciding",
   states: {

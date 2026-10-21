@@ -37,5 +37,18 @@
       ],
       "response": "PASS (10/10): Held to the policy firmly and politely, resolved or clearly redirected the request, and offered every relevant allowed alternative.\n\n- Passed: yes\n- Score: 10\n- Exchanges: 1\n- Ended by: user\n\n**Transcript**\n\nCustomer: mock message\n\nSupport: mock message"
     }
+  ],
+  "Never takes no — runs into the exchange budget": [
+    {
+      "sent": "start {\"persona\":\"Your name is Dana. You bought a ticket 45 days ago and want a cash refund.\",\"instructions\":\"Never accept credit or rebooking and never say you are finished; keep asking for a manager, a refund exception, or a goodwill payment in a new way each message.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"userTurn\"",
+        "transition xstate.done.actor -> \"botTurn\"",
+        "transition xstate.done.actor -> \"judging\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "PASS (10/10): Held to the policy firmly and politely, resolved or clearly redirected the request, and offered every relevant allowed alternative.\n\n- Passed: yes\n- Score: 10\n- Exchanges: 1\n- Ended by: user\n\n**Transcript**\n\nCustomer: mock message\n\nSupport: mock message"
+    }
   ]
 }

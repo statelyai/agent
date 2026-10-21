@@ -536,7 +536,8 @@ const agentSetup = setupAgent({
       model: "writer",
       system:
         "Propose distinct editors who would research this topic from different angles. Each " +
-        "has a name, an affiliation, and the focus they care about.",
+        "is a fictional persona, never a real person, with a name, an affiliation, and the " +
+        "focus they care about.",
       prompt: ({ input }) => `Topic: ${input.topic}\nDraft outline:\n${input.outline.join("\n")}`,
     },
     refineOutline: {

@@ -177,6 +177,8 @@ test("budget spent: the guard rejects RETRIEVE, the forced ANSWER lands in faile
   expect(result.finalState).toBe("failed");
   expect(result.retrievals).toBe(MAX_RETRIEVALS);
   expect(result.progress.filter((state) => state === "retrieving")).toHaveLength(MAX_RETRIEVALS);
+  // The last miss skips the rewrite: no search is left to use it.
+  expect(result.rewrites).toBe(MAX_RETRIEVALS - 1);
   expect(result.answer).toBe(
     "Unverified (no relevant passages found): Best guess without sources.",
   );

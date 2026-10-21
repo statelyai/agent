@@ -136,6 +136,14 @@ export function planFrom(from: Location, closed: readonly string[]): Location[] 
     .map((event) => event.to);
 }
 
+/** The route `planFrom` would take, as the dispatcher reads it. */
+function describeDetour(from: Location, closed: readonly string[]): string {
+  const route = planFrom(from, closed);
+  return route
+    ? `${[from, ...route].join(" → ")} (${route.length} leg${route.length === 1 ? "" : "s"})`
+    : "none";
+}
+
 // ─── The world's vote ───
 
 /**
@@ -171,6 +179,7 @@ const MAX_REPLANS = 2;
 const agentSetup = setupAgent({
   models,
   context: z.object({
+    parcel: z.string(),
     at: locationSchema,
     route: z.array(locationSchema),
     closed: z.array(z.string()),
@@ -204,7 +213,11 @@ const agentSetup = setupAgent({
   requests: {
     writeReport: {
       schemas: {
-        input: z.object({ travelled: z.array(z.string()), delivered: z.boolean() }),
+        input: z.object({
+          parcel: z.string(),
+          travelled: z.array(z.string()),
+          delivered: z.boolean(),
+        }),
         output: z.string(),
       },
       model: "dispatcher",
@@ -213,6 +226,7 @@ const agentSetup = setupAgent({
         "Say where the parcel went and mention any road closure that forced a detour.",
       prompt: ({ input }) =>
         [
+          `Parcel: ${input.parcel}`,
           `Delivered: ${input.delivered}`,
           "Legs travelled:",
           ...input.travelled.map((leg, index) => `${index + 1}. ${leg}`),
@@ -319,8 +333,12 @@ export const routeReplanningMachine = agentSetup.createMachine({
             "A road on the courier's route is closed. Reroute when a detour is " +
             "plausible and the replan budget allows it; abandon only when it is not.",
           prompt: [
+            `Parcel: ${context.parcel}`,
             `Closed road: ${context.lastClosure}`,
             `Courier is at: ${context.at}`,
+            // The judgement needs the detour it is judging. Planning it here is
+            // a pure lookup; the `planning` state recomputes it on REROUTE.
+            `Detour from here: ${describeDetour(context.at, context.closed)}`,
             `Legs travelled so far: ${context.travelled.length}`,
             `Replans used: ${context.replans} of ${context.maxReplans}`,
           ].join("\n"),
@@ -343,6 +361,7 @@ export const routeReplanningMachine = agentSetup.createMachine({
       invoke: {
         src: "writeReport",
         input: ({ context }) => ({
+          parcel: context.parcel,
           travelled: context.travelled,
           delivered: context.at === "market",
         }),

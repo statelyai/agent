@@ -31,7 +31,7 @@ const pickTwo = { module4: 0.9, module14: 0.8, "*": 0.1 };
 /** Jev finds no module helpful. */
 const pickNone = { "*": 0.1 };
 const stages = {
-  adaptModules: [{ adapted: "Split the pets by constraint; check each owner in turn." }],
+  adaptModules: [{ adapted: ["Split the pets by constraint; check each owner in turn."] }],
   structurePlan: [{ steps: ["Apply Alice's constraint", "State the answer"] }],
   solveTask: [
     {
@@ -51,8 +51,8 @@ test("happy path: select → adapt → structure → reason → done", async () 
   // The worked steps follow the answer as prose, not a JSON trace.
   expect(result.answer).toContain("Reasoning:\n1. Alice is allergic to fur");
   expect(result.selectedModules).toEqual(twoModules.modules);
-  expect(result.adaptedModules).toContain("Split the pets");
-  expect(result.reasoningStructure).toBe("1. Apply Alice's constraint\n2. State the answer");
+  expect(result.adaptedModules.join("\n")).toContain("Split the pets");
+  expect(result.reasoningStructure).toEqual(["Apply Alice's constraint", "State the answer"]);
   expect(result.progress).toEqual(["selecting", "adapting", "structuring", "reasoning", "done"]);
 });
 
@@ -112,14 +112,12 @@ test("plan and reasoning render as numbered plain lines: no JSON, no stray headi
   const result = await runSelfDiscoverExample({ ...executors });
 
   expect(result.finalState).toBe("done");
-  expect(result.reasoningStructure).toBe(
-    [
-      "1. Identify all entities",
-      "2. Count the segments",
-      "3. Check closure",
-      "4. Name the shape",
-    ].join("\n"),
-  );
+  expect(result.reasoningStructure).toEqual([
+    "Identify all entities",
+    "Count the segments",
+    "Check closure",
+    "Name the shape",
+  ]);
   expect(result.answer).toBe(
     [
       "(B) heptagon",
@@ -160,8 +158,8 @@ test("a failing stage lands in failed with the stages that completed", async () 
 
   expect(result.finalState).toBe("failed");
   expect(result.selectedModules).toEqual(twoModules.modules);
-  expect(result.adaptedModules).toContain("Split the pets");
-  expect(result.reasoningStructure).toBe("");
+  expect(result.adaptedModules.join("\n")).toContain("Split the pets");
+  expect(result.reasoningStructure).toEqual([]);
   expect(result.answer).toContain("structurePlan failed");
 });
 
@@ -169,11 +167,12 @@ const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.
   .starters as string[];
 
 test("starters behave as their labels advertise", async () => {
-  // Plain-string starters are whole tasks: each runs all four stages, and the
-  // task text reaches every stage's prompt unchanged.
-  expect(starters).toHaveLength(3);
+  // Plain-string starters are whole tasks: each of the first three runs all
+  // four stages, and the task text reaches every stage's prompt unchanged.
+  // The last is not a reasoning task: live, no module clears the threshold.
+  expect(starters).toHaveLength(4);
   expect(starters[0]).toContain("SVG path element");
-  for (const task of starters) {
+  for (const task of starters.slice(0, 3)) {
     const executors = scripted(stages);
     const result = await runSelfDiscoverExample({ task, ...executors });
     expect(result.finalState).toBe("done");
@@ -183,6 +182,12 @@ test("starters behave as their labels advertise", async () => {
     expect(executors.calls).toHaveLength(3);
     for (const call of executors.calls) expect(call.request.prompt).toContain(task);
   }
+  const offTask = await runSelfDiscoverExample({
+    task: starters[3]!,
+    ...scripted(stages, { "*": 0 }),
+  });
+  expect(offTask.finalState).toBe("failed");
+  expect(offTask.answer).toContain("MODULE_THRESHOLD");
 });
 
 test("select asks Jev one boolean question per module and keeps the top-k above the threshold", async () => {

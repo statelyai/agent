@@ -63,7 +63,12 @@ const agentSetup = setupAgent({
   input: z.object({ topic: z.string() }),
   // `draft` is nullable because `abandoned` is also where a failed first draft
   // lands, and there is no draft to report then.
-  output: z.object({ published: z.boolean(), draft: z.string().nullable() }),
+  output: z.object({
+    published: z.boolean(),
+    draft: z.string().nullable(),
+    /** Why the run ended, so an unpublished draft says which bound stopped it. */
+    summary: z.string(),
+  }),
   // The library's own interaction meta — a `label`, a button `label`/`style`
   // per accepted event, and `textEvent` naming the ONE event free-typed text
   // is delivered to — instead of restating that shape per machine.
@@ -77,17 +82,23 @@ const agentSetup = setupAgent({
   requests: {
     writeDraft: {
       schemas: {
-        input: z.object({ topic: z.string(), feedback: z.string().nullable() }),
+        input: z.object({
+          topic: z.string(),
+          draft: z.string().nullable(),
+          feedback: z.string().nullable(),
+        }),
         output: z.string(),
       },
       model: "writer",
       system: "You write short, punchy internal announcements — two or three sentences.",
       // The prompt is composed here, from durable facts. Context stores the
-      // topic and the last feedback, never the rendered prompt.
+      // topic, the last draft, and the last feedback, never the rendered
+      // prompt. A redraft revises the last draft, so earlier asks survive.
       prompt: ({ input }) =>
-        input.feedback === null
+        input.feedback === null || input.draft === null
           ? `Write a short announcement about: ${input.topic}`
-          : `Write a short announcement about: ${input.topic}\nRevision requested: ${input.feedback}`,
+          : `Write a short announcement about: ${input.topic}\nPrevious draft: ${input.draft}\n` +
+            `Revision requested: ${input.feedback}`,
     },
   },
   // `reviewing` and `published` are reachable only after drafting's onDone set
@@ -113,7 +124,11 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
     drafting: {
       invoke: {
         src: "writeDraft",
-        input: ({ context }) => ({ topic: context.topic, feedback: context.feedback }),
+        input: ({ context }) => ({
+          topic: context.topic,
+          draft: context.draft,
+          feedback: context.feedback,
+        }),
         onDone: ({ output }) => ({
           target: "reviewing",
           context: { draft: output.result },
@@ -131,7 +146,9 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
       tags: ["awaiting-review"],
       meta: {
         interaction: {
-          label: "Approve the draft to publish it, or type what you want changed.",
+          label:
+            "Approve the draft to publish it, or type what you want changed " +
+            `({rejections} of ${MAX_REJECTIONS} revisions used).`,
           events: {
             APPROVE: { label: "Approve draft", style: "primary" },
             REJECT: { label: "Request changes", style: "danger" },
@@ -161,13 +178,24 @@ export const humanInTheLoopMachine = agentSetup.createMachine({
     },
     published: {
       type: "final",
-      output: ({ context }) => ({ published: true, draft: context.draft }),
+      output: ({ context }) => ({
+        published: true,
+        draft: context.draft,
+        summary: `Published after ${context.rejections} revision(s).`,
+      }),
     },
     // A distinct final state, not `published: false` smuggled out of the happy
     // path: the review budget ran out, or drafting errored.
     abandoned: {
       type: "final",
-      output: ({ context }) => ({ published: false, draft: context.draft }),
+      output: ({ context }) => ({
+        published: false,
+        draft: context.draft,
+        summary:
+          context.draft === null
+            ? "Not published: the first draft failed."
+            : `Not published: rejected again after all ${MAX_REJECTIONS} revisions were used.`,
+      }),
     },
   },
 });

@@ -171,8 +171,8 @@ const schemas = createAgentSchemas({
   events: {
     /** Accept the model's category as classified. */
     CONFIRM: z.object({}),
-    /** Override it. Free text lands in `category` and the machine validates it. */
-    RECLASSIFY: z.object({ category: z.string() }),
+    /** Override it. An enum, so a chat host can read "it's a bug" as `technical`. */
+    RECLASSIFY: z.object({ category: categorySchema }),
   },
 });
 
@@ -293,9 +293,8 @@ export const triageMachine = triageAgentSetup.createMachine({
       meta: {
         interaction: {
           label:
-            "{notice} {slaNote} Confirm the category, or type the right one " +
+            "{notice} {slaNote} Confirm the category, or say which one it is " +
             "(billing, technical, other).",
-          textEvent: "RECLASSIFY",
           events: {
             CONFIRM: { label: "Confirm category", style: "primary" },
             RECLASSIFY: { label: "Set category", style: "default" },
@@ -306,17 +305,19 @@ export const triageMachine = triageAgentSetup.createMachine({
         CONFIRM: ({ context }) => ({
           target: "replying",
           context: {
-            notice: `Human confirmed ${context.classification.category}. Drafting the reply.`,
+            notice: `Human confirmed ${context.classification.category}.`,
           },
         }),
-        // An unknown category keeps the turn and explains why, so the host
-        // re-prompts with feedback instead of silently.
+        // The event schema limits `category` to the enum, but a host that does
+        // not parse events can send anything: an unknown category keeps the
+        // turn and explains why, so the host re-prompts with feedback.
         RECLASSIFY: ({ context, event }) => {
-          const parsed = categorySchema.safeParse(event.category.trim().toLowerCase());
+          const raw = String(event.category).trim();
+          const parsed = categorySchema.safeParse(raw.toLowerCase());
           if (!parsed.success) {
             return {
               context: {
-                notice: `"${event.category.trim()}" is not a category. Use billing, technical, or other.`,
+                notice: `"${raw}" is not a category. Use billing, technical, or other.`,
               },
             };
           }
@@ -330,7 +331,7 @@ export const triageMachine = triageAgentSetup.createMachine({
             context: {
               classification,
               slaNote: slaNoteFor(classification),
-              notice: `Human set the category to ${parsed.data}. Drafting the reply.`,
+              notice: `Human set the category to ${parsed.data}.`,
             },
           };
         },
@@ -371,7 +372,8 @@ export const triageMachine = triageAgentSetup.createMachine({
     done: {
       type: "final",
       output: ({ context }) => ({
-        summary: `${context.notice} ${context.slaNote} Drafted reply: ${context.reply}`,
+        // The reply has its own field; repeating it here prints it twice.
+        summary: `${context.notice} ${context.slaNote}`,
         sentiment: context.classification.sentiment,
         category: context.classification.category,
         reply: context.reply,
@@ -448,7 +450,11 @@ export async function main() {
       }),
       {
         snapshot: result.persist(),
-        event: answer === "" ? { type: "CONFIRM" } : { type: "RECLASSIFY", category: answer },
+        // Unparsed on purpose: the machine explains an unknown category.
+        event:
+          answer === ""
+            ? { type: "CONFIRM" }
+            : { type: "RECLASSIFY", category: answer as z.infer<typeof categorySchema> },
         ...shared,
       },
     );

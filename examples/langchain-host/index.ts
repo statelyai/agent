@@ -143,7 +143,9 @@ export async function main() {
 
   console.log("— Direction A: LangChain model as executor —");
   const jokeOutput = await runJokeDemo(model, (chunk) => process.stdout.write(chunk));
-  console.log(`\nRating: ${jokeOutput.lastRating}, jokes told: ${jokeOutput.jokes.length}\n`);
+  console.log(
+    `\nRating: ${jokeOutput.lastRating}, jokes told: ${jokeOutput.earlierJokes.length + 1}\n`,
+  );
 
   console.log("— Direction B: createAgent over the machine's two tools —");
   const agent = createEmailHostAgent(model);

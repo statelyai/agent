@@ -74,17 +74,14 @@ describe("joke-teller", () => {
     // The decision only runs after the improvement pass.
     expect(mock.decideCount).toBe(1);
     expect(result.output.topic).toBe("penguins");
-    expect(result.output.firstJoke).toBe("A joke about penguins.");
     expect(result.output.joke).toBe("A better joke about penguins.");
-    expect(result.output.jokes).toEqual([
-      "A joke about penguins.",
-      "A better joke about penguins.",
-    ]);
+    // The final joke is not repeated in the history.
+    expect(result.output.earlierJokes).toEqual(["A joke about penguins."]);
     // The notice is rendered from `firstRating`/`firstExplanation` in `output`,
     // not stored in context.
     expect(result.output.revisionNotice).toContain("First attempt scored 8/10");
     // The explanation is the matched rubric level, not model prose.
-    expect(result.output.revisionNotice).toContain(JOKE_LEVELS[3]);
+    expect(result.output.revisionNotice).toContain(JOKE_LEVELS[3].replace(/\.$/, ""));
     expect(result.output.revisionNotice).toContain("improvement pass");
     expect(result.output.lastRating).toBe(10);
     expect(result.output.error).toBeNull();
@@ -109,7 +106,7 @@ describe("joke-teller", () => {
     // so `checkingRating` targets `done` without asking again.
     expect(mock.decideCount).toBe(1);
     expect(result.output.status).toBe("told");
-    expect(result.output.jokes).toHaveLength(3);
+    expect(result.output.earlierJokes).toHaveLength(2);
     expect(result.output.lastRating).toBe(8);
   });
 
@@ -130,7 +127,7 @@ describe("joke-teller", () => {
     if (result.status !== "done") throw new Error("expected done");
     expect(mock.decideCount).toBe(1);
     expect(result.output.status).toBe("told");
-    expect(result.output.jokes).toHaveLength(2);
+    expect(result.output.earlierJokes).toHaveLength(1);
     expect(result.output.lastRating).toBe(8);
   });
 
@@ -164,7 +161,7 @@ describe("joke-teller", () => {
     expect(result.output.status).toBe("failed");
     expect(result.output.joke).toBeNull();
     expect(result.output.error).toContain("rateJoke failed");
-    expect(result.output.jokes).toEqual(["A joke about state machines."]);
+    expect(result.output.earlierJokes).toEqual(["A joke about state machines."]);
   });
 
   test("rateJoke asks Jev one five-level score over the joke and maps it to 1-10", async () => {

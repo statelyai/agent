@@ -36,6 +36,8 @@ const portableLoopSetup = setupAgent({
     draft: {
       model: "writer",
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
+      system:
+        "You write short release notes: a title and two or three sentences. Return only the note.",
       prompt: ({ input }) => `Draft a release note about ${input.topic}.`,
     },
   },
@@ -61,7 +63,7 @@ export const portableLoopMachine = portableLoopSetup.createMachine({
       },
     },
     reviewing: {
-      description: "Approve the drafted release notes to finish.",
+      description: "Approve the drafted release note to finish.",
       on: { APPROVE: { target: "done" } },
     },
     done: {

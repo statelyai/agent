@@ -227,16 +227,18 @@ export function createWorldActors(world: World) {
 
 /**
  * The sample world the default actors use: the sample customers and a fresh
- * copy of the sample orders. A claim verifies when it matches the customer's
- * identity answer on file. It records no violations; the per-episode worlds
- * from `createWorld` do.
+ * copy of the sample orders. A claim verifies when it mentions the email in
+ * the customer's identity answer on file, so a person typing in the demo can
+ * pass it (the benchmark's worlds want the whole answer). It records no
+ * violations; the per-episode worlds from `createWorld` do.
  */
 function createSampleWorld(): DeskTools {
   const orders = new Map(ORDERS.map((order) => [order.id, { ...order }]));
   return {
     verifyIdentity: ({ customerId, claim }) => {
       const customer = CUSTOMERS.find((c) => c.id === customerId);
-      return !!customer && claim.trim().toLowerCase() === customer.identityAnswer.toLowerCase();
+      const email = customer?.identityAnswer.split(",")[0]!.trim().toLowerCase();
+      return !!email && claim.toLowerCase().includes(email);
     },
     lookupOrder: (orderId) => {
       const order = orders.get(orderId);
@@ -363,7 +365,7 @@ export const refundDeskMachine = deskSetup.createMachine({
       entry: ({ context }) => ({ context: { choices: deskChoices(context) } }),
       meta: {
         interaction: {
-          label: "Turn {turn}: {notice} Choose the next step.",
+          label: 'Ticket from {customerId}: "{ticket}" Turn {turn}: {notice} Choose the next step.',
           choices: "choices",
         },
       },
@@ -435,7 +437,7 @@ export const refundDeskMachine = deskSetup.createMachine({
       tags: ["waiting"],
       meta: {
         interaction: {
-          label: "Please confirm your identity (email and one order detail).",
+          label: "Please confirm your identity with the email on your account.",
           textEvent: { type: "IDENTITY_CLAIM", field: "claim" },
           events: { IDENTITY_CLAIM: { label: "Confirm identity" } },
         },

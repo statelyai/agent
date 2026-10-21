@@ -68,9 +68,11 @@ test("draft → search → revise, looped until MAX_REVISIONS, with grounded cit
     "Query: measure pays off cycle time",
   );
   // Each trail line reads as prose: no empty "Draft:;" field.
-  expect(result.trail).toMatch(/^Draft — missing: No rollout plan, no security rules\.$/m);
-  expect(result.trail).toContain("Revision 2 cites [S1, S3, S5] — missing:");
-  expect(result.trail).not.toMatch(/:;/);
+  expect(result.trail.join("\n")).toMatch(
+    /^Draft — missing: No rollout plan, no security rules\.$/m,
+  );
+  expect(result.trail.join("\n")).toContain("Revision 2 cites [S1, S3, S5] — missing:");
+  expect(result.trail.join("\n")).not.toMatch(/:;/);
 });
 
 test("citations to passages the run never retrieved are dropped", async () => {
@@ -89,7 +91,7 @@ test("citations to passages the run never retrieved are dropped", async () => {
   expect(result.progress.at(-1)).toBe("done");
   expect(result.references).toHaveLength(1);
   expect(result.references[0]).toMatch(/^\[S1\] Small teams/);
-  expect(result.trail).toContain("dropped unretrieved: S7, S42");
+  expect(result.trail.join("\n")).toContain("dropped unretrieved: S7, S42");
 });
 
 test("the loop is bounded: revisions stop at MAX_REVISIONS even with queries left", async () => {
@@ -130,7 +132,7 @@ test("a revise error lands in failed but keeps the latest answer", async () => {
   expect(result.answer).toBe("Pilot first [S1].");
   expect(result.revisions).toBe(1);
   expect(result.references[0]).toMatch(/^\[S1\]/);
-  expect(result.trail).toContain("Failed: revise failed");
+  expect(result.trail.join("\n")).toContain("Failed: revise failed");
 });
 
 test("starters behave as their labels advertise", async () => {

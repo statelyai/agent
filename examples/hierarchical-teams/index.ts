@@ -32,9 +32,9 @@
  * Each team returns a `log` of structured worker steps (worker, status,
  * result) alongside its output, and the coordinator collects those into a
  * `teamReport` array as the teams finish. The tree is rendered from that array
- * in `output`, not maintained as a string in context. That tree, not the raw
- * research prose, is what the run leads with; the full research and report stay
- * nested under `details`.
+ * in `output`, not maintained as a string in context. That tree, with the
+ * report under it, is what the run leads with; the full research stays nested
+ * under `details`.
  *
  * Dual-mode: `runHierarchicalTeamsExample(options?)` takes injectable
  * `generateText`/`decide` (tests script them — CI with no API key); the direct run
@@ -358,10 +358,11 @@ const coordinatorSetup = setupAgent({
   }),
   input: z.object({ topic: z.string() }),
   // One leading string (the tree, with the report under it); the raw research
-  // and report stay nested so neither becomes the lead.
+  // stays nested so it does not become the lead. The report is not repeated
+  // in `details`: it is already under the tree.
   output: z.object({
     teamReport: z.string(),
-    details: z.object({ research: z.string(), report: z.string() }),
+    details: z.object({ research: z.string() }),
   }),
   events: {
     REVISE: z.object({}),
@@ -386,7 +387,7 @@ export const hierarchicalTeamsMachine = coordinatorSetup.createMachine({
       "Report",
       context.report || "(none)",
     ].join("\n"),
-    details: { research: context.research ?? "", report: context.report ?? "" },
+    details: { research: context.research ?? "" },
   }),
   initial: "researching",
   states: {

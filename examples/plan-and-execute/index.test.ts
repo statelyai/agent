@@ -40,11 +40,6 @@ test("plan-and-execute plans steps, gathers per-step evidence, and solves from t
     E1: "evidence for: What is library A?",
     E2: "evidence for: What is library B?",
   });
-  assert.deepEqual(
-    output.details.steps.map((step) => step.id),
-    ["E1", "E2"],
-  );
-  assert.ok(output.details.answer.startsWith("final answer"));
 
   // The summary leads with the plan, collapses each finished step to one line,
   // and ends with the answer.
@@ -56,12 +51,11 @@ test("plan-and-execute plans steps, gathers per-step evidence, and solves from t
     .split("\n")
     .filter((line) => /^E\d\. (done|skipped)\./.test(line));
   assert.equal(progressLines.length, 2);
-  // The summary always contains the answer, so it is the longest string field
-  // and leads the rendered output.
-  assert.ok(output.summary.length > output.details.answer.length);
+  // The plan and answer are not repeated beside the summary.
+  assert.deepEqual(Object.keys(output.details), ["evidence"]);
 });
 
-test("an over-budget plan spends at most MAX_STEPS and then ends in `failed`", async () => {
+test("an over-budget plan ends in `failed` as it arrives, before any worker call", async () => {
   let workerCalls = 0;
   let solverCalls = 0;
   const planned = MAX_STEPS + 6;
@@ -89,16 +83,14 @@ test("an over-budget plan spends at most MAX_STEPS and then ends in `failed`", a
     },
   });
 
-  // The budget caps the spend...
-  assert.equal(workerCalls, MAX_STEPS);
-  assert.equal(Object.keys(output.details.evidence).length, MAX_STEPS);
+  // The budget is checked against the plan itself: nothing is spent...
+  assert.equal(workerCalls, 0);
+  assert.deepEqual(output.details.evidence, {});
+  assert.ok(output.summary.includes("(no steps run)"));
   // ...and the run fails honestly instead of solving from a truncated plan.
   assert.equal(solverCalls, 0);
-  assert.equal(output.details.answer, "");
   assert.ok(output.summary.includes("Failed"));
-  assert.ok(
-    output.summary.includes(`step budget exhausted: ran ${MAX_STEPS} of ${planned} planned steps`),
-  );
+  assert.ok(output.summary.includes(`plan needs ${planned} steps; the budget is ${MAX_STEPS}`));
   // The whole plan is still reported, with the unrunnable tail marked.
   assert.ok(output.summary.includes(`E${planned}. Question ${planned}? (over budget)`));
 });
@@ -126,7 +118,7 @@ test("a plan that fits the budget still solves and lands in `done`", async () =>
 
   // Exactly MAX_STEPS steps is the boundary case: it is spent, not exceeded.
   assert.equal(Object.keys(output.details.evidence).length, MAX_STEPS);
-  assert.equal(output.details.answer, "final answer");
+  assert.ok(output.summary.trimEnd().endsWith("final answer"));
   assert.ok(!output.summary.includes("Failed"));
 });
 
@@ -144,7 +136,6 @@ test("a failing solver ends in `failed`, not in a done run with an empty answer"
     },
   });
 
-  assert.equal(output.details.answer, "");
   assert.ok(output.summary.includes("Failed"));
   assert.ok(output.summary.includes("solveTask failed: "));
   // The evidence gathered before the failure is still reported.

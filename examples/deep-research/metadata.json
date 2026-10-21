@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["Open Deep Research", "Gemini Fullstack LangGraph", "local-deep-researcher"],
-    "purpose": "Plans several complementary searches, runs them at the same time, has Jev judge whether the findings answer the question, does one follow-up round aimed at what they leave out if not, then writes a report with its sources."
+    "purpose": "Plans several complementary searches and runs them at the same time; then Jev judges whether the findings answer the question, and a choice state either writes the report (sufficient) or spends the one follow-up round the budget allows, aimed at what the findings leave out. The output says which rule ended it. Researchers run real web search, and a cited page enters the source ledger only if the search actually returned it."
   },
   "starters": [
     "What are the leading approaches to long-context LLMs in 2026?",

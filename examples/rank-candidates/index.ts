@@ -254,18 +254,13 @@ export function rank(context: RankContext) {
   return { ranked, cut };
 }
 
+/** The headline only: `ranked` and `cut` carry the rows, so a host never shows them twice. */
 function renderSummary(context: RankContext): string {
   if (context.failure) return `Ranking failed: ${context.failure}`;
-  const lines = [
-    `Ranked ${context.ranked.length} of ${context.candidates.length} candidates.`,
-    ...context.ranked.map(
-      (r, i) => `${i + 1}. ${r.title} [${r.bucket}] (${r.id}, fit ${r.score.toFixed(2)})`,
-    ),
-  ];
-  if (context.cut.length) {
-    lines.push(`Cut ${context.cut.length}:`, ...context.cut.map((c) => `- ${c.id}: ${c.reason}`));
-  }
-  return lines.join("\n");
+  return (
+    `Ranked ${context.ranked.length} of ${context.candidates.length} candidates.` +
+    (context.cut.length ? ` Cut ${context.cut.length}, each with its reason.` : "")
+  );
 }
 
 const outputSchema = z.object({
@@ -482,6 +477,10 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       onProgress: (state) => console.log(`  → ${state}`),
     });
     console.log(`\n${result.summary}`);
+    result.ranked.forEach((r, i) =>
+      console.log(`${i + 1}. ${r.title} [${r.bucket}] (${r.id}, fit ${r.score.toFixed(2)})`),
+    );
+    result.cut.forEach((c) => console.log(`- cut ${c.id}: ${c.reason}`));
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;

@@ -69,6 +69,24 @@ describe("crash-recovery", () => {
     expect(stored).toEqual(recovered.events);
   });
 
+  test("the runner tells the crash-and-recover story before the article", async () => {
+    const executors = createMockModelExecutors({
+      text: { outline: "1. Intro", draft: "The recovered draft." },
+    });
+    const result = await runCrashRecoveryExample({ executors });
+
+    expect(result.callKeyMatched).toBe(true);
+    expect(result).toMatchObject({ status: "done", callsBeforeCrash: 2, callsDuringRecovery: 1 });
+    // The crash leg hung its draft before the model saw it; recovery re-ran
+    // only the draft, never the recorded outline.
+    expect(executors.calls.map((call) => call.name)).toEqual(["outline", "draft"]);
+    expect(result.summary).toContain("while `draft` was in flight");
+    expect(result.summary).toContain(
+      "re-ran only `draft` (1 model call), under the same `callKey`",
+    );
+    expect(result.summary.endsWith("**Recovered article**\n\nThe recovered draft.")).toBe(true);
+  });
+
   test("a host cancel during the outline stops the run and never starts recovery", async () => {
     const host = new AbortController();
     const executors = createMockModelExecutors({

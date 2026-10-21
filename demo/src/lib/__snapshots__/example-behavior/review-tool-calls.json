@@ -59,9 +59,9 @@
       "response": "- Executed: yes\n- Edited: no\n\n**Call**\n\n**Order id**: mock orderId  \n**Amount**: $0.01  \n**Reason**: mock reason"
     }
   ],
-  "What is 6 times 7?": [
+  "Refund $5,000 on order #8891, the package arrived two days late.": [
     {
-      "sent": "start {\"request\":\"What is 6 times 7?\"}",
+      "sent": "start {\"request\":\"Refund $5,000 on order #8891, the package arrived two days late.\"}",
       "status": "idle",
       "trace": [
         "transition @xstate.init -> \"proposing\"",

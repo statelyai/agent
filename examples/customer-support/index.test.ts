@@ -7,6 +7,7 @@ import {
   customerSupportMachine,
   findCodeCandidates,
   MAX_CLARIFICATIONS,
+  MAX_CODE_ASKS,
   resetBookings,
   runCustomerSupportExample,
 } from "./index.js";
@@ -318,14 +319,53 @@ test("two candidate codes: Jev picks which span is the confirmation code", async
   expect(result.pendingAction).toMatchObject({ type: "rebook", confirmationCode: "CD5678" });
 });
 
+test("a change request without a code asks for it, then proceeds to the approval gate", async () => {
+  const jev = classifier({ intent: "rebook", newFlight: "UA920" });
+  const result = await runCustomerSupportExample({
+    query: "Move me to a later flight",
+    replies: ["it's 7qx2p"],
+    approve: true,
+    generateText: mockGenerateText({}),
+    judge: jev.model,
+  });
+
+  expect(result.progress).toContain("awaitingConfirmationCode");
+  // Code found the code in the reply; the second classify saw it and offered
+  // only that booking's route alternatives.
+  expect(jev.calls).toHaveLength(2);
+  const second = jev.calls[1]!.state as { knownCodes: string[]; flights: { id: string }[] };
+  expect(second.knownCodes).toEqual(["7QX2P"]);
+  expect(second.flights.map((flight) => flight.id)).toEqual(["UA916", "UA920"]);
+  expect(result.settledIdle).toBe(true);
+  expect(result.pendingAction).toMatchObject({ type: "rebook", confirmationCode: "7QX2P" });
+  expect(result.resolution).toBe("executed");
+  expect(BOOKINGS["7QX2P"]?.flight).toBe("UA920 SFO→NRT, 2026-10-04 11:05");
+});
+
+test("the code ask is bounded: replies without a code end in failed", async () => {
+  const result = await runCustomerSupportExample({
+    query: "Please cancel my flight.",
+    // Always willing to reply, never with a code: the bound has to come from the machine.
+    replies: Array.from({ length: MAX_CODE_ASKS + 1 }, () => "I don't remember it"),
+    generateText: mockGenerateText({}),
+    judge: classifier({ intent: "cancel" }).model,
+  });
+
+  expect(result.resolution).toBe("failed");
+  expect(result.message).toContain(`No confirmation code after ${MAX_CODE_ASKS} asks`);
+  expect(result.progress).not.toContain("confirming");
+});
+
 test("a sensitive intent without a code or a target flight fails before the approval gate", async () => {
   const noCode = await runCustomerSupportExample({
     query: "Please cancel my flight.",
+    replies: [], // declines to give one, so the host sends STOP_ASKING
     generateText: mockGenerateText({}),
     judge: classifier({ intent: "cancel" }).model,
   });
   expect(noCode.resolution).toBe("failed");
   expect(noCode.message).toContain("confirmation code");
+  expect(noCode.progress).toContain("awaitingConfirmationCode");
   expect(noCode.progress).not.toContain("confirming");
 
   const noFlight = await runCustomerSupportExample({

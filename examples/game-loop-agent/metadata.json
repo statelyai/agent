@@ -13,12 +13,12 @@
   },
   "starters": [
     {
-      "seed": 11
+      "label": "Full match — first to 50, up to 3 rounds",
+      "input": { "seed": 11 }
     },
     {
-      "seed": 3,
-      "target": 30,
-      "maxRounds": 2
+      "label": "Quick match — first to 30, at most 2 rounds",
+      "input": { "seed": 3, "target": 30, "maxRounds": 2 }
     }
   ],
   "machine": "gameMachine"

@@ -413,11 +413,6 @@ function hasReport(reports: Report[]): boolean {
   return reports.some((entry) => entry.status === "done");
 }
 
-function oneLine(text: string, max = 100): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-}
-
 function renderRoutingPrompt(context: SupervisorContext): string {
   return [
     `Task: ${context.task}`,
@@ -437,12 +432,13 @@ function renderRoutingPrompt(context: SupervisorContext): string {
   ].join("\n");
 }
 
-/** One line per delegation, rendered from the reports in `output`. */
+/**
+ * One line per delegation, rendered from the reports in `output`. The report
+ * text is not repeated: `reports` already carries it in full.
+ */
 function renderTrail(context: SupervisorContext): string[] {
   return [
-    ...context.reports.map(
-      (entry, i) => `turn ${i + 1}: ${entry.worker} ${entry.status}. ${oneLine(entry.report)}`,
-    ),
+    ...context.reports.map((entry, i) => `turn ${i + 1}: ${entry.worker} ${entry.status}.`),
     context.notice,
   ];
 }

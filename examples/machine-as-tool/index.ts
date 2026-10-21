@@ -34,8 +34,9 @@
  * the AI SDK's `experimental_decide` with Jev (`@ai-sdk/typesafe-ai`) as
  * the decision model and asks one boolean question, `valid`, over the refund
  * and the written policy, and the machine auto-approves when that probability
- * clears `VALID_THRESHOLD`. It is the only model call, so the example needs no
- * text model at all. `runOptions` passes a judge model with
+ * clears `VALID_THRESHOLD` and the amount is within `AUTO_APPROVAL_LIMIT` (the
+ * limit is a code guard, so a wrong verdict can only cost a human review). It
+ * is the only model call, so the example needs no text model at all. `runOptions` passes a judge model with
  * `actors: { validateRefund: createValidateRefund(model) }`.
  *
  * Run: TYPESAFE_AI_API_KEY=... npx tsx examples/machine-as-tool/index.ts
@@ -169,11 +170,15 @@ export const refundMachine = agentSetup.createMachine({
       },
     },
     // Choice state: the branch is its own routing state, not a decision hidden
-    // inside `onDone`, so path exploration reaches both arms.
+    // inside `onDone`, so path exploration reaches both arms. The limit is
+    // checked here in code too: Jev's verdict can send a refund to a human,
+    // but it can never auto-approve one over the limit.
     checked: {
       type: "choice",
       choice: ({ context }) =>
-        context.check?.valid ? { target: "executing" } : { target: "awaitingApproval" },
+        context.amount <= AUTO_APPROVAL_LIMIT && context.check?.valid
+          ? { target: "executing" }
+          : { target: "awaitingApproval" },
     },
     awaitingApproval: {
       tags: ["awaiting-approval"],

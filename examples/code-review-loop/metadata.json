@@ -9,11 +9,11 @@
   },
   "comparison": {
     "targets": ["raw agent loop", "LangGraph"],
-    "purpose": "An author writes a file, then self-checks it while a separate reviewer reviews it, and the task's visible tests run. A patch ships only when the checks pass and the reviewer approves, which canReach proves for every author, reviewer, and test result. Otherwise a JSON policy picks one legal option: retry with targeted feedback, or escalate. Escalated tasks wait for a person to ship as-is, request changes, or reject. Try the contradictory spec to see escalation."
+    "purpose": "An author writes a file, then self-checks it while a separate reviewer reviews it, and the task's visible tests run. A patch ships only when the checks pass and the reviewer approves, which canReach proves for every author, reviewer, and test result. Otherwise a JSON policy picks one legal option: retry with targeted feedback, or escalate. Escalated tasks wait for a person to ship as-is, request changes, or reject. Try the contradictory spec to see escalation. In the demo the demo's own model makes the triage choice instead of the JSON policy, and the author and reviewer run on it instead of Claude Code."
   },
   "starters": [
     { "label": "clamp (simple)", "input": { "taskId": "clamp" } },
-    { "label": "slugify (needs a retry)", "input": { "taskId": "slugify" } },
+    { "label": "slugify (diacritics and dashes)", "input": { "taskId": "slugify" } },
     { "label": "round-half (spec contradicts its tests)", "input": { "taskId": "round-half" } }
   ],
   "machine": "codeReviewLoopMachine"

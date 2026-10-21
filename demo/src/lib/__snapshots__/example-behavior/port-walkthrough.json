@@ -158,5 +158,165 @@
         "textEvent": null
       }
     }
+  ],
+  "Refund my duplicate charge and email the confirmation to sam@example.com.": [
+    {
+      "sent": "start {\"request\":\"Refund my duplicate charge and email the confirmation to sam@example.com.\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"assisting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition SEND_EMAIL -> \"awaitingApproval\""
+      ],
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
+      "idle": {
+        "prompt": "Send this email to mock to?",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"sending\"",
+        "transition xstate.done.actor -> \"assisting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition SEND_EMAIL -> \"awaitingApproval\""
+      ],
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
+      "idle": {
+        "prompt": "Send this email to mock to?",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"sending\"",
+        "transition xstate.done.actor -> \"assisting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition SEND_EMAIL -> \"awaitingApproval\""
+      ],
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
+      "idle": {
+        "prompt": "Send this email to mock to?",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"sending\"",
+        "transition xstate.done.actor -> \"assisting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition SEND_EMAIL -> \"awaitingApproval\""
+      ],
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
+      "idle": {
+        "prompt": "Send this email to mock to?",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"sending\"",
+        "transition xstate.done.actor -> \"assisting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition SEND_EMAIL -> \"awaitingApproval\""
+      ],
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
+      "idle": {
+        "prompt": "Send this email to mock to?",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"sending\"",
+        "transition xstate.done.actor -> \"assisting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition SEND_EMAIL -> \"awaitingApproval\""
+      ],
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
+      "idle": {
+        "prompt": "Send this email to mock to?",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"sending\"",
+        "transition xstate.done.actor -> \"assisting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition SEND_EMAIL -> \"awaitingApproval\""
+      ],
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
+      "idle": {
+        "prompt": "Send this email to mock to?",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "idle",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"sending\"",
+        "transition xstate.done.actor -> \"assisting\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition SEND_EMAIL -> \"awaitingApproval\""
+      ],
+      "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
+      "idle": {
+        "prompt": "Send this email to mock to?",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": null
+      }
+    }
   ]
 }

@@ -41,5 +41,18 @@
       ],
       "response": "- Approved: no\n- Human reviewed: yes\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | security |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
     }
+  ],
+  "Trusted patch with SQL injection (votes fall short)": [
+    {
+      "sent": "start {\"patch\":\"Speed up user search by building the query directly.\\n\\n--- a/src/users.ts\\n+++ b/src/users.ts\\n@@ export async function findUsers(db: Db, name: string) {\\n-  return db.query(\\\"SELECT * FROM users WHERE name = $1\\\", [name]);\\n+  return db.query(`SELECT * FROM users WHERE name = '${name}'`);\\n }\",\"source\":\"trusted\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> {\"reviewing\":{\"security\":\"working\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"working\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> {\"reviewing\":{\"security\":\"done\",\"reliability\":\"done\",\"maintainability\":\"working\"}}",
+        "transition xstate.done.actor -> \"accepted\""
+      ],
+      "response": "- Approved: yes\n- Human reviewed: no\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | security |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
+    }
   ]
 }

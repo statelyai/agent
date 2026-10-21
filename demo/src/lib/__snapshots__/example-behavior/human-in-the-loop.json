@@ -9,7 +9,7 @@
       ],
       "response": "Mock reply to: Write a short announcement about: the new deploy pipeline",
       "idle": {
-        "prompt": "Approve the draft to publish it, or type what you want changed.",
+        "prompt": "Approve the draft to publish it, or type what you want changed (0 of 2 revisions used).",
         "events": [
           "APPROVE",
           "REJECT"
@@ -24,7 +24,7 @@
         "transition @xstate.init -> \"reviewing\"",
         "transition APPROVE -> \"published\""
       ],
-      "response": "- Published: yes"
+      "response": "Published after 0 revision(s).\n\n- Published: yes"
     }
   ],
   "our move to a four-day work week": [
@@ -37,7 +37,7 @@
       ],
       "response": "Mock reply to: Write a short announcement about: our move to a four-day wor",
       "idle": {
-        "prompt": "Approve the draft to publish it, or type what you want changed.",
+        "prompt": "Approve the draft to publish it, or type what you want changed (0 of 2 revisions used).",
         "events": [
           "APPROVE",
           "REJECT"
@@ -52,7 +52,7 @@
         "transition @xstate.init -> \"reviewing\"",
         "transition APPROVE -> \"published\""
       ],
-      "response": "- Published: yes"
+      "response": "Published after 0 revision(s).\n\n- Published: yes"
     }
   ]
 }

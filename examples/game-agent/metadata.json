@@ -10,7 +10,7 @@
   },
   "comparison": {
     "targets": ["LangGraph", "Burr", "Flowise"],
-    "purpose": "Play rock-paper-scissors against the model, first to 3 — it reads the round history saved in context to counter your habits. The saved event log is the agent's only memory."
+    "purpose": "Play rock-paper-scissors against the model, first to 3 — it reads the round history saved in context to counter your habits. The saved event log is the agent's only memory, and the only thing its prompt is built from: your throw is locked in before it decides, so it can never see the throw it is answering."
   },
   "starters": [
     {

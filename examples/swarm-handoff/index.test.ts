@@ -9,13 +9,16 @@ import {
 import { createMockModelExecutors } from "../mock-model.js";
 import { runSwarmHandoffExample, swarmHandoffMachine, MAX_TURNS } from "./index.js";
 
+/** The user's new message, without the conversation the prompt carries before it. */
+const messageOf = (request: AgentTextRequest) => (request.input as { message: string }).message;
+
 // Name-keyed script: `travelReply`/`foodReply` are request names, `route` is
 // the name the `agent.decide` invoke declares.
 function scripted(routeTo: "travel" | "food") {
   return createMockModelExecutors({
     text: {
-      travelReply: [(request: AgentTextRequest) => `[travel] ${request.prompt}`],
-      foodReply: [(request: AgentTextRequest) => `[food] ${request.prompt}`],
+      travelReply: [(request: AgentTextRequest) => `[travel] ${messageOf(request)}`],
+      foodReply: [(request: AgentTextRequest) => `[food] ${messageOf(request)}`],
     },
     decisions: { route: [{ type: "HANDOFF", to: routeTo }] },
   });
@@ -34,12 +37,35 @@ test("the model's HANDOFF moves the mic, and it survives the JSON round-trip", a
   assert.equal(food.reply, "[food] What are the must-try dishes there?");
 });
 
+test("the concierge taking the mic after a handoff reads the conversation so far", async () => {
+  const prompts: string[] = [];
+  const executors = createMockModelExecutors({
+    text: {
+      travelReply: [(request: AgentTextRequest) => `[travel] ${messageOf(request)}`],
+      foodReply: [
+        (request: AgentTextRequest) => {
+          prompts.push(request.prompt ?? "");
+          return `[food] ${messageOf(request)}`;
+        },
+      ],
+    },
+    decisions: { route: [{ type: "HANDOFF", to: "food" }] },
+  });
+  await runSwarmHandoffExample({ executors });
+
+  // "there" only means Lisbon because the earlier turns travel with the handoff.
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0]!, /\[user\] I want a 3-day trip to Lisbon\./);
+  assert.match(prompts[0]!, /\[travel\] \[travel\] I want a 3-day trip to Lisbon\./);
+  assert.match(prompts[0]!, /New message from the user: What are the must-try dishes there\?$/);
+});
+
 test("a HANDOFF to the agent already holding the mic is rejected and retried", async () => {
   const chosen: string[] = [];
   const executors = createMockModelExecutors({
     text: {
-      travelReply: [(request: AgentTextRequest) => `[travel] ${request.prompt}`],
-      foodReply: [(request: AgentTextRequest) => `[food] ${request.prompt}`],
+      travelReply: [(request: AgentTextRequest) => `[travel] ${messageOf(request)}`],
+      foodReply: [(request: AgentTextRequest) => `[food] ${messageOf(request)}`],
     },
     decisions: {
       // First attempt hands off to the active agent (illegal), second is legal.
@@ -64,6 +90,7 @@ test("the spent turn budget is a state where only END is offered", async () => {
     activeAgent: "travel" as const,
     reply: "answered",
     turns: MAX_TURNS,
+    history: [],
   };
   const snapshot = swarmHandoffMachine.resolveState({ value: "budgetSpent", context });
   assert.equal(snapshot.can({ type: "SAY", message: "again" }), false);

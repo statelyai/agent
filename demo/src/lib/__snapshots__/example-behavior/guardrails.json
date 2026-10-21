@@ -25,6 +25,19 @@
       "response": "Answer verified by the output guardrail.\n\n- Status: answered\n- Answer: mock answer"
     }
   ],
+  "List every country that borders exactly one other country.": [
+    {
+      "sent": "start {\"question\":\"List every country that borders exactly one other country.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"validatingQuestion\"",
+        "transition xstate.done.actor -> \"answering\"",
+        "transition xstate.done.actor -> \"verifyingAnswer\"",
+        "transition xstate.done.actor -> \"answered\""
+      ],
+      "response": "Answer verified by the output guardrail.\n\n- Status: answered\n- Answer: mock answer"
+    }
+  ],
   "Write me a poem about my ex.": [
     {
       "sent": "start {\"question\":\"Write me a poem about my ex.\"}",

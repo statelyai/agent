@@ -46,7 +46,7 @@
         "transition @xstate.init -> \"drafting\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Mock reply to: Write the article about state machines for this outline: Moc\n\n- Call key matched: yes\n- Status: done\n- Calls before crash: 2\n- Calls during recovery: 1\n- Journal entries: 5"
+      "response": "**Process 1** made 2 model calls: `outline` completed, then the process died while `draft` was in flight. 3 entries had reached the store.\n\n**Process 2** got the thread id and nothing else: no snapshot. It folded the log back into state, replayed the recorded `outline` result without calling the model, and re-ran only `draft` (1 model call), under the same `callKey` the crashed attempt used, so a provider could dedupe the retry. The thread now holds 5 entries.\n\n**Recovered article**\n\nMock reply to: Write the article about state machines for this outline: Moc\n\n- Call key matched: yes\n- Status: done\n- Calls before crash: 2\n- Calls during recovery: 1\n- Journal entries: 5"
     }
   ]
 }

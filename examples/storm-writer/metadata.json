@@ -16,7 +16,10 @@
     "state machines for AI agents",
     "retrieval-augmented generation",
     "prompt injection defenses",
-    "the history of the Byzantine Empire (off-index: interviews find no sample sources)"
+    {
+      "label": "the history of the Byzantine Empire (off-index: no on-topic sample sources)",
+      "input": { "topic": "the history of the Byzantine Empire" }
+    }
   ],
   "budgetMs": 240000
 }

@@ -10,7 +10,7 @@
   },
   "comparison": {
     "targets": ["LangGraph", "hand-rolled loop"],
-    "purpose": "Writes and revises a product launch blurb using an ordinary XState machine that knows nothing about the agent library \u2014 the runtime picks the next event from the ones the machine accepts."
+    "purpose": "Writes and revises a product launch blurb with an ordinary XState machine that knows nothing about the agent library. The runtime binds its draft step to a model, you approve or revise, and the machine's own guard stops REVISE after two rounds."
   },
   "starters": [
     "a CLI that turns shell history into a changelog",

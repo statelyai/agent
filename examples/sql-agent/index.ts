@@ -49,10 +49,13 @@ export const orders: Order[] = [
   { id: 5, category: "toys", amount: 15 },
 ];
 
+/** The categories the table holds: a free-string filter would let "book" silently match nothing. */
+export const CATEGORIES = ["books", "electronics", "toys"] as const;
+
 const queryPlanSchema = z.object({
   operation: z.enum(["count", "sum", "average"]),
   column: z.literal("amount"),
-  category: z.string().nullable(),
+  category: z.enum(CATEGORIES).nullable(),
 });
 type QueryPlan = z.infer<typeof queryPlanSchema>;
 
@@ -132,7 +135,8 @@ const agentSetup = setupAgent({
       system:
         "You translate a question into a query plan over an orders table with " +
         "columns (id, category, amount). Choose an operation (count/sum/average) " +
-        'over "amount", optionally filtered to one category (or null for all).',
+        `over "amount", optionally filtered to one category (${CATEGORIES.join(", ")}) ` +
+        "or null for all.",
       prompt: ({ input }) => input.question,
     },
     summarize: {

@@ -148,14 +148,13 @@ describe("langchain-host: Direction A (LangChain model as executor)", () => {
 
     // Two jokes: the first attempt, then the improvement pass the machine
     // always takes before the decision.
-    expect(output.jokes).toHaveLength(2);
-    expect(output.firstJoke).toBe(output.jokes[0]);
-    expect(output.joke).toBe(output.jokes[1]);
+    expect(output.earlierJokes).toHaveLength(1);
+    expect(output.joke).not.toBeNull();
     expect(output.revisionNotice).toContain("First attempt scored 6/10");
     expect(output.lastRating).toBe(8);
     // Streaming really streamed: more than one chunk, reassembling to both jokes.
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.join("")).toBe(output.jokes.join(""));
+    expect(chunks.join("")).toBe([...output.earlierJokes, output.joke].join(""));
     // Three LangChain calls: tell twice, then decide (tool call).
     expect(model.calls).toBe(3);
   });
