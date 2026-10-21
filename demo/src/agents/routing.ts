@@ -84,7 +84,12 @@ function routed(
 
 /** Every route carries the WHY: the matched criterion and Jev's confidence in it. */
 function reasonFor(intent: keyof typeof INTENTS, confidence: number): string {
-  return `${INTENTS[intent]} (Jev confidence ${Math.round(confidence * 100)}%)`;
+  const percent = `${Math.round(confidence * 100)}%`;
+  // An unsure pick is not routed, so its reason is the bar it missed, not the
+  // criterion of a queue the request never reached.
+  return intent !== "unclear" && confidence < ROUTING_CONFIDENCE
+    ? `Jev's best guess, ${intent}, is only ${percent} confident, below the ${Math.round(ROUTING_CONFIDENCE * 100)}% bar.`
+    : `${INTENTS[intent]} (Jev confidence ${percent})`;
 }
 
 export const routingMachine = agentSetup.createMachine({

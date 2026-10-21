@@ -6,10 +6,10 @@
  * What the MACHINE owns: the $100 auto-refund limit. `AUTO_REFUND` never lands
  * on `refunded` directly — it routes through the `checkingLimit` choice state,
  * so the policy, not the model, decides whether an amount can be auto-approved.
- * Over-limit amounts settle idle in `awaitingApproval`, waiting for a human
- * `APPROVE` / `DENY` event. A request with no amount settles idle in
- * `askingAmount` and asks once; the machine, not the model, bounds how many
- * times it asks (`clarifications`).
+ * Over-limit amounts, and requests the model sends to REVIEW, settle idle in
+ * `awaitingApproval`, waiting for a human `APPROVE` / `DENY` event. A request
+ * with no amount settles idle in `askingAmount` and asks once; the machine,
+ * not the model, bounds how many times it asks (`clarifications`).
  *
  * Mirrors the README quickstart, with the amount extracted by the decision
  * (carried on the chosen event) instead of supplied as input.
@@ -21,6 +21,8 @@ const agentSetup = setupAgent({
   context: z.object({
     request: z.string(),
     amount: z.number().nullable(),
+    /** The model's reason when it chose REVIEW; null when the limit escalated. */
+    reviewReason: z.string().nullable(),
     /** Times the machine has asked for missing details; capped at one. */
     clarifications: z.number(),
   }),
@@ -44,7 +46,12 @@ const agentSetup = setupAgent({
 
 export const refundMachine = agentSetup.createMachine({
   id: "refund",
-  context: ({ input }) => ({ request: input.request, amount: null, clarifications: 0 }),
+  context: ({ input }) => ({
+    request: input.request,
+    amount: null,
+    reviewReason: null,
+    clarifications: 0,
+  }),
   initial: "deciding",
   states: {
     deciding: {
@@ -69,7 +76,7 @@ export const refundMachine = agentSetup.createMachine({
         },
         REVIEW: {
           target: "awaitingApproval",
-          context: ({ event }) => ({ amount: event.amount }),
+          context: ({ event }) => ({ amount: event.amount, reviewReason: event.reason }),
         },
         // Ask once. A second NEEDS_DETAILS ends the run: the bound is the
         // machine's, so the model cannot keep the customer in a loop.
@@ -107,10 +114,14 @@ export const refundMachine = agentSetup.createMachine({
     },
     // Idle: waits for a human. `meta.interaction` labels the prompt; the legal
     // events (APPROVE / DENY) come from the snapshot via getAcceptedEvents.
+    // Two ways in: the limit escalated an AUTO_REFUND, or the model chose REVIEW.
     awaitingApproval: {
       meta: {
         interaction: {
-          label: "Amount exceeds the $100 auto-refund limit. Approve or deny.",
+          label: ({ context }) =>
+            (context.amount ?? 0) > 100
+              ? `$${context.amount} is over the $100 auto-refund limit. Approve or deny.`
+              : `Flagged for review: ${(context.reviewReason ?? "needs judgment").replace(/\.?$/, ".")} Approve or deny.`,
           events: {
             APPROVE: { label: "Approve refund", style: "primary" },
             DENY: { label: "Deny", style: "danger" },

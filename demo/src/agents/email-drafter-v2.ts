@@ -69,7 +69,8 @@ const agentSetup = setupAgent({
         "Draft a polished email from the request. Use the details given. Pick a sensible subject if none is given, " +
         "unless the request explicitly says to leave the subject blank, in which case return an empty `subject`. " +
         "`to` must be an email address from the request; if none is given, leave `to` empty. Never invent an address. " +
-        "In `openQuestions`, list one short question per detail you had to assume or leave out (recipient, subject, time, place). Empty if nothing was missing.",
+        "In `openQuestions`, list one short question per detail you had to assume or leave out (recipient, subject, time, place). Empty if nothing was missing. " +
+        "End with a plain sign-off, no name placeholder.",
       prompt: ({ input }) => input.prompt,
     },
   },

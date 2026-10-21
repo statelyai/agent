@@ -34,7 +34,7 @@ const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-lat
 /** Revision rounds `reviewing` allows before only SEND is legal. */
 export const MAX_REVISIONS = 2;
 
-const RECIPIENT_QUESTION = "Who should this go to? Type an email address.";
+const RECIPIENT_QUESTION = "Who should this go to? I need an email address.";
 const SUBJECT_QUESTION = "What should the subject line be?";
 
 /**
@@ -142,7 +142,8 @@ const agentSetup = setupAgent({
       schemas: { input: z.object({ prompt: z.string() }), output: emailDraftSchema },
       model: "writer",
       system:
-        "Draft a polished email from the request. Use the provided details without inventing missing essentials unless the user explicitly asked to draft anyway.",
+        "Draft a polished email from the request. Use the provided details without inventing missing essentials unless the user explicitly asked to draft anyway. " +
+        "End with a plain sign-off, no name placeholder.",
       prompt: ({ input }) => input.prompt,
     },
   },
@@ -226,7 +227,7 @@ export const emailDrafterV1Machine = agentSetup.createMachine({
     needsMoreInfo: {
       meta: {
         interaction: {
-          label: "Some details are missing. {questions} Type them in, or draft anyway.",
+          label: "Some details are missing. {questions} Answer here, or draft anyway.",
           events: {
             MORE_INFO: { label: "Add details", style: "primary" },
             DRAFT_ANYWAY: { label: "Draft anyway" },

@@ -147,13 +147,10 @@ const agentSetup = setupAgent({
       model: "writer",
       system:
         "Write a short paragraph. If feedback is provided, revise to address every point while keeping what works.",
-      // The first pass is deliberately weak, so the loop has something to improve
-      // and the before/after is worth looking at. Without it the writer opens
-      // near the bar and the revision states barely earn their place.
       prompt: ({ input }) =>
         input.feedback
           ? `Topic: ${input.topic}\n\nRevise to address this feedback:\n${input.feedback}`
-          : `Topic: ${input.topic}\n\nFirst pass only: two flat, generic sentences. No sensory detail, no polish, no strong verbs.`,
+          : `Topic: ${input.topic}`,
     },
   },
   states: {

@@ -35,6 +35,7 @@ import { interpretIdleText, unclearTextReply } from "./interpret-text.server";
 import {
   createTraceRecorder,
   describeIdle,
+  ignoredEventNote,
   missingApiKeys,
   type RunLimits,
   type TraceEntry,
@@ -162,12 +163,17 @@ async function resolveExecutors(
   //                             succeeds on the primary model.
   //   `[primary-outage-hard]` — EVERY primary attempt throws, so the retry
   //                             budget is spent and the fallback model answers.
+  //   `[all-models-down]`     — the fallback throws too, so the run ends in
+  //                             its `failed` state.
   // The counter is per-run: `resolveExecutors` is called once per start/resume.
   if (scenarioId === "retry") {
     const inner = executors.generateText;
     if (inner) {
       let primaryAttempts = 0;
       executors.generateText = (request, ...rest) => {
+        if ((request.prompt ?? "").includes("[all-models-down]")) {
+          throw new Error(`Simulated ${request.model} model outage`);
+        }
         if (request.model === "primary") {
           const prompt = request.prompt ?? "";
           primaryAttempts += 1;
@@ -204,9 +210,7 @@ function judgeActors(
 // ─── result shaping ───
 
 function describeResult(scenarioId: ScenarioId, result: AgentRunResult<AnyStateMachine>): string {
-  if (result.ignored) {
-    return `"${result.ignored.type}" isn't an accepted event in this state, so nothing happened.`;
-  }
+  if (result.ignored) return ignoredEventNote(result.snapshot, result.ignored);
   if (result.status === "done") {
     const output = result.output as Record<string, unknown>;
     switch (scenarioId) {
@@ -221,8 +225,9 @@ function describeResult(scenarioId: ScenarioId, result: AgentRunResult<AnyStateM
       case "research":
         return String(output.synthesis || "Synthesis complete.");
       case "pipeline":
-        return output.failedAt
-          ? `Failed at ${output.failedAt}.`
+        if (output.failedAt) return `Failed at ${output.failedAt}.`;
+        return output.verified === false
+          ? `Withheld: the check did not pass, so this draft never reached complete.\n\n${output.verification}\n\n${output.draft}`
           : `${output.draft}\n\nVerification: ${output.verification}`;
       case "retry":
         return output.category
@@ -231,7 +236,10 @@ function describeResult(scenarioId: ScenarioId, result: AgentRunResult<AnyStateM
       case "tools":
         return `${output.answer} (in ${output.steps} tool step${output.steps === 1 ? "" : "s"})`;
       case "reflection":
-        return `**First draft**\n\n${output.firstDraft}\n\n**Final draft**\n\n${output.draft}\n\n${output.verdict}`;
+        // A draft that cleared the bar first time has no before/after.
+        return output.firstDraft === output.draft
+          ? `${output.draft}\n\n${output.verdict}`
+          : `**First draft**\n\n${output.firstDraft}\n\n**Final draft**\n\n${output.draft}\n\n${output.verdict}`;
       case "email-drafter-v1":
       case "email-drafter-v2":
         return describeEmailOutcome(output);
@@ -241,15 +249,26 @@ function describeResult(scenarioId: ScenarioId, result: AgentRunResult<AnyStateM
     const context = result.snapshot.context as Record<string, unknown>;
     if (scenarioId === "approval") return String(context.draft ?? "Draft ready for review.");
     if (scenarioId === "refund") {
-      return result.snapshot.value === "askingAmount"
-        ? "No amount in the request. Asking the customer how much was charged."
-        : "Amount exceeds the auto-refund limit. Awaiting approval.";
+      if (result.snapshot.value === "askingAmount") {
+        return "No amount in the request. Asking the customer how much was charged.";
+      }
+      // The model can also send a refund under the limit to review.
+      return Number(context.amount) > 100
+        ? "Amount exceeds the auto-refund limit. Awaiting approval."
+        : "The model flagged this refund for review. Awaiting approval.";
     }
     if (scenarioId === "email-drafter-v1" || scenarioId === "email-drafter-v2") {
       const draft = context.draft as { to: string; subject: string; body: string } | null;
+      // v1 asks its clarifications before drafting, so by the draft they are
+      // answered; v2 drafts first and lists what it still wants to know.
       return draft
-        ? formatDraft(draft, context.clarifications as string[] | undefined)
-        : "Waiting for input.";
+        ? formatDraft(
+            draft,
+            scenarioId === "email-drafter-v2"
+              ? (context.clarifications as string[] | undefined)
+              : undefined,
+          )
+        : "Some details are missing.";
     }
     return "Waiting for input.";
   }
