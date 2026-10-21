@@ -467,6 +467,13 @@ export interface AgentDecisionRequest {
    */
   options?: AgentDecisionOption[];
   /**
+   * Candidate events the snapshot rejected when the options were built:
+   * enumerated like `options`, but `snapshot.can(event)` was false. Never
+   * offered; executors ignore it. Set by `decideNext` and by the runtime's
+   * closed choices, so a `request.start` trace shows what the guards blocked.
+   */
+  withheld?: ChosenEvent[];
+  /**
    * Prior failed attempts for THIS decision. Empty on the first attempt.
    * Adapters render these into the provider request so retries converge.
    * Core never rewrites prompts/messages — attempts are data on the request.

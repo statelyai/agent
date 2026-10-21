@@ -40,7 +40,7 @@ type HandWrittenJsonSerializableTraceEvent = {
     }
   | { type: "request.error"; request: JsonValue; error: JsonValue }
   | { type: "stream.chunk"; request: JsonValue; chunk: string }
-  | { type: "machine.transition"; snapshot: JsonValue; event: JsonValue }
+  | { type: "machine.transition"; from: JsonValue; snapshot: JsonValue; event: JsonValue }
   | { type: "emit"; event: JsonValue }
   | { type: "usage.dropped"; event: JsonValue; reason: "settled" }
   | { type: "run.end"; status: "done"; output: JsonValue; snapshot: JsonValue }
@@ -114,6 +114,7 @@ describe("serializeTraceEvent", () => {
       {
         ...envelope,
         type: "machine.transition",
+        from: { value: "a" },
         snapshot: { value: "a", context: {} } as never,
         event: { type: "GO" },
       },
@@ -206,6 +207,7 @@ describe("serializeTraceEvent", () => {
     const serialized = serializeTraceEvent({
       ...envelope,
       type: "machine.transition",
+      from: { value: "a" },
       snapshot: snapshot as never,
       event: { type: "GO" },
     });
@@ -215,6 +217,7 @@ describe("serializeTraceEvent", () => {
     // Date goes through toJSON, bigint stringifies, NaN becomes null.
     expect(serialized).toMatchObject({
       type: "machine.transition",
+      from: { value: "a" },
       snapshot: {
         value: "a",
         context: {

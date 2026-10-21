@@ -197,6 +197,29 @@ Entries for a key are consumed in order. The seam consumes its slot even when `c
 
 A queue that runs dry throws an `AgentError` with code `seam-script-exhausted`, naming the request. Pass `repeatLast: true` to replay a queue's last entry instead, for a live seam that sends the run down a longer branch.
 
+## Per-state stats
+
+`foldTraces` (from `@statelyai/agent/testing`) folds many runs' traces into one row per state: how many runs visited it, how many of those failed, and how many options the guards withheld at decisions made there.
+
+```ts no-check
+import { foldTraces } from "@statelyai/agent/testing";
+
+// One AgentTraceEvent[] per run, collected with onTrace.
+const stats = foldTraces(traces, {
+  failed: (trace) => {
+    const end = trace.at(-1);
+    return end?.type !== "run.end" || !end.snapshot.matches("refunded");
+  },
+});
+// [{ state: "deciding", visits: 2, failures: 1, withheld: 2 }, ...]
+```
+
+- A trace is one run's events, live or from `serializeTraceEvent`. `failed` judges the whole trace.
+- A run visits each state in a `machine.transition`'s `from.value` and `snapshot.value`. Nested states are dot-joined paths; a parallel state counts once per active leaf.
+- `withheld` comes from a decision's first `request.start`: the length of `request.withheld`, counted toward the state the run was in, which is the `from.value` of the transition the choice causes.
+- `decideNext` called by the host emits no trace. Push its request onto the trace before sending the event: `trace.push({ type: "request.start", request: result.request })`.
+- Rows come in the order states were first seen. Sort them yourself, for example by `failures / visits`.
+
 ## Verification
 
 `simulateAgent`, `explorePaths`, `canReach`, and `matchesTrajectory` operate on the machine artifact. Unknown state targets and empty expected trajectories fail loudly instead of producing misleading successful scores.

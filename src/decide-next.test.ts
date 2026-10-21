@@ -131,6 +131,25 @@ describe("decideNext on a plain machine", () => {
     expect(limited).toBe(`GO. Then: state: "idle" → "done"; note: "" → "${"x".repeat(118)}…`);
   });
 
+  test("withheld lists the candidates the guards blocked", async () => {
+    const snapshot = createActor(desk).start().getSnapshot();
+    const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+
+    const result = await decideNext(snapshot, {
+      decide,
+      model: "quick",
+      allowedEvents: "desk.*",
+      payloads,
+    });
+
+    expect(result.withheld).toEqual([{ amount: 80, type: "desk.refund" }]);
+    expect(result.request.withheld).toEqual(result.withheld);
+    expect(requests[0]!.options!.map((option) => option.event)).not.toContainEqual({
+      amount: 80,
+      type: "desk.refund",
+    });
+  });
+
   test("a type with no payloads key is offered bare; an empty list withholds it", async () => {
     const snapshot = createActor(desk).start().getSnapshot();
     const { decide, requests } = scripted([(request) => request.options![0]!.event]);
@@ -198,6 +217,7 @@ describe("decideNext on a plain machine", () => {
 
     expect(result.event).toBeNull();
     expect(result.request.options).toEqual([]);
+    expect(result.withheld).toEqual([{ amount: 80, type: "desk.refund" }]);
     expect(requests).toHaveLength(0);
   });
 });
@@ -258,6 +278,24 @@ describe("agent.decide with payloads under the runtime", () => {
     expect(result.snapshot.context.refunded).toBe(20);
   });
 
+  test("the request.start trace carries the withheld options", async () => {
+    const { decide } = scripted([(request) => request.options![0]!.event]);
+    const starts: AgentDecisionRequest[] = [];
+    await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText: async () => ({ result: {} }), decide },
+        onTrace: (event) => {
+          if (event.type === "request.start" && event.request.kind === "decision") {
+            starts.push(event.request);
+          }
+        },
+      }),
+      { input: {} },
+    );
+
+    expect(starts.map((request) => request.withheld)).toEqual([[{ amount: 80, type: "refund" }]]);
+  });
+
   test("fails to onError without a model call when no offered option is accepted", async () => {
     const noOptions = setupAgent({ schemas }).createMachine({
       context: { limit: 50, refunded: 0 },
@@ -293,14 +331,26 @@ describe("agent.decide with payloads under the runtime", () => {
       },
     });
     const { decide, requests } = scripted([(request) => request.options![0]!.event]);
+    const traced: string[] = [];
+    const starts: AgentDecisionRequest[] = [];
     const result = await runToQuiescence(
       createAgentRuntime(noOptions, {
         executors: { generateText: async () => ({ result: {} }), decide },
+        onTrace: (event) => {
+          if (event.type === "request.start" || event.type === "request.error") {
+            if (event.request.kind !== "decision") return;
+            traced.push(event.type);
+            if (event.type === "request.start") starts.push(event.request);
+          }
+        },
       }),
       { input: {} },
     );
 
     expect(requests).toHaveLength(0);
+    // The blocked options still reach the trace, so foldTraces counts them.
+    expect(traced).toEqual(["request.start", "request.error"]);
+    expect(starts.map((request) => request.withheld)).toEqual([[{ amount: 80, type: "refund" }]]);
     expect(result.snapshot.value).toBe("failed");
     const context = result.snapshot.context as { code?: string; error?: string };
     expect(context.code).toBe("decision-exhausted");
