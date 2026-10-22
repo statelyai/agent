@@ -131,6 +131,27 @@ describe("describeMachine", () => {
     expect(describeMachine(machine)).toContain("always → stopped; sets prompt");
   });
 
+  test("a transition that returns a helper's result is unknown, not (stays)", () => {
+    const next = (ready: boolean) => (ready ? { target: "done" as const } : undefined);
+    const machine = setup({}).createMachine({
+      context: { ready: false },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            CHECK: ({ context }) => next(context.ready),
+            NOTE: () => ({ context: { ready: true } }),
+          },
+        },
+        done: {},
+      },
+    });
+
+    const text = describeMachine(machine);
+    expect(text).toContain("on CHECK → ?");
+    expect(text).toContain("on NOTE → (stays)");
+  });
+
   test("describes a TS-authored machine", () => {
     expect(describeMachine(refundMachine)).toMatchInlineSnapshot(`
       "Machine refund

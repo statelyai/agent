@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import {
   createActor,
@@ -4463,6 +4463,69 @@ describe("runAgent write-ahead store", () => {
     expect(stored).toEqual(result.events);
     expect(stored.map((entry) => entry.index)).toEqual(stored.map((_entry, index) => index));
     expect(stored[0]!.event.type).toBe(AGENT_INIT_EVENT_TYPE);
+  });
+
+  test("an observer that throws is reported and does not change the run", async () => {
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await runToQuiescence(
+        createAgentRuntime(makeMachine(), {
+          executors: executors(),
+          onTrace: () => {
+            throw new Error("sink down");
+          },
+          onTransition: () => {
+            throw new Error("sink down");
+          },
+        }),
+        { input: undefined },
+      );
+
+      expect(result.status).toBe("idle");
+      expect(report).toHaveBeenCalled();
+      expect(String(report.mock.calls[0]![0])).toContain("onTrace");
+    } finally {
+      report.mockRestore();
+    }
+  });
+
+  test("a thread started with other input is refused, and the same input resumes it", async () => {
+    const promptMachine = setup({}).createMachine({
+      id: "prompted",
+      context: ({ input }: { input: { prompt: string } }) => ({ prompt: input.prompt }),
+      initial: "waiting",
+      states: { waiting: { on: { GO: { target: "done" } } }, done: { type: "final" } },
+    });
+    const store = createInMemoryEventLogStore();
+    const first = await runToQuiescence(
+      createAgentRuntime(promptMachine, { store, threadId: "t1" }),
+      { input: { prompt: "a checkout flow" } },
+    );
+    expect(first.status).toBe("idle");
+
+    await expect(
+      runToQuiescence(createAgentRuntime(promptMachine, { store, threadId: "t1" }), {
+        input: { prompt: "a login flow" },
+      }),
+    ).rejects.toMatchObject({ code: "thread-input-mismatch" });
+
+    const resumed = await runToQuiescence(
+      createAgentRuntime(promptMachine, { store, threadId: "t1" }),
+      { input: { prompt: "a checkout flow" }, event: { type: "GO" } as never },
+    );
+    expect(resumed.status).toBe("done");
+  });
+
+  test("a run whose init entry cannot be built fails instead of running unlogged", async () => {
+    const store = createInMemoryEventLogStore();
+    const result = await runToQuiescence(
+      createAgentRuntime(makeMachine(), { store, threadId: "main", executors: executors() }),
+      { input: { at: new Date(0) } as never },
+    );
+
+    expect(result.status).toBe("error");
+    expect(result.status === "error" && result.cause).toBe("journal");
+    expect(await store.read("main")).toEqual([]);
   });
 
   test("the result resolves only after the last write lands", async () => {

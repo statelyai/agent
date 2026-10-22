@@ -14,18 +14,18 @@ Environment and policy:
 
 - The environment is code you own and can verify; the policy is something a model can write inside it.
 - The environment holds the rules and invariants as TypeScript states and guards, fixed and checked with `canReach`.
-- The policy is a JSON machine a model can author and improve from traces, gated before it runs and promoted only on a measured gain. See [Environment and policy](docs/environment-and-policy.md).
+- The policy is a JSON machine a model can author and improve from traces, gated before it runs and promoted only on a measured gain. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md).
 
 Stately Agent 2 is in alpha. APIs may change before the stable release.
 
-[Documentation](https://stately.ai/docs/packages/agent) · [Examples](examples/README.md) · [XState](https://github.com/statelyai/xstate)
+[Documentation](https://stately.ai/docs/packages/agent) · [Examples](https://github.com/statelyai/agent/blob/next/examples/README.md) · [XState](https://github.com/statelyai/xstate)
 
 ## Four starting points
 
-- **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runAgent`, test it with no API key, then use it in any framework or runtime with zero machine changes. See the [Quickstart](docs/quickstart.md) and [Use in any stack](docs/any-stack.md).
-- **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](docs/from-a-loop.md).
-- **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, and more, each a single runnable file you lift in 60 seconds. See [Agent patterns](docs/patterns.md).
-- **Let an agent improve its own logic.** Keep the rules in a fixed TypeScript environment and let a model rewrite the JSON policy inside it, gated by `verifyAgentConfig` and promoted only when held-out scenarios improve. See [Environment and policy](docs/environment-and-policy.md) and the [`improve-machine` skill](skills/improve-machine/SKILL.md).
+- **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runAgent`, test it with no API key, then use it in any framework or runtime with zero machine changes. See the [Quickstart](https://github.com/statelyai/agent/blob/next/docs/quickstart.md) and [Use in any stack](https://github.com/statelyai/agent/blob/next/docs/any-stack.md).
+- **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](https://github.com/statelyai/agent/blob/next/docs/from-a-loop.md).
+- **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, and more, each a single runnable file you lift in 60 seconds. See [Agent patterns](https://github.com/statelyai/agent/blob/next/docs/patterns.md).
+- **Let an agent improve its own logic.** Keep the rules in a fixed TypeScript environment and let a model rewrite the JSON policy inside it, gated by `verifyAgentConfig` and promoted only when held-out scenarios improve. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md) and the [`improve-machine` skill](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md).
 
 ## Install
 
@@ -55,13 +55,40 @@ For the optional TanStack AI executor (`@statelyai/agent/tanstack-ai`):
 pnpm add @tanstack/ai @tanstack/ai-openai
 ```
 
-Classification, grading, relevance, and yes/no checks are judgments: call the AI SDK's `experimental_decide` with `@ai-sdk/typesafe-ai` (`pnpm add ai @ai-sdk/typesafe-ai`) from an ordinary actor; see [Judgments with the AI SDK](docs/judgments.md).
+Classification, grading, relevance, and yes/no checks are judgments: call the AI SDK's `experimental_decide` with `@ai-sdk/typesafe-ai` (`pnpm add ai @ai-sdk/typesafe-ai`) from an ordinary actor; see [Judgments with the AI SDK](https://github.com/statelyai/agent/blob/next/docs/judgments.md).
 
 Requirements:
 
-- Node 22.18 or newer, and XState `6.0.0-alpha.69`.
-- The package is ESM-first. CommonJS builds are published too, so `require()` works.
-- Provider packages must match your `ai` major: `@ai-sdk/openai@^4` pairs with `ai@^7`. A bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer.
+- Node 22 or newer, and XState exactly `6.0.0-alpha.69`.
+- TypeScript 5.4 or newer. Older versions accept the code, but callback parameters in `createMachine` silently become `any`.
+- A [Standard Schema](https://standardschema.dev) library: zod 4, zod 3.24 or newer, Valibot, or ArkType. `setupAgent` throws `invalid-schema` for zod 3.23 and earlier.
+- The package is ESM-first. CommonJS builds are published too, so `require()` works. Subpath imports (`@statelyai/agent/testing`) resolve under every `moduleResolution`, including `node`.
+- Provider packages must match your `ai` major: `@ai-sdk/openai@^4` pairs with `ai@^7`. A bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer. `@statelyai/agent/openai` needs `openai` 5 or newer.
+
+An app that already uses XState 4 or 5 keeps it: put the agent in its own workspace package. See [Use in an XState 4 or 5 app](https://github.com/statelyai/agent/blob/next/docs/xstate-4-and-5-apps.md). If both versions land in one `node_modules`, the package fails with errors that do not mention a version:
+
+| Error | Cause |
+| --- | --- |
+| `createAsyncLogic is not a function` | `xstate` resolved to 4 or 5 from CommonJS |
+| `Cannot find module '…/node_modules/xstate/durable'` | `xstate` resolved to 4 or 5 from ESM |
+| `unmet peer dependency "xstate@6.0.0-alpha.69"` (pnpm, npm) or `has incorrect peer dependency "xstate@6.0.0-alpha.69"` (yarn 1) | The install's only warning of the two above |
+
+## Agent skills
+
+The package ships agent skills in `node_modules/@statelyai/agent/skills/`. Copy them into your coding agent's skills directory (for Claude Code, `.claude/skills/`):
+
+```sh
+cp -R node_modules/@statelyai/agent/skills/* .claude/skills/
+```
+
+| Skill | What it does |
+| --- | --- |
+| [`graph-engineering`](https://github.com/statelyai/agent/blob/next/skills/graph-engineering/SKILL.md) | Finds which step a project is at and routes to the next skill |
+| [`loop-to-machine`](https://github.com/statelyai/agent/blob/next/skills/loop-to-machine/SKILL.md) | Converts existing agent code into a machine and checks parity with `compareRuns` |
+| [`generate-machine`](https://github.com/statelyai/agent/blob/next/skills/generate-machine/SKILL.md) | Authors a JSON policy machine from scratch and runs `verifyAgentConfig` |
+| [`add-traces`](https://github.com/statelyai/agent/blob/next/skills/add-traces/SKILL.md) | Stamps and persists every run so it replays |
+| [`add-evals`](https://github.com/statelyai/agent/blob/next/skills/add-evals/SKILL.md) | Writes evals per state, at the cheapest level that catches the failure |
+| [`improve-machine`](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md) | Improves a policy from traces and hands the change to a person as a pull request |
 
 ## Quick start
 
@@ -159,11 +186,11 @@ const liveResult = await runAgent(refundMachine, {
 });
 ```
 
-`createAiSdkExecutors(refundMachine)` reads the `models` declared in `setupAgent({ models })`, which also type the machine's model refs. `createAiSdkExecutors({ models })` still works when the host owns the map. Executors are always explicit, and core does not import the AI SDK. See [Models and providers](docs/models-and-providers.md) and [Hosts and executors](docs/hosts.md).
+`createAiSdkExecutors(refundMachine)` reads the `models` declared in `setupAgent({ models })`, which also type the machine's model refs. `createAiSdkExecutors({ models })` still works when the host owns the map. Executors are always explicit, and core does not import the AI SDK. See [Models and providers](https://github.com/statelyai/agent/blob/next/docs/models-and-providers.md) and [Hosts and executors](https://github.com/statelyai/agent/blob/next/docs/hosts.md).
 
-For a machine with several requests, the executor routes on `request.name`, or `MockLanguageModelV3` from `ai/test` stands in for the provider behind `createAiSdkExecutors`. See [Evals](docs/evals.md#testing-without-a-provider).
+For a machine with several requests, the executor routes on `request.name`, or `MockLanguageModelV3` from `ai/test` stands in for the provider behind `createAiSdkExecutors`. See [Evals](https://github.com/statelyai/agent/blob/next/docs/evals.md#testing-without-a-provider).
 
-A host that needs the transition loop itself (a durable object, events pushed mid-run, a custom checkpoint policy) uses `createAgentRuntime` directly. See [Write your own host loop](docs/hosts.md#write-your-own-host-loop).
+A host that needs the transition loop itself (a durable object, events pushed mid-run, a custom checkpoint policy) uses `createAgentRuntime` directly. See [Write your own host loop](https://github.com/statelyai/agent/blob/next/docs/hosts.md#write-your-own-host-loop).
 
 ## Architecture
 
@@ -181,38 +208,38 @@ The machine never talks to a model directly, so swapping `createAiSdkExecutors` 
 
 The example above has one model decision and two final outcomes. Real machines add approval states, retries, parallel work, child agents, and long-running waits without changing how control flow is represented.
 
-The core concepts (machines owning control flow, bounded model decisions, typed requests, host-run executors, and native XState snapshots) are in the [documentation overview](docs/index.md).
+The core concepts (machines owning control flow, bounded model decisions, typed requests, host-run executors, and native XState snapshots) are in the [documentation overview](https://github.com/statelyai/agent/blob/next/docs/index.md).
 
 ## Examples
 
 <!-- starter examples derived from examples/*/metadata.json and examples/index.ts -->
 
-- [Twenty Questions](examples/twenty-questions) shows a model choosing legal events in a loop.
-- [Chameleon](examples/chameleon) combines hidden information, sequential turns, and a human vote.
-- [Snapshot migration](examples/snapshot-migration) uses XState's native `version` and `migrate` contract.
-- [Portable XState loop](examples/portable-xstate-loop) runs the artifact through native transitions and effects.
-- [Application-owned storage](examples/file-snapshot-store) persists native XState snapshots in application code.
-- [Tool calling](examples/review-tool-calls) keeps tools and message history in the AI SDK's native format.
-- [Ticket triage](examples/triage) returns structured data from a model request.
-- [JSON agent](examples/json-agent) runs a machine defined as data.
+- [Twenty Questions](https://github.com/statelyai/agent/tree/next/examples/twenty-questions) shows a model choosing legal events in a loop.
+- [Chameleon](https://github.com/statelyai/agent/tree/next/examples/chameleon) combines hidden information, sequential turns, and a human vote.
+- [Snapshot migration](https://github.com/statelyai/agent/tree/next/examples/snapshot-migration) uses XState's native `version` and `migrate` contract.
+- [Portable XState loop](https://github.com/statelyai/agent/tree/next/examples/portable-xstate-loop) runs the artifact through native transitions and effects.
+- [Application-owned storage](https://github.com/statelyai/agent/tree/next/examples/file-snapshot-store) persists native XState snapshots in application code.
+- [Tool calling](https://github.com/statelyai/agent/tree/next/examples/review-tool-calls) keeps tools and message history in the AI SDK's native format.
+- [Ticket triage](https://github.com/statelyai/agent/tree/next/examples/triage) returns structured data from a model request.
+- [JSON agent](https://github.com/statelyai/agent/tree/next/examples/json-agent) runs a machine defined as data.
 
-See [all examples](examples/README.md).
+See [all examples](https://github.com/statelyai/agent/blob/next/examples/README.md).
 
 ## Related
 
-- [Machines](docs/machines.md)
-- [Text requests](docs/text-requests.md)
-- [Decisions](docs/decisions.md)
-- [Human in the loop](docs/human-in-the-loop.md)
-- [Testing and verification](docs/verify.md)
-- [Evals](docs/evals.md)
-- [Generating machines with an LLM](docs/generate-machines.md)
-- [Hosts and executors](docs/hosts.md)
-- [Models and providers](docs/models-and-providers.md)
-- [Use in any stack](docs/any-stack.md)
-- [Persistence](docs/persistence.md)
-- [Observability](docs/observability.md)
-- [Usage and budgets](docs/usage-and-budgets.md)
-- [Agent patterns](docs/patterns.md)
-- [Migrating from a hand-rolled loop](docs/from-a-loop.md)
-- [Coming from LangGraph](docs/langgraph-comparison.md)
+- [Machines](https://github.com/statelyai/agent/blob/next/docs/machines.md)
+- [Text requests](https://github.com/statelyai/agent/blob/next/docs/text-requests.md)
+- [Decisions](https://github.com/statelyai/agent/blob/next/docs/decisions.md)
+- [Human in the loop](https://github.com/statelyai/agent/blob/next/docs/human-in-the-loop.md)
+- [Testing and verification](https://github.com/statelyai/agent/blob/next/docs/verify.md)
+- [Evals](https://github.com/statelyai/agent/blob/next/docs/evals.md)
+- [Generating machines with an LLM](https://github.com/statelyai/agent/blob/next/docs/generate-machines.md)
+- [Hosts and executors](https://github.com/statelyai/agent/blob/next/docs/hosts.md)
+- [Models and providers](https://github.com/statelyai/agent/blob/next/docs/models-and-providers.md)
+- [Use in any stack](https://github.com/statelyai/agent/blob/next/docs/any-stack.md)
+- [Persistence](https://github.com/statelyai/agent/blob/next/docs/persistence.md)
+- [Observability](https://github.com/statelyai/agent/blob/next/docs/observability.md)
+- [Usage and budgets](https://github.com/statelyai/agent/blob/next/docs/usage-and-budgets.md)
+- [Agent patterns](https://github.com/statelyai/agent/blob/next/docs/patterns.md)
+- [Migrating from a hand-rolled loop](https://github.com/statelyai/agent/blob/next/docs/from-a-loop.md)
+- [Coming from LangGraph](https://github.com/statelyai/agent/blob/next/docs/langgraph-comparison.md)

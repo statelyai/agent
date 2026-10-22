@@ -38,12 +38,12 @@ interface AgentLogEntry {
 
 - `recordedAt` is acceptance metadata, not machine time. A transition that needs time takes it from the event.
 - `machineVersion` is the machine's declared `version`, or its structural hash when none is declared.
-- `verification.stateHash` is the hash of the persisted snapshot `replay` folds to after the entry is applied. A run records replay's fold, not its live snapshot: replay never starts children, so a live child that already settled while its completion waits to be delivered is not part of the hash.
+- `verification.stateHash` is the hash of the persisted snapshot `replay` folds to after the entry is applied. A run records replay's fold, not its live snapshot: replay never starts children, so a live child that already settled while its completion waits to be delivered is not part of the hash. So the hash proves a log was not altered or truncated, not that the fold matches the live run: a machine that reads something the log does not keep can replay to a different state. Compare the replayed context and output with the live result in a test.
 - `metadata` is host-owned and stored verbatim. The init entry's `metadata.executionId` names the lineage; read it with `getLogExecutionId(entries)`.
 - To stamp a run with what produced it (a policy version, model ids, a scenario), pass `metadata` to `createAgentRuntime` or `runAgent`. It lands on the init entry next to `executionId`, which is reserved. A resume keeps the stamp of the run that started the log; a version bridge opens a new segment stamped with the bridging run's `metadata`. A value that is not JSON throws before the run starts.
 - `attempts` holds the decision attempts the machine did not accept before this entry's event landed. Replay ignores it. See [Decision attempts](#decision-attempts).
 
-Entries are strict JSON. `createReplayEntry`, `initEntry`, and every store append reject values JSON would drop or coerce (`undefined`, functions, symbols, bigint, non-finite numbers, `Date`, `Map`, `Set`, class instances, cycles) with `NonSerializableAgentEventError`, which carries the offending `path`. `Error` payloads on `xstate.error.actor` are normalized to `{ name, message, cause? }`; an `AgentDecisionExhaustedError` also keeps its `attempts`. Use `assertJsonSerializable` and `assertAgentLogEntry` at custom transport boundaries.
+Entries are strict JSON, and plain objects and arrays from another realm (a jest test's vm context) count as JSON. `createReplayEntry`, `initEntry`, and every store append reject values JSON would drop or coerce (`undefined`, functions, symbols, bigint, non-finite numbers, `Date`, `Map`, `Set`, class instances, cycles) with `NonSerializableAgentEventError`, which carries the offending `path`. `Error` payloads on `xstate.error.actor` are normalized to `{ name, message, code?, cause? }`, keeping `code` when it is a string or a number; an `AgentDecisionExhaustedError` also keeps its `attempts`. `replay` turns them back into `Error` objects, so an `onError` that checks `instanceof Error` takes the same branch on replay. Other properties of the thrown value are not kept. Use `assertJsonSerializable` and `assertAgentLogEntry` at custom transport boundaries.
 
 ## Record a log
 
@@ -72,6 +72,8 @@ const result = await runToQuiescence(
 - A rejected write (an `AgentEventLogConflictError`, or any storage failure) aborts in-flight work and settles the run `{ status: "error", cause: "journal" }`. No further calls run.
 - A `@agent.usage` entry that arrives after the run settled is still written, but the result does not wait for it. Await `result.drain()` before terminating the process if you care about those straggler entries; it resolves once every write issued so far has landed, and never rejects (a failed write already settled the run with `cause: "journal"`).
 - `threadId` is required with a `store`; without it `runToQuiescence` throws `AgentError` with code `missing-thread-id`.
+- A thread that already has entries is resumed. `input` that differs from the input the thread started with throws `AgentError` with code `thread-input-mismatch`, since two runs sharing a thread id would otherwise get one result.
+- If the run's first entry cannot be written (its `input` or `metadata` is not JSON), the run settles `{ status: "error", cause: "journal" }` instead of running without a log.
 - Passing `events` as well makes that log the resume, and it must BE the thread's log: a different length throws `AgentEventLogConflictError`, and an entry-for-entry mismatch at the same length throws `AgentError` with code `event-log-conflict`.
 
 ### `onEvent`: observer

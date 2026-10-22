@@ -1,4 +1,5 @@
 import { createAsyncLogic, type AsyncActorLogic, type EventObject } from "xstate";
+import { isPlainObject } from "./internal/is-record.js";
 import type {
   AgentMessage,
   AgentToolChoice,
@@ -256,7 +257,7 @@ export function responseMessagesOf(raw: unknown): AgentMessage[] {
 // every other value (strings, typed arrays, URLs, class instances) is kept as-is.
 function dropUndefined(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(dropUndefined);
-  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+  if (isPlainObject(value)) {
     const out: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
       if (entry !== undefined) out[key] = dropUndefined(entry);

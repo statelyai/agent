@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, test } from "vitest";
 import {
   createAsyncLogic,
@@ -272,6 +273,63 @@ describe("replay", () => {
     expect(snapshot.value).toBe("failed");
   });
 
+  test("a journaled error keeps its code and replays as an Error", () => {
+    const job = createAsyncLogic<string, { attempt: number }>({
+      run: () => {
+        throw new Error("never runs");
+      },
+    });
+    const errorMachine = setup({ actors: { job } }).createMachine({
+      id: "jobber",
+      initial: "working",
+      context: { seen: "" },
+      states: {
+        working: {
+          invoke: {
+            id: "job",
+            src: "job",
+            input: { attempt: 1 },
+            onError: ({ event }) => {
+              const error = (event as { error?: unknown }).error;
+              return {
+                target: "failed",
+                context: {
+                  seen:
+                    error instanceof Error
+                      ? `${error.name}:${error.message}:${String((error as { code?: unknown }).code)}`
+                      : "plain",
+                },
+              };
+            },
+          },
+        },
+        failed: {},
+      },
+    });
+    const entries = [initEntry(errorMachine, {})];
+    const sessionId = (
+      Object.values((replay(errorMachine, entries).snapshot as AnyMachineSnapshot).children)[0] as {
+        sessionId: string;
+      }
+    ).sessionId;
+    const error = Object.assign(new Error("down"), { name: "TRPCError", code: "TIMEOUT" });
+    entries.push(
+      createReplayEntry(
+        errorMachine,
+        entries,
+        journaled({ type: "xstate.error.actor", actorId: "job", sessionId, error }),
+      ),
+    );
+
+    expect((entries[1]!.event as { error?: unknown }).error).toEqual({
+      name: "TRPCError",
+      message: "down",
+      code: "TIMEOUT",
+    });
+    const roundTripped = JSON.parse(JSON.stringify(entries)) as AgentLogEntry[];
+    expect(replay(errorMachine, roundTripped).snapshot.context.seen).toBe("TRPCError:down:TIMEOUT");
+  });
+
   test("verify: true accepts an untampered log and rejects a tampered hash", () => {
     const entries = buildLog();
 
@@ -358,6 +416,36 @@ describe("replay", () => {
 
   test("an empty log cannot be replayed", () => {
     expect(() => replay(machine, [])).toThrowError(AgentEventLogError);
+  });
+});
+
+// Jest runs each test file in its own vm context, so values built there (and
+// `structuredClone` results, which come from the main realm) have another
+// realm's `Object.prototype` and `Error`.
+describe("values from another realm", () => {
+  test("a log read back through another realm's JSON replays", () => {
+    const entries = runInNewContext("JSON.parse(text)", {
+      text: JSON.stringify(buildLog({ output: "shipped" })),
+    }) as AgentLogEntry[];
+
+    expect(Object.getPrototypeOf(entries[0])).not.toBe(Object.prototype);
+    expect(replay(machine, entries).snapshot.value).toBe("done");
+  });
+
+  test("another realm's plain object is accepted as init metadata", () => {
+    const metadata = runInNewContext('({ policyVersion: "v3", models: { decider: "x" } })');
+
+    const entry = initEntry(machine, { input: { attempt: 1 } }, { metadata });
+
+    expect(entry.metadata).toMatchObject({ policyVersion: "v3", models: { decider: "x" } });
+  });
+
+  test("another realm's Error is normalized like a local one", () => {
+    const error = runInNewContext('Object.assign(new Error("nope"), { code: "E_DOWN" })');
+
+    const { snapshot } = replay(machine, buildLog({ error }));
+
+    expect(snapshot.value).toBe("failed");
   });
 });
 

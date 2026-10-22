@@ -180,11 +180,17 @@ const mayDecline = (code: string) =>
     code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""'),
   );
 
+/** True when the function returns a call's result (`=> next(ctx)`, `return pick(x)`), so its target is not in its own source. */
+const returnsCall = (code: string) =>
+  /(?:=>|\breturn)\s*[A-Za-z_$][\w$.]*\s*\(/.test(
+    code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""'),
+  );
+
 /**
  * Where a transition written as a function goes: every string literal after a
  * `target:` that names a real state node, `(conditional)` when it may decline
  * or pick among several, `(stays)` when its source has no `target`, `?` when
- * it names none that resolves.
+ * it names none that resolves or returns a helper call's result.
  */
 function targetsInSource(source: AnyStateNode, code: string, choice: boolean): string {
   const found = new Set<AnyStateNode>();
@@ -199,7 +205,8 @@ function targetsInSource(source: AnyStateNode, code: string, choice: boolean): s
     const conditional = names.length > 1 || (!choice && mayDecline(code));
     return `${names.join(", ")}${conditional ? " (conditional)" : ""}`;
   }
-  return /\btarget\s*:/.test(code) ? "?" : "(stays)";
+  // A target the source does not spell out, or one a helper call returns, is unknown.
+  return /\btarget\s*:/.test(code) || returnsCall(code) ? "?" : "(stays)";
 }
 
 /** One transition, as a line: `on GO if context.ready → review; sets draft — description`. */

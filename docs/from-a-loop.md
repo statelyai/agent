@@ -492,7 +492,7 @@ pnpm exec tsx examples/code-review-loop/run.ts --improve --policy v0
 4. Replay the train and held-out tasks with the candidate.
 5. Promote only with zero violations on both splits, a held-out objective no lower than before, and a combined objective strictly higher. `run.ts` writes a promoted policy to `policies/current.json`.
 
-Inside Claude Code, the [`improve-machine` skill](https://github.com/statelyai/agent/blob/main/skills/improve-machine/SKILL.md) runs the same round with Claude Code as the improver:
+Inside Claude Code, the [`improve-machine` skill](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md) runs the same round with Claude Code as the improver:
 
 ```bash
 mkdir -p .claude/skills && cp -R skills/improve-machine .claude/skills/
@@ -512,4 +512,4 @@ The full prompt and its allowed tools are in the [example's README](../examples/
 - [Human in the loop](human-in-the-loop.md): idle states, `meta.interaction`, and resuming.
 - [Environment and policy](environment-and-policy.md): the fixed environment, the generated policy, the objective, and the improvement loop.
 - [code-review-loop](../examples/code-review-loop): Part 2's factory: `before.ts`, the machine, the policies, and the improvement round on Claude Code.
-- [`skills/improve-machine`](https://github.com/statelyai/agent/blob/main/skills/improve-machine/SKILL.md): one improvement round from traces, run by an agent.
+- [`skills/improve-machine`](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md): one improvement round from traces, run by an agent.

@@ -30,7 +30,9 @@ Read the loop and fill this table before writing anything. Each row maps to a ma
 | A tool with a side effect someone must gate (refund, send)                   | An actor invoked by one state, entered only through a guarded transition |
 | A read-only tool (search, lookup)                                            | An actor the machine invokes itself, or a tool on a text request         |
 | A rule: an `if`, a prompt line, a check after the fact                       | A guard on the transition it protects                                    |
+| A model call that produces content (a draft, generated code, a summary)      | A text request in `setupAgent({ requests })`, invoked by one state       |
 | A point where the model picks what to do                                     | A decision state: `agent.decide`, usually a closed choice                |
+| A check on the model's output, then a retry or a repair call                 | An actor or guard that checks it, and a `choice` state that routes to the repair request, the next candidate, or a failure final |
 | A value the model pulled out of the input (an order id, an amount)           | Code when the format is fixed (a regex); a text request when it is not   |
 | A step every correct run takes in the same order (verify, then look up)      | A state the machine enters itself; the model no longer chooses it        |
 | A person in the loop: `await approve()`, a returned `pending`, or a tool that asks a person (`askCustomer`, `requestApproval`), even a synchronous one | An idle state with `meta.interaction`, answered by `onIdle` in the runner |
@@ -41,14 +43,17 @@ Read the loop and fill this table before writing anything. Each row maps to a ma
 
 List the rules as a numbered list in your notes. Every one must end as a guard, a state ordering, or a written reason it was dropped.
 
+A loop with no decision point (generate, validate, repair) is still worth converting: the machine makes the retry cap, the validation rules, and every failure path explicit and provable. It has no `agent.decide`, so step 4 and the decision parts of step 5 do not apply.
+
 ## 2. Pin the baseline
 
 The parity test exists before the machine does.
 
 1. **Scenarios.** Reuse the code's tests, fixtures, or benchmark cases. Each has an `id` and, where people know it, the `expected` outcome. If there are none, draft 6–10 that cover every terminal and every rule, and ask the user to confirm them.
-2. **Deterministic stand-in models.** Parity with a live model drifts between runs. Use the code's scripted or mock models if it has them; otherwise write one keyed on the input (see [`examples/mock-model.ts`](https://github.com/statelyai/agent/blob/main/examples/mock-model.ts) in the `statelyai/agent` repo). You want two: one that follows the rules, and one that breaks them. A seeded random model needs its seed derived from the scenario id and a fresh instance per run, or every scenario replays the same draws.
+2. **Deterministic stand-in models.** Parity with a live model drifts between runs. Use the code's scripted or mock models if it has them; otherwise write one: a function from the request (its prompt, or its `name`) to a fixed answer. ([`examples/mock-model.ts`](https://github.com/statelyai/agent/blob/next/examples/mock-model.ts) in the `statelyai/agent` repo is one, built on the AI SDK's `MockLanguageModelV3`; it is not in the package.) You want two: one that follows the rules, and one that breaks them. A seeded random model needs its seed derived from the scenario id and a fresh instance per run, or every scenario replays the same draws.
 3. **Ground truth.** Read outcomes and effects from the world, not from the agent's own report. `effects` holds **every write the world records**: the refunds, and also the approvals, the verifications, the questions asked, the escalations. A refund issued without its approval looks correct if `effects` holds only refunds. Text a model wrote (an escalation reason) differs on every run: compare its count or presence, not the text. If the world can check rules after the fact, return those violations. If it cannot, write the check as a plain function over the effects.
-4. **The harness check.** Run the old code on both sides with each stand-in model. Each row's baseline must equal its candidate (the runs are deterministic), and with the rule-following model every row must be `same`. With a rule-breaking model, rows are `regression` by design: the candidate breaks rules.
+4. **A baseline with no function to call.** When the loop lives inline in a framework handler (a tRPC procedure, a route), call the handler itself in the test, with its model client and storage replaced by the stand-ins (a module mock, or the framework's test caller). Do not extract the loop into a function first: that changes the code you are trying to pin.
+5. **The harness check.** Run the old code on both sides with each stand-in model. Each row's baseline must equal its candidate (the runs are deterministic), and with the rule-following model every row must be `same`. With a rule-breaking model, rows are `regression` by design: the candidate breaks rules.
 
 ```ts
 import { compareRuns, type ParityResult, type ParityRun } from "@statelyai/agent/testing";

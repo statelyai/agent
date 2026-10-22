@@ -43,12 +43,12 @@ The host decides how it happens, binding `searchWeb` to the search client, cache
 
 The repository examples show the orchestration shape. They are not replacement implementations of the systems listed above.
 
-- [Deep research](https://github.com/statelyai/agent/blob/main/examples/deep-research/index.ts) models planning, concurrent research, reflection, and synthesis. The host still supplies the search implementation.
-- [Hierarchical teams](https://github.com/statelyai/agent/blob/main/examples/hierarchical-teams/index.ts) models specialized child agents. External data and side effects remain host-owned.
+- [Deep research](https://github.com/statelyai/agent/blob/next/examples/deep-research/index.ts) models planning, concurrent research, reflection, and synthesis. The host still supplies the search implementation.
+- [Hierarchical teams](https://github.com/statelyai/agent/blob/next/examples/hierarchical-teams/index.ts) models specialized child agents. External data and side effects remain host-owned.
 
 ## Core criteria
 
-The rules for what belongs in core live in [CONTRIBUTING.md](https://github.com/statelyai/agent/blob/main/CONTRIBUTING.md).
+The rules for what belongs in core live in [CONTRIBUTING.md](https://github.com/statelyai/agent/blob/next/CONTRIBUTING.md).
 
 ## Non-goals
 

@@ -27,6 +27,34 @@
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
   "types": "dist/index.d.mts",
+  "typesVersions": {
+    "*": {
+      "ai-sdk": [
+        "./dist/ai-sdk.d.mts"
+      ],
+      "log": [
+        "./dist/log.d.mts"
+      ],
+      "machines": [
+        "./dist/machines.d.mts"
+      ],
+      "openai": [
+        "./dist/openai.d.mts"
+      ],
+      "otel": [
+        "./dist/otel.d.mts"
+      ],
+      "tanstack-ai": [
+        "./dist/tanstack-ai.d.mts"
+      ],
+      "testing": [
+        "./dist/testing.d.mts"
+      ],
+      "validate": [
+        "./dist/validate.d.mts"
+      ]
+    }
+  },
   "exports": {
     ".": {
       "import": {
@@ -206,7 +234,7 @@
     }
   },
   "engines": {
-    "node": ">=22.18.0"
+    "node": ">=22"
   },
   "packageManager": "pnpm@10.28.2"
 }

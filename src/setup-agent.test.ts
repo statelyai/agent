@@ -3237,6 +3237,27 @@ describe("per-state context schemas (setupAgent({ states }))", () => {
   });
 });
 
+describe("setupAgent schemas that are not Standard Schema", () => {
+  // The shape of a zod 3.23 schema: a parser, but no `~standard` property.
+  const legacy = { _def: { typeName: "ZodObject" }, parse: (value: unknown) => value };
+
+  test.each([
+    ["context", { context: legacy }],
+    ["input", { context: z.object({}), input: legacy }],
+    ["an event", { context: z.object({}), events: { GO: legacy } }],
+    [
+      "a request",
+      { context: z.object({}), requests: { ask: { schemas: { output: legacy }, prompt: "hi" } } },
+    ],
+  ])("%s is rejected with a clear error", (_where, config) => {
+    expect(() => setupAgent(config as never)).toThrow(/not a Standard Schema.*zod/is);
+  });
+
+  test("an empty event payload is still accepted", () => {
+    expect(() => setupAgent({ context: z.object({}), events: { GO: {} } })).not.toThrow();
+  });
+});
+
 describe("setupAgent reserved agent.* actor keys", () => {
   const schemas = createAgentSchemas({
     context: z.object({}),

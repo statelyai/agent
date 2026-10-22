@@ -19,6 +19,7 @@ import {
   type StateValue,
   type TimerKey,
 } from "xstate";
+import { canonicalJson } from "./internal/is-record.js";
 import { createDurable, type DurableExecution } from "xstate/durable";
 import type {
   AgentTools,
@@ -478,9 +479,12 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
   onEvent?: (entry: AgentLogEntry) => void;
   /**
    * Record a `verification.stateHash` on every appended entry (default `true`).
-   * The hash is taken O(1) from the live actor's persisted snapshot right after
-   * that entry's transition, so `replay(machine, events)` can prove it lands on
-   * the same state. Set `false` for a smaller, unverifiable log.
+   * The hash is of the state the log folds to after that entry, the same fold
+   * `replay` runs, so `replay(machine, events)` can prove a log was not
+   * altered or truncated. It does not compare against the live snapshot: a
+   * machine that reads something the log does not keep (an error's class, a
+   * non-JSON field) can replay to a different state. Set `false` for a
+   * smaller, unverifiable log.
    */
   verification?: boolean;
   /**
@@ -1108,22 +1112,32 @@ interface TraceSinks {
  * `seq`). @internal
  */
 function createTraceDispatch(sinks: TraceSinks): TraceDispatch {
+  // Observers never control the run: one that throws is reported and skipped.
+  const observe = (name: string, call: () => void): void => {
+    try {
+      call();
+    } catch (error) {
+      console.error(`@statelyai/agent: ${name} threw; the run continues.`, error);
+    }
+  };
   return (payload, self) => {
     switch (payload.type) {
       case "stream.chunk":
-        sinks.onTrace?.(payload, self);
-        sinks.onChunk?.(payload.chunk, { request: payload.request });
+        observe("onTrace", () => sinks.onTrace?.(payload, self));
+        observe("onChunk", () => sinks.onChunk?.(payload.chunk, { request: payload.request }));
         return;
       case "request.end":
-        sinks.onResult?.(payload.request, { result: payload.output, raw: payload.raw });
-        sinks.onTrace?.(payload, self);
+        observe("onResult", () =>
+          sinks.onResult?.(payload.request, { result: payload.output, raw: payload.raw }),
+        );
+        observe("onTrace", () => sinks.onTrace?.(payload, self));
         return;
       case "machine.transition":
-        sinks.onTrace?.(payload, self);
-        sinks.onTransition?.(payload.snapshot, payload.event);
+        observe("onTrace", () => sinks.onTrace?.(payload, self));
+        observe("onTransition", () => sinks.onTransition?.(payload.snapshot, payload.event));
         return;
       default:
-        sinks.onTrace?.(payload, self);
+        observe("onTrace", () => sinks.onTrace?.(payload, self));
     }
   };
 }
@@ -2781,6 +2795,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
 
       // ─── Resolve the log to resume from ───
       let resumeEvents = init.events;
+      let resumedFromStore = false;
       if (store !== undefined) {
         const storedThread = await store.read(threadId!);
         if (resumeEvents !== undefined) {
@@ -2798,6 +2813,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           assertThreadMatchesEvents(threadId!, storedThread, resumeEvents);
         } else if (storedThread.length > 0) {
           resumeEvents = storedThread;
+          resumedFromStore = true;
         }
       }
 
@@ -2805,6 +2821,18 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // start, the replayable init entry, and the `run.start` trace all see
       // the same post-defaults value, so a replay reproduces this run exactly.
       const resolvedInput = resolveMachineInput(machine, init.input);
+      // A thread that has entries is resumed, which ignores `input`. Input
+      // that differs from the thread's own means two runs share a thread id:
+      // resuming would hand this caller another run's result.
+      if (resumedFromStore && init.input !== undefined) {
+        const threadInput = (resumeEvents![0]?.event as { input?: unknown } | undefined)?.input;
+        if (canonicalJson(threadInput) !== canonicalJson(resolvedInput)) {
+          throw new AgentError(
+            "thread-input-mismatch",
+            `createAgentRuntime: thread '${threadId}' was started with different input. A thread that already has entries is resumed, not restarted; give a new run a new threadId.`,
+          );
+        }
+      }
       let effectiveSnapshot: Snapshot<unknown> | undefined = init.snapshot;
       let seedInitEntry: (() => void) | undefined;
 
@@ -2834,6 +2862,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         candidates: readonly AgentLogInit[],
         metadata: Record<string, AgentLogJsonValue>,
       ): void => {
+        let lastError: unknown;
         for (const candidate of candidates) {
           for (const verification of verificationEnabled ? [true, false] : [false]) {
             try {
@@ -2846,12 +2875,19 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
               journalEntry(entry);
               options.onEvent?.(entry);
               return;
-            } catch {
+            } catch (error) {
               // Try the next (less exact) form.
+              lastError = error;
             }
           }
         }
         loggingEnabled = false;
+        // With a store, the caller asked for a durable log; running without
+        // one would break write-ahead silently, so the run stops instead.
+        if (store !== undefined) {
+          journalError ??= lastError;
+          stopRun({ cause: "journal", error: lastError });
+        }
       };
 
       /** Init forms for a snapshot resume, most faithful first. */

@@ -88,11 +88,11 @@ A failed gate's `detail` is the repair prompt. Send it back to the model with th
 
 The full authoring procedure ships as an agent skill. It covers the environment and policy split, the schema location, the rules a config must follow, a few-shot config, the Ajv adapter, `verifyAgentConfig`, the repair loop, and persisting traces.
 
-**[`skills/generate-machine/SKILL.md`](https://github.com/statelyai/agent/blob/main/skills/generate-machine/SKILL.md)**
+**[`skills/generate-machine/SKILL.md`](https://github.com/statelyai/agent/blob/next/skills/generate-machine/SKILL.md)**
 
 Copy that directory into your coding agent's skills directory. For Claude Code this is `.claude/skills/`. Other harnesses use their own location. The agent then loads the skill on requests such as "author an agent machine for X" and runs the gates itself.
 
-To improve a generated policy from its run traces, use [`skills/improve-machine`](https://github.com/statelyai/agent/blob/main/skills/improve-machine/SKILL.md). See [Environment and policy](environment-and-policy.md).
+To improve a generated policy from its run traces, use [`skills/improve-machine`](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md). See [Environment and policy](environment-and-policy.md).
 
 ## Limits
 
