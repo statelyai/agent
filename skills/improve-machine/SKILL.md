@@ -152,8 +152,9 @@ Run every check; a failure's output is the repair prompt. Cap repairs at 3.
 2. **Types:** `tsc --noEmit` passes.
 3. **Lint:** `lintAgentMachine(policy)` from `@statelyai/agent/testing` reports no errors.
 4. **Paths:** for probe inputs built from recorded decision requests (one per training scenario that reaches the decision: its facts and offered options), `canReach(policy, (snapshot) => snapshot.status === "done" && !isOfferedEvent(snapshot.output), { input })` is `{ reachable: false, complete: true }`: every final output is one of the offered events. Pass `outputs` for any actor the policy invokes, and `errors: { "agent.decide": new Error("down") }` so the fallback path is checked too.
-5. **Overfit:** the diff contains no literal from the scenarios (ids, ticket text, customer ids, order ids). A branch that matches one scenario's data is memorization; discard it.
-6. **Existing evals:** the rule and decision evals from `add-evals` still pass. Tests that pin measured numbers of the current version (a baseline failure list, a call count) are expected to change; update them in the same pull request and list each change in its body.
+5. **Source rules:** the policy file is still one `setupAgent` machine; its imports from the environment are only schemas, types, constants, and exported guard functions; it names no actor the environment owns. These are source checks: read the diff, or grep its imports and actor names.
+6. **Overfit:** the diff contains no literal from the scenarios (ids, ticket text, customer ids, order ids). A branch that matches one scenario's data is memorization; discard it.
+7. **Existing evals:** the rule and decision evals from `add-evals` still pass. Tests that pin measured numbers of the current version (a baseline failure list, a call count) are expected to change; update them in the same pull request and list each change in its body.
 
 The environment's own `canReach` proofs still cover every policy, because the environment's guards judge every proposed event.
 
@@ -226,7 +227,7 @@ Stop when any of these holds:
 - the remaining failures need an environment change (write a change request),
 - the vocabulary lacks a capability the fix needs (ask for it; name the actor, request, or guard and its input and output).
 
-Report to the user: rounds run, each candidate with its hypothesis and decision, the pull request link, the objective before and after on both splits, violations, cost, and any change requests.
+Report to the user: rounds run, each candidate with its hypothesis and decision, the pull request link (or, with no remote, the branch and diff file), the objective before and after on both splits, violations, cost, and any change requests.
 
 ## Worked example
 

@@ -90,8 +90,8 @@ const trace: JsonSerializableTraceEvent[] = [];
 const result = await runAgent(deskMachine, { ..., onTrace: (event) => trace.push(serializeTraceEvent(event)) });
 await result.drain();
 
-// For local batches: one file per thread, colons out of the name.
-const file = threadId.replaceAll(":", "__");
+// For local batches: one file per thread. Encoding keeps colons and path separators out of the name.
+const file = encodeURIComponent(threadId);
 await mkdir("runs", { recursive: true });
 await writeFile(`runs/${file}.events.json`, JSON.stringify(result.events));
 await writeFile(`runs/${file}.trace.json`, JSON.stringify(trace));

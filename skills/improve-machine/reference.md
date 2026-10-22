@@ -13,7 +13,7 @@ Templates for the `improve-machine` skill: a round checklist, the hypothesis, th
 [ ] Failures clustered (train only); one cause picked
 [ ] Hypothesis written
 [ ] Candidate: smallest diff, id kept, version bumped, description unchanged (or, for a new policy: v0 recorded, v1 reproduces current behavior plus one rule)
-[ ] Gates passed: TS (env unchanged, tsc, lint, paths, overfit, evals) or JSON (verifyAgentConfig) (repairs used: _/3)
+[ ] Gates passed: TS (env unchanged, tsc, lint, paths, source rules, overfit, evals) or JSON (verifyAgentConfig) (repairs used: _/3)
 [ ] Replayed train, then held-out, k runs each, new thread ids
 [ ] Promotion rule applied; CHANGELOG entry written
 [ ] Recommended candidate opened as one pull request with its scorecard; not merged
@@ -57,6 +57,9 @@ Evidence: {failing rows: scenario, expected, reached state, rejections, tokens}
 Return the complete policy: the TypeScript file, or one AgentWorkflowConfig as
 JSON. Make the smallest change that addresses the diagnosed cause. Keep "id" and
 "description". Set "version" to {n + 1}. Never match on a scenario's data.
+For a TypeScript policy, keep the result one `setupAgent` machine. Import from
+the environment only schemas, types, constants, and exported guard functions.
+Do not invoke tools the environment owns.
 ```
 
 On a failed gate, append:

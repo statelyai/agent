@@ -3732,6 +3732,18 @@ describe("runAgent event log", () => {
     expect(second.events[0]!.metadata).toMatchObject({ policyVersion: "v3" });
   });
 
+  test("metadata changed after the runtime is created does not reach the log", async () => {
+    const metadata: Record<string, unknown> = { policyVersion: "v3" };
+    const runtime = createAgentRuntime(makeLoggedMachine(), {
+      executors: executors(),
+      metadata: metadata as never,
+    });
+    metadata.policyVersion = new Date();
+    const result = await runToQuiescence(runtime, { input: undefined });
+
+    expect(result.events[0]!.metadata).toMatchObject({ policyVersion: "v3" });
+  });
+
   test("metadata that is not JSON throws before the run starts", () => {
     expect(() =>
       createAgentRuntime(makeLoggedMachine(), {

@@ -2164,7 +2164,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   const machineVersion = resolveMachineVersion(machine);
   // A metadata value the log cannot hold would silently cost the run its log
   // (see `appendInitEntry`), so reject it before anything runs.
+  // Copied once validated, so a later change to the caller's object cannot reach the log.
   if (options.metadata !== undefined) assertJsonSerializable(options.metadata, "metadata");
+  const initMetadata: Record<string, AgentLogJsonValue> | undefined =
+    options.metadata === undefined ? undefined : structuredClone(options.metadata);
 
   // The run's single observation dispatch point: every trace payload in this
   // run goes through `onTrace`, which stamps the run-scoped envelope for
@@ -2974,7 +2977,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           };
           seedInitEntry = () =>
             appendInitEntry(snapshotInitCandidates(), {
-              ...options.metadata,
+              ...initMetadata,
               ...(logExecutionId !== undefined ? { executionId: logExecutionId } : {}),
               migratedFrom,
             });
@@ -2983,14 +2986,14 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         logExecutionId = crypto.randomUUID();
         seedInitEntry = () =>
           appendInitEntry(snapshotInitCandidates(), {
-            ...options.metadata,
+            ...initMetadata,
             executionId: logExecutionId!,
           });
       } else {
         logExecutionId = crypto.randomUUID();
         seedInitEntry = () =>
           appendInitEntry([resolvedInput !== undefined ? { input: resolvedInput } : {}], {
-            ...options.metadata,
+            ...initMetadata,
             executionId: logExecutionId!,
           });
       }

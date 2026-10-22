@@ -51,7 +51,7 @@ The parity test exists before the machine does.
 4. **The harness check.** Run the old code on both sides with each stand-in model. Each row's baseline must equal its candidate (the runs are deterministic), and with the rule-following model every row must be `same`. With a rule-breaking model, rows are `regression` by design: the candidate breaks rules.
 
 ```ts
-import { compareRuns, type ParityRun } from "@statelyai/agent/testing";
+import { compareRuns, type ParityResult, type ParityRun } from "@statelyai/agent/testing";
 
 function toParityRun(run: { outcome: string; world: World }): ParityRun {
   return {
@@ -62,7 +62,8 @@ function toParityRun(run: { outcome: string; world: World }): ParityRun {
   };
 }
 
-// A model factory, so a seeded model gets a fresh instance per scenario and per side.
+// A model factory, called once per scenario and per side. Construct a stateful or seeded
+// model inside it (seeded from s.id); returning a shared stateless object is fine.
 const runWith = (runner: typeof runLoop, model: (s: Scenario) => Model) => async (s: Scenario) =>
   toParityRun(await runner({ ...s, model: model(s), world: createWorld(s) }));
 
@@ -154,8 +155,16 @@ Switch the parity test's candidate to `runMachine`, and run it with each stand-i
 ```ts
 test.each(MODELS)("parity with the loop: %s", async (_, model) => {
   const report = await compareRuns({ scenarios: SCENARIOS, baseline: runWith(runLoop, model), candidate: runWith(runMachine, model) });
-  expect(report.scenarios.filter((row) => row.label === "regression")).toEqual([]);
+  const unreviewed = report.scenarios.filter((row) => row.label === "regression" && !REVIEWED[row.id]);
+  expect(unreviewed).toEqual([]);
+  // A reviewed difference still has to be exactly the difference a person accepted.
+  for (const row of report.scenarios.filter((row) => REVIEWED[row.id])) REVIEWED[row.id]!(row);
 });
+
+// Effect-only differences a person accepted: who, and the exact difference.
+const REVIEWED: Record<string, (row: ParityResult<Scenario>) => void> = {
+  // "no-order-id-no-reply": (row) => { /* accepted by <name>: asks once, not three times */ expect(row.candidate.outcome).toBe(row.baseline.outcome); ... },
+};
 ```
 
 - Every `regression` row: fix the machine, or, when the old behavior was wrong but broke no rule, ask the user. If the outcomes differ, the answer may become the scenario's `expected`. If only effects differ (the loop asked three times, the machine once), list the row in a reviewed-differences list in the test, with the exact difference asserted and the person who accepted it. Never edit a scenario to make a row pass.

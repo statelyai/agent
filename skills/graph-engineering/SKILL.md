@@ -9,7 +9,7 @@ Four steps, in order. Each one needs the one before it.
 
 | Step | Skill | Done when |
 | --- | --- | --- |
-| 1. Make it a state machine | `loop-to-machine` (existing code) or `generate-machine` (from scratch) | Rules are guards, the sentinel is unreachable (`canReach`), parity report has no regressions |
+| 1. Make it a state machine | `loop-to-machine` (existing code) or `generate-machine` (from scratch) | Rules are guards and the sentinel is unreachable (`canReach`). From existing code: the parity report has no unreviewed regressions. From scratch: every `verifyAgentConfig` gate passes |
 | 2. Add traces | `add-traces` | Every run leaves a stamped log thread that replays to its final state |
 | 3. Add evals | `add-evals` | Evals per state at the cheapest level, an objective, baseline numbers per split |
 | 4. Self-improve | `improve-machine` | A pull request with one policy change and its held-out scorecard, or a report that none helped |
