@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      hasChangesets: ${{ steps.changesets.outputs.hasChangesets }}
+      hasChangesets: ${{ steps.changesets.outputs.has-changesets }}
     permissions:
       contents: write # to create release (changesets/action)
       issues: write # to post issue comments (changesets/action)
@@ -36,13 +36,13 @@ jobs:
       - name: install dependencies
         run: pnpm install --frozen-lockfile
 
+      # v2 reads the Changesets v3 layout (`.changeset/pre/`); v1 fails on it.
       - name: create or update release pull request
         id: changesets
-        uses: changesets/action@v1
+        uses: changesets/action@v2.1.2
         with:
-          version: pnpm run version
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          version-script: pnpm run version
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   publish:
     name: Publish
@@ -69,8 +69,7 @@ jobs:
         run: pnpm build
 
       - name: publish to npm
-        uses: changesets/action@v1
+        uses: changesets/action@v2.1.2
         with:
-          publish: pnpm run release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          publish-script: pnpm run release
+          github-token: ${{ secrets.GITHUB_TOKEN }}
