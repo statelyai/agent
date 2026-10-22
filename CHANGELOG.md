@@ -1,5 +1,192 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.29
+
+### Minor Changes
+
+- [#155](https://github.com/statelyai/agent/pull/155) [`a6d05dc`](https://github.com/statelyai/agent/commit/a6d05dccc1d963859b4dcdd5f117a41265bc67aa) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Declare models once.** `createAiSdkExecutors` and `createTanStackAiExecutors` now accept a machine built by `setupAgent(...).createMachine`, or the `setupAgent(...)` result itself, and read the `models` declared in `setupAgent({ models })`: `createAiSdkExecutors(machine)` replaces `createAiSdkExecutors({ models })` when the map is already on the setup. The options form is unchanged and still takes `settings`. A wrong-shaped argument, including a setup or machine that declared no models, now throws when the executors are built, naming what it got. Core stays provider-free.
+
+- [#161](https://github.com/statelyai/agent/pull/161) [`48f6a9f`](https://github.com/statelyai/agent/commit/48f6a9f92e2440bb57df1178a5de2062d01bf461) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Closed choices and `decideNext`.** A decision can list the concrete events a model may pick instead of asking it to write a payload.
+  
+  - `agent.decide` input `payloads`: one payload list per event type, without `type`. Each payload becomes an `AgentDecisionOption` on `request.options`; an event type with no `payloads` key is offered as `{ type }`, and an empty list (`escalate: []`) withholds it. Only options the snapshot accepts are offered, and a choice that matches none is retried as `rejected-by-guard`. When the snapshot accepts no option, the invoke fails at once with `AgentDecisionExhaustedError` (no attempts, no model call), which its `onError` handles.
+  - `createAiSdkExecutors` presents a closed choice as one `choose_option` tool whose input is an enum of option ids such as `refund:20`. An id that is not offered, or a call to another tool, is retried, with the valid ids in the attempt's reason.
+  - `decideNext(snapshot, options)` asks a model to pick one event that any XState snapshot accepts now, including a plain `createMachine`/`setup` machine with no `agent.*` invoke. It takes `decide`, `model`, `allowedEvents` (exact types or wildcards), and optional `payloads(snapshot)`, `lookahead` (describe each option's state and context change; `true` reports every changed context key, an array of keys reports only those, and each value is cut at 120 characters), `system`, `prompt`, `name`, `maxRetries`, and `signal`. It returns `{ event, attempts, request }` and never sends: the host sends after re-checking `can`.
+  
+  ```ts
+  import { decideNext } from "@statelyai/agent";
+  
+  const { event } = await decideNext(snapshot, {
+    decide,
+    model: "quick",
+    allowedEvents: "desk.*",
+    payloads: (s) => ({ "desk.refund": [{ amount: s.context.requested }] }),
+    lookahead: true,
+  });
+  if (event && actor.getSnapshot().can(event)) actor.send(event);
+  ```
+
+- [#164](https://github.com/statelyai/agent/pull/164) [`9da8d10`](https://github.com/statelyai/agent/commit/9da8d1057c5bce998b6ad8475d690fded07580af) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`decideNext` reports what the guards blocked.** The result has `withheld: ChosenEvent[]`: every `allowedEvents` type and payload, built like the offered options, that `snapshot.can(event)` rejected. It is filled when nothing is offered too. `AgentDecisionRequest.withheld` holds the same list, and a closed choice under the runtime (`agent.decide` with `payloads`) sets it as well, so a decision's `request.start` trace shows it.
+
+- [#161](https://github.com/statelyai/agent/pull/161) [`48f6a9f`](https://github.com/statelyai/agent/commit/48f6a9f92e2440bb57df1178a5de2062d01bf461) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Decision models in the models map.** `createAiSdkExecutors` accepts an AI SDK decision model, such as TypeSafe's Jev, as a `models` entry next to the language models. A decide request whose model ref names a decision model is answered through `experimental_decide`.
+  
+  - The request must be a closed choice: `payloads` on `agent.decide`, or `decideNext`. A request without `options` throws.
+  - It asks one `choice` question. Each option id is a label, and its criterion is the option's description, or the event as JSON when it has none. The instructions are the request's `system` and `prompt`, and the state is the request's `input`.
+  - A label that is not an option is retried like any failed choice. A retry appends the earlier attempts' reasons to the instructions, so the model sees why its last answer failed.
+  - The result carries `confidence` when the model reports it. Branch on it in your own code.
+  - A text request on a decision model throws.
+  
+  ```ts
+  import { openai } from "@ai-sdk/openai";
+  import { typeSafeAi } from "@ai-sdk/typesafe-ai";
+  import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
+  
+  const executors = createAiSdkExecutors({
+    models: { desk: openai("gpt-5.4-mini"), judge: typeSafeAi.decisionModel("jev-latest") },
+  });
+  ```
+
+- [#161](https://github.com/statelyai/agent/pull/161) [`48f6a9f`](https://github.com/statelyai/agent/commit/48f6a9f92e2440bb57df1178a5de2062d01bf461) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`describeMachine`.** `describeMachine(machine, { snapshot? })` renders any machine, from a config or from TypeScript, as deterministic plain text for a model to read: `Machine <id>`, then `Goal: <description>`, then every state with its transitions (guard, target, context keys set), then the event schemas with their fields (the agent machine's, or a plain XState machine's own `schemas.events`). Pass `snapshot` to mark the active states with `*`. Use it as the prompt for a model that proposes an improved machine, or as context for a decider.
+  
+  ```ts
+  import { describeMachine } from "@statelyai/agent";
+  
+  const prompt = `Propose an improved machine for this goal.\n\n${describeMachine(machine)}`;
+  ```
+
+- [#161](https://github.com/statelyai/agent/pull/161) [`730d64c`](https://github.com/statelyai/agent/commit/730d64c3bc4492153a61446e1c7a26d70e2fd1a9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`AgentEventLogStore.listThreads`.** An optional store method, `listThreads({ prefix?, limit?, cursor? })`, returns `{ threadIds, cursor? }`: the threads holding at least one entry, paged by an opaque cursor. `createInMemoryEventLogStore()` implements it, and `assertEventLogStoreConformance` checks it only when a store has it, so existing stores keep compiling and passing.
+
+- [#161](https://github.com/statelyai/agent/pull/161) [`48f6a9f`](https://github.com/statelyai/agent/commit/48f6a9f92e2440bb57df1178a5de2062d01bf461) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Payload and output branching in `explorePaths` and `canReach`.** Exploration no longer applies every event as a bare `{ type }`, so guards that read the payload are explored too.
+  
+  **Breaking:** `explorePaths` and `canReach` no longer take `text` or `invokes`. Move each canned value into a one-element `outputs` list: `text: { parse: { total: 42 } }` becomes `outputs: { parse: [{ total: 42 }] }`. `simulateAgent`'s `script.text` and `script.invokes` queues are unchanged.
+  
+  - `payloads(snapshot)`: payloads per event type at each branch point. A type with an entry forks once per payload, at decisions and idle waits; guard-rejected variants count in `prunedByGuard`. A decide input's own `payloads` become that decision's branch set.
+  - A type with no entry is filled from its event schema: each finite field (`enum`, `const`, `boolean`, `null`, or a union of those) contributes its values, and an optional one also the omitted case, up to 64 combinations. Plain XState machines are filled from their own `schemas.events`. A type the fill cannot enumerate (a non-finite field, or over 64) is listed in the new `report.unexpandedEvents`, so you know which `payloads` entries to add. A type with no schema is listed too when a transition for it could read the payload (a function transition, a guard, a `matches` pattern, or a `context` mapper).
+  - `outputs`: every output to try per src, for text requests and invoked actors alike. A one-element list is a canned output. Two or more fork one branch each, so `onDone` branching on the output is explored down every arm. Each forked branch records `{ type: 'xstate.done.actor.<id>', output }` in the path.
+  - `dedupeBy(snapshot)`: a key for settled snapshots, each explored once, so converging branches stay tractable.
+  - `maxNodes` (default 100,000) caps the branch points expanded, bounding work and memory on loopy machines where `maxPaths` alone cannot. `hitPathCap` is true when either cap cut exploration short.
+  - `canReach` results carry `complete`. It is false when a cap or `maxDepth` cut the search short, a branch stopped `needs-output`, or an event type was not fully expanded, so `reachable: false` is a proof only when `complete` is true.
+  
+  ```ts
+  const violation = await canReach(refundMachine, "illegallyIssued", {
+    payloads: () => ({ ISSUE: [0, 100, 100.01, 500].map((amount) => ({ amount })) }),
+    outputs: { lookupOrder: [{ found: true }, { found: false }] },
+    dedupeBy: (snapshot) => JSON.stringify([snapshot.value, snapshot.context]),
+  });
+  ```
+
+- [#164](https://github.com/statelyai/agent/pull/164) [`9da8d10`](https://github.com/statelyai/agent/commit/9da8d1057c5bce998b6ad8475d690fded07580af) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`foldTraces` turns many runs into per-state stats.** From `@statelyai/agent/testing`: `foldTraces(traces, { failed })` takes one trace per run, live or serialized, and returns `{ state, visits, failures, withheld }` per state. Visits read `machine.transition`'s `from.value` and `snapshot.value`; `withheld` sums a decision's `request.withheld` from its first `request.start`.
+
+- [#161](https://github.com/statelyai/agent/pull/161) [`730d64c`](https://github.com/statelyai/agent/commit/730d64c3bc4492153a61446e1c7a26d70e2fd1a9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Interactions can offer one button per payload, not only one per event type.
+  
+  - `meta.interaction.choices`: a list of `{ label, event, style? }`, each carrying the full event it sends ("Seat 2" for `ACCUSE { seat: 2 }`), or a context path string holding an array of the same shape, for choices computed at runtime.
+  - `getInteraction(snapshot).choices` resolves either form, interpolates `{context.path}` in labels, and keeps only the events the schema and `snapshot.can` accept. The `events` list is unchanged.
+  - `eventFromInteraction(snapshot, { choice })` returns a choice's event by index or label. A label several choices share throws and asks for the index.
+  - `textEvent` also takes `{ type, field }` to name the field free text fills; `getInteraction` reports it as `textField`. The bare form still fills `text`.
+  - `getInteraction` and `eventFromInteraction` fall back to a plain XState machine's `schemas.events` when no `setupAgent` schemas are registered.
+  - New type: `AgentInteractionChoice`.
+
+- [#161](https://github.com/statelyai/agent/pull/161) [`730d64c`](https://github.com/statelyai/agent/commit/730d64c3bc4492153a61446e1c7a26d70e2fd1a9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Decision attempts in the event log.** The log now keeps the decision attempts the machine did not accept, on the entry they explain, so a decider can be improved from its traces:
+  
+  - An `agent.decide` invoke that lands after failed tries records them on the delivered event's entry as `entry.attempts`.
+  - A decision that exhausts its retries keeps `code: "decision-exhausted"` and `attempts` on its `xstate.error.actor` entry's normalized `error`.
+  - A host that decides with `decideNext` passes its `attempts` with the event: `runToQuiescence(runtime, { event, attempts })` (or `runAgent(machine, { event, attempts })`), or `runtime.transition(state, event, { attempts })` in a host-owned loop.
+  - `getDecisionAttempts(entries)` in `@statelyai/agent/log` lists them as `{ index, eventType, attempts }[]`.
+  
+  Replay ignores both fields, and logs written before them replay unchanged. `AGENT_EVENT_SCHEMA_VERSION` stays `1`: `assertAgentLogEntry` already accepted unknown envelope fields, so older readers accept the new ones.
+
+- [#164](https://github.com/statelyai/agent/pull/164) [`9da8d10`](https://github.com/statelyai/agent/commit/9da8d1057c5bce998b6ad8475d690fded07580af) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`recordLog(actor)` records a plain actor run.** From `@statelyai/agent/log`: attach it to a `createActor` actor before `start()`, and `log.entries` is an event log of the run (init entry, then every event the root machine processed, invoke outputs inline) that `replay` folds with no actor executed. An actor created from a `snapshot` starts its log from that snapshot.
+
+- [#152](https://github.com/statelyai/agent/pull/152) [`cc5a7a6`](https://github.com/statelyai/agent/commit/cc5a7a675d88573df137ea10a4f44201225c495c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`runAgent`.** One call runs a machine to quiescence: `runAgent(machine, { input, executors })` is `runToQuiescence(createAgentRuntime(machine, options), options)` with a single options object, and returns the same `AgentRunResult`. Resume with `{ snapshot: result.persist(), event }`. A blocking host can pass `onIdle(snapshot) => Promise<event>` to answer idle states in place. `createAgentRuntime` and `runToQuiescence` are unchanged; write the loop yourself when the host is non-blocking, pushes events mid-run, or needs its own stop or checkpoint policy.
+  
+  ```ts
+  import { runAgent } from "@statelyai/agent";
+  
+  const result = await runAgent(machine, { input: { topic }, executors });
+  if (result.status === "done") return NextResponse.json(result.output);
+  ```
+
+- [#149](https://github.com/statelyai/agent/pull/149) [`545fcee`](https://github.com/statelyai/agent/commit/545fcee025e2ce5b04859071d6022d18416a71a8) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **TanStack AI adapter.** `@statelyai/agent/tanstack-ai` adds `createTanStackAiExecutors`, the `{ generateText, streamText, decide }` executor set over TanStack AI's `chat()`, alongside the AI SDK and OpenAI adapters. Any TanStack AI text adapter is a model:
+  
+  ```ts
+  import { openaiText } from "@tanstack/ai-openai";
+  import { createTanStackAiExecutors } from "@statelyai/agent/tanstack-ai";
+  
+  const executors = createTanStackAiExecutors({
+    models: { quick: openaiText("gpt-5.4-mini") },
+  });
+  ```
+  
+  - `models`, `resolveModel`, and `settings` work as in `createAiSdkExecutors`; a model entry can be `{ adapter, settings }`.
+  - Structured output, tool loops bounded by `maxSteps` (in `generateText` and `streamText`), response `messages`, forced-tool decisions, usage summed over model turns, and `AgentTruncatedError` all follow the shared adapter contract.
+  - A request's generation settings and `toolChoice` map onto `modelOptions` for the `openai`, `anthropic`, and `gemini` providers. For others, map them in a `settings` function.
+  
+  `@tanstack/ai` (`>=0.66.0 <1`) is a new optional peer dependency.
+
+- [#164](https://github.com/statelyai/agent/pull/164) [`9da8d10`](https://github.com/statelyai/agent/commit/9da8d1057c5bce998b6ad8475d690fded07580af) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`machine.transition` traces carry `from`.** `from: { value: StateValue }` is the state value the event arrived in, emitted by `createAgentRuntime`/`runAgent` and by `traceTransitions`, and kept by `serializeTraceEvent`. The first transition of a stream (the init event, or a restore on resume) has no earlier state, so its `from.value` equals its `snapshot.value`.
+
+- [#161](https://github.com/statelyai/agent/pull/161) [`48f6a9f`](https://github.com/statelyai/agent/commit/48f6a9f92e2440bb57df1178a5de2062d01bf461) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`verifyAgentConfig`.** `@statelyai/agent/validate` adds one call that runs every pre-run gate on a model-authored `AgentWorkflowConfig` and stops at the first failure: `validate` (shipped JSON Schema), `vocabulary` (the actors, requests, named guards, actions, decision events, and model refs in `allow`), `lower` (`setupAgent.fromConfig`), `lint` (`lintAgentMachine`), and `explore` (`explorePaths` per `explore.inputs` entry, every path ending in `explore.terminals`). With `allow` given, a raw `{ "@expr": ... }` slot anywhere in the config fails `vocabulary`, since xstate would evaluate it in place of the literals the lists check. `explore` also fails on an empty `explore.inputs`, on a `maxPaths` or `maxNodes` cap that cut exploration short, and on `unexpandedEvents` (event types whose payloads were not all tried; add `payloads` entries). Other `explore` keys pass through to `explorePaths`; script text requests and invoked actors with `outputs`, not `text` or `invokes`, as for `explorePaths` (see the breaking note there). It never throws on a bad config. Each gate is `{ name, ok, detail? }`, and `detail` is a model-readable repair prompt.
+  
+  ```ts
+  import { verifyAgentConfig } from "@statelyai/agent/validate";
+  
+  const result = await verifyAgentConfig(candidate, {
+    compileSchema,
+    allow: { requests: ["draftReply"], events: ["APPROVE", "DENY"], models: ["openai/gpt-5.4-mini"] },
+    explore: { inputs: [{ amount: 5 }, { amount: 500 }], outputs: { draftReply: [{ reply: "" }] } },
+  });
+  const failed = result.gates.find((gate) => !gate.ok);
+  if (failed) feedback.push(`gate '${failed.name}' failed: ${failed.detail}`);
+  ```
+
+- [#165](https://github.com/statelyai/agent/pull/165) [`9858657`](https://github.com/statelyai/agent/commit/98586570888e87e57647c2c647708184fbb3f63b) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Require XState `6.0.0-alpha.69`** (was `6.0.0-alpha.64`) as both the peer and dev dependency.
+  
+  **Breaking:** XState `alpha.69` changes what your code and your stored data see:
+  
+  - Renamed exports: `serializeMachine` is now `machineToJSON`, `createMachineFromConfig` is now `machineFromJSON`, and `ExecutableActionObjectFromLogic` is now `ExecutableEffectFrom`.
+  - Persisted snapshots list `timers` as an array, and `version` moved to `machine.version`.
+  - XState's lifecycle events are `xstate.init` and `xstate.stop` (were `@xstate.init` and `@xstate.stop`). The agent runtime's own init event in `onTransition` and the event log is still `@xstate.init`.
+  - `"xstate.error.actor.*"` is no longer a valid `on` key. Use `"xstate.error.actor"`.
+  - A host timer scheduler (`timers: { schedule, cancel }`) still receives `{ id, delay }`, but `id` is now an opaque JSON string. Pass it back unchanged as `{ type: "xstate.timer", id }`.
+
+### Patch Changes
+
+- [#147](https://github.com/statelyai/agent/pull/147) [`9d32376`](https://github.com/statelyai/agent/commit/9d3237698e71b83d7a671a799ffab6085338f43c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Move judgments to the AI SDK's non-deprecated decision API (`ai` 7.0.133, `@ai-sdk/typesafe-ai` 3.0.16):
+  
+  - `experimental_evaluate` → `experimental_decide`
+  - `Experimental_EvaluationModel` / `Experimental_EvaluationQuestion` → `Experimental_DecisionModel` / `Experimental_DecisionQuestion`
+  - `typeSafeAi.evaluationModel("jev-latest")` → `typeSafeAi.decisionModel("jev-latest")`
+  - Scripted judges implement `doDecide` instead of `doEvaluate`. The SDK now hands a model its `state` as parts, so a plain value arrives as `[{ type: "json", value }]`.
+
+- [#166](https://github.com/statelyai/agent/pull/166) [`126603f`](https://github.com/statelyai/agent/commit/126603fd6c5057f2beeb212ebb2003209376e7a1) Thanks [@davidkpiano](https://github.com/davidkpiano)! - The AI SDK adapter passes provider-defined tools such as `openai.tools.webSearch()` through unchanged. Before, it rebuilt them as plain tools without their `id`, so the provider never ran them.
+
+- [#161](https://github.com/statelyai/agent/pull/161) [`730d64c`](https://github.com/statelyai/agent/commit/730d64c3bc4492153a61446e1c7a26d70e2fd1a9) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `canReach` now returns a shortest witness. It searches breadth first by path length, so the witness has the fewest events of any path within `maxDepth`, with each recorded invoke outcome (`xstate.done.actor.*`, `xstate.error.actor.*`) counted as one event. A retry loop no longer pads it. `complete` keeps its meaning, `dedupeBy` stays sound, `maxNodes` bounds the breadth-first frontier, and `explorePaths` still walks depth first with an unchanged report.
+
+- [#163](https://github.com/statelyai/agent/pull/163) [`2847e22`](https://github.com/statelyai/agent/commit/2847e229f18a51a22bd2371cea53c0c95b9457d8) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `examples/code-review-loop`: a review that approves a patch but still flags a `novel` issue now goes to a person instead of shipping. `checkingShip` enforces the same rule, so the `canReach` proof covers it. `docs/from-a-loop.md` gains Part 2, which ports the software-factory loop in `examples/code-review-loop/before.ts` to the machine and improves its triage from traces.
+
+- [#159](https://github.com/statelyai/agent/pull/159) [`4e68ca8`](https://github.com/statelyai/agent/commit/4e68ca8f3995c2d400411193f63d410eeb0e9a48) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Fix: `agent.decide` honors the invoke input's `maxRetries`.** `createAgentRuntime` and `simulateAgent` used the builtin decision logic's fixed budget of 2 retries and ignored `maxRetries` set in an `agent.decide` invoke's input. The lowered request now carries the input's `maxRetries` and both hosts prefer it, falling back to the logic's configured value (so `createDecisionLogic({ maxRetries })` behaves as before).
+
+- [#160](https://github.com/statelyai/agent/pull/160) [`aa875e7`](https://github.com/statelyai/agent/commit/aa875e7ed945a785c4ccff87c3ad9bd04f5dd849) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Void async actors journal.** An invoked `createAsyncLogic` actor whose `run` resolves `undefined` (or `null`, which XState's `data ?? output` coalesce turns into `undefined`) no longer makes the event log throw `NonSerializableAgentEventError` on its `xstate.done.actor` event. The journaled entry omits the `output` key instead; replay folds it identically.
+
+- [#153](https://github.com/statelyai/agent/pull/153) [`45d6383`](https://github.com/statelyai/agent/commit/45d63832d610a69030ff99e84dc34fca452d2b51) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Events declared with the `{}` shorthand in `setupAgent({ events: { APPROVE: {} } })` now convert to an empty-object JSON Schema when offered to a model. Listing one under `agent.decide({ allowedEvents })` with `createAiSdkExecutors` previously failed with "Standard schema vendor 'statelyai-agent' does not support JSON Schema conversion."
+
+- [#161](https://github.com/statelyai/agent/pull/161) [`4672646`](https://github.com/statelyai/agent/commit/46726465ebb5195cbee3fd0c43d81c57a88888a5) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `explorePaths` and `canReach` follow a decision that cannot succeed the way a live run does.
+  
+  - A decision with no candidate the snapshot takes (its guards refuse every one, or a closed choice has nothing on offer) exhausts: the branch records `{ type: 'xstate.error.actor.<id>' }` and takes the invoke's `onError`, or ends in an `error` terminal without one. It used to end without a branch, so `canReach` could report a state behind that `onError` as unreachable while a live run reached it.
+  - With an `errors` entry for a decision src, the failure and the candidate events are sibling branches, each one level of `maxDepth` deep. The candidates used to spend two levels, so a path within `maxDepth` could stop as `max-depth`.
+  - A wait where the guards refuse every offered event records an `idle` terminal and lists those types in `unexpandedEvents`, so `canReach` reports `complete: false`. The path used to end with nothing recorded, which could make an empty payload table look like a proof.
+  - An explorer `payloads` entry of `[]` for a type a wait accepts lists that type in `unexpandedEvents`, because its branches were skipped.
+
+- [#149](https://github.com/statelyai/agent/pull/149) [`545fcee`](https://github.com/statelyai/agent/commit/545fcee025e2ce5b04859071d6022d18416a71a8) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Tested against the latest integration packages: `ai` 7.0.133, `@ai-sdk/openai` 4.0.89, `openai` 7.30, `@anthropic-ai/sdk` 0.132, LangChain 1.5/1.6, Mastra 1.75, Braintrust 3.37, and TanStack AI 0.66. Peer ranges are unchanged. The package is now built with TypeScript 7 and tsdown 0.23.
+
+- [#162](https://github.com/statelyai/agent/pull/162) [`1e46eb7`](https://github.com/statelyai/agent/commit/1e46eb70d3728ae08927589de812ebcef2c13608) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Parallel invokes replay from the store.** A run whose parallel state invokes two or more actors no longer records a state hash that its own replay cannot reproduce. When a second child settled before the first child's completion was delivered, the hash on that completion's entry included the second child as `done`, while replay (which never starts children) holds it active, so resuming the thread from the store alone threw `AgentReplayDivergenceError`. Each entry's `verification.stateHash` is now taken from the pure fold of the log, the state `replay` reaches. Logs recorded without that race keep the same hashes; a log already recorded with the race still fails verification and can be resumed with its `snapshot` cache.
+
+- [#151](https://github.com/statelyai/agent/pull/151) [`c8f68ce`](https://github.com/statelyai/agent/commit/c8f68ce82673a55b9d6ac59eb19e741495520105) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Two more examples.** `examples/rank-candidates` ranks a list against a brief: Jev scores each candidate and judges near-duplicate pairs, while code applies the threshold, sort, per-bucket quota and top-k cut-off, with a reason for every cut. `examples/answer-reuse` judges the help article a search already found before spending an agent call, investigates at most once, and settles idle for a person when the answer still does not pass.
+
+- [#162](https://github.com/statelyai/agent/pull/162) [`d99266d`](https://github.com/statelyai/agent/commit/d99266de813f320d0584d1241477801f69e3af72) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **Two more environment and policy examples.**
+  
+  - `examples/code-review-loop` keeps the review loop fixed: generate, then a self-check and an independent review in parallel, then checks, then ship, retry or ask a person. `canReach` proves it never ships without passing checks and approval. A JSON triage policy decides between retrying and escalating, and it is improved from event-log traces against hidden tests. It runs on Claude Code in headless mode.
+  - `examples/tic-tac-toe` is a plain XState game that knows nothing about AI, with the agent playing O at its boundary through `decideNext`. A JSON policy over low-level board features climbs from "first empty cell" to a policy that `canReach` proves never loses to any opponent.
+
 ## 2.0.0-alpha.28
 
 ### Patch Changes
