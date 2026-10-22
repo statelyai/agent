@@ -32,7 +32,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 <!-- install command matching the package prerelease channel and package.json peers -->
 
 ```sh
-pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.64 zod
+pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.69 zod
 ```
 
 XState is pinned while its experimental durable restoration API evolves.
@@ -59,7 +59,7 @@ Classification, grading, relevance, and yes/no checks are judgments: call the AI
 
 Requirements:
 
-- Node 22.18 or newer, and XState v6 alpha.46 or newer.
+- Node 22.18 or newer, and XState `6.0.0-alpha.69`.
 - The package is ESM-first. CommonJS builds are published too, so `require()` works.
 - Provider packages must match your `ai` major: `@ai-sdk/openai@^4` pairs with `ai@^7`. A bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer.
 
