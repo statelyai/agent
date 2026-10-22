@@ -51,7 +51,7 @@ import {} from "@statelyai/agent/ai-sdk";
 // Declared so the machine is playable against a real model; the report below
 // never calls it.
 const models = {
-  reviewer: openai("gpt-5.4-mini"),
+  reviewer: openai("gpt-6-luna"),
 };
 
 /** The business rule, in one number. Refunds above this need a human. */

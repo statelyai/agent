@@ -58,7 +58,7 @@ Rules the runtime enforces. Each one maps to a build error or a lint diagnostic:
 - A request invoke resolves with `{ result, messages }`, so `onDone.assign` reads its result from `"{{ event.output.result.<field> }}"` (`"{{ event.output.result }}"` for a plain-text request). A non-request `actors` invoke reads `"{{ event.output.<field> }}"` directly.
 - Every path must reach a `"type": "final"` state, and each final state needs an `output` when `schemas.output` is declared.
 - Do not invent guard or action names. Only `"{{ }}"` guards, `assign`, and `emit` exist unless the host tells you which named guards/actions it implements.
-- Model refs are strings (`"openai/gpt-5.4-mini"`); the host resolves them.
+- Model refs are strings (`"openai/gpt-6-luna"`); the host resolves them.
 - To make a decision a closed choice, add `payloads` to the `agent.decide` input: one payload list per event type, without `type` (`"payloads": { "REFUND": [{ "amount": 20 }, { "amount": 50 }], "ESCALATE": [] }`). The model then picks one listed event instead of writing a payload. A type with no key is offered as `{ type }`; `[]` withholds it.
 - An idle human step can carry `meta.interaction` for the host to render with `getInteraction`: a `label`, `events` (one button per event type), `choices` (one button per full event, `{ "label": "Refund $20", "event": { "type": "REFUND", "amount": 20 } }`, or a context path string holding such a list), and `textEvent` for free text. A bare `"textEvent": "REJECT"` puts the text in a `text` field; `{ "type": "REJECT", "field": "reason" }` names the field. `meta` is not template-evaluated.
 
@@ -102,7 +102,7 @@ Reference config — decision, text request, idle human step, one final state:
   "context": { "ticket": "{{ input.ticket }}" },
   "requests": {
     "draftReply": {
-      "model": "openai/gpt-5.4-mini",
+      "model": "openai/gpt-6-luna",
       "system": "Draft a short, courteous support reply.",
       "prompt": "{{ input.ticket }}",
       "input": {
@@ -124,7 +124,7 @@ Reference config — decision, text request, idle human step, one final state:
         "id": "triageDecision",
         "src": "agent.decide",
         "input": {
-          "model": "openai/gpt-5.4-mini",
+          "model": "openai/gpt-6-luna",
           "system": "Decide whether this ticket needs escalation or a drafted reply.",
           "prompt": "{{ context.ticket }}",
           "allowedEvents": ["ESCALATE", "REPLY"],
@@ -217,7 +217,7 @@ const result = await verifyAgentConfig(candidate, {
     guards: [],
     actions: [],
     events: ["ESCALATE", "REPLY", "APPROVE", "REJECT"],
-    models: ["openai/gpt-5.4-mini"],
+    models: ["openai/gpt-6-luna"],
   },
   explore: {
     inputs: [{ ticket: "Export downloads a 0-byte CSV on Safari." }],

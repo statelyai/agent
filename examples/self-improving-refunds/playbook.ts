@@ -106,7 +106,7 @@ const proposalEventJsonSchemas = Object.fromEntries(
 // ─── The vocabulary ───
 
 /** The model every playbook model call uses. A string ref, resolved by the host. */
-export const PLAYBOOK_MODEL = "openai/gpt-5.4-mini";
+export const PLAYBOOK_MODEL = "openai/gpt-6-luna";
 
 /** Actors a playbook may invoke by name. */
 export const playbookActorNames = ["classifyTicket"] as const;

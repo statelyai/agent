@@ -80,7 +80,7 @@ import {
   type AgentRequestExecutors,
 } from "@statelyai/agent";
 
-const models = { agent: openai("gpt-5.4-mini") };
+const models = { agent: openai("gpt-6-luna") };
 
 /**
  * The judge: TypeSafe's Jev through the AI SDK's decision-model provider.

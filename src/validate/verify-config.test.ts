@@ -25,7 +25,7 @@ const compileSchema: SchemaCompiler = (jsonSchema, name): StandardSchemaV1 => {
   };
 };
 
-const MODEL = "openai/gpt-5.4-mini";
+const MODEL = "openai/gpt-6-luna";
 
 /** A refund triage: a named guard, then a decision over APPROVE/DENY. */
 function refundConfig() {

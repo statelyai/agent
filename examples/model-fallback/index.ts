@@ -51,8 +51,8 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  quick: openai("gpt-5.4-mini"),
-  strong: openai("gpt-5.4"),
+  quick: openai("gpt-6-luna"),
+  strong: openai("gpt-6.1-sol"),
 };
 
 /** Fallbacks to the strong model before a rejected call ends in `failed`. */

@@ -71,7 +71,7 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  responder: openai("gpt-5.4-mini"),
+  responder: openai("gpt-6-luna"),
 };
 
 /** Revisions after the first draft (the tutorial's MAX_ITERATIONS). */

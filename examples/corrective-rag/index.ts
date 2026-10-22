@@ -78,7 +78,7 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  crag: openai("gpt-5.4-mini"),
+  crag: openai("gpt-6-luna"),
 };
 
 /**

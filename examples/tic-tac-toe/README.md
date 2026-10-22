@@ -29,7 +29,7 @@ pnpm exec tsx examples/tic-tac-toe/evaluate.ts examples/tic-tac-toe/policies/v0.
 ## Running the climb with real models
 
 ```bash
-# One proof of v0, then up to 4 rounds with gpt-5.4-mini as the reflection model.
+# One proof of v0, then up to 4 rounds with gpt-6-luna as the reflection model.
 OPENAI_API_KEY=... pnpm exec tsx examples/tic-tac-toe/index.ts
 
 # Every arm: raw model, Jev (with TYPESAFE_AI_API_KEY), v0, and each promoted round.

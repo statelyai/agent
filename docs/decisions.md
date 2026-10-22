@@ -250,7 +250,7 @@ import { openai } from "@ai-sdk/openai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 
 const { decide } = createAiSdkExecutors({
-  models: { desk: openai("gpt-5.4-mini"), judge: typeSafeAi.decisionModel("jev-latest") },
+  models: { desk: openai("gpt-6-luna"), judge: typeSafeAi.decisionModel("jev-latest") },
 });
 ```
 
@@ -303,7 +303,7 @@ const desk = createMachine({
   },
 });
 
-const { decide } = createAiSdkExecutors({ models: { quick: openai("gpt-5.4-mini") } });
+const { decide } = createAiSdkExecutors({ models: { quick: openai("gpt-6-luna") } });
 const actor = createActor(desk);
 
 let busy = false;

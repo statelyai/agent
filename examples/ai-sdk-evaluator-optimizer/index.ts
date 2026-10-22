@@ -124,9 +124,9 @@ function translationPasses(evaluation: TranslationEvaluation | null) {
 }
 
 const models = {
-  translator: openai("gpt-5.4-mini"),
-  critic: openai("gpt-5.4-mini"),
-  improver: openai("gpt-5.4-mini"),
+  translator: openai("gpt-6-luna"),
+  critic: openai("gpt-6-luna"),
+  improver: openai("gpt-6-luna"),
 };
 
 /**

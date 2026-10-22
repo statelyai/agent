@@ -60,7 +60,7 @@ describe("skills/generate-machine reference config", () => {
         guards: [],
         actions: [],
         events: ["ESCALATE", "REPLY", "APPROVE", "REJECT"],
-        models: ["openai/gpt-5.4-mini"],
+        models: ["openai/gpt-6-luna"],
       },
       explore: {
         inputs: [{ ticket: "Export downloads a 0-byte CSV on Safari." }],

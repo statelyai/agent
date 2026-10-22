@@ -34,7 +34,7 @@ import { fromV5Config } from "./from-v5-config.js";
 /** Change requests allowed before the machine gives up. */
 export const MAX_REVISIONS = 2;
 
-const models = { writer: openai("gpt-5.4-mini") };
+const models = { writer: openai("gpt-6-luna") };
 
 type Context = {
   ticket: string;

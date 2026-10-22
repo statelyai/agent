@@ -221,8 +221,8 @@ describe("createTanStackAiExecutors — generateText", () => {
       },
     });
 
-    expect((await generateText(textRequest({ model: "openai/gpt-5.4-mini" }))).result).toBe("ok");
-    expect(seen).toEqual(["openai/gpt-5.4-mini"]);
+    expect((await generateText(textRequest({ model: "openai/gpt-6-luna" }))).result).toBe("ok");
+    expect(seen).toEqual(["openai/gpt-6-luna"]);
   });
 });
 

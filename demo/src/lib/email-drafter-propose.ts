@@ -88,7 +88,7 @@ async function main() {
     import("@statelyai/agent/ai-sdk"),
     import("@ai-sdk/openai"),
   ]);
-  const model = process.env.OPENAI_PROPOSER_MODEL || "gpt-5.4";
+  const model = process.env.OPENAI_PROPOSER_MODEL || "gpt-6.1-sol";
   const result = await runToQuiescence(
     createAgentRuntime(proposerMachine, {
       executors: createAiSdkExecutors({ models: { reasoner: openai(model) } }),

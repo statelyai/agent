@@ -77,7 +77,7 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  researcher: openai("gpt-5.4-mini"),
+  researcher: openai("gpt-6-luna"),
 };
 
 /**

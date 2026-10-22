@@ -20,7 +20,7 @@ import type { AgentRequestExecutors } from "../index.js";
 import { createOtelTraceHandler } from "./index.js";
 
 const setup = setupAgent({
-  models: { quick: "openai/gpt-5.4-mini" },
+  models: { quick: "openai/gpt-6-luna" },
   context: z.object({ topic: z.string(), draft: z.string().nullable() }),
   input: z.object({ topic: z.string() }),
   output: z.object({ draft: z.string() }),

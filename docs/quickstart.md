@@ -98,7 +98,7 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 // In the setupAgent({ ... }) call above:
-//   models: { fast: openai("gpt-5.4-mini") },
+//   models: { fast: openai("gpt-6-luna") },
 
 const liveResult = await runAgent(machine, {
   input: { prompt: "Why state machines?" },
@@ -111,7 +111,7 @@ if (liveResult.status === "done") {
 ```
 
 A host that owns its own model map passes it instead:
-`createAiSdkExecutors({ models: { fast: openai("gpt-5.4-mini") } })`.
+`createAiSdkExecutors({ models: { fast: openai("gpt-6-luna") } })`.
 
 Continue with [Choosing a run mode](choosing-a-run-mode.md),
 [Messages](messages.md), and [Persistence](persistence.md). A host that drives

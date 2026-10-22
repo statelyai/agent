@@ -23,8 +23,8 @@ import { openai } from "@ai-sdk/openai";
 
 // Model IDs here are illustrative; substitute your provider's current models.
 const models = {
-  quick: openai("gpt-5.4-mini"),
-  careful: openai("gpt-5.4"),
+  quick: openai("gpt-6-luna"),
+  careful: openai("gpt-6.1-sol"),
 };
 const answerSchema = z.object({ answer: z.string() });
 

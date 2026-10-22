@@ -177,7 +177,7 @@ const schemas = createAgentSchemas({
 });
 
 const models = {
-  ticketTriage: openai("gpt-5.4-mini"),
+  ticketTriage: openai("gpt-6-luna"),
 };
 
 /** The narrowed context every post-classification state reads. */
