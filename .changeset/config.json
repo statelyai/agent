@@ -1,12 +1,21 @@
 {
   "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
-  "changelog": ["@changesets/changelog-github", { "repo": "statelyai/agent" }],
+  "changelog": [
+    "@changesets/changelog-github",
+    {
+      "repo": "statelyai/agent"
+    }
+  ],
   "commit": false,
   "fixed": [],
   "linked": [],
   "access": "public",
   "baseBranch": "next",
   "updateInternalDependencies": "patch",
-  "privatePackages": { "version": true, "tag": false },
-  "ignore": []
+  "privatePackages": {
+    "version": true,
+    "tag": false
+  },
+  "ignore": [],
+  "format": false
 }
