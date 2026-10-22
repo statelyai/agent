@@ -23,18 +23,20 @@ This is step 2 of 4. Before: `loop-to-machine`. Next: `add-evals`, then `improve
 - **Traces never change behavior.** Recording is an observer. No branch reads a trace.
 - **A trace must name what produced it.** A run with no machine version or policy version cannot be used to compare versions, so it is useless to the improver.
 - **Replay is the test.** A log that does not replay to the run's final state with zero model calls is not a trace yet.
-- **No secrets or personal data in metadata or thread ids.** Use ids, not names or emails.
+- **No secrets or personal data in metadata or thread ids.** Use ids, not names or emails. The log itself holds the machine's input and every event verbatim (a ticket's text, a customer's reply), and trace snapshots hold the context: in production, redact or encrypt them per your data rules, and ask the user which applies.
 
 ## 1. Version the machines
 
-Declare `version` on every machine whose runs you record: the environment and, if there is one, the policy.
+Declare `version` on every machine whose runs you record: the environment and, if there is one, the policy machine.
 
 ```ts
-export const deskMachine = deskSetup.createMachine({ id: "refund-desk", version: "3", ... });
+export const deskMachine = deskSetup.createMachine({ id: "refund-desk", version: "1", ... });
 ```
 
+Also name the **decider version**: what answers the decisions. It is the policy machine's `version` when there is one; otherwise a label for the model and prompt that decide (`gpt-6-luna.p1`), or for a stand-in model in tests (`careful`). Runs by different deciders must never share a version label.
+
 - Every log entry carries `machineVersion`. Without a declared `version` it falls back to a structural hash that skips functions, and in XState v6 the guards and targets live in transition functions. Changing a guard would not change the hash.
-- Bump `version` on every behavior change. `improve-machine` bumps the policy's on promotion.
+- Bump `version` on every behavior change. Adding recording is not one: it only observes. `improve-machine` bumps the policy's on promotion.
 
 ## 2. Pick a store
 
@@ -45,7 +47,10 @@ Pass it with a `threadId`. The store is write-ahead: no model call starts until 
 
 ```ts
 const result = await runAgent(deskMachine, { input, executors, store, threadId, metadata });
+await result.drain(); // late usage entries, before you read the store or exit
 ```
+
+**A thread that already has entries is resumed, not overwritten.** Give every new run a new thread id; reuse one only to continue that run.
 
 ## 3. Name threads
 
@@ -53,10 +58,10 @@ A thread id is how runs are found later. Use a prefix scheme and keep it in one 
 
 | Runs                     | Thread id                                    |
 | ------------------------ | -------------------------------------------- |
-| Scenario runs for evals  | `<split>:<policyVersion>:<scenarioId>:r<k>`  |
+| Scenario runs for evals  | `<split>:<deciderVersion>:<scenarioId>:r<k>`, `k` = the repeat index |
 | Production               | `prod:<domain id>` (ticket id, session id)   |
 
-`store.listThreads({ prefix: "train:v3:" })` then pages through one split of one policy version.
+`store.listThreads?.({ prefix: "train:careful:" })` then pages through one split of one decider. `listThreads` is optional on a custom store.
 
 ## 4. Stamp each run
 
@@ -65,26 +70,34 @@ A thread id is how runs are found later. Use a prefix scheme and keep it in one 
 ```ts
 const metadata = {
   environmentVersion: deskMachine.version ?? "unversioned",
-  policyVersion: policyMachine.version ?? "none",
-  models: { decide: "openai/gpt-6-luna" },
+  deciderVersion, // see step 1
+  models: { decider: "openai/gpt-6-luna" }, // the machine's model refs → what the host resolved them to
   scenario: scenario.id, // eval runs only
   split: scenario.split, // eval runs only
 };
 ```
 
-Read it back with `entries[0].metadata`. A resumed run keeps the stamp of the run that started the log. `executionId` is reserved.
+Read it back with `entries[0].metadata`. A resumed run keeps the stamp of the run that started the log. `executionId` is reserved. The value type is `JsonValue` from `@statelyai/agent/log`.
 
 ## 5. Collect trace events
 
 `onTrace` sees every trace event. Serialize and keep them per thread:
 
 ```ts
-import { serializeTraceEvent } from "@statelyai/agent";
+import { serializeTraceEvent, type JsonSerializableTraceEvent } from "@statelyai/agent";
 
-const trace: unknown[] = [];
-await runAgent(deskMachine, { ..., onTrace: (event) => trace.push(serializeTraceEvent(event)) });
-await writeFile(`traces/${threadId}.json`, JSON.stringify(trace));
+const trace: JsonSerializableTraceEvent[] = [];
+const result = await runAgent(deskMachine, { ..., onTrace: (event) => trace.push(serializeTraceEvent(event)) });
+await result.drain();
+
+// For local batches: one file per thread, colons out of the name.
+const file = threadId.replaceAll(":", "__");
+await mkdir("runs", { recursive: true });
+await writeFile(`runs/${file}.events.json`, JSON.stringify(result.events));
+await writeFile(`runs/${file}.trace.json`, JSON.stringify(trace));
 ```
+
+Decide with the user whether `runs/` is committed or gitignored.
 
 - In production, send them to OpenTelemetry instead: `createOtelTraceHandler({ tracer })` from `@statelyai/agent/otel` is an `onTrace` handler.
 - **A policy run inside a decider** is a separate run. Pass it the same `onTrace` (and its own `store` thread, `<threadId>:policy:<n>`) if you want per-state stats for the policy too.
@@ -97,18 +110,21 @@ Write these tests, with the stand-in model from `loop-to-machine`:
 
 ```ts
 import { getDecisionAttempts, replay } from "@statelyai/agent/log";
+import { foldTraces } from "@statelyai/agent/testing";
 
 test("a recorded run replays to its final state with no model calls", async () => {
-  const result = await runAgent(deskMachine, { input, executors, store, threadId: "test:v3:small-clean:r1", metadata });
-  const entries = await store.read("test:v3:small-clean:r1");
+  const result = await runAgent(deskMachine, { input, executors, store, threadId: "test:careful:small-clean:r1", metadata });
+  await result.drain();
+  const entries = await store.read("test:careful:small-clean:r1");
   const { snapshot } = replay(deskMachine, entries); // a pure fold: nothing runs
   expect(snapshot.value).toEqual(result.snapshot.value);
-  expect(entries[0]!.metadata).toMatchObject({ environmentVersion: "3" });
+  expect(entries[0]!.metadata).toMatchObject({ environmentVersion: "1" });
 });
 ```
 
-- `foldTraces` over a batch returns a row for every decision state, with `withheld` above 0 where guards refused options.
-- `getDecisionAttempts(entries)` lists the refused choices of a run where the stand-in model proposes an illegal one.
+- `foldTraces(traces, { failed })` over a batch returns a row for every decision state. `failed` judges one whole trace; start with "the last event is not a `run.end` with status `done`, or the run ended in a failure or sentinel state", and ask the user whether a wrong outcome counts too. `withheld` is above 0 only for a closed choice (`payloads`), where the guards refused an option.
+- `getDecisionAttempts(entries)` lists the refused choices of a run. A stand-in model that picks from the offered options can never propose an illegal one, so write a raw decide executor for this test that proposes a refused event first: `decide: async (request) => ({ event: request.attempts.length ? request.options![0]!.event : { type: "REFUND", amount: 1000 } })`.
+- Running a scenario with and without recording leaves the same world and the same final state.
 
 ## 7. Hand back
 
