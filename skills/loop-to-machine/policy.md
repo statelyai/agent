@@ -10,12 +10,15 @@ A policy answers one decision of the environment. It is a `setupAgent` machine, 
 
 ## What the environment exports
 
-The event schemas and the facts schema, so the policy reuses them instead of redeclaring them. The `agent.decide` input passes the facts as `metadata: { facts }`.
+The event schemas and the facts schema, so the policy reuses them instead of redeclaring them. The `agent.decide` input passes the facts as `metadata: { facts }`. The facts must carry everything any decider reads: the policy's rules, and the adapter that turns a request into a call to your model (the ticket, the customer, the order's owner). A field the adapter needs and the facts lack changes what the model sees, so the policy no longer reproduces the current behavior.
 
 ```ts
 // In the environment file (exported there):
+// Everything a decider reads: the policy's rules, and the model adapter when the policy asks the model.
 export const factsSchema = z.object({
-  order: z.object({ orderId: z.string(), amount: z.number(), refunded: z.boolean() }).nullable(),
+  ticket: z.string(),
+  customerId: z.string(),
+  order: z.object({ orderId: z.string(), customerId: z.string(), amount: z.number(), refunded: z.boolean() }).nullable(),
   requestedAmount: z.number().nullable(),
 });
 export const deskEvents = {
@@ -156,3 +159,5 @@ export function withPolicy(modelExecutors: AgentRequestExecutors): AgentRequestE
 ```
 
 Pass `withPolicy(modelExecutors)` as the environment's `executors` in the runner. That one line is the only runner change a policy needs. Decisions with any other name still reach the model.
+
+A runner that already takes a decide executor for the decision (`runMachine({ decide })`) needs no routing: pass `policyDecider(modelExecutors)` there. If your model is not an executor (a function that returns an option index, say), wrap it in a decide executor first, the same adapter the runner uses, and keep that adapter out of the environment's imports.

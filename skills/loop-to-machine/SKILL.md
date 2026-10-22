@@ -99,15 +99,16 @@ deciding: {
       // The facts a decider reads. Arrives as `request.metadata.facts`.
       metadata: { facts: { order: context.order, requestedAmount: context.requestedAmount } },
     }),
-    onError: { target: "escalated" }, // retries exhausted, or no option legal
+    onError: { target: "escalating" }, // retries exhausted, or no option legal
   },
   on: {
     REFUND: ({ context, event }) =>
       refundIsLegal(context, event.amount)
         ? { target: event.amount > APPROVAL_THRESHOLD ? "awaitingApproval" : "paying", context: { amount: event.amount } }
         : undefined, // undefined rejects: the decision retries with feedback
-    ESCALATE: { target: "escalated" },
-    CLOSE: { target: "closed" },
+    // `escalate` and `close` are tools with side effects: states that invoke them, then the final states.
+    ESCALATE: { target: "escalating" },
+    CLOSE: { target: "closing" },
   },
 },
 ```
@@ -141,7 +142,19 @@ From `@statelyai/agent/testing`:
 
 - `lintAgentMachine(machine)`: no errors.
 - `canReach(machine, "<sentinel>", options)` returns `reachable: false` **and** `complete: true`, for each distinct input shape (an input with an order id and one without lead to different paths; loop over them).
-- `options.payloads` lists values on both sides of every guard boundary (`0, 40, 41, 100, 101, 240, 241, 1000`). Without it, a closed choice is explored only with its own `payloads`, and `complete: true` then proves nothing about the boundaries.
+- `options.payloads` is a function of the snapshot that returns payload lists per event type. List values on both sides of every guard boundary: `0`, the threshold and one over, and each order amount the outputs below can produce and one over. Without it, a closed choice is explored only with its own `payloads`, and `complete: true` then proves nothing about the boundaries.
+- A free-text event from a person's step (`CUSTOMER_REPLIED`) needs an entry too, one payload per branch it can take, or the search cannot send it.
+
+```ts
+const proofOptions: ExplorePathsOptions = {
+  payloads: () => ({
+    REFUND: [0, 40, 41, 100, 101, 240, 241, 800, 801].map((amount) => ({ amount })),
+    CUSTOMER_REPLIED: [{ reply: "It's ORD-1001" }, { reply: "no idea" }],
+  }),
+  outputs: { lookupOrder: [ownedOrder, otherCustomersOrder, refundedOrder, { found: false }] },
+  errors: { lookupOrder: new Error("down"), "agent.decide": new Error("exhausted") },
+};
+```
 - `options.outputs` lists every output each actor can return (found and not found, owned and not, refunded and not); `options.errors` makes each actor fail once.
 - A loosened guard makes `canReach` true. Write this test too, or the proof proves nothing.
 - Each normal final state is reachable, so the search is not vacuous.

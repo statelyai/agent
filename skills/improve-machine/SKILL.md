@@ -83,8 +83,9 @@ Then find the training threads and compute one outcome row per episode:
 ```ts
 import { getDecisionAttempts, getUsageFromEvents, replay } from "@statelyai/agent/log";
 
-// Thread ids name the split and policy version: "train:v<n>:<scenario>:r<k>".
-const prefix = `train:v${currentVersion}:`;
+// Thread ids name the split and the decider version, as add-traces set up: "train:<deciderVersion>:<scenario>:r<k>".
+// With a policy, the decider version is the policy's version ("v3"); before one exists, the model's label.
+const prefix = `train:${deciderVersion}:`;
 const threadIds: string[] = [];
 let cursor: string | undefined;
 do {

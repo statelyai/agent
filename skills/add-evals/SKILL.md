@@ -59,21 +59,25 @@ A guard or ordering is always a rule eval. Use a decision eval when the guards l
 
 ## 4. Write them
 
-Name every eval `<state>: <what it checks>`, so the report reads as a map of the machine. In `test.each` titles, `$name` is a placeholder: write amounts as `100 dollars`, not `$100`.
+Name every eval `<state>: <what it checks>`, so the report reads as a map of the machine. An outcome eval over a whole run takes the final state it expects (`issued: partial-refund refunds 50 dollars`). In `test.each` titles, `$name` is a placeholder: write amounts as `100 dollars`, not `$100`.
 
 **Rule evals**, from `@statelyai/agent/testing`:
 
 ```ts
 test("paying: no refund over 100 dollars issues without approval", async () => {
-  const result = await canReach(machine, "ruleBroken", { input, payloads, outputs, errors });
+  const result = await canReach(machine, "<sentinel>", { input, payloads, outputs, errors });
   expect(result.complete).toBe(true); // reachable: false is a proof only when the search finished
   expect(result.reachable, JSON.stringify(result.witness)).toBe(false);
 });
 
-test("deciding: REFUND over the order amount is refused", () => {
-  expect(refundIsLegal({ ...context, order: { ...order, amount: 40 } }, 41)).toBe(false);
+test("deciding: REFUND over the order amount never reaches paying", async () => {
+  const result = await canReach(machine, (s) => s.matches("paying") && s.context.amount > s.context.order.amount, { input, payloads, outputs });
+  expect(result.complete).toBe(true);
+  expect(result.reachable).toBe(false);
 });
 ```
+
+Check guards through the machine, not by importing the guard and calling it: an imported `refundIsLegal` is always the one in the source, so it passes on a machine built with a loosened guard. A unit test of the guard function is fine as well, never instead.
 
 Use `explorePaths` to assert the set of reachable final states, and `await simulateAgent(...)` for one scripted path. Cover both sides of every threshold. The two treat a closed choice differently:
 

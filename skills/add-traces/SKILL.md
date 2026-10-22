@@ -77,7 +77,7 @@ const metadata = {
 };
 ```
 
-Read it back with `entries[0].metadata`. A resumed run keeps the stamp of the run that started the log. `executionId` is reserved. The value type is `JsonValue` from `@statelyai/agent/log`.
+Read it back with `entries[0].metadata`. It also holds `executionId`, which the library adds and reserves, so compare with `toMatchObject`, not `toEqual`. A resumed run keeps the stamp of the run that started the log. The value type is `JsonValue` from `@statelyai/agent/log`.
 
 ## 5. Collect trace events
 
@@ -122,7 +122,7 @@ test("a recorded run replays to its final state with no model calls", async () =
 });
 ```
 
-- `foldTraces(traces, { failed })` over a batch returns a row for every decision state. `failed` judges one whole trace; start with "the last event is not a `run.end` with status `done`, or the run ended in a failure or sentinel state", and ask the user whether a wrong outcome counts too. `withheld` is above 0 only for a closed choice (`payloads`), where the guards refused an option.
+- `foldTraces(traces, { failed })` over a batch returns a row for every state the runs visited, including each decision state. `failed` judges one whole trace; start with "the last event is not a `run.end` with status `done`, or the run ended in a failure or sentinel state", and ask the user whether a wrong outcome counts too. `withheld` is above 0 only for a closed choice (`payloads`), where the guards refused an option.
 - `getDecisionAttempts(entries)` lists the refused choices of a run. A stand-in model that picks from the offered options can never propose an illegal one, so write a raw decide executor for this test that proposes a refused event first: `decide: async (request) => ({ event: request.attempts.length ? request.options![0]!.event : { type: "REFUND", amount: 1000 } })`.
 - Running a scenario with and without recording leaves the same world and the same final state.
 
