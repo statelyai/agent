@@ -303,8 +303,13 @@ function stateLine(node: AnyStateNode, json: Json): string {
   }
   const tags = node.tags.length ? ` [tags: ${node.tags.join(", ")}]` : "";
   const interaction = (node.meta as { interaction?: { label?: unknown } } | undefined)?.interaction;
-  const label =
-    typeof interaction?.label === "string" ? ` [interaction: "${oneLine(interaction.label)}"]` : "";
+  const label = !interaction
+    ? ""
+    : typeof interaction.label === "string"
+      ? ` [interaction: "${oneLine(interaction.label)}"]`
+      : typeof interaction.label === "function"
+        ? " [interaction: computed label]"
+        : " [interaction]";
   const description = node.description ? ` — ${oneLine(node.description)}` : "";
   return `${node.key}${marker}${tags}${label}${description}`;
 }

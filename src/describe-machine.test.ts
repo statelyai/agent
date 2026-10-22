@@ -82,6 +82,28 @@ const refundMachine = refundAgent.createMachine({
 });
 
 describe("describeMachine", () => {
+  test("shows an interaction whose label is computed, or that has no label", () => {
+    const machine = setup({}).createMachine({
+      context: { amount: 240 },
+      initial: "approving",
+      states: {
+        approving: {
+          meta: {
+            interaction: {
+              label: ({ context }: { context: { amount: number } }) =>
+                `Approve $${context.amount}?`,
+            },
+          } as never,
+        },
+        replying: { meta: { interaction: { textEvent: "REPLIED" } } as never },
+      },
+    });
+
+    const text = describeMachine(machine);
+    expect(text).toContain("approving [interaction: computed label]");
+    expect(text).toContain("replying [interaction]");
+  });
+
   test("marks a minified transition that may decline as conditional", () => {
     // Bundlers and tsx print `undefined` as `void 0` and drop the spaces around `?`.
     const always = new Function(
