@@ -135,6 +135,16 @@ function list(items: readonly unknown[]): string {
 
 function structurallyEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
+  // Values whose contents are not enumerable own keys.
+  if (a instanceof Date || b instanceof Date) {
+    return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
+  }
+  if (a instanceof Map || b instanceof Map) {
+    return a instanceof Map && b instanceof Map && structurallyEqual([...a], [...b]);
+  }
+  if (a instanceof Set || b instanceof Set) {
+    return a instanceof Set && b instanceof Set && structurallyEqual([...a], [...b]);
+  }
   if (Array.isArray(a) || Array.isArray(b)) {
     return (
       Array.isArray(a) &&

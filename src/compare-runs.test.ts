@@ -102,6 +102,31 @@ describe("compareRuns", () => {
     expect(report.scenarios[0]!.label).toBe("same");
   });
 
+  it("compares Maps, Sets, and Dates by their contents", async () => {
+    const report = await compareRuns({
+      scenarios: [{ id: "map" }, { id: "set" }, { id: "date" }, { id: "same" }],
+      baseline: runs({
+        map: { outcome: "issued", effects: new Map([["order-1", 40]]) },
+        set: { outcome: "issued", effects: new Set(["C-1"]) },
+        date: { outcome: "issued", effects: new Date(0) },
+        same: { outcome: "issued", effects: { at: new Date(0), ids: new Set(["a"]) } },
+      }),
+      candidate: runs({
+        map: { outcome: "issued", effects: new Map([["order-1", 400]]) },
+        set: { outcome: "issued", effects: new Set(["C-2"]) },
+        date: { outcome: "issued", effects: new Date(1) },
+        same: { outcome: "issued", effects: { at: new Date(0), ids: new Set(["a"]) } },
+      }),
+    });
+
+    expect(report.scenarios.map((s) => s.label)).toEqual([
+      "regression",
+      "regression",
+      "regression",
+      "same",
+    ]);
+  });
+
   it("records a run that throws as a regression on the candidate side", async () => {
     const report = await compareRuns({
       scenarios: [{ id: "a" }],

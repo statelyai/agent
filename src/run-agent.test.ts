@@ -4079,6 +4079,7 @@ describe("runAgent event log", () => {
     const bridged = await runToQuiescence(
       createAgentRuntime(v2, {
         executors: executors(),
+        metadata: { policyVersion: "p2" },
       }),
       {
         events: first.events,
@@ -4096,6 +4097,8 @@ describe("runAgent event log", () => {
       machineVersion: "1",
       logIndex: first.events.length,
     });
+    // The new segment is stamped by the run that opened it.
+    expect(init.metadata?.policyVersion).toBe("p2");
 
     await expect(
       runToQuiescence(

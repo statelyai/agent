@@ -487,7 +487,8 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * Host-owned JSON stored on the log's `@agent.init` entry when this run
    * starts a log: what produced the run, such as a policy version, the model
    * ids, or the scenario. A resume keeps the stamp of the run that started
-   * the log. `executionId` is reserved and cannot be set here.
+   * the log; a version bridge, which opens a new log segment, takes this
+   * run's. `executionId` and `migratedFrom` are reserved and cannot be set here.
    */
   metadata?: Record<string, AgentLogJsonValue>;
   // actor sources — sugar for machine.provide({ actors }) before the run
@@ -2973,6 +2974,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           };
           seedInitEntry = () =>
             appendInitEntry(snapshotInitCandidates(), {
+              ...options.metadata,
               ...(logExecutionId !== undefined ? { executionId: logExecutionId } : {}),
               migratedFrom,
             });

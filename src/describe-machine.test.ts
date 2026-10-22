@@ -96,6 +96,19 @@ describe("describeMachine", () => {
     expect(describeMachine(machine)).toContain("always → stopped (conditional)");
   });
 
+  test("a question mark inside a string does not make a transition conditional", () => {
+    const always = new Function(
+      'return ({ context }) => ({ target: "stopped", context: { prompt: "Approve?" } })',
+    )() as never;
+    const machine = setup({}).createMachine({
+      context: { prompt: "" },
+      initial: "paying",
+      states: { paying: { always }, stopped: {} },
+    });
+
+    expect(describeMachine(machine)).toContain("always → stopped; sets prompt");
+  });
+
   test("describes a TS-authored machine", () => {
     expect(describeMachine(refundMachine)).toMatchInlineSnapshot(`
       "Machine refund
