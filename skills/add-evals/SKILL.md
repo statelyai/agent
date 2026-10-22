@@ -84,11 +84,15 @@ Use `explorePaths` to assert the set of reachable final states, and `await simul
 - `explorePaths` and `canReach` use `options.payloads` **instead of** the decision's own offered options, so they explore values the machine would never offer. That is what a boundary proof needs.
 - `simulateAgent` keeps the offered options: a scripted event the decision did not offer is refused, and the run ends in the decision's `onError`. Script only offered events, or pick an input that offers the value.
 
-**Decision evals.** A row is a decision request and the event a person says is right. Write rows by hand, or take them from recorded traces: the first attempt of each decision is a `request.start` event with `request.kind === "decision"` and `request.attempts.length === 0`, and its `request` carries `name`, `options`, and `metadata`. Cast the serialized `request` to `AgentExecutorDecisionRequest`, and compare events without caring about key order. If the decider reads anything outside the request (the ticket, the tool history), store that in the row too.
+**Decision evals.** A row is a decision request and the event a person says is right. Write rows by hand, or take them from recorded traces with `getDecisionRequests(trace, { name })` from `@statelyai/agent/testing`: each decision's first attempt, with the states it was asked in, its `options`, and its `metadata`. Compare events without caring about key order. If the decider reads anything outside the request (the ticket, the tool history), store that in the row too.
 
 ```ts
-// Your helper: rows for one decision state, from traces or a fixture file.
-const rows: Array<{ id: string; request: AgentExecutorDecisionRequest; expected: ChosenEvent }> = loadDecisionRows("deciding");
+import { getDecisionRequests } from "@statelyai/agent/testing";
+
+// One row per recorded decision; `expected` is the label a person confirmed for that scenario.
+const rows = traces.flatMap(({ scenario, trace }) =>
+  getDecisionRequests(trace, { name: "chooseResolution" }).map(({ request }) => ({ id: scenario.id, request, expected: labels[scenario.id] })),
+);
 
 test.each(rows)("deciding: $id", async ({ request, expected }) => {
   const { event } = await decide(request); // the policy decider, or the model executor

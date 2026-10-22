@@ -256,6 +256,27 @@ const { decide } = createAiSdkExecutors({
 
 See [Decision models](models-and-providers.md#decision-models).
 
+## A policy as the decider
+
+A decision can be answered by another machine: a policy that applies a rule when the facts are enough and asks a model only for the rest. `createPolicyDecider` turns a policy machine into a decide executor.
+
+```ts no-check
+import { createPolicyDecider, runAgent } from "@statelyai/agent";
+
+const decide = createPolicyDecider(policyMachine, { executors: modelExecutors });
+
+await runAgent(deskMachine, { input, executors: { ...modelExecutors, decide } });
+```
+
+- Each decision request starts one run of the policy. Its output, an event, is the choice. The environment still judges it: an event it does not accept is retried like any decider's.
+- The policy's input defaults to `{ facts, options, system, prompt }`: the request's `metadata.facts`, the offered events, and its prompt. The policy's input schema validates it. Pass `input: (request) => ...` to build it another way.
+- The policy's own `agent.decide` invokes are answered by `executors`. Pass the environment's `metadata` on to them, so the model sees what it would without the policy.
+- The result carries the policy's token usage, and none when it decided with a rule.
+- A run that does not end `done` with an event throws `AgentError` with code `policy-not-done`. Give each of the policy's decisions an `onError` that falls back to an event the environment always accepts.
+- Every other `runAgent` option passes through: `store`, `threadId`, and `metadata` to journal the policy's runs, `onTrace` to trace them.
+
+To route by request name, wrap it: `decide: (request, info) => (request.name === "chooseResolution" ? policy(request, info) : modelExecutors.decide!(request, info))`.
+
 ## Decisions at the boundary of a plain machine
 
 A machine does not have to know about AI. `decideNext` asks a model to pick one event that a plain XState machine accepts right now, built with `createMachine` or `setup`, with no `agent.*` invoke anywhere.
