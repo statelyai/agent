@@ -49,3 +49,11 @@ export type {
 } from "../seam.js";
 export { foldTraces } from "../fold-traces.js";
 export type { FoldTracesOptions, StateStats } from "../fold-traces.js";
+export { compareRuns } from "../compare-runs.js";
+export type {
+  CompareRunsOptions,
+  ParityLabel,
+  ParityReport,
+  ParityResult,
+  ParityRun,
+} from "../compare-runs.js";

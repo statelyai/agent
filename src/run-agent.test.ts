@@ -3712,6 +3712,35 @@ describe("runAgent event log", () => {
 
   const types = (entries: readonly AgentLogEntry[]) => entries.map((entry) => entry.event.type);
 
+  test("metadata stamps the init entry, and a resume keeps the first run's stamp", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+        metadata: { policyVersion: "v3", executionId: "ignored" },
+      }),
+      { input: undefined },
+    );
+
+    expect(first.events[0]!.metadata).toMatchObject({ policyVersion: "v3" });
+    expect(getLogExecutionId(first.events)).not.toBe("ignored");
+
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, { executors: executors(), metadata: { policyVersion: "v4" } }),
+      { events: first.events, snapshot: first.persist(), event: { type: "APPROVE" } as never },
+    );
+    expect(second.events[0]!.metadata).toMatchObject({ policyVersion: "v3" });
+  });
+
+  test("metadata that is not JSON throws before the run starts", () => {
+    expect(() =>
+      createAgentRuntime(makeLoggedMachine(), {
+        executors: executors(),
+        metadata: { at: new Date() as never },
+      }),
+    ).toThrow(/metadata/);
+  });
+
   test("a fresh run yields a self-contained log of external inputs only", async () => {
     const machine = makeLoggedMachine();
     const streamed: AgentLogEntry[] = [];

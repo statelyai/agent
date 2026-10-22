@@ -220,6 +220,40 @@ const stats = foldTraces(traces, {
 - `decideNext` called by the host emits no trace. Push its request onto the trace before sending the event: `trace.push({ type: "request.start", request: result.request })`.
 - Rows come in the order states were first seen. Sort them yourself, for example by `failures / visits`.
 
+## Parity with the code you replace
+
+`compareRuns` (from `@statelyai/agent/testing`) runs every scenario through the existing implementation and its replacement, and labels each difference. Use it when you port a loop to a machine and need to show where they behave the same and where the machine differs on purpose.
+
+```ts no-check
+import { compareRuns } from "@statelyai/agent/testing";
+
+const report = await compareRuns({
+  scenarios, // [{ id, expected?, ...your fields }]
+  baseline: async (scenario) => {
+    const run = await runRawLoop(scenario);
+    return { outcome: run.outcome, effects: run.world.refunds, violations: run.world.violations };
+  },
+  candidate: async (scenario) => {
+    const run = await runDesk(scenario);
+    return { outcome: run.outcome, effects: run.world.refunds, violations: run.world.violations };
+  },
+});
+expect(report.ok).toBe(true); // no regressions
+// report.counts: { same: 7, intended: 3, regression: 0 }
+```
+
+| Label        | When                                                                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `same`       | Same `outcome`, structurally equal `effects`, and neither run broke a rule                                                                            |
+| `intended`   | The candidate broke no rule, and the baseline broke one (even with the same outcome), or only the candidate reached the scenario's `expected` outcome |
+| `regression` | The candidate broke a rule or threw, or they differ for any other reason                                                                              |
+
+- Parity is outcome-level: the terminal outcome and the effects in the world. It does not compare tool-call order, because a machine usually reorders steps.
+- `violations` come from ground truth, such as a ledger the world checks after the fact. A port that blocks a rule the loop broke is labeled `intended`, not a regression, so the machine is never pushed to copy the loop's bugs.
+- Put every write the world records in `effects`, not only the main one. A refund issued without its approval looks the same as a correct one if `effects` holds only the refunds.
+- A run that throws is recorded with outcome `'threw'` and its message as `detail`.
+- Parity holds for these scenarios and these runs. With a live model, run it more than once, or drive both sides with the same deterministic stand-in model.
+
 ## Verification
 
 `simulateAgent`, `explorePaths`, `canReach`, and `matchesTrajectory` operate on the machine artifact. Unknown state targets and empty expected trajectories fail loudly instead of producing misleading successful scores.

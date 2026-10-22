@@ -13,9 +13,10 @@ Templates for the `improve-machine` skill: a round checklist, the hypothesis, th
 [ ] Failures clustered (train only); one cause picked
 [ ] Hypothesis written
 [ ] Candidate: smallest diff, id kept, version bumped, description unchanged
-[ ] verifyAgentConfig passed (repairs used: _/3)
+[ ] Gates passed: TS (env unchanged, tsc, lint, paths, overfit, evals) or JSON (verifyAgentConfig) (repairs used: _/3)
 [ ] Replayed train, then held-out, k runs each, new thread ids
 [ ] Promotion rule applied; CHANGELOG entry written
+[ ] Recommended candidate opened as one pull request with its scorecard; not merged
 [ ] Stop condition checked
 ```
 
@@ -39,7 +40,7 @@ You improve a policy machine. You may change only the policy config below.
 {describeMachine(environment)}
 
 Current policy (version {n}):
-{JSON.stringify(policyConfig, null, 2)}
+{the policy file's source, or JSON.stringify(policyConfig, null, 2)}
 
 Vocabulary (use no other names):
 - actors: {actors}
@@ -53,8 +54,9 @@ Objective on the training scenarios: {objective summary}
 Diagnosed cause: {hypothesis.cause}
 Evidence: {failing rows: scenario, expected, reached state, rejections, tokens}
 
-Return one complete AgentWorkflowConfig as JSON. Make the smallest change that
-addresses the diagnosed cause. Keep "id" and "description". Set "version" to {n + 1}.
+Return the complete policy: the TypeScript file, or one AgentWorkflowConfig as
+JSON. Make the smallest change that addresses the diagnosed cause. Keep "id" and
+"description". Set "version" to {n + 1}. Never match on a scenario's data.
 ```
 
 On a failed gate, append:
@@ -69,11 +71,11 @@ Return a corrected config.
 ## Changelog entry
 
 ```md
-## v{n} — {promoted | discarded}
+## v{n} — {recommended | discarded}
 
 - Hypothesis: {cause} → {change}
 - Diff: {states or transitions touched}
-- Gates: validate ✓ vocabulary ✓ lower ✓ lint ✓ explore ✓ (repairs: {r})
+- Gates: {TS: environment ✓ tsc ✓ lint ✓ paths ✓ overfit ✓ evals ✓ | JSON: validate ✓ vocabulary ✓ lower ✓ lint ✓ explore ✓} (repairs: {r})
 - Train: objective {a} → {b}, violations {v}, cost {c0} → {c1}
 - Held-out: objective {a} → {b}, violations {v}, cost {c0} → {c1}
 - Regressions: {none | scenario ids}
