@@ -1,5 +1,17 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.30
+
+### Minor Changes
+
+- [#170](https://github.com/statelyai/agent/pull/170) [`7e97c1f`](https://github.com/statelyai/agent/commit/7e97c1f6c6e079db3233b4a86ffd0b82107a29f2) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`compareRuns` checks a port against the code it replaces.** From `@statelyai/agent/testing`: `compareRuns({ scenarios, baseline, candidate })` runs each scenario through both and labels it `same`, `intended` (the candidate broke no rule where the baseline broke one, or only the candidate reached the expected outcome), or `regression`. It compares outcomes and effects, not tool-call order.
+
+- [#170](https://github.com/statelyai/agent/pull/170) [`7e97c1f`](https://github.com/statelyai/agent/commit/7e97c1f6c6e079db3233b4a86ffd0b82107a29f2) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`metadata` stamps a run's log.** `createAgentRuntime` and `runAgent` take `metadata`, host-owned JSON stored on the log's `@agent.init` entry next to the reserved `executionId`: a policy version, model ids, a scenario. A resume keeps the first run's stamp. A value that is not JSON throws before the run starts.
+
+### Patch Changes
+
+- [#170](https://github.com/statelyai/agent/pull/170) [`98829e2`](https://github.com/statelyai/agent/commit/98829e2c48b1915710530cb202f1d9eabc24cad2) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `describeMachine` marks a transition function as `(conditional)` when its source is minified (`void 0`, a ternary with no spaces), as bundlers and `tsx` print it.
+
 ## 2.0.0-alpha.29
 
 ### Minor Changes
