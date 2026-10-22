@@ -483,6 +483,14 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * the same state. Set `false` for a smaller, unverifiable log.
    */
   verification?: boolean;
+  /**
+   * Host-owned JSON stored on the log's `@agent.init` entry when this run
+   * starts a log: what produced the run, such as a policy version, the model
+   * ids, or the scenario. A resume keeps the stamp of the run that started
+   * the log; a version bridge, which opens a new log segment, takes this
+   * run's. `executionId` and `migratedFrom` are reserved and cannot be set here.
+   */
+  metadata?: Record<string, AgentLogJsonValue>;
   // actor sources — sugar for machine.provide({ actors }) before the run
   /** Actor source implementations, merged onto the machine before binding — sugar for `machine.provide({ actors })` ahead of the run. */
   actors?: Record<string, AnyActorLogic>;
@@ -2154,6 +2162,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // prop, `.provide`-surviving) is the single source of truth; an unversioned
   // machine falls back to the structural hash.
   const machineVersion = resolveMachineVersion(machine);
+  // A metadata value the log cannot hold would silently cost the run its log
+  // (see `appendInitEntry`), so reject it before anything runs.
+  // Copied once validated, so a later change to the caller's object cannot reach the log.
+  if (options.metadata !== undefined) assertJsonSerializable(options.metadata, "metadata");
+  const initMetadata: Record<string, AgentLogJsonValue> | undefined =
+    options.metadata === undefined ? undefined : structuredClone(options.metadata);
 
   // The run's single observation dispatch point: every trace payload in this
   // run goes through `onTrace`, which stamps the run-scoped envelope for
@@ -2963,6 +2977,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           };
           seedInitEntry = () =>
             appendInitEntry(snapshotInitCandidates(), {
+              ...initMetadata,
               ...(logExecutionId !== undefined ? { executionId: logExecutionId } : {}),
               migratedFrom,
             });
@@ -2970,11 +2985,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       } else if (init.snapshot !== undefined) {
         logExecutionId = crypto.randomUUID();
         seedInitEntry = () =>
-          appendInitEntry(snapshotInitCandidates(), { executionId: logExecutionId! });
+          appendInitEntry(snapshotInitCandidates(), {
+            ...initMetadata,
+            executionId: logExecutionId!,
+          });
       } else {
         logExecutionId = crypto.randomUUID();
         seedInitEntry = () =>
           appendInitEntry([resolvedInput !== undefined ? { input: resolvedInput } : {}], {
+            ...initMetadata,
             executionId: logExecutionId!,
           });
       }

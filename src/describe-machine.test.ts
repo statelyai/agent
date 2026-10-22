@@ -82,6 +82,33 @@ const refundMachine = refundAgent.createMachine({
 });
 
 describe("describeMachine", () => {
+  test("marks a minified transition that may decline as conditional", () => {
+    // Bundlers and tsx print `undefined` as `void 0` and drop the spaces around `?`.
+    const always = new Function(
+      'return ({ context }) => context.broken?{target:"stopped"}:void 0',
+    )() as never;
+    const machine = setup({}).createMachine({
+      context: { broken: false },
+      initial: "paying",
+      states: { paying: { always }, stopped: {} },
+    });
+
+    expect(describeMachine(machine)).toContain("always → stopped (conditional)");
+  });
+
+  test("a question mark inside a string does not make a transition conditional", () => {
+    const always = new Function(
+      'return ({ context }) => ({ target: "stopped", context: { prompt: "Approve?" } })',
+    )() as never;
+    const machine = setup({}).createMachine({
+      context: { prompt: "" },
+      initial: "paying",
+      states: { paying: { always }, stopped: {} },
+    });
+
+    expect(describeMachine(machine)).toContain("always → stopped; sets prompt");
+  });
+
   test("describes a TS-authored machine", () => {
     expect(describeMachine(refundMachine)).toMatchInlineSnapshot(`
       "Machine refund

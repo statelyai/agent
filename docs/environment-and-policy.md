@@ -10,24 +10,24 @@ This page explains how to split an agent into two machines: an environment that 
 An agent does two kinds of work. It follows the rules of its domain, and it chooses how to make progress within those rules. The two change at different rates and need different owners, so they can live in different machines.
 
 - The **environment** is the rules of the world and the business invariants. People author it in TypeScript, as states and guards, and verify it with [`canReach` and `explorePaths`](verify.md). It is fixed.
-- The **policy** is how the agent works toward the goal: which step comes next, which tool to call, when to ask a person, and when a cheap judgment is enough instead of a model call. It is a JSON `AgentWorkflowConfig` that a model can write. It is gated before it runs and promoted only on a measured improvement.
+- The **policy** is how the agent works toward the goal: which step comes next, which tool to call, when to ask a person, and when a cheap judgment is enough instead of a model call. It is a machine a model can write: a TypeScript `setupAgent` machine, or a JSON `AgentWorkflowConfig` when it must change without a deploy. It is gated before it runs and promoted only on a measured improvement.
 
 The environment is code you own and can verify. The policy is something a model can write inside it.
 
 ## The two layers
 
-<!-- viz: two nested boxes: environment (TypeScript, fixed: states, guards, invariant sentinel) asks for one event at each decision point -> policy (JSON config, generated: steps, tools, judgments) returns one event -> environment guards accept it or not; traces flow from the environment to an event log store -->
+<!-- viz: two nested boxes: environment (TypeScript, fixed: states, guards, invariant sentinel) asks for one event at each decision point -> policy (TypeScript or JSON machine, improvable: steps, tools, judgments) returns one event -> environment guards accept it or not; traces flow from the environment to an event log store -->
 
 ```text
-environment (TypeScript, fixed)          policy (JSON, generated)
+environment (TypeScript, fixed)          policy (TS or JSON, improvable)
   states, guards, invariants   ── asks for one event ──▶  steps, tools, judgments
   accepts the event or not ◀── returns one event ───  ends in a final state
 ```
 
-| Layer       | Authored by | Format                     | Changes                         | Checked with                           |
-| ----------- | ----------- | -------------------------- | ------------------------------- | -------------------------------------- |
-| Environment | People      | TypeScript machine         | By code review, rarely          | `canReach`, `explorePaths`, unit tests |
-| Policy      | A model     | JSON `AgentWorkflowConfig` | Between runs, on measured gains | `verifyAgentConfig`, replay, objective |
+| Layer       | Authored by                   | Format                                                         | Changes                         | Checked with                                                                                   |
+| ----------- | ----------------------------- | -------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Environment | People                        | TypeScript machine                                             | By code review, rarely          | `canReach`, `explorePaths`, unit tests                                                         |
+| Policy      | A model, reviewed by a person | TypeScript `setupAgent` machine, or JSON `AgentWorkflowConfig` | Between runs, on measured gains | TS: `tsc`, `lintAgentMachine`, replay, objective; JSON: `verifyAgentConfig`, replay, objective |
 
 - The environment exposes decision points: states where it asks for one event. Its guards decide whether to accept whatever the policy proposes, so a policy cannot take an action the environment forbids.
 - The policy answers at those decision points. It can be a single model call, a ladder of `choice` states over the facts, a judgment, or a request to ask the customer. Its final state outputs the event it proposes. The host runs the policy as the environment's `decide` executor, as the [worked example](../examples/self-improving-refunds) does.
@@ -174,7 +174,7 @@ The split pays off when there is a policy worth learning. Skip it in these cases
 - [Machines as data](machines-as-data.md): the config format and `describeMachine`.
 - [Testing and verification](verify.md): `canReach`, `explorePaths`, and payload variants.
 - [Event log](event-log.md) and [Persistence](persistence.md): stores, threads, and replay.
-- Agent skills: [`skills/generate-machine`](https://github.com/statelyai/agent/blob/main/skills/generate-machine/SKILL.md) authors a policy config, and [`skills/improve-machine`](https://github.com/statelyai/agent/blob/main/skills/improve-machine/SKILL.md) improves one from traces.
+- Agent skills: [`graph-engineering`](https://github.com/statelyai/agent/blob/main/skills/graph-engineering/SKILL.md) routes to [`loop-to-machine`](https://github.com/statelyai/agent/blob/main/skills/loop-to-machine/SKILL.md) converts existing agent code and checks parity with `compareRuns`, or to [`generate-machine`](https://github.com/statelyai/agent/blob/main/skills/generate-machine/SKILL.md), which authors a JSON policy from scratch; then [`add-traces`](https://github.com/statelyai/agent/blob/main/skills/add-traces/SKILL.md) stamps and persists runs, [`add-evals`](https://github.com/statelyai/agent/blob/main/skills/add-evals/SKILL.md) writes evals per state, and [`improve-machine`](https://github.com/statelyai/agent/blob/main/skills/improve-machine/SKILL.md) improves a policy from traces and hands the change to a person as a pull request.
 - [examples/self-improving-refunds](../examples/self-improving-refunds): a refund desk as the environment, JSON playbooks as the policy, an improvement loop, and a benchmark against a raw tool loop.
 - [examples/code-review-loop](../examples/code-review-loop): review gates as the environment, a triage policy improved from traces against hidden tests, run with Claude Code in headless mode.
 - [examples/tic-tac-toe](../examples/tic-tac-toe): a game as the environment, a policy over board features, and a `canReach` proof that it never loses as the bar for promotion.

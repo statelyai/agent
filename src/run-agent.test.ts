@@ -3712,6 +3712,47 @@ describe("runAgent event log", () => {
 
   const types = (entries: readonly AgentLogEntry[]) => entries.map((entry) => entry.event.type);
 
+  test("metadata stamps the init entry, and a resume keeps the first run's stamp", async () => {
+    const machine = makeLoggedMachine();
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: executors(),
+        metadata: { policyVersion: "v3", executionId: "ignored" },
+      }),
+      { input: undefined },
+    );
+
+    expect(first.events[0]!.metadata).toMatchObject({ policyVersion: "v3" });
+    expect(getLogExecutionId(first.events)).not.toBe("ignored");
+
+    const second = await runToQuiescence(
+      createAgentRuntime(machine, { executors: executors(), metadata: { policyVersion: "v4" } }),
+      { events: first.events, snapshot: first.persist(), event: { type: "APPROVE" } as never },
+    );
+    expect(second.events[0]!.metadata).toMatchObject({ policyVersion: "v3" });
+  });
+
+  test("metadata changed after the runtime is created does not reach the log", async () => {
+    const metadata: Record<string, unknown> = { policyVersion: "v3" };
+    const runtime = createAgentRuntime(makeLoggedMachine(), {
+      executors: executors(),
+      metadata: metadata as never,
+    });
+    metadata.policyVersion = new Date();
+    const result = await runToQuiescence(runtime, { input: undefined });
+
+    expect(result.events[0]!.metadata).toMatchObject({ policyVersion: "v3" });
+  });
+
+  test("metadata that is not JSON throws before the run starts", () => {
+    expect(() =>
+      createAgentRuntime(makeLoggedMachine(), {
+        executors: executors(),
+        metadata: { at: new Date() as never },
+      }),
+    ).toThrow(/metadata/);
+  });
+
   test("a fresh run yields a self-contained log of external inputs only", async () => {
     const machine = makeLoggedMachine();
     const streamed: AgentLogEntry[] = [];
@@ -4050,6 +4091,7 @@ describe("runAgent event log", () => {
     const bridged = await runToQuiescence(
       createAgentRuntime(v2, {
         executors: executors(),
+        metadata: { policyVersion: "p2" },
       }),
       {
         events: first.events,
@@ -4067,6 +4109,8 @@ describe("runAgent event log", () => {
       machineVersion: "1",
       logIndex: first.events.length,
     });
+    // The new segment is stamped by the run that opened it.
+    expect(init.metadata?.policyVersion).toBe("p2");
 
     await expect(
       runToQuiescence(

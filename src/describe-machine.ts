@@ -169,9 +169,16 @@ function guardText(guard: unknown): string | undefined {
   return "guarded";
 }
 
-/** True when a transition function's source has a path that returns no transition, so it may not be taken. */
+/**
+ * True when a transition function's source has a path that returns no
+ * transition, so it may not be taken. Matches minified source too: `void 0`
+ * for `undefined`, and a ternary `?` with no spaces (but not `?.` or `??`).
+ * String and template literals are blanked first, so their text never counts.
+ */
 const mayDecline = (code: string) =>
-  /\bundefined\b|\bnull\b|\breturn\s*;|\bif\s*\(|\s\?\s|&&/.test(code);
+  /\bundefined\b|\bnull\b|\bvoid 0\b|\breturn\s*;|\bif\s*\(|(?<!\?)\?(?![.?])|&&/.test(
+    code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""'),
+  );
 
 /**
  * Where a transition written as a function goes: every string literal after a

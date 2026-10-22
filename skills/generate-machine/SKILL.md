@@ -31,7 +31,7 @@ import { describeMachine } from "@statelyai/agent";
 const text = describeMachine(machine); // "Machine <id>", then "Goal: …", states, transitions, events
 ```
 
-Pass `{ snapshot }` to mark the active states with `*`. Concept page: `docs/environment-and-policy.md`.
+Pass `{ snapshot }` to mark the active states with `*`. Concept page: [Environment and policy](https://github.com/statelyai/agent/blob/main/docs/environment-and-policy.md).
 
 ## 1. Read the schema
 
