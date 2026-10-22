@@ -12,7 +12,7 @@ Templates for the `improve-machine` skill: a round checklist, the hypothesis, th
 [ ] Baseline: objective, violations, cost per split for the current version
 [ ] Failures clustered (train only); one cause picked
 [ ] Hypothesis written
-[ ] Candidate: smallest diff, id kept, version bumped, description unchanged
+[ ] Candidate: smallest diff, id kept, version bumped, description unchanged (or, for a new policy: v0 recorded, v1 reproduces current behavior plus one rule)
 [ ] Gates passed: TS (env unchanged, tsc, lint, paths, overfit, evals) or JSON (verifyAgentConfig) (repairs used: _/3)
 [ ] Replayed train, then held-out, k runs each, new thread ids
 [ ] Promotion rule applied; CHANGELOG entry written

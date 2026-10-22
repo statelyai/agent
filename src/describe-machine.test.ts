@@ -86,7 +86,7 @@ describe("describeMachine", () => {
     // Bundlers and tsx print `undefined` as `void 0` and drop the spaces around `?`.
     const always = new Function(
       'return ({ context }) => context.broken?{target:"stopped"}:void 0',
-    )() as (args: { context: { broken: boolean } }) => { target: "stopped" } | undefined;
+    )() as never;
     const machine = setup({}).createMachine({
       context: { broken: false },
       initial: "paying",

@@ -2,9 +2,11 @@
 
 A policy answers one decision of the environment. It is a `setupAgent` machine, so `describeMachine`, traces, and evals work on it, and `improve-machine` can change it one diff at a time.
 
-- **Input:** the facts it reads and the options the environment offered. **Output:** one event, from a final state.
-- **It proposes; the environment disposes.** The environment's guards still judge whatever the policy returns, so the policy needs no copy of the rules to be safe. It may read the exported guard functions to decide well.
-- **Declare `version`** and bump it on every change.
+- **Input:** the facts it reads, the options the environment offered, and the environment's prompt. **Output:** one event, from a final state.
+- **It proposes; the environment disposes.** The environment's guards still judge whatever the policy returns, so the policy needs no copy of the rules to be safe. It may import the environment's schemas, types, constants, and exported guard functions to decide well, and nothing else from it.
+- **Its first version reproduces the current behavior.** When it still asks the model, it passes the environment's `system`, `prompt`, and `metadata.facts` through unchanged, so the model sees what it saw before.
+- **Declare `version`** and bump it on every change. Its `description` is the environment's goal with measurable success criteria; ask the user to confirm it.
+- **Where it lives:** one file next to the environment (`policy.ts`, or `policy/` with its `CHANGELOG.md`), holding the machine, `policyDecider`, and `withPolicy`.
 
 ## What the environment exports
 
@@ -39,14 +41,23 @@ const proposalSchema = z.discriminatedUnion("type", [
 type Proposal = z.infer<typeof proposalSchema>;
 
 const policySetup = setupAgent({
-  input: z.object({ facts: factsSchema, options: z.array(proposalSchema) }),
+  input: z.object({
+    facts: factsSchema,
+    options: z.array(proposalSchema),
+    // The environment's own prompt, passed through so the model sees what it saw before.
+    system: z.string().optional(),
+    prompt: z.string().optional(),
+  }),
   context: z.object({
     facts: factsSchema,
     options: z.array(proposalSchema),
+    system: z.string().optional(),
+    prompt: z.string().optional(),
     chosen: proposalSchema.nullable(),
   }),
   output: proposalSchema,
-  events: deskEvents,
+  // Only the events the policy can propose, not every environment event.
+  events: { REFUND: deskEvents.REFUND, ESCALATE: deskEvents.ESCALATE, CLOSE: deskEvents.CLOSE },
 });
 
 /** The offered options of one type, as `payloads` entries (`type` removed). */
@@ -77,7 +88,8 @@ export const policyMachine = policySetup.createMachine({
         input: ({ context }) => ({
           model: "decider",
           name: "pickResolution",
-          prompt: `Facts: ${JSON.stringify(context.facts)}`,
+          system: context.system,
+          prompt: context.prompt ?? `Facts: ${JSON.stringify(context.facts)}`,
           allowedEvents: ["REFUND", "ESCALATE", "CLOSE"],
           // Only what the environment offered; `[]` withholds a type.
           payloads: {
@@ -85,6 +97,8 @@ export const policyMachine = policySetup.createMachine({
             ESCALATE: payloadsOf(context.options, "ESCALATE"),
             CLOSE: payloadsOf(context.options, "CLOSE"),
           },
+          // Same shape as the environment's request, so the model adapter reads the facts unchanged.
+          metadata: { facts: context.facts },
         }),
         onError: { target: "gaveUp" },
       },
@@ -109,6 +123,8 @@ export function policyDecider(executors: AgentRequestExecutors): AgentDecisionEx
       input: {
         facts: factsSchema.parse(request.metadata?.facts),
         options: (request.options ?? []).map((option) => proposalSchema.parse(option.event)),
+        system: request.system,
+        prompt: request.prompt,
       },
       executors,
       signal: info?.signal,
@@ -139,4 +155,4 @@ export function withPolicy(modelExecutors: AgentRequestExecutors): AgentRequestE
 }
 ```
 
-Pass `withPolicy(modelExecutors)` as the environment's `executors`. Decisions with any other name still reach the model.
+Pass `withPolicy(modelExecutors)` as the environment's `executors` in the runner. That one line is the only runner change a policy needs. Decisions with any other name still reach the model.
