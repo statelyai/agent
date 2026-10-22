@@ -5,7 +5,9 @@ description: Isolate @statelyai/agent behind a workspace package so an app on XS
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-`@statelyai/agent` peers on `xstate@>=6.0.0-alpha.46 <6.0.0`. An app already using XState 4 or 5 for its own machines cannot install both versions into one `node_modules` tree and have each resolve the one it needs. This page isolates the agent in its own workspace package so the app keeps its XState version and never imports XState 6.
+<!-- versions from package.json version and peerDependencies.xstate -->
+
+`@statelyai/agent` peers on exactly `xstate@6.0.0-alpha.69`. An app already using XState 4 or 5 for its own machines cannot install both versions into one `node_modules` tree and have each resolve the one it needs. This page isolates the agent in its own workspace package so the app keeps its XState version and never imports XState 6.
 
 The same page applies to an app with no XState at all that cannot take a prerelease dependency in its main tree.
 
@@ -29,10 +31,10 @@ Put the agent in a workspace package that owns its own dependencies, and give th
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "dependencies": {
-    "@statelyai/agent": "2.0.0-alpha.22",
+    "@statelyai/agent": "2.0.0-alpha.29",
     "@ai-sdk/openai": "^4.0.0",
     "ai": "^7.0.0",
-    "xstate": "6.0.0-alpha.48",
+    "xstate": "6.0.0-alpha.69",
     "zod": "^4.4.3"
   }
 }
