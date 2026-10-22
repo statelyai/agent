@@ -296,58 +296,77 @@ function valueMeaning(description: string | null, value: number): string | null 
  * field, or one small bounded number field, is one candidate per value
  * (ACCUSE with seat 2); an event whose payload is one string field takes the
  * whole text. Events that need more than that are left to their buttons.
+ * A state's payload `choices` are one candidate each, named by their label,
+ * and replace the events they cover: "Refund $240" picks that refund, and no
+ * covered event takes the whole text as its payload.
  */
-export function textCandidates(events: AcceptedEvent[]): TextCandidate[] {
-  return events.flatMap((event): TextCandidate[] => {
-    const action = `"${event.label}"`;
-    if (!event.needsPayload) {
-      return [
-        {
-          event: { type: event.type },
-          description: `Chooses ${action}.`,
-          fill: null,
-          names: [event.label],
-        },
-      ];
-    }
-    const fields = event.jsonSchema ? schemaFields(event.jsonSchema) : null;
-    if (!fields || fields.length !== 1) return [];
-    const [field] = fields;
-    const name = field.label.toLowerCase();
-    if (field.kind.type === "enum") {
-      return field.kind.options.map((option) => ({
-        event: { type: event.type, [field.name]: option },
-        description: `Chooses ${action} with ${name} ${option}.`,
+export function textCandidates(
+  events: AcceptedEvent[],
+  choices: InteractionChoice[] = [],
+): TextCandidate[] {
+  const fromChoices = choices.map((choice): TextCandidate => ({
+    event: choice.event,
+    description: `Chooses "${choice.label}".`,
+    fill: null,
+    names: [choice.label],
+  }));
+  return fromChoices.concat(
+    events.flatMap((event): TextCandidate[] => {
+      if (event.coveredByChoices) return [];
+      return eventCandidates(event);
+    }),
+  );
+}
+
+function eventCandidates(event: AcceptedEvent): TextCandidate[] {
+  const action = `"${event.label}"`;
+  if (!event.needsPayload) {
+    return [
+      {
+        event: { type: event.type },
+        description: `Chooses ${action}.`,
         fill: null,
-        names: [String(option)],
-      }));
-    }
-    if (field.kind.type === "number" || field.kind.type === "json") {
-      const property = (event.jsonSchema?.properties as Record<string, JsonObject> | undefined)?.[
-        field.name
-      ];
-      return (numericChoices(property) ?? []).map((value) => {
-        const meaning = valueMeaning(field.description, value);
-        return {
-          event: { type: event.type, [field.name]: value },
-          description: `Chooses ${action} with ${name} ${value}${meaning ? ` (${meaning})` : ""}.`,
-          fill: null,
-          names: meaning ? [String(value), meaning] : [String(value)],
-        };
-      });
-    }
-    if (field.kind.type === "string") {
-      return [
-        {
-          event: { type: event.type },
-          description: `Is the ${name} to send with ${action}: the reply's own words.`,
-          fill: field.name,
-          names: [],
-        },
-      ];
-    }
-    return [];
-  });
+        names: [event.label],
+      },
+    ];
+  }
+  const fields = event.jsonSchema ? schemaFields(event.jsonSchema) : null;
+  if (!fields || fields.length !== 1) return [];
+  const [field] = fields;
+  const name = field.label.toLowerCase();
+  if (field.kind.type === "enum") {
+    return field.kind.options.map((option) => ({
+      event: { type: event.type, [field.name]: option },
+      description: `Chooses ${action} with ${name} ${option}.`,
+      fill: null,
+      names: [String(option)],
+    }));
+  }
+  if (field.kind.type === "number" || field.kind.type === "json") {
+    const property = (event.jsonSchema?.properties as Record<string, JsonObject> | undefined)?.[
+      field.name
+    ];
+    return (numericChoices(property) ?? []).map((value) => {
+      const meaning = valueMeaning(field.description, value);
+      return {
+        event: { type: event.type, [field.name]: value },
+        description: `Chooses ${action} with ${name} ${value}${meaning ? ` (${meaning})` : ""}.`,
+        fill: null,
+        names: meaning ? [String(value), meaning] : [String(value)],
+      };
+    });
+  }
+  if (field.kind.type === "string") {
+    return [
+      {
+        event: { type: event.type },
+        description: `Is the ${name} to send with ${action}: the reply's own words.`,
+        fill: field.name,
+        names: [],
+      },
+    ];
+  }
+  return [];
 }
 
 /**
@@ -356,7 +375,7 @@ export function textCandidates(events: AcceptedEvent[]): TextCandidate[] {
  * several readings it means, and `none` means no event can carry text.
  */
 export function textRouting(idle: ChatIdle): "direct" | "interpret" | "none" {
-  const candidates = textCandidates(idle.events).length;
+  const candidates = textCandidates(idle.events, idle.choices).length;
   if (idle.textEvent && candidates <= 1) return "direct";
   return candidates > 0 ? "interpret" : "none";
 }

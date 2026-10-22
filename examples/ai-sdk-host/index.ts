@@ -88,6 +88,11 @@ export const models: AiSdkModelMap<"moveChooser" | "turnSummarizer"> = {
 const defaultMoveEvents = ["ATTACK", "DEFEND", "FLEE"] satisfies GameEventType[];
 const lowHpMoveEvents = ["ATTACK", "DEFEND", "HEAL", "FLEE"] satisfies GameEventType[];
 
+/** The legal move set, computed from HP: HEAL is offered only when the player is low. */
+export function legalMoves(playerHp: number) {
+  return playerHp <= 6 ? lowHpMoveEvents : defaultMoveEvents;
+}
+
 // Reusable decision as a shared *input builder* — a `({ context }) => AgentDecisionInput`
 // function, not an actor. Drop it into any state's `agent.decide` invoke to reuse
 // the same move-choosing decision. `allowedEvents` widens to include HEAL only
@@ -99,12 +104,15 @@ export const chooseMoveInput = ({
 }) => ({
   model: "moveChooser" as const,
   system: "You are playing a turn-based game. Choose exactly one legal move.",
+  // The rules the machine enforces, stated so the choice is an informed one.
+  // Stating them changes nothing about what is legal: that is `allowedEvents`.
   prompt: [
     `Player HP: ${context.playerHp}`,
     `Enemy HP: ${context.enemyHp}`,
+    `Rules: ATTACK deals ${PLAYER_DAMAGE}. The goblin then hits back for ${ENEMY_DAMAGE}, or ${ENEMY_DAMAGE_BLOCKED} if you DEFEND. HEAL restores up to 8 HP (max 20). FLEE ends the fight. At 0 HP you lose.`,
     "Pick the best legal move.",
   ].join("\n"),
-  allowedEvents: context.playerHp <= 6 ? lowHpMoveEvents : defaultMoveEvents,
+  allowedEvents: legalMoves(context.playerHp),
 });
 
 export const summarizeTurn = createTextLogic({
@@ -208,7 +216,9 @@ export const gameMachine = gameAgentSetup.createMachine({
     playerHp: input.playerHp,
     enemyHp: input.enemyHp,
     lastSummary: null,
-    log: [`You face a goblin. ${hpLine(input.playerHp, input.enemyHp)}`],
+    log: [
+      `You face a goblin. ${hpLine(input.playerHp, input.enemyHp)} Legal moves: ${legalMoves(input.playerHp).join(", ")}.`,
+    ],
   }),
   initial: "choosingMove",
   states: {

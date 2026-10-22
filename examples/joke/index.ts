@@ -79,10 +79,10 @@ export const jokeSchemas = createAgentSchemas({
   output: z.object({
     status: z.enum(["told", "failed"]),
     joke: z.string().nullable(),
-    firstJoke: z.string().nullable(),
     revisionNotice: z.string().nullable(),
     topic: z.string(),
-    jokes: z.array(z.string()),
+    /** Every joke told before `joke`, first attempt first. */
+    earlierJokes: z.array(z.string()),
     lastRating: z.number().nullable(),
     error: z.string().nullable(),
   }),
@@ -194,14 +194,13 @@ type JokeContext = z.infer<typeof jokeSchemas.context>;
  */
 function describeRun(context: JokeContext) {
   return {
-    firstJoke: context.jokes[0] ?? null,
     revisionNotice:
       context.firstRating === null
         ? null
-        : `First attempt scored ${context.firstRating}/10 (${context.firstExplanation ?? ""}). ` +
+        : `First attempt scored ${context.firstRating}/10 ` +
+          `(${(context.firstExplanation ?? "").replace(/\.$/, "")}). ` +
           "Every run takes one improvement pass before deciding whether to stop.",
     topic: context.topic,
-    jokes: context.jokes,
     lastRating: context.lastRating,
     error: context.error,
   };
@@ -311,6 +310,7 @@ export const jokeMachine = jokeAgentSetup.createMachine({
       output: ({ context }) => ({
         status: "told" as const,
         joke: context.jokes.at(-1) ?? null,
+        earlierJokes: context.jokes.slice(0, -1),
         ...describeRun(context),
       }),
     },
@@ -320,6 +320,8 @@ export const jokeMachine = jokeAgentSetup.createMachine({
       output: ({ context }) => ({
         status: "failed" as const,
         joke: null,
+        // No joke made it through, so every one told is an earlier one.
+        earlierJokes: context.jokes,
         ...describeRun(context),
       }),
     },
@@ -367,7 +369,7 @@ export async function main() {
   }
   if (result.output.revisionNotice) console.log(`\n\n${result.output.revisionNotice}`);
   console.log(
-    `\nTold ${result.output.jokes.length} joke(s) about "${result.output.topic}". ` +
+    `\nTold ${result.output.earlierJokes.length + 1} joke(s) about "${result.output.topic}". ` +
       `Final rating: ${result.output.lastRating}`,
   );
 }

@@ -30,6 +30,8 @@ vi.mock("@ai-sdk/openai", async () => {
   const openai = Object.assign((modelId: string) => genericLanguageModel(modelId), {
     chat: (modelId: string) => genericLanguageModel(modelId),
     responses: (modelId: string) => genericLanguageModel(modelId),
+    // Provider tools stay real: they only describe a tool (deep-research's web search).
+    tools: (await vi.importActual<typeof import("@ai-sdk/openai")>("@ai-sdk/openai")).openai.tools,
   });
   return { openai, createOpenAI: () => openai };
 });
@@ -184,6 +186,35 @@ describe("free text → an offered event (Jev)", () => {
       [{ type: "ACCUSE", player: "Ada" }, null],
       [{ type: "ACCUSE", player: "Bruno" }, null],
       [{ type: "RENAME" }, "name"],
+    ]);
+  });
+
+  test("payload choices are candidates, and replace the events they cover", () => {
+    const covered: AcceptedEvent = {
+      type: "LOOKUP_ORDER",
+      label: "Look up order",
+      style: "default",
+      jsonSchema: { type: "object", properties: { orderId: { type: "string" } } },
+      needsPayload: true,
+      coveredByChoices: true,
+    };
+    const candidates = textCandidates(
+      [covered],
+      [
+        {
+          label: "Look up ORD-1002",
+          style: "default",
+          event: { type: "LOOKUP_ORDER", orderId: "ORD-1002" },
+        },
+      ],
+    );
+    expect(candidates).toEqual([
+      {
+        event: { type: "LOOKUP_ORDER", orderId: "ORD-1002" },
+        description: 'Chooses "Look up ORD-1002".',
+        fill: null,
+        names: ["Look up ORD-1002"],
+      },
     ]);
   });
 
@@ -424,10 +455,15 @@ describe("a text event among other actions", () => {
     });
   });
 
-  test("an unsure pick of another action delivers nothing rather than the text event", async () => {
+  test("an unsure pick of another action is sent as the text event, never as that action", async () => {
     control.pick = '"Approve draft"';
     control.confidence = TEXT_EVENT_CONFIDENCE - 0.1;
-    expect(await interpretIdleText("looks good?", review)).toBeNull();
+    expect(await interpretIdleText("looks good?", review)).toEqual({
+      type: "REJECT",
+      text: "looks good?",
+    });
+    // With no text event to carry it, nothing is delivered.
+    expect(await interpretIdleText("looks good?", { ...review, textEvent: null })).toBeNull();
   });
 });
 
@@ -480,17 +516,13 @@ describe("scenario runs interpret free text too", () => {
     expect(delivered(result)).toEqual({ type: "REQUEST_CHANGES", text: "make it shorter" });
   });
 
-  test("an unclear reading re-settles idle with the available actions", async () => {
+  test("an unsure send becomes a change request, never a send", async () => {
     control.pick = '"Send email"';
     control.confidence = TEXT_EVENT_CONFIDENCE - 0.1;
-    const snapshot = await reviewing();
-    const result = await resumeScenario("email-drafter-v2", snapshot, {
+    const result = await resumeScenario("email-drafter-v2", await reviewing(), {
       kind: "interpret",
       text: "hmm",
     });
-    expect(result.status).toBe("idle");
-    expect(result.trace).toEqual([]);
-    expect(result.idle?.snapshot).toEqual(snapshot);
-    expect(result.response).toContain("“Send email”");
+    expect(delivered(result)).toEqual({ type: "REQUEST_CHANGES", text: "hmm" });
   });
 });

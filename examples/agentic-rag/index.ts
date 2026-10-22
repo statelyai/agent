@@ -68,7 +68,8 @@
  *     earlier version of the question (`isNewQuestion`). Both prompts list what
  *     was already tried, and a rejected choice is fed back for another attempt.
  *   - An empty retrieval skips grading (nothing to grade) and goes straight to
- *     the rewrite.
+ *     the rewrite. Once the budget is spent, a miss skips the rewrite too (no
+ *     search could use it) and returns to `deciding` for the forced ANSWER.
  *   - Every invoke has an `onError` that lands in `failed`.
  *
  * Dual-mode: `runAgenticRagExample(options?)` takes injectable `generateText`
@@ -304,6 +305,15 @@ function renderTrail(context: AgenticRagContext, verified: boolean): string {
 }
 
 /**
+ * Where a search that found nothing relevant goes: a rewrite while the budget
+ * lasts. Once it is spent no search can follow, so a rewrite would be a wasted
+ * model call; the model goes straight back to `deciding`, where it must ANSWER.
+ */
+function afterMiss(context: AgenticRagContext): "rewriting" | "deciding" {
+  return context.retrievals >= MAX_RETRIEVALS ? "deciding" : "rewriting";
+}
+
+/**
  * An answer the model chose after its searches found nothing relevant: the
  * retriever ran, yet no passage backs the answer. It is general knowledge,
  * so it is labeled unverified like the budget-forced answer in `failed`.
@@ -415,7 +425,7 @@ export const agenticRagMachine = agentSetup.createMachine({
             context.rewrittenQuestions.length > 0 ? `(Rewritten from: ${context.question})` : "",
             `Retrievals used: ${context.retrievals} of ${MAX_RETRIEVALS}.`,
             context.retrievals > 0
-              ? "The last retrieval found nothing relevant, so the question was rewritten. " +
+              ? "The last retrieval found nothing relevant. " +
                 `Already searched, all without a relevant result: ${renderTried(context.triedKeywords)}. ` +
                 "A new search must use at least one word none of those used."
               : "",
@@ -470,8 +480,8 @@ export const agenticRagMachine = agentSetup.createMachine({
         input: ({ context }) => ({
           keywords: context.triedKeywords.at(-1) ?? currentQuestion(context),
         }),
-        onDone: ({ output }) => ({
-          target: output.length > 0 ? "grading" : "rewriting",
+        onDone: ({ context, output }) => ({
+          target: output.length > 0 ? "grading" : afterMiss(context),
           context: { documents: output },
         }),
         onError: ({ event }) => ({
@@ -492,7 +502,7 @@ export const agenticRagMachine = agentSetup.createMachine({
           );
           return relevant.length > 0
             ? { target: "generating", context: { documents: relevant } }
-            : { target: "rewriting", context: { documents: [] } };
+            : { target: afterMiss(context), context: { documents: [] } };
         },
         onError: ({ event }) => ({
           target: "failed",

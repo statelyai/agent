@@ -2,15 +2,18 @@
  * Deep research — plan N searches, run researchers concurrently, reflect on
  * coverage, optionally repeat once, then synthesize a cited report.
  *
- * Search is a host-owned request here. A real host can bind Tavily, MCP, native
- * web search, a private corpus, or any other research implementation without
+ * Search is real: each researcher binds OpenAI's provider-executed web search
+ * tool (`openai.tools.webSearch`), so the model reads fetched pages, not its
+ * own recall. Swap the tool for Tavily, MCP or a private corpus without
  * changing the machine.
  *
- * Citations are structural: each researcher returns its finding *with* the
- * specific pages it rests on, the machine folds those into one numbered ledger
- * (dropping search-results and bare-domain URLs), and the finding carries the
- * `[n]` markers into the report. The writer cites the ledger it is handed
- * rather than inventing links.
+ * Citations are checked, not trusted: each researcher returns its finding
+ * *with* the pages it rests on, and the machine keeps a page only if its URL
+ * is one the search actually returned (`searchedUrls` reads the search
+ * results and URL citations off the response messages). Kept pages fold into
+ * one numbered ledger (also dropping search-results and bare-domain URLs), and
+ * the finding carries the `[n]` markers into the report. The writer cites the
+ * ledger it is handed rather than inventing links.
  *
  * Fan-out is dynamic: the planner returns 2-4 queries and `researching` spawns
  * one `research` branch per query off `actors` — the machine's post-
@@ -94,17 +97,76 @@ function isSpecificPage(url: string): boolean {
 }
 
 /**
+ * One spelling per page: no tracking params (`utm_*`), no fragment, no
+ * trailing slash. Search results and the model's citations are compared in
+ * this form, and the ledger shows it. `null` for an unparseable URL.
+ */
+export function normalizeUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (key.startsWith("utm_")) parsed.searchParams.delete(key);
+    }
+    parsed.hash = "";
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+/** The slice of an AI SDK response-message part `searchedUrls` reads. */
+type ResponsePart = {
+  type?: string;
+  toolName?: string;
+  output?: { value?: { sources?: Array<{ url?: unknown }> } };
+  providerOptions?: { openai?: { annotations?: Array<{ type?: string; url?: unknown }> } };
+};
+
+/**
+ * Every page the web search returned in one researcher call, read off its
+ * response messages: the `web_search` tool result's `sources`, plus the
+ * `url_citation` annotations OpenAI attaches to the answer text. Normalized.
+ */
+export function searchedUrls(messages: readonly unknown[]): Set<string> {
+  const urls = new Set<string>();
+  const add = (url: unknown) => {
+    const normalized = typeof url === "string" ? normalizeUrl(url) : null;
+    if (normalized) urls.add(normalized);
+  };
+  for (const message of messages as Array<{ content?: unknown }>) {
+    if (!Array.isArray(message?.content)) continue;
+    for (const part of message.content as ResponsePart[]) {
+      if (part?.type === "tool-result" && part.toolName === "web_search") {
+        for (const source of part.output?.value?.sources ?? []) add(source?.url);
+      }
+      if (part?.type === "text") {
+        for (const annotation of part.providerOptions?.openai?.annotations ?? []) {
+          if (annotation?.type === "url_citation") add(annotation.url);
+        }
+      }
+    }
+  }
+  return urls;
+}
+
+/**
  * Fold a branch's sources into the run-wide ledger, deduped by URL, and return
- * the `[n]` markers for that branch. Numbers only ever get appended, so a
- * marker handed to a finding stays valid for the rest of the run.
+ * the `[n]` markers for that branch. Only pages in `searched` (what the search
+ * returned) are kept. Numbers only ever get appended, so a marker handed to a
+ * finding stays valid for the rest of the run.
  */
 function mergeSources(
   existing: Source[],
   incoming: Source[],
+  searched: Set<string>,
 ): { sources: Source[]; markers: string } {
   const sources = [...existing];
   const numbers: number[] = [];
-  for (const source of incoming.filter((candidate) => isSpecificPage(candidate.url))) {
+  for (const candidate of incoming) {
+    const url = normalizeUrl(candidate.url);
+    if (!url || !searched.has(url) || !isSpecificPage(url)) continue;
+    const source = { ...candidate, url };
     let index = sources.findIndex((known) => known.url === source.url);
     if (index === -1) index = sources.push(source) - 1;
     numbers.push(index + 1);
@@ -157,6 +219,31 @@ export function createReflect(model: Experimental_DecisionModel = judgeModel) {
   });
 }
 
+/**
+ * The round's findings keyed by the query each branch ran, not by branch id:
+ * a reader sees what was searched for. A repeated query keeps its position.
+ */
+function findingsByQuery(context: {
+  queries: string[];
+  findings: Record<string, string>;
+}): Record<string, string> {
+  const byQuery: Record<string, string> = {};
+  for (const [id, finding] of Object.entries(context.findings)) {
+    const index = Number(id.slice(id.lastIndexOf("-") + 1));
+    const query = context.queries[index] ?? id;
+    byQuery[query in byQuery ? `${query} (${index + 1})` : query] = finding;
+  }
+  return byQuery;
+}
+
+/** Which rule sent the run to the writer: Jev's sufficiency judgment or the round budget. */
+function stopReason(context: { sufficiency: number | null; round: number }): string {
+  const p = (context.sufficiency ?? 0).toFixed(2);
+  return (context.sufficiency ?? 0) >= SUFFICIENCY_THRESHOLD
+    ? `Judged sufficient (${p} ≥ ${SUFFICIENCY_THRESHOLD})`
+    : `Round budget of ${MAX_ROUNDS} spent (${p} < ${SUFFICIENCY_THRESHOLD})`;
+}
+
 /** What a follow-up round's planner is told: the findings judged incomplete. */
 function renderFeedback(findings: string[]): string {
   return [
@@ -203,11 +290,14 @@ export const research = createTextLogic({
   },
   name: "research",
   model: "researcher",
+  // Provider-executed: OpenAI runs the search inside this one call.
+  tools: { web_search: openai.tools.webSearch({ searchContextSize: "low" }) },
   system:
-    "Research the query using the host's available search tools. Return a concise finding " +
-    "plus the specific pages it came from: each source is the document carrying the claim " +
-    "(article, paper, docs page) with its title, its page URL, and the one line from it " +
-    "the finding rests on. Never cite a search-results page or a bare homepage.",
+    "Search the web for the query, then return a concise finding (plain text, no links) " +
+    "plus the specific pages it came from: each source is a page the search returned " +
+    "(article, paper, docs page) with its title, its exact URL, and the one line from it " +
+    "the finding rests on. Cite only pages the search returned; never a search-results " +
+    "page, a bare homepage, or a URL from memory.",
   prompt: ({ input }) => `Question: ${input.question}\nQuery: ${input.query}`,
 });
 
@@ -219,6 +309,9 @@ const setup = setupAgent({
   output: z.object({
     report: z.string(),
     rounds: z.number(),
+    /** Why the writer ran; empty when the run failed before reflecting. */
+    stoppedBy: z.string(),
+    /** The last round's findings, keyed by the query that produced each. */
     findings: z.record(z.string(), z.string()),
     /** Rendered from `context.sources` at the end, never stored in context. */
     sourceLedger: z.string(),
@@ -281,7 +374,8 @@ export const deepResearchMachine = setup.createMachine({
   output: ({ context }) => ({
     report: context.report ?? "",
     rounds: context.round,
-    findings: context.findings,
+    stoppedBy: context.report === null ? "" : stopReason(context),
+    findings: findingsByQuery(context),
     sourceLedger: renderLedger(context.sources),
     failedBranches: context.failedBranches,
     failure: context.failure,
@@ -334,10 +428,14 @@ export const deepResearchMachine = setup.createMachine({
           if (!actorId.startsWith(BRANCH_PREFIX)) {
             return undefined;
           }
-          // The branch's sources join the run-wide ledger, and its finding
-          // carries the `[n]` markers back, so the citation survives the
-          // reduce instead of being re-guessed by the writer.
-          const { sources, markers } = mergeSources(context.sources, finding.sources);
+          // The branch's sources join the run-wide ledger only if the search
+          // returned them, and its finding carries the `[n]` markers back, so
+          // the citation survives the reduce instead of being re-guessed.
+          const { sources, markers } = mergeSources(
+            context.sources,
+            finding.sources,
+            searchedUrls(output.messages),
+          );
           const settled = context.settled + 1;
           const next = {
             settled,

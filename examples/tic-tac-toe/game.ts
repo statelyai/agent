@@ -89,7 +89,10 @@ const cellSchema = z
   .int()
   .min(0)
   .max(8)
-  .describe("A cell index, row by row: 0 1 2 / 3 4 5 / 6 7 8");
+  // Each value's name, so typed text ("take the center") can pick a cell.
+  .describe(
+    `A cell index, row by row: ${CELL_NAMES.map((name, cell) => `${cell}=${name}`).join(", ")}`,
+  );
 
 const contextSchema = z.object({
   board: z.array(markSchema.nullable()).length(9),

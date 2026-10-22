@@ -82,8 +82,9 @@ describe("ticket-triage", () => {
     expect(jev.calls[0]!.state).toEqual({ ticket: TICKET });
     expect(prompts[0]).toContain("SLA: first response due in 2h");
     expect(Object.keys(result.output)[0]).toBe("summary");
-    expect(result.output.summary).toContain("refund");
     expect(result.output.summary).toContain("SLA");
+    // The reply is its own field, not repeated in the summary.
+    expect(result.output.summary).not.toContain(REPLY);
     expect(result.output.category).toBe("billing");
     expect(result.output.sentiment).toBe("negative");
     expect(result.output.reply).toBe(REPLY);
@@ -121,7 +122,8 @@ describe("ticket-triage", () => {
       }),
       {
         snapshot: first.persist(),
-        event: { type: "RECLASSIFY", category: "Technical" },
+        // Typed by a person, unparsed: the machine normalizes the case.
+        event: { type: "RECLASSIFY", category: "Technical" as "technical" },
       },
     );
 
@@ -154,7 +156,8 @@ describe("ticket-triage", () => {
       }),
       {
         snapshot: first.persist(),
-        event: { type: "RECLASSIFY", category: "urgent" },
+        // A host that skips parsing the event against its schema.
+        event: { type: "RECLASSIFY", category: "urgent" as "other" },
       },
     );
 

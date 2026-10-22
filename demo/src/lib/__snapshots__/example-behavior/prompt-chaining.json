@@ -25,9 +25,9 @@
       "response": "mock joke\n\n- Stage: generated\n- Regenerations: 2\n\n**Trail**\n\n- Stage reached: generated.\n- Regenerations: 2 of 2.\n- No punchline after 2 regenerations; kept the last joke."
     }
   ],
-  "time zones": [
+  "deadpan one-liners that end in a flat period": [
     {
-      "sent": "start {\"topic\":\"time zones\"}",
+      "sent": "start {\"topic\":\"deadpan one-liners that end in a flat period\"}",
       "status": "done",
       "trace": [
         "transition @xstate.init -> \"generating\"",

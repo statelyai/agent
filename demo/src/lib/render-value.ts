@@ -544,8 +544,8 @@ function cutAtLine(markdown: string, max: number): string {
  * just sent (`omitValues`), text the waiting box's `prompt` already says, and
  * a string identical to one shown above it. A conversation log (message
  * array or "User: …" lines) renders only its newest assistant reply — the
- * reply a chat loop keeps in `messages` instead of a dedicated field — and
- * only when no other readable text is shown, since that text is the reply.
+ * reply a chat loop keeps in `messages` instead of a dedicated field — first,
+ * unless another field already holds that text.
  * Null when the run changed nothing presentable — the idle prompt alone is
  * then the whole story.
  */
@@ -562,11 +562,14 @@ export function renderIdleWork(
   changedKeys = changedKeys.map(moneyKey);
   if (!isRecord(context)) return null;
   const omitted = new Set(omitValues.map((value) => value.trim()).filter(Boolean));
-  const promptText = prompt?.trim() ?? "";
+  // The prompt arrives with its whitespace collapsed, so compare collapsed.
+  const collapse = (text: string) => text.replace(/\s+/g, " ").trim();
+  const promptText = collapse(prompt ?? "");
   const alreadyShown = (text: string) =>
     omitted.has(text) ||
-    text === promptText ||
-    (isProse(text) && promptText.includes(text)) ||
+    collapse(text) === promptText ||
+    // Prose, or an id long enough not to match by accident ("WELCOME-emp-001").
+    ((isProse(text) || text.length >= 8) && promptText.includes(collapse(text))) ||
     shownTexts.includes(text);
 
   const strings: Array<{ key: string; body: string }> = [];
@@ -599,10 +602,18 @@ export function renderIdleWork(
       shownTexts.push(...textLeaves(value));
     }
   }
-  // A log's reply only when it is the only readable text, and not a repeat.
+  // A log's newest reply, unless another field already says it. It leads: a
+  // turn that also changed other prose (a compaction summary) still answered.
   for (const { key, text } of replies) {
-    if (shownTexts.some(isProse) || shownTexts.some((shown) => shown.includes(text))) continue;
-    if (!alreadyShown(text)) pushString(key, text);
+    const repeats = (shown: string) =>
+      shown.includes(text) || (isProse(shown) && text.includes(shown));
+    if (shownTexts.some(repeats)) continue;
+    if (alreadyShown(text)) continue;
+    strings.unshift({
+      key,
+      body: prose(text.length > MAX_STRING ? `${text.slice(0, MAX_STRING)}…` : text),
+    });
+    shownTexts.push(text);
   }
 
   const sections = [...strings, ...objects].slice(0, MAX_SECTIONS);

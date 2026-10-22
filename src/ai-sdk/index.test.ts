@@ -117,6 +117,17 @@ describe("toAiSdkTools", () => {
     expect((tools.calculate as Record<string, unknown>).customExtra).toEqual({ keep: true });
   });
 
+  test("a provider-defined tool passes through with its id (openai.tools.webSearch())", () => {
+    const webSearch = {
+      type: "provider",
+      id: "openai.web_search",
+      args: {},
+      inputSchema: () => ({}),
+    };
+    const tools = toAiSdkTools({ web_search: webSearch as never });
+    expect(tools.web_search).toBe(webSearch);
+  });
+
   test("a native AI SDK tool assigns into an AgentTools map with no cast (type test)", () => {
     // Compile-time proof of §2: a real `ai` `tool({...})` with a concrete
     // inputSchema and an (input, options) execute is structurally an AgentTool.

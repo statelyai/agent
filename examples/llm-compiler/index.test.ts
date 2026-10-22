@@ -6,6 +6,7 @@ import { createMockModelExecutors } from "../mock-model.js";
 import {
   MAX_REPLANS,
   MAX_TASKS,
+  SAMPLE_FACTS,
   dependenciesOf,
   evaluateArithmetic,
   llmCompilerMachine,
@@ -350,8 +351,18 @@ test("the math tool is a real evaluator, not eval", () => {
 });
 
 test("starters behave as their labels advertise", async () => {
-  const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
-    .starters as string[];
+  const raw = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
+    .starters as Array<string | { label: string; input: { question: string } }>;
+  const starters = raw.filter((starter): starter is string => typeof starter === "string");
+  // The one labeled starter asks about countries the sample facts lack, so
+  // only a replan (and then the budget) can end it.
+  const offTable = raw.filter((starter) => typeof starter !== "string");
+  expect(offTable.map((starter) => starter.input.question)).toEqual([
+    "What is Brazil's population divided by Canada's?",
+  ]);
+  for (const country of ["Brazil", "Canada"]) {
+    expect(SAMPLE_FACTS.some((fact) => fact.subject === country)).toBe(false);
+  }
   // The plan a competent planner writes for each starter: two independent
   // lookups, then one arithmetic step over both.
   const plans: Record<string, [string, string, string]> = {

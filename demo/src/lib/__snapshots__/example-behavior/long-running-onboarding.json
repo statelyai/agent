@@ -7,7 +7,7 @@
         "transition @xstate.init -> \"sendingWelcomePacket\"",
         "transition xstate.done.actor -> \"waitingForSignedDocs\""
       ],
-      "response": "WELCOME-emp-001",
+      "response": "",
       "idle": {
         "prompt": "Waiting on Jordan Rivera's signed onboarding documents (packet WELCOME-emp-001). Mark them signed, send them back, or escalate.",
         "events": [

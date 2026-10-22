@@ -42,7 +42,6 @@ test("research supervisor routes SEARCH → SCRAPE → FINISH, looping workers",
   expect(workerCalls).toEqual(["search", "scrape", "outline", "write"]);
   expect(researchDecisions).toBe(3); // SEARCH, SCRAPE, FINISH
   expect(output.details.research).toContain("approval gates");
-  expect(output.details.report).toContain("inspectable");
 
   // The team tree leads: one line per team, indented one line per worker, and
   // the coordinator's verdict.
@@ -57,8 +56,10 @@ test("research supervisor routes SEARCH → SCRAPE → FINISH, looping workers",
     "  review. done. publish",
   ]);
   // The report sits under the tree, so the tree string always leads.
-  expect(output.teamReport).toContain("Report\nExplicit workflow state");
-  expect(output.teamReport.length).toBeGreaterThan(output.details.report.length);
+  expect(output.teamReport).toContain(
+    "Report\nExplicit workflow state makes reliability behavior inspectable.",
+  );
+  expect(output.details).toEqual({ research: expect.stringContaining("approval gates") });
 });
 
 test("worker-step budget bounds the research loop", async () => {
@@ -82,7 +83,7 @@ test("worker-step budget bounds the research loop", async () => {
   expect(workerCalls.filter((name) => name === "search")).toHaveLength(2);
   expect(workerCalls).not.toContain("scrape");
   // The coordinator still published a report from what was gathered.
-  expect(output.details.report).toContain("inspectable");
+  expect(output.teamReport).toMatch(/Report\n.*inspectable/);
 });
 
 test("coordinator supervisor sends one bounded revision round back to research", async () => {

@@ -81,3 +81,17 @@ test("executeQuery is a genuine aggregate over the in-memory table", () => {
   assert.equal(executeQuery({ operation: "count", column: "amount", category: "books" }), 2);
   assert.equal(executeQuery({ operation: "average", column: "amount", category: "books" }), 21);
 });
+
+test('the plan names only categories the table holds: a near-miss like "book" never runs', async () => {
+  const { output } = await runSqlAgentExample("How many book orders are there?", {
+    executors: {
+      generateText: async (request) =>
+        request.name === "planQuery"
+          ? { result: { operation: "count", column: "amount", category: "book" } }
+          : generateText(request),
+    },
+  });
+  // Before the enum, this plan ran and answered "There are 0 book orders."
+  assert.equal(output.status, "failed");
+  assert.equal(output.result, null);
+});

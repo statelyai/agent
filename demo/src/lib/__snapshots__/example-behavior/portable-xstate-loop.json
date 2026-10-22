@@ -9,7 +9,7 @@
       ],
       "response": "Mock reply to: Draft a release note about portable agent machines.",
       "idle": {
-        "prompt": "Approve the drafted release notes to finish.",
+        "prompt": "Approve the drafted release note to finish.",
         "events": [
           "APPROVE"
         ],

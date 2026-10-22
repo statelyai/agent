@@ -4,11 +4,11 @@
   "kind": "pattern",
   "comparison": {
     "targets": ["output validation", "repair loop"],
-    "purpose": "Asks for three candidate machine configs in one request, parses each with the host's own validator, and sends the first rejection back to the model as a repair prompt — capped at two rounds by an explicit choice state."
+    "purpose": "Fans out three concurrent requests for a machine config and checks each with the host's own validator (every target declared, every state reachable, no nested shapes). Only when all three are rejected does the last rejection go back to the model as a repair prompt, and a choice state caps repairs at MAX_REPAIRS (two) before the run ends in failed."
   },
   "starters": [
     "a turnstile that locks and unlocks",
     "a checkout that can be paid, shipped, or refunded",
-    "a file upload with retry and cancel"
+    "a media player whose playing state has nested buffering and streaming substates"
   ]
 }

@@ -18,6 +18,12 @@
       "input": {
         "parcel": "a birthday cake"
       }
+    },
+    {
+      "label": "Ice cream that melts after 3 legs",
+      "input": {
+        "parcel": "a tub of ice cream that melts if the trip takes more than 3 legs"
+      }
     }
   ]
 }

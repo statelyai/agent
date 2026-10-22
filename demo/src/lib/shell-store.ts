@@ -20,6 +20,8 @@ type ShellContext = {
   pendingIdle: ChatIdle | null;
   /** Snapshot to resume from while the machine idles awaiting human input. */
   idleSnapshot: Json | null;
+  /** The wait the in-flight resume left, restored if that resume fails. */
+  resumedIdle: ChatIdle | null;
   /**
    * Run generation. Bumped on every reset/selection change; async settle events
    * carry the epoch they started under and are dropped on mismatch.
@@ -78,6 +80,7 @@ function resetRunState(context: ShellContext): ShellContext {
     turns: [],
     pendingIdle: null,
     idleSnapshot: null,
+    resumedIdle: null,
     epoch: context.epoch + 1,
   };
 }
@@ -94,6 +97,7 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
       turns: [],
       pendingIdle: null,
       idleSnapshot: null,
+      resumedIdle: null,
       epoch: 0,
       nextTurnId: 1,
     },
@@ -140,6 +144,7 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
         ],
         // Sending anything consumes the pending idle affordances.
         pendingIdle: event.status === "loading" ? null : context.pendingIdle,
+        resumedIdle: event.status === "loading" ? context.pendingIdle : context.resumedIdle,
       }),
       turnSettled: (context, event) => {
         if (event.epoch !== context.epoch) return context;
@@ -162,8 +167,11 @@ export function createShellStore(initialSelection: Selection, initialTheme: Them
       },
       turnFailed: (context, event) => {
         if (event.epoch !== context.epoch) return context;
+        // A failed or cancelled resume delivered nothing: the machine is still
+        // at the wait it was resumed from, so its buttons come back for a retry.
         return {
           ...context,
+          pendingIdle: context.idleSnapshot ? context.resumedIdle : null,
           turns: context.turns.map((turn) =>
             turn.id === event.id
               ? event.cancelled

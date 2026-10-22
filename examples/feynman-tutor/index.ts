@@ -20,9 +20,10 @@
  *
  *   planningCheckpoints → checkingPlan ─┬─ failed (no checkpoints)
  *                                       └─ presenting → awaitingExplanation
- *   awaitingExplanation ─EXPLAIN→ verifying → grading ─┬─ (pass) advancing
- *                      │                              ├─ (budget left) teaching → awaitingExplanation
- *                      │                              └─ (budget spent) advancing   [checkpoint failed]
+ *   awaitingExplanation ─EXPLAIN→ (first try) distilling ─┐
+ *                      │         (retry) ──────────────────┴→ verifying → grading ─┬─ (pass) advancing
+ *                      │                                    ├─ (budget left) teaching → awaitingExplanation
+ *                      │                                    └─ (budget spent) advancing   [checkpoint failed]
  *                      └─SKIP→ advancing              [checkpoint skipped]
  *   advancing ─┬─ presenting (next checkpoint)
  *              └─ done
@@ -33,6 +34,8 @@
  *   - context_builder      → `presenting` (request `introduceCheckpoint`)
  *   - user_answer interrupt→ `awaitingExplanation` (`meta.interaction`,
  *                            `textEvent: "EXPLAIN"`, plus a SKIP button)
+ *   - (answer key)         → `distilling` (request `distillKeyIdea`), once per
+ *                            checkpoint, after the learner's first explanation
  *   - verify_answer        → `verifying` (Jev judgment `verifyExplanation`: one
  *                            `score` question — see note below)
  *   - understanding check  → `grading` (a `choice` state on PASS_SCORE and MAX_RETEACHES)
@@ -52,13 +55,19 @@
  *     explanation }` on five concrete levels (`UNDERSTANDING_LEVELS`), mapped
  *     to 0-100 in code as `score / (levels - 1) * 100`. The feedback the
  *     learner sees is the matched level's description; the text model is kept
- *     for what is generative: the plan, the intro, and the re-teach, which
+ *     for what is generative: the plan, the intro, the answer key, and the
+ *     re-teach, which
  *     reads the learner's own attempt to address the specific gap.
  *   - The learner can SKIP a checkpoint — a real event, recorded in the output.
  *   - The number of checkpoints is capped (MAX_CHECKPOINTS) whatever the model
  *     returns, so a session has a known worst-case length.
  *   - Chiron's web search for checkpoint context is replaced by the model's
  *     own introduction; there is no retrieval step.
+ *   - The answer key stays hidden until the learner has tried. The plan holds
+ *     only checkpoint titles; the key idea the grader scores against is
+ *     distilled from the intro the learner was shown, after their first
+ *     explanation arrives. Nothing in context (which a host may render) gives
+ *     the answer away before they explain.
  *
  * Stand-ins: none. Every node is a model call or a Jev judgment; there is no
  * tool or search.
@@ -102,7 +111,8 @@ export const PASS_SCORE = 70;
 /** Re-teaches allowed per checkpoint before it is recorded as failed. */
 export const MAX_RETEACHES = 2;
 
-const checkpointSchema = z.object({ title: z.string(), keyIdea: z.string() });
+/** Titles only: a key idea in the plan would show the learner every answer up front. */
+const checkpointSchema = z.object({ title: z.string() });
 
 /** How well an explanation captures the key idea, lowest to highest. */
 export const UNDERSTANDING_LEVELS = [
@@ -167,6 +177,11 @@ const feynmanContextSchema = z.object({
   topic: z.string(),
   checkpoints: z.array(checkpointSchema),
   checkpointIndex: z.number(),
+  /**
+   * The current checkpoint's key idea, the grader's answer key. Null until the
+   * learner first explains, so it never shows before they try.
+   */
+  keyIdea: z.string().nullable(),
   /** Re-teaches spent on the current checkpoint. */
   reteaches: z.number(),
   explanation: z.string(),
@@ -186,7 +201,7 @@ export function stripNumbering(title: string): string {
 }
 
 function currentCheckpoint(context: FeynmanContext) {
-  return context.checkpoints[context.checkpointIndex] ?? { title: "", keyIdea: "" };
+  return context.checkpoints[context.checkpointIndex] ?? { title: "" };
 }
 
 /** Records the current checkpoint's outcome and moves the index on. */
@@ -202,6 +217,7 @@ function recordAndAdvance(context: FeynmanContext, status: CheckpointResult["sta
       },
     ],
     checkpointIndex: context.checkpointIndex + 1,
+    keyIdea: null,
     reteaches: 0,
     lastScore: null,
     lastFeedback: "",
@@ -266,13 +282,13 @@ const agentSetup = setupAgent({
       system:
         "You design Feynman-technique study sessions. Split the topic into a short, " +
         "ordered list of checkpoints, simplest first. Each has a short, unnumbered title " +
-        "and the one key idea a learner must be able to explain in plain words.",
+        "naming one idea a learner could explain back in plain words.",
       prompt: ({ input }) => `Topic: ${input.topic}\nAt most ${input.max} checkpoints.`,
     },
     // context_builder: set the scene for one checkpoint.
     introduceCheckpoint: {
       schemas: {
-        input: z.object({ topic: z.string(), title: z.string(), keyIdea: z.string() }),
+        input: z.object({ topic: z.string(), title: z.string() }),
         output: z.object({ context: z.string() }),
       },
       model: "tutor",
@@ -283,8 +299,20 @@ const agentSetup = setupAgent({
         'to the learner as "you": why it matters and what you want them to understand. ' +
         'Never refer to "the learner" or "the student" in the third person. ' +
         "Do not quiz; they will explain it back to you next.",
-      prompt: ({ input }) =>
-        `Topic: ${input.topic}\nCheckpoint: ${input.title}\nKey idea: ${input.keyIdea}`,
+      prompt: ({ input }) => `Topic: ${input.topic}\nCheckpoint: ${input.title}`,
+    },
+    // The answer key: the one idea the intro taught, written down only once
+    // the learner has explained, so it is never on screen before they try.
+    distillKeyIdea: {
+      schemas: {
+        input: z.object({ title: z.string(), lesson: z.string() }),
+        output: z.object({ keyIdea: z.string() }),
+      },
+      model: "tutor",
+      system:
+        "State, in one plain sentence, the key idea this lesson teaches: the thing a " +
+        "learner must be able to explain back to show they understood it.",
+      prompt: ({ input }) => `Checkpoint: ${input.title}\n\nLesson:\n${input.lesson}`,
     },
     // teach_concept: a simpler, analogy-first re-explanation.
     explainSimply: {
@@ -321,6 +349,7 @@ export const feynmanTutorMachine = agentSetup.createMachine({
     topic: input.topic,
     checkpoints: [],
     checkpointIndex: 0,
+    keyIdea: null,
     reteaches: 0,
     explanation: "",
     lastScore: null,
@@ -380,7 +409,9 @@ export const feynmanTutorMachine = agentSetup.createMachine({
       tags: ["waiting"],
       meta: {
         interaction: {
-          label: "{notice}\n\nExplain this back in your own words.",
+          // The notice (intro or re-teach) is context, shown as the run's
+          // work; the label is only the ask, so a host never prints it twice.
+          label: "Explain this back in your own words.",
           textEvent: "EXPLAIN",
           events: {
             EXPLAIN: { label: "Submit explanation", style: "primary" },
@@ -389,10 +420,34 @@ export const feynmanTutorMachine = agentSetup.createMachine({
         },
       },
       on: {
-        EXPLAIN: ({ event }) => ({ target: "verifying", context: { explanation: event.text } }),
+        // The first explanation of a checkpoint goes through `distilling` to
+        // write down its answer key; a retry already has one.
+        EXPLAIN: ({ context, event }) => ({
+          target: context.keyIdea === null ? "distilling" : "verifying",
+          context: { explanation: event.text },
+        }),
         SKIP: ({ context }) => ({
           target: "advancing",
           context: recordAndAdvance(context, "skipped"),
+        }),
+      },
+    },
+    // The notice still holds the intro the learner just read: no re-teach
+    // has replaced it before the first explanation.
+    distilling: {
+      invoke: {
+        src: "distillKeyIdea",
+        input: ({ context }) => ({
+          title: currentCheckpoint(context).title,
+          lesson: context.notice,
+        }),
+        onDone: ({ output }) => ({
+          target: "verifying",
+          context: { keyIdea: output.result.keyIdea },
+        }),
+        onError: ({ event }) => ({
+          target: "failed",
+          context: { failure: `distillKeyIdea failed: ${String(event.error)}` },
         }),
       },
     },
@@ -401,6 +456,7 @@ export const feynmanTutorMachine = agentSetup.createMachine({
         src: "verifyExplanation",
         input: ({ context }) => ({
           ...currentCheckpoint(context),
+          keyIdea: context.keyIdea ?? "",
           explanation: context.explanation,
         }),
         onDone: ({ output }) => ({
@@ -430,6 +486,7 @@ export const feynmanTutorMachine = agentSetup.createMachine({
         src: "explainSimply",
         input: ({ context }) => ({
           ...currentCheckpoint(context),
+          keyIdea: context.keyIdea ?? "",
           explanation: context.explanation,
           feedback: context.lastFeedback,
         }),
@@ -437,9 +494,11 @@ export const feynmanTutorMachine = agentSetup.createMachine({
           target: "awaitingExplanation",
           context: {
             reteaches: context.reteaches + 1,
+            // The grader's feedback is its own field (`lastFeedback`), so it
+            // is not repeated here.
             notice:
-              `Not yet (score ${context.lastScore ?? 0}/100, need ${PASS_SCORE}): ` +
-              `${context.lastFeedback}\n\n${output.result.explanation}`,
+              `Not yet (score ${context.lastScore ?? 0}/100, need ${PASS_SCORE}).\n\n` +
+              output.result.explanation,
           },
         }),
         onError: ({ event }) => ({
@@ -529,9 +588,14 @@ export async function runFeynmanTutorExample(
     },
   );
   while (result.status === "idle") {
-    const label =
-      getInteraction(result.snapshot, { preserveWhitespace: true })?.label ??
-      result.snapshot.context.notice;
+    const { notice, lastFeedback } = result.snapshot.context;
+    const label = [
+      notice,
+      lastFeedback && `Feedback: ${lastFeedback}`,
+      getInteraction(result.snapshot)?.label,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     onPrompt?.(label);
     const event = queued.shift() ?? toHumanEvent(await promptLine(`${label}\n(or "skip")\n> `));
     result = await runToQuiescence(

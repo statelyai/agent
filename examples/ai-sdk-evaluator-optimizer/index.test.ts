@@ -67,8 +67,6 @@ test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {
       preservesTone: true,
       preservesNuance: true,
       culturallyAccurate: true,
-      specificIssues: [],
-      improvementSuggestions: [],
     },
   });
   assert.equal(output?.qualityScore, 8);
@@ -78,6 +76,7 @@ test("AI SDK evaluator-optimizer maps to an explicit machine", async () => {
   assert.ok(output?.summary.includes("**First draft**"));
   assert.ok(output?.summary.includes("Score 8/10"));
   assert.ok(output?.summary.includes("Revised to fix: missing nuance"));
+  assert.ok(output?.summary.includes(`Passed: ${PASSING_QUALITY}/10 or better`));
   // Two evaluate passes (iterations 1 then 2) with one improve step between.
   assert.deepEqual(evaluated, [1, 2]);
   assert.deepEqual(improved, ["Spanish:Hello friend improved"]);
@@ -164,4 +163,39 @@ test("the grade asks Jev one score and three boolean questions in one call; thre
   assert.deepEqual(requests, ["translateText", "critiqueTranslation", "improveTranslation"]);
   assert.equal(result.status === "done" ? result.output.qualityScore : 0, 10);
   assert.equal(result.status === "done" ? result.output.iterations : 0, 2);
+});
+
+test("a draft that never passes stops at the grade budget and says so", async () => {
+  const jev = createMockJudge({
+    quality: 1,
+    preservesTone: true,
+    preservesNuance: false,
+    culturallyAccurate: true,
+  });
+  const executors = createMockModelExecutors({
+    text: {
+      translateText: ["Es regnet Katzen und Hunde."],
+      critiqueTranslation: [{ specificIssues: ["calque"], improvementSuggestions: ["use idiom"] }],
+    },
+  });
+  const result = await runToQuiescence(
+    createAgentRuntime(aiSdkEvaluatorOptimizerMachine, {
+      executors,
+      actors: { gradeTranslation: createGradeTranslation(jev.model) },
+    }),
+    {
+      input: { text: "It is raining cats and dogs.", targetLanguage: "German", maxIterations: 1 },
+    },
+  );
+
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  // One grade, one critique, no revision: the budget, not the critic, ended it.
+  assert.equal(jev.calls.length, 1);
+  assert.deepEqual(
+    executors.calls.map((call) => call.name),
+    ["translateText", "critiqueTranslation"],
+  );
+  assert.ok(result.output.summary.includes("Score 3/10 — calque"));
+  assert.ok(result.output.summary.includes("Did not pass. Stopped at the budget of 1 grade;"));
 });

@@ -68,7 +68,13 @@ export function toAiSdkTools(tools: AgentTools) {
     // the SDK owns its typing/validation/execute(input, options), and extras
     // ride along untouched. Only descriptors with no readable schema fall
     // through to the conversion path below.
-    if (isStandardSchema(descriptor.inputSchema)) {
+    // Provider-defined tools (`openai.tools.webSearch()`) run on the
+    // provider, identified by `type: "provider"` and `id`; their `inputSchema`
+    // is a lazy function. Rebuilding one drops the id, so pass it as-is.
+    if (
+      isStandardSchema(descriptor.inputSchema) ||
+      (descriptor as { type?: unknown }).type === "provider"
+    ) {
       entries.push([name, descriptor as unknown as Tool<unknown, unknown>]);
       continue;
     }

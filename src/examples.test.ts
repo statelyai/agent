@@ -249,8 +249,7 @@ describe("curated XState setup examples", () => {
     expect(result.status === "done" && result.output).toMatchObject({
       topic: "state machines",
       joke: "joke 2 about state machines",
-      firstJoke: "joke 1 about state machines",
-      jokes: ["joke 1 about state machines", "joke 2 about state machines"],
+      earlierJokes: ["joke 1 about state machines"],
       lastRating: 10,
     });
     // The revision notice carries the score the first attempt got.

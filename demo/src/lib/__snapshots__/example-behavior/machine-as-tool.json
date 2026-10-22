@@ -14,10 +14,27 @@
   "Large refund ($780) — over the approval limit": [
     {
       "sent": "start {\"amount\":780,\"orderId\":\"ORD-9002\"}",
-      "status": "done",
+      "status": "idle",
       "trace": [
         "transition @xstate.init -> \"validating\"",
-        "transition xstate.done.actor -> \"executing\"",
+        "transition xstate.done.actor -> \"awaitingApproval\""
+      ],
+      "response": "**Check**\n\n**Valid**: yes",
+      "idle": {
+        "prompt": "Approve the $780 refund on order ORD-9002 or type a reason to reject it.",
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "textEvent": "REJECT.reason"
+      }
+    },
+    {
+      "sent": "{\"type\":\"APPROVE\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"awaitingApproval\"",
+        "transition APPROVE -> \"executing\"",
         "transition xstate.done.actor -> \"done\""
       ],
       "response": "- Refunded: yes"

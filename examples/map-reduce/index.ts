@@ -62,7 +62,7 @@
  *
  * No stand-ins: every node here is a model call. Branches finish in any
  * order, but each joke is kept in its branch's slot, so branch `joke-N`,
- * `jokes[N]`, trail line `[N]` and judge label `jokeN` all name the same joke.
+ * `jokes[N]` and judge label `jokeN` all name the same joke.
  *
  * Dual-mode: `runMapReduceExample(options?)` takes an injectable
  * `generateText` and `judge` (tests script both); the direct run uses real
@@ -205,11 +205,13 @@ function branchIndex(actorId: string): number {
   return Number(actorId.slice(BRANCH_PREFIX.length));
 }
 
-/** Rendered in `output`, never stored. */
+/**
+ * Rendered in `output`, never stored. The jokes themselves are not repeated
+ * here: `jokes` already lists each one with its branch.
+ */
 function renderTrail(context: MapReduceContext): string[] {
   return [
     `Subjects: ${context.subjects.join(", ") || "(none)"}${context.truncated ? ` (truncated to ${MAX_SUBJECTS})` : ""}`,
-    ...context.jokes.map((entry) => `[${entry.branch}] ${entry.subject}: ${entry.joke}`),
     context.notice,
   ];
 }

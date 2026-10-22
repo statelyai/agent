@@ -259,11 +259,17 @@ test("a section failure ends in `failed` with the sections written so far", asyn
 });
 
 test("starters behave as their labels advertise", async () => {
-  const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
-    .starters as string[];
-  expect(starters).toHaveLength(4);
-  const offIndex = starters.filter((topic) => topic.includes("off-index"));
-  expect(offIndex).toHaveLength(1);
+  const raw = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
+    .starters as Array<string | { label: string; input: { topic: string } }>;
+  expect(raw).toHaveLength(4);
+  // The off-index starter says so in its label only; the topic sent is clean.
+  const offIndex = raw.flatMap((starter) =>
+    typeof starter !== "string" && starter.label.includes("off-index") ? [starter.input.topic] : [],
+  );
+  expect(offIndex).toEqual(["the history of the Byzantine Empire"]);
+  const starters = raw.map((starter) =>
+    typeof starter === "string" ? starter : starter.input.topic,
+  );
   for (const topic of starters) {
     const executors = scripted();
     const result = await runStormWriterExample({ topic, generateText: executors.generateText });

@@ -242,16 +242,20 @@ test("each reviewer asks Jev one choice over the patch and its brief; reason is 
   ]);
 });
 
-test("both starters send the built-in diff; trusted auto-accepts, external waits for a human", async () => {
+test("the first two starters send the built-in diff; trusted auto-accepts, external waits for a human", async () => {
   // A one-line description gave Jev nothing to judge, and every reviewer
   // abstained on it — so the trusted starter could never reach quorum. The
   // starters now carry a real diff, the same one the runner trusts.
   const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
     .starters as Array<{ input: { patch: string; source: "trusted" | "external" } }>;
-  expect(starters.map((starter) => starter.input.source)).toEqual(["trusted", "external"]);
+  expect(starters.map((starter) => starter.input.source)).toEqual([
+    "trusted",
+    "external",
+    "trusted",
+  ]);
   const judge = approving();
   const settled: unknown[] = [];
-  for (const { input } of starters) {
+  for (const { input } of starters.slice(0, 2)) {
     expect(input.patch).toBe(BUILT_IN_PATCH);
     expect(input.patch).toMatch(/^\+\+\+ /m);
     const actor = createActor(
@@ -264,4 +268,23 @@ test("both starters send the built-in diff; trusted auto-accepts, external waits
     actor.stop();
   }
   expect(settled).toEqual(["accepted", "humanReview"]);
+});
+
+test("the third starter is trusted, so only the votes send it to a human", async () => {
+  // A trusted source is not enough on its own: the SQL-injection diff needs two
+  // approvals like any trusted patch, and rejecting votes leave it short.
+  const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
+    .starters as Array<{ input: { patch: string; source: "trusted" | "external" } }>;
+  const { input } = starters[2]!;
+  expect(input.patch).toMatch(/^\+.*'\$\{name\}'/m);
+  const actor = createActor(
+    consensusReviewMachine.provide({
+      actors: { review: createReview(createMockJudge({ verdict: "reject" }).model) },
+    }),
+    { input },
+  );
+  actor.start();
+  await expect.poll(() => actor.getSnapshot().value).toBe("humanReview");
+  expect(actor.getSnapshot().context.votes.every((vote) => !vote.approve)).toBe(true);
+  actor.stop();
 });

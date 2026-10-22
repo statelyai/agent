@@ -44,7 +44,9 @@ const agentSetup = setupAgent({
   output: z.object({ answer: z.string(), steps: z.number() }),
   events: {
     CALCULATE: calcSchema,
-    LOOKUP: z.object({ key: z.string() }),
+    // The environment offers only keys it holds: a lookup of anything else is
+    // not a legal move, so the model cannot burn steps guessing key names.
+    LOOKUP: z.object({ key: z.enum(Object.keys(KNOWLEDGE_BASE) as [string, ...string[]]) }),
     FINISH: z.object({ answer: z.string() }),
   },
   // Two real tools as typed actors — they genuinely compute.
@@ -82,7 +84,9 @@ const agentSetup = setupAgent({
         output: z.string(),
       },
       model: "reasoner",
-      system: "Give the best final answer you can from the observations gathered so far.",
+      system:
+        "Give the best final answer you can from the observations gathered so far. " +
+        "Do no new arithmetic: report what the observations show and name what is still missing. Plain text, no LaTeX.",
       prompt: ({ input }) =>
         `Question: ${input.question}\n\nObservations:\n${input.observations.join("\n") || "(none)"}`,
     },
@@ -121,7 +125,7 @@ export const toolsMachine = agentSetup.createMachine({
           model: "reasoner",
           system:
             "You are a ReAct agent. Each turn, either call a tool or FINISH with the answer. " +
-            'Tools: CALCULATE (arithmetic), LOOKUP (retrieve a fact by key, e.g. "speed of light"). ' +
+            "Tools: CALCULATE (one arithmetic operation), LOOKUP (retrieve a stored fact by its key). " +
             "Prefer answering as soon as you can.",
           prompt:
             `Question: ${context.question}\n\nObservations:\n` +
@@ -180,7 +184,13 @@ export const toolsMachine = agentSetup.createMachine({
           question: context.question,
           observations: context.observations,
         }),
-        onDone: { target: "done", context: ({ output }) => ({ answer: output.result }) },
+        // Say so in the answer: a capped run reads differently from a finished one.
+        onDone: {
+          target: "done",
+          context: ({ output }) => ({
+            answer: `Stopped at the ${MAX_STEPS}-step cap; answering from what was gathered.\n\n${output.result}`,
+          }),
+        },
         onError: { target: "done" },
       },
     },

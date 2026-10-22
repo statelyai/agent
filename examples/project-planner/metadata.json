@@ -17,6 +17,10 @@
       "input": { "goal": "Ship a mobile app MVP for iOS and Android", "deadlineDays": 10 }
     },
     {
+      "label": "Impossible 5-day house — the replan budget runs out, ends in failed",
+      "input": { "goal": "Build a three-bedroom house", "deadlineDays": 5 }
+    },
+    {
       "label": "Generous 90-day deadline — fits on the first plan",
       "input": { "goal": "Launch a company blog with ten launch posts", "deadlineDays": 90 }
     }

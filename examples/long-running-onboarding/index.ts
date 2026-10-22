@@ -251,7 +251,7 @@ export const longRunningOnboardingMachine = coordinatorSetup.createMachine({
             "). Mark them signed, send them back, or escalate.",
           events: {
             DOCS_SIGNED: { label: "Mark documents signed", style: "primary" },
-            DOCS_REJECTED: { label: "Send the packet back" },
+            DOCS_REJECTED: { label: "Documents rejected: resend the packet" },
             ESCALATE: { label: "Escalate to HR", style: "danger" },
           },
         },

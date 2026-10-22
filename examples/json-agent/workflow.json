@@ -158,7 +158,7 @@
       "tags": ["awaiting-approval"],
       "meta": {
         "interaction": {
-          "label": "Nothing left to do until you approve or reject the drafted reply.",
+          "label": "Send this reply to the customer, or reject it and escalate to a person?",
           "events": {
             "APPROVE": {
               "label": "Send reply",

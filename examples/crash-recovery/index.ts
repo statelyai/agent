@@ -54,6 +54,7 @@ const crashRecoverySetup = setupAgent({
     outline: {
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
       model: "writer",
+      system: "Return only the outline: no preamble, no offer to do more.",
       prompt: ({ input }) => `Outline a short article about ${input.topic}.`,
     },
     draft: {
@@ -62,6 +63,7 @@ const crashRecoverySetup = setupAgent({
         output: z.string(),
       },
       model: "writer",
+      system: "Return only the article: no preamble, no offer to do more.",
       prompt: ({ input }) =>
         `Write the article about ${input.topic} for this outline: ${input.outline}`,
     },
@@ -202,7 +204,12 @@ export async function runUntilCrash({
   console.log(`crashed with status '${crashed.status}'`);
   console.log(`model calls before the crash: ${observed.calls()}`); // 2 — one completed
   console.log(`journaled entries: ${crashed.events.length}`);
-  return { threadId, inFlightCallKey: observed.draftCallKey(), calls: observed.calls() };
+  return {
+    threadId,
+    inFlightCallKey: observed.draftCallKey(),
+    calls: observed.calls(),
+    journaled: crashed.events.length,
+  };
 }
 
 /**
@@ -261,6 +268,7 @@ export async function runCrashRecoveryExample(options: ExampleRunOptions = {}) {
     threadId,
     inFlightCallKey,
     calls: callsBeforeCrash,
+    journaled,
   } = await runUntilCrash({
     store,
     ...(signal ? { signal } : {}),
@@ -278,15 +286,24 @@ export async function runCrashRecoveryExample(options: ExampleRunOptions = {}) {
     ...(signal ? { signal } : {}),
     ...observers,
   });
+  // The headline: the in-flight call re-executes under the SAME key, so the
+  // retry is safe to dedupe at the provider.
+  const callKeyMatched = inFlightCallKey === replayedCallKey;
+  const article = recovered.status === "done" ? recovered.output.article : null;
+  const summary = [
+    `**Process 1** made ${callsBeforeCrash} model calls: \`outline\` completed, then the process died while \`draft\` was in flight. ${journaled} entries had reached the store.`,
+    `**Process 2** got the thread id and nothing else: no snapshot. It folded the log back into state, replayed the recorded \`outline\` result without calling the model, and re-ran only \`draft\` (${callsDuringRecovery} model call), under ${callKeyMatched ? "the same" : "a DIFFERENT"} \`callKey\` the crashed attempt used${callKeyMatched ? ", so a provider could dedupe the retry" : ""}. The thread now holds ${recovered.events.length} entries.`,
+    article === null
+      ? `Recovery ended with status '${recovered.status}'.`
+      : `**Recovered article**\n\n${article}`,
+  ].join("\n\n");
   return {
-    // The headline: the in-flight call re-executes under the SAME key, so the
-    // retry is safe to dedupe at the provider.
-    callKeyMatched: inFlightCallKey === replayedCallKey,
+    summary,
+    callKeyMatched,
     status: recovered.status,
     callsBeforeCrash,
     callsDuringRecovery,
     journalEntries: recovered.events.length,
-    article: recovered.status === "done" ? recovered.output.article : null,
   };
 }
 

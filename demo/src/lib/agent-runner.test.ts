@@ -61,9 +61,19 @@ describe("scenario outcomes", () => {
     expect(first.idle?.events.map((event) => event.type)).toEqual(
       expect.arrayContaining(["APPROVE", "DENY"]),
     );
+    expect(first.idle?.prompt).toBe("$500 is over the $100 auto-refund limit. Approve or deny.");
     const second = await resume("refund", first.idle!.snapshot, { type: "APPROVE" }, executors);
     expect(second.status).toBe("done");
     expect((second.output as { outcome: string }).outcome).toBe("approved");
+  });
+
+  test("refund the model sends to REVIEW asks a human with its reason, not the limit", async () => {
+    const executors = decides({ type: "REVIEW", amount: 30, reason: "Item was used all winter" });
+    const result = await start("refund", "Refund $30, I wore it all winter.", executors);
+    expect(result.status).toBe("idle");
+    expect(result.idle?.prompt).toBe(
+      "Flagged for review: Item was used all winter. Approve or deny.",
+    );
   });
 
   test("refund with no amount asks once, then decides on the reply", async () => {
@@ -175,16 +185,43 @@ describe("scenario outcomes", () => {
     });
   });
 
+  const pipelineWrites = (passed: boolean): Executors => ({
+    generateText: async (request) => ({
+      result:
+        request.name === "verifyTask"
+          ? { passed, notes: "verifyTask notes" }
+          : `${request.name} output`,
+    }),
+  });
+
   test("pipeline plans, executes, and verifies", async () => {
     const result = await start(
       "pipeline",
       "Write a launch update: faster sync, safer retries, gradual rollout.",
-      { generateText: async (request) => ({ result: `${request.name} output` }) },
+      pipelineWrites(true),
     );
     expect(result.status).toBe("done");
-    const output = result.output as { verification: string; failedAt: string | null };
+    const output = result.output as {
+      verification: string;
+      verified: boolean;
+      failedAt: string | null;
+    };
     expect(output.failedAt).toBeNull();
-    expect(output.verification).toBe("verifyTask output");
+    expect(output.verified).toBe(true);
+    expect(output.verification).toBe("Passed. verifyTask notes");
+  });
+
+  test("a draft the verifier fails ends rejected, never complete", async () => {
+    const result = await start(
+      "pipeline",
+      "Write a launch update with customer quotes.",
+      pipelineWrites(false),
+    );
+    expect(result.status).toBe("done");
+    const output = result.output as { verification: string; verified: boolean; draft: string };
+    expect(output.verified).toBe(false);
+    expect(output.draft).toBe("executeTask output");
+    expect(output.verification).toBe("Rejected. verifyTask notes");
   });
 
   test("retry answers on the first attempt when the primary is healthy", async () => {
@@ -258,6 +295,19 @@ describe("scenario outcomes", () => {
     expect(output.answer).toContain("speed of light: 299,792,458 meters per second");
   });
 
+  test("tools forces an answer at the step cap and says so", async () => {
+    const result = await start("tools", "Keep calculating.", {
+      decide: async () => ({ event: { type: "CALCULATE", operation: "add", a: 1, b: 1 } }),
+      generateText: async () => ({ result: "Best effort." }),
+    });
+    expect(result.status).toBe("done");
+    const output = result.output as { answer: string; steps: number };
+    expect(output.steps).toBe(4);
+    expect(output.answer).toBe(
+      "Stopped at the 4-step cap; answering from what was gathered.\n\nBest effort.",
+    );
+  });
+
   test("reflection revises once then accepts", async () => {
     const revised = (state: { draft: string }) => state.draft === "Revised draft.";
     const judge = createTestJudge({
@@ -289,7 +339,7 @@ describe("scenario outcomes", () => {
     expect(output.revisions).toBe(1);
     expect(output.accepted).toBe(true);
     expect(output.score).toBe(4);
-    // Before/after: the weak first pass is kept alongside the revised draft.
+    // Before/after: the first draft is kept alongside the revised one.
     expect(output.firstDraft).toBe("Flat draft.");
     expect(output.draft).toBe("Revised draft.");
     expect(output.verdict).toBe("Reached target in 1 revision (score 4/4).");
@@ -406,6 +456,10 @@ describe("Jev judgments", () => {
     });
     const asked = await start("routing", "The app crashes on settings.", {}, unsure.model);
     expect((asked.output as { queue: string }).queue).toBe("unclear");
+    // The reason names the bar the pick missed, not the queue it never reached.
+    expect((asked.output as { reason: string }).reason).toBe(
+      "Jev's best guess, technical, is only 49% confident, below the 50% bar.",
+    );
   });
 
   test("routing degrades to clarification when Jev fails", async () => {

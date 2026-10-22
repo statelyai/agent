@@ -232,6 +232,7 @@ const gameSetup = setupAgent({
     maxRounds: z.number().int().positive().default(DEFAULT_MAX_ROUNDS),
   }),
   output: z.object({
+    summary: z.string(),
     rounds: z.number(),
     humanWins: z.number(),
     agentWins: z.number(),
@@ -272,7 +273,7 @@ function applyMove(context: GameContext, who: "human" | "agent", move: "roll" | 
     const gained = context.turnTotal;
     const humanScore = context.humanScore + (who === "human" ? gained : 0);
     const agentScore = context.agentScore + (who === "agent" ? gained : 0);
-    const note = `${who} banked ${gained} (human ${humanScore}, agent ${agentScore})`;
+    const note = `${who} banked ${gained} (human ${humanScore}, agent ${agentScore}).`;
     const won = (who === "human" ? humanScore : agentScore) >= context.target;
     return {
       context: { ...context, humanScore, agentScore, turnTotal: 0, notice: note },
@@ -283,7 +284,7 @@ function applyMove(context: GameContext, who: "human" | "agent", move: "roll" | 
 
   const { value, seed } = rollDie(context.seed);
   if (value === 1) {
-    const note = `${who} rolled a 1 and busted`;
+    const note = `${who} rolled a 1 and busted.`;
     return {
       context: { ...context, seed, turnTotal: 0, notice: note },
       note,
@@ -291,7 +292,7 @@ function applyMove(context: GameContext, who: "human" | "agent", move: "roll" | 
     };
   }
   const turnTotal = context.turnTotal + value;
-  const note = `${who} rolled ${value} (turn total ${turnTotal})`;
+  const note = `${who} rolled ${value} (turn total ${turnTotal}).`;
   return {
     context: { ...context, seed, turnTotal, notice: note },
     note,
@@ -330,6 +331,16 @@ function freshRound(context: GameContext): GameContext {
     pendingReply: "",
     notice: `Round ${round}. ${starterOf(round) === "human" ? "You start." : "The agent starts."}`,
   };
+}
+
+/** How the match ended, in words: who stopped it, and the wins. */
+function matchSummary(context: GameContext, reason: "user-stopped" | "round-limit"): string {
+  const rounds = `${context.round} ${context.round === 1 ? "round" : "rounds"}`;
+  const ended =
+    reason === "round-limit"
+      ? `Match over: the ${context.maxRounds}-round limit is reached after ${rounds}.`
+      : `Match stopped after ${rounds}.`;
+  return `${ended} Wins: you ${context.humanWins}, agent ${context.agentWins}.`;
 }
 
 function roundWinner(context: GameContext): "human" | "agent" {
@@ -374,7 +385,7 @@ export const gameMachine = gameSetup.createMachine({
               // The full decision context rides in the label — score, turn
               // total, round, target — so a host never asks for a blind move.
               label:
-                "{notice} Round {round}: you {humanScore} · agent {agentScore} · turn total {turnTotal} · first to {target}. Your turn — roll or bank?",
+                "{notice} Round {round}: you {humanScore} · agent {agentScore} · turn total {turnTotal} · first to {target}. Your turn — roll, or bank (hold) your turn total?",
               events: {
                 HUMAN_ROLL: { label: "Roll", style: "primary" },
                 HUMAN_BANK: { label: "Bank" },
@@ -505,6 +516,7 @@ export const gameMachine = gameSetup.createMachine({
     stopped: {
       type: "final",
       output: ({ context }) => ({
+        summary: matchSummary(context, "user-stopped"),
         rounds: context.round,
         humanWins: context.humanWins,
         agentWins: context.agentWins,
@@ -514,6 +526,7 @@ export const gameMachine = gameSetup.createMachine({
     roundLimit: {
       type: "final",
       output: ({ context }) => ({
+        summary: matchSummary(context, "round-limit"),
         rounds: context.round,
         humanWins: context.humanWins,
         agentWins: context.agentWins,

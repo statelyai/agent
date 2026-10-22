@@ -28,6 +28,14 @@ const BAD_TARGET = `\`\`\`json
 }
 \`\`\``;
 
+/** Every target is declared, but nothing leads into "open". */
+const UNREACHABLE = `\`\`\`json
+{
+  "initial": "locked",
+  "states": { "locked": { "on": { "COIN": "locked" } }, "open": {} }
+}
+\`\`\``;
+
 const BAD_JSON = '```json\n{ "initial": "locked", }\n```';
 
 const NO_BLOCK = "Sure! Here is a turnstile machine with two states.";
@@ -108,6 +116,9 @@ test("every candidate rejected, then one repair fixes it", async () => {
   // invokes settle concurrently, so the candidates are asserted as a set.
   expect(rejections).toHaveLength(CANDIDATE_COUNT);
   expect(rejections.some((error) => error.includes('"open"'))).toBe(true);
+  expect(result.status === "done" && result.output.summary).toContain(
+    "The validator rejected 3 candidates first.",
+  );
   // `checkingRepairBudget` is a choice state, so the machine never rests there
   // and it never appears in the transition log. The three `generating` entries
   // are the three fanned-out invokes settling in place; the three `parsing`
@@ -185,4 +196,10 @@ test("the parser rejects the shapes the repair prompt has to describe", () => {
   expect(() => parseGeneratedConfig(NO_BLOCK)).toThrow(/No JSON code block/);
   expect(() => parseGeneratedConfig(BAD_JSON)).toThrow(/not valid JSON/);
   expect(() => parseGeneratedConfig(BAD_TARGET)).toThrow(/not a declared state/);
+  expect(() => parseGeneratedConfig(UNREACHABLE)).toThrow(/reaches: open/);
+  expect(() =>
+    parseGeneratedConfig(
+      '{ "initial": "door", "states": { "door": { "type": "parallel", "states": {} } } }',
+    ),
+  ).toThrow(/Unrecognized keys?/);
 });

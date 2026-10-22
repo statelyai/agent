@@ -11,7 +11,7 @@
         "transition xstate.done.actor -> \"revising\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Draft — missing: mock missing  \n  next queries: mock searchQueries0  \nSearch 1: no passages  \nRevision 1 cites [none] (dropped unretrieved: mock references0) — missing: mock missing  \n  next queries: mock searchQueries0  \nSearch 2: no passages  \nRevision 2 cites [none] (dropped unretrieved: mock references0) — missing: mock missing  \n  next queries: mock searchQueries0\n\n- Answer: mock answer\n- Revisions: 2"
+      "response": "mock answer\n\n- Revisions: 2\n\n**Trail**\n\n- Draft — missing: mock missing\n- Next queries: mock searchQueries0\n- Search 1: no passages\n- Revision 1 cites [none] (dropped unretrieved: mock references0) — missing: mock missing\n- Next queries: mock searchQueries0\n- Search 2: no passages\n- Revision 2 cites [none] (dropped unretrieved: mock references0) — missing: mock missing\n- Next queries: mock searchQueries0"
     }
   ],
   "What security and licensing risks come with AI coding assistants?": [
@@ -26,7 +26,7 @@
         "transition xstate.done.actor -> \"revising\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Draft — missing: mock missing  \n  next queries: mock searchQueries0  \nSearch 1: no passages  \nRevision 1 cites [none] (dropped unretrieved: mock references0) — missing: mock missing  \n  next queries: mock searchQueries0  \nSearch 2: no passages  \nRevision 2 cites [none] (dropped unretrieved: mock references0) — missing: mock missing  \n  next queries: mock searchQueries0\n\n- Answer: mock answer\n- Revisions: 2"
+      "response": "mock answer\n\n- Revisions: 2\n\n**Trail**\n\n- Draft — missing: mock missing\n- Next queries: mock searchQueries0\n- Search 1: no passages\n- Revision 1 cites [none] (dropped unretrieved: mock references0) — missing: mock missing\n- Next queries: mock searchQueries0\n- Search 2: no passages\n- Revision 2 cites [none] (dropped unretrieved: mock references0) — missing: mock missing\n- Next queries: mock searchQueries0"
     }
   ],
   "How can a team tell whether an AI coding assistant pays off?": [
@@ -41,7 +41,7 @@
         "transition xstate.done.actor -> \"revising\"",
         "transition xstate.done.actor -> \"done\""
       ],
-      "response": "Draft — missing: mock missing  \n  next queries: mock searchQueries0  \nSearch 1: no passages  \nRevision 1 cites [none] (dropped unretrieved: mock references0) — missing: mock missing  \n  next queries: mock searchQueries0  \nSearch 2: no passages  \nRevision 2 cites [none] (dropped unretrieved: mock references0) — missing: mock missing  \n  next queries: mock searchQueries0\n\n- Answer: mock answer\n- Revisions: 2"
+      "response": "mock answer\n\n- Revisions: 2\n\n**Trail**\n\n- Draft — missing: mock missing\n- Next queries: mock searchQueries0\n- Search 1: no passages\n- Revision 1 cites [none] (dropped unretrieved: mock references0) — missing: mock missing\n- Next queries: mock searchQueries0\n- Search 2: no passages\n- Revision 2 cites [none] (dropped unretrieved: mock references0) — missing: mock missing\n- Next queries: mock searchQueries0"
     }
   ]
 }

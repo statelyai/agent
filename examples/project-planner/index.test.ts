@@ -87,8 +87,8 @@ test("on time: the first plan fits the deadline", async () => {
     "T2 Task T2: day 5–15",
     "T3 Task T3: day 5–8",
     "T4 Task T4: day 15–25",
-    "Risk: medium. Mitigation: Parallelize testing.",
   ]);
+  expect(result.mitigation).toBe("Parallelize testing.");
   // Choice states (`checkingTasks`, `routingGraph`, `routingDeadline`) are
   // left in the same step they are entered, so they never show as a settled state.
   expect(result.progress).toEqual([
@@ -222,10 +222,14 @@ test("starters behave as their labels advertise", async () => {
   for (const starter of starters) {
     const result = await plan({
       ...starter.input,
-      generateText: scripted({ generateTasks: [slowPlan], replanTasks: [fastPlan] }).generateText,
+      generateText: scripted({ generateTasks: [slowPlan], replanTasks: [fastPlan, fastPlan] })
+        .generateText,
     });
     if (starter.label.includes("triggers a replan")) {
       expect(result.progress).toContain("replanning");
+    } else if (starter.label.includes("ends in failed")) {
+      // Even the 8-day fast plan misses a 5-day deadline: every replan is spent.
+      expect(result).toMatchObject({ outcome: "failed", onTime: false, replans: MAX_REPLANS });
     } else {
       expect(starter.label).toContain("fits on the first plan");
       expect(result.progress).not.toContain("replanning");

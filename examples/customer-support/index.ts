@@ -13,6 +13,7 @@
  * a node, and "am I paused?" is read off `snapshot.next` outside the graph.
  *
  * Here the same shape is explicit, typed states:
+ *   classifying ⇄ awaitingConfirmationCode
  *   classifying → routing → (answering ⇄ awaitingInfo | confirming → executing/denied)
  *
  *   - Non-sensitive Q&A: ONE `answer` request carries real `tools`
@@ -34,8 +35,12 @@
  *     to a concrete flight by selection, and a confirmation code is always a
  *     verbatim span of the message: Jev cannot invent either. A `choice` state
  *     then routes on the staged action — the typed analogue of `route_tools`.
- *     A sensitive intent without a code or a target flight ends in `failed`
- *     with a message saying what was missing, never at the approval gate.
+ *     A sensitive intent without a code pauses at `awaitingConfirmationCode`
+ *     and asks for it; code (`findCodeCandidates` again, not a model) checks
+ *     the reply, and a reply with a code goes back through `classifying`.
+ *     Asking is bounded by MAX_CODE_ASKS; past it — or with no target flight —
+ *     the turn ends in `failed` saying what was missing, never at the approval
+ *     gate.
  *   - TWO KINDS OF PAUSE, and the machine tells them apart. `confirming` blocks
  *     a write until a human approves it. `awaitingInfo` blocks an ANSWER until
  *     the customer supplies something only they know — which booking, which
@@ -270,15 +275,13 @@ function stageAction(
     newFlight: { choice: string };
     confirmationCode?: { choice: string };
   },
-): { pendingAction: PendingAction | null } | { missing: string } {
+): { pendingAction: PendingAction | null } | { missing: string } | { needsCode: true } {
   const intent = answers.intent.choice;
   if (intent !== "cancel" && intent !== "rebook") return { pendingAction: null };
   const candidates = findCodeCandidates(query);
   const picked =
     candidates.length === 1 ? candidates[0]! : (answers.confirmationCode?.choice ?? NONE);
-  if (picked === NONE || !candidates.includes(picked)) {
-    return { missing: "Could not find a confirmation code in the request." };
-  }
+  if (picked === NONE || !candidates.includes(picked)) return { needsCode: true };
   if (intent === "cancel") {
     return {
       pendingAction: {
@@ -335,6 +338,8 @@ const contextSchema = z.object({
   /** Questions asked so far, so the bot cannot interrogate forever. */
   clarifications: z.number(),
   maxClarifications: z.number(),
+  /** Times a change request has asked for its confirmation code. */
+  codeAsks: z.number(),
   // The one line this turn will report, whichever way it ends. Which final
   // state was reached IS the resolution — no mirror of it lives here.
   message: z.string(),
@@ -356,6 +361,8 @@ const agentSetup = setupAgent({
     PROVIDE_INFO: z.object({ text: z.string() }),
     /** The customer would rather not say. */
     STOP_ASKING: z.object({}),
+    /** The customer's reply when asked for a confirmation code. */
+    PROVIDE_CODE: z.object({ text: z.string() }),
   },
   actors: {
     // Intent routing + argument selection: one Jev call (see createClassify).
@@ -455,6 +462,29 @@ const agentSetup = setupAgent({
 /** Questions the bot may ask before it answers with whatever it has. */
 export const MAX_CLARIFICATIONS = 2;
 
+/** Times a change request may ask for its confirmation code before it fails. */
+export const MAX_CODE_ASKS = 2;
+
+const CODE_HINT = "It's 5–6 letters and digits, from your booking email.";
+
+/**
+ * Asks (again) for the confirmation code, or ends the turn once MAX_CODE_ASKS
+ * asks have gone unanswered.
+ */
+function askForCode(codeAsks: number, question: string) {
+  return codeAsks < MAX_CODE_ASKS
+    ? {
+        target: "awaitingConfirmationCode" as const,
+        context: { codeAsks: codeAsks + 1, message: `${question} ${CODE_HINT}` },
+      }
+    : {
+        target: "failed" as const,
+        context: {
+          message: `No confirmation code after ${MAX_CODE_ASKS} asks, so nothing was changed.`,
+        },
+      };
+}
+
 export const customerSupportMachine = agentSetup.createMachine({
   id: "customer-support",
   context: ({ input }) => ({
@@ -463,6 +493,7 @@ export const customerSupportMachine = agentSetup.createMachine({
     details: [],
     clarifications: 0,
     maxClarifications: MAX_CLARIFICATIONS,
+    codeAsks: 0,
     message: "",
   }),
   initial: "classifying",
@@ -473,9 +504,16 @@ export const customerSupportMachine = agentSetup.createMachine({
         src: "classify",
         input: ({ context }) => ({ query: context.query }),
         // Map the selections back onto the candidates. A sensitive intent
-        // missing its code or target flight never reaches the approval gate.
+        // missing its code asks for it; missing its target flight, it fails.
+        // Neither reaches the approval gate.
         onDone: ({ context, output }) => {
           const staged = stageAction(context.query, output.answers);
+          if ("needsCode" in staged) {
+            return askForCode(
+              context.codeAsks,
+              "Which booking should I change? Please send its confirmation code.",
+            );
+          }
           return "missing" in staged
             ? { target: "failed", context: { message: staged.missing } }
             : { target: "routing", context: { pendingAction: staged.pendingAction } };
@@ -545,6 +583,38 @@ export const customerSupportMachine = agentSetup.createMachine({
           },
         }),
         STOP_ASKING: { target: "unresolved" },
+      },
+    },
+    // A change request without a booking to change. The reply is checked by
+    // the same parser classify uses — code, not a model, decides whether a
+    // code arrived — and a reply with one goes back through `classifying`
+    // with the code appended, so the flight choice sees that booking's route.
+    awaitingConfirmationCode: {
+      tags: ["awaiting-code"],
+      meta: {
+        interaction: {
+          label: "{message}",
+          events: {
+            STOP_ASKING: { label: "I don't have it", style: "danger" },
+          },
+          textEvent: "PROVIDE_CODE",
+        },
+      },
+      on: {
+        PROVIDE_CODE: ({ context, event }) => {
+          const codes = findCodeCandidates(event.text.toUpperCase());
+          if (codes.length === 0) {
+            return askForCode(context.codeAsks, "I couldn't find a confirmation code in that.");
+          }
+          return {
+            target: "classifying",
+            context: { query: `${context.query}\nConfirmation code: ${codes.join(" or ")}` },
+          };
+        },
+        STOP_ASKING: {
+          target: "failed",
+          context: { message: "No confirmation code, so nothing was changed." },
+        },
       },
     },
     answered: {
@@ -657,9 +727,9 @@ export interface CustomerSupportResult {
  * Runs one support turn across as many `runAgent` calls as the turn needs.
  * A direct answer finishes in one. A sensitive query settles idle at
  * `confirming` and resumes with APPROVE or DENY. A question the bot cannot
- * answer alone settles idle at `awaitingInfo` and resumes with the detail it
- * asked for — as many times as it asks, until the machine's own budget stops
- * it. Every leg persists and JSON-round-trips the snapshot.
+ * answer alone settles idle at `awaitingInfo` (a change request without a code,
+ * at `awaitingConfirmationCode`) and resumes with the detail it asked for — as
+ * many times as it asks, until the machine's own budget stops it. Every leg persists and JSON-round-trips the snapshot.
  */
 export async function runCustomerSupportExample(
   options: RunCustomerSupportOptions = {},
@@ -701,8 +771,12 @@ export async function runCustomerSupportExample(
   // Every question the bot asks is another leg. The machine decides when to
   // stop asking; the host only decides what to say.
   const pending = [...(options.replies ?? [])];
-  while (first.status === "idle" && first.snapshot.hasTag("awaiting-info")) {
+  while (
+    first.status === "idle" &&
+    (first.snapshot.hasTag("awaiting-info") || first.snapshot.hasTag("awaiting-code"))
+  ) {
     const reply = pending.shift();
+    const replyType = first.snapshot.hasTag("awaiting-code") ? "PROVIDE_CODE" : "PROVIDE_INFO";
     first = await runToQuiescence(
       createAgentRuntime(customerSupportMachine, {
         ...executors,
@@ -710,8 +784,7 @@ export async function runCustomerSupportExample(
       }),
       {
         snapshot: first.persist(),
-        event:
-          reply === undefined ? { type: "STOP_ASKING" } : { type: "PROVIDE_INFO", text: reply },
+        event: reply === undefined ? { type: "STOP_ASKING" } : { type: replyType, text: reply },
         ...executors,
       },
     );
@@ -813,12 +886,13 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       const persisted = result.persist();
 
       let event: { type: string } & Record<string, unknown>;
-      if (snapshot.hasTag("awaiting-info")) {
+      if (snapshot.hasTag("awaiting-info") || snapshot.hasTag("awaiting-code")) {
         console.log("\n--- More information needed ---");
         console.log(interaction?.label ?? "");
         console.log("Legal events:", legalEvents.join(", "));
         const detail = await promptLine("your answer (blank = decline) > ");
-        event = detail ? { type: "PROVIDE_INFO", text: detail } : { type: "STOP_ASKING" };
+        const type = snapshot.hasTag("awaiting-code") ? "PROVIDE_CODE" : "PROVIDE_INFO";
+        event = detail ? { type, text: detail } : { type: "STOP_ASKING" };
       } else {
         console.log("\n--- Approval required ---");
         console.log("Pending action:", snapshot.context.pendingAction?.summary);

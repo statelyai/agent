@@ -32,7 +32,7 @@
       "response": "Shipped clamp.mjs after 1 round(s), approved by a person.\n\n- Outcome: shipped\n- Rounds: 1\n- Human approved: yes"
     }
   ],
-  "slugify (needs a retry)": [
+  "slugify (diacritics and dashes)": [
     {
       "sent": "start {\"taskId\":\"slugify\"}",
       "status": "idle",

@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["swarm", "handoff"],
-    "purpose": "An active-agent conversation hands off between two specialists; the active agent persists across a snapshot round-trip."
+    "purpose": "Two specialists share one conversation. For each new message a router model picks HANDOFF or KEEP; a guard rejects a handoff to the agent already holding the mic, the agent that takes over reads the whole conversation, both survive a JSON snapshot round-trip, and after MAX_TURNS replies only END is offered."
   },
   "starters": [
     {

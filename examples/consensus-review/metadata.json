@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["LangGraph"],
-    "purpose": "Independent reviewer votes, each a Jev choice (approve, reject, or abstain), an explicit two-of-three threshold, abstentions, and human escalation."
+    "purpose": "Three reviewers vote in parallel, each a Jev choice (approve, reject, or abstain); a failed reviewer abstains. The machine, not the reviewers, decides: a trusted patch auto-accepts only on two of three approvals, and anything short of that, or any external patch whatever the votes, waits for a human to accept or reject."
   },
   "starters": [
     {
@@ -24,6 +24,13 @@
       "input": {
         "patch": "Validate input before a database write.\n\n--- a/src/users.ts\n+++ b/src/users.ts\n@@ export async function createUser(db: Db, body: unknown) {\n-  await db.insert(\"users\", body);\n+  const parsed = UserSchema.safeParse(body);\n+  if (!parsed.success) throw new ValidationError(parsed.error.issues);\n+  await db.insert(\"users\", parsed.data);\n }",
         "source": "external"
+      }
+    },
+    {
+      "label": "Trusted patch with SQL injection (votes fall short)",
+      "input": {
+        "patch": "Speed up user search by building the query directly.\n\n--- a/src/users.ts\n+++ b/src/users.ts\n@@ export async function findUsers(db: Db, name: string) {\n-  return db.query(\"SELECT * FROM users WHERE name = $1\", [name]);\n+  return db.query(`SELECT * FROM users WHERE name = '${name}'`);\n }",
+        "source": "trusted"
       }
     }
   ]

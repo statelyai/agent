@@ -410,9 +410,10 @@ export const dataEnrichmentMachine = agentSetup.createMachine({
           query: context.query ?? context.company,
           seen: context.passages,
         }),
-        // One search pass spent, whatever it found.
+        // One search pass spent, whatever it found. Nothing new found means
+        // nothing new to extract: skip the model call and check the record.
         onDone: ({ context, output }) => ({
-          target: "extracting",
+          target: output.length > 0 ? "extracting" : "checkingCompleteness",
           context: { passages: [...context.passages, ...output], loops: context.loops + 1 },
         }),
         onError: ({ event }) => ({

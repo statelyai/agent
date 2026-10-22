@@ -238,6 +238,7 @@ describe("game-loop-agent", () => {
     });
 
     expect(output).toMatchObject({ reason: "round-limit", rounds: 2 });
+    expect(output.summary).toMatch(/^Match over: the 2-round limit is reached after 2 rounds\./);
   });
 });
 

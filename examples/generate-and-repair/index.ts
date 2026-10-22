@@ -3,9 +3,10 @@
  *
  * A model writes a small state-machine config as JSON. Nothing accepts it
  * until a host actor has parsed it: the parser extracts the fenced code block,
- * `JSON.parse`s it, and checks that every transition target names a declared
- * state. The parser is the only thing that decides whether the output is
- * usable, and it is the host's code, not the model's.
+ * `JSON.parse`s it, checks that every transition target names a declared
+ * state, and that every declared state can be reached from the initial one.
+ * The parser is the only thing that decides whether the output is usable,
+ * and it is the host's code, not the model's.
  *
  * The loop is the machine's, not the model's:
  *
@@ -47,7 +48,12 @@ export const CANDIDATE_COUNT = 3;
 /** The machine config the model is asked to write. */
 const machineConfigSchema = z.object({
   initial: z.string(),
-  states: z.record(z.string(), z.object({ on: z.record(z.string(), z.string()).optional() })),
+  // Strict: a nested `states` or a `type: "parallel"` is rejected, not
+  // silently stripped into a state with nothing in it.
+  states: z.record(
+    z.string(),
+    z.object({ on: z.record(z.string(), z.string()).optional() }).strict(),
+  ),
 });
 
 export type GeneratedMachineConfig = z.infer<typeof machineConfigSchema>;
@@ -62,8 +68,9 @@ function describeIssues(error: z.ZodError): string {
 
 /**
  * The validation the app actually cares about: syntax first, then the semantic
- * rule that no transition may name a state that does not exist. Every failure
- * throws a message specific enough for the model to act on.
+ * rules that no transition may name a state that does not exist and no
+ * declared state may be unreachable from `initial`. Every failure throws a
+ * message specific enough for the model to act on.
  */
 export function parseGeneratedConfig(text: string): GeneratedMachineConfig {
   const block = CODE_BLOCK.exec(text)?.[1];
@@ -109,6 +116,19 @@ export function parseGeneratedConfig(text: string): GeneratedMachineConfig {
       }
     }
   }
+  // Flattened statecharts (a "parallel" or "nested" state written as a
+  // sibling with no way in) pass the target check; this catches them.
+  const reached = new Set([config.initial]);
+  for (const name of reached) {
+    for (const target of Object.values(config.states[name]?.on ?? {})) reached.add(target);
+  }
+  const unreachable = stateNames.filter((name) => !reached.has(name));
+  if (unreachable.length > 0) {
+    throw new Error(
+      `No transition path from the initial state "${config.initial}" reaches: ${unreachable.join(", ")}. ` +
+        "Every declared state must be reachable.",
+    );
+  }
   return config;
 }
 
@@ -131,6 +151,7 @@ const SHAPE_RULES = [
   'The JSON object has exactly two keys: "initial" (a state name) and "states".',
   '"states" maps each state name to an object with an optional "on" map of event type to target state name.',
   'Every target named in an "on" map must be one of the declared states.',
+  "Every declared state must be reachable from the initial state.",
 ].join("\n");
 
 const contextSchema = z.object({
@@ -144,6 +165,8 @@ const contextSchema = z.object({
   config: machineConfigSchema.nullable(),
   /** Why the last candidate was rejected — the repair request's whole input. */
   lastError: z.string().nullable(),
+  /** How many candidates (drafts and repairs) the validator rejected. */
+  rejections: z.number(),
   repairs: z.number(),
   maxRepairs: z.number(),
   failureReason: z.string().nullable(),
@@ -242,6 +265,7 @@ const agentMachine = generateAndRepairSetup.createMachine({
     settled: 0,
     config: null,
     lastError: null,
+    rejections: 0,
     repairs: 0,
     maxRepairs: MAX_REPAIRS,
     failureReason: null,
@@ -304,12 +328,13 @@ const agentMachine = generateAndRepairSetup.createMachine({
           const [next, ...rest] = context.pending;
           enq.emit({ type: "CANDIDATE_REJECTED", error, remaining: context.pending.length });
           // Another candidate is left: try it before spending a repair.
+          const rejections = context.rejections + 1;
           return next === undefined
-            ? { target: "checkingRepairBudget", context: { lastError: error } }
+            ? { target: "checkingRepairBudget", context: { lastError: error, rejections } }
             : {
                 target: "parsing",
                 reenter: true,
-                context: { candidate: next, pending: rest, lastError: error },
+                context: { candidate: next, pending: rest, lastError: error, rejections },
               };
         },
       },
@@ -366,6 +391,13 @@ const agentMachine = generateAndRepairSetup.createMachine({
           `Initial state: ${context.config?.initial ?? "unknown"}. States: ${Object.keys(
             context.config?.states ?? {},
           ).join(", ")}.`,
+          ...(context.rejections > 0
+            ? [
+                `The validator rejected ${context.rejections} ${
+                  context.rejections === 1 ? "candidate" : "candidates"
+                } first. Last rejection: ${context.lastError}`,
+              ]
+            : []),
         ].join("\n\n"),
         config: context.config,
         repairs: context.repairs,

@@ -13,7 +13,10 @@
   },
   "starters": [
     "Tell me about state machines",
-    "Summarize what we've talked about so far",
-    "What's the difference between a state and a context?"
+    "What's the difference between a state and a context?",
+    {
+      "label": "Small window (compacts from turn 3)",
+      "input": { "maxMessages": 4, "keepRecent": 2 }
+    }
   ]
 }

@@ -707,6 +707,18 @@ function isTimerEvent(event: { type: string }): event is { type: "xstate.timer";
   return event.type === "xstate.timer";
 }
 
+/**
+ * Why a delivered event changed nothing: the state has no transition for it,
+ * or it has one and every guard on it refused. The second is the machine
+ * enforcing a rule, and reads as one.
+ */
+export function ignoredEventNote(snapshot: AnyMachineSnapshot, event: { type: string }): string {
+  const handled = getAcceptedEvents(snapshot).some((accepted) => accepted.type === event.type);
+  return handled
+    ? `"${event.type}" was refused by this state's rules, so nothing happened.`
+    : `"${event.type}" isn't an accepted event in this state, so nothing happened.`;
+}
+
 function toChatResult(
   machine: AnyStateMachine,
   model: string | undefined,
@@ -735,9 +747,7 @@ function toChatResult(
     const work = renderIdleWork(result.snapshot.context, changedKeys, omitValues, idle.prompt);
     // An event the state has no transition for is ignored, not an error: say
     // so instead of re-showing the work as if the event had applied.
-    const ignoredNote = result.ignored
-      ? `"${result.ignored.type}" isn't an accepted event in this state, so nothing happened.`
-      : null;
+    const ignoredNote = result.ignored ? ignoredEventNote(result.snapshot, result.ignored) : null;
     return {
       model,
       status: "idle",

@@ -1,5 +1,5 @@
 {
-  "add milk and eggs": [
+  "add milk, eggs, and call the dentist": [
     {
       "sent": "start {}",
       "status": "idle",
@@ -46,7 +46,7 @@
       "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1"
     }
   ],
-  "mark the first one done": [
+  "add pay rent and buy stamps, then mark pay rent done": [
     {
       "sent": "start {}",
       "status": "idle",
@@ -93,7 +93,7 @@
       "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1"
     }
   ],
-  "delete anything about groceries": [
+  "add milk, eggs, and fix the bike, then delete the grocery items": [
     {
       "sent": "start {}",
       "status": "idle",

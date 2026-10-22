@@ -5,6 +5,9 @@
  *
  * Shows:
  *   - `context.activeAgent` tracks who is "holding the mic" ('travel' | 'food').
+ *   - `context.history` is the one shared conversation: the agent that takes
+ *     the mic after a handoff reads every earlier turn, so "what should I eat
+ *     there?" still means Lisbon.
  *   - each agent has its own reply request (distinct model ref + system) that
  *     runs one conversation turn, then the machine settles idle in `waiting`.
  *   - the human only supplies the next message (SAY) or ends the conversation
@@ -16,7 +19,7 @@
  *     idles in `budgetSpent`, which declares only END, so the host's
  *     `getInteraction` call sees the bound instead of guessing at a guard.
  *   - the idle snapshot is JSON round-tripped between turns, proving the
- *     active agent survives a real persistence layer.
+ *     active agent and the conversation survive a real persistence layer.
  *
  * Dual-mode: `runSwarmHandoffExample(options?)` takes injectable executors
  * (the test passes mocks — CI with no API key); the direct run below uses real models.
@@ -39,6 +42,46 @@ import {
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 const agentName = z.enum(["travel", "food"]);
+/**
+ * One conversation turn, in chat-message shape (`role` + `content`) so a host
+ * reads `history` as a transcript; `agent` says which concierge spoke.
+ */
+const turnSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+  agent: agentName.optional(),
+});
+type Turn = z.infer<typeof turnSchema>;
+
+const replyInput = z.object({ message: z.string(), history: z.array(turnSchema) });
+
+/**
+ * One concierge turn's prompt: the conversation so far, then the new message.
+ * Without it a handed-off concierge would get "What are the must-try dishes
+ * there?" with no idea where "there" is.
+ */
+function replyPrompt({ input }: { input: z.infer<typeof replyInput> }): string {
+  if (input.history.length === 0) return input.message;
+  return [
+    "Conversation so far:",
+    ...input.history.map((turn) => `[${turn.agent ?? "user"}] ${turn.content}`),
+    "",
+    `New message from the user: ${input.message}`,
+  ].join("\n");
+}
+
+/** The history after a reply: the user's message, then the agent who answered it. */
+function withReply(
+  context: { message: string; history: Turn[] },
+  agent: z.infer<typeof agentName>,
+  reply: string,
+): Turn[] {
+  return [
+    ...context.history,
+    { role: "user", content: context.message },
+    { role: "assistant", content: reply, agent },
+  ];
+}
 
 /** Replies the conversation may run before only END is legal. */
 export const MAX_TURNS = 4;
@@ -57,6 +100,8 @@ const agentSetup = setupAgent({
     activeAgent: agentName,
     reply: z.string().nullable(),
     turns: z.number().int(),
+    /** The shared conversation: whoever takes the mic reads what came before. */
+    history: z.array(turnSchema),
   }),
   input: z.object({
     message: z.string(),
@@ -81,22 +126,16 @@ const agentSetup = setupAgent({
   },
   requests: {
     travelReply: {
-      schemas: {
-        input: z.object({ message: z.string() }),
-        output: z.string(),
-      },
+      schemas: { input: replyInput, output: z.string() },
       model: "travel",
       system: "You are a travel concierge. Help with destinations, flights, and itineraries.",
-      prompt: ({ input }) => input.message,
+      prompt: replyPrompt,
     },
     foodReply: {
-      schemas: {
-        input: z.object({ message: z.string() }),
-        output: z.string(),
-      },
+      schemas: { input: replyInput, output: z.string() },
       model: "food",
       system: "You are a food concierge. Help with restaurants, dishes, and dietary needs.",
-      prompt: ({ input }) => input.message,
+      prompt: replyPrompt,
     },
   },
 });
@@ -110,6 +149,7 @@ export const swarmHandoffMachine = agentSetup.createMachine({
     activeAgent: input.activeAgent ?? "travel",
     reply: null,
     turns: 0,
+    history: [],
   }),
   initial: "dispatching",
   states: {
@@ -122,10 +162,14 @@ export const swarmHandoffMachine = agentSetup.createMachine({
     travelTurn: {
       invoke: {
         src: "travelReply",
-        input: ({ context }) => ({ message: context.message }),
+        input: ({ context }) => ({ message: context.message, history: context.history }),
         onDone: ({ context, output }) => ({
           target: "checkingBudget",
-          context: { reply: output.result, turns: context.turns + 1 },
+          context: {
+            reply: output.result,
+            turns: context.turns + 1,
+            history: withReply(context, "travel", output.result),
+          },
         }),
         onError: { target: "failed" },
       },
@@ -133,10 +177,14 @@ export const swarmHandoffMachine = agentSetup.createMachine({
     foodTurn: {
       invoke: {
         src: "foodReply",
-        input: ({ context }) => ({ message: context.message }),
+        input: ({ context }) => ({ message: context.message, history: context.history }),
         onDone: ({ context, output }) => ({
           target: "checkingBudget",
-          context: { reply: output.result, turns: context.turns + 1 },
+          context: {
+            reply: output.result,
+            turns: context.turns + 1,
+            history: withReply(context, "food", output.result),
+          },
         }),
         onError: { target: "failed" },
       },

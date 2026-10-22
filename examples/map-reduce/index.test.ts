@@ -117,7 +117,11 @@ test("jokes and subjects are trimmed, so no list item ends in a blank line", asy
     expect(entry.joke).toBe(`Why did the ${entry.subject} cross?\nTo get away.`);
   }
   expect(result.bestJoke).toBe("Why did the penguins cross?\nTo get away.");
-  expect(result.trail).toContain("[0] lions: Why did the lions cross?\nTo get away.");
+  expect(result.jokes[0]).toEqual({
+    branch: 0,
+    subject: "lions",
+    joke: "Why did the lions cross?\nTo get away.",
+  });
 });
 
 test("more than MAX_SUBJECTS subjects are truncated", async () => {
@@ -165,9 +169,9 @@ test("a failing branch records a placeholder joke and the run continues", async 
   expect(result.jokes).toContainEqual({ branch: 0, subject: "lions", joke: "A joke about lions." });
 });
 
-test("branches that finish out of order keep their branch ids in the trail", async () => {
+test("branches that finish out of order keep their branch ids", async () => {
   // The last subject's writer answers first: arrival order is the reverse of
-  // branch order, yet branch `joke-N`, `jokes[N]` and trail `[N]` agree.
+  // branch order, yet branch `joke-N` and `jokes[N]` agree.
   const delays: Record<string, number> = { lions: 30, penguins: 15, reptiles: 0 };
   const executors = scripted(
     {
@@ -188,7 +192,11 @@ test("branches that finish out of order keep their branch ids in the trail", asy
     [1, "penguins"],
     [2, "reptiles"],
   ]);
-  expect(result.trail).toContain("[2] reptiles: A joke about reptiles.");
+  expect(result.jokes[2]).toEqual({
+    branch: 2,
+    subject: "reptiles",
+    joke: "A joke about reptiles.",
+  });
   // The judge label `joke2` names branch `joke-2`.
   expect(result.subject).toBe("reptiles");
 });

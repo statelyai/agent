@@ -72,7 +72,7 @@ it survives a snapshot round-trip instead of living in a closure.
 - [answer-reuse](answer-reuse): Jev checks the help article the search already found before any agent call, reusing it at `yes` and confidence `0.8` or higher, otherwise investigating exactly once, rechecking, and waiting for a person when the answer still fails
 - [sql-agent](sql-agent): the model plans the query, a human approves, and only then does the engine run it
 - [long-running-onboarding](long-running-onboarding): pauses measured in days, with a bounded resend loop and an escalation path off every wait
-- [machine-as-tool](machine-as-tool): the whole machine behind one tool call, where the handle _is_ the persisted snapshot and the policy check is a Jev judgment
+- [machine-as-tool](machine-as-tool): the whole machine behind one tool call, where the handle _is_ the persisted snapshot and the policy check is a Jev judgment backed by a hard limit in code, so a wrong verdict only costs a human review
 - [info-gathering](info-gathering): a choice state checks the four requirement slots itself (the model only extracts), forces one confirmation turn, and ends in `failed` after `MAX_TURNS` answers
 - [long-term-memory](long-term-memory): the memory store is machine input and output, recall is a Jev relevance judgment per memory and a capped save is its own state, and a second run started from the first run's output remembers
 - [feynman-tutor](feynman-tutor): an idle explain-back state per checkpoint; Jev scores the explanation against a rubric, and a choice state re-teaches below `PASS_SCORE` while a per-checkpoint `MAX_RETEACHES` budget lasts, then records the checkpoint failed and moves on

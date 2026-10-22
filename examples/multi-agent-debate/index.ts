@@ -26,8 +26,9 @@
  *   - messages reducer    → `transcript` in context, appended on each speaker's `onDone`
  *
  * Differences from LangGraph worth calling out:
- *   - The round budget is data with a ceiling: input `rounds` is clamped by its
- *     schema to `MAX_ROUNDS`, and the loop guard compares against both. A
+ *   - The round budget is data with a ceiling: the input schema rejects a
+ *     `rounds` above `MAX_ROUNDS` before the run starts, and the loop guard
+ *     compares against both. A
  *     LangGraph version counts messages in a router function and relies on
  *     recursion_limit if the count is wrong.
  *   - A speaker cannot speak out of turn or end the debate early: neither
@@ -322,7 +323,7 @@ export const multiAgentDebateMachine = agentSetup.createMachine({
         }),
       },
     },
-    // The rounds edge. `rounds` is already clamped by the input schema; the
+    // The rounds edge. The input schema already rejects `rounds` above MAX_ROUNDS; the
     // MAX_ROUNDS term keeps the bound visible in the guard itself.
     checkingRound: {
       type: "choice",

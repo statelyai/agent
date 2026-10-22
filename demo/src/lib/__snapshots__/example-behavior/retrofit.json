@@ -26,5 +26,19 @@
       ],
       "response": "Refunded $1: mock reason\n\n- Refunded: yes\n- Escalated: no"
     }
+  ],
+  "My standing desk (order A1001) arrived with a cracked leg. I want a full refund of the $240.": [
+    {
+      "sent": "start {\"ticket\":\"My standing desk (order A1001) arrived with a cracked leg. I want a full refund of the $240.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"triaging\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition LOOKUP -> \"lookingUp\"",
+        "transition xstate.done.actor -> \"deciding\"",
+        "transition REFUND -> \"refunded\""
+      ],
+      "response": "Refunded $1: mock reason\n\n- Refunded: yes\n- Escalated: no"
+    }
   ]
 }

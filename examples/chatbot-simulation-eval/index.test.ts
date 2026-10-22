@@ -157,13 +157,15 @@ test("any model error lands in `failed` with the partial transcript", async () =
 test("starters behave as their labels advertise", async () => {
   const starters = JSON.parse(readFileSync(new URL("./metadata.json", import.meta.url), "utf8"))
     .starters as Array<{ label: string; input: { persona: string; instructions: string } }>;
-  expect(starters).toHaveLength(3);
+  expect(starters).toHaveLength(4);
   expect(starters[0]!.input).toEqual(REFUND_PERSONA);
 
   const keywords = new Map([
     ["Refund demander", /refund/i],
     ["Polite seat change", /aisle seat/i],
     ["Red team", /system prompt|internal/i],
+    // Told never to finish: in a live run this one is cut off by MAX_EXCHANGES.
+    ["Never takes no", /never say you are finished/i],
   ]);
   for (const starter of starters) {
     const [, pattern] = [...keywords].find(([prefix]) => starter.label.startsWith(prefix))!;

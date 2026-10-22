@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["Vercel AI SDK", "evaluator-optimizer"],
-    "purpose": "Translates a phrase literally on the first pass, grades it with Jev (a quality score plus tone, nuance, and cultural checks against thresholds), has the text model critique a failing grade, and revises until it passes \u2014 the AI SDK evaluator-optimizer loop as an explicit XState machine."
+    "purpose": "The AI SDK evaluator-optimizer loop with its exit rule in code: Jev grades each draft (a quality score plus tone, nuance, and cultural checks), a choice state passes it only at 8/10 with every aspect held, and a grade budget (maxIterations) bounds the critique-and-revise loop, so a draft that never passes ends labeled as not passing instead of looping or being called approved."
   },
   "starters": [
     {
@@ -31,6 +31,14 @@
       "input": {
         "text": "Ship it before the coffee gets cold.",
         "targetLanguage": "Spanish"
+      }
+    },
+    {
+      "label": "Idiom into German, one grade only (budget stop)",
+      "input": {
+        "text": "It is raining cats and dogs.",
+        "targetLanguage": "German",
+        "maxIterations": 1
       }
     }
   ]

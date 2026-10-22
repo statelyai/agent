@@ -53,9 +53,9 @@
       "response": "No usable config for \"a checkout that can be paid, shipped, or refunded\". No valid config after 2 repair rounds. Last validator error: No JSON code block found in the response.\n\n- Repairs: 2"
     }
   ],
-  "a file upload with retry and cancel": [
+  "a media player whose playing state has nested buffering and streaming substates": [
     {
-      "sent": "start {\"prompt\":\"a file upload with retry and cancel\"}",
+      "sent": "start {\"prompt\":\"a media player whose playing state has nested buffering and streaming substates\"}",
       "status": "done",
       "trace": [
         "transition @xstate.init -> \"generating\"",
@@ -77,7 +77,7 @@
         "transition xstate.error.actor -> \"failed\"",
         "emitted CANDIDATE_REJECTED -> \"failed\""
       ],
-      "response": "No usable config for \"a file upload with retry and cancel\". No valid config after 2 repair rounds. Last validator error: No JSON code block found in the response.\n\n- Repairs: 2"
+      "response": "No usable config for \"a media player whose playing state has nested buffering and streaming substates\". No valid config after 2 repair rounds. Last validator error: No JSON code block found in the response.\n\n- Repairs: 2"
     }
   ]
 }

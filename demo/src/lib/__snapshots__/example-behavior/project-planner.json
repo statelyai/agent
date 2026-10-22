@@ -15,6 +15,22 @@
       "response": "The task graph was still invalid after 2 regeneration(s): mock id depends on unknown task \"mock dependsOn0\".\n\n- Deadline days: 10\n- Replans: 0\n- On time: no"
     }
   ],
+  "Impossible 5-day house — the replan budget runs out, ends in failed": [
+    {
+      "sent": "start {\"goal\":\"Build a three-bedroom house\",\"deadlineDays\":5}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"generatingTasks\"",
+        "transition xstate.done.actor -> \"validatingGraph\"",
+        "transition xstate.done.actor -> \"regeneratingTasks\"",
+        "transition xstate.done.actor -> \"validatingGraph\"",
+        "transition xstate.done.actor -> \"regeneratingTasks\"",
+        "transition xstate.done.actor -> \"validatingGraph\"",
+        "transition xstate.done.actor -> \"failed\""
+      ],
+      "response": "The task graph was still invalid after 2 regeneration(s): mock id depends on unknown task \"mock dependsOn0\".\n\n- Deadline days: 5\n- Replans: 0\n- On time: no"
+    }
+  ],
   "Generous 90-day deadline — fits on the first plan": [
     {
       "sent": "start {\"goal\":\"Launch a company blog with ten launch posts\",\"deadlineDays\":90}",

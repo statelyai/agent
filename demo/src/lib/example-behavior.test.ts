@@ -38,6 +38,8 @@ vi.mock("@ai-sdk/openai", async () => {
   const openai = Object.assign((modelId: string) => genericLanguageModel(modelId), {
     chat: (modelId: string) => genericLanguageModel(modelId),
     responses: (modelId: string) => genericLanguageModel(modelId),
+    // Provider tools stay real: they only describe a tool (deep-research's web search).
+    tools: (await vi.importActual<typeof import("@ai-sdk/openai")>("@ai-sdk/openai")).openai.tools,
   });
   return { openai, createOpenAI: () => openai };
 });

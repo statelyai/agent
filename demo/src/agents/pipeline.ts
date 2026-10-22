@@ -1,12 +1,13 @@
 /**
  * Plan → execute → verify — three model calls, three separate states.
  *
- * What the MODEL owns: planning the work, writing the artifact, and verifying
- * it against the request.
- * What the MACHINE owns: the sequence and, crucially, the failure boundaries.
- * Each step is its own state with its own `onError`, so a failure in `verify`
- * is a different, independently handled event from a failure in `plan` — not
- * one opaque prompt that either works or doesn't.
+ * What the MODEL owns: planning the work, writing the artifact, and judging
+ * it against the request (a typed pass/fail plus notes).
+ * What the MACHINE owns: what the verdict means. A draft reaches `complete`
+ * only when the verifier passes it; a failed check ends in `rejected`, never
+ * in `complete`. Each step is also its own state with its own `onError`, so a
+ * failure in `verify` is a different, independently handled event from a
+ * failure in `plan` — not one opaque prompt that either works or doesn't.
  */
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
@@ -26,6 +27,8 @@ const agentSetup = setupAgent({
     plan: z.string(),
     draft: z.string(),
     verification: z.string(),
+    /** True only on `complete`: the verifier passed the draft. */
+    verified: z.boolean(),
     failedAt: z.string().nullable(),
   }),
   requests: {
@@ -44,10 +47,14 @@ const agentSetup = setupAgent({
       prompt: ({ input }) => `Task:\n${input.task}\n\nPlan:\n${input.plan}`,
     },
     verifyTask: {
-      schemas: { input: z.object({ task: z.string(), draft: z.string() }), output: z.string() },
+      schemas: {
+        input: z.object({ task: z.string(), draft: z.string() }),
+        output: z.object({ passed: z.boolean(), notes: z.string() }),
+      },
       model: "critic",
       system:
-        "Verify the draft against the task. Flag unsupported claims or missing requirements, then give a concise verdict.",
+        "Verify the draft against the task. `passed` is false if the draft makes a claim the task does not support " +
+        "or misses a requirement. `notes`: one or two sentences naming what you checked or what failed.",
       prompt: ({ input }) => `Task:\n${input.task}\n\nDraft:\n${input.draft}`,
     },
   },
@@ -90,7 +97,12 @@ export const pipelineMachine = agentSetup.createMachine({
       invoke: {
         src: "verifyTask",
         input: ({ context }) => ({ task: context.task, draft: context.draft }),
-        onDone: { target: "complete", context: ({ output }) => ({ verification: output.result }) },
+        // The verdict is the model's; what it gates is the machine's. Both
+        // targets stay visible in this expression.
+        onDone: ({ output: { result } }) =>
+          result.passed
+            ? { target: "complete", context: { verification: `Passed. ${result.notes}` } }
+            : { target: "rejected", context: { verification: `Rejected. ${result.notes}` } },
         onError: { target: "failed", context: { failedAt: "verifying" } },
       },
     },
@@ -100,6 +112,19 @@ export const pipelineMachine = agentSetup.createMachine({
         plan: context.plan ?? "",
         draft: context.draft ?? "",
         verification: context.verification ?? "",
+        verified: true,
+        failedAt: null,
+      }),
+    },
+    // The draft exists but did not pass: kept for the human to read, never
+    // reported as complete.
+    rejected: {
+      type: "final",
+      output: ({ context }) => ({
+        plan: context.plan ?? "",
+        draft: context.draft ?? "",
+        verification: context.verification ?? "",
+        verified: false,
         failedAt: null,
       }),
     },
@@ -109,6 +134,7 @@ export const pipelineMachine = agentSetup.createMachine({
         plan: context.plan ?? "",
         draft: context.draft ?? "",
         verification: context.verification ?? "",
+        verified: false,
         failedAt: context.failedAt,
       }),
     },

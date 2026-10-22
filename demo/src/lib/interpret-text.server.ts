@@ -101,18 +101,18 @@ export function createInterpretText(model: Experimental_DecisionModel = judgeMod
  * The offered event `text` asks for, with its payload filled, or null when
  * Jev is unsure, picks "unclear", or fails — the caller then delivers
  * nothing. The state's text event, when there is one, is the catch-all
- * reading: chosen, it carries the whole text at any confidence (it is what
- * the state asks free text to be), and it replaces "unclear". Any other
- * reading must clear `TEXT_EVENT_CONFIDENCE`, so an unsure "approve" is asked
- * about, never sent as something else. `judge` is injected by tests;
- * omitted, Jev reads the key.
+ * reading: it carries the whole text at any confidence (it is what the state
+ * asks free text to be), it replaces "unclear", and it takes any reply whose
+ * other reading falls below `TEXT_EVENT_CONFIDENCE`. So an unsure "approve"
+ * is never sent as an approval: it becomes a message, or, with no text event,
+ * is asked about. `judge` is injected by tests; omitted, Jev reads the key.
  */
 export async function interpretIdleText(
   text: string,
   idle: ChatIdle,
   options: { signal?: AbortSignal; judge?: Experimental_DecisionModel } = {},
 ): Promise<({ type: string } & JsonObject) | null> {
-  const candidates = textCandidates(idle.events);
+  const candidates = textCandidates(idle.events, idle.choices);
   if (!candidates.length) return null;
   // A reply that is exactly one choice's name needs no judgment.
   const named = candidates.filter((candidate) =>
@@ -153,10 +153,13 @@ export async function interpretIdleText(
     });
     actor.start();
     const { choice, confidence } = await toPromise(actor);
-    const index = labels.indexOf(choice);
+    let index = labels.indexOf(choice);
+    // Unsure of another reading: the text event, when there is one, carries
+    // the reply as a message ("mhm, definitely" is an answer, not a guess at a
+    // button). Without one, nothing is delivered.
+    if (index !== catchAll && confidence < TEXT_EVENT_CONFIDENCE) index = catchAll;
     const candidate = candidates[index];
     if (!candidate) return null;
-    if (index !== catchAll && confidence < TEXT_EVENT_CONFIDENCE) return null;
     return candidate.fill ? { ...candidate.event, [candidate.fill]: text } : candidate.event;
   } catch (error) {
     // Reads as "unclear" to the person, but a failed judgment (a bad key, an

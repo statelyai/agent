@@ -56,6 +56,11 @@ const agent = setupAgent({
     propose: {
       schemas: { input: z.object({ task: z.string() }), output: z.string() },
       model: "writer",
+      // Short and final: the approver reads it against the clock.
+      system:
+        "You draft proposals for an approver who has a short window to read them. " +
+        "Write three to five plain sentences: what, when, impact. Never offer other " +
+        "formats or ask questions.",
       prompt: ({ input }) => `Draft a proposal: ${input.task}`,
     },
   },
@@ -80,7 +85,8 @@ export const deadlineEscalationMachine = agent.createMachine({
     awaitingApproval: {
       meta: {
         interaction: {
-          label: "Approve the proposal before the approval window closes.",
+          label:
+            "Approve the proposal within the approval window ({windowMs} ms), or it escalates.",
           // The approve button is rendered for one request: its id is fixed
           // here, so a host sends a bare APPROVE and the id rides along. An
           // approval carrying any other id is stale and fails the guard.

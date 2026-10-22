@@ -121,7 +121,9 @@ const agentSetup = setupAgent({
     answer: z.string(),
     modelUsed: z.enum(["quick", "strong"]),
     fallbacks: z.number(),
-    toolCalls: z.string(),
+    // A list, not one joined string: the answer stays the longest prose field,
+    // so it leads even when every attempt was rejected.
+    toolCalls: z.array(z.string()),
   }),
   actors: {
     // The tool's input validation (the how-to's "tool raises" moment), as data.
@@ -173,9 +175,9 @@ function finalOutput(context: ModelFallbackContext, answer: string) {
     answer,
     modelUsed: context.fallbacks > 0 ? ("strong" as const) : ("quick" as const),
     fallbacks: context.fallbacks,
-    toolCalls: context.attempts
-      .map((a) => `${a.model}: ${a.call} ${a.rejection ? `rejected (${a.rejection})` : "accepted"}`)
-      .join("\n\n"),
+    toolCalls: context.attempts.map(
+      (a) => `${a.model}: ${a.call} ${a.rejection ? `rejected (${a.rejection})` : "accepted"}`,
+    ),
   };
 }
 
@@ -320,7 +322,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     const result = await runModelFallbackExample({
       onProgress: (state) => console.log(`  → ${state}`),
     });
-    console.log(`\n[${result.outcome}, model: ${result.modelUsed}] ${result.toolCalls}`);
+    console.log(`\n[${result.outcome}, model: ${result.modelUsed}] ${result.toolCalls.join("; ")}`);
     console.log(result.answer);
   })().catch((error) => {
     console.error(error);

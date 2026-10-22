@@ -168,6 +168,15 @@ function renderTaxonomy(taxonomy: Category[]): string[] {
   return taxonomy.map((category) => `- ${category.name} — ${category.description}`);
 }
 
+/** Each minibatch as the chats it holds, 1-based: "Batch 2: chats 5–8". */
+function describeBatches(batches: number[][]): string[] {
+  return batches.map((batch, index) => {
+    const first = (batch[0] ?? 0) + 1;
+    const last = (batch.at(-1) ?? 0) + 1;
+    return `Batch ${index + 1}: ${first === last ? `chat ${first}` : `chats ${first}–${last}`}`;
+  });
+}
+
 function failureReason(context: TntContext): string {
   if (context.batches.length > MAX_BATCHES) {
     return `${context.batches.length} minibatches exceed MAX_BATCHES (${MAX_BATCHES}); raise batchSize`;
@@ -200,7 +209,8 @@ const agentSetup = setupAgent({
   output: z.object({
     report: z.string(),
     taxonomy: z.array(categorySchema),
-    batches: z.array(z.array(z.number())),
+    // Described, not raw index arrays: read as a list, not a JSON dump.
+    batches: z.array(z.string()),
     documents: z.array(z.string()),
     droppedCategories: z.number(),
   }),
@@ -363,7 +373,7 @@ export const tntLlmMachine = agentSetup.createMachine({
           ...renderTaxonomy(context.taxonomy),
         ].join("\n"),
         taxonomy: context.taxonomy,
-        batches: context.batches,
+        batches: describeBatches(context.batches),
         documents: context.documents,
         droppedCategories: context.droppedCategories,
       }),
@@ -379,7 +389,7 @@ export const tntLlmMachine = agentSetup.createMachine({
             : []),
         ].join("\n"),
         taxonomy: context.taxonomy,
-        batches: context.batches,
+        batches: describeBatches(context.batches),
         documents: context.documents,
         droppedCategories: context.droppedCategories,
       }),
@@ -398,7 +408,7 @@ export interface RunTntLlmOptions {
 export interface TntLlmResult {
   report: string;
   taxonomy: Category[];
-  batches: number[][];
+  batches: string[];
   documents: string[];
   droppedCategories: number;
   /** `done`, or `failed` when the batch limit or a taxonomy request failed. */
