@@ -78,7 +78,7 @@ const kitchenSinkWorkflow = {
   context: { topic: "{{ input.topic }}" },
   requests: {
     summarize: {
-      model: "openai/gpt-5.4-mini",
+      model: "openai/gpt-6-luna",
       prompt: "Summarize {{ input.topic }}",
       includeReasoning: true,
       toolChoice: "auto",
@@ -165,7 +165,7 @@ describe("schemas/agent-workflow.json", () => {
         states: { a: { type: "final" } },
         requests: {
           ask: {
-            model: "openai/gpt-5.4-mini",
+            model: "openai/gpt-6-luna",
             toolChoice: "{{ context.toolChoice }}",
             input: { type: "object" },
             output: { type: "object" },
@@ -180,7 +180,7 @@ describe("schemas/agent-workflow.json", () => {
       schemaErrors({
         initial: "a",
         states: { a: { type: "final" } },
-        requests: { ask: { model: "openai/gpt-5.4-mini" } },
+        requests: { ask: { model: "openai/gpt-6-luna" } },
       }),
     ).not.toEqual([]);
   });

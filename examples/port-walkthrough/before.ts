@@ -48,7 +48,7 @@ export async function runSupportAgent(
 
     const { toolCalls, text, response } = await generateText({
       // Model IDs here are illustrative; substitute your provider's current models.
-      model: openai("gpt-5.4-mini"),
+      model: openai("gpt-6-luna"),
       messages,
       tools: { search, sendEmail },
     });

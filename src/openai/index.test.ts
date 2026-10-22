@@ -223,11 +223,11 @@ describe("createOpenAiExecutors: settings", () => {
     const create = vi.fn(async (_params: any) => ({ choices: [choice("hi")] }));
     const { generateText } = createOpenAiExecutors({
       client: stubClient(create),
-      resolveModel: () => "gpt-5.4-mini",
+      resolveModel: () => "gpt-6-luna",
     });
 
     await generateText(textRequest());
-    expect(create.mock.calls[0]![0]).toMatchObject({ model: "gpt-5.4-mini" });
+    expect(create.mock.calls[0]![0]).toMatchObject({ model: "gpt-6-luna" });
   });
 });
 

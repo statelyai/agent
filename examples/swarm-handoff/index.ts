@@ -87,9 +87,9 @@ function withReply(
 export const MAX_TURNS = 4;
 
 const models = {
-  travel: openai("gpt-5.4-mini"),
-  food: openai("gpt-5.4-mini"),
-  router: openai("gpt-5.4-mini"),
+  travel: openai("gpt-6-luna"),
+  food: openai("gpt-6-luna"),
+  router: openai("gpt-6-luna"),
 };
 
 const agentSetup = setupAgent({

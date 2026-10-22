@@ -78,7 +78,7 @@ export function canLookUp(context: {
 }
 
 const models = {
-  agent: openai("gpt-5.4-mini"),
+  agent: openai("gpt-6-luna"),
 };
 
 /**

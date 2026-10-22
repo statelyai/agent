@@ -177,7 +177,7 @@ if (entry && import.meta.url === pathToFileURL(realpathSync(entry)).href) {
     process.exit(1);
   }
   runBenchmark({
-    textModel: openai("gpt-5.4-mini"),
+    textModel: openai("gpt-6-luna"),
     ...(process.env.TYPESAFE_AI_API_KEY ? { judge: typeSafeAi.decisionModel("jev-latest") } : {}),
     log: (line) => console.log(line),
   })

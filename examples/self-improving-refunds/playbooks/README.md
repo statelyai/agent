@@ -12,7 +12,7 @@ A playbook authors `context` (with its input at `context.facts`), its context sc
 - `schemas.input`, `schemas.events`, `schemas.output`: the facts plus `payloads` (offered options per proposal type), the proposal events, and a proposal.
 - Actor `classifyTicket`: input `{ ticket, customerReplies }`, output `{ isRefundRequest, confidence }`.
 - Request `draftQuestion`: input `{ ticket, missing }`, output `{ question }`.
-- `agent.decide` with the literal model ref `openai/gpt-5.4-mini` and `allowedEvents` drawn from the proposals.
+- `agent.decide` with the literal model ref `openai/gpt-6-luna` and `allowedEvents` drawn from the proposals.
 - Named guards from `playbookGuards`: `identityRejected`, `orderBelongsToOtherCustomer`, `overThreshold`. Everything else is a truthy `{{ path }}` guard.
 
 `improvePlaybook` in `../improve.ts` gates every candidate with `verifyAgentConfig` over this vocabulary, then probes it at the real desk boundary, before any replay.

@@ -35,7 +35,7 @@ import { emailSchema, search } from "./before.js";
 export const MAX_STEPS = 8;
 
 // Model IDs here are illustrative; substitute your provider's current models.
-const models = { quick: openai("gpt-5.4-mini") };
+const models = { quick: openai("gpt-6-luna") };
 
 const messagesField = z.custom<AgentMessage[]>(
   (value) => !("issues" in messagesSchema["~standard"].validate(value)),

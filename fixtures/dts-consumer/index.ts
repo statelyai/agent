@@ -36,7 +36,7 @@ export {
 } from "@statelyai/agent/otel";
 
 const setup = setupAgent({
-  models: { quick: "openai/gpt-5.4-mini" },
+  models: { quick: "openai/gpt-6-luna" },
   context: z.object({ topic: z.string(), summary: z.string().nullable() }),
   input: z.object({ topic: z.string() }),
   events: {

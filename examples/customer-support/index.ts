@@ -85,7 +85,7 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  assistant: openai("gpt-5.4-mini"),
+  assistant: openai("gpt-6-luna"),
 };
 
 // ─── sample data (stand-ins for the tutorial's SQLite airline DB) ───

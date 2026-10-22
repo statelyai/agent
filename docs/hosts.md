@@ -57,7 +57,7 @@ See [The event log](event-log.md).
 ```ts no-check
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-const models = { fast: openai("gpt-5.4-mini") };
+const models = { fast: openai("gpt-6-luna") };
 const agent = setupAgent({ models /* schemas and requests */ });
 
 await runToQuiescence(
@@ -82,7 +82,7 @@ import { createOpenAiExecutors } from "@statelyai/agent/openai";
 
 const executors = createOpenAiExecutors({
   client: new OpenAI(),
-  resolveModel: (modelRef) => (modelRef === "deep" ? "gpt-5.4" : "gpt-5.4-mini"),
+  resolveModel: (modelRef) => (modelRef === "deep" ? "gpt-6.1-sol" : "gpt-6-luna"),
   settings: {
     deep: { reasoning_effort: "high" },
   },
@@ -124,7 +124,7 @@ import { createTanStackAiExecutors } from "@statelyai/agent/tanstack-ai";
 
 const executors = createTanStackAiExecutors({
   models: {
-    quick: openaiText("gpt-5.4-mini"),
+    quick: openaiText("gpt-6-luna"),
     deep: {
       adapter: anthropicText("claude-sonnet-5"),
       settings: { modelOptions: { thinking: { type: "enabled", budget_tokens: 4096 } } },

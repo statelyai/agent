@@ -31,7 +31,7 @@
         "src": "agent.decide",
         "input": {
           "name": "chooseProposal",
-          "model": "openai/gpt-5.4-mini",
+          "model": "openai/gpt-6-luna",
           "system": "You run a refund desk. Each turn, choose exactly one of the offered next steps. Rules: verify the customer's identity before any refund. Look up the order before acting on it. If you do not know the order number, ask the customer. Never refund an order that belongs to another customer; escalate instead. Never refund an order that was already refunded; close instead. Refunds above the approval threshold need a human approval first: request it, and refund only once approved. If the ticket is not a refund request, close it. If identity verification failed, escalate.",
           "prompt": "Ticket: {{ context.facts.ticket }}\nCustomer: {{ context.facts.customerId }}\nIdentity verified: {{ context.facts.identityVerified }}\nOrder id candidates: {{ context.facts.orderIdCandidates }}\nLoaded order: {{ context.facts.order.id }} (customer {{ context.facts.order.customerId }}, total {{ context.facts.order.total }}, refunded {{ context.facts.order.refunded }})\nApproved: {{ context.facts.approved }}\nApproval threshold: {{ context.facts.approvalThreshold }}\nCustomer replies: {{ context.facts.customerReplies }}\nFailed so far: {{ context.facts.rejections.0.proposal }} {{ context.facts.rejections.0.reason }} {{ context.facts.rejections.1.proposal }} {{ context.facts.rejections.1.reason }}\nTurn: {{ context.facts.turn }}",
           "allowedEvents": [

@@ -87,7 +87,7 @@ function isDecisionModel(model: unknown): model is AiSdkDecisionModel {
 
 /**
  * Splits a portable `"provider/model-id"` model ref (the convention JSON
- * workflows and registry-less hosts use, e.g. `"openai/gpt-5.4-mini"`) into
+ * workflows and registry-less hosts use, e.g. `"openai/gpt-6-luna"`) into
  * its parts. A ref with no `/` has no provider — `modelId` is the whole ref.
  * The standard building block for a host's `resolveModel`:
  *
@@ -136,7 +136,7 @@ export type AiSdkCallSettings = Omit<
 /**
  * Options for {@link createAiSdkExecutors}: either a static `models` map
  * (model refs resolved by lookup), a `resolveModel` function (refs resolved
- * dynamically, e.g. `"openai/gpt-5.4-mini"` → `openai('gpt-5.4-mini')`), or
+ * dynamically, e.g. `"openai/gpt-6-luna"` → `openai('gpt-6-luna')`), or
  * both — `resolveModel` takes precedence when both are supplied.
  *
  * `settings` carries provider knobs that are the HOST's business rather than
@@ -356,10 +356,10 @@ function truncated(
  *
  * @example
  * ```ts
- * const agentSetup = setupAgent({ models: { quick: openai('gpt-5.4-mini') }, ... });
+ * const agentSetup = setupAgent({ models: { quick: openai('gpt-6-luna') }, ... });
  * const machine = agentSetup.createMachine({ ... });
  * const result = await runAgent(machine, { input, executors: createAiSdkExecutors(machine) });
- * // Or explicitly: createAiSdkExecutors({ models: { quick: openai('gpt-5.4-mini') } })
+ * // Or explicitly: createAiSdkExecutors({ models: { quick: openai('gpt-6-luna') } })
  * ```
  */
 export function createAiSdkExecutors<TModels extends AiSdkModelMap>(

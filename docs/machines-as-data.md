@@ -112,7 +112,7 @@ context:
   ticket: "{{ input.ticket }}"
 requests:
   draftReply:
-    model: openai/gpt-5.4-mini
+    model: openai/gpt-6-luna
     system: "Draft a short, courteous support reply to the customer's ticket."
     prompt: "{{ context.ticket }}"
     input:
@@ -130,7 +130,7 @@ states:
       id: triageDecision
       src: agent.decide
       input:
-        model: openai/gpt-5.4-mini
+        model: openai/gpt-6-luna
         system: "Decide whether this ticket needs human escalation or a drafted reply."
         prompt: "{{ context.ticket }}"
         allowedEvents: [ESCALATE, REPLY]
@@ -221,7 +221,7 @@ A `requests` entry can also declare these fields.
 ```yaml
 requests:
   lookupOrder:
-    model: openai/gpt-5.4-mini
+    model: openai/gpt-6-luna
     prompt: "{{ context.ticket }}"
     includeReasoning: true
     toolChoice: auto
@@ -350,7 +350,7 @@ states:
     invoke:
       src: agent.decide
       input:
-        model: openai/gpt-5.4
+        model: openai/gpt-6.1-sol
         prompt: "{{ context.ticket }}"
         allowedEvents: [ESCALATE, REPLY]
       onError:

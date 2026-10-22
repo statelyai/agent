@@ -232,7 +232,7 @@ const schemas = createAgentSchemas({
 });
 
 const models = {
-  support: openai("gpt-5.4-mini"),
+  support: openai("gpt-6-luna"),
 };
 
 const answerReuseSetup = setupAgent({

@@ -174,7 +174,7 @@ export function createClassifyPlayAgain(model: Experimental_DecisionModel = judg
 }
 
 const models = {
-  quick: openai("gpt-5.4-mini"),
+  quick: openai("gpt-6-luna"),
 };
 
 export const twentyQuestionsSchemas = createAgentSchemas({

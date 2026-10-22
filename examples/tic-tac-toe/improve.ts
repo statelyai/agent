@@ -124,7 +124,7 @@ export const proposePolicy = createTextLogic({
     input: z.object({ prompt: z.string() }),
     output: z.looseObject({ initial: z.string(), states: z.record(z.string(), z.unknown()) }),
   },
-  model: "openai/gpt-5.4-mini",
+  model: "openai/gpt-6-luna",
   system:
     "You improve the POLICY that plays O in tic-tac-toe: a JSON agent workflow config. The " +
     "ENVIRONMENT (the game machine) is fixed: it offers only empty cells and refuses everything " +

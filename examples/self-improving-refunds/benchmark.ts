@@ -235,7 +235,7 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     process.exit(1);
   }
   runBenchmark({
-    textModel: openai("gpt-5.4-mini"),
+    textModel: openai("gpt-6-luna"),
     judge: typeSafeAi.decisionModel("jev-latest"),
     log: (line) => console.log(line),
   })

@@ -66,7 +66,7 @@ import {
 } from "@statelyai/agent";
 
 const models = {
-  proposer: openai("gpt-5.4-mini"),
+  proposer: openai("gpt-6-luna"),
 };
 
 /** Partial solutions kept after each depth. */

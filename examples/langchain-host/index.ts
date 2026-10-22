@@ -53,7 +53,7 @@ import {
 export * from "./executors.js";
 export * from "./bridge.js";
 
-const LIVE_MODEL = "gpt-5.4-mini";
+const LIVE_MODEL = "gpt-6-luna";
 
 // ─── Direction A: LangChain model as the machine's executors ───
 

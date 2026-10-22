@@ -188,7 +188,7 @@ describe("toAiSdkCallSettings", () => {
   test("uses messages when present (identity mapping)", () => {
     const messages = [{ role: "user" as const, content: "hi" }];
     const settings: Record<string, unknown> = toAiSdkCallSettings({
-      model: "openai/gpt-5.4-mini",
+      model: "openai/gpt-6-luna",
       messages,
     });
     expect(settings.messages).toBe(messages as never);
@@ -197,7 +197,7 @@ describe("toAiSdkCallSettings", () => {
 
   test("falls back to prompt when messages are absent", () => {
     const settings: Record<string, unknown> = toAiSdkCallSettings({
-      model: "openai/gpt-5.4-mini",
+      model: "openai/gpt-6-luna",
       prompt: "hello",
     });
     expect(settings.prompt).toBe("hello");
@@ -206,7 +206,7 @@ describe("toAiSdkCallSettings", () => {
 
   test("maps model params and toolChoice", () => {
     const settings = toAiSdkCallSettings({
-      model: "openai/gpt-5.4-mini",
+      model: "openai/gpt-6-luna",
       prompt: "hi",
       temperature: 0.2,
       maxOutputTokens: 100,
@@ -228,7 +228,7 @@ describe("toAiSdkCallSettings", () => {
 
   test("builds AI SDK tools when request tools are present", () => {
     const settings = toAiSdkCallSettings({
-      model: "openai/gpt-5.4-mini",
+      model: "openai/gpt-6-luna",
       prompt: "hi",
       tools: { lookup: { description: "Look something up." } },
     });
@@ -236,7 +236,7 @@ describe("toAiSdkCallSettings", () => {
   });
 
   test("omits tools when request has none", () => {
-    const settings = toAiSdkCallSettings({ model: "openai/gpt-5.4-mini", prompt: "hi" });
+    const settings = toAiSdkCallSettings({ model: "openai/gpt-6-luna", prompt: "hi" });
     expect(settings.tools).toBeUndefined();
   });
 });
@@ -1208,9 +1208,9 @@ describe("createAiSdkExecutors — truncation", () => {
 
 describe("parseModelRef", () => {
   test("splits provider/model-id refs on the first slash", () => {
-    expect(parseModelRef("openai/gpt-5.4-mini")).toEqual({
+    expect(parseModelRef("openai/gpt-6-luna")).toEqual({
       provider: "openai",
-      modelId: "gpt-5.4-mini",
+      modelId: "gpt-6-luna",
     });
     // Only the FIRST slash splits — model ids may contain slashes.
     expect(parseModelRef("openrouter/meta/llama-3")).toEqual({

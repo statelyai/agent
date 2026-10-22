@@ -547,7 +547,7 @@ function toToolContent(output: unknown): string {
  * ```ts
  * const executors = createOpenAiExecutors({
  *   client: new OpenAI(),
- *   resolveModel: () => 'gpt-5.4-mini',
+ *   resolveModel: () => 'gpt-6-luna',
  * });
  * const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
  * ```

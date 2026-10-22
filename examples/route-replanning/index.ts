@@ -46,7 +46,7 @@ import {
   type AgentRunInit,
 } from "@statelyai/agent";
 
-const models = { dispatcher: openai("gpt-5.4-mini") };
+const models = { dispatcher: openai("gpt-6-luna") };
 
 // ─── The road network ───
 

@@ -65,7 +65,7 @@ import {
 // Model refs → OpenAI model ids. The text adapters are built in
 // `resolveExecutors`, because `openaiText` reads `OPENAI_API_KEY` when called.
 const models = {
-  writer: "gpt-5.4-mini",
+  writer: "gpt-6-luna",
 } as const;
 
 function createExecutors() {

@@ -310,7 +310,7 @@ function resolveAllowedEventTypes(
  *
  * export const chooseMove = createDecisionLogic({
  *   schemas: { input: z.object({ playerHp: z.number(), enemyHp: z.number() }) },
- *   model: 'openai/gpt-5.4-mini',
+ *   model: 'openai/gpt-6-luna',
  *   system: 'You are playing a turn-based game. Choose exactly one legal move.',
  *   prompt: ({ input }) => `Player HP: ${input.playerHp}\nEnemy HP: ${input.enemyHp}`,
  *   allowedEvents: ({ input }) =>

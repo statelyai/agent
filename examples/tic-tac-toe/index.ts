@@ -62,7 +62,7 @@ export async function runTicTacToeExample(
 ): Promise<ImprovementResult> {
   const log = options.log ?? console.log;
   const executors =
-    options.executors ?? createAiSdkExecutors({ resolveModel: () => openai("gpt-5.4-mini") });
+    options.executors ?? createAiSdkExecutors({ resolveModel: () => openai("gpt-6-luna") });
 
   const v0 = loadPolicy("v0");
   const proof = await provePolicy(lowerPolicy(v0));

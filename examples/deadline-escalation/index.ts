@@ -39,7 +39,7 @@ const input = z.object({
   windowMs: z.number().int().nonnegative(),
 });
 const models = {
-  writer: openai("gpt-5.4-mini"),
+  writer: openai("gpt-6-luna"),
 };
 const agent = setupAgent({
   models,
