@@ -1,14 +1,25 @@
 import type { AnyStateMachine, InputFrom } from "xstate";
 import type { AgentDecisionExecutor, AgentExecutorDecisionRequest } from "./decision.js";
 import { AgentError } from "./errors.js";
+import { assertJsonSerializable } from "./event-log.js";
 import { isRecord } from "./internal/is-record.js";
 import { runAgent, type AgentRunOptions } from "./run-agent.js";
+import type { AgentRequestExecutorInfo } from "./text-logic.js";
 
 /** Options for {@link createPolicyDecider}: everything {@link runAgent} takes for the policy run, except how the run opens. */
 export interface PolicyDeciderOptions<TPolicy extends AnyStateMachine> extends Omit<
   AgentRunOptions<TPolicy>,
-  "input" | "event" | "attempts" | "snapshot" | "events" | "onIdle" | "signal"
+  "input" | "event" | "attempts" | "snapshot" | "events" | "onIdle" | "signal" | "threadId"
 > {
+  /**
+   * The `store` thread for one decision's policy run. Every decision, and every
+   * retry of one, needs its own thread: a thread that already has entries is
+   * resumed, so a shared one would return an earlier decision's choice. Default
+   * with a `store`: `policy:${info.callKey}`, which is unique per call and
+   * attempt and stays the same when a crashed run re-issues the call. Required
+   * with a `store` when the decider is called without a `callKey`.
+   */
+  threadId?: (request: AgentExecutorDecisionRequest, info?: AgentRequestExecutorInfo) => string;
   /**
    * Builds the policy's input from the decision request. Default:
    * `{ facts: request.metadata?.facts, options, system: request.system, prompt: request.prompt }`,
@@ -25,7 +36,9 @@ export interface PolicyDeciderOptions<TPolicy extends AnyStateMachine> extends O
  * `agent.decide` for the rest, answered by `options.executors`.
  *
  * The environment still judges the event: one it does not accept is retried
- * like any other decider's choice. The policy's token usage is reported on the
+ * like any other decider's choice. The policy's input must be JSON (it opens
+ * the policy run's event log): the default drops keys whose value is
+ * `undefined`, and any other value that is not JSON throws before the run. The policy's token usage is reported on the
  * result, and left out when the policy made no model call. A run that does not
  * end `done` with an event throws `AgentError` with code `policy-not-done`.
  *
@@ -39,14 +52,18 @@ export function createPolicyDecider<TPolicy extends AnyStateMachine>(
   policy: TPolicy,
   options: PolicyDeciderOptions<TPolicy> = {},
 ): AgentDecisionExecutor {
-  const { input = defaultInput, ...runOptions } = options;
+  const { input = defaultInput, threadId, ...runOptions } = options;
+  const id = (policy.config as { id?: string }).id ?? policy.id;
   return async (request, info) => {
+    const policyInput = input(request);
+    assertJsonSerializable(policyInput, "policy input");
+    const thread = runOptions.store === undefined ? undefined : policyThread(request, info);
     const result = await runAgent(policy, {
       ...(runOptions as AgentRunOptions<TPolicy>),
-      input: input(request),
+      input: policyInput,
+      ...(thread === undefined ? {} : { threadId: thread }),
       ...(info?.signal ? { signal: info.signal } : {}),
     });
-    const id = (policy.config as { id?: string }).id ?? policy.id;
     if (result.status !== "done") {
       const why = result.status === "error" ? `: ${String(result.error)}` : "";
       throw new AgentError("policy-not-done", `policy '${id}' settled '${result.status}'${why}`, {
@@ -63,17 +80,39 @@ export function createPolicyDecider<TPolicy extends AnyStateMachine>(
     const { modelCalls, ...usage } = result.usage;
     return { event: event as { type: string }, ...(modelCalls > 0 ? { usage } : {}) };
   };
+
+  function policyThread(request: AgentExecutorDecisionRequest, info?: AgentRequestExecutorInfo) {
+    if (threadId) return threadId(request, info);
+    if (info?.callKey) return `policy:${info.callKey}`;
+    throw new AgentError(
+      "missing-thread-id",
+      `policy '${id}' has a store but no threadId, and the decision came with no callKey to derive one from`,
+    );
+  }
 }
 
 function defaultInput<TPolicy extends AnyStateMachine>(
   request: AgentExecutorDecisionRequest,
 ): InputFrom<TPolicy> {
   const facts = (request.metadata as { facts?: unknown } | undefined)?.facts;
-  // Absent keys stay absent: an `undefined` in a run's input keeps it from being journaled.
-  return {
-    ...(facts === undefined ? {} : { facts }),
+  // An `undefined` anywhere in a run's input keeps it from being journaled; an absent key means the same.
+  return withoutUndefinedKeys({
+    facts,
     options: (request.options ?? []).map((option) => option.event),
-    ...(request.system === undefined ? {} : { system: request.system }),
-    ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
-  } as InputFrom<TPolicy>;
+    system: request.system,
+    prompt: request.prompt,
+  }) as InputFrom<TPolicy>;
+}
+
+/** A copy of `value` with every object key whose value is `undefined` removed, at any depth. */
+function withoutUndefinedKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutUndefinedKeys);
+  // Plain objects only: a Date or a class instance passes through for the JSON check to reject.
+  if (!isRecord(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value)))
+    return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, child]) => child !== undefined)
+      .map(([key, child]) => [key, withoutUndefinedKeys(child)]),
+  );
 }

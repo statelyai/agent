@@ -89,9 +89,14 @@ Use `explorePaths` to assert the set of reachable final states, and `await simul
 ```ts
 import { getDecisionRequests } from "@statelyai/agent/testing";
 
-// One row per recorded decision; `expected` is the label a person confirmed for that scenario.
+// One row per recorded decision; `expected` is the label a person confirmed for that decision.
+// A scenario can decide more than once, so label each decision by its position, not the scenario alone.
 const rows = traces.flatMap(({ scenario, trace }) =>
-  getDecisionRequests(trace, { name: "chooseResolution" }).map(({ request }) => ({ id: scenario.id, request, expected: labels[scenario.id] })),
+  getDecisionRequests(trace, { name: "chooseResolution" }).map(({ request }, i) => ({
+    id: `${scenario.id}#${i}`,
+    request,
+    expected: labels[`${scenario.id}#${i}`],
+  })),
 );
 
 test.each(rows)("deciding: $id", async ({ request, expected }) => {

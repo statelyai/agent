@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { createMachine } from "xstate";
 import { z } from "zod";
 import type { AgentDecisionExecutor, AgentExecutorDecisionRequest } from "./decision.js";
+import { createInMemoryEventLogStore } from "./event-log-store.js";
 import { createPolicyDecider } from "./policy-decider.js";
 import { runAgent } from "./run-agent.js";
 import { setupAgent } from "./setup-agent.js";
@@ -10,7 +11,8 @@ const proposal = z.discriminatedUnion("type", [
   z.object({ type: z.literal("REFUND"), amount: z.number() }),
   z.object({ type: z.literal("ESCALATE") }),
 ]);
-const facts = z.object({ requested: z.number() });
+// `coupon` is optional: a present key holding undefined survives the schema.
+const facts = z.object({ requested: z.number(), coupon: z.string().optional() });
 
 // The environment: one closed-choice decision, facts passed as metadata.
 const desk = setupAgent({
@@ -203,6 +205,73 @@ describe("createPolicyDecider", () => {
     expect(seenInput).toEqual([
       { facts: { requested: 30 }, options: [{ type: "REFUND", amount: 30 }] },
     ]);
+  });
+
+  const decisionRequest = (facts: Record<string, unknown>, requested = facts.requested as number) =>
+    ({
+      kind: "decision",
+      id: "d",
+      name: "chooseResolution",
+      model: "decider",
+      events: [{ type: "REFUND" }, { type: "ESCALATE" }],
+      options: [{ event: { type: "REFUND", amount: requested } }, { event: { type: "ESCALATE" } }],
+      attempts: [],
+      metadata: { facts },
+    }) as unknown as AgentExecutorDecisionRequest;
+
+  test("gives every decision its own policy thread, so a store never replays an earlier choice", async () => {
+    const store = createInMemoryEventLogStore();
+    const decide = createPolicyDecider(policy, {
+      executors: { decide: model("ESCALATE").decide },
+      store,
+    });
+
+    const first = await decide(decisionRequest({ requested: 240 }), { callKey: "exec:site#0" });
+    const second = await decide(decisionRequest({ requested: 40 }), { callKey: "exec:site#1" });
+
+    expect(first.event).toEqual({ type: "ESCALATE" });
+    expect(second.event).toEqual({ type: "REFUND", amount: 40 });
+    const { threadIds } = await store.listThreads!({ prefix: "policy:" });
+    expect(threadIds.sort()).toEqual(["policy:exec:site#0", "policy:exec:site#1"]);
+  });
+
+  test("takes the policy thread from `threadId`, and needs one when a store has no call key to go on", async () => {
+    const store = createInMemoryEventLogStore();
+    const decide = createPolicyDecider(policy, {
+      executors: { decide: model("ESCALATE").decide },
+      store,
+      threadId: (request) =>
+        `policy:${String((request.metadata as { facts: { requested: number } }).facts.requested)}`,
+    });
+    await decide(decisionRequest({ requested: 240 }));
+    expect((await store.listThreads!({ prefix: "policy:" })).threadIds).toEqual(["policy:240"]);
+
+    const without = createPolicyDecider(policy, {
+      executors: { decide: model("ESCALATE").decide },
+      store,
+    });
+    await expect(without(decisionRequest({ requested: 240 }))).rejects.toThrow(/threadId/);
+  });
+
+  test("drops undefined keys nested in the default input, so the policy's log and usage survive", async () => {
+    const decide = createPolicyDecider(policy, {
+      executors: { decide: model("first", { totalTokens: 12 }).decide },
+    });
+
+    const result = await decide(decisionRequest({ requested: 240, coupon: undefined }));
+
+    expect(result).toEqual({ event: { type: "REFUND", amount: 240 }, usage: { totalTokens: 12 } });
+  });
+
+  test("rejects a policy input that is not JSON before the policy runs", async () => {
+    const inner = model("first");
+    const decide = createPolicyDecider(policy, {
+      executors: { decide: inner.decide },
+      input: () => ({ facts: { requested: 240, at: new Date() }, options: [] }) as never,
+    });
+
+    await expect(decide(decisionRequest({ requested: 240 }))).rejects.toThrow(/at/);
+    expect(inner.seen).toEqual([]);
   });
 
   test("throws when the policy does not finish with an event", async () => {
