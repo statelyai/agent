@@ -368,8 +368,9 @@ function eventLines(machine: AnyStateMachine): string[] {
  * and under it every transition leaving it, one per line: `on EVENT`,
  * `always`, `after <delay>`, invoke `done`/`error`, and `choice` branches,
  * each with `(human)` when its `meta.actor` is `"human"`, its guard (`if …`),
- * where it goes (`→ review`), and what it sets in context (`sets draft, attempts`). An `Events` section lists the
- * machine's event schemas with their descriptions and fields.
+ * where it goes (`→ review`), and what it sets in context (`sets draft,
+ * attempts`). An `Events` section lists the machine's event schemas with their
+ * descriptions and fields.
  *
  * A transition written as a function shows the targets its source names
  * (`→ review (conditional)` when it may decline or pick among several),

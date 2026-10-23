@@ -1429,6 +1429,8 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
         request.options = options;
         request.withheld = withheld;
       }
+      // After the options: a closed choice builds them from `events`, so a
+      // person's event still lands in `withheld`.
       if (actorRef) {
         const humanEventTypes = getHumanEventTypes(actorRef.getSnapshot() as AnyMachineSnapshot);
         request.events = events.filter((event) => !humanEventTypes.has(event.type));
