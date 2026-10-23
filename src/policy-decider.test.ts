@@ -232,7 +232,28 @@ describe("createPolicyDecider", () => {
     expect(first.event).toEqual({ type: "ESCALATE" });
     expect(second.event).toEqual({ type: "REFUND", amount: 40 });
     const { threadIds } = await store.listThreads!({ prefix: "policy:" });
-    expect(threadIds.sort()).toEqual(["policy:exec:site#0", "policy:exec:site#1"]);
+    expect(threadIds.map((thread) => thread.replace(/:[^:]+$/, "")).sort()).toEqual([
+      "policy:exec:site#0",
+      "policy:exec:site#1",
+    ]);
+  });
+
+  test("a different request at the same call key gets its own thread; the same one resumes", async () => {
+    const store = createInMemoryEventLogStore();
+    const decide = createPolicyDecider(policy, {
+      executors: { decide: model("ESCALATE").decide },
+      store,
+    });
+
+    // A fork inherits the parent's call key but asks with other facts.
+    const parent = await decide(decisionRequest({ requested: 240 }), { callKey: "exec:site#0" });
+    const fork = await decide(decisionRequest({ requested: 40 }), { callKey: "exec:site#0" });
+    const reissued = await decide(decisionRequest({ requested: 40 }), { callKey: "exec:site#0" });
+
+    expect(parent.event).toEqual({ type: "ESCALATE" });
+    expect(fork.event).toEqual({ type: "REFUND", amount: 40 });
+    expect(reissued.event).toEqual({ type: "REFUND", amount: 40 });
+    expect((await store.listThreads!({ prefix: "policy:" })).threadIds).toHaveLength(2);
   });
 
   test("takes the policy thread from `threadId`, and needs one when a store has no call key to go on", async () => {

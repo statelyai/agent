@@ -274,7 +274,7 @@ await runAgent(deskMachine, { input, executors: { ...modelExecutors, decide } })
 - The result carries the policy's token usage, and none when it decided with a rule.
 - A run that does not end `done` with an event throws `AgentError` with code `policy-not-done`. Give each of the policy's decisions an `onError` that falls back to an event the environment always accepts.
 - Every other `runAgent` option passes through: `store` and `metadata` to journal the policy's runs, `onTrace` to trace them.
-- Each decision's policy run gets its own `store` thread, `policy:${info.callKey}` by default: a thread that already has entries is resumed, so a shared one would return an earlier choice. Pass `threadId: (request, info) => ...` to name them yourself; it is required with a `store` when the decider is called without a `callKey`.
+- Each decision's policy run gets its own `store` thread, `policy:${info.callKey}:${hash}` by default, where `hash` fingerprints the policy input: a thread that already has entries is resumed, so a shared one would return an earlier choice. The hash keeps a fork that asks something else at the same call site off its parent's thread. Pass `threadId: (request, info) => ...` to name them yourself; it is required with a `store` when the decider is called without a `callKey`.
 - The policy's input must be JSON, since it opens the run's event log. The default drops keys whose value is `undefined`; any other value that is not JSON throws before the run.
 
 To route by request name, wrap it: `decide: (request, info) => (request.name === "chooseResolution" ? policyDecide(request, info) : modelExecutors.decide!(request, info))`, where `policyDecide` is the executor `createPolicyDecider` returned.
