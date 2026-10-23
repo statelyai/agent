@@ -113,6 +113,7 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 - [cloudflare-agent-host](cloudflare-agent-host): a Durable Object whose SQLite event log is the source of truth
 - [cloudflare-workers-ai-host](cloudflare-workers-ai-host): a provider with no native tool calling, so the legal events are serialized into the prompt
 - [next-host](next-host): controlled mode across a stateless Next route handler
+- [mcp-workflow](mcp-workflow): a coding agent drives a bug-fix machine through MCP tools; review events are tagged `actor: "human"`, so only a person sends them
 
 ## Evals and verification
 
