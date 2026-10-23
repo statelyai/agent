@@ -33,7 +33,7 @@ Declare `version` on every machine whose runs you record: the environment and, i
 export const deskMachine = deskSetup.createMachine({ id: "refund-desk", version: "1", ... });
 ```
 
-Also name the **decider version**: whatever produces the model's answers. It is the policy machine's `version` when there is one. Otherwise it is a label for the model, its settings, and its prompts (`gpt-6-luna.xhigh.p<hash of the prompts>`); this holds for a machine with only text requests too. In tests it is the stand-in model's name (`careful`). Runs by different deciders must never share a label.
+Also name the **decider version**: whatever produces the model's answers. It is the policy machine's `version` when there is one. Otherwise it is a label for the model, its settings, and its prompts (`gpt-6-luna.xhigh.p<hash of the prompts>`); this holds for a machine with only text requests too. When the prompts are private to another module (a route file), export a prompt version from that module rather than guessing; a release or commit id is the fallback. In tests it is the stand-in model's name (`careful`). Runs by different deciders must never share a label.
 
 - Every log entry carries `machineVersion`. Without a declared `version` it falls back to a structural hash that skips functions, and in XState v6 the guards and targets live in transition functions. Changing a guard would not change the hash.
 - Bump `version` on every behavior change. Adding recording is not one: it only observes. `improve-machine` bumps the policy's on promotion.
@@ -119,7 +119,7 @@ test("a recorded run replays to its final state with no model calls", async () =
   const result = await runAgent(deskMachine, { input, executors, store, threadId: "test:careful:small-clean:r1", metadata });
   await result.drain();
   const entries = await store.read("test:careful:small-clean:r1");
-  expect(entries.length).toBeGreaterThan(1); // a log was written at all
+  expect(entries[0]?.event.type).toBe("@agent.init"); // a log was written at all; a run with no outside input has only this entry
   const { snapshot } = replay(deskMachine, entries, { verify: "strict" }); // a pure fold: nothing runs
   // Compare more than the state value: context and output catch a field the log does not keep.
   expect({ status: snapshot.status, value: snapshot.value, context: snapshot.context, output: snapshot.output }).toEqual({
@@ -134,7 +134,7 @@ test("a recorded run replays to its final state with no model calls", async () =
 
 `verify: "strict"` proves the log was not altered: every entry's hash matches the fold. It does not prove the fold matches the live run, which is why the test compares the snapshots too. A journaled error replays as an `Error` with its `name`, `message`, and a string or number `code`; any other property of the thrown value is not kept.
 
-- `foldTraces(traces, { failed })` over a batch returns a row for every state a run rested in. A `choice` state the run passes through in the same step gets no row. `failed` judges one whole trace; start with "the last event is not a `run.end` with status `done`, or the run ended in a failure or sentinel state", and ask the user whether a wrong outcome counts too. `withheld` is above 0 only for a closed choice (`payloads`), where the guards refused an option.
+- `foldTraces(traces, { failed })` over a batch returns a row for every state a run rested in. A `choice` state the run passes through in the same step gets no row. `failed` judges one whole trace; start with "the last event is not a `run.end` with status `done`, or the run ended in a failure or sentinel state", and ask the user whether a wrong outcome counts too. A serialized `run.end` is `{ type: "run.end", status, snapshot: { value, context, … } }`: `failed: (t) => { const end = t.at(-1); return end?.type !== "run.end" || end.status !== "done" || ["failed", "invariantBroken"].includes(String(end.snapshot?.value)); }`. `withheld` is above 0 only for a closed choice (`payloads`), where the guards refused an option.
 - `getDecisionAttempts(entries)` lists the refused choices of a run; for a machine with no decisions (`agent.decide` or `decideNext`) it is always empty, so skip this test. A stand-in model that picks from the offered options can never propose an illegal one, so write a raw decide executor for this test that proposes a refused event first: `decide: async (request) => ({ event: request.attempts.length ? request.options![0]!.event : { type: "REFUND", amount: 1000 } })`.
 - Running a scenario with and without recording leaves the same world, the same model calls, and the same final state, and the recorded run's log is not empty.
 

@@ -2340,6 +2340,23 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // and later entries go unverified rather than failing the run.
   let logFold: LogFold | null | undefined;
 
+  // A value the log cannot hold. With a store the caller asked for a durable
+  // log, so the run stops; without one, the log stops and the run goes on.
+  // Either way it is loud: a silently short `result.events` replays wrong.
+  const stopLogging = (error: unknown): void => {
+    if (!loggingEnabled) return;
+    loggingEnabled = false;
+    if (store !== undefined) {
+      journalError ??= error;
+      stopRun({ cause: "journal", error });
+      return;
+    }
+    console.warn(
+      `@statelyai/agent: this run's log stopped at entry ${logEntries.length}, so result.events is incomplete: ` +
+        `${error instanceof Error ? error.message : String(error)}. Pass input and events that JSON can hold.`,
+    );
+  };
+
   const appendLogEntry = (
     event: EventObject,
     attempts?: DecisionAttempt[],
@@ -2347,11 +2364,17 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (!loggingEnabled) {
       return undefined;
     }
-    const entry = createReplayEntry(logMachine, logEntries, event, {
-      machineVersion,
-      verification: false,
-      ...(attempts !== undefined ? { attempts } : {}),
-    });
+    let entry: AgentLogEntry;
+    try {
+      entry = createReplayEntry(logMachine, logEntries, event, {
+        machineVersion,
+        verification: false,
+        ...(attempts !== undefined ? { attempts } : {}),
+      });
+    } catch (error) {
+      stopLogging(error);
+      return undefined;
+    }
     if (verificationEnabled && logFold !== null) {
       try {
         logFold ??= foldLog(logMachine, logEntries, { machineVersion, verify: false });
@@ -2881,13 +2904,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             }
           }
         }
-        loggingEnabled = false;
-        // With a store, the caller asked for a durable log; running without
-        // one would break write-ahead silently, so the run stops instead.
-        if (store !== undefined) {
-          journalError ??= lastError;
-          stopRun({ cause: "journal", error: lastError });
-        }
+        stopLogging(lastError);
       };
 
       /** Init forms for a snapshot resume, most faithful first. */

@@ -3253,6 +3253,12 @@ describe("setupAgent schemas that are not Standard Schema", () => {
     expect(() => setupAgent(config as never)).toThrow(/not a Standard Schema.*zod/is);
   });
 
+  test("a request with neither prompt nor messages is rejected at setup", () => {
+    expect(() =>
+      setupAgent({ context: z.object({}), requests: { chatStep: { model: "m" } } } as never),
+    ).toThrow(/'chatStep' has neither `prompt` nor `messages`/);
+  });
+
   test("an empty event payload is still accepted", () => {
     expect(() => setupAgent({ context: z.object({}), events: { GO: {} } })).not.toThrow();
   });

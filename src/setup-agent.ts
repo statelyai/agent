@@ -765,11 +765,7 @@ export function setupAgent<
   for (const [type, schema] of Object.entries(schemas.emitted ?? {})) {
     assertStandardSchema(schema, `emitted.${type}`);
   }
-  for (const [name, request] of Object.entries(config.requests ?? {})) {
-    const requestSchemas = (request as { schemas?: { input?: unknown; output?: unknown } }).schemas;
-    assertStandardSchema(requestSchemas?.input, `requests.${name}.schemas.input`);
-    assertStandardSchema(requestSchemas?.output, `requests.${name}.schemas.output`);
-  }
+
   // `requests` is optional; an omitted map is simply empty.
   const requests = (config.requests ?? {}) as AgentRequestInput<
     TRequestSchemas,
@@ -780,6 +776,19 @@ export function setupAgent<
     config.actors,
     requestActors,
   );
+  for (const [name, request] of Object.entries(config.requests ?? {})) {
+    if (!("prompt" in request) && !("messages" in request)) {
+      throw new AgentError(
+        "invalid-request",
+        `setupAgent: request '${name}' has neither \`prompt\` nor \`messages\`, so every call to it fails. ` +
+          `A request whose executor builds its own model call still needs one: pass the conversation as ` +
+          `\`messages: ({ input }) => input.messages\` (or a \`prompt\`) and read it in the executor.`,
+      );
+    }
+    const requestSchemas = (request as { schemas?: { input?: unknown; output?: unknown } }).schemas;
+    assertStandardSchema(requestSchemas?.input, `requests.${name}.schemas.input`);
+    assertStandardSchema(requestSchemas?.output, `requests.${name}.schemas.output`);
+  }
   // The plain-object config passed to xstate's setup(...) (see
   // AgentSetupXStateConfig's note on why it's not SetupConfig<...>).
   const setupConfig: AgentSetupXStateConfig<

@@ -638,7 +638,8 @@ export function createReplayEntry(
     recordedAt: options.recordedAt ?? new Date().toISOString(),
     machineId: machineIdOf(machine),
     machineVersion,
-    event: normalizeDoneActorEvent(normalizeEventErrors(event) as EventObject),
+    // Object fields set to `undefined` are dropped, as `JSON.stringify` drops them.
+    event: normalizeDoneActorEvent(pruneUndefined(normalizeEventErrors(event)) as EventObject),
     ...(options.causationId !== undefined ? { causationId: options.causationId } : {}),
     ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
     ...(options.attempts !== undefined && options.attempts.length > 0
@@ -671,15 +672,24 @@ export type AgentLogInit =
 // A persisted snapshot carries `output`/`error` as explicit `undefined` before
 // serialization; JSON drops those keys, and so does this, so the entry passes
 // `assertJsonSerializable` and hashes identically before and after a round-trip.
-function pruneUndefined(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(pruneUndefined);
+function pruneUndefined(value: unknown, ancestors: WeakSet<object> = new WeakSet()): unknown {
   if (value === null || typeof value !== "object") return value;
+  // A cycle is left as is, for `assertJsonSerializable` to reject with its path.
+  if (ancestors.has(value)) return value;
+  if (Array.isArray(value)) {
+    ancestors.add(value);
+    const result = value.map((item) => pruneUndefined(item, ancestors));
+    ancestors.delete(value);
+    return result;
+  }
   if (!isPlainObject(value)) return value;
+  ancestors.add(value);
   const result: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     if (child === undefined) continue;
-    result[key] = pruneUndefined(child);
+    result[key] = pruneUndefined(child, ancestors);
   }
+  ancestors.delete(value);
   return result;
 }
 

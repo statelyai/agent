@@ -21,7 +21,8 @@
   "files": [
     "dist",
     "schemas",
-    "skills"
+    "skills",
+    "CHANGELOG.md"
   ],
   "type": "module",
   "main": "dist/index.cjs",
@@ -211,7 +212,7 @@
   "peerDependencies": {
     "@opentelemetry/api": "^1",
     "@tanstack/ai": ">=0.66.0 <1",
-    "ai": "^7.0.0",
+    "ai": "^7.0.128",
     "ajv": "^8.20.0",
     "openai": ">=5.0.0 <8",
     "xstate": "6.0.0-alpha.69"

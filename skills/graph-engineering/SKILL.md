@@ -18,7 +18,7 @@ Four steps, in order. Each one needs the one before it.
 
 Check in this order and start at the first step that is not done:
 
-1. Is the agent's control flow a machine (`setupAgent`, `createMachine`, an `AgentWorkflowConfig`)? If it is a loop or ad-hoc code, step 1.
+1. Does the code path production actually runs go through a machine (`setupAgent`, `createMachine`, an `AgentWorkflowConfig`)? Follow the route or entry point to the model call; a machine that nothing calls does not count. If the path is a loop or ad-hoc code, step 1.
 2. Do runs persist to an event log store with a declared machine `version` and a `metadata` stamp? If not, step 2.
 3. Is there an objective over ground truth, and evals that name the states they cover? If not, step 3.
 4. Otherwise, step 4.

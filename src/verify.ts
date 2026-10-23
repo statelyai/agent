@@ -912,6 +912,16 @@ function scriptDryError(
 // ─── Path exploration ───
 
 /** Options for {@link explorePaths}. */
+/**
+ * The snapshot type the exploration callbacks (`payloads`, `dedupeBy`, a
+ * `canReach` predicate) receive. Import it from here rather than from your
+ * own `xstate`, which can be another version than the one this package uses.
+ */
+export type ExploreSnapshot = AnyMachineSnapshot;
+
+/** What {@link canReach} looks for: a state id or path, or a snapshot predicate. */
+export type CanReachTarget = string | ((snapshot: ExploreSnapshot) => boolean);
+
 export interface ExplorePathsOptions {
   input?: unknown;
   /** Max branch points (decisions + external-event forks) along any path. Default 8. */
@@ -974,7 +984,7 @@ export interface ExplorePathsOptions {
    * were not all tried, so it is listed in `unexpandedEvents`. A type with no
    * schema at all is applied as `{ type }`.
    */
-  payloads?: (snapshot: AnyMachineSnapshot) => Partial<Record<string, Record<string, unknown>[]>>;
+  payloads?: (snapshot: ExploreSnapshot) => Partial<Record<string, Record<string, unknown>[]>>;
   /**
    * A projection of the snapshot that determines its future. Settled
    * snapshots with an equal key are explored once (again only when reached
@@ -983,7 +993,7 @@ export interface ExplorePathsOptions {
    * a key that drops a field the machine reads makes the search unsound.
    * Without it, every path is explored in full.
    */
-  dedupeBy?: (snapshot: AnyMachineSnapshot) => string;
+  dedupeBy?: (snapshot: ExploreSnapshot) => string;
 }
 
 /** A single explored path's terminal outcome. */
@@ -1703,7 +1713,7 @@ function resolveStateTarget(machine: AnyStateMachine, target: string): string {
  */
 export async function canReach(
   machine: AnyStateMachine,
-  target: string | ((snapshot: AnyMachineSnapshot) => boolean),
+  target: CanReachTarget,
   options: ExplorePathsOptions = {},
 ): Promise<CanReachResult> {
   const resolvedTarget =

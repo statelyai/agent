@@ -40,7 +40,7 @@ XState is pinned while its experimental durable restoration API evolves.
 For the optional Vercel AI SDK executor:
 
 ```sh
-pnpm add ai@^7 @ai-sdk/openai@^4
+pnpm add ai@^7.0.128 @ai-sdk/openai@^4
 ```
 
 For the optional raw OpenAI SDK executor (`@statelyai/agent/openai`):
@@ -57,13 +57,15 @@ pnpm add @tanstack/ai @tanstack/ai-openai
 
 Classification, grading, relevance, and yes/no checks are judgments: call the AI SDK's `experimental_decide` with `@ai-sdk/typesafe-ai` (`pnpm add ai @ai-sdk/typesafe-ai`) from an ordinary actor; see [Judgments with the AI SDK](https://github.com/statelyai/agent/blob/next/docs/judgments.md).
 
+Upgrading from an earlier alpha: see [Upgrading between alphas](https://github.com/statelyai/agent/blob/next/docs/upgrading.md). Every release's notes are in `CHANGELOG.md`, which ships in the package.
+
 Requirements:
 
 - Node 22 or newer, and XState exactly `6.0.0-alpha.69`.
 - TypeScript 5.4 or newer. Older versions accept the code, but callback parameters in `createMachine` silently become `any`.
 - A [Standard Schema](https://standardschema.dev) library: zod 4, zod 3.24 or newer, Valibot, or ArkType. `setupAgent` throws `invalid-schema` for zod 3.23 and earlier.
 - The package is ESM-first. CommonJS builds are published too, so `require()` works. Subpath imports (`@statelyai/agent/testing`) resolve under every `moduleResolution`, including `node`.
-- Provider packages must match your `ai` major: `@ai-sdk/openai@^4` pairs with `ai@^7`. A bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer. `@statelyai/agent/openai` needs `openai` 5 or newer.
+- `@statelyai/agent/ai-sdk` needs `ai` 7.0.128 or newer. Provider packages must match your `ai` major: `@ai-sdk/openai@^4` pairs with `ai@^7`. A bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer. `@statelyai/agent/openai` needs `openai` 5 or newer.
 
 An app that already uses XState 4 or 5 keeps it: put the agent in its own workspace package. See [Use in an XState 4 or 5 app](https://github.com/statelyai/agent/blob/next/docs/xstate-4-and-5-apps.md). If both versions land in one `node_modules`, the package fails with errors that do not mention a version:
 

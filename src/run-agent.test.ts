@@ -4516,6 +4516,72 @@ describe("runAgent write-ahead store", () => {
     expect(resumed.status).toBe("done");
   });
 
+  describe("values JSON cannot hold", () => {
+    const noteMachine = setup({}).createMachine({
+      id: "noted",
+      context: ({ input }: { input: { note?: string; at?: unknown } }) => ({ note: input.note }),
+      initial: "waiting",
+      states: { waiting: { on: { GO: { target: "done" } } }, done: { type: "final" } },
+    });
+
+    test("undefined fields are dropped from input and events, as JSON.stringify drops them", async () => {
+      const store = createInMemoryEventLogStore();
+      const first = await runToQuiescence(
+        createAgentRuntime(noteMachine, { store, threadId: "u" }),
+        { input: { note: undefined } },
+      );
+      const done = await runToQuiescence(
+        createAgentRuntime(noteMachine, { store, threadId: "u" }),
+        {
+          event: { type: "GO", detail: undefined } as never,
+        },
+      );
+
+      expect(first.status).toBe("idle");
+      expect(done.status).toBe("done");
+      const entries = await store.read("u");
+      expect(entries[0]!.event).not.toHaveProperty("input.note");
+      expect(entries.at(-1)!.event).toEqual({ type: "GO" });
+      expect(replay(noteMachine, entries).snapshot.status).toBe("done");
+    });
+
+    test("without a store, a non-JSON value warns and stops the log instead of failing the run", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const idle = await runToQuiescence(createAgentRuntime(noteMachine, {}), {
+          input: { note: "x" },
+        });
+        const done = await runToQuiescence(createAgentRuntime(noteMachine, {}), {
+          events: idle.events,
+          snapshot: idle.persist(),
+          event: { type: "GO", at: new Date(0) } as never,
+        });
+
+        expect(done.status).toBe("done");
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0]![0])).toMatch(/log stopped/);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("with a store, a non-JSON event fails the run", async () => {
+      const store = createInMemoryEventLogStore();
+      await runToQuiescence(createAgentRuntime(noteMachine, { store, threadId: "d" }), {
+        input: { note: "x" },
+      });
+      const result = await runToQuiescence(
+        createAgentRuntime(noteMachine, { store, threadId: "d" }),
+        {
+          event: { type: "GO", at: new Date(0) } as never,
+        },
+      );
+
+      expect(result.status).toBe("error");
+      expect(result.status === "error" && result.cause).toBe("journal");
+    });
+  });
+
   test("a run whose init entry cannot be built fails instead of running unlogged", async () => {
     const store = createInMemoryEventLogStore();
     const result = await runToQuiescence(

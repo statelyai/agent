@@ -31,6 +31,8 @@ Read the loop and fill this table before writing anything. Each row maps to a ma
 | A read-only tool (search, lookup)                                            | An actor the machine invokes itself, or a tool on a text request         |
 | A rule: an `if`, a prompt line, a check after the fact                       | A guard on the transition it protects                                    |
 | A model call that produces content (a draft, generated code, a summary)      | A text request in `setupAgent({ requests })`, invoked by one state       |
+| One SDK tool call that both picks the action and carries its content (`edit_graph({ … })`, `send_email({ … })`) | A text request with those tools, then guards on the returned call: exactly one, a tool that was offered, input that passes the tool's schema. Keep it a text request: `agent.decide` would rename the tools to `send_event_<TYPE>` with the description "Choose the '<TYPE>' move.", so the model would no longer see your tool names and descriptions |
+| A tool the browser runs (no `execute`; the client sends results back)        | The request ends with the tool calls; an idle state waits for a `TOOL_RESULTS` event the route sends when the client posts results |
 | A point where the model picks what to do                                     | A decision state: `agent.decide`, usually a closed choice                |
 | A check on the model's output, then a retry or a repair call                 | An actor or guard that checks it, and a `choice` state that routes to the repair request, the next candidate, or a failure final |
 | A value the model pulled out of the input (an order id, an amount)           | Code when the format is fixed (a regex); a text request when it is not   |
@@ -136,9 +138,14 @@ If the code does have that logic, port it as a policy machine that answers `choo
 
 Write `runMachine` with the old function's signature and result type, so callers and the parity test change one line.
 
+- **The existing SDK call becomes the executor.** Write `generateText` (or `streamText`) in `executors` as the old call, with the same model, system prompt, tools, and options, and return `{ result }`. The request still needs `prompt` or `messages` in `setupAgent({ requests })` (`setupAgent` throws `invalid-request` otherwise): pass the conversation as `messages: ({ input }) => input.messages` and read `request.messages` in the executor.
+- **A streaming route keeps its response, not its function signature.** `createAiSdkExecutors().streamText` forwards text chunks only, so a UI stream with tool calls cannot come out of it. Write the `streamText` executor around the old call, pipe its UI stream to the route's response yourself, and return the final messages as `{ result }`.
+
 - `runAgent(machine, { input, executors, actors, onIdle })`.
 - `onIdle` answers each idle state with the old code's call (`tools.askCustomer(...)`, `tools.requestApproval(...)`). Write the returned events with `as const` on `type`, or the event union does not narrow.
 - `executors.decide` adapts the code's model to the decision: the closed choice arrives as `request.options` (each `{ event }`), and the facts as `request.metadata?.facts`, typed `unknown`: parse it with the exported facts schema. Every executor slot is optional in the type; check or assert the ones you call.
+- In an `onError` function, the error is `event.error`: `onError: ({ event }) => ({ target: "failed", context: { error: String(event.error) } })`. There is no `error` argument.
+- Make input and events JSON-safe at the boundary: no `Date`, `Map`, class instances, or functions (fields set to `undefined` are dropped). With a store, a value the log cannot hold fails the run; without one, the log stops with a warning.
 - Rebuild the old result from `result.output` and the world. A field that has no meaning anymore (a turn count with no loop) keeps its type and gets a comment saying what it now holds.
 
 ## 6. Proofs that need no model
@@ -161,10 +168,12 @@ const proofOptions: ExplorePathsOptions = {
 };
 ```
 - `options.outputs` lists every output each actor can return (found and not found, owned and not, refunded and not); `options.errors` makes each actor fail once.
+- **A machine with a loop** (a repair cycle, a resubmit) needs `options.dedupeBy`, or the search runs to `maxDepth` and reports `complete: false`. Return every context field a guard or choice reads: `dedupeBy: (s) => JSON.stringify([s.value, s.context.attempts, s.context.lastError])`. `outputs` are canned per actor src, not per call: to explore "fails twice, then succeeds", let the guard read a counter from context instead of the output.
+- `explorePaths(...).reachedStates` lists only states a run settles in; a `choice` state it passes through is not listed.
 - A loosened guard makes `canReach` true. Write this test too, or the proof proves nothing.
 - Each normal final state is reachable, so the search is not vacuous.
 
-Type the options with `ExplorePathsOptions` from `@statelyai/agent/testing`. `errors` takes one error per actor src, and `"agent.decide"` is a valid key.
+Type the options with `ExplorePathsOptions`, and a `payloads`, `dedupeBy`, or predicate callback's snapshot with `ExploreSnapshot`, both from `@statelyai/agent/testing`. Do not use `AnyMachineSnapshot` from your app's own `xstate`, which may be another version. `errors` takes one error per actor src, and `"agent.decide"` is a valid key.
 
 ## 7. Parity
 
