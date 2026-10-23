@@ -5,7 +5,6 @@ import { assertJsonSerializable, canonicalEventJson } from "./event-log.js";
 import { isRecord } from "./internal/is-record.js";
 import { runAgent, type AgentRunOptions } from "./run-agent.js";
 import type { AgentRequestExecutorInfo } from "./text-logic.js";
-import { djb2Hex } from "./utils.js";
 
 /** Options for {@link createPolicyDecider}: everything {@link runAgent} takes for the policy run, except how the run opens. */
 export interface PolicyDeciderOptions<TPolicy extends AnyStateMachine> extends Omit<
@@ -16,8 +15,8 @@ export interface PolicyDeciderOptions<TPolicy extends AnyStateMachine> extends O
    * The `store` thread for one decision's policy run. Every decision, and every
    * retry of one, needs its own thread: a thread that already has entries is
    * resumed, so a shared one would return an earlier decision's choice. Default
-   * with a `store`: `policy:${info.callKey}:${hash}`, where `hash` fingerprints
-   * the policy input. The call key is unique per call and attempt and stays the
+   * with a `store`: `policy:${info.callKey}:${hash}`, where `hash` is the
+   * SHA-256 of the policy input's canonical JSON. The call key is unique per call and attempt and stays the
    * same when a crashed run re-issues the call; the hash keeps a fork that asks
    * something else at the same call site off the parent's thread. Required
    * with a `store` when the decider is called without a `callKey`.
@@ -61,7 +60,7 @@ export function createPolicyDecider<TPolicy extends AnyStateMachine>(
     const policyInput = input(request);
     assertJsonSerializable(policyInput, "policy input");
     const thread =
-      runOptions.store === undefined ? undefined : policyThread(request, policyInput, info);
+      runOptions.store === undefined ? undefined : await policyThread(request, policyInput, info);
     const result = await runAgent(policy, {
       ...(runOptions as AgentRunOptions<TPolicy>),
       input: policyInput,
@@ -85,14 +84,15 @@ export function createPolicyDecider<TPolicy extends AnyStateMachine>(
     return { event: event as { type: string }, ...(modelCalls > 0 ? { usage } : {}) };
   };
 
-  function policyThread(
+  async function policyThread(
     request: AgentExecutorDecisionRequest,
     policyInput: unknown,
     info?: AgentRequestExecutorInfo,
   ) {
     if (threadId) return threadId(request, info);
     // The call key names the call site, not the request: a fork shares it.
-    if (info?.callKey) return `policy:${info.callKey}:${djb2Hex(canonicalEventJson(policyInput))}`;
+    if (info?.callKey)
+      return `policy:${info.callKey}:${await sha256(canonicalEventJson(policyInput))}`;
     throw new AgentError(
       "missing-thread-id",
       `policy '${id}' has a store but no threadId, and the decision came with no callKey to derive one from`,
@@ -124,4 +124,10 @@ function withoutUndefinedKeys(value: unknown): unknown {
       .filter(([, child]) => child !== undefined)
       .map(([key, child]) => [key, withoutUndefinedKeys(child)]),
   );
+}
+
+/** Hex SHA-256 of `text`, with Web Crypto (Node, browsers, workers). */
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

@@ -253,7 +253,9 @@ describe("createPolicyDecider", () => {
     expect(parent.event).toEqual({ type: "ESCALATE" });
     expect(fork.event).toEqual({ type: "REFUND", amount: 40 });
     expect(reissued.event).toEqual({ type: "REFUND", amount: 40 });
-    expect((await store.listThreads!({ prefix: "policy:" })).threadIds).toHaveLength(2);
+    const { threadIds } = await store.listThreads!({ prefix: "policy:" });
+    expect(threadIds).toHaveLength(2);
+    expect(threadIds[0]).toMatch(/^policy:exec:site#0:[0-9a-f]{64}$/);
   });
 
   test("takes the policy thread from `threadId`, and needs one when a store has no call key to go on", async () => {
