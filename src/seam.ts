@@ -212,10 +212,16 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
   candidate?: AgentRequestExecutor;
   /**
    * The simulated user. Called at every idle pause; return the event to send,
-   * or `null`/`undefined` to stop the run there. Omitted, the run stops at the
-   * first idle pause.
+   * or `null`/`undefined` to stop the run there, directly or as a promise (a
+   * real async client). Omitted, the run stops at the first idle pause.
    */
-  respond?: (turn: SeamTurn<TMachine>) => EventFromLogic<TMachine> | null | undefined;
+  respond?: (
+    turn: SeamTurn<TMachine>,
+  ) =>
+    | EventFromLogic<TMachine>
+    | null
+    | undefined
+    | PromiseLike<EventFromLogic<TMachine> | null | undefined>;
   /** Maximum idle pauses to answer before stopping. Default `12`. */
   maxTurns?: number;
   /**
@@ -448,7 +454,7 @@ export async function runSeam<TMachine extends AnyStateMachine>(
       break;
     }
 
-    const next = options.respond?.({
+    const next = await options.respond?.({
       snapshot: result.snapshot,
       state: (result.snapshot as AnyMachineSnapshot).value,
       meta: getStateMeta(result.snapshot),

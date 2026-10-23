@@ -17,3 +17,4 @@ Fixes from installing the package in an existing app for the first time.
 - **`setupAgent` throws `invalid-request`** for a request with neither `prompt` nor `messages`, instead of every call failing inside the invoke.
 - **`ExploreSnapshot` and `CanReachTarget` types** from `@statelyai/agent/testing`, for exploration callbacks in an app whose own `xstate` is another version.
 - **`CHANGELOG.md` ships in the package,** and a new "Upgrading between alphas" page lists the breaking changes since earlier alphas.
+- **`runSeam`'s `respond` may return a promise,** so a seam eval can answer idle pauses with a real async client.
