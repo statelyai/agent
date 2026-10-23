@@ -8,7 +8,7 @@ import { getAcceptedEvents } from "./events.js";
 import { interactionMetaSchema } from "./interaction.js";
 import { createAgentRuntime, runToQuiescence } from "./run-agent.js";
 import { createAgentSchemas, setupAgent } from "./setup-agent.js";
-import { lintAgentMachine } from "./verify.js";
+import { explorePaths, lintAgentMachine } from "./verify.js";
 
 const schemas = createAgentSchemas({
   context: z.object({}),
@@ -151,6 +151,26 @@ describe('transition meta `actor: "human"`', () => {
     expect(
       lintAgentMachine(review).filter((d) => d.code === "decide-allows-human-event"),
     ).toHaveLength(1);
+  });
+
+  test("lint reads a single-string `allowedEvents` too", () => {
+    const single = setupAgent({ schemas }).createMachine({
+      context: {},
+      initial: "reviewing",
+      states: {
+        reviewing: {
+          invoke: { src: "agent.decide", input: { model: "quick", allowedEvents: "approve" } },
+          on: { approve: { target: "approved", meta: { actor: "human" } } },
+        },
+        approved: { type: "final" },
+      },
+    });
+    expect(lintAgentMachine(single).map((d) => d.code)).toContain("decide-allows-human-event");
+  });
+
+  test("explorePaths branches a decision only on events a model may choose", async () => {
+    const report = await explorePaths(review, { input: {} });
+    expect(report.terminals.map((terminal) => terminal.state)).toEqual(["revised"]);
   });
 
   test("the meta schema accepts only `actor: 'human'`", () => {

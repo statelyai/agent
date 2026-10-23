@@ -242,8 +242,8 @@ export function getAcceptedEvents(
   } = {},
 ): AgentEventDescriptor[] {
   const eventTypes = options.eventTypes;
-  const humanEventTypes =
-    options.actor === "agent" ? getHumanEventTypes(snapshot) : new Set<string>();
+  const humanEventTypes: ReadonlySet<string> =
+    options.actor === "agent" ? getHumanEventTypes(snapshot) : new Set();
   const seen = new Set<string>();
   const usedToolNames = new Set<string>();
 
@@ -283,12 +283,19 @@ export function getAcceptedEvents(
  * `meta: { actor: "human" }`: a person sends them, so no model is offered them.
  * @internal
  */
-export function getHumanEventTypes(snapshot: AnyMachineSnapshot): Set<string> {
-  const types = new Set<string>();
-  for (const transition of getNextTransitions(snapshot)) {
-    if ((transition.meta as { actor?: unknown } | undefined)?.actor === "human") {
-      types.add(transition.eventType);
+export function getHumanEventTypes(snapshot: AnyMachineSnapshot): ReadonlySet<string> {
+  let types = humanEventTypesBySnapshot.get(snapshot);
+  if (!types) {
+    types = new Set();
+    for (const transition of getNextTransitions(snapshot)) {
+      if ((transition.meta as { actor?: unknown } | undefined)?.actor === "human") {
+        types.add(transition.eventType);
+      }
     }
+    humanEventTypesBySnapshot.set(snapshot, types);
   }
   return types;
 }
+
+// Snapshots are immutable, so each one's human event types are read once.
+const humanEventTypesBySnapshot = new WeakMap<AnyMachineSnapshot, Set<string>>();

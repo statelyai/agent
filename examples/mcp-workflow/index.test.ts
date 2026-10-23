@@ -90,3 +90,17 @@ test("requested changes send the agent back to fixing", async () => {
     events: [{ type: "fixed" }],
   });
 });
+
+test("concurrent sends to one run apply one at a time", async () => {
+  const { call } = await connect();
+  const started = await call("start", { issue: "Flaky retry" });
+  if ("error" in started) throw new Error(started.error);
+  const { runId } = started;
+
+  const [first, second] = await Promise.all([
+    call("send", { runId, event: { type: "reproduced", test: "retry.test.ts" } }),
+    call("send", { runId, event: { type: "cannotReproduce", notes: "Passes locally" } }),
+  ]);
+  expect(first).toMatchObject({ state: "fixing" });
+  expect(second).toEqual({ error: "'cannotReproduce' does not apply in state 'fixing'." });
+});

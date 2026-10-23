@@ -19,8 +19,11 @@
  * will not deliver them. The host's own UI answers with `answer(...)`, and the
  * agent's next `status` call picks the run up from there.
  *
- * Runs live in a `Map` of persisted snapshots. A real host keeps them in its
- * own store, keyed the same way.
+ * Runs live in a `Map` of persisted snapshots, and deliveries to one run go
+ * one at a time. A real host keeps runs in its own store, keyed the same way,
+ * and guards each write with a version check. Over stdio the only caller is
+ * the agent that started the server; a server reachable by several clients
+ * scopes each run to the caller that started it.
  *
  * Run: npx tsx examples/mcp-workflow/index.ts
  * Add to Claude Code: claude mcp add bugfix -- npx tsx examples/mcp-workflow/index.ts
@@ -201,15 +204,26 @@ function load(runId: string): StoredRun {
   return run;
 }
 
-async function deliver(runId: string, event: BugfixEvent): Promise<RunStatus> {
-  const result = await runToQuiescence(createAgentRuntime(bugfixMachine), {
-    snapshot: load(runId).persisted as never,
-    event,
-  });
-  if (result.ignored) {
-    throw new Error(`'${event.type}' does not apply in state '${String(result.snapshot.value)}'.`);
-  }
-  return save(runId, result);
+/** Each run's last delivery, so deliveries to one run never restore the same snapshot. */
+const deliveries = new Map<string, Promise<unknown>>();
+
+function deliver(runId: string, event: BugfixEvent): Promise<RunStatus> {
+  const delivery = (deliveries.get(runId) ?? Promise.resolve())
+    .catch(() => {})
+    .then(async () => {
+      const result = await runToQuiescence(createAgentRuntime(bugfixMachine), {
+        snapshot: load(runId).persisted as never,
+        event,
+      });
+      if (result.ignored) {
+        throw new Error(
+          `'${event.type}' does not apply in state '${String(result.snapshot.value)}'.`,
+        );
+      }
+      return save(runId, result);
+    });
+  deliveries.set(runId, delivery);
+  return delivery;
 }
 
 /** Opens a run for an issue. */

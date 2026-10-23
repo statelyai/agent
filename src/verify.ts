@@ -255,7 +255,12 @@ function literalAllowedEvents(
       return undefined;
     }
   }
-  return isRecord(input) && Array.isArray(input.allowedEvents) ? input.allowedEvents : undefined;
+  const allowedEvents = isRecord(input) ? input.allowedEvents : undefined;
+  return typeof allowedEvents === "string"
+    ? [allowedEvents]
+    : Array.isArray(allowedEvents)
+      ? allowedEvents
+      : undefined;
 }
 
 // True when the state handles `eventType` through a transition tagged `meta: { actor: "human" }`.
