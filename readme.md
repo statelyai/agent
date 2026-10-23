@@ -80,6 +80,7 @@ An app that already uses XState 4 or 5 keeps it: put the agent in its own worksp
 The package ships agent skills in `node_modules/@statelyai/agent/skills/`. Copy them into your coding agent's skills directory (for Claude Code, `.claude/skills/`):
 
 ```sh
+mkdir -p .claude/skills
 cp -R node_modules/@statelyai/agent/skills/* .claude/skills/
 ```
 

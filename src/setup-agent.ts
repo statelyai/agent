@@ -309,6 +309,20 @@ function assertStandardSchema(schema: unknown, where: string): void {
   );
 }
 
+// State-level `schemas` (`states.<key>.schemas.context`, …), at any depth.
+function assertStateSchemasAreStandard(
+  states: Record<string, SetupStateSchema> | undefined,
+  path: readonly string[] = [],
+): void {
+  for (const [key, state] of Object.entries(states ?? {})) {
+    const statePath = [...path, key];
+    for (const [name, schema] of Object.entries(state?.schemas ?? {})) {
+      assertStandardSchema(schema, `states.${statePath.join(".states.")}.schemas.${name}`);
+    }
+    assertStateSchemasAreStandard(state?.states, statePath);
+  }
+}
+
 /**
  * Builds a machine's {@link AgentSchemaPack} from a partial schema
  * declaration — only `context` is required; `events`/`input`/`output`/`meta`
@@ -765,6 +779,7 @@ export function setupAgent<
   for (const [type, schema] of Object.entries(schemas.emitted ?? {})) {
     assertStandardSchema(schema, `emitted.${type}`);
   }
+  assertStateSchemasAreStandard(config.states);
 
   // `requests` is optional; an omitted map is simply empty.
   const requests = (config.requests ?? {}) as AgentRequestInput<
@@ -777,7 +792,8 @@ export function setupAgent<
     requestActors,
   );
   for (const [name, request] of Object.entries(config.requests ?? {})) {
-    if (!("prompt" in request) && !("messages" in request)) {
+    const source = request as { prompt?: unknown; messages?: unknown };
+    if (source.prompt === undefined && source.messages === undefined) {
       throw new AgentError(
         "invalid-request",
         `setupAgent: request '${name}' has neither \`prompt\` nor \`messages\`, so every call to it fails. ` +

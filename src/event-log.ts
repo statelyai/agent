@@ -374,9 +374,16 @@ function exhaustedAttemptsOf(error: Error): unknown[] | undefined {
 }
 
 /**
- * Replaces `Error` instances with plain `{ name, message, code?, cause? }`
- * objects so an `xstate.error.actor` payload survives the log's JSON
- * round-trip. `code` is kept when it is a string or a number; a
+ * Marks an object {@link normalizeEventErrors} made from an `Error`, so replay
+ * restores that object, and only that one, as an `Error`: a thrown plain
+ * `{ name, message }` stays a plain object.
+ */
+const NORMALIZED_ERROR_KEY = "@error";
+
+/**
+ * Replaces `Error` instances with plain `{ name, message, code?, cause?,
+ * "@error": true }` objects so an `xstate.error.actor` payload survives the
+ * log's JSON round-trip. `code` is kept when it is a string or a number; a
  * decision-exhausted error also keeps its `attempts`. Replay turns the
  * object back into an `Error` (see `restoreJournaledEvent`). Cycles
  * are preserved by identity; non-plain objects are left alone (and are then
@@ -390,6 +397,7 @@ function normalizeEventErrors(
     const normalized: Record<string, unknown> = {
       name: value.name,
       message: value.message,
+      [NORMALIZED_ERROR_KEY]: true,
     };
     seen.set(value, normalized);
     if (value.cause !== undefined) normalized.cause = normalizeEventErrors(value.cause, seen);
@@ -1036,12 +1044,26 @@ function restoreJournaledEvent(event: EventObject): EventObject {
 
 function isNormalizedError(value: unknown): value is { name: string; message: string } {
   return (
-    isPlainObject(value) && typeof value.name === "string" && typeof value.message === "string"
+    isPlainObject(value) &&
+    value[NORMALIZED_ERROR_KEY] === true &&
+    typeof value.name === "string" &&
+    typeof value.message === "string"
   );
 }
 
 function toError(normalized: { name: string; message: string; cause?: unknown }): Error {
-  const { name, message, cause, ...rest } = normalized;
+  const {
+    name,
+    message,
+    cause,
+    [NORMALIZED_ERROR_KEY]: _marker,
+    ...rest
+  } = normalized as {
+    name: string;
+    message: string;
+    cause?: unknown;
+    [NORMALIZED_ERROR_KEY]?: unknown;
+  };
   const error = new Error(
     message,
     cause === undefined ? undefined : { cause: isNormalizedError(cause) ? toError(cause) : cause },

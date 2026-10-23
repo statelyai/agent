@@ -3249,6 +3249,13 @@ describe("setupAgent schemas that are not Standard Schema", () => {
       "a request",
       { context: z.object({}), requests: { ask: { schemas: { output: legacy }, prompt: "hi" } } },
     ],
+    [
+      "a nested state's context",
+      {
+        context: z.object({}),
+        states: { work: { states: { review: { schemas: { context: legacy } } } } },
+      },
+    ],
   ])("%s is rejected with a clear error", (_where, config) => {
     expect(() => setupAgent(config as never)).toThrow(/not a Standard Schema.*zod/is);
   });
@@ -3256,6 +3263,12 @@ describe("setupAgent schemas that are not Standard Schema", () => {
   test("a request with neither prompt nor messages is rejected at setup", () => {
     expect(() =>
       setupAgent({ context: z.object({}), requests: { chatStep: { model: "m" } } } as never),
+    ).toThrow(/'chatStep' has neither `prompt` nor `messages`/);
+    expect(() =>
+      setupAgent({
+        context: z.object({}),
+        requests: { chatStep: { model: "m", prompt: undefined } },
+      } as never),
     ).toThrow(/'chatStep' has neither `prompt` nor `messages`/);
   });
 

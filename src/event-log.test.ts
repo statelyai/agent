@@ -174,6 +174,7 @@ describe("entry creation", () => {
     expect((entry.event as unknown as { error: unknown }).error).toEqual({
       name: "TypeError",
       message: "boom",
+      "@error": true,
     });
   });
 
@@ -325,9 +326,26 @@ describe("replay", () => {
       name: "TRPCError",
       message: "down",
       code: "TIMEOUT",
+      "@error": true,
     });
     const roundTripped = JSON.parse(JSON.stringify(entries)) as AgentLogEntry[];
     expect(replay(errorMachine, roundTripped).snapshot.context.seen).toBe("TRPCError:down:TIMEOUT");
+
+    // A thrown plain object with the same shape replays as the plain object it was.
+    const plain = [entries[0]!];
+    plain.push(
+      createReplayEntry(
+        errorMachine,
+        plain,
+        journaled({
+          type: "xstate.error.actor",
+          actorId: "job",
+          sessionId,
+          error: { name: "RemoteFailure", message: "down" },
+        }),
+      ),
+    );
+    expect(replay(errorMachine, plain).snapshot.context.seen).toBe("plain");
   });
 
   test("verify: true accepts an untampered log and rejects a tampered hash", () => {

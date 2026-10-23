@@ -480,8 +480,9 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
   /**
    * Record a `verification.stateHash` on every appended entry (default `true`).
    * The hash is of the state the log folds to after that entry, the same fold
-   * `replay` runs, so `replay(machine, events)` can prove a log was not
-   * altered or truncated. It does not compare against the live snapshot: a
+   * `replay` runs, so `replay(machine, events)` can check each entry against
+   * the fold before it. It does not show the log is complete (a dropped last
+   * entry leaves the rest intact), nor compare against the live snapshot: a
    * machine that reads something the log does not keep (an error's class, a
    * non-JSON field) can replay to a different state. Set `false` for a
    * smaller, unverifiable log.
@@ -2834,6 +2835,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             );
           }
           assertThreadMatchesEvents(threadId!, storedThread, resumeEvents);
+          resumedFromStore = storedThread.length > 0;
         } else if (storedThread.length > 0) {
           resumeEvents = storedThread;
           resumedFromStore = true;
@@ -2846,10 +2848,16 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       const resolvedInput = resolveMachineInput(machine, init.input);
       // A thread that has entries is resumed, which ignores `input`. Input
       // that differs from the thread's own means two runs share a thread id:
-      // resuming would hand this caller another run's result.
-      if (resumedFromStore && init.input !== undefined) {
-        const threadInput = (resumeEvents![0]?.event as { input?: unknown } | undefined)?.input;
-        if (canonicalJson(threadInput) !== canonicalJson(resolvedInput)) {
+      // resuming would hand this caller another run's result. A thread that
+      // began from a snapshot recorded no input to compare against.
+      const threadInit = resumeEvents?.[0]?.event as Record<string, unknown> | undefined;
+      if (
+        resumedFromStore &&
+        init.input !== undefined &&
+        threadInit !== undefined &&
+        Object.hasOwn(threadInit, "input")
+      ) {
+        if (canonicalJson(threadInit.input) !== canonicalJson(resolvedInput)) {
           throw new AgentError(
             "thread-input-mismatch",
             `createAgentRuntime: thread '${threadId}' was started with different input. A thread that already has entries is resumed, not restarted; give a new run a new threadId.`,

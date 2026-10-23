@@ -140,7 +140,14 @@ describe("describeMachine", () => {
         working: {
           on: {
             CHECK: ({ context }) => next(context.ready),
+            PICK: ({ context }) => {
+              const ready = !context.ready;
+              return next(ready);
+            },
             NOTE: () => ({ context: { ready: true } }),
+            MAP: ({ context }) => ({
+              context: { ready: [context.ready].map((value) => Boolean(value))[0]! },
+            }),
           },
         },
         done: {},
@@ -149,7 +156,10 @@ describe("describeMachine", () => {
 
     const text = describeMachine(machine);
     expect(text).toContain("on CHECK → ?");
+    expect(text).toContain("on PICK → ?");
     expect(text).toContain("on NOTE → (stays)");
+    // A call inside a nested callback is not the transition's own result.
+    expect(text).toContain("on MAP → (stays)");
   });
 
   test("describes a TS-authored machine", () => {

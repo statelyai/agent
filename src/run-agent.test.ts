@@ -4509,8 +4509,39 @@ describe("runAgent write-ahead store", () => {
       }),
     ).rejects.toMatchObject({ code: "thread-input-mismatch" });
 
+    // The thread's own entries passed as `events` are checked the same way.
+    await expect(
+      runToQuiescence(createAgentRuntime(promptMachine, { store, threadId: "t1" }), {
+        events: first.events,
+        input: { prompt: "a login flow" },
+      }),
+    ).rejects.toMatchObject({ code: "thread-input-mismatch" });
+
     const resumed = await runToQuiescence(
       createAgentRuntime(promptMachine, { store, threadId: "t1" }),
+      { input: { prompt: "a checkout flow" }, event: { type: "GO" } as never },
+    );
+    expect(resumed.status).toBe("done");
+  });
+
+  test("a thread that began from a snapshot resumes with input", async () => {
+    const promptMachine = setup({}).createMachine({
+      id: "prompted",
+      context: ({ input }: { input: { prompt: string } }) => ({ prompt: input.prompt }),
+      initial: "waiting",
+      states: { waiting: { on: { GO: { target: "done" } } }, done: { type: "final" } },
+    });
+    const first = await runToQuiescence(createAgentRuntime(promptMachine), {
+      input: { prompt: "a checkout flow" },
+    });
+    if (first.status !== "idle") throw new Error("expected idle");
+
+    const store = createInMemoryEventLogStore();
+    await runToQuiescence(createAgentRuntime(promptMachine, { store, threadId: "s1" }), {
+      snapshot: first.persist(),
+    });
+    const resumed = await runToQuiescence(
+      createAgentRuntime(promptMachine, { store, threadId: "s1" }),
       { input: { prompt: "a checkout flow" }, event: { type: "GO" } as never },
     );
     expect(resumed.status).toBe("done");

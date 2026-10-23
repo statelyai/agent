@@ -180,11 +180,44 @@ const mayDecline = (code: string) =>
     code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""'),
   );
 
-/** True when the function returns a call's result (`=> next(ctx)`, `return pick(x)`), so its target is not in its own source. */
-const returnsCall = (code: string) =>
-  /(?:=>|\breturn)\s*[A-Za-z_$][\w$.]*\s*\(/.test(
-    code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""'),
-  );
+/**
+ * True when the function returns a call's result (`=> next(ctx)`, `return
+ * pick(x)`), so its target is not in its own source. Reads only the
+ * function's own returned expressions, not those of callbacks nested in it.
+ */
+function returnsCall(code: string): boolean {
+  const text = code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
+  const startsWithCall = (at: number) => /^\s*[A-Za-z_$][\w$.]*\s*\(/.test(text.slice(at));
+  // The outer function's body: after its arrow, or its first brace, outside the parameters.
+  let parens = 0;
+  let body = -1;
+  for (let i = 0; i < text.length && body < 0; i++) {
+    const char = text[i];
+    if (char === "(") parens++;
+    else if (char === ")") parens--;
+    else if (parens === 0 && char === "=" && text[i + 1] === ">") body = i + 2;
+    else if (parens === 0 && char === "{") body = i;
+  }
+  if (body < 0) return false;
+  while (/\s/.test(text[body] ?? "")) body++;
+  if (text[body] !== "{") return startsWithCall(body);
+  // A block body: its own `return` statements, at depth 1.
+  let depth = 0;
+  for (let i = body; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}" && --depth === 0) return false;
+    else if (
+      depth === 1 &&
+      text.startsWith("return", i) &&
+      !/[\w$]/.test(text[i - 1] ?? "") &&
+      !/[\w$]/.test(text[i + 6] ?? "") &&
+      startsWithCall(i + 6)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Where a transition written as a function goes: every string literal after a
