@@ -121,6 +121,32 @@ const request = createDecisionRequest({
 });
 ```
 
+## Events a person sends
+
+Tag a transition with `meta: { actor: "human" }` when only a person may send its event, such as an approval. No model-facing decision offers that event in a state that handles it this way.
+
+```ts no-check
+reviewing: {
+  invoke: {
+    src: "agent.decide",
+    input: { model: "quick", allowedEvents: ["revise"] },
+  },
+  on: {
+    approve: { target: "approved", meta: { actor: "human" } },
+    revise: { target: "revising" },
+  },
+},
+```
+
+- `agent.decide` and `decideNext` drop the event from the candidates. A closed choice lists its options in `withheld`, and a choice of it anyway is retried.
+- `getAcceptedEvents(snapshot, { actor: "agent" })` returns the same model-facing list, for a host that offers events itself.
+- `describeMachine` marks the transition `(human)`.
+- `lintAgentMachine` reports `decide-allows-human-event` when a decision's literal `allowedEvents` names a tagged event. `verifyAgentConfig` fails its `lint` gate on it.
+- Only object transitions can be tagged. A transition written as a function has no static `meta`.
+- A plain `createMachine` declares `schemas: { meta: interactionMetaSchema }` to type the tag; `setupAgent` machines have it by default.
+
+The tag does not change what the machine accepts. A host still sends the event when a person answers, and `parseAgentEvent` still parses it.
+
 ## Validation and retries
 
 <!-- decision validation checks and retry behavior from src/decision.ts -->

@@ -24,6 +24,6 @@ Common errors:
 | `AgentMaxModelCallsExceededError` | The run exceeded its configured model-call budget.                                                                                    |
 | XState version error              | The persisted snapshot version needs the machine's native `migrate` function.                                                         |
 
-An event the active state has no transition for is not an error: the run settles normally and the event comes back as `result.ignored`.
+An event the active state has no transition for is not an error: the run settles normally and the event comes back as `result.ignored`. Its `machine.transition` trace event carries `ignored: true`.
 
-`lintAgentMachine` reports only Agent-specific mistakes: decisions with no candidate events, direct object request sources that a host cannot bind, and invokes with no error path. General state-machine lint belongs in XState tooling.
+`lintAgentMachine` reports only Agent-specific mistakes: decisions with no candidate events, decisions that list an event only a person sends, direct object request sources that a host cannot bind, and invokes with no error path. General state-machine lint belongs in XState tooling.

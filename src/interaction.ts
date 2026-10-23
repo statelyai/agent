@@ -90,6 +90,13 @@ export interface AgentInteractionDescriptor<TEvent extends string = string> {
  */
 export interface AgentInteractionMeta<TEvent extends string = string> {
   interaction?: AgentInteractionDescriptor<TEvent>;
+  /**
+   * On a transition: `"human"` means a person sends its event, never a model.
+   * Model-facing decisions (`agent.decide`, `decideNext`) withhold an event a
+   * state handles through a transition tagged this way. Read from object
+   * transitions only; a transition written as a function cannot be tagged.
+   */
+  actor?: "human";
 }
 
 function issue(message: string, path: (string | number)[]) {
@@ -147,7 +154,8 @@ function validateChoice(value: unknown, path: (string | number)[]) {
  * reads: an object whose optional `interaction` declares a `label` (a string
  * with `{context.path}` interpolation, or a function of the context), an
  * `events` map of choices, payload `choices` (an array, or a context path to
- * one), and a `textEvent` (a type, or `{ type, field }`) for free-text answers. This is
+ * one), and a `textEvent` (a type, or `{ type, field }`) for free-text answers; and
+ * an optional `actor: "human"`, which tags a transition as sent by a person. This is
  * the default `meta` type `setupAgent` gives a machine; pass it to
  * `createAgentSchemas({ meta: interactionMetaSchema })` only when building a
  * schema pack by hand.
@@ -159,6 +167,10 @@ export const interactionMetaSchema: StandardSchemaV1<AgentInteractionMeta> = {
     validate(value: unknown) {
       if (!value || typeof value !== "object" || Array.isArray(value)) {
         return { issues: [{ message: "Expected a state meta object" }] };
+      }
+      const actor = (value as Record<string, unknown>)["actor"];
+      if (actor !== undefined && actor !== "human") {
+        return { issues: [issue('Expected "human"', ["actor"])] };
       }
       const interaction = (value as Record<string, unknown>)["interaction"];
       if (interaction === undefined) {

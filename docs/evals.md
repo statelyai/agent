@@ -199,7 +199,7 @@ A queue that runs dry throws an `AgentError` with code `seam-script-exhausted`, 
 
 ## Per-state stats
 
-`foldTraces` (from `@statelyai/agent/testing`) folds many runs' traces into one row per state: how many runs visited it, how many of those failed, and how many options the guards withheld at decisions made there.
+`foldTraces` (from `@statelyai/agent/testing`) folds many runs' traces into one row per state: how many runs visited it, how many of those failed, how many options the guards withheld at decisions made there, and how many events it ignored.
 
 ```ts no-check
 import { foldTraces } from "@statelyai/agent/testing";
@@ -211,12 +211,13 @@ const stats = foldTraces(traces, {
     return end?.type !== "run.end" || !end.snapshot.matches("refunded");
   },
 });
-// [{ state: "deciding", visits: 2, failures: 1, withheld: 2 }, ...]
+// [{ state: "deciding", visits: 2, failures: 1, withheld: 2, ignored: 0 }, ...]
 ```
 
 - A trace is one run's events, live or from `serializeTraceEvent`. `failed` judges the whole trace.
 - A run visits each state in a `machine.transition`'s `from.value` and `snapshot.value`. Nested states are dot-joined paths; a parallel state counts once per active leaf.
 - `withheld` comes from a decision's first `request.start`: the length of `request.withheld`, counted toward the state the run was in, which is the `from.value` of the transition the choice causes.
+- `ignored` counts `machine.transition` events with `ignored: true`: a host event the state had no transition for, counted toward that state.
 - `decideNext` called by the host emits no trace. Push its request onto the trace before sending the event: `trace.push({ type: "request.start", request: result.request })`.
 - Rows come in the order states were first seen. Sort them yourself, for example by `failures / visits`.
 

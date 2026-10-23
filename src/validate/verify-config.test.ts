@@ -202,6 +202,14 @@ describe("verifyAgentConfig", () => {
     expect(result.machine).toBeDefined();
   });
 
+  test('lint: a decision that lists an `actor: "human"` event fails', async () => {
+    const config = refundConfig();
+    config.states.triage.on.APPROVE.meta = { actor: "human" };
+    const result = await verifyAgentConfig(config, options());
+    expect(result.gates.at(-1)).toMatchObject({ name: "lint", ok: false });
+    expect(result.gates.at(-1)!.detail).toContain("decide-allows-human-event at 'triage'");
+  });
+
   test("lint: warnings are recorded by default and fail with `warnings: true`", async () => {
     const config = refundConfig();
     delete config.states.triage.invoke.onError;

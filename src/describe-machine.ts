@@ -202,7 +202,7 @@ function targetsInSource(source: AnyStateNode, code: string, choice: boolean): s
   return /\btarget\s*:/.test(code) ? "?" : "(stays)";
 }
 
-/** One transition, as a line: `on GO if context.ready → review; sets draft — description`. */
+/** One transition, as a line: `on GO (human) if context.ready → review; sets draft — description`. */
 function transitionLine(
   source: AnyStateNode,
   head: string,
@@ -213,6 +213,7 @@ function transitionLine(
   let to: string;
   let guard: string | undefined;
   let description: string | undefined;
+  let human = false;
   let sets: string[];
   if (typeof transition === "string") {
     const node = resolveTarget(source, transition);
@@ -233,12 +234,13 @@ function transitionLine(
       : "(stays)";
     guard = guardText(transition[options.guardKey ?? "guard"]);
     description = typeof transition.description === "string" ? transition.description : undefined;
+    human = isObject(transition.meta) && transition.meta.actor === "human";
     sets = contextKeys(transition, undefined);
   } else {
     to = "?";
     sets = [];
   }
-  return `${head}${guard ? ` if ${guard}` : ""} → ${to}${sets.length ? `; sets ${sets.join(", ")}` : ""}${
+  return `${head}${human ? " (human)" : ""}${guard ? ` if ${guard}` : ""} → ${to}${sets.length ? `; sets ${sets.join(", ")}` : ""}${
     description ? ` — ${oneLine(description)}` : ""
   }`;
 }
@@ -365,8 +367,8 @@ function eventLines(machine: AnyStateMachine): string[] {
  * label and description (`*` marks the active ones when `snapshot` is given),
  * and under it every transition leaving it, one per line: `on EVENT`,
  * `always`, `after <delay>`, invoke `done`/`error`, and `choice` branches,
- * each with its guard (`if …`), where it goes (`→ review`), and what it sets
- * in context (`sets draft, attempts`). An `Events` section lists the
+ * each with `(human)` when its `meta.actor` is `"human"`, its guard (`if …`),
+ * where it goes (`→ review`), and what it sets in context (`sets draft, attempts`). An `Events` section lists the
  * machine's event schemas with their descriptions and fields.
  *
  * A transition written as a function shows the targets its source names

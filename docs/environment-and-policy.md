@@ -152,6 +152,7 @@ The `vocabulary` gate keeps a candidate inside the environment's contract: it li
 People own everything that defines "better" and everything the policy cannot touch.
 
 - The environment: its states, guards, invariants, and the `canReach` proofs behind them.
+- The events a person sends. Tag their transitions `meta: { actor: "human" }` so no decision offers them and `verifyAgentConfig` fails a policy that lists them. See [Events a person sends](decisions.md#events-a-person-sends).
 - The goal, its success criteria, and the objective function. A model can draft an objective from the goal; a person confirms it before it is used.
 - The vocabulary a policy may reference.
 - The scenario set, the held-out split, and the regression tolerance.

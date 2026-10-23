@@ -230,14 +230,20 @@ export function parseAgentEvent<TSource extends AnyStateMachine | AnyMachineSnap
  * ({@link RESERVED_AGENT_EVENT_PREFIX}) event types are always excluded, before
  * any `allowedEvents` matching — a machine that handles `'@agent.usage'` still
  * never offers it to a model.
+ *
+ * Pass `actor: "agent"` for the list a model may choose from: it also drops an
+ * event the state handles through a transition tagged `meta: { actor: "human" }`.
  */
 export function getAcceptedEvents(
   snapshot: AnyMachineSnapshot,
   options: Pick<AgentRequestOptions, "events" | "schemas"> & {
     eventTypes?: readonly string[];
+    actor?: "agent";
   } = {},
 ): AgentEventDescriptor[] {
   const eventTypes = options.eventTypes;
+  const humanEventTypes =
+    options.actor === "agent" ? getHumanEventTypes(snapshot) : new Set<string>();
   const seen = new Set<string>();
   const usedToolNames = new Set<string>();
 
@@ -249,6 +255,7 @@ export function getAcceptedEvents(
       eventType === "*" ||
       eventType.startsWith("xstate.") ||
       isReservedAgentEvent(eventType) ||
+      humanEventTypes.has(eventType) ||
       (eventTypes && !eventTypes.some((pattern) => matchesEventPattern(eventType, pattern))) ||
       seen.has(eventType)
     ) {
@@ -269,4 +276,19 @@ export function getAcceptedEvents(
       },
     ];
   });
+}
+
+/**
+ * The event types a snapshot handles through a transition tagged
+ * `meta: { actor: "human" }`: a person sends them, so no model is offered them.
+ * @internal
+ */
+export function getHumanEventTypes(snapshot: AnyMachineSnapshot): Set<string> {
+  const types = new Set<string>();
+  for (const transition of getNextTransitions(snapshot)) {
+    if ((transition.meta as { actor?: unknown } | undefined)?.actor === "human") {
+      types.add(transition.eventType);
+    }
+  }
+  return types;
 }
