@@ -189,13 +189,17 @@ Replayability rests on pure transitions.
 
 ## Fork
 
-`forkEventLog(entries, upToIndex)` returns the prefix `[0, upToIndex)` as a new, still self-contained log. `upToIndex` is exclusive and must leave the init entry in place. A fork copies the init entry, so it inherits the parent's execution id.
+`forkEventLog(entries, upToIndex)` returns the prefix `[0, upToIndex)` as a new, still self-contained log. `upToIndex` is exclusive and must leave the init entry in place.
+
+- The fork is its own lineage. Its init entry gets a fresh `metadata.executionId` and `metadata.forkedFrom: { executionId, logIndex }`, naming the parent's id and the cutoff. Every other entry is copied as is.
+- Call keys derive from the execution id, so a call the fork makes never shares an `info.callKey` with one its parent makes at the same site.
+- A snapshot of the parent does not take the fork's fast path. Resuming the fork with one folds its log instead.
 
 ```ts no-check
 const branch = forkEventLog(entries, 8);
 ```
 
-`store.fork({ threadId, newThreadId, upToIndex })` does the same at the storage layer. To diverge, append different entries to the new thread.
+`store.fork({ threadId, newThreadId, upToIndex })` does the same at the storage layer. To diverge, append different entries to the new thread. A store you write stores what `forkEventLog` returns for the prefix; the conformance suite checks it.
 
 ## Decision attempts
 
@@ -265,7 +269,7 @@ const next = await store.length("session-1"); // the next expectedIndex
 - `append` is atomic. A stale writer fails with `AgentEventLogConflictError`, carrying `threadId`, `expectedIndex`, and `actualIndex`, so two hosts resuming one thread resolve to exactly one winner. Entry indices must be contiguous from `expectedIndex`, and ids unique within the thread.
 - `createAgentRuntime(machine, { store, threadId })` drives all three: `read` to resume, `append` per entry, `read` again to check an explicit `events` log against the thread.
 - `read` and `length` are the per-thread reads. Everything else about a thread is derived from its entries.
-- `fork` copies a prefix onto a fresh thread.
+- `fork` copies a prefix onto a fresh thread, with the fork's own lineage on its init entry (see [Fork](#fork)).
 - `listThreads` is optional: it lists the threads that hold at least one entry, so a caller need not record thread ids itself.
 
 ```ts no-check

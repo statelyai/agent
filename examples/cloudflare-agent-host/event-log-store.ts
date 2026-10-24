@@ -29,7 +29,7 @@ import {
   type AgentEventLogStore,
   type AgentLogEntry,
 } from "@statelyai/agent";
-import { assertAgentLogEntry } from "@statelyai/agent/log";
+import { assertAgentLogEntry, forkEventLog } from "@statelyai/agent/log";
 export interface DurableObjectEventLogStoreOptions {
   /** Table holding the log entries. Defaults to `agent_event_log`. */
   table?: string;
@@ -179,13 +179,25 @@ export function createDurableObjectEventLogStore(
               `cannot fork up to index ${upTo}; expected an integer in [1, ${sourceLength}].`,
           );
         }
-        sql.exec(
-          `INSERT INTO ${table} (thread_id, idx, entry_id, entry)
-           SELECT ?, idx, entry_id, entry FROM ${table} WHERE thread_id = ? AND idx < ?`,
-          newThreadId,
-          threadId,
-          upTo,
-        );
+        const prefix = sql
+          .exec(
+            `SELECT entry FROM ${table} WHERE thread_id = ? AND idx < ? ORDER BY idx ASC`,
+            threadId,
+            upTo,
+          )
+          .toArray()
+          .map((row) => JSON.parse(String(row.entry)) as AgentLogEntry);
+        // `forkEventLog` gives the fork its own lineage: a fresh executionId
+        // and `forkedFrom` on its init entry.
+        for (const entry of forkEventLog(prefix, upTo)) {
+          sql.exec(
+            `INSERT INTO ${table} (thread_id, idx, entry_id, entry) VALUES (?, ?, ?, ?)`,
+            newThreadId,
+            entry.index,
+            entry.id,
+            JSON.stringify(entry),
+          );
+        }
       });
     },
 

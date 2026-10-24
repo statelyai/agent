@@ -1,5 +1,9 @@
 import { describe, expect, it, test } from "vitest";
-import { AGENT_EVENT_SCHEMA_VERSION, type AgentLogEntry } from "./event-log.js";
+import {
+  AGENT_EVENT_SCHEMA_VERSION,
+  AGENT_INIT_EVENT_TYPE,
+  type AgentLogEntry,
+} from "./event-log.js";
 import { AgentEventLogConflictError, createInMemoryEventLogStore } from "./event-log-store.js";
 import { assertEventLogStoreConformance } from "./event-log-store-conformance.js";
 
@@ -72,7 +76,11 @@ describe("createInMemoryEventLogStore listThreads", () => {
   async function storeWith(threadIds: string[]) {
     const store = createInMemoryEventLogStore();
     for (const threadId of threadIds) {
-      await store.append({ threadId, expectedIndex: 0, entries: [testEntry(0, "start")] });
+      await store.append({
+        threadId,
+        expectedIndex: 0,
+        entries: [testEntry(0, AGENT_INIT_EVENT_TYPE)],
+      });
     }
     return store;
   }

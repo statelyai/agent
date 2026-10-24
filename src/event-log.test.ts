@@ -608,6 +608,25 @@ describe("forkEventLog", () => {
     expect(replay(machine, forked).snapshot.value).toBe("working");
   });
 
+  test("gives the fork its own executionId and records the parent in forkedFrom", () => {
+    const entries = buildLog();
+    const parent = getLogExecutionId(entries);
+
+    const forked = forkEventLog(entries, 2);
+    const sibling = forkEventLog(entries, 2);
+
+    expect(getLogExecutionId(forked)).toEqual(expect.any(String));
+    expect(getLogExecutionId(forked)).not.toBe(parent);
+    expect(getLogExecutionId(forked)).not.toBe(getLogExecutionId(sibling));
+    expect(forked[0]!.metadata?.forkedFrom).toEqual({
+      ...(parent !== undefined ? { executionId: parent } : {}),
+      logIndex: 2,
+    });
+    // The parent's own entries are untouched.
+    expect(getLogExecutionId(entries)).toBe(parent);
+    expect(entries[0]!.metadata?.forkedFrom).toBeUndefined();
+  });
+
   test("rejects a cutoff that drops the init entry or overruns the log", () => {
     const entries = buildLog();
 

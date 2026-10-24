@@ -16,9 +16,10 @@ export interface PolicyDeciderOptions<TPolicy extends AnyStateMachine> extends O
    * retry of one, needs its own thread: a thread that already has entries is
    * resumed, so a shared one would return an earlier decision's choice. Default
    * with a `store`: `policy:${info.callKey}:${hash}`, where `hash` is the
-   * SHA-256 of the policy input's canonical JSON. The call key is unique per call and attempt and stays the
-   * same when a crashed run re-issues the call; the hash keeps a fork that asks
-   * something else at the same call site off the parent's thread. Required
+   * SHA-256 of the policy input's canonical JSON. The call key is unique per
+   * call and attempt and stays the same when a crashed run re-issues the call;
+   * the hash keeps a machine that asks something else at the same call site
+   * after a version bridge, which keeps the call key, off the earlier thread. Required
    * with a `store` when the decider is called without a `callKey`.
    */
   threadId?: (request: AgentExecutorDecisionRequest, info?: AgentRequestExecutorInfo) => string;
@@ -90,7 +91,7 @@ export function createPolicyDecider<TPolicy extends AnyStateMachine>(
     info?: AgentRequestExecutorInfo,
   ) {
     if (threadId) return threadId(request, info);
-    // The call key names the call site, not the request: a fork shares it.
+    // The call key names the call site, not the request: a version bridge keeps it.
     if (info?.callKey)
       return `policy:${info.callKey}:${await sha256(canonicalEventJson(policyInput))}`;
     throw new AgentError(

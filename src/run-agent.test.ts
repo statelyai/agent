@@ -3959,6 +3959,57 @@ describe("runAgent event log", () => {
     expect(secondCalls[0]!.callKey).toMatch(/^[0-9a-f-]+:b#1$/);
   });
 
+  test("a forked thread's calls get their own callKeys, not the parent's", async () => {
+    const askMachine = setup({ actors: { answer } }).createMachine({
+      id: "ask-later",
+      context: () => ({}),
+      initial: "waiting",
+      states: {
+        waiting: { on: { GO: { target: "asking" } } },
+        asking: {
+          invoke: {
+            id: "ask",
+            src: "answer",
+            input: () => ({}),
+            onDone: { target: "done" },
+          } as never,
+        },
+        done: { type: "final" },
+      },
+    });
+    const store = createInMemoryEventLogStore();
+    const generateText = async () => ({ result: "ok" });
+    await runToQuiescence(
+      createAgentRuntime(askMachine, { store, threadId: "parent", executors: { generateText } }),
+      { input: undefined },
+    );
+    await store.fork({ threadId: "parent", newThreadId: "branch" });
+
+    const keyOf = async (threadId: string) => {
+      const keys: Array<string | undefined> = [];
+      await runToQuiescence(
+        createAgentRuntime(askMachine, {
+          store,
+          threadId,
+          executors: {
+            generateText: async (_request, info) => {
+              keys.push(info?.callKey);
+              return { result: "ok" };
+            },
+          },
+        }),
+        { event: { type: "GO" } },
+      );
+      return keys[0]!;
+    };
+    const [parentKey, branchKey] = [await keyOf("parent"), await keyOf("branch")];
+
+    const branchId = getLogExecutionId(await store.read("branch"))!;
+    expect(branchKey).toBe(`${branchId}:ask#1`);
+    expect(parentKey).toBe(`${getLogExecutionId(await store.read("parent"))}:ask#1`);
+    expect(branchKey).not.toBe(parentKey);
+  });
+
   test("decision retries get distinct, replay-stable callKeys", async () => {
     const schemas = createAgentSchemas({
       context: z.object({}),

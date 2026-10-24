@@ -751,8 +751,8 @@ function isSnapshotInitEntry(entry: AgentLogEntry): boolean {
  * Minted once per run and inherited verbatim by every resume of that log, so
  * it names one lineage rather than one process. Entry ids cannot serve this
  * role — the built-in ids are index-derived, so every log's init entry is
- * `evt_00000000`. A fork copies the init entry, so it shares its parent's
- * execution id by construction.
+ * `evt_00000000`. A fork ({@link forkEventLog}, `store.fork`) mints its own
+ * and records the parent's in `metadata.forkedFrom`.
  *
  * Returns `undefined` for a log with no init entry and for one written without
  * the field — callers must treat the id as optional.
@@ -835,6 +835,12 @@ export function validateReplayEntries(
 /**
  * The prefix `[0, upToIndex)` of a log, as a new log. `upToIndex` is exclusive
  * and must leave the init entry in place, so the fork is still self-contained.
+ *
+ * The fork is its own lineage: its init entry gets a fresh
+ * `metadata.executionId` and `metadata.forkedFrom: { executionId, logIndex }`
+ * naming the parent's id (when it had one) and the cutoff. Call keys derive
+ * from the execution id, so a fork's calls never collide with its parent's.
+ * Every other entry is copied as is.
  */
 export function forkEventLog(
   entries: readonly AgentLogEntry[],
@@ -851,7 +857,19 @@ export function forkEventLog(
       `forkEventLog: the forked prefix must start with the reserved '${AGENT_INIT_EVENT_TYPE}' entry.`,
     );
   }
-  return forked;
+  const [init, ...rest] = forked;
+  const parentExecutionId = getLogExecutionId(forked);
+  const forkedFrom: Record<string, JsonValue> = {
+    ...(parentExecutionId !== undefined ? { executionId: parentExecutionId } : {}),
+    logIndex: upToIndex,
+  };
+  return [
+    {
+      ...init!,
+      metadata: { ...init!.metadata, executionId: crypto.randomUUID(), forkedFrom },
+    },
+    ...rest,
+  ];
 }
 
 // --- Occurrence + usage ----------------------------------------------------
