@@ -181,10 +181,50 @@ const mayDecline = (code: string) =>
   );
 
 /**
+ * True when the function returns a call's result (`=> next(ctx)`, `return
+ * pick(x)`), so its target is not in its own source. Reads only the
+ * function's own returned expressions, not those of callbacks nested in it.
+ */
+function returnsCall(code: string): boolean {
+  const text = code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
+  // Grouping parentheses first: `=> (next(x))` returns a call; `=> ({ … })` does not.
+  const startsWithCall = (at: number) => /^[\s(]*[A-Za-z_$][\w$.]*\s*\(/.test(text.slice(at));
+  // The outer function's body: after its arrow, or its first brace, outside the parameters.
+  let parens = 0;
+  let body = -1;
+  for (let i = 0; i < text.length && body < 0; i++) {
+    const char = text[i];
+    if (char === "(") parens++;
+    else if (char === ")") parens--;
+    else if (parens === 0 && char === "=" && text[i + 1] === ">") body = i + 2;
+    else if (parens === 0 && char === "{") body = i;
+  }
+  if (body < 0) return false;
+  while (/\s/.test(text[body] ?? "")) body++;
+  if (text[body] !== "{") return startsWithCall(body);
+  // A block body: its own `return` statements, at depth 1.
+  let depth = 0;
+  for (let i = body; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}" && --depth === 0) return false;
+    else if (
+      depth === 1 &&
+      text.startsWith("return", i) &&
+      !/[\w$]/.test(text[i - 1] ?? "") &&
+      !/[\w$]/.test(text[i + 6] ?? "") &&
+      startsWithCall(i + 6)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Where a transition written as a function goes: every string literal after a
  * `target:` that names a real state node, `(conditional)` when it may decline
  * or pick among several, `(stays)` when its source has no `target`, `?` when
- * it names none that resolves.
+ * it names none that resolves or returns a helper call's result.
  */
 function targetsInSource(source: AnyStateNode, code: string, choice: boolean): string {
   const found = new Set<AnyStateNode>();
@@ -199,7 +239,8 @@ function targetsInSource(source: AnyStateNode, code: string, choice: boolean): s
     const conditional = names.length > 1 || (!choice && mayDecline(code));
     return `${names.join(", ")}${conditional ? " (conditional)" : ""}`;
   }
-  return /\btarget\s*:/.test(code) ? "?" : "(stays)";
+  // A target the source does not spell out, or one a helper call returns, is unknown.
+  return /\btarget\s*:/.test(code) || returnsCall(code) ? "?" : "(stays)";
 }
 
 /** One transition, as a line: `on GO (human) if context.ready → review; sets draft — description`. */

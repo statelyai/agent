@@ -148,7 +148,7 @@ export const hostAgent = new Agent({
 });
 ```
 
-Any framework that exposes a `LanguageModel` works the same way. The machine and the Mastra agent share one model definition. See [`examples/mastra-host`](https://github.com/statelyai/agent/tree/main/examples/mastra-host) for the full bridge, including pause and resume across tool calls.
+Any framework that exposes a `LanguageModel` works the same way. The machine and the Mastra agent share one model definition. See [`examples/mastra-host`](https://github.com/statelyai/agent/tree/next/examples/mastra-host) for the full bridge, including pause and resume across tool calls.
 
 ## LangChain models
 

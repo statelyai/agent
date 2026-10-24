@@ -22,6 +22,8 @@ export type {
   AgentPathTerminal,
   AssertAgentMachineOptions,
   CanReachResult,
+  CanReachTarget,
+  ExploreSnapshot,
   ExplorePathsOptions,
   LintAgentMachineOptions,
   SimulateAgentOptions,

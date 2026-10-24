@@ -19,6 +19,7 @@ import {
   type StateValue,
   type TimerKey,
 } from "xstate";
+import { canonicalJson } from "./internal/is-record.js";
 import { createDurable, type DurableExecution } from "xstate/durable";
 import type {
   AgentTools,
@@ -485,9 +486,13 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
   onEvent?: (entry: AgentLogEntry) => void;
   /**
    * Record a `verification.stateHash` on every appended entry (default `true`).
-   * The hash is taken O(1) from the live actor's persisted snapshot right after
-   * that entry's transition, so `replay(machine, events)` can prove it lands on
-   * the same state. Set `false` for a smaller, unverifiable log.
+   * The hash is of the state the log folds to after that entry, the same fold
+   * `replay` runs, so `replay(machine, events)` can check each entry against
+   * the fold before it. It does not show the log is complete (a dropped last
+   * entry leaves the rest intact), nor compare against the live snapshot: a
+   * machine that reads something the log does not keep (an error's class, a
+   * non-JSON field) can replay to a different state. Set `false` for a
+   * smaller, unverifiable log.
    */
   verification?: boolean;
   /**
@@ -1102,6 +1107,15 @@ interface TraceSinks {
   ) => void;
 }
 
+// Observers never control the run: one that throws is reported and skipped.
+function observe(name: string, call: () => void): void {
+  try {
+    call();
+  } catch (error) {
+    console.error(`@statelyai/agent: ${name} threw; the run continues.`, error);
+  }
+}
+
 /**
  * Builds the ONE place a trace payload is emitted: it hands the payload to the
  * envelope-stamping trace sink and, from that same payload, invokes the sugar
@@ -1118,19 +1132,21 @@ function createTraceDispatch(sinks: TraceSinks): TraceDispatch {
   return (payload, self) => {
     switch (payload.type) {
       case "stream.chunk":
-        sinks.onTrace?.(payload, self);
-        sinks.onChunk?.(payload.chunk, { request: payload.request });
+        observe("onTrace", () => sinks.onTrace?.(payload, self));
+        observe("onChunk", () => sinks.onChunk?.(payload.chunk, { request: payload.request }));
         return;
       case "request.end":
-        sinks.onResult?.(payload.request, { result: payload.output, raw: payload.raw });
-        sinks.onTrace?.(payload, self);
+        observe("onResult", () =>
+          sinks.onResult?.(payload.request, { result: payload.output, raw: payload.raw }),
+        );
+        observe("onTrace", () => sinks.onTrace?.(payload, self));
         return;
       case "machine.transition":
-        sinks.onTrace?.(payload, self);
-        sinks.onTransition?.(payload.snapshot, payload.event);
+        observe("onTrace", () => sinks.onTrace?.(payload, self));
+        observe("onTransition", () => sinks.onTransition?.(payload.snapshot, payload.event));
         return;
       default:
-        sinks.onTrace?.(payload, self);
+        observe("onTrace", () => sinks.onTrace?.(payload, self));
     }
   };
 }
@@ -2346,6 +2362,23 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // and later entries go unverified rather than failing the run.
   let logFold: LogFold | null | undefined;
 
+  // A value the log cannot hold. With a store the caller asked for a durable
+  // log, so the run stops; without one, the log stops and the run goes on.
+  // Either way it is loud: a silently short `result.events` replays wrong.
+  const stopLogging = (error: unknown): void => {
+    if (!loggingEnabled) return;
+    loggingEnabled = false;
+    if (store !== undefined) {
+      journalError ??= error;
+      stopRun({ cause: "journal", error });
+      return;
+    }
+    console.warn(
+      `@statelyai/agent: this run's log stopped at entry ${logEntries.length}, so result.events is incomplete: ` +
+        `${error instanceof Error ? error.message : String(error)}. Pass input and events that JSON can hold.`,
+    );
+  };
+
   const appendLogEntry = (
     event: EventObject,
     attempts?: DecisionAttempt[],
@@ -2353,11 +2386,17 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (!loggingEnabled) {
       return undefined;
     }
-    const entry = createReplayEntry(logMachine, logEntries, event, {
-      machineVersion,
-      verification: false,
-      ...(attempts !== undefined ? { attempts } : {}),
-    });
+    let entry: AgentLogEntry;
+    try {
+      entry = createReplayEntry(logMachine, logEntries, event, {
+        machineVersion,
+        verification: false,
+        ...(attempts !== undefined ? { attempts } : {}),
+      });
+    } catch (error) {
+      stopLogging(error);
+      return undefined;
+    }
     if (verificationEnabled && logFold !== null) {
       try {
         logFold ??= foldLog(logMachine, logEntries, { machineVersion, verify: false });
@@ -2368,7 +2407,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     }
     logEntries.push(entry);
     journalEntry(entry);
-    options.onEvent?.(entry);
+    observe("onEvent", () => options.onEvent?.(entry));
     return entry;
   };
 
@@ -2671,9 +2710,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   const emitFromRoot = (event: EventObject): void => {
     onTrace({ type: "emit", event: event as EmittedFrom<TMachine> });
     const on = (options.on ?? {}) as Record<string, ((event: EventObject) => void) | undefined>;
-    on[event.type]?.(event);
+    observe(`on['${event.type}']`, () => on[event.type]?.(event));
     if (event.type !== "*") {
-      on["*"]?.(event);
+      observe("on['*']", () => on["*"]?.(event));
     }
   };
 
@@ -2802,6 +2841,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
 
       // ─── Resolve the log to resume from ───
       let resumeEvents = init.events;
+      let resumedFromStore = false;
       if (store !== undefined) {
         const storedThread = await store.read(threadId!);
         if (resumeEvents !== undefined) {
@@ -2817,8 +2857,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             );
           }
           assertThreadMatchesEvents(threadId!, storedThread, resumeEvents);
+          resumedFromStore = storedThread.length > 0;
         } else if (storedThread.length > 0) {
           resumeEvents = storedThread;
+          resumedFromStore = true;
         }
       }
 
@@ -2826,6 +2868,24 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // start, the replayable init entry, and the `run.start` trace all see
       // the same post-defaults value, so a replay reproduces this run exactly.
       const resolvedInput = resolveMachineInput(machine, init.input);
+      // A thread that has entries is resumed, which ignores `input`. Input
+      // that differs from the thread's own means two runs share a thread id:
+      // resuming would hand this caller another run's result. A thread that
+      // began from a snapshot recorded no input to compare against.
+      const threadInit = resumeEvents?.[0]?.event as Record<string, unknown> | undefined;
+      if (
+        resumedFromStore &&
+        init.input !== undefined &&
+        threadInit !== undefined &&
+        Object.hasOwn(threadInit, "input")
+      ) {
+        if (canonicalJson(threadInit.input) !== canonicalJson(resolvedInput)) {
+          throw new AgentError(
+            "thread-input-mismatch",
+            `createAgentRuntime: thread '${threadId}' was started with different input. A thread that already has entries is resumed, not restarted; give a new run a new threadId.`,
+          );
+        }
+      }
       let effectiveSnapshot: Snapshot<unknown> | undefined = init.snapshot;
       let seedInitEntry: (() => void) | undefined;
 
@@ -2855,24 +2915,24 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         candidates: readonly AgentLogInit[],
         metadata: Record<string, AgentLogJsonValue>,
       ): void => {
+        let lastError: unknown;
         for (const candidate of candidates) {
           for (const verification of verificationEnabled ? [true, false] : [false]) {
+            let entry: AgentLogEntry;
             try {
-              const entry = initEntry(logMachine, candidate, {
-                machineVersion,
-                verification,
-                metadata,
-              });
-              logEntries.push(entry);
-              journalEntry(entry);
-              options.onEvent?.(entry);
-              return;
-            } catch {
+              entry = initEntry(logMachine, candidate, { machineVersion, verification, metadata });
+            } catch (error) {
               // Try the next (less exact) form.
+              lastError = error;
+              continue;
             }
+            logEntries.push(entry);
+            journalEntry(entry);
+            observe("onEvent", () => options.onEvent?.(entry));
+            return;
           }
         }
-        loggingEnabled = false;
+        stopLogging(lastError);
       };
 
       /** Init forms for a snapshot resume, most faithful first. */
@@ -3143,6 +3203,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         ignoredEvent = event as EventObject;
       }
       appendLogEntry(event as EventObject, attempts);
+      // The store refused the entry and the run stopped: the transition never
+      // happened, so the result stays at the last journaled state.
+      if (stopReason !== undefined) {
+        return [state, []];
+      }
       commit(next, event as EventObject, ignored);
       return [next as SnapshotFrom<TMachine>, effects];
     },

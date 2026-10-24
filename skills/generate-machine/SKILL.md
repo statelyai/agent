@@ -31,13 +31,13 @@ import { describeMachine } from "@statelyai/agent";
 const text = describeMachine(machine); // "Machine <id>", then "Goal: …", states, transitions, events
 ```
 
-Pass `{ snapshot }` to mark the active states with `*`. Concept page: [Environment and policy](https://github.com/statelyai/agent/blob/main/docs/environment-and-policy.md).
+Pass `{ snapshot }` to mark the active states with `*`. Concept page: [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md).
 
 ## 1. Read the schema
 
 The config shape is fixed by a shipped JSON Schema. Read it first; it is the contract.
 
-- Consuming the package: `node_modules/@statelyai/agent/agent-workflow.json` (importable as `@statelyai/agent/agent-workflow.json`)
+- Consuming the package: `node_modules/@statelyai/agent/schemas/agent-workflow.json` (importable as `@statelyai/agent/agent-workflow.json`)
 - In the `statelyai/agent` repo: `schemas/agent-workflow.json`
 
 ## 2. Author the config

@@ -1,4 +1,5 @@
 import type { AnyMachineSnapshot, AnyStateMachine, StateValue } from "xstate";
+import { isPlainObject } from "./internal/is-record.js";
 import type {
   AgentMessage,
   AssistantMessage,
@@ -82,8 +83,7 @@ export function findNonSerializableContextPaths(context: unknown, limit = 5): st
       return;
     }
 
-    const proto = Object.getPrototypeOf(value);
-    if (proto === Object.prototype || proto === null) {
+    if (isPlainObject(value)) {
       // Plain object — walk its entries.
       seen.add(obj);
       for (const [key, item] of Object.entries(value as Record<string, unknown>)) {

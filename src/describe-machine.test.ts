@@ -131,6 +131,47 @@ describe("describeMachine", () => {
     expect(describeMachine(machine)).toContain("always → stopped; sets prompt");
   });
 
+  test("a transition that returns a helper's result is unknown, not (stays)", () => {
+    const next = (ready: boolean) => (ready ? { target: "done" as const } : undefined);
+    const machine = setup({}).createMachine({
+      context: { ready: false },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            CHECK: ({ context }) => next(context.ready),
+            WRAPPED: ({ context }) => next(context.ready),
+            PICK: ({ context }) => {
+              const ready = !context.ready;
+              return next(ready);
+            },
+            NOTE: () => ({ context: { ready: true } }),
+            MAP: ({ context }) => ({
+              context: { ready: [context.ready].map((value) => Boolean(value))[0]! },
+            }),
+          },
+        },
+        done: {},
+      },
+    });
+
+    // As authored: the transpiler drops these grouping parentheses.
+    const { on } = (
+      machine.config as unknown as { states: { working: { on: Record<string, unknown> } } }
+    ).states.working;
+    Object.defineProperty(on.WRAPPED, "toString", {
+      value: () => "({ context }) => (next(context.ready))",
+    });
+
+    const text = describeMachine(machine);
+    expect(text).toContain("on CHECK → ?");
+    expect(text).toContain("on WRAPPED → ?");
+    expect(text).toContain("on PICK → ?");
+    expect(text).toContain("on NOTE → (stays)");
+    // A call inside a nested callback is not the transition's own result.
+    expect(text).toContain("on MAP → (stays)");
+  });
+
   test("describes a TS-authored machine", () => {
     expect(describeMachine(refundMachine)).toMatchInlineSnapshot(`
       "Machine refund

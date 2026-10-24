@@ -30,7 +30,7 @@ console.log(describeMachine(machine)); // goal, states, transitions, events
 
 List:
 
-- the decision states: an `agent.decide` invoke, a `decision` tag, or a state a host answers with `decideNext`;
+- the decision states: an `agent.decide` invoke, a `decision` tag, or a state a host answers with `decideNext`. A machine whose model choice is the output of a text request (a tool call it then checks) has no decision states: eval that choice at the **request** level with `runSeam`;
 - the person's steps: idle states a person answers (`meta.interaction`, the runner's `onIdle`). What the person decides is ground truth, not something to eval; the routing after their answer is a rule;
 - the guards. `describeMachine` shows where a transition function can go and marks it `(conditional)`, but not the guard's name or logic. Read the source for those;
 - the sentinel states and the final states.
@@ -56,6 +56,8 @@ If the request names nothing ("write evals"), cover every decision state, every 
 | **Stats**    | Which state the failures cluster in                  | No (reads traces)     | `foldTraces`                                                       |
 
 A guard or ordering is always a rule eval. Use a decision eval when the guards leave more than one legal option. Use an outcome eval when a person can label the right end result.
+
+Draft labels gate nothing, but rule evals need no labels, so they gate CI from day one. The label-based evals start gating as the user confirms labels (`draft: false`). Say so in the hand-back, so nobody reads a green CI as "the outcome evals pass".
 
 ## 4. Write them
 

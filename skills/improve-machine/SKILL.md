@@ -11,7 +11,7 @@ You improve a **policy**: the machine that decides how the agent works toward it
 locate inputs → read traces → diagnose → propose one diff → gate (≤ 3 repairs) → replay train → replay held-out → recommend or discard → record → pull request
 ```
 
-This is step 4 of 4, after `loop-to-machine`, `add-traces`, and `add-evals`. To author a JSON policy from scratch, use the `generate-machine` skill. Concept page: [Environment and policy](https://github.com/statelyai/agent/blob/main/docs/environment-and-policy.md).
+This is step 4 of 4, after `loop-to-machine`, `add-traces`, and `add-evals`. To author a JSON policy from scratch, use the `generate-machine` skill. Concept page: [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md).
 
 ## Hard rules
 
@@ -232,7 +232,7 @@ Report to the user: rounds run, each candidate with its hypothesis and decision,
 
 ## Worked example
 
-[`examples/self-improving-refunds`](https://github.com/statelyai/agent/blob/main/examples/self-improving-refunds) in the `statelyai/agent` repo (not in the installed package) runs this loop end to end for a JSON policy:
+[`examples/self-improving-refunds`](https://github.com/statelyai/agent/blob/next/examples/self-improving-refunds) in the `statelyai/agent` repo (not in the installed package) runs this loop end to end for a JSON policy:
 
 - the refund desk is the environment: business rules as guards, and an `illegallyIssued` sentinel proven unreachable,
 - `playbooks/*.json` are policy versions, with the vocabulary listed in `playbooks/README.md`,

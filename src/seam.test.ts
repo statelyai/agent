@@ -224,6 +224,21 @@ describe("runSeam", () => {
     expect(run.after.statePath).toEqual(["reviewing", "done"]);
   });
 
+  test("respond may answer asynchronously", async () => {
+    const answer = user({ prompt: "Tell the team.", changes: "Add the ship date." });
+    const run = await runSeam(machine, {
+      scripts: { judge: [COMPLETE], writer: [DRAFT, REVISED] },
+      respond: async (turn) => {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return answer(turn);
+      },
+      seam: { request: "write", occurrence: 1 },
+      candidate: async () => ({ result: REVISED }),
+    });
+
+    expect(run.after.statePath).toEqual(["reviewing", "done"]);
+  });
+
   test("repeatLast replays the last scripted answer down a longer branch", async () => {
     // One scripted draft, but the user asks for a revision: the `write` queue
     // is called twice and its last entry covers the second call.

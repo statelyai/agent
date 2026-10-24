@@ -31,6 +31,8 @@ import {
   type TextLogicConfig,
 } from "./text-logic.js";
 import { createDecideActor } from "./decision.js";
+import { AgentError } from "./errors.js";
+import { isPlainObject } from "./internal/is-record.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import type { AgentInteractionMeta } from "./interaction.js";
 import { getAgentExecutionOptions, setAgentExecutionOptions } from "./internal/registry.js";
@@ -276,11 +278,49 @@ function normalizeEventSchemas<T extends AgentEventSchemaInputMap>(
   events: T,
 ): NormalizedEventSchemas<T> {
   return Object.fromEntries(
-    Object.entries(events).map(([type, schema]) => [
-      type,
-      schema && typeof schema === "object" && "~standard" in schema ? schema : emptyEventSchema,
-    ]),
+    Object.entries(events).map(([type, schema]) => {
+      if (schema && typeof schema === "object" && "~standard" in schema) return [type, schema];
+      // `{}` is the shorthand for an event with no payload; anything else
+      // without `~standard` is a schema this package cannot read.
+      if (!(isPlainObject(schema) && Object.keys(schema).length === 0)) {
+        assertStandardSchema(schema, `events.${type}`);
+      }
+      return [type, emptyEventSchema];
+    }),
   ) as NormalizedEventSchemas<T>;
+}
+
+/**
+ * Throws for a declared schema without the Standard Schema `~standard`
+ * property. Such a schema would otherwise be skipped, so values it should
+ * reject would pass unchecked. Zod 3.23 and earlier are the usual cause.
+ */
+function assertStandardSchema(schema: unknown, where: string): void {
+  if (
+    schema === undefined ||
+    (typeof schema === "object" && schema !== null && "~standard" in schema)
+  ) {
+    return;
+  }
+  throw new AgentError(
+    "invalid-schema",
+    `setupAgent: '${where}' is not a Standard Schema (it has no '~standard' property), so it cannot be used to validate. ` +
+      `Use zod 4 or zod 3.24 and later, Valibot, ArkType, or any other Standard Schema library; zod 3.23 and earlier do not implement it.`,
+  );
+}
+
+// State-level `schemas` (`states.<key>.schemas.context`, …), at any depth.
+function assertStateSchemasAreStandard(
+  states: Record<string, SetupStateSchema> | undefined,
+  path: readonly string[] = [],
+): void {
+  for (const [key, state] of Object.entries(states ?? {})) {
+    const statePath = [...path, key];
+    for (const [name, schema] of Object.entries(state?.schemas ?? {})) {
+      assertStandardSchema(schema, `states.${statePath.join(".states.")}.schemas.${name}`);
+    }
+    assertStateSchemasAreStandard(state?.states, statePath);
+  }
 }
 
 /**
@@ -733,6 +773,14 @@ export function setupAgent<
     TMetaSchema,
     TEmittedSchemas
   >(config);
+  for (const key of ["context", "input", "output", "meta"] as const) {
+    assertStandardSchema(schemas[key], key);
+  }
+  for (const [type, schema] of Object.entries(schemas.emitted ?? {})) {
+    assertStandardSchema(schema, `emitted.${type}`);
+  }
+  assertStateSchemasAreStandard(config.states);
+
   // `requests` is optional; an omitted map is simply empty.
   const requests = (config.requests ?? {}) as AgentRequestInput<
     TRequestSchemas,
@@ -743,6 +791,20 @@ export function setupAgent<
     config.actors,
     requestActors,
   );
+  for (const [name, request] of Object.entries(config.requests ?? {})) {
+    const source = request as { prompt?: unknown; messages?: unknown };
+    if (source.prompt === undefined && source.messages === undefined) {
+      throw new AgentError(
+        "invalid-request",
+        `setupAgent: request '${name}' has neither \`prompt\` nor \`messages\`, so every call to it fails. ` +
+          `A request whose executor builds its own model call still needs one: pass the conversation as ` +
+          `\`messages: ({ input }) => input.messages\` (or a \`prompt\`) and read it in the executor.`,
+      );
+    }
+    const requestSchemas = (request as { schemas?: { input?: unknown; output?: unknown } }).schemas;
+    assertStandardSchema(requestSchemas?.input, `requests.${name}.schemas.input`);
+    assertStandardSchema(requestSchemas?.output, `requests.${name}.schemas.output`);
+  }
   // The plain-object config passed to xstate's setup(...) (see
   // AgentSetupXStateConfig's note on why it's not SetupConfig<...>).
   const setupConfig: AgentSetupXStateConfig<

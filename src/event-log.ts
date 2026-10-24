@@ -15,6 +15,7 @@
  * so {@link replay} needs no side channel.
  * @module
  */
+import { isError, isPlainObject } from "./internal/is-record.js";
 import {
   initialTransition,
   transition,
@@ -239,8 +240,7 @@ export function assertJsonSerializable(
       assertNoHiddenKeys(value, path, (key) => key === "length" || arrayIndexPattern.test(key));
       return;
     }
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
+    if (!isPlainObject(value)) {
       const type = (value as { constructor?: { name?: string } }).constructor?.name ?? "object";
       throw new NonSerializableAgentEventError(path, type);
     }
@@ -374,9 +374,18 @@ function exhaustedAttemptsOf(error: Error): unknown[] | undefined {
 }
 
 /**
- * Replaces `Error` instances with plain `{ name, message, cause? }` objects so
- * an `xstate.error.actor` payload survives the log's JSON round-trip. A
- * decision-exhausted error also keeps its `code` and `attempts`. Cycles
+ * Marks an object {@link normalizeEventErrors} made from an `Error`, so replay
+ * restores that object, and only that one, as an `Error`: a thrown plain
+ * `{ name, message }` stays a plain object.
+ */
+const NORMALIZED_ERROR_KEY = "@error";
+
+/**
+ * Replaces `Error` instances with plain `{ name, message, code?, cause?,
+ * "@error": true }` objects so an `xstate.error.actor` payload survives the
+ * log's JSON round-trip. `code` is kept when it is a string or a number; a
+ * decision-exhausted error also keeps its `attempts`. Replay turns the
+ * object back into an `Error` (see `restoreJournaledEvent`). Cycles
  * are preserved by identity; non-plain objects are left alone (and are then
  * rejected by {@link assertJsonSerializable}).
  */
@@ -384,16 +393,20 @@ function normalizeEventErrors(
   value: unknown,
   seen: WeakMap<object, unknown> = new WeakMap(),
 ): unknown {
-  if (value instanceof Error) {
+  if (isError(value)) {
     const normalized: Record<string, unknown> = {
       name: value.name,
       message: value.message,
+      [NORMALIZED_ERROR_KEY]: true,
     };
     seen.set(value, normalized);
     if (value.cause !== undefined) normalized.cause = normalizeEventErrors(value.cause, seen);
-    if ((value as { code?: unknown }).code === DECISION_EXHAUSTED_CODE) {
-      // The discriminator getDecisionAttempts requires before it reads `attempts`.
-      normalized.code = DECISION_EXHAUSTED_CODE;
+    const code = (value as { code?: unknown }).code;
+    if (typeof code === "string" || (typeof code === "number" && Number.isFinite(code))) {
+      normalized.code = code;
+    }
+    if (code === DECISION_EXHAUSTED_CODE) {
+      // `code` is the discriminator getDecisionAttempts requires before it reads `attempts`.
       const attempts = exhaustedAttemptsOf(value);
       if (attempts !== undefined) normalized.attempts = structuredClone(attempts);
     }
@@ -408,8 +421,7 @@ function normalizeEventErrors(
     for (const item of value) result.push(normalizeEventErrors(item, seen));
     return result;
   }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) return value;
+  if (!isPlainObject(value)) return value;
   const result: Record<string, unknown> = {};
   seen.set(value, result);
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
@@ -460,7 +472,7 @@ function canonicalizeForHash(
   if (typeof value === "symbol") return `[symbol:${String(value)}]`;
   if (value === null || typeof value !== "object") return value;
   if (value instanceof Date) return `[Date:${value.toISOString()}]`;
-  if (value instanceof Error) {
+  if (isError(value)) {
     if (seen.has(value)) return "[circular]";
     seen.add(value);
     try {
@@ -607,7 +619,7 @@ function toPersisted(
 // coalesce, when it resolves `null` as well. Both reach the root machine as an
 // `xstate.done.actor` event carrying the key explicitly, which
 // `assertJsonSerializable` rejects. The key is dropped instead; `replay` puts
-// it back (`restoreDoneActorOutput`), and the hash already ignores it.
+// it back (`restoreJournaledEvent`), and the hash already ignores it.
 function normalizeDoneActorEvent(event: EventObject): EventObject {
   if (event.type !== DONE_ACTOR_EVENT_TYPE) return event;
   const { output, ...rest } = event as EventObject & { output?: unknown };
@@ -634,7 +646,8 @@ export function createReplayEntry(
     recordedAt: options.recordedAt ?? new Date().toISOString(),
     machineId: machineIdOf(machine),
     machineVersion,
-    event: normalizeDoneActorEvent(normalizeEventErrors(event) as EventObject),
+    // Object fields set to `undefined` are dropped, as `JSON.stringify` drops them.
+    event: normalizeDoneActorEvent(pruneUndefined(normalizeEventErrors(event)) as EventObject),
     ...(options.causationId !== undefined ? { causationId: options.causationId } : {}),
     ...(options.metadata !== undefined ? { metadata: options.metadata } : {}),
     ...(options.attempts !== undefined && options.attempts.length > 0
@@ -667,17 +680,24 @@ export type AgentLogInit =
 // A persisted snapshot carries `output`/`error` as explicit `undefined` before
 // serialization; JSON drops those keys, and so does this, so the entry passes
 // `assertJsonSerializable` and hashes identically before and after a round-trip.
-function pruneUndefined(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(pruneUndefined);
+function pruneUndefined(value: unknown, ancestors: WeakSet<object> = new WeakSet()): unknown {
   if (value === null || typeof value !== "object") return value;
-  if (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
-    return value;
+  // A cycle is left as is, for `assertJsonSerializable` to reject with its path.
+  if (ancestors.has(value)) return value;
+  if (Array.isArray(value)) {
+    ancestors.add(value);
+    const result = value.map((item) => pruneUndefined(item, ancestors));
+    ancestors.delete(value);
+    return result;
   }
+  if (!isPlainObject(value)) return value;
+  ancestors.add(value);
   const result: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     if (child === undefined) continue;
-    result[key] = pruneUndefined(child);
+    result[key] = pruneUndefined(child, ancestors);
   }
+  ancestors.delete(value);
   return result;
 }
 
@@ -1006,9 +1026,50 @@ export function rebindActorSession(
 // completion with an own `output` key (value `undefined`), so the fold gets
 // the same shape — a guard testing key presence takes the same branch both
 // times.
-function restoreDoneActorOutput(event: EventObject): EventObject {
-  if (event.type !== DONE_ACTOR_EVENT_TYPE || Object.hasOwn(event, "output")) return event;
-  return { ...event, output: undefined } as EventObject;
+/**
+ * The event as the machine received it live: a done event's dropped
+ * `undefined` output restored, and an error event's normalized error turned
+ * back into an `Error`, so `error instanceof Error` holds on replay too.
+ */
+function restoreJournaledEvent(event: EventObject): EventObject {
+  if (event.type === DONE_ACTOR_EVENT_TYPE && !Object.hasOwn(event, "output")) {
+    return { ...event, output: undefined } as EventObject;
+  }
+  if (event.type.startsWith(ERROR_ACTOR_EVENT_TYPE)) {
+    const error = (event as { error?: unknown }).error;
+    if (isNormalizedError(error)) return { ...event, error: toError(error) } as EventObject;
+  }
+  return event;
+}
+
+function isNormalizedError(value: unknown): value is { name: string; message: string } {
+  return (
+    isPlainObject(value) &&
+    value[NORMALIZED_ERROR_KEY] === true &&
+    typeof value.name === "string" &&
+    typeof value.message === "string"
+  );
+}
+
+function toError(normalized: { name: string; message: string; cause?: unknown }): Error {
+  const {
+    name,
+    message,
+    cause,
+    [NORMALIZED_ERROR_KEY]: _marker,
+    ...rest
+  } = normalized as {
+    name: string;
+    message: string;
+    cause?: unknown;
+    [NORMALIZED_ERROR_KEY]?: unknown;
+  };
+  const error = new Error(
+    message,
+    cause === undefined ? undefined : { cause: isNormalizedError(cause) ? toError(cause) : cause },
+  );
+  error.name = name;
+  return Object.assign(error, rest);
 }
 
 /** Options for {@link replay}. */
@@ -1125,7 +1186,7 @@ export function foldLog(
 
   const sessions = new Map<string, string>();
   const apply = (entry: AgentLogEntry): AgentPersistedSnapshot => {
-    const event = restoreDoneActorOutput(rebindActorSession(entry.event, snapshot, sessions));
+    const event = restoreJournaledEvent(rebindActorSession(entry.event, snapshot, sessions));
     [snapshot] = transition(machine, snapshot as never, event as never) as [
       AnyMachineSnapshot,
       unknown,
