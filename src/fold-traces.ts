@@ -10,6 +10,8 @@ export interface StateStats {
   failures: number;
   /** Options withheld by the guards at decisions made in this state, summed over runs. */
   withheld: number;
+  /** Events this state ignored (`machine.transition` with `ignored`), summed over runs. */
+  ignored: number;
 }
 
 /** Options for {@link foldTraces}. */
@@ -20,10 +22,11 @@ export interface FoldTracesOptions<TTrace> {
 
 /**
  * Folds many runs' traces into per-state stats: how many runs visited each
- * state, how many of those failed, and how many options the guards withheld
- * at decisions made there. Pure; reads only:
+ * state, how many of those failed, how many options the guards withheld
+ * at decisions made there, and how many events it ignored. Pure; reads only:
  *
- * - `machine.transition`: the run visited `from.value` and `snapshot.value`.
+ * - `machine.transition`: the run visited `from.value` and `snapshot.value`;
+ *   with `ignored`, each of those states ignored one event.
  * - `request.start` of a decision, first attempt only: its `request.withheld`
  *   counts toward the state the run was in, the `from.value` of the
  *   transition its choice causes.
@@ -48,7 +51,7 @@ export function foldTraces<TTrace extends readonly { readonly type: string }[]>(
   const statsFor = (state: string): StateStats => {
     let entry = stats.get(state);
     if (!entry) {
-      entry = { state, visits: 0, failures: 0, withheld: 0 };
+      entry = { state, visits: 0, failures: 0, withheld: 0, ignored: 0 };
       stats.set(state, entry);
     }
     return entry;
@@ -66,6 +69,9 @@ export function foldTraces<TTrace extends readonly { readonly type: string }[]>(
         for (const state of statePaths(valueOf(event.from))) visit(state);
         current = statePaths(valueOf(event.snapshot));
         for (const state of current) visit(state);
+        if (event.ignored === true) {
+          for (const state of current) statsFor(state).ignored++;
+        }
       } else if (event.type === "request.start" && isFirstDecision(event.request)) {
         const withheld = event.request.withheld;
         if (!Array.isArray(withheld)) continue;

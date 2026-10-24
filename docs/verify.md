@@ -40,11 +40,12 @@ skip checks by code.
 assertAgentMachine(machine, { warnings: true });
 ```
 
-| Code                      | Severity | Fires when                                                                                                                                                                                                                                                      |
-| ------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `decide-without-events`   | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                   |
-| `invoke-without-on-error` | warning  | An invoke declares no `onError`, and neither its state nor any ancestor handles an actor error, so a rejected request or actor lands the machine in an error state with no modeled recovery. Add `onError` targeting a `failed` final state or a bounded retry. |
-| `direct-object-src`       | warning  | An invoke `src` is a direct object or machine value that `runToQuiescence` cannot rebind, so it inherits no host executors.                                                                                                                                     |
+| Code                        | Severity | Fires when                                                                                                                                                                                                                                                      |
+| --------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `decide-without-events`     | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                   |
+| `decide-allows-human-event` | error    | A decision's literal `allowedEvents` names an event the state or an ancestor handles through a transition tagged `meta: { actor: "human" }`, so the model is never offered it. See [Events a person sends](decisions.md#events-a-person-sends).                 |
+| `invoke-without-on-error`   | warning  | An invoke declares no `onError`, and neither its state nor any ancestor handles an actor error, so a rejected request or actor lands the machine in an error state with no modeled recovery. Add `onError` targeting a `failed` final state or a bounded retry. |
+| `direct-object-src`         | warning  | An invoke `src` is a direct object or machine value that `runToQuiescence` cannot rebind, so it inherits no host executors.                                                                                                                                     |
 
 ## Test assertions
 

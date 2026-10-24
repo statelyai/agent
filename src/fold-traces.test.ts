@@ -76,9 +76,9 @@ describe("foldTraces", () => {
     const stats = foldTraces(traces, { failed: (trace) => endedIn(trace) !== "refunded" });
 
     expect(stats).toEqual([
-      { state: "deciding", visits: 2, failures: 1, withheld: 2 },
-      { state: "refunded", visits: 1, failures: 0, withheld: 0 },
-      { state: "escalated", visits: 1, failures: 1, withheld: 0 },
+      { state: "deciding", visits: 2, failures: 1, withheld: 2, ignored: 0 },
+      { state: "refunded", visits: 1, failures: 0, withheld: 0, ignored: 0 },
+      { state: "escalated", visits: 1, failures: 1, withheld: 0, ignored: 0 },
     ]);
   });
 
@@ -138,8 +138,25 @@ describe("foldTraces", () => {
     actor.send(result.event!);
 
     expect(foldTraces([trace], { failed: () => false })).toEqual([
-      { state: "reviewing", visits: 1, failures: 0, withheld: 1 },
-      { state: "refunded", visits: 1, failures: 0, withheld: 0 },
+      { state: "reviewing", visits: 1, failures: 0, withheld: 1, ignored: 0 },
+      { state: "refunded", visits: 1, failures: 0, withheld: 0, ignored: 0 },
+    ]);
+  });
+
+  test("counts ignored events toward the state that ignored them", () => {
+    const trace = [
+      { type: "machine.transition", from: { value: "idle" }, snapshot: { value: "waiting" } },
+      {
+        type: "machine.transition",
+        from: { value: "waiting" },
+        snapshot: { value: "waiting" },
+        ignored: true,
+      },
+    ];
+
+    expect(foldTraces([trace, trace], { failed: () => false })).toEqual([
+      { state: "idle", visits: 2, failures: 0, withheld: 0, ignored: 0 },
+      { state: "waiting", visits: 2, failures: 0, withheld: 0, ignored: 2 },
     ]);
   });
 

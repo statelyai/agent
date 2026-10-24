@@ -1,0 +1,16 @@
+{
+  "name": "mcp-workflow",
+  "title": "MCP Workflow Server",
+  "kind": "host-adapter",
+  "manual": true,
+  "origin": {
+    "type": "platform-adapter",
+    "source": "Real @modelcontextprotocol/sdk: an McpServer over stdio with start, status, and send tools",
+    "url": "https://modelcontextprotocol.io"
+  },
+  "comparison": {
+    "targets": ["Claude Code", "Codex", "MCP clients"],
+    "purpose": "A coding agent works through a bug-fix machine over MCP. start returns the workflow from describeMachine; status lists the events the agent may send, from getAcceptedEvents with actor: \"agent\"; send parses the payload at the boundary and reports an ignored event. Review events are tagged meta: { actor: \"human\" }, so only the host's own UI sends them."
+  },
+  "starters": []
+}

@@ -16,13 +16,14 @@
  */
 import {
   getNextTransitions,
+  machineToJSON,
   type AnyActorLogic,
   type AnyMachineSnapshot,
   type AnyStateMachine,
 } from "xstate";
 import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
 import { AgentError } from "./errors.js";
-import { getAcceptedEvents, type AgentSchemas } from "./events.js";
+import { getAcceptedEvents, isEventPattern, type AgentSchemas } from "./events.js";
 import {
   acceptedDecisionOptions,
   AgentDecisionExhaustedError,
@@ -59,7 +60,11 @@ export type AgentLintSeverity = "error" | "warning";
  * or config location, and `message` explains the problem and its remedy.
  */
 export interface AgentLintDiagnostic {
-  code: "decide-without-events" | "direct-object-src" | "invoke-without-on-error";
+  code:
+    | "decide-without-events"
+    | "decide-allows-human-event"
+    | "direct-object-src"
+    | "invoke-without-on-error";
   severity: AgentLintSeverity;
   /** State path (`parent.child`) or config pointer (e.g. `(root)`, `context`) the finding is about. */
   path: string;
@@ -100,6 +105,7 @@ interface AnyConfig {
 interface InvokeConfig {
   id?: unknown;
   src?: unknown;
+  input?: unknown;
   onDone?: unknown;
   onError?: unknown;
 }
@@ -150,6 +156,8 @@ function buildStateIndex(rootConfig: AnyConfig): Map<string, StateNode> {
 
 interface LintContext {
   config: AnyConfig;
+  /** The machine as `machineToJSON` writes it, where invoke inputs stay data. */
+  json: AnyConfig | undefined;
   index: Map<string, StateNode>;
   schemas: { context?: unknown; output?: unknown; events?: Record<string, unknown> } | undefined;
   actors: Record<string, AnyActorLogic>;
@@ -230,6 +238,81 @@ function checkDecideWithoutEvents(ctx: LintContext): AgentLintDiagnostic[] {
   return out;
 }
 
+// The `allowedEvents` of a state's invoke as written: from a literal input,
+// or the JSON of a fromConfig `{ "@expr" }` input. A function input has none.
+function literalAllowedEvents(
+  json: AnyConfig | undefined,
+  path: string,
+  index: number,
+): unknown[] | undefined {
+  let node: AnyConfig | undefined = json;
+  for (const key of path.split(".")) node = node?.states?.[key];
+  let input = normalizeInvokes(node?.invoke)[index]?.input;
+  if (isRecord(input) && typeof input["@expr"] === "string") {
+    try {
+      input = JSON.parse(input["@expr"]);
+    } catch {
+      return undefined;
+    }
+  }
+  const allowedEvents = isRecord(input) ? input.allowedEvents : undefined;
+  return typeof allowedEvents === "string"
+    ? [allowedEvents]
+    : Array.isArray(allowedEvents)
+      ? allowedEvents
+      : undefined;
+}
+
+// True when the state handles `eventType` through a transition tagged `meta: { actor: "human" }`.
+function handlesAsHuman(config: AnyConfig, eventType: string): boolean {
+  const transitions = config.on?.[eventType];
+  return (Array.isArray(transitions) ? transitions : [transitions]).some(
+    (transition) =>
+      !!transition &&
+      typeof transition === "object" &&
+      (transition as { meta?: { actor?: unknown } }).meta?.actor === "human",
+  );
+}
+
+function checkDecideAllowsHumanEvent(ctx: LintContext): AgentLintDiagnostic[] {
+  const out: AgentLintDiagnostic[] = [];
+  for (const node of ctx.index.values()) {
+    for (const [index, invoke] of node.invokes.entries()) {
+      if (!isDecisionInvoke(invoke.src, ctx.actors)) {
+        continue;
+      }
+      const allowedEvents = literalAllowedEvents(ctx.json, node.path, index);
+      if (!allowedEvents) {
+        continue;
+      }
+      const configs = [
+        node.config,
+        ...ancestorChain(node, ctx.index).map((ancestor) => ancestor.config),
+        ctx.config,
+      ];
+      for (const type of allowedEvents) {
+        if (
+          typeof type !== "string" ||
+          isEventPattern(type) ||
+          !configs.some((config) => handlesAsHuman(config, type))
+        ) {
+          continue;
+        }
+        out.push({
+          code: "decide-allows-human-event",
+          severity: "error",
+          path: node.path,
+          message:
+            `State '${node.path}' lets a decision choose '${type}', but a transition tagged ` +
+            `'meta: { actor: "human" }' handles it, so the model is never offered it. Remove ` +
+            `'${type}' from 'allowedEvents', or drop the tag if a model may send it.`,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 function checkDirectObjectSrc(ctx: LintContext): AgentLintDiagnostic[] {
   const out: AgentLintDiagnostic[] = [];
   for (const node of ctx.index.values()) {
@@ -296,6 +379,7 @@ function checkInvokeWithoutOnError(ctx: LintContext): AgentLintDiagnostic[] {
 
 const LINT_CHECKS: Array<(ctx: LintContext) => AgentLintDiagnostic[]> = [
   checkDecideWithoutEvents,
+  checkDecideAllowsHumanEvent,
   checkDirectObjectSrc,
   checkInvokeWithoutOnError,
 ];
@@ -337,8 +421,15 @@ export function lintAgentMachine(
   const config = (machine as { config?: AnyConfig }).config ?? {};
   const index = buildStateIndex(config);
   const registered = getRegisteredAgentExecutionOptions(machine);
+  let json: AnyConfig | undefined;
+  try {
+    json = machineToJSON(machine) as AnyConfig;
+  } catch {
+    json = undefined;
+  }
   const ctx: LintContext = {
     config,
+    json,
     index,
     schemas: registered.schemas as LintContext["schemas"],
     actors:

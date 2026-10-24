@@ -30,6 +30,7 @@ import {
 import { isDecisionLogic, type AgentDecisionRequest } from "./decision.js";
 import {
   getAcceptedEvents,
+  getHumanEventTypes,
   type AgentEventDescriptor,
   type AgentRequestOptions,
   type AgentRequestSource,
@@ -200,19 +201,31 @@ export function getAgentRequests(
           allowedEventTypes?: (input: unknown) => readonly string[] | undefined;
         }
       ).allowedEventTypes?.(params.input);
+      // The same model-facing set the runtime offers: no event a person sends.
       const events = options.snapshot
         ? getAcceptedEvents(options.snapshot, {
             events: options.events,
             schemas: options.schemas,
             eventTypes: allowedEventTypes,
+            actor: "agent",
           })
         : [];
+      const humanEventTypes: ReadonlySet<string> = options.snapshot
+        ? getHumanEventTypes(options.snapshot)
+        : new Set();
 
       return [
         {
           ...decisionRequest,
           id: params.id,
           events,
+          ...(decisionRequest.options
+            ? {
+                options: decisionRequest.options.filter(
+                  (option) => !humanEventTypes.has(option.event.type),
+                ),
+              }
+            : {}),
         },
       ];
     }

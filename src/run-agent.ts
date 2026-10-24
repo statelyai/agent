@@ -35,7 +35,7 @@ import {
   resolveMachineVersion,
   validateSchemaSync,
 } from "./utils.js";
-import { getAcceptedEvents, type AgentSchemas } from "./events.js";
+import { getAcceptedEvents, getHumanEventTypes, type AgentSchemas } from "./events.js";
 import {
   GENERATE_TEXT_ACTOR,
   getCallFinishReason,
@@ -222,6 +222,13 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
       from: { value: StateValue };
       snapshot: SnapshotFrom<TMachine>;
       event: EventFromLogic<TMachine>;
+      /**
+       * `true` when the host's own event (the run's opening `event`, or one
+       * sent with `runtime.transition`) had no transition in this state, so
+       * nothing changed: the same event {@link AgentRunResult.ignored}
+       * reports. Absent otherwise.
+       */
+      ignored?: true;
     }
   | { type: "emit"; event: EmittedFrom<TMachine> }
   | {
@@ -1388,6 +1395,14 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
           })
         : [];
 
+      // The model may take an event the snapshot accepts, unless a person sends
+      // it (a transition tagged `meta: { actor: "human" }`).
+      const agentCan = (event: ChosenEvent): boolean => {
+        if (!actorRef) return true;
+        const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
+        return !getHumanEventTypes(snapshot).has(event.type) && snapshot.can(event);
+      };
+
       const lowered = logic.request(input as never);
       const request: AgentDecisionRequest = {
         ...lowered,
@@ -1396,14 +1411,14 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
         input,
         events,
       };
-      // A closed choice offers only the options the snapshot accepts right
+      // A closed choice offers only the options the model may take right
       // now; resolveDecision rejects a choice matching none of them. The rest
       // ride along as `withheld`, for traces.
       const withheld: ChosenEvent[] = [];
       const options = acceptedDecisionOptions(request, (event) => {
         let accepted: boolean;
         try {
-          accepted = actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true;
+          accepted = agentCan(event);
         } catch {
           accepted = false;
         }
@@ -1413,6 +1428,12 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       if (options) {
         request.options = options;
         request.withheld = withheld;
+      }
+      // After the options: a closed choice builds them from `events`, so a
+      // person's event still lands in `withheld`.
+      if (actorRef) {
+        const humanEventTypes = getHumanEventTypes(actorRef.getSnapshot() as AnyMachineSnapshot);
+        request.events = events.filter((event) => !humanEventTypes.has(event.type));
       }
       // Nothing to choose from: fail without a model call, the same way
       // exhausted retries fail, so the invoke's onError handles it.
@@ -1444,8 +1465,7 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
           // the logic's configured budget.
           maxRetries: lowered.maxRetries ?? logic.maxRetries,
           signal,
-          canTake: (event) =>
-            actorRef ? (actorRef.getSnapshot() as AnyMachineSnapshot).can(event) : true,
+          canTake: agentCan,
         },
       );
 
@@ -2742,7 +2762,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         ? "decision-exhausted"
         : "machine";
 
-  const commit = (snapshot: AnyMachineSnapshot, event: EventObject): void => {
+  const commit = (snapshot: AnyMachineSnapshot, event: EventObject, ignored = false): void => {
     const from = { value: (current ?? snapshot).value };
     current = snapshot;
     onTrace({
@@ -2750,6 +2770,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       from,
       snapshot: snapshot as SnapshotFrom<TMachine>,
       event: event as EventFromLogic<TMachine>,
+      ...(ignored ? { ignored: true as const } : {}),
     });
   };
 
@@ -3114,15 +3135,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // The host's own event (not one the mailbox handed out) was ignored when
       // the state has no transition for it: nothing changed and nothing is to
       // be done. Reported as `result.ignored`; still journaled.
-      if (
+      const ignored =
         !fromMailbox.has(event as object) &&
         (next as unknown) === (state as unknown) &&
-        effects.length === 0
-      ) {
+        effects.length === 0;
+      if (ignored) {
         ignoredEvent = event as EventObject;
       }
       appendLogEntry(event as EventObject, attempts);
-      commit(next, event as EventObject);
+      commit(next, event as EventObject, ignored);
       return [next as SnapshotFrom<TMachine>, effects];
     },
 
