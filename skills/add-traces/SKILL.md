@@ -100,7 +100,7 @@ await writeFile(`runs/${file}.trace.json`, JSON.stringify(trace));
 Decide with the user whether `runs/` is committed or gitignored.
 
 - In production, send them to OpenTelemetry instead: `createOtelTraceHandler({ tracer })` from `@statelyai/agent/otel` is an `onTrace` handler.
-- **A policy run inside a decider** is a separate run. Pass it the same `onTrace` (and its own `store` thread, `<threadId>:policy:<n>`) if you want per-state stats for the policy too.
+- **A policy run inside a decider** is a separate run. Pass it the same `onTrace` (and a `store`) if you want per-state stats for the policy too. `createPolicyDecider` gives each decision's policy run its own thread, `policy:<callKey>`; never give it one fixed `threadId`, or the second decision resumes the first.
 - **A plain XState machine** (built with `createMachine` or `setup`, decided with `decideNext`): drive it with `createAgentRuntime` and `runToQuiescence`, which accept plain machines, and pass each `decideNext` result as `{ event, attempts }` so refused choices reach the log. Push `{ type: "request.start", request: result.request }` onto the trace before sending the event, since a host-driven decision emits no trace itself.
 - **A plain `createActor` run you cannot change:** attach `recordLog(actor)` from `@statelyai/agent/log` before `actor.start()`, and pass `inspect: traceTransitions((event) => trace.push(serializeTraceEvent(event)))` to `createActor`. `recordLog` cannot record decision attempts.
 

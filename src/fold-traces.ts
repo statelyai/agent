@@ -1,4 +1,4 @@
-import { isRecord } from "./internal/is-record.js";
+import { isFirstDecision, statePaths, valueOf } from "./internal/trace-states.js";
 
 /** One state's numbers across many runs. See {@link foldTraces}. */
 export interface StateStats {
@@ -86,25 +86,4 @@ export function foldTraces<TTrace extends readonly { readonly type: string }[]>(
     }
   }
   return [...stats.values()];
-}
-
-function valueOf(holder: unknown): unknown {
-  return isRecord(holder) ? holder.value : undefined;
-}
-
-function isFirstDecision(request: unknown): request is Record<string, unknown> {
-  return (
-    isRecord(request) &&
-    request.kind === "decision" &&
-    (!Array.isArray(request.attempts) || request.attempts.length === 0)
-  );
-}
-
-// `'a'` → `['a']`; `{ a: 'b' }` → `['a.b']`; `{ p: { x: 'one', y: {} } }` → `['p.x.one', 'p.y']`.
-function statePaths(value: unknown, prefix = ""): string[] {
-  if (typeof value === "string") return [prefix + value];
-  if (!isRecord(value)) return [];
-  const entries = Object.entries(value);
-  if (entries.length === 0) return prefix ? [prefix.slice(0, -1)] : [];
-  return entries.flatMap(([key, child]) => statePaths(child, `${prefix}${key}.`));
 }

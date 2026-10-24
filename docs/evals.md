@@ -221,6 +221,27 @@ const stats = foldTraces(traces, {
 - `decideNext` called by the host emits no trace. Push its request onto the trace before sending the event: `trace.push({ type: "request.start", request: result.request })`.
 - Rows come in the order states were first seen. Sort them yourself, for example by `failures / visits`.
 
+## Decision requests from traces
+
+`getDecisionRequests` (from `@statelyai/agent/testing`) lists the decisions a run asked for, read from its trace: each decision's first `request.start`, and the states the run was in.
+
+```ts no-check
+import { getDecisionRequests } from "@statelyai/agent/testing";
+
+for (const { states, request } of getDecisionRequests(trace, { name: "chooseResolution" })) {
+  const { event } = await decide(request); // a candidate decider
+  console.log(
+    states,
+    request.options?.map((o) => o.event),
+    event,
+  );
+}
+```
+
+- A trace is one run's events, live or from `serializeTraceEvent`. Retries of a decision are left out, so each decision appears once.
+- A serialized request keeps its `options`, `withheld`, `metadata`, `system`, and `prompt`. Event schemas do not survive serialization, so replay closed choices rather than open ones.
+- Use the requests as eval rows (a decider on each, compared with a label) or as probe inputs for a policy.
+
 ## Parity with the code you replace
 
 `compareRuns` (from `@statelyai/agent/testing`) runs every scenario through the existing implementation and its replacement, and labels each difference. Use it when you port a loop to a machine and need to show where they behave the same and where the machine differs on purpose.
