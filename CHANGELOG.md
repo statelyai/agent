@@ -1,5 +1,40 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.31
+
+### Minor Changes
+
+- [#173](https://github.com/statelyai/agent/pull/173) [`37707bd`](https://github.com/statelyai/agent/commit/37707bdd0ca0b103095596e8250d86ca6f837035) Thanks [@davidkpiano](https://github.com/davidkpiano)! - **`createPolicyDecider` runs a policy machine as a decide executor.** Each decision request starts one policy run, whose output event is the choice. The input defaults to the request's `metadata.facts`, offered events, `system`, and `prompt`; the policy's token usage is reported on the result. A run that does not end `done` with an event throws `AgentError` with code `policy-not-done`. With a `store`, each decision's policy run gets its own thread (`policy:<callKey>:<SHA-256 of the input>` by default, or `threadId: (request, info) => ...`). The input must be JSON: the default drops `undefined` keys, and anything else that is not JSON throws before the run.
+  
+  **`getDecisionRequests` reads the decisions a run asked for from its trace.** From `@statelyai/agent/testing`: `getDecisionRequests(trace, { name? })` returns each decision's first-attempt request with the states it was asked in, from a live or serialized trace, for eval rows and policy probes.
+
+### Patch Changes
+
+- [#172](https://github.com/statelyai/agent/pull/172) [`5a877e9`](https://github.com/statelyai/agent/commit/5a877e9701d56d1096250ef2f33c40c226d52997) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `describeMachine` shows a state's interaction when its label is computed from context (`[interaction: computed label]`) or absent (`[interaction]`). Before, only a string label was shown, so a host's human step looked like an ordinary state.
+
+- [#176](https://github.com/statelyai/agent/pull/176) [`28d17d9`](https://github.com/statelyai/agent/commit/28d17d9d161bfc70aff9c94ccaac89dcf800c142) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Events a person sends, and ignored events in traces.
+  
+  - **`meta: { actor: "human" }` on a transition** means a person sends its event. `agent.decide` and `decideNext` never offer it: a closed choice lists its options in `withheld`, and a choice of it anyway is retried. `getAcceptedEvents(snapshot, { actor: "agent" })` returns the same model-facing list. `describeMachine` marks the transition `(human)`.
+  - **New lint check `decide-allows-human-event`** (error): a decision's literal `allowedEvents` names a tagged event. `verifyAgentConfig` fails its `lint` gate on it.
+  - **`machine.transition` trace events carry `ignored: true`** for the host event the state had no transition for, the one `result.ignored` reports. `foldTraces` counts them per state as `ignored`.
+
+- [#174](https://github.com/statelyai/agent/pull/174) [`37ac4e7`](https://github.com/statelyai/agent/commit/37ac4e70cd4257ae9d96ab6070d8e218b51a409a) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Fixes from installing the package in an existing app for the first time.
+  
+  - **Plain objects from another realm are JSON.** A jest test's vm context gives objects another `Object.prototype`, so `metadata`, store reads, and errors from there were rejected and a run could silently lose its log. The log's checks now accept them.
+  - **A run with a `store` fails rather than run unlogged** when its first entry cannot be written: `{ status: "error", cause: "journal" }`.
+  - **Journaled errors keep their `code`** (a string or a number), and `replay` turns them back into `Error` objects. They carry an `"@error": true` marker, so a thrown plain `{ name, message }` replays as the plain object it was.
+  - **A throwing `onTrace`, `onTransition`, `onChunk`, `onResult`, `onEvent`, or `on` handler no longer fails the run**; it is reported with `console.error`.
+  - **Reusing a thread id with different input throws `thread-input-mismatch`** instead of returning the other run's result.
+  - **`setupAgent` throws `invalid-schema` for a schema without `~standard`** (zod 3.23 and earlier) instead of skipping its validation.
+  - **`describeMachine` prints `?`** for a transition whose target comes from a helper call, instead of `(stays)`.
+  - **Subpath types resolve under `moduleResolution: "node"`** (`typesVersions`), and `engines` allows Node 22.
+  - **`ai` peer floor is 7.0.128,** the first release with `experimental_decide`, which `@statelyai/agent/ai-sdk` imports.
+  - **Undefined fields are dropped from input and events** before they are journaled, as `JSON.stringify` drops them. Any other value the log cannot hold fails a run that has a `store`, and stops the log with a `console.warn` when it does not, instead of failing one way for input and another for events.
+  - **`setupAgent` throws `invalid-request`** for a request with neither `prompt` nor `messages`, instead of every call failing inside the invoke.
+  - **`ExploreSnapshot` and `CanReachTarget` types** from `@statelyai/agent/testing`, for exploration callbacks in an app whose own `xstate` is another version.
+  - **`CHANGELOG.md` ships in the package,** and a new "Upgrading between alphas" page lists the breaking changes since earlier alphas.
+  - **`runSeam`'s `respond` may return a promise,** so a seam eval can answer idle pauses with a real async client.
+
 ## 2.0.0-alpha.30
 
 ### Minor Changes
