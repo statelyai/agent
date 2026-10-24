@@ -194,6 +194,8 @@ Replayability rests on pure transitions.
 - The fork is its own lineage. Its init entry gets a fresh `metadata.executionId` and `metadata.forkedFrom: { executionId?, logIndex }`: the cutoff, and the parent's id when the parent's init entry has one. Every other entry is copied as is.
 - Call keys derive from the execution id, so a call the fork makes never shares an `info.callKey` with one its parent makes at the same site.
 - A snapshot of the parent does not take the fork's fast path. Resuming the fork with one folds its log instead.
+- A version bridge accepts the parent's snapshot while the fork has appended nothing since its cutoff, since the fork's log is then the parent's. After the fork appends, bridge it with its own snapshot.
+- Passing the parent's log as `events` for the fork's `threadId` is refused (`event-log-conflict`): the init entries name different lineages.
 
 ```ts no-check
 const branch = forkEventLog(entries, 8);

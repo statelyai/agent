@@ -2128,7 +2128,9 @@ function assertThreadMatchesEvents(
       storedEntry.id === givenEntry.id &&
       storedEntry.index === givenEntry.index &&
       canonicalEventJson(storedEntry.event) === canonicalEventJson(givenEntry.event) &&
-      (storedHash === undefined || givenHash === undefined || storedHash === givenHash);
+      (storedHash === undefined || givenHash === undefined || storedHash === givenHash) &&
+      // A fork differs from its parent only here: its init entry's lineage id.
+      (index > 0 || getLogExecutionId([storedEntry]) === getLogExecutionId([givenEntry]));
     if (!same) {
       throw new AgentError(
         "event-log-conflict",
@@ -3026,7 +3028,18 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           // version: an older or foreign snapshot would silently roll the
           // thread back to state the log has already moved past.
           const bridgeMeta = readAgentMeta(init.snapshot);
-          if (inheritedExecutionId === undefined || bridgeMeta?.logId !== inheritedExecutionId) {
+          // A fork that has appended nothing since its cutoff holds exactly
+          // its parent's entries, so the parent's snapshot of them is its tail too.
+          const forkedFrom = (resumeEvents[0]!.metadata as { forkedFrom?: unknown } | undefined)
+            ?.forkedFrom as { executionId?: unknown; logIndex?: unknown } | undefined;
+          const parentCache =
+            forkedFrom?.executionId !== undefined &&
+            bridgeMeta?.logId === forkedFrom.executionId &&
+            forkedFrom.logIndex === resumeEvents.length;
+          if (
+            inheritedExecutionId === undefined ||
+            (bridgeMeta?.logId !== inheritedExecutionId && !parentCache)
+          ) {
             throw new AgentMachineVersionMismatchError(
               tail.id,
               tail.index,
