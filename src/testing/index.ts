@@ -51,6 +51,8 @@ export type {
 } from "../seam.js";
 export { foldTraces } from "../fold-traces.js";
 export type { FoldTracesOptions, StateStats } from "../fold-traces.js";
+export { getDecisionRequests } from "../decision-requests.js";
+export type { GetDecisionRequestsOptions, TracedDecisionRequest } from "../decision-requests.js";
 export { compareRuns } from "../compare-runs.js";
 export type {
   CompareRunsOptions,

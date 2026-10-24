@@ -17,7 +17,7 @@ await runToQuiescence(
 
 Agent trace kinds are `run.start`, `request.start`, `request.end`, `request.error`, `stream.chunk`, `machine.transition`, `emit`, `usage.dropped`, and `run.end`.
 
-A `machine.transition` event carries `from.value`, the state value the event arrived in, next to `snapshot`, the state after it. The first transition of a stream (the init event, or a restore on resume) has no earlier state, so its `from.value` equals its `snapshot.value`. `traceTransitions` sets it the same way for a plain actor.
+A `machine.transition` event carries `from.value`, the state value the event arrived in, next to `snapshot`, the state after it. The first transition of a stream (the init event, or a restore on resume) has no earlier state, so its `from.value` equals its `snapshot.value`. `traceTransitions` sets it the same way for a plain actor. When the host's own event had no transition in the active state, the runtime's `machine.transition` also carries `ignored: true` (the event `result.ignored` reports), so evals can count those events from the trace alone.
 
 A `request.end` event carries the call's `output` and `raw`, plus what the executor reported about the call itself: `usage` when it reported tokens, and `finishReason` when it reported why the call stopped, normalized to `'stop'`, `'length'`, `'tool-calls'`, `'content-filter'`, or `'other'`. See [Finish reason and truncation](text-requests.md#finish-reason-and-truncation).
 

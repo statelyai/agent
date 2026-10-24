@@ -8,7 +8,12 @@ import {
   type DecisionAttempt,
 } from "./decision.js";
 import { canonicalEventJson } from "./event-log.js";
-import { getAcceptedEvents, isEventPattern, type EventFromSnapshot } from "./events.js";
+import {
+  getAcceptedEvents,
+  getHumanEventTypes,
+  isEventPattern,
+  type EventFromSnapshot,
+} from "./events.js";
 import { isRecord } from "./internal/is-record.js";
 import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
 
@@ -54,7 +59,9 @@ export interface DecideNextResult<TEvent = ChosenEvent> {
   /**
    * The candidates the snapshot rejected: every `allowedEvents` type × payload,
    * built the same way as the offered options, where `snapshot.can(event)` was
-   * false. Never offered to the model. Filled when nothing is offered too.
+   * false or the state handles the type through a transition tagged
+   * `meta: { actor: "human" }`. Never offered to the model. Filled when
+   * nothing is offered too.
    */
   withheld: ChosenEvent[];
 }
@@ -63,7 +70,8 @@ export interface DecideNextResult<TEvent = ChosenEvent> {
  * Asks a model to choose the next event for ANY XState snapshot, including a
  * machine built with plain `createMachine`/`setup` that knows nothing about AI.
  * The candidates are the `allowedEvents` an active state handles, one option per
- * payload, kept only where `snapshot.can(event)` is true; the rest come back as
+ * payload, kept only where `snapshot.can(event)` is true and no transition
+ * tagged `meta: { actor: "human" }` handles the type; the rest come back as
  * `withheld`. Each option is
  * described from the transition's `description`, else the event schema's,
  * plus (with `lookahead`) what it changes. The chosen event must equal one
@@ -102,17 +110,19 @@ export async function decideNext<TSnapshot extends AnyMachineSnapshot>(
   const patterns =
     typeof options.allowedEvents === "string" ? [options.allowedEvents] : options.allowedEvents;
   const schemas = snapshot.machine.schemas?.events as Record<string, StandardSchemaV1> | undefined;
-  const events = getAcceptedEvents(snapshot, { events: schemas, eventTypes: patterns }).filter(
+  const candidates = getAcceptedEvents(snapshot, { events: schemas, eventTypes: patterns }).filter(
     (event) => !isEventPattern(event.type),
   );
+  const humanEventTypes = getHumanEventTypes(snapshot);
+  const events = candidates.filter((event) => !humanEventTypes.has(event.type));
   const payloads = options.payloads?.(snapshot) ?? {};
 
   const accepted: ChosenEvent[] = [];
   const withheld: ChosenEvent[] = [];
-  for (const { type } of events) {
+  for (const { type } of candidates) {
     for (const payload of payloads[type] ?? [{}]) {
       const event = { ...payload, type };
-      (safeCan(snapshot, event) ? accepted : withheld).push(event);
+      (!humanEventTypes.has(type) && safeCan(snapshot, event) ? accepted : withheld).push(event);
     }
   }
 

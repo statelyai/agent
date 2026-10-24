@@ -2678,6 +2678,39 @@ describe("Feature B: an event the state does not handle is ignored", () => {
     expect(second.status === "idle" ? second.snapshot.value : undefined).toBe("reviewing");
   });
 
+  test("the trace marks the ignored event's transition", async () => {
+    const first = await runToQuiescence(
+      createAgentRuntime(machine, { executors: { generateText } }),
+      {
+        input: {},
+      },
+    );
+    if (first.status !== "idle") throw new Error("expected idle");
+
+    const trace: AgentTraceEvent[] = [];
+    const runAgain = (event: { type: string }) =>
+      runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: { generateText },
+          onTrace: (traceEvent) => trace.push(traceEvent),
+        }),
+        { snapshot: first.persist(), event: event as never },
+      );
+    await runAgain({ type: "NOPE" });
+    await runAgain({ type: "APPROVE" });
+
+    const transitions = trace.filter(
+      (event): event is Extract<AgentTraceEvent, { type: "machine.transition" }> =>
+        event.type === "machine.transition",
+    );
+    expect(transitions.map((event) => [event.event.type, event.ignored])).toEqual([
+      ["@xstate.init", undefined],
+      ["NOPE", true],
+      ["@xstate.init", undefined],
+      ["APPROVE", undefined],
+    ]);
+  });
+
   test("an ignored event is still journaled, and replay ignores it again", async () => {
     const first = await runToQuiescence(
       createAgentRuntime(machine, {

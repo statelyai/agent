@@ -32,7 +32,7 @@ export const deskEvents = {
 
 ```ts
 import { z } from "zod";
-import { runAgent, setupAgent, type AgentDecisionExecutor, type AgentRequestExecutors } from "@statelyai/agent";
+import { createPolicyDecider, setupAgent, type AgentDecisionExecutor, type AgentRequestExecutors } from "@statelyai/agent";
 import { deskEvents, factsSchema } from "./desk.js";
 
 /** One proposal: an environment event with its `type`. */
@@ -119,22 +119,13 @@ export const policyMachine = policySetup.createMachine({
   },
 });
 
-/** Runs the policy as the environment's decider. */
+/**
+ * Runs the policy as the environment's decider. createPolicyDecider passes the request's
+ * `metadata.facts`, offered events, `system`, and `prompt` as the policy's input (its input
+ * schema validates them), and returns the policy's output event with its token usage.
+ */
 export function policyDecider(executors: AgentRequestExecutors): AgentDecisionExecutor {
-  return async (request, info) => {
-    const result = await runAgent(policyMachine, {
-      input: {
-        facts: factsSchema.parse(request.metadata?.facts),
-        options: (request.options ?? []).map((option) => proposalSchema.parse(option.event)),
-        system: request.system,
-        prompt: request.prompt,
-      },
-      executors,
-      signal: info?.signal,
-    });
-    if (result.status !== "done") throw new Error(`policy settled '${result.status}'`);
-    return { event: result.output };
-  };
+  return createPolicyDecider(policyMachine, { executors });
 }
 ```
 

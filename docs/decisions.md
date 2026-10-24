@@ -121,6 +121,32 @@ const request = createDecisionRequest({
 });
 ```
 
+## Events a person sends
+
+Tag a transition with `meta: { actor: "human" }` when only a person may send its event, such as an approval. No model-facing decision offers that event in a state that handles it this way.
+
+```ts no-check
+reviewing: {
+  invoke: {
+    src: "agent.decide",
+    input: { model: "quick", allowedEvents: ["revise"] },
+  },
+  on: {
+    approve: { target: "approved", meta: { actor: "human" } },
+    revise: { target: "revising" },
+  },
+},
+```
+
+- `agent.decide` and `decideNext` drop the event from the candidates. A closed choice lists its options in `withheld`, and a choice of it anyway is retried.
+- `getAcceptedEvents(snapshot, { actor: "agent" })` returns the same model-facing list, for a host that offers events itself.
+- `describeMachine` marks the transition `(human)`.
+- `lintAgentMachine` reports `decide-allows-human-event` when a decision's literal `allowedEvents` names a tagged event. `verifyAgentConfig` fails its `lint` gate on it.
+- Only object transitions can be tagged. A transition written as a function has no static `meta`.
+- A plain `createMachine` declares `schemas: { meta: interactionMetaSchema }` to type the tag; `setupAgent` machines have it by default.
+
+The tag does not change what the machine accepts. A host still sends the event when a person answers, and `parseAgentEvent` still parses it.
+
 ## Validation and retries
 
 <!-- decision validation checks and retry behavior from src/decision.ts -->
@@ -255,6 +281,29 @@ const { decide } = createAiSdkExecutors({
 ```
 
 See [Decision models](models-and-providers.md#decision-models).
+
+## A policy as the decider
+
+A decision can be answered by another machine: a policy that applies a rule when the facts are enough and asks a model only for the rest. `createPolicyDecider` turns a policy machine into a decide executor.
+
+```ts no-check
+import { createPolicyDecider, runAgent } from "@statelyai/agent";
+
+const decide = createPolicyDecider(policyMachine, { executors: modelExecutors });
+
+await runAgent(deskMachine, { input, executors: { ...modelExecutors, decide } });
+```
+
+- Each decision request starts one run of the policy. Its output, an event, is the choice. The environment still judges it: an event it does not accept is retried like any decider's.
+- The policy's input defaults to `{ facts, options, system, prompt }`: the request's `metadata.facts`, the offered events, and its prompt. The policy's input schema validates it. Pass `input: (request) => ...` to build it another way.
+- The policy's own `agent.decide` invokes are answered by `executors`. Pass the environment's `metadata` on to them, so the model sees what it would without the policy.
+- The result carries the policy's token usage, and none when it decided with a rule.
+- A run that does not end `done` with an event throws `AgentError` with code `policy-not-done`. Give each of the policy's decisions an `onError` that falls back to an event the environment always accepts.
+- Every other `runAgent` option passes through: `store` and `metadata` to journal the policy's runs, `onTrace` to trace them.
+- Each decision's policy run gets its own `store` thread, `policy:${info.callKey}:${hash}` by default, where `hash` is the SHA-256 of the policy input: a thread that already has entries is resumed, so a shared one would return an earlier choice. The hash keeps a fork that asks something else at the same call site off its parent's thread. Pass `threadId: (request, info) => ...` to name them yourself; it is required with a `store` when the decider is called without a `callKey`.
+- The policy's input must be JSON, since it opens the run's event log. The default drops keys whose value is `undefined`; any other value that is not JSON throws before the run.
+
+To route by request name, wrap it: `decide: (request, info) => (request.name === "chooseResolution" ? policyDecide(request, info) : modelExecutors.decide!(request, info))`, where `policyDecide` is the executor `createPolicyDecider` returned.
 
 ## Decisions at the boundary of a plain machine
 
