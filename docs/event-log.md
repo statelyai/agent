@@ -191,7 +191,7 @@ Replayability rests on pure transitions.
 
 `forkEventLog(entries, upToIndex)` returns the prefix `[0, upToIndex)` as a new, still self-contained log. `upToIndex` is exclusive and must leave the init entry in place.
 
-- The fork is its own lineage. Its init entry gets a fresh `metadata.executionId` and `metadata.forkedFrom: { executionId, logIndex }`, naming the parent's id and the cutoff. Every other entry is copied as is.
+- The fork is its own lineage. Its init entry gets a fresh `metadata.executionId` and `metadata.forkedFrom: { executionId?, logIndex }`: the cutoff, and the parent's id when the parent's init entry has one. Every other entry is copied as is.
 - Call keys derive from the execution id, so a call the fork makes never shares an `info.callKey` with one its parent makes at the same site.
 - A snapshot of the parent does not take the fork's fast path. Resuming the fork with one folds its log instead.
 

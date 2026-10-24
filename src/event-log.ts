@@ -837,8 +837,8 @@ export function validateReplayEntries(
  * and must leave the init entry in place, so the fork is still self-contained.
  *
  * The fork is its own lineage: its init entry gets a fresh
- * `metadata.executionId` and `metadata.forkedFrom: { executionId, logIndex }`
- * naming the parent's id (when it had one) and the cutoff. Call keys derive
+ * `metadata.executionId` and `metadata.forkedFrom: { executionId?, logIndex }`:
+ * the cutoff, and the parent's id when it had one. Call keys derive
  * from the execution id, so a fork's calls never collide with its parent's.
  * Every other entry is copied as is.
  */
