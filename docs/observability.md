@@ -21,7 +21,7 @@ A `machine.transition` event carries `from.value`, the state value the event arr
 
 A `request.end` event carries the call's `output` and `raw`, plus what the executor reported about the call itself: `usage` when it reported tokens, and `finishReason` when it reported why the call stopped, normalized to `'stop'`, `'length'`, `'tool-calls'`, `'content-filter'`, or `'other'`. See [Finish reason and truncation](text-requests.md#finish-reason-and-truncation).
 
-Trace handlers are observers: an `onTrace`, `onTransition`, `onChunk`, or `onResult` that throws is reported with `console.error`, and the run continues.
+Trace handlers are observers: an `onTrace`, `onTransition`, `onChunk`, `onResult`, `onEvent`, or `on` handler that throws is reported with `console.error`, and the run continues.
 
 `serializeTraceEvent` creates a JSON-safe projection. Traces are observations, not a persistence protocol; the [event log](event-log.md) is.
 

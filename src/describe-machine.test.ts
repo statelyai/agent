@@ -140,6 +140,7 @@ describe("describeMachine", () => {
         working: {
           on: {
             CHECK: ({ context }) => next(context.ready),
+            WRAPPED: ({ context }) => next(context.ready),
             PICK: ({ context }) => {
               const ready = !context.ready;
               return next(ready);
@@ -154,8 +155,17 @@ describe("describeMachine", () => {
       },
     });
 
+    // As authored: the transpiler drops these grouping parentheses.
+    const { on } = (
+      machine.config as unknown as { states: { working: { on: Record<string, unknown> } } }
+    ).states.working;
+    Object.defineProperty(on.WRAPPED, "toString", {
+      value: () => "({ context }) => (next(context.ready))",
+    });
+
     const text = describeMachine(machine);
     expect(text).toContain("on CHECK → ?");
+    expect(text).toContain("on WRAPPED → ?");
     expect(text).toContain("on PICK → ?");
     expect(text).toContain("on NOTE → (stays)");
     // A call inside a nested callback is not the transition's own result.

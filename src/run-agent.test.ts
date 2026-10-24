@@ -1679,6 +1679,28 @@ describe("emitted events (runAgent `on`)", () => {
     },
   });
 
+  test("a throwing `on` handler is reported, and the run goes on", async () => {
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await runToQuiescence(
+        createAgentRuntime(machine, {
+          on: {
+            DRAFTING_STARTED: () => {
+              throw new Error("sink down");
+            },
+          },
+          executors: { generateText: async () => ({ result: "a draft" }) },
+        }),
+        { input: { topic: "rivers" } },
+      );
+
+      expect(result.status).toBe("done");
+      expect(String(report.mock.calls[0]![0])).toContain("on['DRAFTING_STARTED']");
+    } finally {
+      report.mockRestore();
+    }
+  });
+
   test("`on` handlers fire per type, including events emitted during the initial transition", async () => {
     const started: string[] = [];
     const drafted: number[] = [];
@@ -4643,7 +4665,35 @@ describe("runAgent write-ahead store", () => {
 
       expect(result.status).toBe("error");
       expect(result.status === "error" && result.cause).toBe("journal");
+      // The refused event never moved the run: it still rests where the log ends.
+      expect(result.snapshot.value).toBe("waiting");
+      expect((result.persist() as { value?: unknown }).value).toBe("waiting");
     });
+  });
+
+  test("a throwing `onEvent` is reported, and the log keeps one init entry", async () => {
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const store = createInMemoryEventLogStore();
+      const result = await runToQuiescence(
+        createAgentRuntime(makeMachine(), {
+          store,
+          threadId: "main",
+          executors: executors(),
+          onEvent: () => {
+            throw new Error("sink down");
+          },
+        }),
+        { input: undefined },
+      );
+
+      expect(result.status).not.toBe("error");
+      const stored = await store.read("main");
+      expect(stored.filter((entry) => entry.event.type === AGENT_INIT_EVENT_TYPE)).toHaveLength(1);
+      expect(String(report.mock.calls[0]![0])).toContain("onEvent");
+    } finally {
+      report.mockRestore();
+    }
   });
 
   test("a run whose init entry cannot be built fails instead of running unlogged", async () => {

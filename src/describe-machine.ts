@@ -187,7 +187,8 @@ const mayDecline = (code: string) =>
  */
 function returnsCall(code: string): boolean {
   const text = code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
-  const startsWithCall = (at: number) => /^\s*[A-Za-z_$][\w$.]*\s*\(/.test(text.slice(at));
+  // Grouping parentheses first: `=> (next(x))` returns a call; `=> ({ … })` does not.
+  const startsWithCall = (at: number) => /^[\s(]*[A-Za-z_$][\w$.]*\s*\(/.test(text.slice(at));
   // The outer function's body: after its arrow, or its first brace, outside the parameters.
   let parens = 0;
   let body = -1;

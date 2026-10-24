@@ -1107,6 +1107,15 @@ interface TraceSinks {
   ) => void;
 }
 
+// Observers never control the run: one that throws is reported and skipped.
+function observe(name: string, call: () => void): void {
+  try {
+    call();
+  } catch (error) {
+    console.error(`@statelyai/agent: ${name} threw; the run continues.`, error);
+  }
+}
+
 /**
  * Builds the ONE place a trace payload is emitted: it hands the payload to the
  * envelope-stamping trace sink and, from that same payload, invokes the sugar
@@ -1120,14 +1129,6 @@ interface TraceSinks {
  * `seq`). @internal
  */
 function createTraceDispatch(sinks: TraceSinks): TraceDispatch {
-  // Observers never control the run: one that throws is reported and skipped.
-  const observe = (name: string, call: () => void): void => {
-    try {
-      call();
-    } catch (error) {
-      console.error(`@statelyai/agent: ${name} threw; the run continues.`, error);
-    }
-  };
   return (payload, self) => {
     switch (payload.type) {
       case "stream.chunk":
@@ -2406,7 +2407,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     }
     logEntries.push(entry);
     journalEntry(entry);
-    options.onEvent?.(entry);
+    observe("onEvent", () => options.onEvent?.(entry));
     return entry;
   };
 
@@ -2709,9 +2710,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   const emitFromRoot = (event: EventObject): void => {
     onTrace({ type: "emit", event: event as EmittedFrom<TMachine> });
     const on = (options.on ?? {}) as Record<string, ((event: EventObject) => void) | undefined>;
-    on[event.type]?.(event);
+    observe(`on['${event.type}']`, () => on[event.type]?.(event));
     if (event.type !== "*") {
-      on["*"]?.(event);
+      observe("on['*']", () => on["*"]?.(event));
     }
   };
 
@@ -2917,20 +2918,18 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         let lastError: unknown;
         for (const candidate of candidates) {
           for (const verification of verificationEnabled ? [true, false] : [false]) {
+            let entry: AgentLogEntry;
             try {
-              const entry = initEntry(logMachine, candidate, {
-                machineVersion,
-                verification,
-                metadata,
-              });
-              logEntries.push(entry);
-              journalEntry(entry);
-              options.onEvent?.(entry);
-              return;
+              entry = initEntry(logMachine, candidate, { machineVersion, verification, metadata });
             } catch (error) {
               // Try the next (less exact) form.
               lastError = error;
+              continue;
             }
+            logEntries.push(entry);
+            journalEntry(entry);
+            observe("onEvent", () => options.onEvent?.(entry));
+            return;
           }
         }
         stopLogging(lastError);
@@ -3204,6 +3203,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         ignoredEvent = event as EventObject;
       }
       appendLogEntry(event as EventObject, attempts);
+      // The store refused the entry and the run stopped: the transition never
+      // happened, so the result stays at the last journaled state.
+      if (stopReason !== undefined) {
+        return [state, []];
+      }
       commit(next, event as EventObject, ignored);
       return [next as SnapshotFrom<TMachine>, effects];
     },
