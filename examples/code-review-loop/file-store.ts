@@ -20,7 +20,11 @@ import {
 } from "node:fs";
 import path from "node:path";
 import type { AgentEventLogStore, AgentLogEntry } from "@statelyai/agent";
-import { AgentEventLogConflictError, assertAgentLogEntry } from "@statelyai/agent/log";
+import {
+  AgentEventLogConflictError,
+  assertAgentLogEntry,
+  forkEventLog,
+} from "@statelyai/agent/log";
 
 const EXTENSION = ".jsonl";
 
@@ -91,8 +95,7 @@ export function createFileEventLogStore(dir: string): AgentEventLogStore {
       }
       writeFileSync(
         fileOf(dir, newThreadId),
-        source
-          .slice(0, upTo)
+        forkEventLog(source, upTo)
           .map((entry) => `${JSON.stringify(entry)}\n`)
           .join(""),
       );

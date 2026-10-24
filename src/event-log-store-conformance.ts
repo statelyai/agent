@@ -9,7 +9,13 @@
  * @module
  */
 import { AgentEventLogConflictError, type AgentEventLogStore } from "./event-log-store.js";
-import { AGENT_EVENT_SCHEMA_VERSION, type AgentLogEntry, type JsonValue } from "./event-log.js";
+import {
+  AGENT_EVENT_SCHEMA_VERSION,
+  AGENT_INIT_EVENT_TYPE,
+  getLogExecutionId,
+  type AgentLogEntry,
+  type JsonValue,
+} from "./event-log.js";
 
 /** Produces a fresh, empty store for one case. */
 type CreateStore = () => Promise<AgentEventLogStore> | AgentEventLogStore;
@@ -40,8 +46,16 @@ function entry(index: number, type: string, metadata?: Record<string, JsonValue>
   } as AgentLogEntry;
 }
 
+// A log's own first entry: the reserved init entry, naming its lineage.
+function initFixture(executionId = "exec-src"): AgentLogEntry {
+  return entry(0, AGENT_INIT_EVENT_TYPE, { executionId });
+}
+
+// Entries `start…start+count`; from 0, the first is the init entry.
 function entriesFrom(start: number, count: number): AgentLogEntry[] {
-  return Array.from({ length: count }, (_unused, i) => entry(start + i, `e${start + i}`));
+  return Array.from({ length: count }, (_unused, i) =>
+    start + i === 0 ? initFixture() : entry(start + i, `e${start + i}`),
+  );
 }
 
 function assertJsonEqual(actual: unknown, expected: unknown, message: string): void {
@@ -273,12 +287,42 @@ const cases: Array<{ name: string; run: (create: CreateStore) => Promise<void> }
       await store.append({ threadId: "fork-1", expectedIndex: 1, entries: [entry(1, "branch")] });
       assertJsonEqual(
         (await store.read("fork-1")).map((e) => (e.event as { type: string }).type),
-        ["e0", "branch"],
+        [AGENT_INIT_EVENT_TYPE, "branch"],
         "a forked thread must append independently from its copied length",
       );
       if ((await store.length("src")) !== 3) {
         fail("appending to a fork must not touch the source thread");
       }
+    },
+  },
+  {
+    name: "a fork is its own lineage: a fresh executionId, and forkedFrom naming the parent",
+    async run(create) {
+      const store = await create();
+      const source = entriesFrom(0, 3);
+      await store.append({ threadId: "src", expectedIndex: 0, entries: source });
+      await store.fork({ threadId: "src", newThreadId: "fork-a", upToIndex: 2 });
+      await store.fork({ threadId: "src", newThreadId: "fork-b", upToIndex: 2 });
+
+      const [a, b] = [await store.read("fork-a"), await store.read("fork-b")];
+      const ids = [getLogExecutionId(a), getLogExecutionId(b)];
+      if (typeof ids[0] !== "string" || typeof ids[1] !== "string") {
+        fail("a fork's init entry must carry a string metadata.executionId");
+      }
+      if (ids.includes("exec-src") || ids[0] === ids[1]) {
+        fail("every fork must mint its own executionId, not reuse the parent's or a sibling's");
+      }
+      assertJsonEqual(
+        a[0]!.metadata?.forkedFrom,
+        { executionId: "exec-src", logIndex: 2 },
+        "a fork's init entry must record forkedFrom: { executionId, logIndex }",
+      );
+      assertJsonEqual(
+        a.slice(1),
+        source.slice(1, 2),
+        "a fork must copy every entry after the init entry unchanged",
+      );
+      assertJsonEqual(await store.read("src"), source, "forking must not touch the source thread");
     },
   },
   {
@@ -351,7 +395,7 @@ const cases: Array<{ name: string; run: (create: CreateStore) => Promise<void> }
         "listThreads on an empty store must list nothing",
       );
       for (const threadId of ["user:b", "user:a", "admin:x", "user:c"]) {
-        await store.append({ threadId, expectedIndex: 0, entries: [entry(0, "start")] });
+        await store.append({ threadId, expectedIndex: 0, entries: [initFixture()] });
       }
       await store.fork({ threadId: "user:a", newThreadId: "user:d" });
 

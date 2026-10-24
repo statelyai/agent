@@ -5,7 +5,7 @@
  * @module
  */
 import { AgentError } from "./errors.js";
-import { assertAgentLogEntry, type AgentLogEntry } from "./event-log.js";
+import { assertAgentLogEntry, forkEventLog, type AgentLogEntry } from "./event-log.js";
 
 /** Options for {@link AgentEventLogStore.listThreads}. */
 export interface ListThreadsOptions {
@@ -64,8 +64,10 @@ export interface AgentEventLogStore {
    * init entry and stays a self-contained log. The fork then appends
    * independently. Rejects (plain `Error`) if `newThreadId` already has
    * entries, the source is unknown, or `upToIndex` is out of range.
-   * Implementations may copy-on-write or physically copy; observable behavior
-   * must match a full copy.
+   *
+   * The fork is its own lineage: store what {@link forkEventLog} returns for
+   * the prefix, whose init entry carries a fresh `metadata.executionId` and
+   * `metadata.forkedFrom`. Every other entry must match the source.
    */
   fork(input: {
     threadId: string;
@@ -188,7 +190,7 @@ export function createInMemoryEventLogStore(): AgentEventLogStore {
       }
       threads.set(
         newThreadId,
-        source.slice(0, upTo).map((entry) => clone(entry)),
+        forkEventLog(source, upTo).map((entry) => clone(entry)),
       );
     },
 
