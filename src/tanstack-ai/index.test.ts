@@ -734,15 +734,19 @@ describe("createTanStackAiExecutors with createAgentRuntime", () => {
   test("a machine's generateText runs through TanStack AI and its usage is aggregated", async () => {
     const adapter = new FakeTextAdapter([{ text: "hello" }]);
     const models = { quick: adapter };
-    const agent = setupAgent({ context: z.object({}), input: z.object({}), models });
+    const agent = setupAgent({
+      context: z.object({}),
+      input: z.object({}),
+      models,
+      requests: { write: { schemas: { output: z.string() }, model: "quick", prompt: "hi" } },
+    });
     const machine = agent.createMachine({
       context: ({ input }) => input,
       initial: "writing",
       states: {
         writing: {
           invoke: {
-            src: "agent.generateText",
-            input: { model: "quick", prompt: "hi" },
+            src: "write",
             onDone: { target: "done" },
           },
         },

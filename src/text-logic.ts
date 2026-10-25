@@ -12,11 +12,6 @@ import type { AgentDecisionExecutor, AgentDecisionInput } from "./decision.js";
 import type { ChosenEvent } from "./types.js";
 import { executorBoundLogics } from "./internal/registry.js";
 
-// Well-known invoke `src` for the builtin human-input actor.
-// Well-known invoke `src` for the builtin one-shot text-generation actor.
-export const GENERATE_TEXT_ACTOR = "agent.generateText" as const;
-// Well-known invoke `src` for the builtin streaming text-generation actor.
-export const STREAM_TEXT_ACTOR = "agent.streamText" as const;
 // Well-known invoke `src` for the builtin decision actor.
 export const DECIDE_ACTOR = "agent.decide" as const;
 
@@ -47,8 +42,6 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>, TMessage 
    * `setupAgent({ requests })` key (also set by `setupAgent.fromConfig`), or
    * `TextLogicConfig.name` for standalone `createTextLogic` actors. Hosts and
    * test mocks can route on it instead of sniffing `system`/`prompt` text.
-   * Absent for ad-hoc `agent.generateText`/`agent.streamText` invokes unless
-   * the caller sets it on the inline input.
    */
   name?: string;
   /** The schema-validated invoke input that produced this request. */
@@ -267,10 +260,8 @@ function dropUndefined(value: unknown): unknown {
   return value;
 }
 
-/** The three `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
+/** The `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
 export type BuiltinAgentActors<TEvent extends string = string, TModel extends string = string> = {
-  [GENERATE_TEXT_ACTOR]: AsyncActorLogic<AgentTextResult, AgentTextRequest>;
-  [STREAM_TEXT_ACTOR]: AsyncActorLogic<AgentTextResult, AgentTextRequest>;
   [DECIDE_ACTOR]: AsyncActorLogic<
     ChosenEvent,
     AgentDecisionInput<TEvent, Record<string, unknown>, TModel>
@@ -279,8 +270,8 @@ export type BuiltinAgentActors<TEvent extends string = string, TModel extends st
 
 // Returns the exclusivity error message for a request that resolved both a
 // non-empty `prompt` and a non-empty `messages` array, or `undefined` when the
-// request is fine. Shared by `agentTextInputSchema` and `createTextLogic`'s
-// lowering so config authors hit the same error as direct callers.
+// request is fine. Shared by `createTextLogic`'s lowering and
+// `executeAgentTextRequest` so config authors hit the same error as direct callers.
 function textRequestSourceIssue(request: {
   name?: string;
   prompt?: unknown;
@@ -305,35 +296,9 @@ function textRequestSourceIssue(request: {
   return undefined;
 }
 
-// Input schema for the `agent.generateText`/`agent.streamText` builtins: an
-// object with a string `model` AND exactly one input source — a non-empty
-// `prompt` or a non-empty `messages` array — so the model is never called with
-// nothing to respond to, and never with two competing sources.
-const agentTextInputSchema: StandardSchemaV1<AgentTextRequest> = {
-  "~standard": {
-    version: 1,
-    vendor: "statelyai-agent",
-    validate(value: unknown) {
-      if (!value || typeof value !== "object") {
-        return { issues: [{ message: "Expected agent text input object" }] };
-      }
-      const request = value as AgentTextRequest;
-      if (typeof request.model !== "string") {
-        return { issues: [{ message: "Expected agent text input with a string `model`" }] };
-      }
-      const issue = textRequestSourceIssue(request);
-      if (issue) {
-        return { issues: [{ message: issue }] };
-      }
-      return { value: request };
-    },
-  },
-};
-
-// Accepts anything and returns it untouched. Serves two roles that differ only
-// in the type they assert: `agent.generateText`'s builtin output type, and the
-// default input schema of a text request that declares none (typed `undefined`
-// so `input` is not required at the invoke site).
+// Accepts anything and returns it untouched: the default input schema of a
+// text request that declares none (typed `undefined` so `input` is not
+// required at the invoke site).
 const passthroughSchema: StandardSchemaV1<never> = {
   "~standard": {
     version: 1,
@@ -344,10 +309,8 @@ const passthroughSchema: StandardSchemaV1<never> = {
   },
 };
 
-const unknownOutputSchema = passthroughSchema as StandardSchemaV1<unknown>;
-
-// String output schema: `agent.streamText`'s builtin output type, and the
-// default a text request's `schemas.output` falls back to when omitted.
+// String output schema: the default a text request's `schemas.output` falls
+// back to when omitted.
 const stringOutputSchema: StandardSchemaV1<string> = {
   "~standard": {
     version: 1,
@@ -361,92 +324,6 @@ const stringOutputSchema: StandardSchemaV1<string> = {
 };
 
 const noInputSchema = passthroughSchema as StandardSchemaV1<undefined>;
-
-// Builds the unbound `agent.generateText`/`agent.streamText` builtin actor logic registered by setupAgent.
-function createBuiltinTextActor(
-  src: typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR,
-  mode: AgentRequestMode,
-  outputSchema: StandardSchemaV1,
-): TextLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1> {
-  const logic = createAsyncLogic<AgentTextResult, AgentTextRequest>({
-    run: async () => {
-      throw new Error(
-        `'${src}' has no host execution. Provide an implementation with ` +
-          `machine.provide({ actors: { '${src}': ... } }) or execute the ` +
-          `returned agent request with executeAgentRequest(...).`,
-      );
-    },
-  });
-
-  return Object.assign(logic, {
-    kind: "statelyai.textLogic" as const,
-    mode,
-    schemas: {
-      input: agentTextInputSchema,
-      output: outputSchema,
-    },
-    request(input: AgentTextRequest) {
-      return validateSchemaSync(agentTextInputSchema, input);
-    },
-    async execute(input: AgentTextRequest, executors: AgentRequestExecutors) {
-      const { result: output, raw } = await executeAgentTextRequest(
-        mode,
-        src,
-        validateSchemaSync(agentTextInputSchema, input),
-        executors,
-      );
-
-      return {
-        result: validateSchemaSync(outputSchema, output),
-        messages: responseMessagesOf(raw),
-      };
-    },
-    withExecutor(
-      execute: TextLogicExecutor<
-        StandardSchemaV1<AgentTextRequest>,
-        StandardSchemaV1<unknown>,
-        Record<string, unknown>
-      >,
-    ) {
-      return createTextLogic(
-        {
-          mode,
-          schemas: {
-            input: agentTextInputSchema,
-            output: outputSchema,
-          },
-          name: ({ input }) => input.name,
-          model: ({ input }) => input.model,
-          system: ({ input }) => input.system,
-          prompt: ({ input }) => input.prompt,
-          messages: ({ input }) => input.messages,
-          tools: ({ input }) => input.tools,
-          toolChoice: ({ input }) => input.toolChoice,
-          includeReasoning: ({ input }) => input.includeReasoning,
-          temperature: ({ input }) => input.temperature,
-          maxOutputTokens: ({ input }) => input.maxOutputTokens,
-          topP: ({ input }) => input.topP,
-          topK: ({ input }) => input.topK,
-          seed: ({ input }) => input.seed,
-          stopSequences: ({ input }) => input.stopSequences,
-          maxSteps: ({ input }) => input.maxSteps,
-          metadata: ({ input }) => input.metadata,
-        },
-        execute,
-      );
-    },
-  }) as TextLogic<StandardSchemaV1<AgentTextRequest>, StandardSchemaV1>;
-}
-
-/** The unbound `agent.generateText`/`agent.streamText` builtins registered by setupAgent. @internal */
-export const builtinTextActors = {
-  [GENERATE_TEXT_ACTOR]: createBuiltinTextActor(
-    GENERATE_TEXT_ACTOR,
-    "generate",
-    unknownOutputSchema,
-  ),
-  [STREAM_TEXT_ACTOR]: createBuiltinTextActor(STREAM_TEXT_ACTOR, "stream", stringOutputSchema),
-} satisfies Pick<BuiltinAgentActors, typeof GENERATE_TEXT_ACTOR | typeof STREAM_TEXT_ACTOR>;
 
 /**
  * Validates a raw model/executor output against `schema`, returning the
@@ -545,9 +422,8 @@ export type TextLogicExecutor<
  * Actor logic for a text request: an async effect that resolves typed input
  * to typed, schema-validated output via a model call. Built by
  * {@link createTextLogic}; register under `actors:` and invoke by name, or
- * bind an executor later with `withExecutor`. The `agent.generateText`/
- * `agent.streamText` builtins and `setupAgent({ requests })` entries are
- * both `TextLogic` under the hood.
+ * bind an executor later with `withExecutor`. `setupAgent({ requests })`
+ * entries are `TextLogic` under the hood.
  */
 export interface TextLogic<
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1,
@@ -997,9 +873,8 @@ export function parseProviderOutput(
  * Merges request-declared and call-site `tools`, dispatches to the
  * `mode`-appropriate executor (`generateText`/`streamText`), and normalizes
  * the raw result via {@link normalizeGeneratorResult}. Shared by
- * `TextLogic.execute`, `executeAgentRequest`, and the `agent.generateText`/
- * `agent.streamText` builtins. Throws if no executor is registered for
- * `mode`.
+ * `TextLogic.execute` and `executeAgentRequest`. Throws if no executor is
+ * registered for `mode`.
  *
  * @internal
  */

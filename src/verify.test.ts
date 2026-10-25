@@ -636,7 +636,10 @@ describe("canReach — reachability with a witness path", () => {
     // `middle` is entered and immediately left while exploration resolves the
     // chained text requests — the target check must run on every intermediate
     // snapshot, not only where a path settles.
-    const agent = setupAgent({ context: z.object({}) });
+    const agent = setupAgent({
+      context: z.object({}),
+      requests: { ask: { schemas: { output: z.string() }, model: "quick", prompt: "next?" } },
+    });
     const machine = agent.createMachine({
       context: () => ({}),
       initial: "first",
@@ -644,23 +647,21 @@ describe("canReach — reachability with a witness path", () => {
         first: {
           invoke: {
             id: "t1",
-            src: "agent.generateText",
-            input: () => ({ model: "quick", prompt: "one" }),
+            src: "ask",
             onDone: { target: "middle" },
           },
         },
         middle: {
           invoke: {
             id: "t2",
-            src: "agent.generateText",
-            input: () => ({ model: "quick", prompt: "two" }),
+            src: "ask",
             onDone: { target: "last" },
           },
         },
         last: { type: "final" },
       },
     });
-    const outputs = { "agent.generateText": ["canned"] };
+    const outputs = { ask: ["canned"] };
 
     const byPath = await canReach(machine, "middle", { outputs });
     expect(byPath.reachable).toBe(true);
@@ -781,6 +782,7 @@ describe("invoke-without-on-error", () => {
   const agent = setupAgent({
     context: z.object({ topic: z.string() }),
     events: { RETRY: z.object({}) },
+    requests: { draft: { schemas: { output: z.string() }, model: "quick", prompt: "draft" } },
   });
 
   const makeMachine = (states: Record<string, unknown>) =>
@@ -798,8 +800,7 @@ describe("invoke-without-on-error", () => {
       makeMachine({
         drafting: {
           invoke: {
-            src: "agent.generateText",
-            input: () => ({ model: "quick", prompt: "draft" }),
+            src: "draft",
             onDone: { target: "done" },
           },
         },
@@ -808,7 +809,7 @@ describe("invoke-without-on-error", () => {
     );
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).toMatchObject({ severity: "warning", path: "drafting" });
-    expect(diagnostics[0]!.message).toContain("agent.generateText");
+    expect(diagnostics[0]!.message).toContain("draft");
   });
 
   test("is silent when the machine root handles actor errors", () => {
@@ -819,8 +820,7 @@ describe("invoke-without-on-error", () => {
       states: {
         drafting: {
           invoke: {
-            src: "agent.generateText",
-            input: () => ({ model: "quick", prompt: "draft" }),
+            src: "draft",
             onDone: { target: "done" },
           },
         },
@@ -837,8 +837,7 @@ describe("invoke-without-on-error", () => {
         makeMachine({
           drafting: {
             invoke: {
-              src: "agent.generateText",
-              input: () => ({ model: "quick", prompt: "draft" }),
+              src: "draft",
               onDone: { target: "done" },
               onError: { target: "failed" },
             },
@@ -860,8 +859,7 @@ describe("invoke-without-on-error", () => {
             states: {
               working: {
                 invoke: {
-                  src: "agent.generateText",
-                  input: () => ({ model: "quick", prompt: "draft" }),
+                  src: "draft",
                   onDone: { target: "#done" },
                 },
               },
@@ -878,8 +876,7 @@ describe("invoke-without-on-error", () => {
     const machine = makeMachine({
       drafting: {
         invoke: {
-          src: "agent.generateText",
-          input: () => ({ model: "quick", prompt: "draft" }),
+          src: "draft",
           onDone: { target: "done" },
         },
       },

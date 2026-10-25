@@ -34,6 +34,13 @@ const agentSetup = setupAgent({
   context: z.object({ prompt: z.string() }),
   input: z.object({ prompt: z.string() }),
   models: { quick: someLanguageModel },
+  requests: {
+    write: {
+      schemas: { input: z.object({ prompt: z.string() }), output: z.string() },
+      model: "quick",
+      prompt: ({ input }) => input.prompt,
+    },
+  },
 });
 
 const machine = agentSetup.createMachine({
@@ -42,8 +49,8 @@ const machine = agentSetup.createMachine({
   states: {
     writing: {
       invoke: {
-        src: "agent.generateText",
-        input: ({ context }) => ({ model: "quick", prompt: context.prompt }),
+        src: "write",
+        input: ({ context }) => ({ prompt: context.prompt }),
         onDone: { target: "done" },
       },
     },

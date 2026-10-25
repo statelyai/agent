@@ -21,7 +21,7 @@ import {
 } from "xstate";
 import type { AgentMessage, AgentToolChoice, AgentTools, StandardSchemaV1 } from "./types.js";
 import { validateSchemaSync } from "./utils.js";
-import { type AgentRequestMode } from "./text-logic.js";
+import { DECIDE_ACTOR, type AgentRequestMode } from "./text-logic.js";
 import { missingActor, setAgentExecutionOptions } from "./internal/registry.js";
 import {
   createAgentActors,
@@ -55,10 +55,6 @@ export type SchemaCompiler = (
   jsonSchema: Record<string, unknown>,
   name: string,
 ) => StandardSchemaV1;
-
-// Builtin decision actor src — an `onDone` on one of these is always a config
-// error (a decision's output IS its chosen event, delivered via `on`).
-const DECIDE_SRC = "agent.decide";
 
 const workflowConfigWholeExpressionPattern = /^\{\{\s*([\s\S]*?)\s*\}\}$/;
 const workflowConfigTemplateExpressionPattern = /\{\{\s*([\s\S]*?)\s*\}\}/g;
@@ -585,7 +581,7 @@ function translateWorkflowInvoke(
   // A decision's output IS its chosen event, delivered automatically via the
   // state's `on` transitions — so an `onDone` on an `agent.decide` invoke can
   // never fire and is always a config error. Reject it early with the state named.
-  if (invokeConfig.src === DECIDE_SRC && invokeConfig.onDone !== undefined) {
+  if (invokeConfig.src === DECIDE_ACTOR && invokeConfig.onDone !== undefined) {
     throw new Error(
       `setupAgent.fromConfig: state '${stateKey}' declares an 'onDone' on its 'agent.decide' ` +
         `invoke, which is always a config error. A decision has no output of its own — the ` +

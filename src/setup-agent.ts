@@ -21,7 +21,6 @@ import type {
   WithAgentInputSchema,
 } from "./types.js";
 import {
-  builtinTextActors,
   createTextLogic,
   DECIDE_ACTOR,
   type AgentModelMap,
@@ -691,8 +690,7 @@ type SetupAgentResult<
  * executors. Context, events, machine input, machine output, and
  * state/transition meta are all standard schemas — no `{} as Type` casts —
  * and are retained on `result.schemas` for runtime validation. Also
- * registers the `agent.generateText`/`agent.streamText`/
- * `agent.decide` builtin actors and lowers `requests`/`actors` into the
+ * registers the `agent.decide` builtin actor and lowers `requests`/`actors` into the
  * machine's actor sources. The result is the xstate `setup(...)` object with
  * a wrapped `result.createMachine(...)` plus `result.schemas`/`models`/
  * `requests` attached. Also has a
@@ -1095,12 +1093,8 @@ function assertStateSchemaKeysExist(
   }
 }
 
-// The builtin `agent.*` actor keys — reserved so a user `actors`/
-// `requests` entry cannot silently clobber a builtin via spread order.
-const RESERVED_AGENT_ACTOR_KEYS = [
-  ...(Object.keys(builtinTextActors) as (keyof typeof builtinTextActors)[]),
-  DECIDE_ACTOR,
-] satisfies readonly (keyof BuiltinAgentActors)[];
+// The builtin `agent.*` actor keys, named in the reserved-prefix error.
+const RESERVED_AGENT_ACTOR_KEYS = [DECIDE_ACTOR] satisfies readonly (keyof BuiltinAgentActors)[];
 
 /**
  * The whole `agent.` actor-source namespace is reserved for the library, not
@@ -1137,20 +1131,14 @@ function assertActorKeys(
 
   for (const [groupName, group] of groups) {
     for (const key of Object.keys(group ?? {})) {
-      if (RESERVED_AGENT_ACTOR_KEYS.some((reserved) => reserved === key)) {
-        throw new Error(
-          `setupAgent: '${groupName}' key '${key}' is a reserved builtin agent actor and ` +
-            `cannot be redefined here (it would silently clobber the builtin). Reserved keys: ` +
-            `${RESERVED_AGENT_ACTOR_KEYS.join(", ")}. To deliberately override a builtin, do it ` +
-            `on the created machine instead: machine.provide({ actors: { '${key}': ... } }).`,
-        );
-      }
       if (key.startsWith(RESERVED_AGENT_KEY_PREFIX)) {
         throw new Error(
           `setupAgent: '${groupName}' key '${key}' uses the reserved '` +
             `${RESERVED_AGENT_KEY_PREFIX}' namespace, which belongs to the library (` +
             `${RESERVED_AGENT_ACTOR_KEYS.join(", ")}, and anything added later). Rename it ` +
-            `without the '${RESERVED_AGENT_KEY_PREFIX}' prefix.`,
+            `without the '${RESERVED_AGENT_KEY_PREFIX}' prefix. To deliberately override a ` +
+            `builtin, do it on the created machine instead: ` +
+            `machine.provide({ actors: { '${key}': ... } }).`,
         );
       }
       const existingGroup = seenIn.get(key);
@@ -1181,7 +1169,6 @@ export function createAgentActors<
   );
 
   return {
-    ...builtinTextActors,
     [DECIDE_ACTOR]: createDecideActor(),
     ...actors,
     ...requestActors,

@@ -41,7 +41,7 @@ import {
 } from "./index.js";
 import { resolveDecision, type AgentRequest } from "./index.js";
 import { executeAgentRequest } from "./steps.js";
-import { getAgentOutputMode, parseOutput } from "./index.js";
+import { getAgentOutputMode } from "./index.js";
 import { isStructuredOutputSchema } from "./text-logic.js";
 
 /**
@@ -454,141 +454,25 @@ describe("setupAgent", () => {
     ).resolves.toMatchObject({ result: "Streamed final text." });
   });
 
-  test("setupAgent auto-provides built-in generateText and streamText sources", async () => {
-    const answerSchema = z.object({ answer: z.string() });
-    const schemas = createAgentSchemas({
-      context: z.object({
-        prompt: z.string(),
-        answer: z.string().nullable(),
-        streamed: z.string().nullable(),
-      }),
-      input: z.object({ prompt: z.string() }),
-      output: z.object({
-        answer: z.string(),
-        streamed: z.string(),
-      }),
-    });
-    const agent = setupAgent({ schemas });
-    const machine = agent.createMachine({
-      context: ({ input }) => ({
-        prompt: input.prompt,
-        answer: null,
-        streamed: null,
-      }),
-      initial: "answering",
-      states: {
-        answering: {
-          invoke: {
-            id: "answer",
-            src: "agent.generateText",
-            input: ({ context }) => ({
-              model: "test-model",
-              prompt: context.prompt,
-              outputSchema: answerSchema,
-              temperature: 0.2,
-            }),
-            onDone: ({ output }) => ({
-              target: "streaming",
-              context: { answer: parseOutput(answerSchema, output.result).answer },
-            }),
-          },
-        },
-        streaming: {
-          invoke: {
-            id: "stream",
-            src: "agent.streamText",
-            input: ({ context }) => ({
-              model: "test-model",
-              prompt: `Expand ${context.answer}`,
-            }),
-            onDone: ({ output }) => ({
-              target: "done",
-              context: { streamed: output.result as string },
-            }),
-          },
-        },
-        done: {
-          type: "final",
-          output: ({ context }) => {
-            const typedContext = context as {
-              answer: string | null;
-              streamed: string | null;
-            };
-            return {
-              answer: typedContext.answer ?? "",
-              streamed: typedContext.streamed ?? "",
-            };
-          },
-        },
-      },
-    });
-
-    let step = initialAgentStep(machine, { prompt: "Why machines?" });
-    expect(step.requests).toEqual([
-      expect.objectContaining({
-        mode: "generate",
-        id: "answer",
-        src: "agent.generateText",
-        input: expect.objectContaining({
-          model: "test-model",
-          prompt: "Why machines?",
-          outputSchema: answerSchema,
-          temperature: 0.2,
-        }),
-      }),
-    ]);
-
-    const answer = await executeAgentRequest(asTextRequest(step.requests[0]), {
-      generateText: async (request: AgentTextRequest & { tools: AgentTools }) => {
-        expect(request.tools).toEqual({});
-        return { result: { answer: `Answered ${request.prompt}` } };
-      },
-    });
-    step = resolveAgentStep(machine, step, step.requests[0]!, {
-      result: answer.result,
-      messages: answer.messages,
-    });
-
-    expect(step.requests).toEqual([
-      expect.objectContaining({
-        mode: "stream",
-        id: "stream",
-        src: "agent.streamText",
-        input: expect.objectContaining({
-          model: "test-model",
-          prompt: "Expand Answered Why machines?",
-        }),
-      }),
-    ]);
-
-    const streamed = await executeAgentRequest(asTextRequest(step.requests[0]), {
-      generateText: async () => {
-        throw new Error("generateText should not be used for stream requests");
-      },
-      streamText: async (request: AgentTextRequest & { tools: AgentTools }) => ({
-        result: `Streamed ${request.prompt}`,
-      }),
-    });
-    step = resolveAgentStep(machine, step, step.requests[0]!, {
-      result: streamed.result,
-      messages: streamed.messages,
-    });
-
-    expect(step.done).toBe(true);
-    expect(step.snapshot.output).toEqual({
-      answer: "Answered Why machines?",
-      streamed: "Streamed Expand Answered Why machines?",
-    });
-  });
-
   test("executeAgentRequest returns the normalized output alongside the raw result", async () => {
     const schemas = createAgentSchemas({
       context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ answer: z.string() }),
     });
-    const answerSchema = z.object({ answer: z.string() });
-    const agent = setupAgent({ schemas });
+    const agent = setupAgent({
+      schemas,
+      requests: {
+        answer: {
+          schemas: {
+            input: z.object({ prompt: z.string() }),
+            output: z.object({ answer: z.string() }),
+          },
+          model: "test-model",
+          prompt: ({ input }) => input.prompt,
+        },
+      },
+    });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, answer: null }),
       initial: "answering",
@@ -596,12 +480,8 @@ describe("setupAgent", () => {
         answering: {
           invoke: {
             id: "answer",
-            src: "agent.generateText",
-            input: ({ context }) => ({
-              model: "test-model",
-              prompt: context.prompt,
-              outputSchema: answerSchema,
-            }),
+            src: "answer",
+            input: ({ context }) => ({ prompt: context.prompt }),
             onDone: { target: "done" },
           },
         },
@@ -3227,7 +3107,7 @@ describe("setupAgent reserved agent.* actor keys", () => {
         schemas,
         actors: { "agent.decide": someLogic } as never,
       }),
-    ).toThrow(/reserved builtin agent actor/);
+    ).toThrow(/reserved 'agent\.' namespace.*agent\.decide/);
   });
 
   test("throws when requests tries to claim a reserved agent.* key", () => {
@@ -3238,14 +3118,14 @@ describe("setupAgent reserved agent.* actor keys", () => {
           "agent.decide": { schemas: { input: z.object({}), output: z.object({}) }, model: "m" },
         } as never,
       }),
-    ).toThrow(/reserved builtin agent actor/);
+    ).toThrow(/reserved 'agent\.' namespace.*agent\.decide/);
   });
 
   test("the reserved-key error points users to machine.provide for deliberate overrides", () => {
     expect(() =>
       setupAgent({
         schemas,
-        actors: { "agent.generateText": someLogic } as never,
+        actors: { "agent.decide": someLogic } as never,
       }),
     ).toThrow(/machine\.provide/);
   });

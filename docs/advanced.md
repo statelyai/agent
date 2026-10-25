@@ -4,7 +4,7 @@ Most hosts call `runAgent`, or drive the [runtime loop](steps.md) themselves. Th
 
 ## `provideExecutors`: the machine as a plain actor
 
-`provideExecutors(machine, executors)` returns a `machine.provide(...)`-ed copy whose `agent.generateText`, `agent.streamText`, and `agent.decide` sources call your executors. What comes back is an ordinary XState machine, so `createActor` runs it with no run loop around it.
+`provideExecutors(machine, executors)` returns a `machine.provide(...)`-ed copy whose text requests and `agent.decide` sources call your executors. What comes back is an ordinary XState machine, so `createActor` runs it with no run loop around it.
 
 ```ts no-check
 import { createActor } from "xstate";

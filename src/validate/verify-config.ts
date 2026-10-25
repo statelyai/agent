@@ -5,7 +5,7 @@
  * can feed a failed gate straight back to the model.
  */
 import type { AnyActorLogic, AnyStateMachine } from "xstate";
-import { DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR } from "../text-logic.js";
+import { DECIDE_ACTOR } from "../text-logic.js";
 import { explorePaths, lintAgentMachine, type ExplorePathsOptions } from "../verify.js";
 import {
   setupAgentFromConfig,
@@ -99,7 +99,7 @@ export interface VerifyAgentConfigResult {
   config?: AgentWorkflowConfig;
 }
 
-const BUILTIN_SRCS: readonly string[] = [DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR];
+const BUILTIN_SRCS: readonly string[] = [DECIDE_ACTOR];
 const MAX_DETAIL_LINES = 10;
 
 /**

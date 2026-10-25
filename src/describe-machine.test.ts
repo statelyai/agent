@@ -29,6 +29,9 @@ const refundAgent = setupAgent({
     RETRY: z.object({}),
   },
   delays: { reviewTimeout: 60_000 },
+  requests: {
+    issuePayout: { schemas: { output: z.string() }, model: "m", prompt: "Pay out the refund" },
+  },
 });
 
 const refundMachine = refundAgent.createMachine({
@@ -63,7 +66,7 @@ const refundMachine = refundAgent.createMachine({
     },
     paying: {
       invoke: {
-        src: "agent.generateText",
+        src: "issuePayout",
         id: "payout",
         onDone: { target: "done" },
         onError: ({ context }) =>
@@ -189,7 +192,7 @@ describe("describeMachine", () => {
         paying
             on RETRY → paying (conditional)
             after 5s → rejected
-            invoke agent.generateText (payout)
+            invoke issuePayout (payout)
               done → done
               error → paying, rejected (conditional); sets attempts
         done (final) — Refund paid
@@ -246,7 +249,7 @@ describe("describeMachine", () => {
         paying
             on RETRY → paying (conditional)
             after 5s → rejected
-            invoke agent.generateText (payout)
+            invoke issuePayout (payout)
               done → done
               error → paying, rejected (conditional); sets attempts
         done (final) — Refund paid

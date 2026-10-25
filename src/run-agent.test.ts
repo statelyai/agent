@@ -2817,6 +2817,13 @@ describe("restore semantics: pending requests and events-only resume", () => {
       input: z.object({}),
       output: z.object({ a: z.string(), b: z.string() }),
       events: { GO: {} },
+      requests: {
+        ask: {
+          schemas: { input: z.object({ prompt: z.string() }), output: z.string() },
+          model: "m",
+          prompt: ({ input }) => input.prompt,
+        },
+      },
     });
     return agentSetup.createMachine({
       context: () => ({ a: null, b: null }),
@@ -2824,8 +2831,8 @@ describe("restore semantics: pending requests and events-only resume", () => {
       states: {
         first: {
           invoke: {
-            src: "agent.generateText",
-            input: () => ({ model: "m", prompt: "one" }),
+            src: "ask",
+            input: { prompt: "one" },
             onDone: ({ event }) => ({
               target: "waiting",
               context: { a: String(event.output.result) },
@@ -2835,8 +2842,8 @@ describe("restore semantics: pending requests and events-only resume", () => {
         waiting: { on: { GO: { target: "second" } } },
         second: {
           invoke: {
-            src: "agent.generateText",
-            input: () => ({ model: "m", prompt: "two" }),
+            src: "ask",
+            input: { prompt: "two" },
             onDone: ({ event }) => ({
               target: "done",
               context: { b: String(event.output.result) },

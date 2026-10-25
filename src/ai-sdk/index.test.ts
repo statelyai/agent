@@ -38,15 +38,19 @@ describe("createAiSdkExecutors with core runAgent", () => {
       warnings: [],
     };
     const models = { quick: new MockLanguageModelV3({ doGenerate: usageResponse }) };
-    const agent = setupAgent({ context: z.object({}), input: z.object({}), models });
+    const agent = setupAgent({
+      context: z.object({}),
+      input: z.object({}),
+      models,
+      requests: { write: { schemas: { output: z.string() }, model: "quick", prompt: "hi" } },
+    });
     const machine = agent.createMachine({
       context: ({ input }) => input,
       initial: "writing",
       states: {
         writing: {
           invoke: {
-            src: "agent.generateText",
-            input: { model: "quick", prompt: "hi" },
+            src: "write",
             onDone: { target: "done" },
           },
         },

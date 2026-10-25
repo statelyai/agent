@@ -110,7 +110,7 @@ type RequestName = RequestNamesOf<typeof agentSetup>;
 
 Beyond schemas, `setupAgent` takes your models plus optional `requests`, `actors`, `actions`, `guards`, `states`, and `delays`. `states` narrows context per state. See [Per-state context narrowing](#per-state-context-narrowing). `delays` names the durations that [delayed transitions](#delayed-transitions) reference. It returns a **setup** whose `createMachine` method builds the machine. Like XState's `setup()`, the return value is a typed foundation, not a running agent. Name it accordingly, for example `agentSetup` or `gameSetup`.
 
-The builtins `agent.generateText`, `agent.streamText`, and `agent.decide` are registered automatically. Invoke them by name.
+The builtin `agent.decide` is registered automatically. Invoke it by name. Text requests have no builtin: declare each one under `requests` (or as a `createTextLogic` actor) and invoke it by its key.
 
 ### Models
 
@@ -204,13 +204,11 @@ const agentSetup = setupAgent({
 
 <!-- builtin src reference, from src/setup-agent.ts -->
 
-`setupAgent` registers reserved `src` strings on every machine. Use them for ad-hoc model work that does not warrant a named request. The invoke's `input` shapes each call:
+`setupAgent` registers a reserved `src` string on every machine. The invoke's `input` shapes each call:
 
-| `src`                | Invoke `input`                                                              | `onDone` output                                                                              | Reference                         |
-| -------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------- |
-| `agent.generateText` | `model`, `prompt` or `messages`, optional `system`, `outputSchema`, `tools` | `{ result, messages }`: text or the value parsed from `outputSchema`, plus response messages | [Text requests](text-requests.md) |
-| `agent.streamText`   | same as `agent.generateText`                                                | same, with chunks delivered to the host as they arrive                                       | [Text requests](text-requests.md) |
-| `agent.decide`       | `model`, `prompt`, optional `system`, `allowedEvents`                       | the one chosen event, applied to the machine                                                 | [Decisions](decisions.md)         |
+| `src`          | Invoke `input`                                        | `onDone` output                              | Reference                 |
+| -------------- | ----------------------------------------------------- | -------------------------------------------- | ------------------------- |
+| `agent.decide` | `model`, `prompt`, optional `system`, `allowedEvents` | the one chosen event, applied to the machine | [Decisions](decisions.md) |
 
 A human's turn is not a builtin: it is an idle state with accepted events. See [Human in the loop](human-in-the-loop.md).
 
@@ -381,34 +379,52 @@ The `onDone` handler receives the actor's `output`. For a text request that is `
 
 `runAgent` runs only what a state invokes. It does not read descriptions or metadata as hidden requests. A machine that keeps its prompts in state metadata or an external map still needs an explicit invoke for each model call, so execution stays visible to XState tooling, persistence, inspection, and tests.
 
-### Inline text requests
+### Structured text requests
 
-<!-- inline agent.generateText + runAgent, from src/setup-agent.ts and src/index.ts -->
+<!-- requests entry + runAgent, from src/setup-agent.ts and src/index.ts -->
 
-For a one-off text call, invoke `agent.generateText` inline. Move it to a named [request](text-requests.md) once it is reused or worth testing:
+Even a one-off text call is a named [request](text-requests.md). Its output schema types `output.result` in `onDone` and validates the model's answer before the machine sees it:
 
-```ts no-check
-import { parseOutput, runAgent } from "@statelyai/agent";
+```ts
+import { runAgent, setupAgent } from "@statelyai/agent";
+import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
-// ...
-generating: {
-  invoke: {
-    id: "draft",
-    src: "agent.generateText",
-    input: ({ context }) => ({
-      model: "openai/gpt-6-luna",
-      prompt: context.prompt,
-      outputSchema: resultSchema,
-    }),
-    onDone: ({ output }) => ({
-      target: "done",
-      context: { result: parseOutput(resultSchema, output.result) },
-    }),
+const agentSetup = setupAgent({
+  models,
+  context: z.object({ prompt: z.string(), title: z.string().nullable() }),
+  input: z.object({ prompt: z.string() }),
+  requests: {
+    draft: {
+      schemas: {
+        input: z.object({ prompt: z.string() }),
+        output: z.object({ title: z.string() }),
+      },
+      model: "quick",
+      prompt: ({ input }) => input.prompt,
+    },
   },
-},
+});
 
-// ...
-await runAgent(machine, { executors: createAiSdkExecutors({ models }), input });
+const machine = agentSetup.createMachine({
+  context: ({ input }) => ({ prompt: input.prompt, title: null }),
+  initial: "generating",
+  states: {
+    generating: {
+      invoke: {
+        id: "draft",
+        src: "draft",
+        input: ({ context }) => ({ prompt: context.prompt }),
+        onDone: ({ output }) => ({ target: "done", context: { title: output.result.title } }),
+      },
+    },
+    done: { type: "final" },
+  },
+});
+
+await runAgent(machine, {
+  executors: createAiSdkExecutors(machine),
+  input: { prompt: "Name this essay." },
+});
 ```
 
 Give an invoke an explicit `id` when the host needs a stable occurrence identity. XState owns invoke identity and snapshot restoration.
