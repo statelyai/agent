@@ -9,7 +9,7 @@ import {
   resolveDecision,
 } from "./decision.js";
 import { runAgent } from "./run-agent.js";
-import { createAgentSchemas, setupAgent } from "./setup-agent.js";
+import { setupAgent } from "./setup-agent.js";
 
 // A plain XState machine: no setupAgent, no agent.* anywhere.
 const desk = createMachine({
@@ -223,16 +223,16 @@ describe("decideNext on a plain machine", () => {
 });
 
 describe("agent.decide with payloads under the runtime", () => {
-  const schemas = createAgentSchemas({
+  const schemas = {
     context: z.object({ limit: z.number(), refunded: z.number() }),
     input: z.object({}),
     events: {
       refund: z.object({ amount: z.number() }),
       escalate: z.object({}),
     },
-  });
+  };
 
-  const machine = setupAgent({ schemas }).createMachine({
+  const machine = setupAgent({ ...schemas }).createMachine({
     context: { limit: 50, refunded: 0 },
     initial: "deciding",
     states: {
@@ -293,7 +293,7 @@ describe("agent.decide with payloads under the runtime", () => {
   });
 
   test("fails to onError without a model call when no offered option is accepted", async () => {
-    const noOptions = setupAgent({ schemas }).createMachine({
+    const noOptions = setupAgent({ ...schemas }).createMachine({
       context: { limit: 50, refunded: 0 },
       initial: "deciding",
       states: {

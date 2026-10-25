@@ -16,11 +16,9 @@ import {
   AgentEventLogConflictError,
   AgentMachineVersionMismatchError,
   AgentSnapshotDivergedError,
-  createAgentSchemas,
   createTextLogic,
   AgentInvalidEventPayloadError,
   parseAgentEvent,
-  inspectTransitions,
   isAgentIdle,
   createAgentRuntime,
   runAgent,
@@ -36,8 +34,8 @@ import {
   type ChosenEvent,
 } from "./index.js";
 import { runToQuiescence } from "./run-agent.js";
+import { AGENT_INIT_EVENT_TYPE } from "./event-log.js";
 import {
-  AGENT_INIT_EVENT_TYPE,
   forkEventLog,
   getLogExecutionId,
   getUsageFromEvents,
@@ -60,11 +58,11 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
 
 describe("runAgent", () => {
   test("done path: completes with typed output from a TextLogic invoke", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ answer: z.string() }),
-    });
+    };
 
     const answerQuestion = createTextLogic({
       schemas: {
@@ -75,7 +73,7 @@ describe("runAgent", () => {
       prompt: ({ input }) => input.prompt,
     });
 
-    const agent = setupAgent({ schemas, actors: { answerQuestion } });
+    const agent = setupAgent({ ...schemas, actors: { answerQuestion } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, answer: null }),
       initial: "answering",
@@ -120,12 +118,12 @@ describe("runAgent", () => {
   });
 
   test("idle + resume: settles idle waiting for an event, then completes on resume", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ prompt: z.string(), draft: z.string().nullable() }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ draft: z.string() }),
       events: { APPROVE: z.object({}) },
-    });
+    };
 
     const draftText = createTextLogic({
       schemas: {
@@ -136,7 +134,7 @@ describe("runAgent", () => {
       prompt: ({ input }) => input.prompt,
     });
 
-    const agent = setupAgent({ schemas, actors: { draftText } });
+    const agent = setupAgent({ ...schemas, actors: { draftText } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, draft: null }),
       initial: "drafting",
@@ -243,12 +241,12 @@ describe("runAgent", () => {
     let sideEffectRuns = 0;
     let modelCalls = 0;
 
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ topic: z.string(), draft: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ draft: z.string() }),
       events: { APPROVE: z.object({}), REJECT: z.object({}) },
-    });
+    };
 
     const draftText = createTextLogic({
       schemas: {
@@ -260,7 +258,7 @@ describe("runAgent", () => {
     });
 
     const agent = setupAgent({
-      schemas,
+      ...schemas,
       actors: {
         draftText,
         recordAudit: createAsyncLogic<{ recorded: boolean }, unknown>({
@@ -359,11 +357,11 @@ describe("runAgent", () => {
     const attackSchema = z.object({ target: z.string() });
     const healSchema = z.object({});
 
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ hp: z.number() }),
       input: z.object({}),
       events: { ATTACK: attackSchema, HEAL: healSchema },
-    });
+    };
 
     const chooseMove = createDecisionLogic({
       model: "test-model",
@@ -371,7 +369,7 @@ describe("runAgent", () => {
       allowedEvents: ["ATTACK", "HEAL"] as const,
     });
 
-    const agent = setupAgent({ schemas, actors: { chooseMove } });
+    const agent = setupAgent({ ...schemas, actors: { chooseMove } });
     const machine = agent.createMachine({
       context: { hp: 10 },
       initial: "choosingMove",
@@ -421,11 +419,11 @@ describe("runAgent", () => {
   });
 
   test("maxModelCalls: exceeding the budget settles a max-model-calls error", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ count: z.number() }),
       input: z.object({}),
       output: z.object({ count: z.number() }),
-    });
+    };
 
     const step = createTextLogic({
       schemas: {
@@ -436,7 +434,7 @@ describe("runAgent", () => {
       prompt: "step",
     });
 
-    const agent = setupAgent({ schemas, actors: { step } });
+    const agent = setupAgent({ ...schemas, actors: { step } });
     const machine = agent.createMachine({
       context: { count: 0 },
       initial: "looping",
@@ -473,11 +471,11 @@ describe("runAgent", () => {
   });
 
   test("maxModelCalls: the overrun is a typed AgentError an invoke's onError can branch on", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ calls: z.number(), budgetSpent: z.boolean() }),
       input: z.object({}),
       output: z.object({ calls: z.number(), budgetSpent: z.boolean() }),
-    });
+    };
 
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.number() },
@@ -485,7 +483,7 @@ describe("runAgent", () => {
       prompt: "step",
     });
 
-    const agent = setupAgent({ schemas, actors: { step } });
+    const agent = setupAgent({ ...schemas, actors: { step } });
     const machine = agent.createMachine({
       context: { calls: 0, budgetSpent: false },
       initial: "looping",
@@ -535,17 +533,17 @@ describe("runAgent", () => {
   });
 
   test("abort: a pre-aborted signal settles an aborted error", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({}),
       input: z.object({}),
       output: z.object({}),
-    });
+    };
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
       prompt: "work",
     });
-    const agent = setupAgent({ schemas, actors: { step } });
+    const agent = setupAgent({ ...schemas, actors: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: "working",
@@ -573,17 +571,17 @@ describe("runAgent", () => {
   });
 
   test("abort: aborting mid-run settles an aborted error", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({}),
       input: z.object({}),
       output: z.object({}),
-    });
+    };
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
       prompt: "work",
     });
-    const agent = setupAgent({ schemas, actors: { step } });
+    const agent = setupAgent({ ...schemas, actors: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: "working",
@@ -614,17 +612,17 @@ describe("runAgent", () => {
   });
 
   test("machine error: an executor throw with no onError settles a machine error", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({}),
       input: z.object({}),
       output: z.object({}),
-    });
+    };
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
       prompt: "work",
     });
-    const agent = setupAgent({ schemas, actors: { step } });
+    const agent = setupAgent({ ...schemas, actors: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: "working",
@@ -691,13 +689,13 @@ describe("runAgent", () => {
     });
 
     test("a machine invoking a decision with no decide option throws naming the source", async () => {
-      const schemas = createAgentSchemas({
+      const schemas = {
         context: z.object({}),
         input: z.object({}),
         events: { ATTACK: z.object({}) },
-      });
+      };
       const chooseMove = createDecisionLogic({ model: "test-model" });
-      const agent = setupAgent({ schemas, actors: { chooseMove } });
+      const agent = setupAgent({ ...schemas, actors: { chooseMove } });
       const machine = agent.createMachine({
         context: {},
         initial: "choosingMove",
@@ -748,7 +746,8 @@ describe("runAgent", () => {
         prompt: "summarize",
       });
       const agent = setupAgent({
-        schemas: createAgentSchemas({ context: z.object({}), input: z.object({}) }),
+        context: z.object({}),
+        input: z.object({}),
         actors: { streamSummary },
       });
       const machine = agent.createMachine({
@@ -1162,14 +1161,14 @@ describe("runAgent", () => {
     const attackSchema = z.object({ target: z.string() });
     const healSchema = z.object({});
 
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ hp: z.number(), messages: z.array(z.unknown()) }),
       input: z.object({}),
       events: { ATTACK: attackSchema, HEAL: healSchema },
-    });
+    };
 
     test("runAgent + inline agent.decide with allowedEvents omitted: candidates are exactly the legal events, with inputSchema attached", async () => {
-      const agent = setupAgent({ schemas });
+      const agent = setupAgent({ ...schemas });
       const machine = agent.createMachine({
         context: { hp: 10, messages: [] },
         initial: "choosingMove",
@@ -1221,7 +1220,7 @@ describe("runAgent", () => {
         // allowedEvents omitted.
       });
 
-      const agent = setupAgent({ schemas, actors: { chooseMove } });
+      const agent = setupAgent({ ...schemas, actors: { chooseMove } });
       const machine = agent.createMachine({
         context: { hp: 10, messages: [] },
         initial: "choosingMove",
@@ -1263,7 +1262,7 @@ describe("runAgent", () => {
     });
 
     test("guard-narrowing still intact: a type-legal event offered as a candidate can still be canTake-rejected", async () => {
-      const agent = setupAgent({ schemas });
+      const agent = setupAgent({ ...schemas });
       const machine = agent.createMachine({
         context: { hp: 10, messages: [] },
         initial: "choosingMove",
@@ -1336,11 +1335,11 @@ describe("runAgent", () => {
   });
 
   test("auto-delivery: the decided event is delivered exactly once despite transition-fn re-evaluation", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ attackCount: z.number() }),
       input: z.object({}),
       events: { ATTACK: z.object({}) },
-    });
+    };
 
     const chooseMove = createDecisionLogic({
       model: "test-model",
@@ -1348,7 +1347,7 @@ describe("runAgent", () => {
       allowedEvents: ["ATTACK"] as const,
     });
 
-    const agent = setupAgent({ schemas, actors: { chooseMove } });
+    const agent = setupAgent({ ...schemas, actors: { chooseMove } });
     const machine = agent.createMachine({
       context: { attackCount: 0 },
       initial: "choosingMove",
@@ -1394,13 +1393,13 @@ describe("runAgent", () => {
   });
 
   test("chosen event whose transition stays in-state: the invoke completes and onDone observes the chosen event as output", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ noted: z.boolean(), notedType: z.string().nullable() }),
       input: z.object({}),
       output: z.object({ noted: z.boolean(), notedType: z.string().nullable() }),
       events: { NOTE: z.object({}) },
-    });
-    const agent = setupAgent({ schemas });
+    };
+    const agent = setupAgent({ ...schemas });
     const machine = agent.createMachine({
       context: { noted: false, notedType: null },
       initial: "deciding",
@@ -1451,13 +1450,13 @@ describe("runAgent", () => {
   });
 
   test("decision inside an invoked child machine delivers to the child (invokingActorOf)", async () => {
-    const childSchemas = createAgentSchemas({
+    const childSchemas = {
       context: z.object({ move: z.string().nullable() }),
       input: z.object({}),
       output: z.object({ move: z.string() }),
       events: { ATTACK: z.object({}), FLEE: z.object({}) },
-    });
-    const childAgent = setupAgent({ schemas: childSchemas });
+    };
+    const childAgent = setupAgent({ ...childSchemas });
     const childMachine = childAgent.createMachine({
       context: { move: null },
       initial: "choosing",
@@ -1484,13 +1483,13 @@ describe("runAgent", () => {
       },
     });
 
-    const parentSchemas = createAgentSchemas({
+    const parentSchemas = {
       context: z.object({ childMove: z.string().nullable() }),
       input: z.object({}),
       output: z.object({ childMove: z.string().nullable() }),
-    });
+    };
     const parentAgent = setupAgent({
-      schemas: parentSchemas,
+      ...parentSchemas,
       actors: { child: childMachine },
     });
     const parentMachine = parentAgent.createMachine({
@@ -2586,17 +2585,17 @@ describe("runAgent error cause split", () => {
   // Builds a decision machine whose `decide` always returns an unknown event,
   // so resolveDecision exhausts its retries and throws AgentDecisionExhaustedError.
   function exhaustingDecisionMachine(withOnError: boolean) {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({}),
       input: z.object({}),
       events: { ATTACK: z.object({}), HEAL: z.object({}) },
-    });
+    };
     const chooseMove = createDecisionLogic({
       model: "test-model",
       prompt: "Choose a move.",
       allowedEvents: ["ATTACK", "HEAL"] as const,
     });
-    const agent = setupAgent({ schemas, actors: { chooseMove } });
+    const agent = setupAgent({ ...schemas, actors: { chooseMove } });
     return agent.createMachine({
       context: {},
       initial: "choosing",
@@ -2651,12 +2650,12 @@ describe("runAgent error cause split", () => {
   test("an inline agent.decide `maxRetries: 0` caps the live attempt budget at one", async () => {
     // Regression: the runtime used to read the builtin logic's fixed
     // `maxRetries: 2` and ignore the invoke input's own value.
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ amount: z.number() }),
       input: z.object({ amount: z.number() }),
       events: { ISSUE: z.object({}), REFUSE: z.object({}) },
-    });
-    const agent = setupAgent({ schemas });
+    };
+    const agent = setupAgent({ ...schemas });
     const machine = agent.createMachine({
       context: ({ input }) => input,
       initial: "classifying",
@@ -2701,17 +2700,17 @@ describe("runAgent error cause split", () => {
   });
 
   test("a plain executor throw (not decision-exhausted) still settles cause 'machine'", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({}),
       input: z.object({}),
       output: z.object({}),
-    });
+    };
     const step = createTextLogic({
       schemas: { input: z.object({}), output: z.object({}) },
       model: "test-model",
       prompt: "work",
     });
-    const agent = setupAgent({ schemas, actors: { step } });
+    const agent = setupAgent({ ...schemas, actors: { step } });
     const machine = agent.createMachine({
       context: {},
       initial: "working",
@@ -2737,12 +2736,12 @@ describe("runAgent error cause split", () => {
 
 describe("runAgent dev-mode serialization guard", () => {
   test("warns once, naming the path, when idle context holds a non-JSON value (Date)", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ createdAt: z.date() }),
       input: z.object({}),
       events: { GO: z.object({}) },
-    });
-    const agent = setupAgent({ schemas });
+    };
+    const agent = setupAgent({ ...schemas });
     const machine = agent.createMachine({
       context: () => ({ createdAt: new Date() }),
       initial: "waiting",
@@ -2775,12 +2774,12 @@ describe("runAgent dev-mode serialization guard", () => {
   });
 
   test("does not warn when idle context is fully JSON-serializable", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ topic: z.string() }),
       input: z.object({}),
       events: { GO: z.object({}) },
-    });
-    const agent = setupAgent({ schemas });
+    };
+    const agent = setupAgent({ ...schemas });
     const machine = agent.createMachine({
       context: () => ({ topic: "cats" }),
       initial: "waiting",
@@ -2970,8 +2969,7 @@ describe("machine version prop (createMachine({ version }))", () => {
   });
 });
 
-// ─── inspectTransitions (item 4) ───
-describe("inspectTransitions", () => {
+describe("inspect", () => {
   test("observes an invoked child machine's transitions with its actorRef", async () => {
     const childAgent = setupAgent({
       context: z.object({}),
@@ -3005,9 +3003,14 @@ describe("inspectTransitions", () => {
 
     const observed: Array<{ id: string; value: unknown }> = [];
     const result = await runAgent(parentMachine, {
-      inspect: inspectTransitions((snapshot, actorRef) => {
-        observed.push({ id: actorRef.id, value: snapshot.value });
-      }),
+      inspect: (event) => {
+        if (event.type === "@xstate.transition") {
+          observed.push({
+            id: (event.actorRef as unknown as { id: string }).id,
+            value: (event.snapshot as { value?: unknown }).value,
+          });
+        }
+      },
       executors: {
         generateText: async () => ({ result: {} }),
       },
@@ -3022,12 +3025,12 @@ describe("inspectTransitions", () => {
 });
 
 describe("runAgent usage aggregation", () => {
-  const usageSchemas = createAgentSchemas({
+  const usageSchemas = {
     context: z.object({ first: z.string().nullable(), second: z.string().nullable() }),
     input: z.object({}),
     output: z.object({ first: z.string(), second: z.string() }),
     events: { APPROVE: z.object({}) },
-  });
+  };
 
   const step = createTextLogic({
     schemas: { input: z.object({ label: z.string() }), output: z.string() },
@@ -3035,7 +3038,7 @@ describe("runAgent usage aggregation", () => {
     prompt: ({ input }) => input.label,
   });
 
-  const usageAgent = setupAgent({ schemas: usageSchemas, actors: { step } });
+  const usageAgent = setupAgent({ ...usageSchemas, actors: { step } });
 
   // first -> second -> done: two sequential model calls.
   const twoCallMachine = usageAgent.createMachine({
@@ -3193,18 +3196,18 @@ describe("runAgent usage aggregation", () => {
   });
 
   test("decide usage is aggregated, and each retry counts as its own call", async () => {
-    const decideSchemas = createAgentSchemas({
+    const decideSchemas = {
       context: z.object({}),
       input: z.object({}),
       output: z.object({}),
       events: { GO: z.object({}) },
-    });
+    };
     const pick = createDecisionLogic({
       model: "test-model",
       prompt: "choose",
       allowedEvents: ["GO"],
     });
-    const decideAgent = setupAgent({ schemas: decideSchemas, actors: { pick } });
+    const decideAgent = setupAgent({ ...decideSchemas, actors: { pick } });
     const decideMachine = decideAgent.createMachine({
       context: {},
       initial: "deciding",
@@ -3286,15 +3289,13 @@ describe("machine input validation", () => {
   // context simply mirrors what the factory was handed.
   const buildMachine = () =>
     setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string(), rounds: z.number(), tone: z.string() }),
-        input: z.object({
-          topic: z.string(),
-          rounds: z.number().default(3),
-          tone: z.string().default("neutral"),
-        }),
-        output: z.object({ topic: z.string(), rounds: z.number(), tone: z.string() }),
+      context: z.object({ topic: z.string(), rounds: z.number(), tone: z.string() }),
+      input: z.object({
+        topic: z.string(),
+        rounds: z.number().default(3),
+        tone: z.string().default("neutral"),
       }),
+      output: z.object({ topic: z.string(), rounds: z.number(), tone: z.string() }),
     }).createMachine({
       id: "input-defaults",
       context: ({ input }) => ({ topic: input.topic, rounds: input.rounds, tone: input.tone }),
@@ -3359,11 +3360,9 @@ describe("machine input validation", () => {
     // A machine that tolerates no input at all: omitting it must not start
     // failing just because a schema with required fields is declared.
     const machine = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string() }),
-        input: z.object({ topic: z.string() }),
-        output: z.object({ topic: z.string() }),
-      }),
+      context: z.object({ topic: z.string() }),
+      input: z.object({ topic: z.string() }),
+      output: z.object({ topic: z.string() }),
     }).createMachine({
       id: "no-input",
       context: ({ input }) => ({ topic: input?.topic ?? "(none)" }),
@@ -3658,17 +3657,17 @@ describe("runAgent event log", () => {
   });
 
   test("decision retries get distinct, replay-stable callKeys", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({}),
       input: z.object({}),
       events: { ATTACK: z.object({}) },
-    });
+    };
     const chooseMove = createDecisionLogic({
       model: "test-model",
       prompt: "Choose a move.",
       allowedEvents: ["ATTACK"] as const,
     });
-    const agent = setupAgent({ schemas, actors: { chooseMove } });
+    const agent = setupAgent({ ...schemas, actors: { chooseMove } });
     const machine = agent.createMachine({
       context: {},
       initial: "choosing",
@@ -4605,6 +4604,7 @@ describe("parallel invokes: recorded hashes are what replay reproduces", () => {
     const firstSettled = deferred();
     return setupAgent({
       context: z.object({ order: z.array(z.string()) }),
+      events: { GO: {} },
       actors: {
         first: createAsyncLogic({
           run: async () => {
@@ -4909,19 +4909,19 @@ describe("xstate contract: snapshot identity is NOT a usable `ignored` signal", 
 
 describe("runAgent (sugar over createAgentRuntime + runToQuiescence)", () => {
   function createReviewMachine() {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ topic: z.string(), draft: z.string().nullable(), drafts: z.number() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ draft: z.string(), drafts: z.number() }),
       // NUDGE is declared but no state handles it: an answer the idle state ignores.
       events: { APPROVE: z.object({}), REJECT: z.object({}), NUDGE: z.object({}) },
-    });
+    };
     const draftText = createTextLogic({
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
       model: "test-model",
       prompt: ({ input }) => input.topic,
     });
-    const agent = setupAgent({ schemas, actors: { draftText } });
+    const agent = setupAgent({ ...schemas, actors: { draftText } });
     return agent.createMachine({
       context: ({ input }) => ({ topic: input.topic, draft: null, drafts: 0 }),
       initial: "drafting",
@@ -4959,11 +4959,11 @@ describe("runAgent (sugar over createAgentRuntime + runToQuiescence)", () => {
   }
 
   function createDoneMachine() {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ answer: z.string() }),
-    });
+    };
     const answerQuestion = createTextLogic({
       schemas: {
         input: z.object({ prompt: z.string() }),
@@ -4972,7 +4972,7 @@ describe("runAgent (sugar over createAgentRuntime + runToQuiescence)", () => {
       model: "test-model",
       prompt: ({ input }) => input.prompt,
     });
-    const agent = setupAgent({ schemas, actors: { answerQuestion } });
+    const agent = setupAgent({ ...schemas, actors: { answerQuestion } });
     return agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, answer: null }),
       initial: "answering",

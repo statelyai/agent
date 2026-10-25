@@ -49,7 +49,7 @@ agentSetup.createMachine({
 });
 ```
 
-The descriptor is an optional `interaction` with a `label` (a string with `{context.path}` interpolation, or a function of the context), an `events` map of choices, payload `choices` (an array, or a context path), and a `textEvent`. A machine that declares its own `meta` schema replaces the default; `interactionMetaSchema` is the runtime schema for the interaction shape when you build a schema pack by hand with `createAgentSchemas`.
+The descriptor is an optional `interaction` with a `label` (a string with `{context.path}` interpolation, or a function of the context), an `events` map of choices, payload `choices` (an array, or a context path), and a `textEvent`. A machine that declares its own `meta` schema replaces the default; `interactionMetaSchema` is the runtime schema for the interaction shape, for a machine that passes `meta` to `setupAgent` itself.
 
 ## Payload choices
 

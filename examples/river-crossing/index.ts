@@ -45,7 +45,6 @@ import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic, setup } from "xstate";
 import { getShortestPaths } from "xstate/graph";
 import {
-  createAgentSchemas,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
@@ -66,7 +65,7 @@ const models = {
 const bankSchema = z.enum(["left", "right"]);
 type Bank = z.infer<typeof bankSchema>;
 
-export const riverCrossingSchemas = createAgentSchemas({
+export const riverCrossingSchemas = {
   context: z.object({
     farmer: bankSchema,
     wolf: bankSchema,
@@ -105,7 +104,7 @@ export const riverCrossingSchemas = createAgentSchemas({
      */
     REQUEST_PLAN: z.object({ reasoning: z.string() }),
   },
-});
+};
 
 // ─── Puzzle physics (shared by guards and describeMachine) ───
 
@@ -289,7 +288,7 @@ const solvePuzzle = createAsyncLogic<string[], WorldState>({
 // ─── Agent + machine ───
 
 const agentSetup = setupAgent({
-  schemas: riverCrossingSchemas,
+  ...riverCrossingSchemas,
   models,
   actors: { solvePuzzle },
 });

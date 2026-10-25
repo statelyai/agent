@@ -157,7 +157,7 @@ function validateChoice(value: unknown, path: (string | number)[]) {
  * one), and a `textEvent` (a type, or `{ type, field }`) for free-text answers; and
  * an optional `actor: "human"`, which tags a transition as sent by a person. This is
  * the default `meta` type `setupAgent` gives a machine; pass it to
- * `createAgentSchemas({ meta: interactionMetaSchema })` only when building a
+ * `setupAgent({ meta: interactionMetaSchema })` only when building a
  * schema pack by hand.
  */
 export const interactionMetaSchema: StandardSchemaV1<AgentInteractionMeta> = {

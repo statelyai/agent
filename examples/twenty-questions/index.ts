@@ -49,7 +49,6 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   type AgentMessage,
   assistantMessage,
-  createAgentSchemas,
   getInteraction,
   getStatePath,
   interactionMetaSchema,
@@ -176,7 +175,7 @@ const models = {
   quick: openai("gpt-6-luna"),
 };
 
-export const twentyQuestionsSchemas = createAgentSchemas({
+export const twentyQuestionsSchemas = {
   meta: interactionMetaSchema,
   context: z.object({
     /** What the agent is currently waiting on; `{question}` in idle labels. */
@@ -222,10 +221,10 @@ export const twentyQuestionsSchemas = createAgentSchemas({
     // host can print it before the pending question is re-asked.
     SIDE_ANSWER: z.object({ question: z.string(), answer: z.string() }),
   },
-});
+};
 
 const agentSetup = setupAgent({
-  schemas: twentyQuestionsSchemas,
+  ...twentyQuestionsSchemas,
   models,
   actors: {
     // Reading free-text replies: Jev judgments (see createClassify* above).

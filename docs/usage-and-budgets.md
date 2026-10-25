@@ -156,7 +156,7 @@ A wrapper is still host-side. The machine cannot read the remaining budget or re
 
 `@agent.usage` is a reserved event that carries one model call's tokens into the machine. Four rules govern it.
 
-- You declare nothing. `setupAgent` and `createAgentSchemas` register `'@agent.usage'` and its payload schema in every agent's events, so the handler is typed and `event.usage.totalTokens` narrows. Declaring it yourself is an error, because the `@agent.` namespace is reserved.
+- You declare nothing. `setupAgent` registers `'@agent.usage'` and its payload schema in every agent's events, so the handler is typed and `event.usage.totalTokens` narrows. Declaring it yourself is an error, because the `@agent.` namespace is reserved.
 - Delivery is opt-in. The event is delivered only when an active state declares a transition that matches it, either `'@agent.usage'` or the wildcard `'*'`. Otherwise no usage event is sent to the machine. Wildcard matching follows XState semantics, so a catch-all `on: { '*': … }` does receive `@agent.usage`. Narrow the handler on `event.type` when the catch-all is meant for other events.
 - Declare the handler at machine level. A root `on: { '@agent.usage': … }` catches every call regardless of which state made it. A state-scoped handler drops calls made in other states.
 - Delivery goes to the run's root machine, including usage from requests inside an invoked child machine. Attribute those calls with `id`, `src`, and `model`.
@@ -199,7 +199,7 @@ Opt in with a transition.
 ```ts no-check
 import { AGENT_USAGE_EVENT_TYPE, setupAgent } from "@statelyai/agent";
 
-const agentSetup = setupAgent({ schemas });
+const agentSetup = setupAgent({ ...schemas });
 
 const machine = agentSetup.createMachine({
   // …context, states
@@ -230,13 +230,7 @@ A machine-level `@agent.usage` handler folds every call's tokens into `context`.
 
 ```ts
 import { z } from "zod";
-import {
-  AGENT_USAGE_EVENT_TYPE,
-  createAgentSchemas,
-  createTextLogic,
-  setupAgent,
-  runAgent,
-} from "@statelyai/agent";
+import { AGENT_USAGE_EVENT_TYPE, createTextLogic, setupAgent, runAgent } from "@statelyai/agent";
 
 const researchStep = createTextLogic({
   schemas: { input: z.object({ topic: z.string(), turn: z.number() }), output: z.string() },
@@ -244,7 +238,7 @@ const researchStep = createTextLogic({
   prompt: ({ input }) => `Research ${input.topic}. Turn ${input.turn}. One new fact.`,
 });
 
-const schemas = createAgentSchemas({
+const schemas = {
   // Limits arrive as input.
   input: z.object({ topic: z.string(), maxTurns: z.number(), maxTokens: z.number() }),
   context: z.object({
@@ -261,9 +255,9 @@ const schemas = createAgentSchemas({
     tokens: z.number(),
     stoppedBy: z.string(),
   }),
-});
+};
 
-const agentSetup = setupAgent({ schemas, actors: { researchStep } });
+const agentSetup = setupAgent({ ...schemas, actors: { researchStep } });
 
 const machine = agentSetup.createMachine({
   // Limits become plain context data.

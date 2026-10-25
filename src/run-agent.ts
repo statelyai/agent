@@ -3369,37 +3369,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
 }
 
 /**
- * The actor handed to an {@link inspectTransitions} handler: an
- * {@link AnyActorRef} widened with the runtime `id`/`src` used to attribute a
- * transition to the root machine or a specific invoked child (xstate's static
- * `ActorRef` type omits them, but they are always present at runtime).
- */
-export type InspectedActorRef = AnyActorRef & { id: string; src?: string | AnyActorLogic };
-
-/**
- * Wraps a `(snapshot, actorRef) => void` handler into a function usable as
- * {@link AgentRuntimeOptions.inspect}: it filters the raw inspection stream to
- * `@xstate.transition` events and hands the handler the typed
- * {@link AnyMachineSnapshot} and the {@link InspectedActorRef} that
- * transitioned. Attribute a child actor via `actorRef.id`/`actorRef.src`. Saves
- * the manual `event.type === '@xstate.transition'` filtering and the snapshot/
- * actorRef casts.
- */
-export function inspectTransitions(
-  handler: (snapshot: AnyMachineSnapshot, actorRef: InspectedActorRef) => void,
-): (inspectionEvent: InspectionEvent) => void {
-  return (inspectionEvent: InspectionEvent) => {
-    if (inspectionEvent.type !== "@xstate.transition") {
-      return;
-    }
-    handler(
-      inspectionEvent.snapshot as AnyMachineSnapshot,
-      inspectionEvent.actorRef as unknown as InspectedActorRef,
-    );
-  };
-}
-
-/**
  * An xstate `inspect` handler that emits `machine.transition` trace events onto
  * `onTrace`, sharing the SAME versioned envelope and per-root-actor `seq`
  * registry as {@link provideExecutors}' `onTrace`. Pair the two on one actor to

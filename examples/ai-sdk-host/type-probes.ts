@@ -16,7 +16,7 @@ import { gameActors, gameSchemas, models } from "./index.js";
 const nonNullSummaryContext = gameSchemas.context.extend({ lastSummary: z.string() });
 
 const gameAgentSetup = setupAgent({
-  schemas: gameSchemas,
+  ...gameSchemas,
   models,
   actors: gameActors,
   states: {

@@ -21,7 +21,6 @@ import {
   type AgentStepRequest,
 } from "./steps.js";
 import {
-  createAgentSchemas,
   createTextLogic,
   AgentDecisionExhaustedError,
   getAcceptedEvents,
@@ -110,12 +109,12 @@ describe("setupAgent", () => {
   });
 
   test("discovers requests from XState's split spawn and start effects", () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ prompt: z.string() }),
       input: z.object({ prompt: z.string() }),
-    });
+    };
     const agent = setupAgent({
-      schemas,
+      ...schemas,
       requests: {
         draft: {
           model: "test-model",
@@ -154,21 +153,21 @@ describe("setupAgent", () => {
   });
 
   test("setupAgent accepts typed model aliases", () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ prompt: z.string() }),
       input: z.object({ prompt: z.string() }),
       events: {
         ASK: z.object({ question: z.string() }),
         GUESS: z.object({ guess: z.string() }),
       },
-    });
+    };
     const models = {
       quick: { provider: "quick" },
       careful: { provider: "careful" },
     } as const;
 
     const agent = setupAgent({
-      schemas,
+      ...schemas,
       models,
       requests: {
         answer: {
@@ -185,7 +184,7 @@ describe("setupAgent", () => {
     expect(agent.models).toBe(models);
 
     setupAgent({
-      schemas,
+      ...schemas,
       models,
       requests: {
         answer: {
@@ -219,7 +218,7 @@ describe("setupAgent", () => {
   });
 
   test("setupAgent accepts schema-bound request configs", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({
         prompt: z.string(),
         draft: z.object({ body: z.string() }).nullable(),
@@ -230,10 +229,10 @@ describe("setupAgent", () => {
         READY_TO_DRAFT: z.object({}),
         NEEDS_INFO: z.object({ question: z.string() }),
       },
-    });
+    };
 
     const agent = setupAgent({
-      schemas,
+      ...schemas,
       requests: {
         draftEmail: {
           mode: "generate",
@@ -257,7 +256,7 @@ describe("setupAgent", () => {
     });
 
     setupAgent({
-      schemas,
+      ...schemas,
       requests: {
         badKind: {
           // @ts-expect-error request mode is constrained
@@ -361,13 +360,13 @@ describe("setupAgent", () => {
   });
 
   test("agent machines execute generated and streamed requests with host callbacks", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ prompt: z.string(), body: z.string().nullable() }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ body: z.string() }),
-    });
+    };
     const agent = setupAgent({
-      schemas,
+      ...schemas,
       requests: {
         draftEmail: {
           schemas: {
@@ -456,7 +455,7 @@ describe("setupAgent", () => {
 
   test("setupAgent auto-provides built-in generateText and streamText sources", async () => {
     const answerSchema = z.object({ answer: z.string() });
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({
         prompt: z.string(),
         answer: z.string().nullable(),
@@ -467,8 +466,8 @@ describe("setupAgent", () => {
         answer: z.string(),
         streamed: z.string(),
       }),
-    });
-    const agent = setupAgent({ schemas });
+    };
+    const agent = setupAgent({ ...schemas });
     const machine = agent.createMachine({
       context: ({ input }) => ({
         prompt: input.prompt,
@@ -582,13 +581,13 @@ describe("setupAgent", () => {
   });
 
   test("executeAgentRequest returns the normalized output alongside the raw result", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ prompt: z.string(), answer: z.string().nullable() }),
       input: z.object({ prompt: z.string() }),
       output: z.object({ answer: z.string() }),
-    });
+    };
     const answerSchema = z.object({ answer: z.string() });
-    const agent = setupAgent({ schemas });
+    const agent = setupAgent({ ...schemas });
     const machine = agent.createMachine({
       context: ({ input }) => ({ prompt: input.prompt, answer: null }),
       initial: "answering",
@@ -743,16 +742,16 @@ describe("setupAgent", () => {
   });
 
   test("setupAgent preserves typed action guard and delay names", () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ prompt: z.string(), ready: z.boolean() }),
       input: z.object({ prompt: z.string() }),
       events: {
         MARK_READY: z.object({ reason: z.string() }),
       },
-    });
+    };
 
     const agent = setupAgent({
-      schemas,
+      ...schemas,
       actions: {
         markReady: ({ event }: { event: { type: string; reason?: string } }) => {
           if (event.type === "MARK_READY") {
@@ -820,12 +819,12 @@ describe("setupAgent", () => {
     // `SetupConfig<TSchemas & SetupSchemas>` whose intersected `events` map
     // gained a string index signature, tripping `InferEvents`'
     // `string extends keyof O` branch.
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ count: z.number() }),
       events: { GO: z.object({ n: z.number() }) },
-    });
+    };
     const child = createAsyncLogic<number, unknown>({ run: async () => 42 });
-    const agent = setupAgent({ schemas, actors: { child } });
+    const agent = setupAgent({ ...schemas, actors: { child } });
 
     agent.createMachine({
       context: { count: 0 },
@@ -2764,14 +2763,14 @@ describe("decision step discovery", () => {
   const attackSchema = z.object({ target: z.string() });
   const defendSchema = z.object({});
 
-  const decisionSchemas = createAgentSchemas({
+  const decisionSchemas = {
     context: z.object({}),
     input: z.object({}),
     events: {
       ATTACK: attackSchema,
       DEFEND: defendSchema,
     },
-  });
+  };
 
   function buildMachine() {
     const chooseMove = createDecisionLogic({
@@ -2779,7 +2778,7 @@ describe("decision step discovery", () => {
       prompt: "Choose a move.",
       allowedEvents: ["ATTACK", "DEFEND"] as const,
     });
-    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
+    const agent = setupAgent({ ...decisionSchemas, actors: { chooseMove } });
 
     const machine = agent.createMachine({
       context: {},
@@ -2824,7 +2823,7 @@ describe("decision step discovery", () => {
 
   test("omitted allowedEvents offers every snapshot-legal event", () => {
     const chooseMove = createDecisionLogic({ model: "test-model" });
-    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
+    const agent = setupAgent({ ...decisionSchemas, actors: { chooseMove } });
     const machine = agent.createMachine({
       context: {},
       initial: "choosingMove",
@@ -2854,21 +2853,21 @@ describe("decision step discovery", () => {
 describe("decision live path (runAgent auto-delivery)", () => {
   const attackSchema = z.object({ target: z.string() });
 
-  const decisionSchemas = createAgentSchemas({
+  const decisionSchemas = {
     context: z.object({}),
     input: z.object({}),
     events: {
       ATTACK: attackSchema,
       DEFEND: z.object({}),
     },
-  });
+  };
 
   function buildMachine() {
     const chooseMove = createDecisionLogic({
       model: "test-model",
       allowedEvents: ["ATTACK", "DEFEND"] as const,
     });
-    const agent = setupAgent({ schemas: decisionSchemas, actors: { chooseMove } });
+    const agent = setupAgent({ ...decisionSchemas, actors: { chooseMove } });
 
     const machine = agent.createMachine({
       context: {},
@@ -2948,17 +2947,17 @@ describe("decision live path (runAgent auto-delivery)", () => {
 describe("inline agent.decide invoke (state-local decisions)", () => {
   const attackSchema = z.object({ target: z.string() });
 
-  const decisionSchemas = createAgentSchemas({
+  const decisionSchemas = {
     context: z.object({}),
     input: z.object({}),
     events: {
       ATTACK: attackSchema,
       DEFEND: z.object({}),
     },
-  });
+  };
 
   function buildMachine() {
-    const agent = setupAgent({ schemas: decisionSchemas });
+    const agent = setupAgent({ ...decisionSchemas });
 
     const machine = agent.createMachine({
       id: "inline-decision-agent",
@@ -3049,7 +3048,7 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
   });
 
   test("type probes: inline agent.decide allowedEvents is checked against the machine event-schema keys", () => {
-    const agent = setupAgent({ schemas: decisionSchemas });
+    const agent = setupAgent({ ...decisionSchemas });
 
     // Legal: 'ATTACK' is a declared event.
     agent.createMachine({
@@ -3097,11 +3096,9 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
 describe("per-state context schemas (setupAgent({ states }))", () => {
   test("a state's schemas.context narrows context in invoke input and final output", async () => {
     const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string(), answer: z.string().nullable() }),
-        input: z.object({ topic: z.string() }),
-        output: z.object({ answer: z.string() }),
-      }),
+      context: z.object({ topic: z.string(), answer: z.string().nullable() }),
+      input: z.object({ topic: z.string() }),
+      output: z.object({ answer: z.string() }),
       actors: {
         finish: createAsyncLogic({
           run: async ({ input }: { input: { echo: string } }) => input.echo,
@@ -3215,16 +3212,16 @@ describe("setupAgent schemas that are not Standard Schema", () => {
 });
 
 describe("setupAgent reserved agent.* actor keys", () => {
-  const schemas = createAgentSchemas({
+  const schemas = {
     context: z.object({}),
     input: z.object({}),
-  });
+  };
   const someLogic = createAsyncLogic({ run: async () => ({}) });
 
   test("throws when actors tries to redefine a builtin agent.* key", () => {
     expect(() =>
       setupAgent({
-        schemas,
+        ...schemas,
         actors: { "agent.decide": someLogic } as never,
       }),
     ).toThrow(/reserved builtin agent actor/);
@@ -3233,7 +3230,7 @@ describe("setupAgent reserved agent.* actor keys", () => {
   test("throws when requests tries to claim a reserved agent.* key", () => {
     expect(() =>
       setupAgent({
-        schemas,
+        ...schemas,
         requests: {
           "agent.decide": { schemas: { input: z.object({}), output: z.object({}) }, model: "m" },
         } as never,
@@ -3244,7 +3241,7 @@ describe("setupAgent reserved agent.* actor keys", () => {
   test("the reserved-key error points users to machine.provide for deliberate overrides", () => {
     expect(() =>
       setupAgent({
-        schemas,
+        ...schemas,
         actors: { "agent.generateText": someLogic } as never,
       }),
     ).toThrow(/machine\.provide/);
@@ -3253,14 +3250,14 @@ describe("setupAgent reserved agent.* actor keys", () => {
   test("the whole 'agent.' namespace is reserved, not just the shipped builtins", () => {
     expect(() =>
       setupAgent({
-        schemas,
+        ...schemas,
         actors: { "agent.summarize": someLogic } as never,
       }),
     ).toThrow(/reserved 'agent\.' namespace/);
 
     expect(() =>
       setupAgent({
-        schemas,
+        ...schemas,
         requests: {
           "agent.classify": { schemas: { input: z.object({}), output: z.object({}) }, model: "m" },
         } as never,
@@ -3269,8 +3266,8 @@ describe("setupAgent reserved agent.* actor keys", () => {
   });
 
   test("a non-reserved actors key is accepted, including one merely containing 'agent'", () => {
-    expect(() => setupAgent({ schemas, actors: { myActor: someLogic } })).not.toThrow();
-    expect(() => setupAgent({ schemas, actors: { agentSummarize: someLogic } })).not.toThrow();
+    expect(() => setupAgent({ ...schemas, actors: { myActor: someLogic } })).not.toThrow();
+    expect(() => setupAgent({ ...schemas, actors: { agentSummarize: someLogic } })).not.toThrow();
   });
 });
 
@@ -3319,11 +3316,9 @@ describe("resolveDecision executor set", () => {
 describe("getAgentSchemas", () => {
   test("returns the registered pack for a setupAgent machine", () => {
     const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string() }),
-        events: { APPROVE: z.object({}) },
-        input: z.object({ topic: z.string() }),
-      }),
+      context: z.object({ topic: z.string() }),
+      events: { APPROVE: z.object({}) },
+      input: z.object({ topic: z.string() }),
     });
     const machine = agent.createMachine({
       context: ({ input }) => ({ topic: input.topic }),

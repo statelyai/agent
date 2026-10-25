@@ -63,7 +63,7 @@ export type AgentEventSchemaInput = StandardSchemaV1 | Record<string, never>;
 /** An event schema map as authored: payload schemas and/or `{}` payload-less shorthands, keyed by event type. */
 export type AgentEventSchemaInputMap = Record<string, AgentEventSchemaInput>;
 
-/** Resolves an authored event schema map's `{}` shorthands to real (empty-payload) schemas — the type-level counterpart of the runtime normalization in `createAgentSchemas`. */
+/** Resolves an authored event schema map's `{}` shorthands to real (empty-payload) schemas — the type-level counterpart of the runtime normalization in `setupAgent`. */
 export type NormalizedEventSchemas<T extends AgentEventSchemaInputMap> = {
   [K in keyof T]: T[K] extends StandardSchemaV1 ? T[K] : StandardSchemaV1<{}>;
 };
@@ -72,7 +72,7 @@ export type NormalizedEventSchemas<T extends AgentEventSchemaInputMap> = {
  * The discriminated event union derived from a machine's event schema map
  * (e.g. `{ ASK: z.object({ question: z.string() }) }` → `{ type: 'ASK';
  * question: string }`; a `{}` shorthand entry yields its bare `{ type: K }`).
- * Used internally by {@link createAgentSchemas} and `setupAgent` to type a
+ * Used internally by `setupAgent` to type a
  * machine's `TEvent`.
  */
 export type EventUnion<T extends AgentEventSchemaInputMap> = {

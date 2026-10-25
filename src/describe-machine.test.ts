@@ -364,6 +364,7 @@ describe("describeMachine", () => {
   test("marks unresolvable and target-free function transitions", () => {
     const machine = setupAgent({
       context: z.object({ next: z.string(), count: z.number() }),
+      events: { RESET: {}, COMPUTED: {}, COUNT: {}, ALWAYS_B: {}, SPREAD: {} },
     }).createMachine({
       id: "fns",
       context: { next: "b", count: 0 },
@@ -393,7 +394,13 @@ describe("describeMachine", () => {
             on SPREAD → (stays); sets …context, count
         b (parallel)
           x
-          y"
+          y
+      Events:
+        ALWAYS_B
+        COMPUTED
+        COUNT
+        RESET
+        SPREAD"
     `);
   });
 });

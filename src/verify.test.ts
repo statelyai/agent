@@ -874,7 +874,7 @@ describe("invoke-without-on-error", () => {
     ).toEqual([]);
   });
 
-  test("never fails assertAgentMachine by default (warning severity)", () => {
+  test("never fails lintAgentMachine({ throw: true }) by default (warning severity)", () => {
     const machine = makeMachine({
       drafting: {
         invoke: {

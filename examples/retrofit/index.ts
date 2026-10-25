@@ -33,7 +33,6 @@ import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
-  createAgentSchemas,
   getInteraction,
   getStatePath,
   interactionMetaSchema,
@@ -138,7 +137,7 @@ export function createTriageTicket(model: Experimental_DecisionModel = judgeMode
   });
 }
 
-const schemas = createAgentSchemas({
+const schemas = {
   context: z.object({
     ticket: z.string(),
     triage: triageSchema.nullable(),
@@ -171,10 +170,10 @@ const schemas = createAgentSchemas({
   // pause's `label`, a button `label`/`style` per accepted event, and
   // `textEvent` naming the ONE event free text goes to.
   meta: interactionMetaSchema,
-});
+};
 
 const agentSetup = setupAgent({
-  schemas,
+  ...schemas,
   models,
   actors: {
     // Triage: a Jev judgment (see createTriageTicket).

@@ -122,7 +122,7 @@ export interface AgentEventDescriptor {
   inputSchema?: StandardSchemaV1;
 }
 
-/** Registered schemas, as attached to a machine by `setupAgent`/`createAgentSchemas`. */
+/** Registered schemas, as attached to a machine by `setupAgent`/`setupAgent.fromConfig`. */
 export interface AgentSchemas {
   events?: Record<string, StandardSchemaV1>;
   /** Machine input schema; the runtime validates the run's `input` against it. */

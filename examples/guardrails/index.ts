@@ -45,7 +45,7 @@ import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import { createAgentSchemas, getStatePath, setupAgent, runAgent } from "@statelyai/agent";
+import { getStatePath, setupAgent, runAgent } from "@statelyai/agent";
 
 const models = {
   quick: openai("gpt-6-luna"),
@@ -159,7 +159,7 @@ const guardrailsContextSchema = z.object({
   verified: z.object({ supported: z.boolean(), critique: z.string() }).nullable(),
 });
 
-export const guardrailsSchemas = createAgentSchemas({
+export const guardrailsSchemas = {
   context: guardrailsContextSchema,
   input: z.object({
     question: z.string(),
@@ -170,10 +170,10 @@ export const guardrailsSchemas = createAgentSchemas({
     reason: z.string(),
   }),
   events: {},
-});
+};
 
 const agentSetup = setupAgent({
-  schemas: guardrailsSchemas,
+  ...guardrailsSchemas,
   models,
   // answering (and its retry, revising) always sets `answer` before either
   // state's request reads it — narrow it non-null there.

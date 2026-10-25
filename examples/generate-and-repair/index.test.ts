@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { runAgent } from "@statelyai/agent";
-import { assertAgentMachine, canReach, matchesTrajectory } from "@statelyai/agent/testing";
+import { canReach, lintAgentMachine, matchesTrajectory } from "@statelyai/agent/testing";
 import { createMockModelExecutors } from "../mock-model.js";
 import type { StateValue } from "xstate";
 import {
@@ -155,7 +155,7 @@ test("repairs that never parse fail after the cap, having made 1 + maxRepairs ca
 test("the machine is structurally sound", async () => {
   // A clean lint is the static proof that every state, `failed` included, is a
   // target of some transition.
-  assertAgentMachine(generateAndRepairMachine);
+  lintAgentMachine(generateAndRepairMachine, { throw: true });
 
   // `explorePaths` reads pending work off the snapshot's live children, so the
   // three concurrent `generateConfig` invokes are all still there after the

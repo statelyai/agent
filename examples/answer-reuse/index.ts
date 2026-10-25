@@ -46,7 +46,6 @@ import { experimental_decide, tool, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
-  createAgentSchemas,
   getInteraction,
   getStatePath,
   interactionMetaSchema,
@@ -218,7 +217,7 @@ export const answerReuseOutputSchema = z.object({
   notice: z.string(),
 });
 
-const schemas = createAgentSchemas({
+const schemas = {
   meta: interactionMetaSchema,
   context: contextSchema,
   input: z.object({ request: z.string() }),
@@ -229,14 +228,14 @@ const schemas = createAgentSchemas({
     /** Reject it. Free text lands in `text`, the field `eventFromInteraction` fills. */
     DENY: z.object({ text: z.string() }),
   },
-});
+};
 
 const models = {
   support: openai("gpt-6-luna"),
 };
 
 const answerReuseSetup = setupAgent({
-  schemas,
+  ...schemas,
   models,
   actors: {
     // The help-center search. Hosts and tests swap in their own.

@@ -11,7 +11,7 @@ export type {
   StateValueOf,
 } from "./type-helpers.js";
 export { isAgentMessages, messagesSchema } from "./messages.js";
-export { createAgentSchemas, getAgentSchemas, setupAgent } from "./setup-agent.js";
+export { getAgentSchemas, setupAgent } from "./setup-agent.js";
 export type {
   AgentDefaultMeta,
   AgentSchemaPack,
@@ -20,7 +20,6 @@ export type {
   // emit needs them nameable.
   AgentUsageEventPayload,
   WithAgentEvents,
-  WithAgentUsageEvent,
 } from "./setup-agent.js";
 export {
   AgentDecisionExhaustedError,
@@ -108,7 +107,6 @@ export {
   AgentMaxModelCallsExceededError,
   AgentSnapshotDivergedError,
   createAgentRuntime,
-  inspectTransitions,
   isAgentIdle,
   runAgent,
   serializeTraceEvent,
@@ -129,7 +127,6 @@ export type {
   AgentRunMeta,
   AgentTransitionHandler,
   AgentTraceEvent,
-  InspectedActorRef,
   JsonSerializableTraceEvent,
   AgentRunResult,
   AgentRunErrorCause,

@@ -34,13 +34,7 @@ import { createAsyncLogic } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  createAgentSchemas,
-  createTextLogic,
-  getStatePath,
-  setupAgent,
-  runAgent,
-} from "@statelyai/agent";
+import { createTextLogic, getStatePath, setupAgent, runAgent } from "@statelyai/agent";
 
 const DEFAULT_TOPIC = "state machines";
 
@@ -62,7 +56,7 @@ const ratingPhrases = [
 ];
 const pick = (phrases: string[]) => phrases[Math.floor(Math.random() * phrases.length)]!;
 
-export const jokeSchemas = createAgentSchemas({
+export const jokeSchemas = {
   context: z.object({
     topic: z.string(),
     jokes: z.array(z.string()),
@@ -90,7 +84,7 @@ export const jokeSchemas = createAgentSchemas({
     TELL_ANOTHER: z.object({}),
     END: z.object({}),
   },
-});
+};
 
 const models = {
   jokeWriter: openai("gpt-6-luna"),
@@ -179,7 +173,7 @@ function toRating(level: number) {
 export const jokeActors = { tellJoke, rateJoke };
 
 const jokeAgentSetup = setupAgent({
-  schemas: jokeSchemas,
+  ...jokeSchemas,
   models,
   actors: jokeActors,
 });

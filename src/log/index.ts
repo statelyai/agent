@@ -9,26 +9,20 @@
  * @module
  */
 export {
-  AGENT_EVENT_SCHEMA_VERSION,
-  AGENT_INIT_EVENT_TYPE,
   AgentEventLogError,
   AgentMachineVersionMismatchError,
   AgentReplayDivergenceError,
   NonSerializableAgentEventError,
-  agentCallOccurrence,
   assertAgentLogEntry,
   assertJsonSerializable,
   createReplayEntry,
   forkEventLog,
   getDecisionAttempts,
   getLogExecutionId,
-  getSnapshotStateHash,
   getUsageFromEvents,
   initEntry,
-  rebindActorSession,
   recordLog,
   replay,
-  validateReplayEntries,
 } from "../event-log.js";
 export type {
   AgentInitEvent,

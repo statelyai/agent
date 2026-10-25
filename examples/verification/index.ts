@@ -36,7 +36,7 @@
  */
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createAgentSchemas, interactionMetaSchema, setupAgent } from "@statelyai/agent";
+import { interactionMetaSchema, setupAgent } from "@statelyai/agent";
 import {
   canReach,
   explorePaths,
@@ -57,7 +57,7 @@ const models = {
 /** The business rule, in one number. Refunds above this need a human. */
 export const APPROVAL_THRESHOLD = 100;
 
-export const verificationSchemas = createAgentSchemas({
+export const verificationSchemas = {
   context: z.object({
     amount: z.number(),
     reason: z.string(),
@@ -82,10 +82,10 @@ export const verificationSchemas = createAgentSchemas({
     APPROVE: z.object({ approver: z.string().default("ops") }),
     REJECT: z.object({ reason: z.string().default("Not eligible") }),
   },
-});
+};
 
 const agentSetup = setupAgent({
-  schemas: verificationSchemas,
+  ...verificationSchemas,
   models,
 });
 

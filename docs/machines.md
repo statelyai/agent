@@ -77,7 +77,7 @@ emitted: {
 
 Both `enq.emit({ type: 'EVALUATED', ... })` and the host-side `on: { EVALUATED: handler }` are then typed. An undeclared type or a wrong payload is a compile error. See [Observability](observability.md).
 
-> **Note:** To reuse one schema set across machines or the step helpers, declare it once with `createAgentSchemas({ context, input, output, events })` and pass it as `setupAgent({ schemas })`. This is equivalent to the inline form. See [Authoring forms](#authoring-forms).
+> **Note:** To reuse one schema set across machines, declare it once as a plain object, `const schemas = { context, input, output, events }`, and spread it: `setupAgent({ ...schemas, requests })`. The machine's resolved schemas are on `agentSetup.schemas`.
 
 <!-- getAgentSchemas registration and lookup from src/setup-agent.ts -->
 
@@ -226,7 +226,6 @@ Each alternate form handles one specific need:
 
 | Form                                                                                                             | Use it when                                                                                                                                                                                                                                                                                         |
 | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createAgentSchemas` pack, passed as `setupAgent({ schemas })`                                                   | You share one schema set across several machines or the [step helpers](steps.md).                                                                                                                                                                                                                   |
 | String model refs with `resolveModel` (`model: 'openai/gpt-6-luna'`, `createAiSdkExecutors({ resolveModel })`) | The machine must not name concrete models, for portability or for refs loaded from JSON [config](machines-as-data.md).                                                                                                                                                                              |
 | `createTextLogic`, a standalone request value                                                                    | A request is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).                                                                                                                              |
 | `logic.withExecutor(...)`                                                                                        | You bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runAgent`](hosts.md#write-your-own-host-loop)'s executor slots. Registered dynamic spawns inherit through `actors`. See [Multi-agent composition](multi-agent.md#collecting-dynamic-children). |

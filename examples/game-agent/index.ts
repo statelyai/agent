@@ -21,7 +21,6 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
-  createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
   setupAgent,
@@ -66,7 +65,7 @@ const rpsContextSchema = z.object({
   history: z.array(roundSchema),
 });
 
-export const rpsSchemas = createAgentSchemas({
+export const rpsSchemas = {
   meta: interactionMetaSchema,
   context: rpsContextSchema,
   input: z.object({
@@ -89,7 +88,7 @@ export const rpsSchemas = createAgentSchemas({
     THROW_PAPER: z.object({}),
     THROW_SCISSORS: z.object({}),
   },
-});
+};
 
 const rpsModels = {
   movePicker: openai("gpt-6-luna"),
@@ -173,7 +172,7 @@ export function renderMatch(
 }
 
 const rpsSetup = setupAgent({
-  schemas: rpsSchemas,
+  ...rpsSchemas,
   models: rpsModels,
   states: {
     awaitingHumanThrow: {},

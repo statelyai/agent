@@ -51,13 +51,7 @@ import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  createAgentSchemas,
-  getInteraction,
-  interactionMetaSchema,
-  setupAgent,
-  runAgent,
-} from "@statelyai/agent";
+import { getInteraction, interactionMetaSchema, setupAgent, runAgent } from "@statelyai/agent";
 
 /** Concrete, guessable words. Rounds take them in order, so runs are repeatable. */
 export const WORD_DECK = [
@@ -143,7 +137,7 @@ const contextSchema = z.object({
 });
 type JustOneContext = z.infer<typeof contextSchema>;
 
-export const justOneSchemas = createAgentSchemas({
+export const justOneSchemas = {
   // The shipped schema for `meta.interaction`: hosts read the label, the
   // buttons, and the free-text event off the idle snapshot with
   // `getInteraction(snapshot)`.
@@ -168,7 +162,7 @@ export const justOneSchemas = createAgentSchemas({
     GUESS: z.object({ guess: z.string() }),
     PASS: z.object({}),
   },
-});
+};
 
 const models = { clueGiver: openai("gpt-6-luna") };
 
@@ -342,7 +336,7 @@ const CLUE_SYSTEM_PROMPT = [
 ].join(" ");
 
 const agentSetup = setupAgent({
-  schemas: justOneSchemas,
+  ...justOneSchemas,
   models,
   requests: {
     // ONE request definition, used by all three regions. Its input type is the

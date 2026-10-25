@@ -7,17 +7,17 @@ import { describeMachine } from "./describe-machine.js";
 import { getAcceptedEvents } from "./events.js";
 import { interactionMetaSchema } from "./interaction.js";
 import { runAgent } from "./run-agent.js";
-import { createAgentSchemas, setupAgent } from "./setup-agent.js";
+import { setupAgent } from "./setup-agent.js";
 import { explorePaths, lintAgentMachine } from "./verify.js";
 
-const schemas = createAgentSchemas({
+const schemas = {
   context: z.object({}),
   input: z.object({}),
   events: { approve: z.object({}), revise: z.object({}), cancel: z.object({}) },
-});
+};
 
 // A person approves; the model may only ask for a revision.
-const review = setupAgent({ schemas }).createMachine({
+const review = setupAgent({ ...schemas }).createMachine({
   context: {},
   initial: "reviewing",
   on: { cancel: { target: ".cancelled", meta: { actor: "human" } } },
@@ -70,7 +70,7 @@ describe('transition meta `actor: "human"`', () => {
   });
 
   test("a closed choice withholds the human-tagged options", async () => {
-    const closed = setupAgent({ schemas }).createMachine({
+    const closed = setupAgent({ ...schemas }).createMachine({
       context: {},
       initial: "reviewing",
       states: {
@@ -150,7 +150,7 @@ describe('transition meta `actor: "human"`', () => {
   });
 
   test("lint reads a single-string `allowedEvents` too", () => {
-    const single = setupAgent({ schemas }).createMachine({
+    const single = setupAgent({ ...schemas }).createMachine({
       context: {},
       initial: "reviewing",
       states: {

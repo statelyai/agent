@@ -456,8 +456,8 @@ export function lintAgentMachine(
 }
 
 /**
- * Thrown by `lintAgentMachine(machine, { throw: true })` (and its
- * {@link assertAgentMachine} alias) when lint finds failing diagnostics.
+ * Thrown by `lintAgentMachine(machine, { throw: true })` when lint finds
+ * failing diagnostics.
  * `diagnostics` holds the findings; the message lists them one per finding,
  * so a test runner's failure output reads like the CLI's lint report.
  */
@@ -475,33 +475,6 @@ export class AgentLintError extends AgentError {
     this.name = "AgentLintError";
     this.diagnostics = diagnostics;
   }
-}
-
-/** Options for {@link assertAgentMachine}. */
-export interface AssertAgentMachineOptions extends LintAgentMachineOptions {
-  /** Also fail on warning-severity findings. Default: errors only. */
-  warnings?: boolean;
-}
-
-/**
- * Asserts a machine passes {@link lintAgentMachine}: returns silently when
- * clean, throws {@link AgentLintError} (with the findings on `.diagnostics`)
- * otherwise — sugar for `lintAgentMachine(machine, { ...options, throw: true })`.
- * Fails on error-severity findings; set `warnings: true` to fail on warnings
- * too. The one-liner for tests and generation loops:
- *
- * @example
- * ```ts
- * test('agent machine is structurally sound', () => {
- *   assertAgentMachine(machine);
- * });
- * ```
- */
-export function assertAgentMachine(
-  machine: AnyStateMachine,
-  options: AssertAgentMachineOptions = {},
-): void {
-  lintAgentMachine(machine, { ...options, throw: true });
 }
 
 // ─── Simulation ───

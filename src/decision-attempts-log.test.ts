@@ -8,33 +8,32 @@ import {
   type AgentDecisionRequest,
   type DecisionAttempt,
 } from "./decision.js";
+import { AGENT_EVENT_SCHEMA_VERSION, getSnapshotStateHash } from "./event-log.js";
 import {
-  AGENT_EVENT_SCHEMA_VERSION,
   AgentEventLogError,
   assertAgentLogEntry,
   createInMemoryEventLogStore,
   getDecisionAttempts,
-  getSnapshotStateHash,
   replay,
   type AgentLogEntry,
 } from "./log/index.js";
 import { createAgentRuntime, runAgent } from "./run-agent.js";
-import { createAgentSchemas, setupAgent } from "./setup-agent.js";
+import { setupAgent } from "./setup-agent.js";
 import type { ChosenEvent } from "./types.js";
 
 // HEAL is type- and payload-legal but guard-rejected at hp 10; ATTACK lands.
 function guardedMoveMachine(withOnError = true) {
-  const schemas = createAgentSchemas({
+  const schemas = {
     context: z.object({ hp: z.number() }),
     input: z.object({}),
     events: { ATTACK: z.object({ target: z.string() }), HEAL: z.object({}) },
-  });
+  };
   const chooseMove = createDecisionLogic({
     model: "test-model",
     prompt: "Choose a move.",
     allowedEvents: ["ATTACK", "HEAL"] as const,
   });
-  return setupAgent({ schemas, actors: { chooseMove } }).createMachine({
+  return setupAgent({ ...schemas, actors: { chooseMove } }).createMachine({
     id: "moves",
     context: { hp: 10 },
     initial: "choosing",

@@ -218,14 +218,11 @@ By default the model writes the event payload. A **closed choice** lists the con
 - When the snapshot accepts none of the options, the decision fails at once with `AgentDecisionExhaustedError` and no model call. Handle it with the invoke's `onError`.
 
 ```ts
-import { createAgentSchemas, setupAgent } from "@statelyai/agent";
+import { setupAgent } from "@statelyai/agent";
 import { z } from "zod";
 
 const agent = setupAgent({
-  schemas: createAgentSchemas({
-    context: z.object({ limit: z.number() }),
-    events: { refund: z.object({ amount: z.number() }), escalate: z.object({}) },
-  }),
+  context: z.object({ limit: z.number() }), events: { refund: z.object({ amount: z.number() }), escalate: z.object({}) },
 });
 
 agent.createMachine({

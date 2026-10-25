@@ -28,7 +28,6 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { type AiSdkModelMap, createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
-  createAgentSchemas,
   createTextLogic,
   createAgentRuntime,
   setupAgent,
@@ -51,7 +50,7 @@ const PLAYER_DAMAGE = 6;
 const ENEMY_DAMAGE = 4;
 const ENEMY_DAMAGE_BLOCKED = 2;
 
-export const gameSchemas = createAgentSchemas({
+export const gameSchemas = {
   context: z.object({
     playerHp: z.number(),
     enemyHp: z.number(),
@@ -76,7 +75,7 @@ export const gameSchemas = createAgentSchemas({
     HEAL: z.object({ amount: z.number().min(1).max(8).default(4) }),
     FLEE: z.object({}),
   },
-});
+};
 
 type GameEventType = keyof typeof gameSchemas.events;
 
@@ -191,7 +190,7 @@ export function renderCombat(log: string[], outcome: string): string {
 const nonNullSummaryContext = gameSchemas.context.extend({ lastSummary: z.string() });
 
 const gameAgentSetup = setupAgent({
-  schemas: gameSchemas,
+  ...gameSchemas,
   models,
   actors: gameActors,
   states: {

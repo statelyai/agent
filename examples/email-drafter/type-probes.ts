@@ -14,7 +14,7 @@ import { emailDrafterActors, emailDrafterSchemas, models } from "./agent-logic.j
 // index.ts need not export the setup — exporting its full inferred type trips
 // the declaration serializer (TS7056) under the root tsconfig's `declaration`.
 const agentSetup = setupAgent({
-  schemas: emailDrafterSchemas,
+  ...emailDrafterSchemas,
   models,
   actors: emailDrafterActors,
 });

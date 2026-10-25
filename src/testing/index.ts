@@ -9,7 +9,6 @@
 export {
   AgentLintError,
   AgentUnknownStateError,
-  assertAgentMachine,
   canReach,
   explorePaths,
   lintAgentMachine,
@@ -20,7 +19,6 @@ export type {
   AgentLintSeverity,
   AgentPathReport,
   AgentPathTerminal,
-  AssertAgentMachineOptions,
   CanReachResult,
   CanReachTarget,
   ExploreSnapshot,

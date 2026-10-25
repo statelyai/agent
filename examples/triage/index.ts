@@ -38,7 +38,6 @@ import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
-  createAgentSchemas,
   getInteraction,
   getStatePath,
   interactionMetaSchema,
@@ -162,7 +161,7 @@ const contextSchema = z.object({
   replyAttempts: z.number(),
 });
 
-const schemas = createAgentSchemas({
+const schemas = {
   meta: interactionMetaSchema,
   context: contextSchema,
   input: z.object({ ticket: z.string() }),
@@ -173,7 +172,7 @@ const schemas = createAgentSchemas({
     /** Override it. An enum, so a chat host can read "it's a bug" as `technical`. */
     RECLASSIFY: z.object({ category: categorySchema }),
   },
-});
+};
 
 const models = {
   ticketTriage: openai("gpt-6-luna"),
@@ -185,7 +184,7 @@ const classified = {
 };
 
 const triageAgentSetup = setupAgent({
-  schemas,
+  ...schemas,
   models,
   actors: {
     // The classifier: a Jev judgment (see createClassifyTicket).

@@ -50,7 +50,6 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
-  createAgentSchemas,
   getInteraction,
   getStatePath,
   interactionMetaSchema,
@@ -75,7 +74,7 @@ const models = {
 /** Events one command may apply before only DONE / QUIT stay legal. */
 export const MAX_STEPS_PER_COMMAND = 6;
 
-export const todoSchemas = createAgentSchemas({
+export const todoSchemas = {
   meta: interactionMetaSchema,
   context: z.object({
     todos: z.array(todoSchema),
@@ -119,7 +118,7 @@ export const todoSchemas = createAgentSchemas({
         "This command is fully handled; wait for the user's next command. Not for 'mark X done' (TOGGLE_TODO) or the user leaving (QUIT).",
       ),
   },
-});
+};
 
 function renderTodoList(todos: Todo[]): string {
   if (todos.length === 0) {
@@ -144,7 +143,7 @@ export function summarizeTodos(todos: Todo[]): string {
 }
 
 const agentSetup = setupAgent({
-  schemas: todoSchemas,
+  ...todoSchemas,
   models,
 });
 

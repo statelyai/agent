@@ -58,13 +58,7 @@ import { openai } from "@ai-sdk/openai";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  createAgentSchemas,
-  getInteraction,
-  interactionMetaSchema,
-  setupAgent,
-  runAgent,
-} from "@statelyai/agent";
+import { getInteraction, interactionMetaSchema, setupAgent, runAgent } from "@statelyai/agent";
 
 /**
  * The part of the original instructions.md that is genuinely prose: tone and
@@ -312,7 +306,7 @@ const models = {
  */
 const judgeModel: Experimental_DecisionModel = typeSafeAi.decisionModel("jev-latest");
 
-export const chatWithPdfSchemas = createAgentSchemas({
+export const chatWithPdfSchemas = {
   // The library's own interaction protocol, not a per-machine restatement.
   meta: interactionMetaSchema,
   context: z.object({
@@ -379,10 +373,10 @@ export const chatWithPdfSchemas = createAgentSchemas({
     QUESTION: z.object({ prompt: z.string(), pageNumber: z.number() }),
     GRADED: z.object({ correct: z.boolean(), expected: z.string(), explanation: z.string() }),
   },
-});
+};
 
 const agentSetup = setupAgent({
-  schemas: chatWithPdfSchemas,
+  ...chatWithPdfSchemas,
   models,
   actors: {
     // Plain typed actor — no model in the retrieval path.

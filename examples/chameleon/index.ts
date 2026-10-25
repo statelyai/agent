@@ -43,13 +43,7 @@ import { z } from "zod";
 import type { SnapshotFrom } from "xstate";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  createAgentSchemas,
-  getInteraction,
-  interactionMetaSchema,
-  setupAgent,
-  runAgent,
-} from "@statelyai/agent";
+import { getInteraction, interactionMetaSchema, setupAgent, runAgent } from "@statelyai/agent";
 
 /** The table, in speaking order. Index doubles as the player's seat. */
 export const PLAYERS = ["Ada", "Bruno", "Cleo", "Dev"] as const;
@@ -94,7 +88,7 @@ const chameleonContextSchema = z.object({
 
 type ChameleonContext = z.infer<typeof chameleonContextSchema>;
 
-export const chameleonSchemas = createAgentSchemas({
+export const chameleonSchemas = {
   // The library's own interaction protocol, not a per-machine restatement.
   meta: interactionMetaSchema,
   context: chameleonContextSchema,
@@ -124,7 +118,7 @@ export const chameleonSchemas = createAgentSchemas({
         .describe(`Seat to accuse: ${PLAYERS.map((name, seat) => `${seat}=${name}`).join(", ")}`),
     }),
   },
-});
+};
 
 const models = { player: openai("gpt-6-luna") };
 
@@ -225,7 +219,7 @@ const CHAMELEON_SYSTEM_PROMPT = [
 ].join(" ");
 
 const agentSetup = setupAgent({
-  schemas: chameleonSchemas,
+  ...chameleonSchemas,
   models,
   requests: {
     /**

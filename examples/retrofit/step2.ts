@@ -12,17 +12,12 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  createAgentSchemas,
-  setupAgent,
-  type AgentRequestExecutors,
-  runAgent,
-} from "@statelyai/agent";
+import { setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const REFUND_LIMIT = 100;
 const models = { agent: openai("gpt-6-luna") };
 
-const schemas = createAgentSchemas({
+const schemas = {
   context: z.object({
     ticket: z.string(),
     pendingRefund: z.number().nullable(),
@@ -42,10 +37,10 @@ const schemas = createAgentSchemas({
     ESCALATE: z.object({ reason: z.string() }),
     RESOLVE: z.object({ message: z.string() }),
   },
-});
+};
 
 const agentSetup = setupAgent({
-  schemas,
+  ...schemas,
   models,
   states: {
     needsApproval: {

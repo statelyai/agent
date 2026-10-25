@@ -39,7 +39,6 @@ import {
   type AgentMessage,
   type EventOf,
   assistantMessage,
-  createAgentSchemas,
   createTextLogic,
   setupAgent,
   userMessage,
@@ -197,13 +196,13 @@ export const draftEmail = createTextLogic({
   messages: ({ input }) => [...input.messages, userMessage(input.prompt)],
 });
 
-export const emailDrafterSchemas = createAgentSchemas({
+export const emailDrafterSchemas = {
   context: contextSchema,
   events: eventSchemas,
   output: outputSchema,
   // The library's own interaction protocol, not a per-machine restatement of
   // it: `label` / `events` / `textEvent`, read back with `getInteraction`.
-});
+};
 
 export const emailDrafterActors = {
   sendEmail: createAsyncLogic<{ sent: boolean }, { draft: EmailDraft }>({
@@ -218,7 +217,7 @@ export const emailDrafterActors = {
 };
 
 const agentSetup = setupAgent({
-  schemas: emailDrafterSchemas,
+  ...emailDrafterSchemas,
   models,
   actors: emailDrafterActors,
 });

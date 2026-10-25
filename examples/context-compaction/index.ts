@@ -46,7 +46,6 @@ import {
   type AgentMessage,
   type AgentRequestExecutor,
   assistantMessage,
-  createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
   setupAgent,
@@ -60,7 +59,7 @@ const models = {
   chat: openai("gpt-6-luna"),
 };
 
-export const contextCompactionSchemas = createAgentSchemas({
+export const contextCompactionSchemas = {
   context: z.object({
     // `messagesSchema` is a Standard Schema, and nesting one inside `z.object`
     // erases the element type, so the context schema keeps a typed `z.custom`.
@@ -92,7 +91,7 @@ export const contextCompactionSchemas = createAgentSchemas({
     /** Readable conversation: the running summary, then the recent turns. */
     transcript: z.string(),
   }),
-});
+};
 
 const RESPOND_SYSTEM =
   "You are a helpful, concise assistant in an ongoing conversation. " +
@@ -122,7 +121,7 @@ function renderMessages(messages: AgentMessage[], separator = "\n"): string {
 }
 
 const agentSetup = setupAgent({
-  schemas: contextCompactionSchemas,
+  ...contextCompactionSchemas,
   models,
   requests: {
     // Chat reply. Rendered as: [summary-as-system?] + recent messages.

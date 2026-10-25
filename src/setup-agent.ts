@@ -114,11 +114,10 @@ export type AgentDefaultMeta<TEventSchemas extends AgentEventSchemaInputMap> = A
 
 /**
  * A machine's full schema set — context, event payloads, machine input/
- * output, and state/transition meta — as returned by {@link createAgentSchemas}
- * and retained on `setupAgent(...)`'s `result.schemas` for runtime
- * validation (e.g. by `getAcceptedEvents` to attach event payload schemas). Unlike
- * `AgentSchemaConfig` (the input to `createAgentSchemas`), every field here
- * is required — `events`/`input`/`output`/`meta` default to empty/unknown
+ * output, and state/transition meta — retained on `setupAgent(...)`'s
+ * `result.schemas` for runtime validation (e.g. by `getAcceptedEvents` to
+ * attach event payload schemas). Unlike the schema fields `setupAgent` takes,
+ * every field here is required — `events`/`input`/`output`/`meta` default to empty/unknown
  * schemas when not supplied.
  */
 export interface AgentSchemaPack<
@@ -246,9 +245,6 @@ export type WithAgentEvents<T extends AgentEventSchemaInputMap> = Omit<
   [AGENT_USAGE_EVENT_TYPE]: StandardSchemaV1<AgentUsageEventPayload>;
 };
 
-/** @deprecated Use {@link WithAgentEvents}. */
-export type WithAgentUsageEvent<T extends AgentEventSchemaInputMap> = WithAgentEvents<T>;
-
 /**
  * Adds the reserved `'@agent.usage'` schema to an authored event map. A
  * user-declared entry under that key is rejected: the `@agent.*` namespace
@@ -324,12 +320,9 @@ function assertStateSchemasAreStandard(
 }
 
 /**
- * Builds a machine's {@link AgentSchemaPack} from a partial schema
- * declaration — only `context` is required; `events`/`input`/`output`/`meta`
- * default to empty/unknown schemas when omitted. Pass the result as
- * `setupAgent({ schemas })`'s `schemas` (or spread the individual fields
- * directly into `setupAgent({ context, events, ... })` — both forms are
- * accepted).
+ * Builds a machine's {@link AgentSchemaPack} from the schema fields of a
+ * `setupAgent` config — only `context` is required; `events`/`input`/`output`/
+ * `meta` default to empty/unknown schemas when omitted. @internal
  */
 export function createAgentSchemas<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
@@ -349,7 +342,7 @@ export function createAgentSchemas<
   >,
 ): AgentSchemaPack<
   TContextSchema,
-  WithAgentUsageEvent<TEventSchemas>,
+  WithAgentEvents<TEventSchemas>,
   TInputSchema,
   TOutputSchema,
   TMetaSchema,
@@ -359,7 +352,7 @@ export function createAgentSchemas<
     context: schemas.context,
     events: normalizeEventSchemas(
       withAgentUsageEventSchema(schemas.events),
-    ) as NormalizedEventSchemas<WithAgentUsageEvent<TEventSchemas>>,
+    ) as NormalizedEventSchemas<WithAgentEvents<TEventSchemas>>,
     input: schemas.input as TInputSchema,
     output: schemas.output as TOutputSchema,
     meta: schemas.meta as TMetaSchema,
@@ -458,7 +451,7 @@ type AgentAllActors<
 // present-but-empty `events: {}` makes `InferEvents<{}>` → `never`, setting the
 // machine's `TEvent` (and, cascading, its `context`) to `never`.
 type AgentSetupEventsSchema<TEventSchemas extends AgentEventSchemaInputMap> = {
-  events: NormalizedEventSchemas<WithAgentUsageEvent<TEventSchemas>>;
+  events: NormalizedEventSchemas<WithAgentEvents<TEventSchemas>>;
 };
 
 // Same omit-when-empty routing as AgentSetupEventsSchema, for `emitted`
@@ -542,7 +535,7 @@ type AgentSetupXStateConfig<
   delays?: NonNullable<AnySetupConfig["delays"]>;
 };
 
-// The public `setupAgent(config)` parameter type: schemas (packed or loose) plus models/actors/requests/actions/guards/delays.
+// The public `setupAgent(config)` parameter type: the schemas plus models/actors/requests/actions/guards/delays.
 type SetupAgentBaseConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends AgentEventSchemaInputMap,
@@ -554,26 +547,14 @@ type SetupAgentBaseConfig<
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
   TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
-> = (
-  | {
-      schemas: AgentSchemaPack<
-        TContextSchema,
-        TEventSchemas,
-        TInputSchema,
-        TOutputSchema,
-        TMetaSchema,
-        TEmittedSchemas
-      >;
-    }
-  | AgentSchemaConfig<
-      TContextSchema,
-      TEventSchemas,
-      TInputSchema,
-      TOutputSchema,
-      TMetaSchema,
-      TEmittedSchemas
-    >
-) & {
+> = AgentSchemaConfig<
+  TContextSchema,
+  TEventSchemas,
+  TInputSchema,
+  TOutputSchema,
+  TMetaSchema,
+  TEmittedSchemas
+> & {
   models?: TModels;
   actors?: TActors;
   /**
@@ -672,7 +653,7 @@ type SetupAgentResult<
   /** The retained schema pack ({@link AgentSchemaPack}) for host-side validation and tooling. Its `events` include the reserved `'@agent.usage'` entry setupAgent registers by default. */
   schemas: AgentSchemaPack<
     TContextSchema,
-    WithAgentUsageEvent<TEventSchemas>,
+    WithAgentEvents<TEventSchemas>,
     TInputSchema,
     TOutputSchema,
     TMetaSchema,
@@ -701,14 +682,10 @@ type SetupAgentResult<
  *
  * @example
  * ```ts
- * const schemas = createAgentSchemas({
+ * const agent = setupAgent({
  *   context: z.object({ topic: z.string(), joke: z.string().nullable() }),
  *   input: z.object({ topic: z.string() }),
  *   output: z.object({ joke: z.string() }),
- * });
- *
- * const agent = setupAgent({
- *   schemas,
  *   actors: { tellJoke },
  * });
  *
@@ -731,8 +708,8 @@ type SetupAgentResult<
  */
 export function setupAgent<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends AgentEventSchemaInputMap,
-  TActors extends { [K in keyof TActors]: AnyActorLogic },
+  TEventSchemas extends AgentEventSchemaInputMap = {},
+  TActors extends { [K in keyof TActors]: AnyActorLogic } = {},
   TRequestSchemas extends AgentRequestSchemaMap = {},
   TInputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
   TOutputSchema extends StandardSchemaV1 = StandardSchemaV1<NonReducibleUnknown>,
@@ -765,7 +742,7 @@ export function setupAgent<
   TEmittedSchemas,
   TStateSchemas
 > {
-  const schemas = normalizeAgentSchemas<
+  const schemas = createAgentSchemas<
     TContextSchema,
     TEventSchemas,
     TInputSchema,
@@ -981,74 +958,6 @@ export function createRequestActors<
       return [key, logic];
     }),
   ) as RequestActors<TRequestSchemas>;
-}
-
-// Accepts either form of setupAgent's schema config (`{ schemas: pack }` or a loose AgentSchemaConfig) and returns a resolved AgentSchemaPack.
-function normalizeAgentSchemas<
-  TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
-  TEventSchemas extends AgentEventSchemaInputMap,
-  TInputSchema extends StandardSchemaV1,
-  TOutputSchema extends StandardSchemaV1,
-  TMetaSchema extends StandardSchemaV1,
-  TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
->(
-  config:
-    | {
-        schemas: AgentSchemaPack<
-          TContextSchema,
-          TEventSchemas,
-          TInputSchema,
-          TOutputSchema,
-          TMetaSchema,
-          TEmittedSchemas
-        >;
-      }
-    | AgentSchemaConfig<
-        TContextSchema,
-        TEventSchemas,
-        TInputSchema,
-        TOutputSchema,
-        TMetaSchema,
-        TEmittedSchemas
-      >,
-): AgentSchemaPack<
-  TContextSchema,
-  WithAgentUsageEvent<TEventSchemas>,
-  TInputSchema,
-  TOutputSchema,
-  TMetaSchema,
-  TEmittedSchemas
-> {
-  if ("schemas" in config && config.schemas) {
-    // A pack built by `createAgentSchemas` already carries the reserved
-    // `'@agent.usage'` entry; a hand-built one gets it here (and is rejected if
-    // it declares its own).
-    return {
-      ...config.schemas,
-      events: normalizeEventSchemas(
-        withAgentUsageEventSchema(config.schemas.events),
-      ) as NormalizedEventSchemas<WithAgentUsageEvent<TEventSchemas>>,
-    };
-  }
-  const loose = config as AgentSchemaConfig<
-    TContextSchema,
-    TEventSchemas,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TEmittedSchemas
-  >;
-  return createAgentSchemas<
-    TContextSchema,
-    TEventSchemas,
-    TInputSchema,
-    TOutputSchema,
-    TMetaSchema,
-    TEmittedSchemas
-  >({
-    ...loose,
-    context: loose.context,
-  });
 }
 
 /**

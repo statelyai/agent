@@ -13,12 +13,7 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  createAgentSchemas,
-  setupAgent,
-  type AgentRequestExecutors,
-  runAgent,
-} from "@statelyai/agent";
+import { setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const REFUND_LIMIT = 100;
 const models = { agent: openai("gpt-6-luna") };
@@ -31,7 +26,7 @@ const actionSchema = z.union([
   z.object({ kind: z.literal("resolve"), message: z.string() }),
 ]);
 
-const schemas = createAgentSchemas({
+const schemas = {
   context: z.object({
     ticket: z.string(),
     action: actionSchema.nullable(),
@@ -48,10 +43,10 @@ const schemas = createAgentSchemas({
     // The sentinel, still carried out as machine output for the runner to detect.
     pending: z.number().nullable(),
   }),
-});
+};
 
 const agentSetup = setupAgent({
-  schemas,
+  ...schemas,
   models,
   requests: {
     decideAction: {

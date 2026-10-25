@@ -2,7 +2,6 @@ import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { createActor, toPromise } from "xstate";
 import {
-  createAgentSchemas,
   createTextLogic,
   createAgentRuntime,
   setupAgent,
@@ -35,11 +34,9 @@ describe('createTextLogic({ mode: "stream" })', () => {
 
   test("runAgent delivers chunks in order and assembles the full text via onChunk", async () => {
     const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string(), joke: z.string().nullable() }),
-        input: z.object({ topic: z.string() }),
-        output: z.object({ joke: z.string() }),
-      }),
+      context: z.object({ topic: z.string(), joke: z.string().nullable() }),
+      input: z.object({ topic: z.string() }),
+      output: z.object({ joke: z.string() }),
       actors: { streamJoke },
     });
     const machine = agent.createMachine({
@@ -106,10 +103,8 @@ describe('createTextLogic({ mode: "stream" })', () => {
 
   test("runAgent: a stream request with no streamText executor throws", async () => {
     const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string() }),
-        input: z.object({ topic: z.string() }),
-      }),
+      context: z.object({ topic: z.string() }),
+      input: z.object({ topic: z.string() }),
       actors: { streamJoke },
     });
     const machine = agent.createMachine({
@@ -254,11 +249,9 @@ describe('createTextLogic({ mode: "stream" })', () => {
     });
 
     const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ a: z.string().nullable(), b: z.string().nullable() }),
-        input: z.object({}),
-        output: z.object({ a: z.string(), b: z.string() }),
-      }),
+      context: z.object({ a: z.string().nullable(), b: z.string().nullable() }),
+      input: z.object({}),
+      output: z.object({ a: z.string(), b: z.string() }),
       actors: { streamA, streamB },
     });
 
@@ -551,10 +544,8 @@ describe("createTextLogic schema defaults", () => {
 
   test("setupAgent({ requests }) runs a request with an omitted output schema end to end", async () => {
     const agent = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string(), joke: z.string().nullable() }),
-        output: z.object({ joke: z.string() }),
-      }),
+      context: z.object({ topic: z.string(), joke: z.string().nullable() }),
+      output: z.object({ joke: z.string() }),
       requests: {
         tellJoke: {
           schemas: { input: z.object({ topic: z.string() }) },
@@ -612,9 +603,7 @@ describe("createTextLogic schema defaults", () => {
 describe("createTextLogic schema default typing", () => {
   test("omitted output infers string, declared output infers the schema type", () => {
     const setupWithDefaults = setupAgent({
-      schemas: createAgentSchemas({
-        context: z.object({ topic: z.string(), score: z.number() }),
-      }),
+      context: z.object({ topic: z.string(), score: z.number() }),
       requests: {
         tellJoke: {
           schemas: { input: z.object({ topic: z.string() }) },

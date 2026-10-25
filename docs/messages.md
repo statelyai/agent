@@ -60,7 +60,7 @@ context: z.object({
 }),
 ```
 
-`messagesSchema` is the same validator as a Standard Schema, for `fromConfig` and `createAgentSchemas`.
+`messagesSchema` is the same validator as a Standard Schema, for `fromConfig` and a `setupAgent` context schema.
 
 This is deliberately transparent: the AI SDK executor returns AI SDK messages, another framework returns its own messages, and the machine stores those values unchanged. Tool calls and tool results remain part of that framework-native chat log.
 

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
-  createAgentSchemas,
   createTextLogic,
   getAcceptedEvents,
   parseAgentEvent,
@@ -11,7 +10,7 @@ import {
 } from "./index.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 
-const schemas = createAgentSchemas({
+const schemas = {
   input: z.object({ maxTokens: z.number() }),
   context: z.object({
     notes: z.array(z.string()),
@@ -20,11 +19,11 @@ const schemas = createAgentSchemas({
     seen: z.array(z.string()),
   }),
   output: z.object({ notes: z.array(z.string()), tokens: z.number(), stoppedBy: z.string() }),
-  // No `'@agent.usage'` entry: setupAgent/createAgentSchemas register it (with
+  // No `'@agent.usage'` entry: setupAgent registers it (with
   // its real payload schema) by default, so the handler below is typed without
   // the machine declaring anything.
   events: { APPROVE: z.object({}) },
-});
+};
 
 const researchStep = createTextLogic({
   name: "researchStep",
@@ -33,7 +32,7 @@ const researchStep = createTextLogic({
   prompt: ({ input }) => `Turn ${input.turn}.`,
 });
 
-const agent = setupAgent({ schemas, actors: { researchStep } });
+const agent = setupAgent({ ...schemas, actors: { researchStep } });
 
 /**
  * The canonical budget-as-a-guard shape: a machine-level `'@agent.usage'`
@@ -125,14 +124,14 @@ describe("@agent.usage (reserved per-call usage event)", () => {
   });
 
   test("a decision call reports its usage with kind 'decision'", async () => {
-    const decisionSchemas = createAgentSchemas({
+    const decisionSchemas = {
       context: z.object({ tokens: z.number(), kinds: z.array(z.string()) }),
       output: z.object({ tokens: z.number(), kinds: z.array(z.string()) }),
       events: {
         GO: z.object({}),
       },
-    });
-    const decisionAgent = setupAgent({ schemas: decisionSchemas });
+    };
+    const decisionAgent = setupAgent({ ...decisionSchemas });
     const machine = decisionAgent.createMachine({
       context: () => ({ tokens: 0, kinds: [] }),
       on: {
@@ -177,11 +176,11 @@ describe("@agent.usage (reserved per-call usage event)", () => {
   });
 
   test("a machine that declares no handler is untouched", async () => {
-    const plainSchemas = createAgentSchemas({
+    const plainSchemas = {
       context: z.object({ note: z.string() }),
       output: z.object({ note: z.string() }),
-    });
-    const plainAgent = setupAgent({ schemas: plainSchemas, actors: { researchStep } });
+    };
+    const plainAgent = setupAgent({ ...plainSchemas, actors: { researchStep } });
     const machine = plainAgent.createMachine({
       context: { note: "" },
       initial: "researching",
@@ -246,11 +245,11 @@ describe("@agent.usage (reserved per-call usage event)", () => {
   });
 
   test("a wildcard-only machine DOES receive it: `on: { '*' }` matches, per plain XState semantics", async () => {
-    const wildcardSchemas = createAgentSchemas({
+    const wildcardSchemas = {
       context: z.object({ note: z.string(), wildcards: z.array(z.string()) }),
       output: z.object({ note: z.string(), wildcards: z.array(z.string()) }),
-    });
-    const wildcardAgent = setupAgent({ schemas: wildcardSchemas, actors: { researchStep } });
+    };
+    const wildcardAgent = setupAgent({ ...wildcardSchemas, actors: { researchStep } });
     const wildcardMachine = wildcardAgent.createMachine({
       context: { note: "", wildcards: [] },
       on: {
@@ -287,12 +286,12 @@ describe("@agent.usage (reserved per-call usage event)", () => {
   });
 
   test("a machine declaring BOTH a wildcard and an explicit handler still receives it", async () => {
-    const bothSchemas = createAgentSchemas({
+    const bothSchemas = {
       context: z.object({ tokens: z.number(), wildcards: z.array(z.string()) }),
       output: z.object({ tokens: z.number(), wildcards: z.array(z.string()) }),
       events: {},
-    });
-    const bothAgent = setupAgent({ schemas: bothSchemas, actors: { researchStep } });
+    };
+    const bothAgent = setupAgent({ ...bothSchemas, actors: { researchStep } });
     const bothMachine = bothAgent.createMachine({
       context: { tokens: 0, wildcards: [] },
       on: {
@@ -333,8 +332,8 @@ describe("@agent.usage (reserved per-call usage event)", () => {
 });
 
 describe("@agent.usage registration (declared by setupAgent, not by the machine)", () => {
-  test("createAgentSchemas registers the event with its payload schema", () => {
-    const pack = createAgentSchemas({ context: z.object({ n: z.number() }) });
+  test("setupAgent registers the event with its payload schema", () => {
+    const pack = setupAgent({ context: z.object({ n: z.number() }) }).schemas;
 
     expect(Object.keys(pack.events)).toContain(AGENT_USAGE_EVENT_TYPE);
 
@@ -408,13 +407,6 @@ describe("@agent.usage registration (declared by setupAgent, not by the machine)
   });
 
   test("declaring it yourself is rejected: the '@agent.' namespace is reserved", () => {
-    expect(() =>
-      createAgentSchemas({
-        context: z.object({ n: z.number() }),
-        events: { [AGENT_USAGE_EVENT_TYPE]: z.object({ usage: z.object({}) }) },
-      }),
-    ).toThrow(/reserved '@agent\.' namespace/);
-
     expect(() =>
       setupAgent({
         context: z.object({ n: z.number() }),

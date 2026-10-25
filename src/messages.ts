@@ -151,7 +151,7 @@ function validatePartsArray(
  * `tool`) and that `content` is either a string (where the role allows it) or
  * an array of role-appropriate parts whose required fields and media payloads
  * have the right runtime types (extra fields are allowed). Use it directly as
- * a context schema's `messages` field when authoring with `createAgentSchemas`
+ * a context schema's `messages` field when authoring with `setupAgent`
  * or `fromConfig`. A zod object cannot nest a Standard Schema, so in a zod
  * context schema write `z.custom<AgentMessage[]>(isAgentMessages)`, which runs
  * this same validator (see {@link isAgentMessages}).

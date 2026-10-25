@@ -4,7 +4,6 @@ import { createActor, toPromise } from "xstate";
 import {
   AGENT_TRACE_SCHEMA_VERSION,
   AGENT_USAGE_EVENT_TYPE,
-  createAgentSchemas,
   createTextLogic,
   provideExecutors,
   setupAgent,
@@ -29,17 +28,17 @@ function stripEnvelope(event: AgentTraceEvent): Record<string, unknown> {
 
 describe("provideExecutors", () => {
   test("binds a mode:'generate' text source to generateText (end-to-end createActor run, typed output)", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ topic: z.string(), draft: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ draft: z.string() }),
-    });
+    };
     const draftText = createTextLogic({
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
       model: "test-model",
       prompt: ({ input }) => input.topic,
     });
-    const agent = setupAgent({ schemas, actors: { draftText } });
+    const agent = setupAgent({ ...schemas, actors: { draftText } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ topic: input.topic, draft: null }),
       initial: "drafting",
@@ -72,18 +71,18 @@ describe("provideExecutors", () => {
   });
 
   test("binds a mode:'stream' text source to streamText and threads onChunk", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ topic: z.string(), streamed: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ streamed: z.string() }),
-    });
+    };
     const streamDraft = createTextLogic({
       mode: "stream",
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
       model: "test-model",
       prompt: ({ input }) => input.topic,
     });
-    const agent = setupAgent({ schemas, actors: { streamDraft } });
+    const agent = setupAgent({ ...schemas, actors: { streamDraft } });
     const machine = agent.createMachine({
       context: ({ input }) => ({ topic: input.topic, streamed: null }),
       initial: "streaming",
@@ -122,12 +121,12 @@ describe("provideExecutors", () => {
   });
 
   test("binds an agent.decide source to decide and auto-delivers the chosen event", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({}),
       input: z.object({}),
       events: { ATTACK: z.object({}), FLEE: z.object({}) },
-    });
-    const agent = setupAgent({ schemas });
+    };
+    const agent = setupAgent({ ...schemas });
     const machine = agent.createMachine({
       context: () => ({}),
       initial: "deciding",
@@ -157,12 +156,12 @@ describe("provideExecutors", () => {
   });
 
   test("throws at bind time when a required executor kind is missing", () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({}),
       input: z.object({}),
       events: { ATTACK: z.object({}) },
-    });
-    const agent = setupAgent({ schemas });
+    };
+    const agent = setupAgent({ ...schemas });
     const machine = agent.createMachine({
       context: () => ({}),
       initial: "deciding",
@@ -184,17 +183,17 @@ describe("provideExecutors", () => {
   });
 
   test("merges options.actors before binding; an executor-bound override is left as-is", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ draft: z.string().nullable() }),
       input: z.object({}),
       output: z.object({ draft: z.string() }),
-    });
+    };
     const draftText = createTextLogic({
       schemas: { input: z.object({}), output: z.string() },
       model: "test-model",
       prompt: "draft",
     });
-    const agent = setupAgent({ schemas, actors: { draftText } });
+    const agent = setupAgent({ ...schemas, actors: { draftText } });
     const machine = agent.createMachine({
       context: () => ({ draft: null }),
       initial: "drafting",
@@ -232,18 +231,18 @@ describe("provideExecutors onTrace / traceTransitions", () => {
   // A tiny one-request machine, reused across the parity tests. The invoke
   // carries an explicit `id` so both paths mint the same request id.
   const buildStreamMachine = () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ topic: z.string(), streamed: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ streamed: z.string() }),
-    });
+    };
     const streamDraft = createTextLogic({
       mode: "stream",
       schemas: { input: z.object({ topic: z.string() }), output: z.string() },
       model: "test-model",
       prompt: ({ input }) => input.topic,
     });
-    const agent = setupAgent({ schemas, actors: { streamDraft } });
+    const agent = setupAgent({ ...schemas, actors: { streamDraft } });
     return agent.createMachine({
       context: ({ input }) => ({ topic: input.topic, streamed: null }),
       initial: "streaming",
@@ -336,11 +335,11 @@ describe("provideExecutors onTrace / traceTransitions", () => {
       model: "test-model",
       prompt: ({ input }) => input.topic,
     });
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ topic: z.string() }),
       input: z.object({ topic: z.string() }),
-    });
-    const machine = setupAgent({ schemas, actors: { draftText } }).createMachine({
+    };
+    const machine = setupAgent({ ...schemas, actors: { draftText } }).createMachine({
       version: "7",
       context: ({ input }: { input: { topic: string } }) => ({ topic: input.topic }),
       initial: "drafting",
@@ -402,8 +401,9 @@ describe("provideExecutors onTrace / traceTransitions", () => {
 });
 
 describe("provideExecutors + '@agent.usage'", () => {
-  const usageSchemas = createAgentSchemas({
+  const usageSchemas = {
     input: z.object({ maxTokens: z.number() }),
+    events: {},
     context: z.object({
       notes: z.array(z.string()),
       tokens: z.number(),
@@ -411,14 +411,14 @@ describe("provideExecutors + '@agent.usage'", () => {
       seen: z.array(z.string()),
     }),
     output: z.object({ notes: z.array(z.string()), tokens: z.number() }),
-  });
+  };
   const researchStep = createTextLogic({
     name: "researchStep",
     schemas: { input: z.object({ turn: z.number() }), output: z.string() },
     model: "test-model",
     prompt: ({ input }) => `Turn ${input.turn}.`,
   });
-  const usageAgent = setupAgent({ schemas: usageSchemas, actors: { researchStep } });
+  const usageAgent = setupAgent({ ...usageSchemas, actors: { researchStep } });
 
   const buildBudgetMachine = (declareUsage: boolean) =>
     usageAgent.createMachine({
@@ -483,11 +483,11 @@ describe("provideExecutors + '@agent.usage'", () => {
   });
 
   test("a wildcard-only machine DOES receive it (plain XState wildcard semantics, as in runAgent)", async () => {
-    const wildcardSchemas = createAgentSchemas({
+    const wildcardSchemas = {
       context: z.object({ tokens: z.number(), seen: z.array(z.string()) }),
       output: z.object({ tokens: z.number(), seen: z.array(z.string()) }),
-    });
-    const wildcardAgent = setupAgent({ schemas: wildcardSchemas, actors: { researchStep } });
+    };
+    const wildcardAgent = setupAgent({ ...wildcardSchemas, actors: { researchStep } });
     const wildcardMachine = wildcardAgent.createMachine({
       context: { tokens: 0, seen: [] },
       on: {
@@ -520,12 +520,12 @@ describe("provideExecutors + '@agent.usage'", () => {
   });
 
   test("a decision call's usage reaches the machine too", async () => {
-    const decisionSchemas = createAgentSchemas({
+    const decisionSchemas = {
       context: z.object({ tokens: z.number(), kinds: z.array(z.string()) }),
       output: z.object({ tokens: z.number(), kinds: z.array(z.string()) }),
       events: { GO: z.object({}) },
-    });
-    const decisionAgent = setupAgent({ schemas: decisionSchemas });
+    };
+    const decisionAgent = setupAgent({ ...decisionSchemas });
     const machine = decisionAgent.createMachine({
       context: () => ({ tokens: 0, kinds: [] }),
       on: {
@@ -573,12 +573,12 @@ describe("provideExecutors recursive child binding", () => {
   });
 
   const buildGrandchild = () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ line: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ line: z.string() }),
-    });
-    return setupAgent({ schemas, actors: { childText } }).createMachine({
+    };
+    return setupAgent({ ...schemas, actors: { childText } }).createMachine({
       context: { line: null },
       initial: "writing",
       states: {
@@ -606,13 +606,13 @@ describe("provideExecutors recursive child binding", () => {
 
   const buildParent = () => {
     const grandchild = buildGrandchild();
-    const childSchemas = createAgentSchemas({
+    const childSchemas = {
       context: z.object({ line: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ line: z.string() }),
-    });
+    };
     const child = setupAgent({
-      schemas: childSchemas,
+      ...childSchemas,
       actors: { grandchild },
     }).createMachine({
       context: { line: null },
@@ -636,12 +636,12 @@ describe("provideExecutors recursive child binding", () => {
       },
     });
 
-    const parentSchemas = createAgentSchemas({
+    const parentSchemas = {
       context: z.object({ line: z.string().nullable() }),
       input: z.object({}),
       output: z.object({ line: z.string() }),
-    });
-    return setupAgent({ schemas: parentSchemas, actors: { child } }).createMachine({
+    };
+    return setupAgent({ ...parentSchemas, actors: { child } }).createMachine({
       context: { line: null },
       initial: "delegating",
       states: {
@@ -710,12 +710,12 @@ describe("provideExecutors recursive child binding", () => {
       mode: "stream",
       prompt: ({ input }) => input.topic,
     });
-    const childSchemas = createAgentSchemas({
+    const childSchemas = {
       context: z.object({ line: z.string().nullable() }),
       input: z.object({ topic: z.string() }),
       output: z.object({ line: z.string() }),
-    });
-    const child = setupAgent({ schemas: childSchemas, actors: { streamLogic } }).createMachine({
+    };
+    const child = setupAgent({ ...childSchemas, actors: { streamLogic } }).createMachine({
       context: { line: null },
       initial: "writing",
       states: {
@@ -736,12 +736,12 @@ describe("provideExecutors recursive child binding", () => {
       },
     });
 
-    const parentSchemas = createAgentSchemas({
+    const parentSchemas = {
       context: z.object({ line: z.string().nullable() }),
       input: z.object({}),
       output: z.object({ line: z.string() }),
-    });
-    const parent = setupAgent({ schemas: parentSchemas, actors: { child } }).createMachine({
+    };
+    const parent = setupAgent({ ...parentSchemas, actors: { child } }).createMachine({
       context: { line: null },
       initial: "delegating",
       states: {

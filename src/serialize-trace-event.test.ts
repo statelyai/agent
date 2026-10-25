@@ -4,7 +4,6 @@ import {
   AgentDecisionExhaustedError,
   AgentError,
   AgentInvalidEventPayloadError,
-  createAgentSchemas,
   createTextLogic,
   serializeTraceEvent,
   setupAgent,
@@ -260,12 +259,12 @@ describe("serializeTraceEvent", () => {
   });
 
   test("serializes a real runAgent trace stream to JSONL", async () => {
-    const schemas = createAgentSchemas({
+    const schemas = {
       context: z.object({ draft: z.string().nullable() }),
       output: z.object({ draft: z.string() }),
-    });
+    };
     const agent = setupAgent({
-      schemas,
+      ...schemas,
       actors: {
         draft: createTextLogic({ model: "test-model", prompt: () => "draft it" }),
       },

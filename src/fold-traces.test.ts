@@ -4,7 +4,6 @@ import { createActor, createMachine } from "xstate";
 import { decideNext } from "./decide-next.js";
 import type { AgentDecisionExecutor } from "./decision.js";
 import {
-  createAgentSchemas,
   serializeTraceEvent,
   setupAgent,
   traceTransitions,
@@ -13,13 +12,13 @@ import {
 } from "./index.js";
 import { foldTraces } from "./testing/index.js";
 
-const schemas = createAgentSchemas({
+const schemas = {
   context: z.object({ limit: z.number() }),
   input: z.object({}),
   events: { refund: z.object({ amount: z.number() }), escalate: z.object({}) },
-});
+};
 
-const desk = setupAgent({ schemas }).createMachine({
+const desk = setupAgent({ ...schemas }).createMachine({
   context: { limit: 50 },
   initial: "deciding",
   states: {
