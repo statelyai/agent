@@ -323,7 +323,10 @@ describe("explorePaths — invoke outcome branching", () => {
   });
 
   test("text requests branch over outputs too, resolving as text results", async () => {
-    const agent = setupAgent({ context: z.object({}) });
+    const agent = setupAgent({
+      context: z.object({}),
+      requests: { ask: { schemas: { output: z.string() }, model: "quick", prompt: "yes or no?" } },
+    });
     const machine = agent.createMachine({
       context: {},
       initial: "asking",
@@ -331,12 +334,9 @@ describe("explorePaths — invoke outcome branching", () => {
         asking: {
           invoke: {
             id: "ask",
-            src: "agent.generateText",
-            input: () => ({ model: "quick", prompt: "yes or no?" }),
+            src: "ask",
             onDone: ({ output }) =>
-              (output as { result: unknown }).result === "yes"
-                ? { target: "yes" }
-                : { target: "no" },
+              output.result === "yes" ? { target: "yes" } : { target: "no" },
           },
         },
         yes: { type: "final" },
@@ -344,12 +344,12 @@ describe("explorePaths — invoke outcome branching", () => {
       },
     });
     const report = await explorePaths(machine, {
-      outputs: { "agent.generateText": ["yes", "no"] },
+      outputs: { ask: ["yes", "no"] },
     });
     expect(report.terminals.map((t) => t.state)).toEqual(["yes", "no"]);
 
     // A one-element list resolves straight through, still as `{ result, messages }`.
-    const canned = await explorePaths(machine, { outputs: { "agent.generateText": ["yes"] } });
+    const canned = await explorePaths(machine, { outputs: { ask: ["yes"] } });
     expect(canned.terminals).toEqual([{ status: "done", path: [], state: "yes" }]);
   });
 });

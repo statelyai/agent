@@ -79,7 +79,7 @@ In `onDone`, `output` is `{ result, messages }`. `output.result` is already vali
 
 ### Narrowing an unknown output outside the machine
 
-The `parseOutput(schema, output)` helper validates a value against a schema and returns the parsed value. It throws on a mismatch. Use it in host code that holds a raw, still-untyped output, such as a value from a persisted snapshot or an inline `agent.generateText` result typed `unknown`. You never need it inside `onDone`.
+The `parseOutput(schema, output)` helper validates a value against a schema and returns the parsed value. It throws on a mismatch. Use it in host code that holds a raw, still-untyped output, such as a value from a persisted snapshot. You never need it inside `onDone`.
 
 ```ts
 import { parseOutput } from "@statelyai/agent";

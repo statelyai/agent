@@ -14,7 +14,6 @@ import { bindRequestExecutor, parseProviderOutput } from "./index.js";
 import { type AgentRequest } from "./index.js";
 import {
   providerOutputSchema,
-  builtinTextActors,
   executeAgentTextRequest,
   type AgentRequestExecutorInfo,
 } from "./text-logic.js";
@@ -653,40 +652,6 @@ describe("createTextLogic schema default typing", () => {
 // `prompt` and `messages` are mutually exclusive at runtime: exactly one input
 // source per text request, matching what AgentExecutorTextRequest types.
 describe("agent text request input sources", () => {
-  const generateText = builtinTextActors["agent.generateText"];
-
-  test("rejects a request with both a non-empty prompt and non-empty messages", () => {
-    expect(() =>
-      generateText.request({
-        name: "tellJoke",
-        model: "test-model",
-        prompt: "Tell a joke.",
-        messages: [{ role: "user", content: "Tell a joke." }],
-      } as AgentTextRequest),
-    ).toThrow(/'tellJoke' has both a non-empty `prompt` and `messages`/);
-  });
-
-  test("rejects a request with neither", () => {
-    expect(() => generateText.request({ model: "test-model" } as AgentTextRequest)).toThrow(
-      /has neither a non-empty `prompt` nor `messages`/,
-    );
-  });
-
-  test("accepts a prompt-only request", () => {
-    expect(
-      generateText.request({ model: "test-model", prompt: "Hi" } as AgentTextRequest).prompt,
-    ).toBe("Hi");
-  });
-
-  test("accepts a messages-only request", () => {
-    expect(
-      generateText.request({
-        model: "test-model",
-        messages: [{ role: "user", content: "Hi" }],
-      } as AgentTextRequest).messages,
-    ).toHaveLength(1);
-  });
-
   test("createTextLogic lowering throws when both sources resolve", () => {
     const both = createTextLogic({
       name: "both",

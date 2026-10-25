@@ -61,7 +61,7 @@ state target, a missing guard/action implementation, an `onDone` on an
 
 ### Reserved key prefix
 
-The `agent.` prefix belongs to the library. `setupAgent` throws when a `requests` or `actors` key starts with `agent.`, including the builtin names `agent.generateText`, `agent.streamText`, and `agent.decide`. Rename the key without the prefix. To override a builtin deliberately, do it on the created machine with `machine.provide({ actors })`.
+The `agent.` prefix belongs to the library. `setupAgent` throws when a `requests` or `actors` key starts with `agent.`, including the builtin name `agent.decide`. Rename the key without the prefix. To override a builtin deliberately, do it on the created machine with `machine.provide({ actors })`.
 
 ## Expressions
 

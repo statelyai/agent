@@ -33,7 +33,7 @@ import {
 } from "./decision.js";
 import { isRecord } from "./internal/is-record.js";
 import { getJsonSchemaSync } from "./utils.js";
-import { isTextLogic, type AgentTextResult } from "./text-logic.js";
+import { DECIDE_ACTOR, isTextLogic, type AgentTextResult } from "./text-logic.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import {
   getPendingInvokes,
@@ -44,10 +44,6 @@ import {
   type AgentStep,
   type AgentStepRequest,
 } from "./steps.js";
-
-// Well-known builtin invoke srcs (kept local to avoid widening the public
-// surface of text-logic/decision internals).
-const DECIDE_SRC = "agent.decide";
 
 // ─── Diagnostics ───
 
@@ -185,7 +181,7 @@ function hasNonEmptyOn(config: AnyConfig): boolean {
 // builtin src string or by a registered/direct-object DecisionLogic.
 function isDecisionInvoke(src: unknown, actors: Record<string, AnyActorLogic>): boolean {
   if (typeof src === "string") {
-    return src === DECIDE_SRC || isDecisionLogic(actors[src]);
+    return src === DECIDE_ACTOR || isDecisionLogic(actors[src]);
   }
   return isDecisionLogic(src);
 }
@@ -484,7 +480,7 @@ export class AgentLintError extends AgentError {
  * by-`src` map of FIFO queues, consumed in the order the machine reaches the
  * requests:
  * - `text` — output values for text requests, keyed by request src (the
- *   `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`).
+ *   `setupAgent({ requests })` key, or a `createTextLogic` actor's key).
  * - `decisions` — the {@link ChosenEvent} to apply for a decision request,
  *   keyed by decision src (usually `agent.decide`). An invoke whose src is an
  *   inline logic object has only an auto-generated src, so its queue may be
@@ -1000,7 +996,7 @@ export interface ExplorePathsOptions {
   maxNodes?: number;
   /**
    * Every output to try per src: a text request's src (the
-   * `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`)
+   * `setupAgent({ requests })` key, or a `createTextLogic` actor's key)
    * or any other invoked actor's src. A one-element list is a canned output,
    * reused every time that src is reached; a text request resolves with it as
    * its `result` (`{ result, messages: [] }`). A src with two or more outputs

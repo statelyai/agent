@@ -38,12 +38,10 @@ import {
 } from "./utils.js";
 import { getAcceptedEvents, getHumanEventTypes, type AgentSchemas } from "./events.js";
 import {
-  GENERATE_TEXT_ACTOR,
   getCallFinishReason,
   getCallUsage,
   isTextLogic,
   normalizeGeneratorResult,
-  STREAM_TEXT_ACTOR,
   type AgentCallUsage,
   type AgentFinishReason,
   type AgentUsage,
@@ -1198,13 +1196,10 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
     // takes its `actors:` registration key: the invoke `src` IS the
     // developer-facing handle, so name-addressed surfaces (runSeam's
     // `{ request }`, script routing, host mocks) work without a `name` in the
-    // config. The `agent.*` builtins keep their documented nameless requests —
-    // their `src` is the builtin id, not a handle the author chose.
+    // config.
     const request: AgentTextRequest = {
       ...rawRequest,
-      name:
-        rawRequest.name ??
-        (src !== "" && src !== GENERATE_TEXT_ACTOR && src !== STREAM_TEXT_ACTOR ? src : id || src),
+      name: rawRequest.name ?? (src || id),
     };
     const executor = logic.mode === "stream" ? runCtx.streamText : runCtx.generateText;
     if (!executor) {
