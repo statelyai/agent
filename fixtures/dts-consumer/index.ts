@@ -28,7 +28,6 @@ export {
 } from "@statelyai/agent";
 export { createAiSdkExecutors, parseModelRef } from "@statelyai/agent/ai-sdk";
 export { createTanStackAiExecutors } from "@statelyai/agent/tanstack-ai";
-export { createToolLoopMachine, type CreateRouterMachineConfig } from "@statelyai/agent/machines";
 export {
   createOtelTraceHandler,
   type OtelTraceHandler,

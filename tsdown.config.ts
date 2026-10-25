@@ -5,7 +5,6 @@ export default defineConfig({
     index: "src/index.ts",
     "ai-sdk": "src/ai-sdk/index.ts",
     log: "src/log/index.ts",
-    machines: "src/machines/index.ts",
     openai: "src/openai/index.ts",
     otel: "src/otel/index.ts",
     "tanstack-ai": "src/tanstack-ai/index.ts",

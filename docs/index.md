@@ -39,7 +39,6 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | `@statelyai/agent/ai-sdk`      | `createAiSdkExecutors`: the Vercel AI SDK adapter, for language and decision models        |
 | `@statelyai/agent/openai`      | Executors over the raw `openai` package                                                    |
 | `@statelyai/agent/tanstack-ai` | `createTanStackAiExecutors`, the TanStack AI adapter                                       |
-| `@statelyai/agent/machines`    | Preset machines: tool loop, sequential, parallel, router, supervisor, handoff              |
 | `@statelyai/agent/otel`        | OpenTelemetry trace handler                                                                |
 | `@statelyai/agent/validate`    | JSON workflow config validation and `verifyAgentConfig` pre-run gates                      |
 

@@ -161,11 +161,9 @@ answering: {
 
 Build these parts by hand only when the machine owns the loop, such as in a ReAct-style machine or when replaying a transcript. With a host-run tool loop, the intermediate calls stay inside the executor. See [Messages](messages.md).
 
-## Presets and ejecting
+## When the loop needs states
 
-`createToolLoopMachine` from `@statelyai/agent/machines` is a prebuilt version of the machine above: one `answering` state and one tool-carrying request. See [Preset machines](machines-presets.md) for its options, including `maxSteps`.
-
-Eject from the preset when the tool loop needs machine states of its own:
+The machine above is the whole tool loop: one `answering` state and one tool-carrying request. Give the loop machine states of its own when it needs them:
 
 - To model approval as machine states, with approve, edit, and reject steps that persist and resume, eject to [examples/review-tool-calls](../examples/review-tool-calls/index.ts).
 - To model each think, act, and observe turn as its own transition, use explicit request, tool, and observation states.
@@ -177,4 +175,3 @@ Eject from the preset when the tool loop needs machine states of its own:
 - Read more about [Text requests](text-requests.md), the request a tool attaches to, including structured and streaming output.
 - Read more about [Hosts](hosts.md), including executors, model aliases, and writing your own adapter.
 - Read more about [Messages](messages.md), the message model that tool parts live in.
-- Read more about [Preset machines](machines-presets.md), including `createToolLoopMachine`.
