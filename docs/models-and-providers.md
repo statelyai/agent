@@ -75,7 +75,7 @@ There are five integration paths. The first two both go through `createAiSdkExec
 
 ## Host-owned model settings
 
-<!-- settings and model-entry precedence from src/ai-sdk/index.ts and src/ai-sdk/mappers.ts -->
+<!-- settings and model-entry precedence from src/ai-sdk/index.ts (textParams), src/ai-sdk/mappers.ts and src/internal/model-source.ts (resolveModelEntry, resolveHostSettings) -->
 
 Pass provider-specific settings to `createAiSdkExecutors`, not the machine. An object applies to every call; a function can vary settings by request. A model entry may also pair one model with its defaults.
 

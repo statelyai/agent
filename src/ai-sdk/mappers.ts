@@ -8,18 +8,14 @@ import {
   type Tool,
   type ToolSet,
 } from "ai";
-import {
-  getAgentOutputMode,
-  type AgentCallUsage,
-  type AgentFinishReason,
-  type AgentTextRequest,
-} from "../text-logic.js";
+import type { AgentCallUsage, AgentFinishReason, AgentTextRequest } from "../text-logic.js";
 import { isStandardSchema } from "../utils.js";
-import { decisionOptionIds, renderDecisionAttempts } from "../decision.js";
+import { decisionOptionIds } from "../decision.js";
 import type { AgentDecisionOption, AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools, ChosenEvent, StandardSchemaV1 } from "../types.js";
 import { isRecord } from "../internal/is-record.js";
+import { decisionAttemptMessages, defined, eventToolDescription } from "../internal/adapter-kit.js";
 
 /**
  * One call's usage as the adapter reports it: the AI SDK's `LanguageModelUsage`
@@ -145,13 +141,6 @@ export function toAgentFinishReason(finishReason: FinishReason): AgentFinishReas
   return finishReason === "error" ? "other" : finishReason;
 }
 
-/** Drops keys whose value is `undefined`, so a spread cannot erase what it lands on. */
-export function defined<T extends object>(settings: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(settings).filter(([, value]) => value !== undefined),
-  ) as Partial<T>;
-}
-
 /**
  * AI SDK request-mapping settings shared by `generateText`/`streamText`.
  * `AgentTextRequest.messages` (`AgentMessage[]`) and AI SDK's `ModelMessage[]`
@@ -208,13 +197,6 @@ export function toAiSdkToolChoice(toolChoice: AgentTextRequest["toolChoice"]) {
     : toolChoice;
 }
 
-/** `true` when the request should use AI SDK structured `Output.object`. */
-export function isStructuredOutputRequest(
-  request: Pick<AgentTextRequest, "outputSchema">,
-): boolean {
-  return getAgentOutputMode(request.outputSchema) === "structured";
-}
-
 /**
  * Extracts the first complete top-level JSON value from `text`, or returns
  * `undefined` when there is nothing to repair (no complete value, or the value
@@ -266,7 +248,7 @@ export function toAiSdkEventTools(events: AgentEventDescriptor[]): ToolSet {
     events.map((event) => [
       event.toolName,
       tool({
-        description: `Choose the '${event.type}' move.`,
+        description: eventToolDescription(event),
         inputSchema: event.inputSchema
           ? (event.inputSchema as FlexibleSchema<unknown>)
           : unknownSchema,
@@ -339,8 +321,7 @@ export function unofferedOption(answer: string, ids: readonly string[]): ChosenE
 
 /**
  * Messages for a decision request, with prior failed `attempts` (§2.6)
- * rendered as appended user messages (via core's {@link renderDecisionAttempts})
- * so retries converge. Core never rewrites prompts — this is adapter business.
+ * rendered as appended user messages so retries converge.
  */
 export function toDecisionMessages(
   request: Pick<AgentDecisionRequest, "messages" | "prompt" | "events" | "attempts" | "options">,
@@ -351,12 +332,9 @@ export function toDecisionMessages(
 
   // A prompt-authored decision that is retrying must not lose its original
   // prompt when the request is lowered to messages for attempt feedback.
-  const messages: ModelMessage[] = [
+  return [
     ...((request.messages as ModelMessage[] | undefined) ??
       (request.prompt !== undefined ? [{ role: "user" as const, content: request.prompt }] : [])),
+    ...decisionAttemptMessages(request),
   ];
-  for (const attempt of renderDecisionAttempts(request)) {
-    messages.push({ role: "user", content: attempt.content as string });
-  }
-  return messages;
 }
