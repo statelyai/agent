@@ -13,10 +13,10 @@ import { tool, type Experimental_DecisionModel } from "ai";
 import { resolveDecision, type AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools } from "../types.js";
+import { isStructuredOutputSchema } from "../text-logic.js";
 import { createAiSdkExecutors, parseModelRef } from "./index.js";
 import {
   extractFirstJsonValue,
-  isStructuredOutputRequest,
   toAiSdkCallSettings,
   toAiSdkEventTools,
   toAiSdkToolChoice,
@@ -143,17 +143,17 @@ describe("toAiSdkTools", () => {
   });
 });
 
-describe("isStructuredOutputRequest", () => {
+describe("isStructuredOutputSchema (the adapter's structured-output switch)", () => {
   test("is true for an object-shaped outputSchema", () => {
-    expect(isStructuredOutputRequest({ outputSchema: z.object({ ok: z.boolean() }) })).toBe(true);
+    expect(isStructuredOutputSchema(z.object({ ok: z.boolean() }))).toBe(true);
   });
 
   test("is false with no outputSchema", () => {
-    expect(isStructuredOutputRequest({})).toBe(false);
+    expect(isStructuredOutputSchema(undefined)).toBe(false);
   });
 
   test("is false for a non-object outputSchema", () => {
-    expect(isStructuredOutputRequest({ outputSchema: z.string() })).toBe(false);
+    expect(isStructuredOutputSchema(z.string())).toBe(false);
   });
 
   test("is true for union and array outputSchemas (no top-level type)", () => {
@@ -162,11 +162,9 @@ describe("isStructuredOutputRequest", () => {
       z.object({ tool: z.literal("x"), n: z.number() }),
       z.object({ tool: z.literal("y"), s: z.string() }),
     ]);
-    expect(isStructuredOutputRequest({ outputSchema: union })).toBe(true);
-    expect(isStructuredOutputRequest({ outputSchema: discriminated })).toBe(true);
-    expect(isStructuredOutputRequest({ outputSchema: z.array(z.object({ a: z.string() })) })).toBe(
-      true,
-    );
+    expect(isStructuredOutputSchema(union)).toBe(true);
+    expect(isStructuredOutputSchema(discriminated)).toBe(true);
+    expect(isStructuredOutputSchema(z.array(z.object({ a: z.string() })))).toBe(true);
   });
 });
 
@@ -579,6 +577,36 @@ describe("maxSteps (multi-step tool loops)", () => {
     // Without maxSteps, the tool loop is not entered — exactly one model call.
     expect(calls).toBe(1);
   });
+
+  test.each([
+    [Number.NaN, 1],
+    [Number.POSITIVE_INFINITY, 1],
+    [0, 1],
+    [2.5, 2],
+  ])(
+    "a maxSteps of %s is normalized to %s step(s), not left to loop unbounded",
+    async (maxSteps, steps) => {
+      // `stepCountIs(n)` stops only when the step count EQUALS n, so a raw NaN,
+      // Infinity, 0 or fraction never stops the loop. The model here keeps
+      // calling the tool and only answers on its 10th call, as a backstop.
+      let calls = 0;
+      const model = new MockLanguageModelV3({
+        doStream: async () => {
+          calls++;
+          return {
+            stream: simulateReadableStream({
+              chunks: calls < 10 ? toolCallStreamChunks(`call-${calls}`) : finalTextStreamChunks,
+            }),
+          };
+        },
+      });
+      const { streamText } = createAiSdkExecutors({ models: { m: model } });
+
+      await streamText({ model: "m", prompt: "hi", maxSteps, tools: pingTool });
+
+      expect(calls).toBe(steps);
+    },
+  );
 
   test("generateText: populated tool set round-trips — schema-parsed input, execute invoked, result fed back, final output", async () => {
     // The dogfood #3 pins: a text request carrying a real tool set (description

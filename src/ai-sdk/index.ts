@@ -17,26 +17,32 @@ import {
   type TypedToolResult,
 } from "ai";
 import type { AnyStateMachine } from "xstate";
-import { resolveModelSource } from "../internal/model-source.js";
 import {
+  resolveHostSettings,
+  resolveModelEntry,
+  resolveModelSource,
+} from "../internal/model-source.js";
+import {
+  isStructuredOutputSchema,
   providerOutputSchema,
   type AgentFinishReason,
   type AgentRequestExecutorInfo,
   type AgentTextRequest,
   type ProviderStructuredOutput,
 } from "../text-logic.js";
-import { AgentTruncatedError } from "../errors.js";
+import { decisionOptionIds, type AgentDecisionRequest } from "../decision.js";
 import {
-  decisionOptionIds,
-  renderDecisionAttempts,
-  type AgentDecisionRequest,
-} from "../decision.js";
+  decisionAttemptMessages,
+  defined,
+  eventForToolCall,
+  normalizeMaxSteps,
+  toChosenEvent,
+  truncated,
+} from "../internal/adapter-kit.js";
 import { isRecord } from "../internal/is-record.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
 import {
-  defined,
   extractFirstJsonValue,
-  isStructuredOutputRequest,
   toAgentCallUsage,
   toAgentFinishReason,
   toAiSdkCallSettings,
@@ -49,12 +55,16 @@ import {
   type AiSdkCallUsage,
 } from "./mappers.js";
 
+const ADAPTER = "createAiSdkExecutors";
+
 // Multi-step tool loops: the request's typed `maxSteps` bounds the AI SDK
 // tool-call loop; default stays single-step. Shared by generateText and
-// streamText so both honor it symmetrically.
+// streamText so both honor it symmetrically. A `maxSteps` that is not a whole
+// number of at least one (NaN, Infinity, 0, 2.5) would never equal the step
+// count, so it is normalized first rather than left to run unbounded.
 function maxStepsSetting(request: AgentTextRequest): { stopWhen?: ReturnType<typeof stepCountIs> } {
   const maxSteps = request.maxSteps;
-  return typeof maxSteps === "number" ? { stopWhen: stepCountIs(maxSteps) } : {};
+  return typeof maxSteps === "number" ? { stopWhen: stepCountIs(normalizeMaxSteps(maxSteps)) } : {};
 }
 
 // ─── createAiSdkExecutors ───
@@ -160,33 +170,12 @@ export type CreateAiSdkExecutorsOptions<TModels extends AiSdkModelMap = AiSdkMod
     }
 );
 
-/** Resolves the host's `settings` option for one request. */
-function callSettings<TModels extends AiSdkModelMap>(
-  options: CreateAiSdkExecutorsOptions<TModels>,
-  request: AgentTextRequest | AgentDecisionRequest,
-): AiSdkCallSettings {
-  const settings = options.settings;
-  return (typeof settings === "function" ? settings(request) : settings) ?? {};
-}
-
 // Resolves a text/decision request's `model` ref to an AI SDK model via `resolveModel` (if given) or a `models` lookup.
 function resolveAiSdkModel<TModels extends AiSdkModelMap>(
   options: CreateAiSdkExecutorsOptions<TModels>,
   modelRef: string,
 ): { model: LanguageModel | AiSdkDecisionModel; settings?: AiSdkCallSettings } {
-  if (options.resolveModel) {
-    return { model: options.resolveModel(modelRef as keyof TModels & string) };
-  }
-
-  const models = options.models;
-  if (!models) {
-    throw new Error(`createAiSdkExecutors: no model resolver configured for '${modelRef}'.`);
-  }
-
-  const entry = models[modelRef as keyof TModels & string];
-  if (!entry) {
-    throw new Error(`createAiSdkExecutors: unknown model '${modelRef}'.`);
-  }
+  const entry = resolveModelEntry<AiSdkModelEntry>(ADAPTER, options, modelRef);
   return isModelWithSettings(entry) ? entry : { model: entry };
 }
 
@@ -204,19 +193,6 @@ function resolveLanguageModel<TModels extends AiSdkModelMap>(
     );
   }
   return { model, ...(settings ? { settings } : {}) };
-}
-
-/**
- * The `LanguageModel` inside a map entry, whichever form it takes. `AiSdkModelMap`
- * widens its return to {@link AiSdkModelMap}, so reading an entry out of the map
- * to hand to a raw AI SDK call needs this to get past the union. Throws for a
- * decision model.
- */
-export function toLanguageModel(entry: AiSdkModelEntry): LanguageModel {
-  if (isDecisionModel(entry)) {
-    throw new TypeError("toLanguageModel: the entry is a decision model, not a language model.");
-  }
-  return isModelWithSettings(entry) ? entry.model : entry;
 }
 
 // A `{ model, settings }` pair, as opposed to a bare `LanguageModel`. In v7 a
@@ -321,27 +297,6 @@ export interface AiSdkExecutors {
   ) => Promise<AiSdkDecideResult>;
 }
 
-// Builds the AgentTruncatedError the adapter throws when a `'length'` finish
-// reason left nothing usable. `what` names the part that was cut off.
-function truncated(
-  request: AgentTextRequest,
-  info: AgentRequestExecutorInfo | undefined,
-  partialOutput?: unknown,
-  cause?: unknown,
-): AgentTruncatedError {
-  return new AgentTruncatedError(
-    `createAiSdkExecutors: request '${request.name ?? "(unnamed)"}' hit the output token ` +
-      "limit — its structured output never completed. Raise `maxOutputTokens`, shorten " +
-      "the input, or ask for a smaller output schema.",
-    {
-      requestName: request.name ?? "(unnamed)",
-      ...(info?.requestId !== undefined ? { requestId: info.requestId } : {}),
-      ...(partialOutput !== undefined ? { partialOutput } : {}),
-      ...(cause !== undefined ? { cause } : {}),
-    },
-  );
-}
-
 /**
  * The canonical Vercel AI SDK adapter: builds the `{ generateText, streamText,
  * decide }` executor set consumed by `createAgentRuntime`/`executeAgentRequest`. `ai`
@@ -369,25 +324,33 @@ export function createAiSdkExecutors(machine: AnyStateMachine): AiSdkExecutors;
 export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
   source: CreateAiSdkExecutorsOptions<TModels> | AnyStateMachine,
 ): AiSdkExecutors {
-  const options = resolveModelSource<CreateAiSdkExecutorsOptions<TModels>>(
-    "createAiSdkExecutors",
-    source,
-  );
-  const generateText = async (
+  const options = resolveModelSource<CreateAiSdkExecutorsOptions<TModels>>(ADAPTER, source);
+
+  // Params generateText and streamText share. Host `settings`, then the model
+  // entry's own, then the request's — each layer `defined()`-filtered or
+  // built without unset keys, so an unset field never erases a layer below.
+  const textParams = (
     request: AgentTextRequest & { tools: AgentTools },
-    info?: AgentRequestExecutorInfo,
-  ): Promise<AiSdkGenerateResult> => {
+    info: AgentRequestExecutorInfo | undefined,
+  ) => {
     const { model, settings: modelSettings } = resolveLanguageModel(options, request);
-    const common = {
+    return {
       model,
       abortSignal: info?.signal,
-      ...callSettings(options, request),
+      ...resolveHostSettings(options.settings, request),
       ...defined(modelSettings ?? {}),
       ...toAiSdkCallSettings(request),
       ...maxStepsSetting(request),
     };
+  };
 
-    if (isStructuredOutputRequest(request)) {
+  const generateText = async (
+    request: AgentTextRequest & { tools: AgentTools },
+    info?: AgentRequestExecutorInfo,
+  ): Promise<AiSdkGenerateResult> => {
+    const common = textParams(request, info);
+
+    if (isStructuredOutputSchema(request.outputSchema)) {
       // Every structured request is sent as `{ result, reasoning? }` — a root
       // object is universally accepted, unlike a bare union/array root. The
       // parsed `result` is what the machine validates against the declared
@@ -407,7 +370,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       const result = await aiGenerateText({ ...common, output: structuredOutput }).catch(
         (error: unknown) => {
           throw NoObjectGeneratedError.isInstance(error) && error.finishReason === "length"
-            ? truncated(request, info, error.text, error)
+            ? truncated(ADAPTER, request, info, error.text, error)
             : error;
         },
       );
@@ -416,14 +379,14 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
           return result.output as ProviderStructuredOutput;
         } catch (error) {
           throw result.finishReason === "length"
-            ? truncated(request, info, result.text, error)
+            ? truncated(ADAPTER, request, info, result.text, error)
             : error;
         }
       })();
       // A structured output the model DID close, but only because it stopped
       // mid-thought, is not something to hand a machine as a final answer.
       if (result.finishReason === "length") {
-        throw truncated(request, info, parsed.result);
+        throw truncated(ADAPTER, request, info, parsed.result);
       }
       return {
         result: parsed.result,
@@ -455,15 +418,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,
   ) => {
-    const { model, settings: modelSettings } = resolveLanguageModel(options, request);
-    const result = aiStreamText({
-      model,
-      abortSignal: info?.signal,
-      ...callSettings(options, request),
-      ...defined(modelSettings ?? {}),
-      ...toAiSdkCallSettings(request),
-      ...maxStepsSetting(request),
-    });
+    const result = aiStreamText(textParams(request, info));
 
     for await (const chunk of result.textStream) {
       info?.onChunk?.(chunk);
@@ -490,7 +445,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const result = await aiGenerateText({
       model,
       abortSignal: info?.signal,
-      ...callSettings(options, request),
+      ...resolveHostSettings(options.settings, request),
       ...defined(modelSettings ?? {}),
       system: request.system,
       ...(messages ? { messages, allowSystemInMessages: true } : { prompt: request.prompt ?? "" }),
@@ -503,33 +458,17 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     });
 
     const toolCall = result.toolCalls[0];
-    if (!toolCall) {
-      throw new Error("createAiSdkExecutors: decide — model did not call an event tool.");
-    }
-    if (choice) {
+    if (choice && toolCall) {
       return {
         event: fromAiSdkOptionCall(toolCall, request.options!, choice.ids),
         usage: toAgentCallUsage(result.usage),
         finishReason: result.finishReason,
       } satisfies AiSdkDecideResult;
     }
-    const chosenEvent = request.events.find((event) => event.toolName === toolCall.toolName);
-    if (!chosenEvent) {
-      throw new Error(
-        `createAiSdkExecutors: decide — model called unknown tool '${toolCall.toolName}'.`,
-      );
-    }
+    const chosenEvent = eventForToolCall(ADAPTER, request.events, toolCall?.toolName);
 
     return {
-      // The event's own `type` (from the chosen event descriptor) is spread
-      // LAST so it always wins: a stray `type` key in the model's tool input
-      // can never override the machine event type. Payloads are flat under the
-      // event object, so a payload field named `type` is unrepresentable — the
-      // event discriminant owns that slot.
-      event: {
-        ...(toolCall.input && typeof toolCall.input === "object" ? toolCall.input : {}),
-        type: chosenEvent.type,
-      } as ChosenEvent,
+      event: toChosenEvent(chosenEvent, toolCall?.input),
       usage: toAgentCallUsage(result.usage),
       finishReason: result.finishReason,
     } satisfies AiSdkDecideResult;
@@ -571,7 +510,7 @@ async function decideWithDecisionModel(
   const instructions = [
     [request.system, request.prompt].filter(Boolean).join("\n\n") ||
       "Which option should happen next?",
-    ...renderDecisionAttempts(request).map((message) => message.content as string),
+    ...decisionAttemptMessages(request).map((message) => message.content),
   ].join("\n\n");
 
   const ask = () =>

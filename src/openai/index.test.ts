@@ -4,16 +4,16 @@ import { AgentTruncatedError } from "../errors.js";
 import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
+import { fromSnakeCaseFinishReason } from "../internal/adapter-kit.js";
+import { createOpenAiExecutors } from "./index.js";
 import {
-  createOpenAiExecutors,
   toAgentCallUsage,
-  toAgentFinishReason,
   toDecisionMessages,
   toOpenAiCallSettings,
   toOpenAiEventTools,
   toOpenAiMessages,
   toOpenAiTools,
-} from "./index.js";
+} from "./mappers.js";
 
 // A stubbed `OpenAI` client: only `chat.completions.create` is ever called, so
 // the whole SDK surface reduces to one function. No network.
@@ -167,13 +167,13 @@ describe("result mapping (pure helpers)", () => {
     expect(toAgentCallUsage(undefined)).toBeUndefined();
   });
 
-  test("toAgentFinishReason maps OpenAI's vocabulary onto the portable union", () => {
-    expect(toAgentFinishReason("stop")).toBe("stop");
-    expect(toAgentFinishReason("length")).toBe("length");
-    expect(toAgentFinishReason("tool_calls")).toBe("tool-calls");
-    expect(toAgentFinishReason("function_call")).toBe("tool-calls");
-    expect(toAgentFinishReason("content_filter")).toBe("content-filter");
-    expect(toAgentFinishReason(null)).toBe("other");
+  test("fromSnakeCaseFinishReason maps OpenAI's vocabulary onto the portable union", () => {
+    expect(fromSnakeCaseFinishReason("stop")).toBe("stop");
+    expect(fromSnakeCaseFinishReason("length")).toBe("length");
+    expect(fromSnakeCaseFinishReason("tool_calls")).toBe("tool-calls");
+    expect(fromSnakeCaseFinishReason("function_call")).toBe("tool-calls");
+    expect(fromSnakeCaseFinishReason("content_filter")).toBe("content-filter");
+    expect(fromSnakeCaseFinishReason(null)).toBe("other");
   });
 });
 

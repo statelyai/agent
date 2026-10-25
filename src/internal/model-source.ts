@@ -50,3 +50,37 @@ export function resolveModelSource<TOptions>(adapter: string, source: unknown): 
       `or a machine from its createMachine; got ${describeValue(source)}.`,
   );
 }
+
+/**
+ * Resolves a request's model ref against an adapter's options, as
+ * {@link resolveModelSource} normalized them: `resolveModel` when given, else
+ * a lookup in `models`. Returns the entry as-is, for the adapter to unpack its
+ * `{ model, settings }`-style pair. Throws, naming the adapter, when there is
+ * nothing to resolve with or the ref is not in the map. @internal
+ */
+export function resolveModelEntry<TEntry>(
+  adapter: string,
+  options: { models?: Record<string, TEntry>; resolveModel?(modelRef: string): TEntry },
+  modelRef: string,
+): TEntry {
+  if (options.resolveModel) {
+    return options.resolveModel(modelRef);
+  }
+  if (!options.models) {
+    throw new Error(`${adapter}: no model resolver configured for '${modelRef}'.`);
+  }
+  const entry = options.models[modelRef];
+  if (!entry) {
+    throw new Error(`${adapter}: unknown model '${modelRef}'.`);
+  }
+  return entry;
+}
+
+/** Resolves an adapter's host `settings` option — an object for every call,
+ * or a function of the request — for one request. @internal */
+export function resolveHostSettings<TSettings extends object, TRequest>(
+  settings: TSettings | ((request: TRequest) => TSettings | undefined) | undefined,
+  request: TRequest,
+): Partial<TSettings> {
+  return (typeof settings === "function" ? settings(request) : settings) ?? {};
+}

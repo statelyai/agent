@@ -14,18 +14,17 @@ import {
   maxIterations,
   type AnyTextAdapter,
   type ChatMiddleware,
-  type ContentPart,
-  type ModelMessage,
   type StreamChunk,
-  type TokenUsage,
-  type Tool,
 } from "@tanstack/ai";
 import type { TextActivityOptions } from "@tanstack/ai/adapters";
 import type { AnyStateMachine } from "xstate";
-import { resolveModelSource } from "../internal/model-source.js";
 import {
-  AGENT_USAGE_TOKEN_FIELDS,
-  getAgentOutputMode,
+  resolveHostSettings,
+  resolveModelEntry,
+  resolveModelSource,
+} from "../internal/model-source.js";
+import {
+  isStructuredOutputSchema,
   parseProviderOutput,
   providerOutputSchema,
   type AgentCallUsage,
@@ -33,368 +32,39 @@ import {
   type AgentRequestExecutorInfo,
   type AgentTextRequest,
 } from "../text-logic.js";
-import { AgentTruncatedError } from "../errors.js";
-import { renderDecisionAttempts, type AgentDecisionRequest } from "../decision.js";
-import type { AgentEventDescriptor } from "../events.js";
+import type { AgentDecisionRequest } from "../decision.js";
 import type {
   AgentMessage,
-  AgentTool,
   AssistantMessage,
   AgentToolChoice,
   AgentTools,
   ChosenEvent,
-  DataContent,
   ToolCallPart,
   ToolResultOutput,
   ToolResultPart,
 } from "../types.js";
-import { getJsonSchema, getJsonSchemaSync, isStandardSchema } from "../utils.js";
+import { getJsonSchema } from "../utils.js";
+import {
+  addAgentCallUsage,
+  eventForToolCall,
+  fromSnakeCaseFinishReason,
+  normalizeMaxSteps,
+  refuseStructuredStream,
+  toChosenEvent,
+  truncated,
+  usageField,
+} from "../internal/adapter-kit.js";
+import {
+  toAgentCallUsage,
+  toDecisionMessages,
+  toTanStackAiEventTools,
+  toTanStackAiMessages,
+  toTanStackAiModelOptions,
+  toTanStackAiTools,
+  type GenerationSettings,
+} from "./mappers.js";
 
-// ─── Request → chat() mapping (pure, unit-testable) ───
-
-/** Thrown for a message part TanStack AI's model messages cannot carry —
- * dropping it would silently change what the model sees. */
-function unsupportedPart(role: string, type: string): never {
-  throw new Error(
-    `createTanStackAiExecutors: a ${role} message part of type '${type}' has no TanStack AI ` +
-      "equivalent. Send text, image, tool-call, or tool-result parts, or convert it before the " +
-      "request.",
-  );
-}
-
-/** A `DataContent`/`URL` image as a TanStack AI content source: an http(s)
- * string or `URL` is a `url` source; a `data:` URL, a bare base64 string, and
- * raw bytes are a base64 `data` source. */
-function toImagePart(image: DataContent | URL, mediaType: string | undefined): ContentPart {
-  const mimeType = mediaType ?? "image/jpeg";
-  if (image instanceof URL || (typeof image === "string" && /^https?:/.test(image))) {
-    return { type: "image", source: { type: "url", value: String(image) } } as ContentPart;
-  }
-  if (typeof image === "string") {
-    const dataUrl = /^data:([^;,]+)?(?:;base64)?,(.*)$/.exec(image);
-    return {
-      type: "image",
-      source: {
-        type: "data",
-        value: dataUrl ? dataUrl[2]! : image,
-        mimeType: dataUrl?.[1] ?? mimeType,
-      },
-    } as ContentPart;
-  }
-  const bytes = image instanceof Uint8Array ? image : new Uint8Array(image);
-  const encode = (globalThis as { btoa?: (data: string) => string }).btoa;
-  if (!encode) {
-    throw new Error(
-      "createTanStackAiExecutors: binary image parts need a global `btoa` to base64-encode. " +
-        "Pass the image as a URL or a base64 string instead.",
-    );
-  }
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return {
-    type: "image",
-    source: { type: "data", value: encode(binary), mimeType },
-  } as ContentPart;
-}
-
-/** One tool message per `ToolResultPart` — the tool role is one message per result. */
-function toToolMessage(part: ToolResultPart): ModelMessage {
-  return {
-    role: "tool",
-    toolCallId: part.toolCallId,
-    content:
-      part.output.type === "text" || part.output.type === "error-text"
-        ? part.output.value
-        : JSON.stringify(part.output.value),
-  };
-}
-
-/**
- * Maps `AgentTextRequest.messages`/`system`/`prompt` onto `chat()`'s
- * `systemPrompts` and `messages`. TanStack AI's model messages have no
- * `system` role — a provider adapter may forward one as a user turn — so every
- * system message, and the request's `system`, becomes a system prompt.
- */
-export function toTanStackAiMessages(
-  request: Pick<AgentTextRequest, "system" | "prompt"> & { messages?: AgentMessage[] },
-): { systemPrompts: string[]; messages: ModelMessage[] } {
-  const systemPrompts = request.system ? [request.system] : [];
-  if (!request.messages) {
-    return { systemPrompts, messages: [{ role: "user", content: request.prompt ?? "" }] };
-  }
-
-  const messages = request.messages.flatMap((message): ModelMessage[] => {
-    switch (message.role) {
-      case "system":
-        systemPrompts.push(message.content);
-        return [];
-      case "user": {
-        if (typeof message.content === "string") {
-          return [{ role: "user", content: message.content }];
-        }
-        const content = message.content.map((part): ContentPart => {
-          switch (part.type) {
-            case "text":
-              return { type: "text", content: part.text };
-            case "image":
-              return toImagePart(part.image, part.mediaType);
-            default:
-              return unsupportedPart("user", part.type);
-          }
-        });
-        return [{ role: "user", content }];
-      }
-      case "assistant": {
-        if (typeof message.content === "string") {
-          return [{ role: "assistant", content: message.content }];
-        }
-        let text = "";
-        const toolCalls: NonNullable<ModelMessage["toolCalls"]> = [];
-        // A tool result carried inline on an assistant message becomes a
-        // separate tool message after it.
-        const trailing: ModelMessage[] = [];
-        for (const part of message.content) {
-          switch (part.type) {
-            case "text":
-              text += part.text;
-              break;
-            case "tool-call":
-              toolCalls.push({
-                id: part.toolCallId,
-                type: "function",
-                function: { name: part.toolName, arguments: JSON.stringify(part.input ?? {}) },
-              });
-              break;
-            case "tool-result":
-              trailing.push(toToolMessage(part));
-              break;
-            default:
-              unsupportedPart("assistant", part.type);
-          }
-        }
-        return [
-          {
-            role: "assistant",
-            content: text || null,
-            ...(toolCalls.length > 0 ? { toolCalls } : {}),
-          },
-          ...trailing,
-        ];
-      }
-      case "tool":
-        return message.content.map(toToolMessage);
-    }
-  });
-  return { systemPrompts, messages };
-}
-
-/** A tool `description` may be a string or, for an AI SDK v7 tool, a function
- * of the call's context. TanStack AI tools carry the static form. */
-function staticDescription(descriptor: AgentTool): string {
-  if (typeof descriptor === "function") {
-    return "";
-  }
-  return typeof descriptor.description === "string" ? descriptor.description : "";
-}
-
-/**
- * One TanStack AI tool per `AgentTools` entry. A tool with an `execute` (or a
- * bare function) is a server tool `chat()` runs in its loop; a tool without one
- * is a client tool, so the run stops at its call and hands the call back.
- * Input schemas travel as JSON Schema.
- */
-export function toTanStackAiTools(tools: AgentTools): Tool[] {
-  return Object.entries(tools).flatMap(([name, descriptor]): Tool[] => {
-    if (!descriptor) {
-      return [];
-    }
-    const inputSchema = typeof descriptor === "function" ? undefined : descriptor.inputSchema;
-    const execute = typeof descriptor === "function" ? descriptor : descriptor.execute;
-    return [
-      {
-        name,
-        description: staticDescription(descriptor),
-        inputSchema: (isStandardSchema(inputSchema)
-          ? getJsonSchemaSync(inputSchema)
-          : undefined) ?? {
-          type: "object",
-        },
-        ...(typeof execute === "function" ? { execute: (input: unknown) => execute(input) } : {}),
-      } as Tool,
-    ];
-  });
-}
-
-/** One client tool per candidate decision event: no `execute`, so the run
- * stops at the model's first call — the "tool-per-event" recipe. */
-export function toTanStackAiEventTools(events: AgentEventDescriptor[]): Tool[] {
-  return events.map(
-    (event) =>
-      ({
-        name: event.toolName,
-        description: `Choose the '${event.type}' move.`,
-        inputSchema: getJsonSchemaSync(event.inputSchema) ?? { type: "object" },
-      }) as Tool,
-  );
-}
-
-/** The generation settings a text and a decision request share. */
-type GenerationSettings = Pick<
-  AgentTextRequest,
-  "temperature" | "maxOutputTokens" | "topP" | "topK" | "seed" | "stopSequences"
->;
-
-/** Drops keys whose value is `undefined`, so a spread cannot erase what it lands on. */
-function defined<T extends object>(settings: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(settings).filter(([, value]) => value !== undefined),
-  ) as Partial<T>;
-}
-
-/**
- * Maps the request's portable generation settings and tool choice onto the
- * `modelOptions` of the adapter's provider. TanStack AI has no portable
- * sampling or tool-choice options — each provider adapter names its own — so
- * the mapping is per provider (`adapter.name`):
- *
- * - `openai` (Responses API): `temperature`, `top_p`, `max_output_tokens`,
- *   `tool_choice`. The API has no `top_k`, `seed`, or `stop`; those are dropped.
- * - `anthropic`: `temperature`, `top_p`, `top_k`, `max_tokens`,
- *   `stop_sequences`, `tool_choice`. `seed` is dropped.
- * - `gemini`: `temperature`, `topP`, `topK`, `maxOutputTokens`, `seed`,
- *   `stopSequences`, `toolConfig.functionCallingConfig`.
- *
- * Any other provider gets none of them: map them yourself through the
- * `settings` option, which receives the request.
- */
-export function toTanStackAiModelOptions(
-  adapter: Pick<AnyTextAdapter, "name">,
-  request: GenerationSettings & { toolChoice?: AgentToolChoice },
-): Record<string, unknown> {
-  const { toolChoice } = request;
-  switch (adapter.name) {
-    case "openai":
-      return defined({
-        temperature: request.temperature,
-        top_p: request.topP,
-        max_output_tokens: request.maxOutputTokens,
-        tool_choice:
-          typeof toolChoice === "object" ? { type: "function", name: toolChoice.name } : toolChoice,
-      });
-    case "anthropic":
-      return defined({
-        temperature: request.temperature,
-        top_p: request.topP,
-        top_k: request.topK,
-        max_tokens: request.maxOutputTokens,
-        stop_sequences: request.stopSequences,
-        tool_choice:
-          typeof toolChoice === "object"
-            ? { type: "tool", name: toolChoice.name }
-            : toolChoice === "required"
-              ? { type: "any" }
-              : toolChoice === undefined
-                ? undefined
-                : { type: toolChoice },
-      });
-    case "gemini":
-      return defined({
-        temperature: request.temperature,
-        topP: request.topP,
-        topK: request.topK,
-        maxOutputTokens: request.maxOutputTokens,
-        seed: request.seed,
-        stopSequences: request.stopSequences,
-        toolConfig:
-          toolChoice === undefined
-            ? undefined
-            : {
-                functionCallingConfig:
-                  typeof toolChoice === "object"
-                    ? { mode: "ANY", allowedFunctionNames: [toolChoice.name] }
-                    : { mode: toolChoice === "required" ? "ANY" : toolChoice.toUpperCase() },
-              },
-      });
-    default:
-      return {};
-  }
-}
-
-/**
- * Messages for a decision request, with prior failed `attempts` rendered as
- * appended user messages so retries converge. Mirrors the AI SDK adapter's
- * `toDecisionMessages`.
- */
-export function toDecisionMessages(
-  request: Pick<AgentDecisionRequest, "system" | "messages" | "prompt" | "events" | "attempts">,
-): { systemPrompts: string[]; messages: ModelMessage[] } {
-  const mapped = toTanStackAiMessages(request);
-  for (const attempt of renderDecisionAttempts(request)) {
-    mapped.messages.push({ role: "user", content: attempt.content as string });
-  }
-  return mapped;
-}
-
-// ─── Result mapping ───
-
-/**
- * Folds TanStack AI's `TokenUsage` onto the flat {@link AgentCallUsage} field
- * names core aggregates. A field the provider omitted stays omitted, so it
- * never contributes a `0` to a run's partial sums.
- */
-export function toAgentCallUsage(usage: TokenUsage | undefined): AgentCallUsage | undefined {
-  if (!usage) {
-    return undefined;
-  }
-  const reasoningTokens = usage.completionTokensDetails?.reasoningTokens;
-  const cachedInputTokens = usage.promptTokensDetails?.cachedTokens;
-  return defined({
-    inputTokens: usage.promptTokens,
-    outputTokens: usage.completionTokens,
-    totalTokens: usage.totalTokens,
-    reasoningTokens,
-    cachedInputTokens,
-  });
-}
-
-/** Adds two model turns' usage together, field by field. A field neither
- * reported stays absent. */
-function addUsage(
-  total: AgentCallUsage | undefined,
-  next: AgentCallUsage | undefined,
-): AgentCallUsage | undefined {
-  if (!total || !next) {
-    return total ?? next;
-  }
-  const sum: AgentCallUsage = {};
-  for (const field of AGENT_USAGE_TOKEN_FIELDS) {
-    if (total[field] !== undefined || next[field] !== undefined) {
-      sum[field] = (total[field] ?? 0) + (next[field] ?? 0);
-    }
-  }
-  return sum;
-}
-
-/**
- * Maps a TanStack AI finish reason onto the portable {@link AgentFinishReason}.
- * Anything unrecognized, including a missing reason, lands on `'other'`.
- */
-export function toAgentFinishReason(finishReason: string | null | undefined): AgentFinishReason {
-  switch (finishReason) {
-    case "stop":
-      return "stop";
-    case "length":
-      return "length";
-    case "tool_calls":
-      return "tool-calls";
-    case "content_filter":
-      return "content-filter";
-    default:
-      return "other";
-  }
-}
+const ADAPTER = "createTanStackAiExecutors";
 
 /** A model's tool call, as read off the run's `TOOL_CALL_*` events. */
 export type TanStackAiToolCall = { toolCallId: string; toolName: string; input: unknown };
@@ -520,9 +190,9 @@ async function readRun(
         const finishReason =
           chunk.finishReason ??
           (chunk.metadata?.tanstack as { finishReason?: string | null } | undefined)?.finishReason;
-        summary.finishReason = toAgentFinishReason(finishReason);
+        summary.finishReason = fromSnakeCaseFinishReason(finishReason);
         if (chunk.usage && !Array.isArray(chunk.usage)) {
-          summary.usage = addUsage(summary.usage, toAgentCallUsage(chunk.usage));
+          summary.usage = addAgentCallUsage(summary.usage, toAgentCallUsage(chunk.usage));
         }
         break;
       }
@@ -589,8 +259,9 @@ export type TanStackAiModelMap<TKey extends string = string> = Record<TKey, TanS
  * provider `modelOptions`. Pass an object to apply it to every call, or a
  * function to vary it per request (`request.name` is the request's registered
  * key). Precedence is global `settings`, then the model entry's `settings`,
- * then the request's own generation settings (see
- * {@link toTanStackAiModelOptions}); `modelOptions` merge key by key.
+ * then the request's own generation settings (mapped onto the provider's
+ * `modelOptions` for the `openai`, `anthropic`, and `gemini` adapters);
+ * `modelOptions` merge key by key.
  */
 export type CreateTanStackAiExecutorsOptions<
   TModels extends TanStackAiModelMap = TanStackAiModelMap,
@@ -680,43 +351,12 @@ function isAdapterWithSettings(
   return "adapter" in entry && !("kind" in entry);
 }
 
-/** The text adapter inside a map entry, whichever form it takes. */
-export function toTextAdapter(entry: TanStackAiModelEntry): AnyTextAdapter {
-  return isAdapterWithSettings(entry) ? entry.adapter : entry;
-}
-
-// Builds the AgentTruncatedError thrown when a structured request ran out of
-// output tokens: its JSON never completed, so there is nothing to hand a machine.
-function truncated(
-  request: AgentTextRequest,
-  info: AgentRequestExecutorInfo | undefined,
-  partialOutput?: unknown,
-  cause?: unknown,
-): AgentTruncatedError {
-  return new AgentTruncatedError(
-    `createTanStackAiExecutors: request '${request.name ?? "(unnamed)"}' hit the output token ` +
-      "limit — its structured output never completed. Raise `maxOutputTokens`, shorten " +
-      "the input, or ask for a smaller output schema.",
-    {
-      requestName: request.name ?? "(unnamed)",
-      ...(info?.requestId !== undefined ? { requestId: info.requestId } : {}),
-      ...(partialOutput !== undefined ? { partialOutput } : {}),
-      ...(cause !== undefined ? { cause } : {}),
-    },
-  );
-}
-
 // TanStack AI reports a structured run cut off by the token limit as an error
 // rather than a finish reason: `max_tokens` from the engine, or OpenAI's
 // Responses `incomplete`, whose message is `max_output_tokens`.
 function isTruncationError(error: unknown): boolean {
   const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
   return code === "max_tokens" || code === "incomplete" || message === "max_output_tokens";
-}
-
-// The `usage` key, present only when the run reported one.
-function usageField(usage: AgentCallUsage | undefined): { usage?: AgentCallUsage } {
-  return usage ? { usage } : {};
 }
 
 /**
@@ -791,7 +431,7 @@ function toolChoiceOnFirstTurn(keys: string[], later: Record<string, unknown>): 
  *   `execute` stops the run at its call.
  * - Decisions offer one tool per candidate event, with no `execute`, so the
  *   run stops at the model's first call; the tool choice is forced where the
- *   provider supports it (see {@link toTanStackAiModelOptions}).
+ *   provider supports it (the `openai`, `anthropic`, and `gemini` adapters).
  *
  * Pass the options object, or pass the machine (or its `setupAgent(...)`
  * result) to reuse the `models` declared in `setupAgent({ models })`. Anything
@@ -812,35 +452,18 @@ export function createTanStackAiExecutors(machine: AnyStateMachine): TanStackAiE
 export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
   source: CreateTanStackAiExecutorsOptions<TModels> | AnyStateMachine,
 ): TanStackAiExecutors {
-  const options = resolveModelSource<CreateTanStackAiExecutorsOptions<TModels>>(
-    "createTanStackAiExecutors",
-    source,
-  );
+  const options = resolveModelSource<CreateTanStackAiExecutorsOptions<TModels>>(ADAPTER, source);
   // Resolves a request's `model` ref to a text adapter plus the settings that
   // apply to it, merged in precedence order.
   const resolve = (
     request: AgentTextRequest | AgentDecisionRequest,
     portable: GenerationSettings & { toolChoice?: AgentToolChoice },
   ): { adapter: AnyTextAdapter; settings: TanStackAiCallSettings } => {
-    let adapter: AnyTextAdapter;
-    let entrySettings: TanStackAiCallSettings | undefined;
-    if (options.resolveModel) {
-      adapter = options.resolveModel(request.model as keyof TModels & string);
-    } else {
-      const entry = options.models?.[request.model as keyof TModels & string];
-      if (!options.models) {
-        throw new Error(
-          `createTanStackAiExecutors: no model resolver configured for '${request.model}'.`,
-        );
-      }
-      if (!entry) {
-        throw new Error(`createTanStackAiExecutors: unknown model '${request.model}'.`);
-      }
-      adapter = toTextAdapter(entry);
-      entrySettings = isAdapterWithSettings(entry) ? entry.settings : undefined;
-    }
-    const host =
-      (typeof options.settings === "function" ? options.settings(request) : options.settings) ?? {};
+    const entry = resolveModelEntry<TanStackAiModelEntry>(ADAPTER, options, request.model);
+    const { adapter, settings: entrySettings } = isAdapterWithSettings(entry)
+      ? entry
+      : { adapter: entry, settings: undefined };
+    const host = resolveHostSettings(options.settings, request);
     const merged = { ...host, ...entrySettings };
     const base = { ...host.modelOptions, ...entrySettings?.modelOptions };
     const generation = toTanStackAiModelOptions(adapter, { ...portable, toolChoice: undefined });
@@ -864,14 +487,9 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
   };
 
   // `maxSteps` bounds the model turns of `chat()`'s tool loop; the default is
-  // one, like the AI SDK adapter. A non-finite value would never end a loop
-  // that keeps calling tools, so it falls back to the default too.
+  // one, like the AI SDK adapter.
   const loopBound = (request: AgentTextRequest) =>
-    maxIterations(
-      typeof request.maxSteps === "number" && Number.isFinite(request.maxSteps)
-        ? Math.max(1, Math.floor(request.maxSteps))
-        : 1,
-    );
+    maxIterations(normalizeMaxSteps(request.maxSteps));
 
   const generateText = async (
     request: AgentTextRequest & { tools: AgentTools },
@@ -879,7 +497,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
   ): Promise<TanStackAiGenerateResult> => {
     const { adapter, settings } = resolve(request, request);
     const tools = toTanStackAiTools(request.tools);
-    const structured = getAgentOutputMode(request.outputSchema) === "structured";
+    const structured = isStructuredOutputSchema(request.outputSchema);
     // The structured-output contract (see docs/hosts.md): send the declared
     // schema wrapped as `{ result, reasoning? }`, and return the parsed
     // `result`, which the machine validates against the schema it declared.
@@ -904,7 +522,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
       );
     } catch (error) {
       throw structured && isTruncationError(error)
-        ? truncated(request, info, undefined, error)
+        ? truncated(ADAPTER, request, info, undefined, error)
         : error;
     }
 
@@ -912,7 +530,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
       // A structured output the model DID close, but only because it stopped
       // mid-thought, is not something to hand a machine as a final answer.
       if (run.finishReason === "length") {
-        throw truncated(request, info, run.structured ?? run.text);
+        throw truncated(ADAPTER, request, info, run.structured ?? run.text);
       }
       const parsed = parseProviderOutput(
         request,
@@ -945,18 +563,13 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
     request: AgentTextRequest & { tools: AgentTools },
     info?: AgentRequestExecutorInfo,
   ): Promise<TanStackAiStreamResult> => {
-    // A chunk-by-chunk structured object has nothing useful to hand `onChunk`
-    // mid-stream, so a structured request is refused rather than silently
-    // downgraded to text. Tools run in the loop, as in generateText.
-    if (getAgentOutputMode(request.outputSchema) === "structured") {
-      throw new Error(
-        "createTanStackAiExecutors: streamText streams text — a request declaring a structured " +
-          "output schema must be routed to generateText.",
-      );
+    // A structured request is refused; tools run in the loop, as in generateText.
+    if (isStructuredOutputSchema(request.outputSchema)) {
+      refuseStructuredStream(ADAPTER);
     }
 
     const { adapter, settings } = resolve(request, request);
-    const tools = toTanStackAiTools(request.tools ?? {});
+    const tools = toTanStackAiTools(request.tools);
     const run = await runChat(
       {
         ...settings,
@@ -995,24 +608,10 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
     );
 
     const toolCall = run.toolCalls[0];
-    if (!toolCall) {
-      throw new Error("createTanStackAiExecutors: decide — model did not call an event tool.");
-    }
-    const chosenEvent = request.events.find((event) => event.toolName === toolCall.toolName);
-    if (!chosenEvent) {
-      throw new Error(
-        `createTanStackAiExecutors: decide — model called unknown tool '${toolCall.toolName}'.`,
-      );
-    }
+    const chosenEvent = eventForToolCall(ADAPTER, request.events, toolCall?.toolName);
 
     return {
-      // The event's own `type` is spread LAST so it always wins: a stray
-      // `type` key in the model's tool input can never override the machine
-      // event type.
-      event: {
-        ...(toolCall.input && typeof toolCall.input === "object" ? toolCall.input : {}),
-        type: chosenEvent.type,
-      } as ChosenEvent,
+      event: toChosenEvent(chosenEvent, toolCall?.input),
       ...usageField(run.usage),
       finishReason: run.finishReason,
       raw: run.chunks,

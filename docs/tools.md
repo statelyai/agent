@@ -122,7 +122,7 @@ For approval and progress around real tools, see [review-tool-calls](../examples
 
 1. The machine invokes the request. Core lowers it to an `AgentTextRequest` carrying `tools`, `toolChoice`, and `metadata`.
 2. The executor maps tools to its SDK. `createAiSdkExecutors` passes a native `tool({...})` through unchanged and wraps a plain descriptor or bare function in `tool()`. A tool with no `inputSchema` gets a permissive one.
-3. `maxSteps` becomes `stopWhen: stepCountIs(maxSteps)`. The loop runs entirely inside the executor.
+3. `maxSteps` becomes `stopWhen: stepCountIs(maxSteps)`. A fractional value is floored, and a value below one or not finite becomes `1`, so the loop always ends. The loop runs entirely inside the executor.
 4. The final output is validated against the request's output schema and returned to `onDone` as `output.result`, next to the executor's response messages in `output.messages`.
 
 The machine observes the request boundary, not each intermediate tool call. For
