@@ -188,9 +188,7 @@ export function SiteHeader({ store, examples, currentTitle, onSelect }: SiteHead
                           <span className="switcher-row__dot" aria-hidden="true" />
                           <span className="switcher-row__text">
                             <strong>{row.title}</strong>
-                            <small
-                              id={`switcher-purpose-${row.selection.type}-${row.selection.id}`}
-                            >
+                            <small id={`switcher-purpose-${row.selection.type}-${row.selection.id}`}>
                               {row.purpose}
                             </small>
                           </span>

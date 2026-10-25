@@ -3,84 +3,121 @@
     {
       "sent": "start {}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"xTurn\""],
+      "trace": [
+        "transition @xstate.init -> \"xTurn\""
+      ],
       "response": "",
       "idle": {
         "prompt": "X to move. Board: . . . / . . . / . . .",
-        "events": ["X.play"],
+        "events": [
+          "X.play"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"X.play\",\"cell\":0}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"xTurn\"", "transition X.play -> \"oTurn\""],
+      "trace": [
+        "transition @xstate.init -> \"xTurn\"",
+        "transition X.play -> \"oTurn\""
+      ],
       "response": "**Board**\n\n```json\n[\n  \"X\",\n  null,\n  null,\n  null,\n  null,\n  null,\n  null,\n  null,\n  null\n]\n```\n\n**Moves**\n\n- Player: X · Cell: 0",
       "idle": {
         "prompt": "O to move. Board: X . . / . . . / . . .",
-        "events": ["O.play"],
+        "events": [
+          "O.play"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"O.play\",\"cell\":1}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"oTurn\"", "transition O.play -> \"xTurn\""],
+      "trace": [
+        "transition @xstate.init -> \"oTurn\"",
+        "transition O.play -> \"xTurn\""
+      ],
       "response": "**Board**\n\n```json\n[\n  \"X\",\n  \"O\",\n  null,\n  null,\n  null,\n  null,\n  null,\n  null,\n  null\n]\n```\n\n**Moves**\n\n| Player | Cell |\n| --- | --- |\n| X | 0 |\n| O | 1 |",
       "idle": {
         "prompt": "X to move. Board: X O . / . . . / . . .",
-        "events": ["X.play"],
+        "events": [
+          "X.play"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"X.play\",\"cell\":2}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"xTurn\"", "transition X.play -> \"oTurn\""],
+      "trace": [
+        "transition @xstate.init -> \"xTurn\"",
+        "transition X.play -> \"oTurn\""
+      ],
       "response": "**Board**\n\n```json\n[\n  \"X\",\n  \"O\",\n  \"X\",\n  null,\n  null,\n  null,\n  null,\n  null,\n  null\n]\n```\n\n**Moves**\n\n| Player | Cell |\n| --- | --- |\n| X | 0 |\n| O | 1 |\n| X | 2 |",
       "idle": {
         "prompt": "O to move. Board: X O X / . . . / . . .",
-        "events": ["O.play"],
+        "events": [
+          "O.play"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"O.play\",\"cell\":3}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"oTurn\"", "transition O.play -> \"xTurn\""],
+      "trace": [
+        "transition @xstate.init -> \"oTurn\"",
+        "transition O.play -> \"xTurn\""
+      ],
       "response": "**Board**\n\n```json\n[\n  \"X\",\n  \"O\",\n  \"X\",\n  \"O\",\n  null,\n  null,\n  null,\n  null,\n  null\n]\n```\n\n**Moves**\n\n| Player | Cell |\n| --- | --- |\n| X | 0 |\n| O | 1 |\n| X | 2 |\n| O | 3 |",
       "idle": {
         "prompt": "X to move. Board: X O X / O . . / . . .",
-        "events": ["X.play"],
+        "events": [
+          "X.play"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"X.play\",\"cell\":4}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"xTurn\"", "transition X.play -> \"oTurn\""],
+      "trace": [
+        "transition @xstate.init -> \"xTurn\"",
+        "transition X.play -> \"oTurn\""
+      ],
       "response": "**Board**\n\n```json\n[\n  \"X\",\n  \"O\",\n  \"X\",\n  \"O\",\n  \"X\",\n  null,\n  null,\n  null,\n  null\n]\n```\n\n**Moves**\n\n| Player | Cell |\n| --- | --- |\n| X | 0 |\n| O | 1 |\n| X | 2 |\n| O | 3 |\n| X | 4 |",
       "idle": {
         "prompt": "O to move. Board: X O X / O X . / . . .",
-        "events": ["O.play"],
+        "events": [
+          "O.play"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"O.play\",\"cell\":5}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"oTurn\"", "transition O.play -> \"xTurn\""],
+      "trace": [
+        "transition @xstate.init -> \"oTurn\"",
+        "transition O.play -> \"xTurn\""
+      ],
       "response": "**Board**\n\n```json\n[\n  \"X\",\n  \"O\",\n  \"X\",\n  \"O\",\n  \"X\",\n  \"O\",\n  null,\n  null,\n  null\n]\n```\n\n**Moves**\n\n| Player | Cell |\n| --- | --- |\n| X | 0 |\n| O | 1 |\n| X | 2 |\n| O | 3 |\n| X | 4 |\n| O | 5 |",
       "idle": {
         "prompt": "X to move. Board: X O X / O X O / . . .",
-        "events": ["X.play"],
+        "events": [
+          "X.play"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"X.play\",\"cell\":6}",
       "status": "done",
-      "trace": ["transition @xstate.init -> \"xTurn\"", "transition X.play -> \"xWins\""],
+      "trace": [
+        "transition @xstate.init -> \"xTurn\"",
+        "transition X.play -> \"xWins\""
+      ],
       "response": "X wins in 7 moves: X O X / O X O / X . .\n\n- Winner: X\n\n**Board**\n\n```json\n[\n  \"X\",\n  \"O\",\n  \"X\",\n  \"O\",\n  \"X\",\n  \"O\",\n  \"X\",\n  null,\n  null\n]\n```\n\n**Moves**\n\n| Player | Cell |\n| --- | --- |\n| X | 0 |\n| O | 1 |\n| X | 2 |\n| O | 3 |\n| X | 4 |\n| O | 5 |\n| X | 6 |"
     }
   ]

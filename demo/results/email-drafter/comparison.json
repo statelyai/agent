@@ -22,7 +22,13 @@
             "reviewing --SEND--> sending": 1,
             "sending --xstate.done.actor--> sent": 1
           },
-          "path": ["evaluating", "drafting", "reviewing", "sending", "sent"],
+          "path": [
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
           "failure": null
         },
         {
@@ -42,14 +48,22 @@
             "reviewing --SEND--> sending": 1,
             "sending --xstate.done.actor--> sent": 1
           },
-          "path": ["evaluating", "drafting", "reviewing", "sending", "sent"],
+          "path": [
+            "evaluating",
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
           "failure": null
         },
         {
           "caseId": "complete-3",
           "category": "complete",
           "clarificationTurns": 1,
-          "clarifications": ["What exact body text would you like included in the email?"],
+          "clarifications": [
+            "What exact body text would you like included in the email?"
+          ],
           "revisions": 0,
           "modelCalls": 3,
           "totalTokens": 546,
@@ -328,7 +342,12 @@
             "reviewing --SEND--> sending": 1,
             "sending --xstate.done.actor--> sent": 1
           },
-          "path": ["drafting", "reviewing", "sending", "sent"],
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
           "failure": null
         },
         {
@@ -347,7 +366,12 @@
             "reviewing --SEND--> sending": 1,
             "sending --xstate.done.actor--> sent": 1
           },
-          "path": ["drafting", "reviewing", "sending", "sent"],
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
           "failure": null
         },
         {
@@ -366,7 +390,12 @@
             "reviewing --SEND--> sending": 1,
             "sending --xstate.done.actor--> sent": 1
           },
-          "path": ["drafting", "reviewing", "sending", "sent"],
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
           "failure": null
         },
         {
@@ -385,7 +414,12 @@
             "reviewing --SEND--> sending": 1,
             "sending --xstate.done.actor--> sent": 1
           },
-          "path": ["drafting", "reviewing", "sending", "sent"],
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
           "failure": null
         },
         {
@@ -404,14 +438,22 @@
             "reviewing --SEND--> sending": 1,
             "sending --xstate.done.actor--> sent": 1
           },
-          "path": ["drafting", "reviewing", "sending", "sent"],
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
           "failure": null
         },
         {
           "caseId": "optional-3",
           "category": "missing-optional",
           "clarificationTurns": 0,
-          "clarifications": ["time", "place"],
+          "clarifications": [
+            "time",
+            "place"
+          ],
           "revisions": 0,
           "modelCalls": 1,
           "totalTokens": 251,
@@ -423,7 +465,12 @@
             "reviewing --SEND--> sending": 1,
             "sending --xstate.done.actor--> sent": 1
           },
-          "path": ["drafting", "reviewing", "sending", "sent"],
+          "path": [
+            "drafting",
+            "reviewing",
+            "sending",
+            "sent"
+          ],
           "failure": null
         },
         {
@@ -447,7 +494,13 @@
             "needsRecipient --RECIPIENT_PROVIDED--> sending": 1,
             "sending --xstate.done.actor--> sent": 1
           },
-          "path": ["drafting", "reviewing", "needsRecipient", "sending", "sent"],
+          "path": [
+            "drafting",
+            "reviewing",
+            "needsRecipient",
+            "sending",
+            "sent"
+          ],
           "failure": null
         },
         {
@@ -471,7 +524,13 @@
             "needsRecipient --RECIPIENT_PROVIDED--> sending": 1,
             "sending --xstate.done.actor--> sent": 1
           },
-          "path": ["drafting", "reviewing", "needsRecipient", "sending", "sent"],
+          "path": [
+            "drafting",
+            "reviewing",
+            "needsRecipient",
+            "sending",
+            "sent"
+          ],
           "failure": null
         }
       ],

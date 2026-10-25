@@ -10,7 +10,10 @@
       "response": "Mock reply to: I want a 3-day trip to Lisbon.",
       "idle": {
         "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
-        "events": ["SAY", "END"],
+        "events": [
+          "SAY",
+          "END"
+        ],
         "textEvent": "SAY.message"
       }
     },
@@ -27,7 +30,10 @@
       "response": "Mock reply to: Conversation so far:  \n[user] I want a 3-day trip to Lisbon.  \n[",
       "idle": {
         "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
-        "events": ["SAY", "END"],
+        "events": [
+          "SAY",
+          "END"
+        ],
         "textEvent": "SAY.message"
       }
     },
@@ -44,7 +50,10 @@
       "response": "",
       "idle": {
         "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
-        "events": ["SAY", "END"],
+        "events": [
+          "SAY",
+          "END"
+        ],
         "textEvent": "SAY.message"
       }
     },
@@ -61,14 +70,19 @@
       "response": "",
       "idle": {
         "prompt": "The travel concierge answered. That was the last turn; end here.",
-        "events": ["END"],
+        "events": [
+          "END"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"END\"}",
       "status": "done",
-      "trace": ["transition @xstate.init -> \"budgetSpent\"", "transition END -> \"finished\""],
+      "trace": [
+        "transition @xstate.init -> \"budgetSpent\"",
+        "transition END -> \"finished\""
+      ],
       "response": "- Active agent: travel\n- Turns: 4"
     }
   ],
@@ -83,7 +97,10 @@
       "response": "Mock reply to: Find me flights and a hotel for next weekend.",
       "idle": {
         "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
-        "events": ["SAY", "END"],
+        "events": [
+          "SAY",
+          "END"
+        ],
         "textEvent": "SAY.message"
       }
     },
@@ -100,7 +117,10 @@
       "response": "Mock reply to: Conversation so far:  \n[user] Find me flights and a hotel for",
       "idle": {
         "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
-        "events": ["SAY", "END"],
+        "events": [
+          "SAY",
+          "END"
+        ],
         "textEvent": "SAY.message"
       }
     },
@@ -117,7 +137,10 @@
       "response": "",
       "idle": {
         "prompt": "The travel concierge answered. Ask a follow-up, or end here.",
-        "events": ["SAY", "END"],
+        "events": [
+          "SAY",
+          "END"
+        ],
         "textEvent": "SAY.message"
       }
     },
@@ -134,14 +157,19 @@
       "response": "",
       "idle": {
         "prompt": "The travel concierge answered. That was the last turn; end here.",
-        "events": ["END"],
+        "events": [
+          "END"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"END\"}",
       "status": "done",
-      "trace": ["transition @xstate.init -> \"budgetSpent\"", "transition END -> \"finished\""],
+      "trace": [
+        "transition @xstate.init -> \"budgetSpent\"",
+        "transition END -> \"finished\""
+      ],
       "response": "- Active agent: travel\n- Turns: 4"
     }
   ]

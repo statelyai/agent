@@ -256,7 +256,6 @@ export async function runCase(
     ...actors,
     onTrace,
     input: { prompt: emailCase.prompt },
-    ...actors,
   });
 
   let guard = 0;
@@ -319,7 +318,6 @@ export async function runCase(
       onTrace,
       snapshot,
       event: event as never,
-      ...actors,
     });
   }
 

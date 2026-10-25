@@ -3,11 +3,15 @@
     {
       "sent": "start {}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"prompting\""],
+      "trace": [
+        "transition @xstate.init -> \"prompting\""
+      ],
       "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
-        "events": ["PROMPT_SUBMITTED"],
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
         "textEvent": "PROMPT_SUBMITTED.text"
       }
     },
@@ -23,7 +27,10 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
-        "events": ["REQUEST_CHANGES", "SEND"],
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
         "textEvent": "REQUEST_CHANGES.text"
       }
     },
@@ -38,18 +45,26 @@
       "response": "**Sent emails**\n\n- To: mock to · Subject: mock subject · Body: mock body",
       "idle": {
         "prompt": "Email sent. Draft another one?",
-        "events": ["ANOTHER", "END"],
+        "events": [
+          "ANOTHER",
+          "END"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"ANOTHER\"}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"sent\"", "transition ANOTHER -> \"prompting\""],
+      "trace": [
+        "transition @xstate.init -> \"sent\"",
+        "transition ANOTHER -> \"prompting\""
+      ],
       "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
-        "events": ["PROMPT_SUBMITTED"],
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
         "textEvent": "PROMPT_SUBMITTED.text"
       }
     },
@@ -65,7 +80,10 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
-        "events": ["REQUEST_CHANGES", "SEND"],
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
         "textEvent": "REQUEST_CHANGES.text"
       }
     },
@@ -80,18 +98,26 @@
       "response": "**Sent emails**\n\n| To | Subject | Body |\n| --- | --- | --- |\n| mock to | mock subject | mock body |\n| mock to | mock subject | mock body |",
       "idle": {
         "prompt": "Email sent. Draft another one?",
-        "events": ["ANOTHER", "END"],
+        "events": [
+          "ANOTHER",
+          "END"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"ANOTHER\"}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"sent\"", "transition ANOTHER -> \"prompting\""],
+      "trace": [
+        "transition @xstate.init -> \"sent\"",
+        "transition ANOTHER -> \"prompting\""
+      ],
       "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
-        "events": ["PROMPT_SUBMITTED"],
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
         "textEvent": "PROMPT_SUBMITTED.text"
       }
     },
@@ -107,7 +133,10 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
-        "events": ["REQUEST_CHANGES", "SEND"],
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
         "textEvent": "REQUEST_CHANGES.text"
       }
     }
@@ -116,11 +145,15 @@
     {
       "sent": "start {}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"prompting\""],
+      "trace": [
+        "transition @xstate.init -> \"prompting\""
+      ],
       "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
-        "events": ["PROMPT_SUBMITTED"],
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
         "textEvent": "PROMPT_SUBMITTED.text"
       }
     },
@@ -136,7 +169,10 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
-        "events": ["REQUEST_CHANGES", "SEND"],
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
         "textEvent": "REQUEST_CHANGES.text"
       }
     },
@@ -151,18 +187,26 @@
       "response": "**Sent emails**\n\n- To: mock to · Subject: mock subject · Body: mock body",
       "idle": {
         "prompt": "Email sent. Draft another one?",
-        "events": ["ANOTHER", "END"],
+        "events": [
+          "ANOTHER",
+          "END"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"ANOTHER\"}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"sent\"", "transition ANOTHER -> \"prompting\""],
+      "trace": [
+        "transition @xstate.init -> \"sent\"",
+        "transition ANOTHER -> \"prompting\""
+      ],
       "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
-        "events": ["PROMPT_SUBMITTED"],
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
         "textEvent": "PROMPT_SUBMITTED.text"
       }
     },
@@ -178,7 +222,10 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
-        "events": ["REQUEST_CHANGES", "SEND"],
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
         "textEvent": "REQUEST_CHANGES.text"
       }
     },
@@ -193,18 +240,26 @@
       "response": "**Sent emails**\n\n| To | Subject | Body |\n| --- | --- | --- |\n| mock to | mock subject | mock body |\n| mock to | mock subject | mock body |",
       "idle": {
         "prompt": "Email sent. Draft another one?",
-        "events": ["ANOTHER", "END"],
+        "events": [
+          "ANOTHER",
+          "END"
+        ],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"ANOTHER\"}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"sent\"", "transition ANOTHER -> \"prompting\""],
+      "trace": [
+        "transition @xstate.init -> \"sent\"",
+        "transition ANOTHER -> \"prompting\""
+      ],
       "response": "",
       "idle": {
         "prompt": "What email should I write? Who is it to, and what should it say?",
-        "events": ["PROMPT_SUBMITTED"],
+        "events": [
+          "PROMPT_SUBMITTED"
+        ],
         "textEvent": "PROMPT_SUBMITTED.text"
       }
     },
@@ -220,7 +275,10 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body\n\n**Assessment**\n\n**Satisfied**: yes",
       "idle": {
         "prompt": "Send the draft, or type the changes you want.",
-        "events": ["REQUEST_CHANGES", "SEND"],
+        "events": [
+          "REQUEST_CHANGES",
+          "SEND"
+        ],
         "textEvent": "REQUEST_CHANGES.text"
       }
     }

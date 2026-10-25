@@ -11,7 +11,10 @@
       "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n- Title: mock title",
       "idle": {
         "prompt": "Explain this back in your own words.",
-        "events": ["EXPLAIN", "SKIP"],
+        "events": [
+          "EXPLAIN",
+          "SKIP"
+        ],
         "textEvent": "EXPLAIN.text"
       }
     },
@@ -39,7 +42,10 @@
       "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n- Title: mock title",
       "idle": {
         "prompt": "Explain this back in your own words.",
-        "events": ["EXPLAIN", "SKIP"],
+        "events": [
+          "EXPLAIN",
+          "SKIP"
+        ],
         "textEvent": "EXPLAIN.text"
       }
     },
@@ -67,7 +73,10 @@
       "response": "**Notice**\n\nCheckpoint 1/1: mock title\n\nmock context\n\n**Checkpoints**\n\n- Title: mock title",
       "idle": {
         "prompt": "Explain this back in your own words.",
-        "events": ["EXPLAIN", "SKIP"],
+        "events": [
+          "EXPLAIN",
+          "SKIP"
+        ],
         "textEvent": "EXPLAIN.text"
       }
     },

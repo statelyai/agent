@@ -343,7 +343,6 @@ export async function startScenarioRun(
       "start",
     ),
     input: inputFor(scenarioId, prompt),
-    ...judgeActors(scenarioId, judge),
   });
   return toResult(scenarioId, model, result as AgentRunResult<AnyStateMachine>, trace);
 }
@@ -382,7 +381,6 @@ export async function resumeScenarioRun(
     ),
     snapshot,
     event,
-    ...judgeActors(scenarioId, judge),
   });
   return toResult(scenarioId, model, result as AgentRunResult<AnyStateMachine>, trace);
 }

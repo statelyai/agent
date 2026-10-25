@@ -3,7 +3,10 @@
     {
       "sent": "start {\"amount\":40,\"reason\":\"Late delivery credit\"}",
       "status": "done",
-      "trace": ["transition @xstate.init -> \"classifying\"", "transition ISSUE -> \"issued\""],
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition ISSUE -> \"issued\""
+      ],
       "response": "Issued $40 automatically (at or under the $100 limit).\n\n- Outcome: issued\n- Amount: 40\n- Approved: no"
     }
   ],
@@ -19,14 +22,20 @@
       "response": "",
       "idle": {
         "prompt": "This refund is over the auto-issue limit. Approve or reject it.",
-        "events": ["APPROVE", "REJECT"],
+        "events": [
+          "APPROVE",
+          "REJECT"
+        ],
         "textEvent": "REJECT.reason"
       }
     },
     {
       "sent": "{\"approver\":\"mock approver\",\"type\":\"APPROVE\"}",
       "status": "done",
-      "trace": ["transition @xstate.init -> \"approving\"", "transition APPROVE -> \"issued\""],
+      "trace": [
+        "transition @xstate.init -> \"approving\"",
+        "transition APPROVE -> \"issued\""
+      ],
       "response": "Issued $500 after human approval.\n\n- Outcome: issued\n- Amount: 500\n- Approved: yes"
     }
   ],
@@ -34,7 +43,10 @@
     {
       "sent": "start {\"amount\":100,\"reason\":\"Damaged item\"}",
       "status": "done",
-      "trace": ["transition @xstate.init -> \"classifying\"", "transition ISSUE -> \"issued\""],
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition ISSUE -> \"issued\""
+      ],
       "response": "Issued $100 automatically (at or under the $100 limit).\n\n- Outcome: issued\n- Amount: 100\n- Approved: no"
     }
   ]

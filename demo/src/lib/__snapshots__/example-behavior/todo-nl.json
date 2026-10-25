@@ -3,11 +3,15 @@
     {
       "sent": "start {}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"awaitingCommand\""],
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\""
+      ],
       "response": "",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
-        "events": ["COMMAND"],
+        "events": [
+          "COMMAND"
+        ],
         "textEvent": "COMMAND.text"
       }
     },
@@ -25,7 +29,9 @@
       "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
-        "events": ["COMMAND"],
+        "events": [
+          "COMMAND"
+        ],
         "textEvent": "COMMAND.text"
       }
     },
@@ -44,11 +50,15 @@
     {
       "sent": "start {}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"awaitingCommand\""],
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\""
+      ],
       "response": "",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
-        "events": ["COMMAND"],
+        "events": [
+          "COMMAND"
+        ],
         "textEvent": "COMMAND.text"
       }
     },
@@ -66,7 +76,9 @@
       "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
-        "events": ["COMMAND"],
+        "events": [
+          "COMMAND"
+        ],
         "textEvent": "COMMAND.text"
       }
     },
@@ -85,11 +97,15 @@
     {
       "sent": "start {}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> \"awaitingCommand\""],
+      "trace": [
+        "transition @xstate.init -> \"awaitingCommand\""
+      ],
       "response": "",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
-        "events": ["COMMAND"],
+        "events": [
+          "COMMAND"
+        ],
         "textEvent": "COMMAND.text"
       }
     },
@@ -107,7 +123,9 @@
       "response": "**Log**\n\n- added #1: mock title\n- toggled #1\n- deleted #1",
       "idle": {
         "prompt": "What should I do with your list? (list is empty)",
-        "events": ["COMMAND"],
+        "events": [
+          "COMMAND"
+        ],
         "textEvent": "COMMAND.text"
       }
     },

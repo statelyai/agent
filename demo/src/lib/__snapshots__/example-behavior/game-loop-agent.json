@@ -3,11 +3,15 @@
     {
       "sent": "start {\"seed\":11}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> {\"playing\":\"humanTurn\"}"],
+      "trace": [
+        "transition @xstate.init -> {\"playing\":\"humanTurn\"}"
+      ],
       "response": "",
       "idle": {
         "prompt": "Round 1. You start. Round 1: you 0 · agent 0 · turn total 0 · first to 50. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL"],
+        "events": [
+          "HUMAN_ROLL"
+        ],
         "textEvent": null
       }
     },
@@ -21,7 +25,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 3 (turn total 3). Round 1: you 0 · agent 0 · turn total 3 · first to 50. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -35,7 +42,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 4 (turn total 7). Round 1: you 0 · agent 0 · turn total 7 · first to 50. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -51,7 +61,9 @@
       "response": "",
       "idle": {
         "prompt": "agent banked 6 (human 0, agent 6). Round 1: you 0 · agent 6 · turn total 0 · first to 50. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL"],
+        "events": [
+          "HUMAN_ROLL"
+        ],
         "textEvent": null
       }
     },
@@ -65,7 +77,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 3 (turn total 3). Round 1: you 0 · agent 6 · turn total 3 · first to 50. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -79,7 +94,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 6 (turn total 9). Round 1: you 0 · agent 6 · turn total 9 · first to 50. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -93,7 +111,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 3 (turn total 12). Round 1: you 0 · agent 6 · turn total 12 · first to 50. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -107,7 +128,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 2 (turn total 14). Round 1: you 0 · agent 6 · turn total 14 · first to 50. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     }
@@ -116,11 +140,15 @@
     {
       "sent": "start {\"seed\":3,\"target\":30,\"maxRounds\":2}",
       "status": "idle",
-      "trace": ["transition @xstate.init -> {\"playing\":\"humanTurn\"}"],
+      "trace": [
+        "transition @xstate.init -> {\"playing\":\"humanTurn\"}"
+      ],
       "response": "",
       "idle": {
         "prompt": "Round 1. You start. Round 1: you 0 · agent 0 · turn total 0 · first to 30. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL"],
+        "events": [
+          "HUMAN_ROLL"
+        ],
         "textEvent": null
       }
     },
@@ -134,7 +162,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 5 (turn total 5). Round 1: you 0 · agent 0 · turn total 5 · first to 30. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -148,7 +179,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 6 (turn total 11). Round 1: you 0 · agent 0 · turn total 11 · first to 30. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -162,7 +196,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 3 (turn total 14). Round 1: you 0 · agent 0 · turn total 14 · first to 30. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -176,7 +213,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 6 (turn total 20). Round 1: you 0 · agent 0 · turn total 20 · first to 30. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -190,7 +230,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 3 (turn total 23). Round 1: you 0 · agent 0 · turn total 23 · first to 30. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -204,7 +247,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 2 (turn total 25). Round 1: you 0 · agent 0 · turn total 25 · first to 30. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     },
@@ -218,7 +264,10 @@
       "response": "",
       "idle": {
         "prompt": "human rolled 5 (turn total 30). Round 1: you 0 · agent 0 · turn total 30 · first to 30. Your turn — roll, or bank (hold) your turn total?",
-        "events": ["HUMAN_ROLL", "HUMAN_BANK"],
+        "events": [
+          "HUMAN_ROLL",
+          "HUMAN_BANK"
+        ],
         "textEvent": null
       }
     }
