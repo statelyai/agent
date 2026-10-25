@@ -299,7 +299,7 @@ export interface AiSdkExecutors {
 
 /**
  * The canonical Vercel AI SDK adapter: builds the `{ generateText, streamText,
- * decide }` executor set consumed by `createAgentRuntime`/`executeAgentRequest`. `ai`
+ * decide }` executor set consumed by `runAgent`/`createAgentRuntime`. `ai`
  * must not become a dependency of core `src/` files — this subpath is the one
  * place it's imported, and callers must supply their own model resolver so no
  * concrete provider package (e.g. `@ai-sdk/openai`) becomes a dependency here

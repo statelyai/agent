@@ -34,7 +34,7 @@ const bound = provideExecutors(machine, executors, {
 - `onChunk` receives every chunk of every `mode: 'stream'` request.
 - `onTrace` receives `request.start`, `request.end`, `request.error`, and `stream.chunk` events with the same envelope `runAgent` emits, minted per root actor. Pair it with `traceTransitions` on the actor's `inspect` option to fold `machine.transition` events into the same stream.
 
-`provideExecutors` does not descend into invoked child machines. A child with its own agent requests needs its own `provideExecutors(...)` call, or `bindRequestExecutor` on its request logic (below). `runAgent` rebinds children for you.
+`provideExecutors` also binds the agent requests of registered child machines, so a parent and its children share one executor set.
 
 ## Writing an executor by hand
 
@@ -84,22 +84,9 @@ if (request.outputSchema) {
 
 `providerOutputSchema` builds the `{ result, reasoning? }` schema to send. `parseProviderOutput` validates the provider's JSON against it and returns `{ result, reasoning? }`, which is already a valid executor result. The machine still validates `result` against the schema it declared.
 
-### Sharing one executor with a child machine
-
-`bindRequestExecutor(logic, executor)` binds a request's `TextLogic` to a `generateText`-shaped function, so a parent and its child machines can share one executor without a second `provideExecutors` call:
-
-```ts no-check
-childMachine.provide({
-  actors: {
-    researchTopic: bindRequestExecutor(childSetup.requests.researchTopic, executors.generateText),
-  },
-});
-```
-
 ### Helpers for the raw result
 
 - `getCallUsage(raw)` reads a call's normalized usage off any executor result.
 - `getCallFinishReason(raw)` reads its normalized finish reason.
-- `parseOutput(schema, value)` validates a bare value against a request's declared schema, for hosts that unwrap provider output themselves.
 
 The adapters in `@statelyai/agent/ai-sdk`, `@statelyai/agent/openai`, and `@statelyai/agent/tanstack-ai` are built from exactly these pieces. Read them when a provider needs something this page does not cover.

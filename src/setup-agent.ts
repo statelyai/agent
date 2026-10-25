@@ -6,7 +6,6 @@ import {
   type AsyncActorLogic,
   type EventObject,
   type MachineContext,
-  type MetaObject,
   type NonReducibleUnknown,
   type SetupReturnFromConfig,
   type SetupStateSchema,
@@ -843,7 +842,7 @@ export function setupAgent<
         config.states,
         (machineConfig as { states?: Record<string, any> } | undefined)?.states,
       );
-      const machine = createBaseMachine(withRootOutputFromSingleFinal(machineConfig) as never);
+      const machine = createBaseMachine(machineConfig as never);
       setAgentExecutionOptions(machine, machineOptions);
       return machine;
     },
@@ -862,32 +861,6 @@ export function setupAgent<
     TEmittedSchemas,
     TStateSchemas
   >;
-}
-
-// Recursively collects every reached-final-state's `output` config in a machine config.
-function collectFinalStateOutputs(
-  states: Record<string, any> | undefined,
-  outputs: unknown[] = [],
-) {
-  for (const state of Object.values(states ?? {})) {
-    if (state?.type === "final" && state.output !== undefined) {
-      outputs.push(state.output);
-    }
-    collectFinalStateOutputs(state?.states, outputs);
-  }
-
-  return outputs;
-}
-
-// Sugar: when a machine config has no root `output` but exactly one final state declares one, promotes it to the root `output` (so `snapshot.output` is set without repeating the same output on every final state).
-function withRootOutputFromSingleFinal<TConfig>(config: TConfig): TConfig {
-  if (!config || typeof config !== "object" || "output" in config || !("states" in config)) {
-    return config;
-  }
-
-  const outputs = collectFinalStateOutputs((config as { states?: Record<string, any> }).states);
-
-  return outputs.length === 1 ? ({ ...config, output: outputs[0] } as TConfig) : config;
 }
 
 export namespace setupAgent {

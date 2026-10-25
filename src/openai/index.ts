@@ -1,6 +1,6 @@
 /**
  * The raw `openai` package adapter: builds the `{ generateText, streamText,
- * decide }` executor set consumed by `createAgentRuntime`/`executeAgentRequest`, mapped
+ * decide }` executor set consumed by `runAgent`/`createAgentRuntime`, mapped
  * onto the Chat Completions API (not `responses` — `chat.completions` is the
  * canonical/stable surface) with no Vercel AI SDK in between.
  *

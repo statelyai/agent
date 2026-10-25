@@ -363,7 +363,7 @@ deciding: {
 
 ### Uncontrolled: `provideExecutors` + `createActor`
 
-Delivery is built in, but it follows the binding boundary. `provideExecutors` does not descend into invoked child machines, so a child with its own agent invokes needs its own `provideExecutors(...)` call. Until it has one, its calls report no usage anywhere. `runAgent` rebinds children and reports their usage to the root. A [long-lived actor](choosing-a-run-mode.md#long-lived-actor) has no run cycle, so no stragglers are dropped either.
+Delivery is built in. `provideExecutors` binds registered child machines too, and their usage reaches the root the same way it does under `runAgent`. A [long-lived actor](choosing-a-run-mode.md#long-lived-actor) has no run cycle, so no stragglers are dropped either.
 
 ```ts no-check
 import { createActor, toPromise } from "xstate";

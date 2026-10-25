@@ -733,7 +733,7 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
     throw new AgentError(
       "missing-decide-executor",
       "resolveDecision(request, executors, ...) takes the EXECUTOR SET (the same object " +
-        "executeAgentRequest takes), and this one has no 'decide' function. Build one with " +
+        "runAgent takes as `executors`), and this one has no 'decide' function. Build one with " +
         "createAiSdkExecutors({ models }), or pass { decide }.",
     );
   }

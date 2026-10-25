@@ -60,13 +60,11 @@ export type {
   AgentRequestSource,
 } from "./events.js";
 export {
-  bindRequestExecutor,
   providerOutputSchema,
   createTextLogic,
   getAgentOutputMode,
   getCallFinishReason,
   getCallUsage,
-  parseOutput,
   parseProviderOutput,
 } from "./text-logic.js";
 export type {

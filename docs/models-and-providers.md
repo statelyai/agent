@@ -207,7 +207,7 @@ To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and use 
 
 For OpenAI itself, `@statelyai/agent/openai` maps the three executors onto the raw `openai` package's Chat Completions API, with no `ai` dependency. See [Hosts](hosts.md#openai-sdk-adapter).
 
-To avoid depending on `ai` or `openai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. For structured output, `providerOutputSchema` and `getJsonSchema` from `@statelyai/agent` build the `{ result, reasoning? }` schema to send; on the way back, `parseProviderOutput` validates the model's JSON against it and returns `{ result, reasoning? }`, which is already the shape an executor returns. Use `parseOutput` when you validate a bare value on its own, against the schema the request declared. Use `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
+To avoid depending on `ai` or `openai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. For structured output, `providerOutputSchema` and `getJsonSchema` from `@statelyai/agent` build the `{ result, reasoning? }` schema to send; on the way back, `parseProviderOutput` validates the model's JSON against it and returns `{ result, reasoning? }`, which is already the shape an executor returns. Use `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
 
 ## Testing with a mock model
 

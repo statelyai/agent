@@ -187,16 +187,9 @@ export const AGENT_USAGE_TOKEN_FIELDS = [
  * the same flat field names), and for any custom executor that follows the
  * shape.
  *
- * The seam for the step-loop path, where the host holds the raw result itself:
- *
- * ```ts
- * const { result, messages } = await executeAgentRequest(effect, executors);
- * const usage = getCallUsage(raw);
- * if (usage) append({ type: AGENT_USAGE_EVENT_TYPE, usage }); // journal + transition, like any event
- * append(effect.toDoneEvent(output));
- * ```
- *
- * See "Token usage on this path" in docs/steps.md for the full loop.
+ * The seam for a hand-written executor or adapter that holds the raw result
+ * itself: `getCallUsage(raw)` reads the same fields the runtime folds into
+ * `result.usage` and the `@agent.usage` event.
  */
 export function getCallUsage(raw: unknown): AgentCallUsage | undefined {
   const usage = (raw as { usage?: unknown } | null | undefined)?.usage;
@@ -324,22 +317,6 @@ const stringOutputSchema: StandardSchemaV1<string> = {
 };
 
 const noInputSchema = passthroughSchema as StandardSchemaV1<undefined>;
-
-/**
- * Validates a raw model/executor output against `schema`, returning the
- * parsed value. Thin wrapper over {@link validateSchemaSync} for parsing a
- * text request's structured output outside of `TextLogic.execute`/
- * `executeAgentRequest` (e.g. a custom host loop).
- */
-export function parseOutput<TSchema extends StandardSchemaV1>(
-  schema: TSchema,
-  output: unknown,
-): InferOutput<TSchema> {
-  return validateSchemaSync<InferOutput<TSchema>>(
-    schema as StandardSchemaV1<InferOutput<TSchema>>,
-    output,
-  );
-}
 
 /** A TextLogicConfig/DecisionLogicConfig field value: either static, or a `({ input }) => value` resolver. @internal */
 export type ResolveTextLogicValue<TValue, TInput> = TValue | ((args: { input: TInput }) => TValue);
@@ -581,41 +558,6 @@ export function createTextLogic<
   return textLogic;
 }
 
-/**
- * Binds a child machine's {@link TextLogic} to a raw
- * {@link AgentRequestExecutor} (the `generateText`/`streamText` shape hosts
- * implement). Encapsulates the `withExecutor` idiom child agents repeat:
- * default the request's `tools` to `{}`, forward the actor `signal`, call the
- * executor, and return its `{ result }`. Use this to share ONE
- * executor across a parent and its nested children.
- *
- * @example
- * ```ts
- * childMachine.provide({
- *   actors: {
- *     researchTopic: bindRequestExecutor(setup.requests.researchTopic, generateText),
- *   },
- * });
- * ```
- */
-export function bindRequestExecutor<
-  TInputSchema extends StandardSchemaV1,
-  TOutputSchema extends StandardSchemaV1,
-  TMetadata,
->(
-  logic: TextLogic<TInputSchema, TOutputSchema, TMetadata>,
-  executor: AgentRequestExecutor,
-  info?: Pick<AgentRequestExecutorInfo, "onChunk">,
-): TextLogic<TInputSchema, TOutputSchema, TMetadata> {
-  return logic.withExecutor(async ({ request, signal }) => {
-    const { result, messages } = await executor(
-      { ...request, tools: request.tools ?? {} } as AgentExecutorTextRequest,
-      { signal, onChunk: info?.onChunk },
-    );
-    return { result, messages } as AgentRequestExecutorResult<InferOutput<TOutputSchema>>;
-  });
-}
-
 /** Type guard: true for any actor logic built by createTextLogic (checks the `kind` marker). @internal */
 export function isTextLogic(value: unknown): value is TextLogic {
   return (
@@ -724,7 +666,7 @@ export type AgentRequestExecutor<
 
 /**
  * The full set of host executors a machine's agent actors are resolved
- * with — passed to `createAgentRuntime`, `executeAgentRequest`, and
+ * with — passed to `runAgent`/`createAgentRuntime` and
  * `TextLogic.execute`. Every slot is optional: `generateText` is needed only
  * if the machine has a `mode: 'generate'` text request, `streamText` only for
  * a `mode: 'stream'` request, and `decide` only for a decision — omitting
@@ -873,7 +815,7 @@ export function parseProviderOutput(
  * Merges request-declared and call-site `tools`, dispatches to the
  * `mode`-appropriate executor (`generateText`/`streamText`), and normalizes
  * the raw result via {@link normalizeGeneratorResult}. Shared by
- * `TextLogic.execute` and `executeAgentRequest`. Throws if no executor is
+ * `TextLogic.execute`. Throws if no executor is
  * registered for `mode`.
  *
  * @internal

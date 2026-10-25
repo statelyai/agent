@@ -823,20 +823,6 @@ function translateWorkflowState(
   };
 }
 
-// Recursively collects every final state's translated `output` value.
-function collectTranslatedFinalOutputs(
-  states: Record<string, any> | undefined,
-  outputs: unknown[] = [],
-) {
-  for (const state of Object.values(states ?? {})) {
-    if (state?.type === "final" && state.output !== undefined) {
-      outputs.push(state.output);
-    }
-    collectTranslatedFinalOutputs(state?.states, outputs);
-  }
-  return outputs;
-}
-
 // Translates a whole AgentWorkflowConfig into the MachineJSON accepted by
 // xstate's machineFromJSON.
 function translateWorkflowConfig(
@@ -864,14 +850,6 @@ function translateWorkflowConfig(
     states,
     ...(config.meta !== undefined ? { meta: config.meta } : {}),
   };
-
-  // Single-final-state root-output sugar (mirrors setupAgent's
-  // withRootOutputFromSingleFinal): when no root `output` is declared and
-  // exactly one final state has one, promote it so `snapshot.output` is set.
-  const finalOutputs = collectTranslatedFinalOutputs(states);
-  if (json.output === undefined && finalOutputs.length === 1) {
-    json.output = finalOutputs[0];
-  }
 
   return json as unknown as MachineJSON;
 }

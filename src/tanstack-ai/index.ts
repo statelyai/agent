@@ -1,6 +1,6 @@
 /**
  * The TanStack AI adapter: builds the `{ generateText, streamText, decide }`
- * executor set consumed by `createAgentRuntime`/`executeAgentRequest`, mapped
+ * executor set consumed by `runAgent`/`createAgentRuntime`, mapped
  * onto TanStack AI's `chat()` activity and any text adapter
  * (`openaiText(...)`, `anthropicText(...)`, `geminiText(...)`, …).
  *

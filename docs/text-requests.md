@@ -77,16 +77,6 @@ In `onDone`, `output` is `{ result, messages }`. `output.result` is already vali
 
 > **Note:** Route on `request.name`. Every lowered request carries its `setupAgent({ requests })` key as `name`. A mock executor, or a router that picks providers per request, tells requests apart with `request.name === 'answerQuestion'`. Do not inspect the `system` or `prompt` text. See [examples/context-compaction/index.test.ts](../examples/context-compaction/index.test.ts).
 
-### Narrowing an unknown output outside the machine
-
-The `parseOutput(schema, output)` helper validates a value against a schema and returns the parsed value. It throws on a mismatch. Use it in host code that holds a raw, still-untyped output, such as a value from a persisted snapshot. You never need it inside `onDone`.
-
-```ts
-import { parseOutput } from "@statelyai/agent";
-
-const answer = parseOutput(answerSchema, rawOutput); // typed as { answer: string }
-```
-
 ## Structured output vs plain text
 
 <!-- output-mode derivation from src/text-logic.ts (getAgentOutputMode) -->

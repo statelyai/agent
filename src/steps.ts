@@ -60,39 +60,6 @@ export interface AgentRequest<TInput extends AgentTextRequest = AgentTextRequest
 /** `AgentStep.requests` element: a text or decision request. */
 export type AgentStepRequest = AgentRequest | AgentDecisionRequest;
 
-interface InvokeEffectMetadata {
-  id?: unknown;
-  src?: unknown;
-  input?: unknown;
-  logic?: unknown;
-}
-
-/** @internal Normalizes current and legacy XState invoke effect shapes. */
-export function getInvokeEffectMetadata(action: {
-  type?: string;
-  params?: unknown;
-  id?: unknown;
-  src?: unknown;
-  input?: unknown;
-  logic?: unknown;
-}): InvokeEffectMetadata | undefined {
-  if (action.type === "@xstate.spawn") {
-    return action;
-  }
-
-  if (action.type === "xstate.spawnChild") {
-    const params = action.params as InvokeEffectMetadata | undefined;
-    return params ? { ...params, logic: action.logic } : undefined;
-  }
-
-  // Before spawn/start were split, @xstate.start carried invoke metadata.
-  if (action.type === "@xstate.start" && typeof action.src === "string") {
-    return action;
-  }
-
-  return undefined;
-}
-
 /**
  * The invokes a snapshot is still waiting on, lowered to the same spawn-effect
  * shape {@link getAgentRequests} reads. Derived from the snapshot's live
@@ -176,9 +143,8 @@ export function getAgentRequests(
     options = { ...getRegisteredAgentExecutionOptions(machine), ...options };
   }
 
-  const fromActions = actions.flatMap((action): AgentStepRequest[] => {
-    const params = getInvokeEffectMetadata(action);
-    if (!params || typeof params.src !== "string") {
+  return actions.flatMap((params): AgentStepRequest[] => {
+    if (params.type !== "@xstate.spawn" || typeof params.src !== "string") {
       return [];
     }
 
@@ -249,51 +215,27 @@ export function getAgentRequests(
       },
     ];
   });
-
-  return fromActions;
 }
 
 /**
- * Builds the canonical `xstate.done.actor` event xstate's `transition()`
- * expects to resolve a spawned invoke — including the child session identity
- * that rejects a stale completion from an earlier incarnation.
- *
- * @internal
+ * Builds the `xstate.done.actor` (or `xstate.error.actor`) event xstate's
+ * `transition()` expects to settle a spawned invoke — including the child
+ * session identity that rejects a stale completion from an earlier
+ * incarnation.
  */
-function doneEvent(
+function settleEvent(
   snapshot: AnyMachineSnapshot,
   request: Pick<AgentRequest, "id"> | string,
-  output: unknown,
+  value: unknown,
+  outcome: "output" | "error",
 ): EventObject {
   const id = typeof request === "string" ? request : request.id;
   const child = (snapshot.children as Record<string, { sessionId?: unknown }>)[id];
   return {
-    type: "xstate.done.actor",
+    type: outcome === "error" ? "xstate.error.actor" : "xstate.done.actor",
     actorId: id,
     ...(typeof child?.sessionId === "string" ? { sessionId: child.sessionId } : {}),
-    output,
-  } as EventObject;
-}
-
-/**
- * The `xstate.error.actor` counterpart of {@link doneEvent} — the event a
- * failed invoke delivers, which `onError` transitions observe. Carries the
- * same child session identity, so xstate does not discard it as stale.
- *
- * @internal
- */
-function errorEvent(
-  snapshot: AnyMachineSnapshot,
-  request: Pick<AgentRequest, "id"> | string,
-  error: unknown,
-): EventObject {
-  const id = typeof request === "string" ? request : request.id;
-  const child = (snapshot.children as Record<string, { sessionId?: unknown }>)[id];
-  return {
-    type: "xstate.error.actor",
-    actorId: id,
-    ...(typeof child?.sessionId === "string" ? { sessionId: child.sessionId } : {}),
-    error,
+    [outcome === "error" ? "error" : "output"]: value,
   } as EventObject;
 }
 
@@ -313,13 +255,8 @@ export function transitionResult<TLogic extends AnyActorLogic>(
   output: unknown,
   outcome: "output" | "error" = "output",
 ): [SnapshotFrom<TLogic>, ExecutableEffectFrom<TLogic>[]] {
-  const event =
-    outcome === "error"
-      ? errorEvent(snapshot as AnyMachineSnapshot, request, output)
-      : doneEvent(snapshot as AnyMachineSnapshot, request, output);
-  const result = transition(logic, snapshot, event as never);
-  applyFinalStateOutput(logic, result[0], event);
-  return result;
+  const event = settleEvent(snapshot as AnyMachineSnapshot, request, output, outcome);
+  return transition(logic, snapshot, event as never);
 }
 
 /**
@@ -496,15 +433,13 @@ function assertTextExecutor(
   }
 }
 
-// Assembles an AgentStep from a snapshot + actions: applies single-final-state output, then discovers pending requests.
+// Assembles an AgentStep from a snapshot + actions: discovers pending requests.
 function createAgentStep<TMachine extends AnyActorLogic>(
   machine: TMachine,
   snapshot: SnapshotFrom<TMachine>,
   actions: readonly { type?: string; params?: unknown }[],
   options?: AgentExecutionOptions,
 ): AgentStep<SnapshotFrom<TMachine>> {
-  applyFinalStateOutput(machine, snapshot);
-
   return {
     snapshot,
     actions,
@@ -514,66 +449,6 @@ function createAgentStep<TMachine extends AnyActorLogic>(
     }),
     done: (snapshot as AnyMachineSnapshot).status === "done",
   };
-}
-
-// Walks a machine config by the snapshot's state `value` to find the reached final-state's config node.
-function resolveStateValueConfig(config: { states?: Record<string, any> }, value: unknown): any {
-  if (typeof value === "string") {
-    return config.states?.[value];
-  }
-
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-
-  for (const [key, childValue] of Object.entries(value)) {
-    const childConfig = config.states?.[key];
-    if (!childConfig) {
-      continue;
-    }
-
-    if (childConfig.type === "final") {
-      return childConfig;
-    }
-
-    const nested = resolveStateValueConfig(childConfig, childValue);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return undefined;
-}
-
-// Backfills `snapshot.output` from the reached final state's `output` config when xstate didn't already set one (single-final-state root-output sugar — see setup-agent.ts's withRootOutputFromSingleFinal).
-function applyFinalStateOutput(logic: AnyActorLogic, snapshot: unknown, event?: EventObject) {
-  const machineSnapshot = snapshot as AnyMachineSnapshot & {
-    output?: unknown;
-    context?: unknown;
-    value?: unknown;
-  };
-
-  if (
-    machineSnapshot.status !== "done" ||
-    machineSnapshot.output !== undefined ||
-    !("config" in logic)
-  ) {
-    return;
-  }
-
-  const config = (logic as { config?: { states?: Record<string, any> } }).config;
-  if (!config) {
-    return;
-  }
-
-  const stateConfig = resolveStateValueConfig(config, machineSnapshot.value);
-  const output = stateConfig?.output;
-  if (output === undefined) {
-    return;
-  }
-
-  machineSnapshot.output =
-    typeof output === "function" ? output({ context: machineSnapshot.context, event }) : output;
 }
 
 // Duck-types an AgentStep vs a raw snapshot, for transitionAgentStep's dual-argument overload.

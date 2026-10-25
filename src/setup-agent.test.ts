@@ -84,6 +84,24 @@ function asTextRequest(request: AgentStepRequest | undefined): AgentRequest {
 }
 
 describe("setupAgent", () => {
+  test("a final state without its own output does not borrow another final state's", async () => {
+    const machine = setupAgent({
+      context: z.object({}),
+      events: { A: {}, B: {} },
+    }).createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: { on: { A: { target: "a" }, B: { target: "b" } } },
+        a: { type: "final", output: () => ({ which: "a" }) },
+        b: { type: "final" },
+      },
+    });
+    const result = await runAgent(machine, { event: { type: "B" } });
+    expect(result.status).toBe("done");
+    expect(result.status === "done" && result.output).toBeUndefined();
+  });
+
   test("accepts {} as a payload-less event schema", () => {
     const agent = setupAgent({
       context: z.object({ count: z.number() }),
