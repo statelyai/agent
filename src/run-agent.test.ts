@@ -38,6 +38,7 @@ import {
 } from "./index.js";
 import {
   AGENT_INIT_EVENT_TYPE,
+  forkEventLog,
   getLogExecutionId,
   getUsageFromEvents,
   replay,
@@ -3959,6 +3960,57 @@ describe("runAgent event log", () => {
     expect(secondCalls[0]!.callKey).toMatch(/^[0-9a-f-]+:b#1$/);
   });
 
+  test("a forked thread's calls get their own callKeys, not the parent's", async () => {
+    const askMachine = setup({ actors: { answer } }).createMachine({
+      id: "ask-later",
+      context: () => ({}),
+      initial: "waiting",
+      states: {
+        waiting: { on: { GO: { target: "asking" } } },
+        asking: {
+          invoke: {
+            id: "ask",
+            src: "answer",
+            input: () => ({}),
+            onDone: { target: "done" },
+          } as never,
+        },
+        done: { type: "final" },
+      },
+    });
+    const store = createInMemoryEventLogStore();
+    const generateText = async () => ({ result: "ok" });
+    await runToQuiescence(
+      createAgentRuntime(askMachine, { store, threadId: "parent", executors: { generateText } }),
+      { input: undefined },
+    );
+    await store.fork({ threadId: "parent", newThreadId: "branch" });
+
+    const keyOf = async (threadId: string) => {
+      const keys: Array<string | undefined> = [];
+      await runToQuiescence(
+        createAgentRuntime(askMachine, {
+          store,
+          threadId,
+          executors: {
+            generateText: async (_request, info) => {
+              keys.push(info?.callKey);
+              return { result: "ok" };
+            },
+          },
+        }),
+        { event: { type: "GO" } },
+      );
+      return keys[0]!;
+    };
+    const [parentKey, branchKey] = [await keyOf("parent"), await keyOf("branch")];
+
+    const branchId = getLogExecutionId(await store.read("branch"))!;
+    expect(branchKey).toBe(`${branchId}:ask#1`);
+    expect(parentKey).toBe(`${getLogExecutionId(await store.read("parent"))}:ask#1`);
+    expect(branchKey).not.toBe(parentKey);
+  });
+
   test("decision retries get distinct, replay-stable callKeys", async () => {
     const schemas = createAgentSchemas({
       context: z.object({}),
@@ -4251,6 +4303,58 @@ describe("runAgent event log", () => {
       },
     );
     expect(bridged.status).toBe("done");
+  });
+
+  test("version bridge: a fork bridges with its parent's snapshot until it moves on", async () => {
+    const v1 = makeLoggedMachine({ version: "1" });
+    const parent = await runToQuiescence(createAgentRuntime(v1, { executors: executors() }), {
+      input: undefined,
+    });
+    const parentTail = JSON.parse(JSON.stringify(parent.persist())) as Snapshot<unknown>;
+    const forked = forkEventLog(parent.events, parent.events.length);
+    const v2 = makeLoggedMachine({
+      version: "2",
+      migrate: (snapshot) => ({ ...(snapshot as object), version: "2" }),
+    });
+
+    // Untouched since the cutoff: the parent's tail snapshot is the fork's tail too.
+    const bridged = await runToQuiescence(createAgentRuntime(v2, { executors: executors() }), {
+      events: forked,
+      snapshot: parentTail,
+      event: { type: "APPROVE" } as never,
+    });
+    expect(bridged.status).toBe("done");
+    expect(getLogExecutionId(bridged.events)).toBe(getLogExecutionId(forked));
+
+    // Once the fork appends, the parent's snapshot no longer caches its tail.
+    const moved = await runToQuiescence(createAgentRuntime(v1, { executors: executors() }), {
+      events: forked,
+      event: { type: "APPROVE" } as never,
+    });
+    expect(moved.events.length).toBeGreaterThan(forked.length);
+    await expect(
+      runToQuiescence(createAgentRuntime(v2, { executors: executors() }), {
+        events: moved.events,
+        snapshot: parentTail,
+      }),
+    ).rejects.toBeInstanceOf(AgentMachineVersionMismatchError);
+  });
+
+  test("a parent's log passed as a fork thread's `events` is refused", async () => {
+    const machine = makeLoggedMachine({ version: "1" });
+    const store = createInMemoryEventLogStore();
+    const parent = await runToQuiescence(
+      createAgentRuntime(machine, { store, threadId: "parent", executors: executors() }),
+      { input: undefined },
+    );
+    await store.fork({ threadId: "parent", newThreadId: "branch" });
+
+    await expect(
+      runToQuiescence(
+        createAgentRuntime(machine, { store, threadId: "branch", executors: executors() }),
+        { events: parent.events },
+      ),
+    ).rejects.toMatchObject({ code: "event-log-conflict" });
   });
 
   test("a log written by another machine is never a resume", async () => {

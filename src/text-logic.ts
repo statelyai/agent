@@ -807,9 +807,11 @@ export interface AgentRequestExecutorInfo {
    * `a` being the number of prior failed attempts), so a retry never collides
    * with the rejected attempt it is replacing.
    *
-   * It identifies the CALL SITE, not the request: a fork inherits its parent's
-   * lineage id, so cache on `callKey` together with a fingerprint of the
-   * request and reuse a cached result only when the request also matches.
+   * It identifies the CALL SITE, not the request: a version bridge keeps the
+   * lineage id, so a migrated machine can ask something else under the same
+   * key. Cache on `callKey` together with a fingerprint of the request and
+   * reuse a cached result only when the request also matches. A fork mints
+   * its own lineage id, so its keys never match its parent's.
    *
    * Undefined off the `createAgentRuntime` path, and for a log with no `executionId`.
    */
