@@ -2,9 +2,7 @@ import type { AnyActorLogic, AnyStateMachine } from "xstate";
 import { isTextLogic, type AgentRequestExecutors } from "./text-logic.js";
 import { isDecisionLogic } from "./decision.js";
 import {
-  bindChildMachineForProvide,
-  bindDecisionForProvide,
-  bindTextForProvide,
+  bindSourcesForProvide,
   getConfiguredInvokeSrcs,
   isStateMachineLogic,
   type AgentTraceEvent,
@@ -82,26 +80,19 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
   executors: AgentRequestExecutors,
   options: ProvideExecutorsOptions<TMachine> = {},
 ): TMachine {
-  const bindOptions = {
-    onChunk: options.onChunk,
-    onTrace: options.onTrace as ((event: AgentTraceEvent) => void) | undefined,
-  };
   const withActors = (target: TMachine, actors: Record<string, AnyActorLogic>): TMachine =>
     target.provide({ actors: actors as never }) as TMachine;
 
   const provided = options.actors ? withActors(machine, options.actors) : machine;
 
   const effectiveSources = provided.sources.actors as Record<string, AnyActorLogic>;
-  const wrappedSources: Record<string, AnyActorLogic> = {};
 
-  // The always-registered `agent.*` builtins are present in every machine even
-  // when unused — so a missing executor is only an error when the machine
-  // actually invokes that source. Un-invoked sources are left unbound.
+  // The sources to bind. A missing executor is only an error for a source the
+  // machine actually invokes; an un-invoked one is left unbound. A source
+  // that already carries its own executor (`.withExecutor(...)`) runs itself.
   const invokedSrcs = getConfiguredInvokeSrcs(provided);
-
+  const bindable: Record<string, AnyActorLogic> = {};
   for (const [key, logic] of Object.entries(effectiveSources)) {
-    // An invoked child machine: recursively bind ITS agent sources with the
-    // same executors (same semantics as the runtime's rebindChildMachine).
     if (isStateMachineLogic(logic)) {
       // Assert BEFORE binding: a child's own invoked text/decision sources
       // need the same executors, and a missing one must fail here rather than
@@ -109,44 +100,29 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
       if (invokedSrcs.has(key)) {
         assertChildBindable(logic, executors, key, new Set([provided as AnyStateMachine]));
       }
-      const rebound = bindChildMachineForProvide(
-        logic,
-        executors,
-        bindOptions,
-        new Set([provided as AnyStateMachine]),
-      );
-      if (rebound !== logic) {
-        wrappedSources[key] = rebound;
-      }
+      bindable[key] = logic;
       continue;
     }
-
-    // Non-agent actors pass through untouched.
     const requirement = executorRequirementOf(logic);
-    if (!requirement) {
+    if (!requirement || executorBoundLogics.has(logic)) {
       continue;
     }
-    const binding: MissingExecutorBinding = {
-      ...requirement,
-      bind: () =>
-        isDecisionLogic(logic)
-          ? bindDecisionForProvide(provided, logic, executors, bindOptions)
-          : bindTextForProvide(provided, logic as never, executors, bindOptions),
-    };
-    // A source that already carries its own executor (`.withExecutor(...)`) runs itself.
-    if (executorBoundLogics.has(logic)) {
-      continue;
-    }
-    if (!executors[binding.executorKey]) {
+    if (!executors[requirement.executorKey]) {
       if (invokedSrcs.has(key)) {
-        throw missingExecutorError(key, binding.kind, binding.executorKey);
+        throw missingExecutorError(key, requirement.kind, requirement.executorKey);
       }
       continue;
     }
-    wrappedSources[key] = binding.bind();
+    bindable[key] = logic;
   }
 
-  return withActors(provided, wrappedSources);
+  return withActors(
+    provided,
+    bindSourcesForProvide(provided, bindable, executors, {
+      onChunk: options.onChunk,
+      onTrace: options.onTrace as ((event: AgentTraceEvent) => void) | undefined,
+    }),
+  );
 }
 
 /** The executor slot + label an agent logic needs, or `undefined` for a non-agent actor. */
@@ -201,13 +177,6 @@ function assertChildBindable(
       throw missingExecutorError(`${path} > ${src}`, requirement.kind, requirement.executorKey);
     }
   }
-}
-
-/** What one agent source needs: the executor slot, its label, and how to bind it. */
-interface MissingExecutorBinding {
-  executorKey: "generateText" | "streamText" | "decide";
-  kind: "text" | "streaming text" | "decision";
-  bind: () => AnyActorLogic;
 }
 
 function missingExecutorError(

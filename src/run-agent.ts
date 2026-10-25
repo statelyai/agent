@@ -142,12 +142,7 @@ export interface AgentRunMeta {
 // log.
 function hashResumeSnapshot(snapshot: unknown): string {
   if (snapshot !== null && typeof snapshot === "object" && "agentMeta" in snapshot) {
-    const rest: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(snapshot as Record<string, unknown>)) {
-      if (key !== "agentMeta") {
-        rest[key] = value;
-      }
-    }
+    const { agentMeta: _agentMeta, ...rest } = snapshot as Record<string, unknown>;
     return getSnapshotStateHash(rest);
   }
   return getSnapshotStateHash(snapshot);
@@ -1503,6 +1498,9 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
     kind: "statelyai.decisionLogic" as const,
     maxRetries: logic.maxRetries,
     request: logic.request,
+    // Kept so a re-bound decision (e.g. `createAgentRuntime(provideExecutors(m))`)
+    // still narrows its candidates to the declared `allowedEvents`.
+    allowedEventTypes: (logic as { allowedEventTypes?: unknown }).allowedEventTypes,
     withExecutor: (nextExecute: AgentDecisionExecutor) =>
       bindDecisionLogic(logic.withExecutor(nextExecute), runCtx),
   }) as DecisionLogic;
@@ -1545,7 +1543,6 @@ interface RootTraceState {
 }
 
 const rootTraceRegistry = new WeakMap<object, RootTraceState>();
-let nextProvideRunId = 1;
 
 /** Walks `self._parent` from an invoked async leaf actor up to its root actor. */
 function rootActorOf(self: BoundActorSelf | undefined): AnyActorRef | undefined {
@@ -1564,7 +1561,7 @@ function rootTraceState(root: AnyActorRef): RootTraceState {
     const machineId =
       (logic?.config as { id?: string } | undefined)?.id ?? logic?.id ?? "(machine)";
     const machineVersion = logic ? resolveMachineVersion(logic) : "";
-    state = { runId: `run_${nextProvideRunId++}`, seq: 0, machineId, machineVersion };
+    state = { runId: `run_${nextRunAgentTraceId++}`, seq: 0, machineId, machineVersion };
     rootTraceRegistry.set(root as object, state);
   }
   return state;
@@ -1632,7 +1629,7 @@ function provideBindContext(
       traceSink || onChunk
         ? createTraceDispatch({
             onTrace: traceSink,
-            onChunk: onChunk ? (chunk) => onChunk(chunk) : undefined,
+            onChunk,
           })
         : undefined,
     consumeModelCall: () => {},
@@ -1689,52 +1686,18 @@ function deliverUsageEvent(
 }
 
 /**
- * Host-binds one text/stream source for {@link provideExecutors} using the SAME
- * emission helper as `createAgentRuntime` ({@link bindTextLogic}), so a bound
- * text request emits request.start/stream.chunk/request.end/request.error with
- * identical shapes. @internal
+ * Binds `sources` for {@link provideExecutors} with the same wrappers the
+ * runtime installs, each machine in the tree bound with its own registered
+ * `setupAgent` schemas. @internal
  */
-export function bindTextForProvide(
+export function bindSourcesForProvide(
   machine: AnyStateMachine,
-  logic: TextLogic,
+  sources: Record<string, AnyActorLogic>,
   executors: Partial<AgentRequestExecutors>,
   options: ProvideBindOptions,
-): TextLogic {
-  return bindTextLogic(logic, provideBindContext(machine, executors, options));
-}
-
-/**
- * Host-binds one `DecisionLogic`/`agent.decide` source for
- * {@link provideExecutors}: the runtime's decision wrapper (snapshot-driven
- * candidate events, `canTake`, auto-delivery of the chosen event) with the same
- * request-level tracing the runtime emits, minus run-scoped counting. @internal
- */
-export function bindDecisionForProvide(
-  machine: AnyStateMachine,
-  logic: DecisionLogic,
-  executors: Partial<AgentRequestExecutors>,
-  options: ProvideBindOptions,
-): DecisionLogic {
-  return bindDecisionLogic(logic, provideBindContext(machine, executors, options));
-}
-
-/**
- * Recursively binds an invoked child state machine for {@link provideExecutors},
- * with the same semantics `createAgentRuntime` applies ({@link rebindChildMachine}):
- * string-keyed text/decision sources at any depth inherit the host executors,
- * a source that carries its own executor is left alone, and a cycle is
- * returned as-is. Each machine in the tree is bound with its own registered
- * `setupAgent` schemas. Returns the original machine when nothing needed
- * wrapping. @internal
- */
-export function bindChildMachineForProvide(
-  childMachine: AnyStateMachine,
-  executors: Partial<AgentRequestExecutors>,
-  options: ProvideBindOptions,
-  visited: Set<AnyStateMachine>,
-): AnyStateMachine {
+): Record<string, AnyActorLogic> {
   const ctxFor = (target: AnyStateMachine) => provideBindContext(target, executors, options);
-  return rebindChildMachine(childMachine, ctxFor(childMachine), visited, ctxFor);
+  return bindAgentSources(sources, ctxFor(machine), new Set([machine]), ctxFor);
 }
 
 /**
@@ -1789,66 +1752,48 @@ function resolveMachineInput(machine: AnyStateMachine, input: unknown): unknown 
 }
 
 /**
- * Recursively rebinds an invoked child machine's own agent sources with the
- * SAME host-backed wrappers the runtime applies to the top-level machine, so a
- * child's text/stream/decision requests inherit the runtime's executors and
- * participate in maxModelCalls counting, onTrace/onChunk/onResult exactly like
- * parent requests. Returns the child machine to invoke: a `.provide`-rebound
- * copy when any inner source needed wrapping, else the original untouched.
+ * Wraps every agent source in `sources` with the host-backed wrappers, so its
+ * text/stream/decision requests use the bound executors and participate in
+ * maxModelCalls counting and tracing. Invoked child machines are rebound
+ * recursively, so requests at any depth inherit the same executors. Returns
+ * only the sources that changed, ready for `machine.provide({ actors })`.
  *
- * Only string-keyed sources are visited — a direct-object invoke src cannot be
- * swapped via `.provide` (assertBindable already rejected an unbound request
- * under one). A source that already carries its own executor
- * (`executorBoundLogics`) is left as-is: explicit binding shadows inheritance.
- * Cycle-safe via `visited` (a machine that invokes itself is returned as-is).
+ * A source that already carries its own executor (`executorBoundLogics`) is
+ * left as-is: explicit binding shadows inheritance. Every other non-agent
+ * source passes through. Cycle-safe via `visited`.
+ *
+ * `ctxFor` gives each child machine its own bind context, so a child decision
+ * validates against the child's registered event schemas, not the root's.
  */
-function rebindChildMachine(
-  childMachine: AnyStateMachine,
+function bindAgentSources(
+  sources: Record<string, AnyActorLogic>,
   runCtx: RunAgentBindContext,
   visited: Set<AnyStateMachine>,
-  /**
-   * Optional per-machine bind-context factory. `createAgentRuntime` shares ONE run-scoped
-   * context at every depth (one budget, one trace envelope, one root actor), so
-   * it omits this. `provideExecutors` passes it so each machine in the tree is
-   * bound with its OWN registered `setupAgent` schemas — a child decision must
-   * validate against the child's event schemas, not the root's. @internal
-   */
-  ctxFor?: (machine: AnyStateMachine) => RunAgentBindContext,
-): AnyStateMachine {
-  if (visited.has(childMachine)) {
-    return childMachine;
-  }
-  const childVisited = new Set([...visited, childMachine]);
-  runCtx = ctxFor ? ctxFor(childMachine) : runCtx;
-  const sources = childMachine.sources.actors as Record<string, AnyActorLogic>;
+  ctxFor: (machine: AnyStateMachine) => RunAgentBindContext,
+): Record<string, AnyActorLogic> {
   const wrapped: Record<string, AnyActorLogic> = {};
-
   for (const [key, logic] of Object.entries(sources)) {
-    if (isDecisionLogic(logic)) {
+    if (isDecisionLogic(logic) || isTextLogic(logic)) {
       if (!executorBoundLogics.has(logic as object)) {
-        wrapped[key] = bindDecisionLogic(logic, runCtx);
+        wrapped[key] = isDecisionLogic(logic)
+          ? bindDecisionLogic(logic, runCtx)
+          : bindTextLogic(logic, runCtx);
       }
       continue;
     }
-    if (isTextLogic(logic)) {
-      if (!executorBoundLogics.has(logic as object)) {
-        wrapped[key] = bindTextLogic(logic, runCtx);
+    if (isStateMachineLogic(logic) && !visited.has(logic)) {
+      const childWrapped = bindAgentSources(
+        logic.sources.actors as Record<string, AnyActorLogic>,
+        ctxFor(logic),
+        new Set([...visited, logic]),
+        ctxFor,
+      );
+      if (Object.keys(childWrapped).length > 0) {
+        wrapped[key] = logic.provide({ actors: childWrapped as never }) as AnyStateMachine;
       }
-      continue;
     }
-    if (isStateMachineLogic(logic)) {
-      const rebound = rebindChildMachine(logic, runCtx, childVisited, ctxFor);
-      if (rebound !== logic) {
-        wrapped[key] = rebound;
-      }
-      continue;
-    }
-    // Non-agent actors and placeholders pass through untouched.
   }
-
-  return Object.keys(wrapped).length > 0
-    ? (childMachine.provide({ actors: wrapped as never }) as AnyStateMachine)
-    : childMachine;
+  return wrapped;
 }
 
 /**
@@ -2183,9 +2128,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   const maxModelCalls = options.maxModelCalls ?? 100;
   let modelCallCount = 0;
   let budgetExceeded = false;
-  // Dev-only serialization guard: warn at most once per run when idle context
-  // holds values that won't survive snapshot persist/resume (see finish).
-  let warnedNonSerializable = false;
   const runId = `run_${nextRunAgentTraceId++}`;
   let traceSeq = 0;
 
@@ -2223,9 +2165,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   }) as (event: AgentTraceEventPayload<TMachine>) => void;
 
   const consumeModelCall = () => {
-    if (budgetExceeded) {
-      throw new AgentMaxModelCallsExceededError(maxModelCalls);
-    }
     // Count only calls the budget actually admits, so `usage.modelCalls`
     // reports calls MADE (the rejected attempt never reaches an executor).
     if (modelCallCount + 1 > maxModelCalls) {
@@ -2448,11 +2387,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     modelCalls: modelCallCount,
   });
 
-  // Dev-only: on idle finish, warn once if the snapshot's context holds values
-  // that won't round-trip through JSON persistence. Skipped in production and
-  // after the first warning. Guarded so a getter/exotic context can't throw.
+  // Dev-only: on idle finish (which runs once per runtime), warn if the
+  // snapshot's context holds values that won't round-trip through JSON
+  // persistence. Guarded so a getter/exotic context can't throw.
   const warnNonSerializableContext = (snapshot: AnyMachineSnapshot) => {
-    if (warnedNonSerializable || process.env.NODE_ENV === "production") {
+    if (process.env.NODE_ENV === "production") {
       return;
     }
     let offending: string[] = [];
@@ -2464,7 +2403,6 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (offending.length === 0) {
       return;
     }
-    warnedNonSerializable = true;
     console.warn(
       `createAgentRuntime: context holds value(s) that will not survive snapshot ` +
         `persist/resume (JSON round-trip): ${offending.join(", ")}. Persist only ` +
@@ -2521,36 +2459,20 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     },
   };
 
-  const wrappedSources: Record<string, AnyActorLogic> = {};
-
-  // Wrap every effective TextLogic/DecisionLogic (and the agent.* builtins)
-  // with a host-backed executor. Invoked child machines are recursively
-  // rebound so their requests inherit the same executors at any depth (see
-  // rebindChildMachine). Every other source (plain actors, non-agent logic)
-  // passes through untouched.
-  for (const [key, logic] of Object.entries(effectiveSources)) {
-    if (isDecisionLogic(logic)) {
-      wrappedSources[key] = bindDecisionLogic(logic, runCtx);
-      continue;
-    }
-
-    if (isTextLogic(logic)) {
-      // A text logic that already carries its own executor (`.withExecutor`)
-      // runs itself — leave it untouched.
-      if (!executorBoundLogics.has(logic as object)) {
-        wrappedSources[key] = bindTextLogic(logic, runCtx);
-      }
-      continue;
-    }
-
-    if (isStateMachineLogic(logic)) {
-      const rebound = rebindChildMachine(logic, runCtx, new Set<AnyStateMachine>([machine]));
-      if (rebound !== logic) {
-        wrappedSources[key] = rebound;
-      }
-      continue;
-    }
-  }
+  // One run-scoped context at every depth (one budget, one trace envelope,
+  // one root actor); a child machine sees it through its own registered
+  // schemas. A prototype view rather than a copy, because `callKey` is
+  // assigned on `runCtx` after binding.
+  const childCtx = (child: AnyStateMachine): RunAgentBindContext =>
+    Object.assign(Object.create(runCtx) as RunAgentBindContext, {
+      schemas: getRegisteredAgentExecutionOptions(child).schemas,
+    });
+  const wrappedSources = bindAgentSources(
+    effectiveSources,
+    runCtx,
+    new Set<AnyStateMachine>([machine]),
+    childCtx,
+  );
 
   const boundMachine = provided.provide({
     actors: wrappedSources as never,

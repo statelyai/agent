@@ -34,6 +34,7 @@ import {
   type ChosenEvent,
 } from "./index.js";
 import { runToQuiescence } from "./run-agent.js";
+import { provideExecutors } from "./provide-executors.js";
 import { AGENT_INIT_EVENT_TYPE } from "./event-log.js";
 import {
   forkEventLog,
@@ -5255,5 +5256,66 @@ describe("invoked async actor completing without a value", () => {
     // A JSON round-trip (what a store does) must replay to the same state.
     const replayed = replay(machine, JSON.parse(JSON.stringify(entries)) as AgentLogEntry[]);
     expect(replayed.snapshot.output).toEqual({ hadKey: true });
+  });
+});
+
+describe("binding decisions", () => {
+  test("a decision that carries its own executor runs itself, at the top level as in a child", async () => {
+    const choose = createDecisionLogic({
+      model: "test-model",
+      prompt: "Pick.",
+      allowedEvents: ["GO"],
+    }).withExecutor(async () => ({ event: { type: "GO" } }));
+    const machine = setupAgent({
+      context: z.object({ picked: z.string().nullable() }),
+      actors: { choose },
+    }).createMachine({
+      context: { picked: null },
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: {
+            src: "choose",
+            onDone: ({ output }) => ({ target: "done", context: { picked: output.type } }),
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+
+    // No host `decide`: the logic's own executor is the one that runs.
+    const result = await runAgent(machine);
+    expect(result.status).toBe("done");
+    expect(result.snapshot.context.picked).toBe("GO");
+  });
+
+  test("a decision bound twice keeps its declared allowedEvents", async () => {
+    const choose = createDecisionLogic({ model: "test-model", allowedEvents: ["GO"] });
+    const machine = setupAgent({
+      context: z.object({}),
+      events: { GO: {}, OTHER: {} },
+      actors: { choose },
+    }).createMachine({
+      context: {},
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: { src: "choose" },
+          on: { GO: { target: "done" }, OTHER: { target: "done" } },
+        },
+        done: { type: "final" },
+      },
+    });
+    const offered: string[][] = [];
+    const decide = async (request: AgentDecisionRequest) => {
+      offered.push(request.events.map((event) => event.type));
+      return { event: { type: "GO" } };
+    };
+
+    const result = await runAgent(provideExecutors(machine, { decide } as never), {
+      executors: { decide },
+    });
+    expect(result.status).toBe("done");
+    expect(offered).toEqual([["GO"]]);
   });
 });
