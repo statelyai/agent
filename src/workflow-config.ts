@@ -414,10 +414,6 @@ type WorkflowTranslation = {
   // Function-valued config guards (JS-built configs), registered under
   // generated names so they survive the JSON layer.
   syntheticGuards: Record<string, (args: { context: any; event: any }) => boolean>;
-  // Every transition target the config declares, by dotted state path. The JSON
-  // layer erases targets from transitions that carry a context patch (they
-  // become opaque resolver functions), so lint reads reachability from here.
-  transitionTargets: Record<string, string[]>;
 };
 
 // Translates a transition's `guard` into a ConditionJSON: `{{ }}` template →
@@ -612,15 +608,12 @@ function translateWorkflowInvoke(
 
 // Config-level structural lint: a plain-string transition `target` must name a
 // state at the same level (a sibling key). Relative (`.child`) and absolute
-// (`#id`) references are left to xstate to resolve. Every declared target is
-// also pushed onto `declaredTargets` (for the static reachability metadata lint
-// reads back), including the relative/absolute forms this check skips.
+// (`#id`) references are left to xstate to resolve.
 function assertValidTransitionTargets(
   stateKey: string,
   location: string,
   transitionConfig: AgentWorkflowTransitionConfig | AgentWorkflowTransitionConfig[] | undefined,
   siblingKeys: Set<string>,
-  declaredTargets: string[],
 ): void {
   if (!transitionConfig) {
     return;
@@ -631,7 +624,6 @@ function assertValidTransitionTargets(
       if (typeof target !== "string") {
         continue;
       }
-      declaredTargets.push(target);
       if (target.startsWith("#") || target.startsWith(".")) {
         continue;
       }
@@ -648,14 +640,12 @@ function assertValidTransitionTargets(
   }
 }
 
-// Validates every sibling-resolved transition target declared on one state, and
-// returns every target it declares (for the static reachability metadata).
+// Validates every sibling-resolved transition target declared on one state.
 function assertStateTransitionTargets(
   stateKey: string,
   stateConfig: AgentWorkflowStateConfig,
   siblingKeys: Set<string>,
-): string[] {
-  const declaredTargets: string[] = [];
+): void {
   const invokes = stateConfig.invoke ? toArray(stateConfig.invoke) : [];
   const sources: readonly (readonly [
     string,
@@ -679,9 +669,8 @@ function assertStateTransitionTargets(
     ),
   ];
   for (const [location, transition] of sources) {
-    assertValidTransitionTargets(stateKey, location, transition, siblingKeys, declaredTargets);
+    assertValidTransitionTargets(stateKey, location, transition, siblingKeys);
   }
-  return declaredTargets;
 }
 
 // Recursively translates one AgentWorkflowStateConfig into a StateNodeJSON.
@@ -708,11 +697,7 @@ function translateWorkflowState(
   }
   const childKeys = new Set(Object.keys(stateConfig.states ?? {}));
   const childPath = [...path, stateKey];
-  translation.transitionTargets[childPath.join(".")] = assertStateTransitionTargets(
-    stateKey,
-    stateConfig,
-    siblingKeys,
-  );
+  assertStateTransitionTargets(stateKey, stateConfig, siblingKeys);
 
   // The JSON layer has no state-level `onDone`; translate it to the state's
   // own done event, keyed by an explicit synthetic id (the `@state.` prefix
@@ -881,7 +866,6 @@ export function setupAgentFromConfig(
     guards: options.guards ?? {},
     actions: options.actions ?? {},
     syntheticGuards: {},
-    transitionTargets: {},
   };
   const json = translateWorkflowConfig(config, translation);
 

@@ -14,6 +14,8 @@
 import type { StateValue } from "xstate";
 import { AgentError } from "./errors.js";
 import { isRecord } from "./internal/is-record.js";
+import { structurallyEqual } from "./internal/structurally-equal.js";
+import { statePaths } from "./internal/trace-states.js";
 
 /** An event-shaped trajectory item: anything with a string `type`. */
 export interface TrajectoryEvent {
@@ -71,7 +73,7 @@ export interface TrajectoryMatch {
   /** `expected.length`, so a scorer can compute its own ratio. */
   expectedCount: number;
   /**
-   * Partial credit, 0..1. `1` for an empty expectation. Denominator is
+   * Partial credit, 0..1. Denominator is
    * `max(expectedCount, actual.length)` in `exact` mode, `expectedCount` otherwise.
    */
   score: number;
@@ -104,36 +106,12 @@ function normalize(item: unknown): Normalized {
   return { kind: "state", value: item as StateValue };
 }
 
-/** Every leaf of a state value as a dot path (`{ review: 'editing' }` → `review.editing`). @internal */
-function statePaths(value: StateValue): string[] {
-  if (typeof value === "string") return [value];
-  if (!isRecord(value)) return [];
-  return Object.entries(value).flatMap(([key, child]) =>
-    statePaths(child as StateValue).map((path) => `${key}.${path}`),
-  );
-}
-
 /**
  * A string expectation matches a state value when it names one of its leaves or
  * an ancestor of one, so `'review'` matches `{ review: 'editing' }`. @internal
  */
 function stateMatchesPath(path: string, value: StateValue): boolean {
   return statePaths(value).some((leaf) => leaf === path || leaf.startsWith(`${path}.`));
-}
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    return (
-      Array.isArray(a) &&
-      Array.isArray(b) &&
-      a.length === b.length &&
-      a.every((item, index) => deepEqual(item, b[index]))
-    );
-  }
-  if (!isRecord(a) || !isRecord(b)) return false;
-  const keys = Object.keys(a);
-  return keys.length === Object.keys(b).length && keys.every((key) => deepEqual(a[key], b[key]));
 }
 
 /**
@@ -164,14 +142,16 @@ function matcherFor(expected: unknown): (actual: unknown) => boolean {
         return (
           actualItem.kind === "event" &&
           Object.keys(expectedItem.event).every((key) =>
-            deepEqual(expectedItem.event[key], actualItem.event[key]),
+            structurallyEqual(expectedItem.event[key], actualItem.event[key]),
           )
         );
       };
     case "state":
       return (actual) => {
         const actualItem = normalize(actual);
-        return actualItem.kind === "state" && deepEqual(expectedItem.value, actualItem.value);
+        return (
+          actualItem.kind === "state" && structurallyEqual(expectedItem.value, actualItem.value)
+        );
       };
   }
 }
@@ -262,7 +242,7 @@ export function matchesTrajectory(
     matched,
     matchedCount,
     expectedCount,
-    score: matched ? 1 : denominator === 0 ? 1 : matchedCount / denominator,
+    score: matched ? 1 : matchedCount / denominator,
     ...(firstMiss ? { firstMiss } : {}),
   };
 }
