@@ -10,10 +10,7 @@
       "response": "**Plan**\n\n**Operation**: count  \n**Column**: amount  \n**Category**: books",
       "idle": {
         "prompt": "Run this query against the orders table?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -40,10 +37,7 @@
       "response": "**Plan**\n\n**Operation**: count  \n**Column**: amount  \n**Category**: books",
       "idle": {
         "prompt": "Run this query against the orders table?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },

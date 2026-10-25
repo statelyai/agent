@@ -30,7 +30,7 @@ export function setAgentExecutionOptions(machine: unknown, options: AgentExecuti
 
 /**
  * Reads the options registered for `machine`, falling back to the root `config`
- * key so a `.provide(...)`-rebound machine (e.g. the one behind a `runToQuiescence`
+ * key so a `.provide(...)`-rebound machine (e.g. the one behind a `runAgent`
  * result snapshot) resolves the same pack.
  */
 export function getAgentExecutionOptions(machine: unknown): AgentExecutionOptions | undefined {

@@ -62,7 +62,6 @@
   font-size: 12px;
 }
 
-
 /* ---------- Static outline (fallback when the inspector is unreachable) ---------- */
 .state-outline {
   position: absolute;

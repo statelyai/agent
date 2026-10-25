@@ -37,12 +37,11 @@ import { z } from "zod";
 import type { AnyStateMachine } from "xstate";
 import {
   getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 import { createTanStackAiExecutors } from "@statelyai/agent/tanstack-ai";
 import { openaiText } from "@tanstack/ai-openai";
@@ -253,46 +252,41 @@ export async function* agentRunToAgUiStream<TMachine extends AnyStateMachine>(
 
   emit({ type: EventType.RUN_STARTED, threadId, runId });
 
-  const run = runToQuiescence(
-    createAgentRuntime(machine, {
-      ...runOptions,
-      onChunk: (chunk, { request }) => {
-        if (!openMessages.has(request.id)) {
-          openMessages.add(request.id);
-          // `role` is required on TEXT_MESSAGE_START (the AG-UI schema defaults it
-          // to "assistant", so the parsed type has it non-optional).
-          emit({
-            type: EventType.TEXT_MESSAGE_START,
-            messageId: request.id,
-            role: "assistant",
-          });
-        }
+  const run = runAgent(machine, {
+    ...runOptions,
+    onChunk: (chunk, { request }) => {
+      if (!openMessages.has(request.id)) {
+        openMessages.add(request.id);
+        // `role` is required on TEXT_MESSAGE_START (the AG-UI schema defaults it
+        // to "assistant", so the parsed type has it non-optional).
         emit({
-          type: EventType.TEXT_MESSAGE_CONTENT,
+          type: EventType.TEXT_MESSAGE_START,
           messageId: request.id,
-          delta: chunk,
+          role: "assistant",
         });
-      },
-      onResult: (request) => {
-        if (openMessages.delete(request.id)) {
-          emit({ type: EventType.TEXT_MESSAGE_END, messageId: request.id });
-        }
-      },
-      // Each machine state becomes an AG-UI step: close the previous, open the next.
-      onTransition: (snapshot) => {
-        // `getStatePath` renders nested and parallel state values; `String(value)`
-        // would collapse an object to "[object Object]".
-        const stepName = getStatePath(snapshot);
-        if (stepName === currentStep) return;
-        if (currentStep !== null) emit({ type: EventType.STEP_FINISHED, stepName: currentStep });
-        emit({ type: EventType.STEP_STARTED, stepName });
-        currentStep = stepName;
-      },
-    }),
-    {
-      ...runOptions,
+      }
+      emit({
+        type: EventType.TEXT_MESSAGE_CONTENT,
+        messageId: request.id,
+        delta: chunk,
+      });
     },
-  ).then(
+    onResult: (request) => {
+      if (openMessages.delete(request.id)) {
+        emit({ type: EventType.TEXT_MESSAGE_END, messageId: request.id });
+      }
+    }, // Each machine state becomes an AG-UI step: close the previous, open the next.
+    onTransition: (snapshot) => {
+      // `getStatePath` renders nested and parallel state values; `String(value)`
+      // would collapse an object to "[object Object]".
+      const stepName = getStatePath(snapshot);
+      if (stepName === currentStep) return;
+      if (currentStep !== null) emit({ type: EventType.STEP_FINISHED, stepName: currentStep });
+      emit({ type: EventType.STEP_STARTED, stepName });
+      currentStep = stepName;
+    },
+    ...runOptions,
+  }).then(
     (result) => {
       closeOpen();
       if (currentStep !== null) emit({ type: EventType.STEP_FINISHED, stepName: currentStep });

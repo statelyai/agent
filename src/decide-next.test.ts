@@ -8,7 +8,7 @@ import {
   type AgentDecisionRequest,
   resolveDecision,
 } from "./decision.js";
-import { createAgentRuntime, runToQuiescence } from "./run-agent.js";
+import { runAgent } from "./run-agent.js";
 import { createAgentSchemas, setupAgent } from "./setup-agent.js";
 
 // A plain XState machine: no setupAgent, no agent.* anywhere.
@@ -263,12 +263,10 @@ describe("agent.decide with payloads under the runtime", () => {
 
   test("delivers only accepted options and takes one of them", async () => {
     const { decide, requests } = scripted([(request) => request.options![0]!.event]);
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: { generateText: async () => ({ result: {} }), decide },
-      }),
-      { input: {} },
-    );
+    const result = await runAgent(machine, {
+      executors: { generateText: async () => ({ result: {} }), decide },
+      input: {},
+    });
 
     expect(requests[0]!.options!.map((option) => option.event)).toEqual([
       { amount: 20, type: "refund" },
@@ -281,17 +279,15 @@ describe("agent.decide with payloads under the runtime", () => {
   test("the request.start trace carries the withheld options", async () => {
     const { decide } = scripted([(request) => request.options![0]!.event]);
     const starts: AgentDecisionRequest[] = [];
-    await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: { generateText: async () => ({ result: {} }), decide },
-        onTrace: (event) => {
-          if (event.type === "request.start" && event.request.kind === "decision") {
-            starts.push(event.request);
-          }
-        },
-      }),
-      { input: {} },
-    );
+    await runAgent(machine, {
+      executors: { generateText: async () => ({ result: {} }), decide },
+      onTrace: (event) => {
+        if (event.type === "request.start" && event.request.kind === "decision") {
+          starts.push(event.request);
+        }
+      },
+      input: {},
+    });
 
     expect(starts.map((request) => request.withheld)).toEqual([[{ amount: 80, type: "refund" }]]);
   });
@@ -333,19 +329,17 @@ describe("agent.decide with payloads under the runtime", () => {
     const { decide, requests } = scripted([(request) => request.options![0]!.event]);
     const traced: string[] = [];
     const starts: AgentDecisionRequest[] = [];
-    const result = await runToQuiescence(
-      createAgentRuntime(noOptions, {
-        executors: { generateText: async () => ({ result: {} }), decide },
-        onTrace: (event) => {
-          if (event.type === "request.start" || event.type === "request.error") {
-            if (event.request.kind !== "decision") return;
-            traced.push(event.type);
-            if (event.type === "request.start") starts.push(event.request);
-          }
-        },
-      }),
-      { input: {} },
-    );
+    const result = await runAgent(noOptions, {
+      executors: { generateText: async () => ({ result: {} }), decide },
+      onTrace: (event) => {
+        if (event.type === "request.start" || event.type === "request.error") {
+          if (event.request.kind !== "decision") return;
+          traced.push(event.type);
+          if (event.type === "request.start") starts.push(event.request);
+        }
+      },
+      input: {},
+    });
 
     expect(requests).toHaveLength(0);
     // The blocked options still reach the trace, so foldTraces counts them.
@@ -359,12 +353,10 @@ describe("agent.decide with payloads under the runtime", () => {
 
   test("rejects a choice that matches no offered option", async () => {
     const { decide, requests } = scripted([() => ({ type: "refund", amount: 30 })]);
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: { generateText: async () => ({ result: {} }), decide },
-      }),
-      { input: {} },
-    );
+    const result = await runAgent(machine, {
+      executors: { generateText: async () => ({ result: {} }), decide },
+      input: {},
+    });
 
     expect(result.snapshot.value).toBe("failed");
     expect(requests).toHaveLength(2);

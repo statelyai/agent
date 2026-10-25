@@ -62,13 +62,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = {
   coder: openai("gpt-6-luna"),
@@ -458,28 +452,24 @@ export async function runCodeAssistantExample(
   const notes: string[] = [];
   // Collect each prose field the moment it changes — the trail a host renders.
   const seen = new Map<string, string>();
-  const result = await runToQuiescence(
-    createAgentRuntime(codeAssistantMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(codeAssistantMachine) }),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-        for (const key of ["checkReport", "repairSummary", "rerunNote"] as const) {
-          const value = snapshot.context[key];
-          if (value && seen.get(key) !== value) {
-            seen.set(key, value);
-            notes.push(value);
-          }
+  const result = await runAgent(codeAssistantMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(codeAssistantMachine) }),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
+      for (const key of ["checkReport", "repairSummary", "rerunNote"] as const) {
+        const value = snapshot.context[key];
+        if (value && seen.get(key) !== value) {
+          seen.set(key, value);
+          notes.push(value);
         }
-      },
-    }),
-    {
-      input: { spec, functionName, checks, initialCode, maxAttempts },
+      }
     },
-  );
+    input: { spec, functionName, checks, initialCode, maxAttempts },
+  });
 
   if (result.status !== "done") {
     throw new Error(`Code-assistant example did not complete: ${result.status}`);

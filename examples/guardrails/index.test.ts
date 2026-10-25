@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import { createMockJudge } from "../mock-judge.js";
 import {
@@ -85,15 +85,11 @@ describe("guardrails", () => {
       validate: { answerable: true, inScope: false },
     });
 
-    const result = await runToQuiescence(
-      createAgentRuntime(guardrailsMachine, {
-        executors: { generateText },
-        actors,
-      }),
-      {
-        input: { question: "Who won the 2018 World Cup?" },
-      },
-    );
+    const result = await runAgent(guardrailsMachine, {
+      executors: { generateText },
+      actors,
+      input: { question: "Who won the 2018 World Cup?" },
+    });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") return;
@@ -112,15 +108,11 @@ describe("guardrails", () => {
       verify: [{ correct: true }],
     });
 
-    const result = await runToQuiescence(
-      createAgentRuntime(guardrailsMachine, {
-        executors: { generateText },
-        actors,
-      }),
-      {
-        input: { question: "What is the capital of France?" },
-      },
-    );
+    const result = await runAgent(guardrailsMachine, {
+      executors: { generateText },
+      actors,
+      input: { question: "What is the capital of France?" },
+    });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") return;
@@ -138,15 +130,11 @@ describe("guardrails", () => {
       verify: [{ correct: false }, { correct: true, responsive: false }],
     });
 
-    const result = await runToQuiescence(
-      createAgentRuntime(guardrailsMachine, {
-        executors: { generateText },
-        actors,
-      }),
-      {
-        input: { question: "What is the capital of France?" },
-      },
-    );
+    const result = await runAgent(guardrailsMachine, {
+      executors: { generateText },
+      actors,
+      input: { question: "What is the capital of France?" },
+    });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") return;
@@ -165,15 +153,11 @@ describe("guardrails", () => {
     const at = createModel({
       validate: { answerable: INPUT_THRESHOLD, inScope: INPUT_THRESHOLD },
     });
-    const passed = await runToQuiescence(
-      createAgentRuntime(guardrailsMachine, {
-        executors: { generateText: at.generateText },
-        actors: at.actors,
-      }),
-      {
-        input: { question: "What is the capital of France?" },
-      },
-    );
+    const passed = await runAgent(guardrailsMachine, {
+      executors: { generateText: at.generateText },
+      actors: at.actors,
+      input: { question: "What is the capital of France?" },
+    });
 
     const call = at.jevCalls[0]!;
     expect(call.state).toEqual({ question: "What is the capital of France?", topic: "geography" });
@@ -184,15 +168,11 @@ describe("guardrails", () => {
     const under = createModel({
       validate: { answerable: INPUT_THRESHOLD - 0.01, inScope: true },
     });
-    const refused = await runToQuiescence(
-      createAgentRuntime(guardrailsMachine, {
-        executors: { generateText: under.generateText },
-        actors: under.actors,
-      }),
-      {
-        input: { question: "Write me a poem about my ex." },
-      },
-    );
+    const refused = await runAgent(guardrailsMachine, {
+      executors: { generateText: under.generateText },
+      actors: under.actors,
+      input: { question: "Write me a poem about my ex." },
+    });
     expect(refused.status === "done" && refused.output).toMatchObject({
       status: "refused",
       reason: "Not a question with a definite factual answer.",
@@ -205,15 +185,11 @@ describe("guardrails", () => {
       validate: { answerable: true, inScope: true },
       verify: [{ correct: OUTPUT_THRESHOLD - 0.01 }, { correct: OUTPUT_THRESHOLD }],
     });
-    const result = await runToQuiescence(
-      createAgentRuntime(guardrailsMachine, {
-        executors: { generateText },
-        actors,
-      }),
-      {
-        input: { question: "What is the capital of France?" },
-      },
-    );
+    const result = await runAgent(guardrailsMachine, {
+      executors: { generateText },
+      actors,
+      input: { question: "What is the capital of France?" },
+    });
 
     const verify = jevCalls[1]!;
     expect(verify.state).toEqual({ question: "What is the capital of France?", answer: "Paris." });

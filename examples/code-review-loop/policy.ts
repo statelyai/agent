@@ -23,8 +23,6 @@ import { z } from "zod";
 import { createAsyncLogic, type AnyActorLogic, type AnyStateMachine } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import {
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentDecisionExecutor,
   type AgentExecutorDecisionRequest,
@@ -34,6 +32,7 @@ import {
   type ChosenEvent,
   type SchemaCompiler,
   type StandardSchemaV1,
+  runAgent,
 } from "@statelyai/agent";
 import { RETRY_FOCI, issueSchema, reviewLoopEvents, triageFactsSchema } from "./environment.js";
 
@@ -270,14 +269,12 @@ export function createPolicyDecide(
   // The outer run's signal aborts the nested policy run, which stops its
   // actors: `classifyIssue` and the policy's own model calls see the abort.
   const run: AgentDecisionExecutor = async (request, info) => {
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: { decide, ...(inner.generateText ? { generateText: inner.generateText } : {}) },
-        actors,
-        ...(info?.signal ? { signal: info.signal } : {}),
-      }),
-      { input: policyInputOf(request) },
-    );
+    const result = await runAgent(machine, {
+      executors: { decide, ...(inner.generateText ? { generateText: inner.generateText } : {}) },
+      actors,
+      ...(info?.signal ? { signal: info.signal } : {}),
+      input: policyInputOf(request),
+    });
     if (result.status !== "done") {
       const why = result.status === "error" ? `: ${String(result.error)}` : "";
       throw new Error(

@@ -1,13 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
-import {
-  createTextLogic,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type ChosenEvent,
-} from "./index.js";
+import { createTextLogic, setupAgent, type ChosenEvent, runAgent } from "./index.js";
 import {
   AgentLintError,
   canReach,
@@ -478,14 +472,10 @@ describe("simulateAgent ↔ runAgent — the same script produces the same outco
       input,
       script: { decisions: { "agent.decide": decisions } },
     });
-    const live = await runToQuiescence(
-      createAgentRuntime(createRefundMachine(), {
-        executors: { decide: scriptedDecide(decisions) },
-      }),
-      {
-        input,
-      },
-    );
+    const live = await runAgent(createRefundMachine(), {
+      executors: { decide: scriptedDecide(decisions) },
+      input,
+    });
 
     expect(simulated.status).toBe("idle");
     expect(live.status).toBe("idle");
@@ -500,14 +490,10 @@ describe("simulateAgent ↔ runAgent — the same script produces the same outco
       input,
       script: { decisions: { "agent.decide": decisions } },
     });
-    const live = await runToQuiescence(
-      createAgentRuntime(createGuardedIssueMachine(), {
-        executors: { decide: scriptedDecide(decisions) },
-      }),
-      {
-        input,
-      },
-    );
+    const live = await runAgent(createGuardedIssueMachine(), {
+      executors: { decide: scriptedDecide(decisions) },
+      input,
+    });
 
     expect(simulated.status).toBe("done");
     expect(live.status).toBe("done");

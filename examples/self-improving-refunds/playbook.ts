@@ -28,8 +28,6 @@ import { createAsyncLogic, type AnyStateMachine } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentDecisionExecutor,
   type AgentExecutorDecisionRequest,
@@ -40,6 +38,7 @@ import {
   type ChosenEvent,
   type SchemaCompiler,
   type StandardSchemaV1,
+  runAgent,
 } from "@statelyai/agent";
 import { factsSchema, PROPOSALS, proposalEventSchemas, type Facts } from "./contract.js";
 
@@ -350,13 +349,11 @@ export function createPlaybookDecide(
 
   const run: AgentDecisionExecutor = async (request) => {
     const input = playbookInputOf(request);
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: { generateText, decide },
-        actors: { classifyTicket },
-      }),
-      { input },
-    );
+    const result = await runAgent(machine, {
+      executors: { generateText, decide },
+      actors: { classifyTicket },
+      input,
+    });
     if (result.status !== "done") {
       const where = JSON.stringify(result.snapshot.value);
       const why = result.status === "error" ? `: ${String(result.error)}` : "";

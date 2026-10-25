@@ -39,7 +39,7 @@ const agentSetup = setupAgent({
 
 <!-- machine input validation from src/run-agent.ts and the input schema retained by src/setup-agent.ts -->
 
-`runToQuiescence` validates supplied machine input before the
+`runAgent` validates supplied machine input before the
 actor starts. Defaults and transforms from the input schema reach the context
 factory and trace; invalid input throws `AgentError` with code
 `invalid-machine-input`. Calling XState's `createActor` directly does not run
@@ -65,7 +65,7 @@ In a `HEAL` transition, `event.amount` is a `number`. Reading a field the event 
 
 ### Emitted event schemas
 
-Emitted event schemas type the progress events a machine emits with `enq.emit(...)`. Hosts receive them through `runToQuiescence`'s `on` handlers. Declare them under `emitted`:
+Emitted event schemas type the progress events a machine emits with `enq.emit(...)`. Hosts receive them through `runAgent`'s `on` handlers. Declare them under `emitted`:
 
 ```ts no-check
 // setupAgent({ ... })
@@ -229,11 +229,11 @@ Each alternate form handles one specific need:
 | `createAgentSchemas` pack, passed as `setupAgent({ schemas })`                                                   | You share one schema set across several machines or the [step helpers](steps.md).                                                                                                                                                                                                                   |
 | String model refs with `resolveModel` (`model: 'openai/gpt-6-luna'`, `createAiSdkExecutors({ resolveModel })`) | The machine must not name concrete models, for portability or for refs loaded from JSON [config](machines-as-data.md).                                                                                                                                                                              |
 | `createTextLogic`, a standalone request value                                                                    | A request is exported, reused across states or machines, or unit-tested on its own. See [Text requests](text-requests.md#reusable-request-logic-with-createtextlogic).                                                                                                                              |
-| `logic.withExecutor(...)`                                                                                        | You bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runToQuiescence`](hosts.md#write-your-own-host-loop)'s executor slots. Registered dynamic spawns inherit through `actors`. See [Multi-agent composition](multi-agent.md#collecting-dynamic-children). |
+| `logic.withExecutor(...)`                                                                                        | You bind execution onto one logic instead of the whole host, so a plain `createActor` runs it without [`runAgent`](hosts.md#write-your-own-host-loop)'s executor slots. Registered dynamic spawns inherit through `actors`. See [Multi-agent composition](multi-agent.md#collecting-dynamic-children). |
 
 ## Machine creation
 
-`agentSetup.createMachine` is XState's `createMachine` with the agent's schemas and actors already bound. It registers the machine, so the step helpers and [`runToQuiescence`](hosts.md) resolve its schemas and actors without you passing them again.
+`agentSetup.createMachine` is XState's `createMachine` with the agent's schemas and actors already bound. It registers the machine, so the step helpers and [`runAgent`](hosts.md) resolve its schemas and actors without you passing them again.
 
 <!-- viz: state diagram for the answering machine below: initial state `answering` invoking the `answerQuestion` request, onDone -> final state `done` producing { answer } -->
 
@@ -383,12 +383,12 @@ The `onDone` handler receives the actor's `output`. For a text request that is `
 
 ### Inline text requests
 
-<!-- inline agent.generateText + runToQuiescence, from src/setup-agent.ts and src/index.ts -->
+<!-- inline agent.generateText + runAgent, from src/setup-agent.ts and src/index.ts -->
 
 For a one-off text call, invoke `agent.generateText` inline. Move it to a named [request](text-requests.md) once it is reused or worth testing:
 
 ```ts no-check
-import { createAgentRuntime, parseOutput, runToQuiescence } from "@statelyai/agent";
+import { parseOutput, runAgent } from "@statelyai/agent";
 
 // ...
 generating: {
@@ -408,7 +408,7 @@ generating: {
 },
 
 // ...
-await runToQuiescence(createAgentRuntime(machine, { executors: createAiSdkExecutors({ models }) }), { input });
+await runAgent(machine, { executors: createAiSdkExecutors({ models }), input });
 ```
 
 Give an invoke an explicit `id` when the host needs a stable occurrence identity. XState owns invoke identity and snapshot restoration.
@@ -464,7 +464,7 @@ waiting: {
 
 How `after` runs depends on the host:
 
-- Under [`runToQuiescence`](hosts.md), the timer runs live. A pending `after` does not count as idle, so `runToQuiescence` waits for it and continues.
+- Under [`runAgent`](hosts.md), the timer runs live. A pending `after` does not count as idle, so `runAgent` waits for it and continues.
 - Under a custom or durable XState host, timers follow that framework's runtime adapter. See [the runtime loop](steps.md).
 
 ## Related

@@ -98,7 +98,7 @@ type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string
 // `createAgentRuntime` binds host executors onto the machine's agent actor
 // sources and runs it on XState's durable transition loop: every transition
 // is pure, effects start work, and everything that finishes lands in one
-// mailbox. The host writes the loop; `runToQuiescence` is the blocking one.
+// mailbox. The host writes the loop; `runAgent` is the blocking one.
 
 /**
  * Thrown by {@link AgentRuntime.start} when a resume is given BOTH an `events` log and a
@@ -443,7 +443,7 @@ type AgentTraceEventPayload<TMachine extends AnyStateMachine = AnyStateMachine> 
 /**
  * Options for {@link createAgentRuntime}: what the runtime binds and observes.
  * The run's `input`/`snapshot`/`events` go to {@link AgentRuntime.start} (or
- * {@link runToQuiescence}) instead.
+ * {@link runAgent}) instead.
  *
  * Host executors are passed as a single {@link AgentRequestExecutors}-shaped
  * set under `executors`. Each executor
@@ -579,7 +579,7 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
 }
 
 /**
- * The outcome of a run ({@link AgentRuntime.finish} / {@link runToQuiescence})
+ * The outcome of a run ({@link AgentRuntime.finish} / {@link runAgent})
  * — always exactly one of three variants, never a throw for a waiting or
  * failed machine (programmer errors like a missing executor still throw,
  * synchronously from {@link createAgentRuntime} before any actor runs).
@@ -1981,7 +1981,7 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
   finish(): Promise<AgentRunResult<TMachine>>;
 }
 
-/** How {@link runToQuiescence} opens a run: {@link AgentRunStart} plus one event to deliver. */
+/** How {@link runAgent} opens a run: {@link AgentRunStart} plus one event to deliver. */
 export interface AgentRunInit<TMachine extends AnyStateMachine> extends AgentRunStart<TMachine> {
   /**
    * An event to send immediately after starting/resuming the actor (e.g. the
@@ -2004,8 +2004,9 @@ export interface AgentRunInit<TMachine extends AnyStateMachine> extends AgentRun
 /**
  * The blocking host: opens the run, delivers `event` if given, then applies
  * every event that arrives until the run is quiescent, and returns the
- * outcome. A request handler or durable engine writes the same loop with its
- * own stop policy; this one is for scripts and tests.
+ * outcome. The loop behind {@link runAgent}; not exported from the package,
+ * since `runAgent(machine, options)` is the one blocking entry point.
+ * @internal
  */
 export async function runToQuiescence<TMachine extends AnyStateMachine>(
   runtime: AgentRuntime<TMachine>,
@@ -2052,7 +2053,7 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
 
 /**
  * Runs `machine` to quiescence in one call: {@link createAgentRuntime} over
- * `options`, then {@link runToQuiescence} with the same object as its init.
+ * `options`, driven to quiescence with the same object as its init.
  * One options object carries both halves (`executors`, `store`, callbacks,
  * and `input` | `snapshot` + `event`), and the result is the same
  * {@link AgentRunResult}. With {@link AgentRunOptions.onIdle}, idle states are
@@ -2152,7 +2153,7 @@ const QUIESCENT = Symbol("quiescent");
  * requests, the write-ahead log, traces, the budget, and a mailbox over
  * XState's durable transition loop (`xstate/durable`). See
  * {@link AgentRuntime} for the loop a host writes around it, and
- * {@link runToQuiescence} for the blocking host. {@link AgentRuntime.finish}
+ * {@link runAgent} for the blocking host. {@link AgentRuntime.finish}
  * stops whatever is still running on every settle path (`done`, `idle`, and
  * `error` alike) — resume is always by snapshot (or log), never by holding a
  * reference to a live actor.
@@ -2166,16 +2167,14 @@ const QUIESCENT = Symbol("quiescent");
  * @example
  * ```ts
  * const executors = createAiSdkExecutors({ models });
- * let r = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
- * while (r.status === 'idle') {
- *   const event = await promptUser(getAcceptedEvents(r.snapshot));
- *   r = await runToQuiescence(createAgentRuntime(machine, { executors }), {
- *     snapshot: r.persist(),
- *     event,
- *   });
+ * const runtime = createAgentRuntime(machine, { executors });
+ * let [state, effects] = await runtime.start({ input });
+ * await runtime.execute(effects);
+ * for (let event; (event = await runtime.nextEvent()); ) {
+ *   [state, effects] = runtime.transition(state, event);
+ *   await runtime.execute(effects);
  * }
- * if (r.status !== 'done') throw new Error(`Run did not complete: ${r.status}`);
- * console.log(r.output);
+ * const result = await runtime.finish();
  * ```
  *
  * Each executor is a plain function returning `{ result }` (plus optional `messages`/`usage`), or

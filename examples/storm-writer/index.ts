@@ -73,11 +73,10 @@ import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type DoneActorEventOf,
+  runAgent,
 } from "@statelyai/agent";
 
 const models = {
@@ -861,21 +860,17 @@ export async function runStormWriterExample(
 ): Promise<StormWriterResult> {
   const { topic = "state machines for AI agents", generateText, onProgress } = options;
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(stormWriterMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(stormWriterMachine) }),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { topic },
+  const result = await runAgent(stormWriterMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(stormWriterMachine) }),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { topic },
+  });
   if (result.status !== "done") {
     throw new Error(`STORM writer example did not complete: ${result.status}`);
   }

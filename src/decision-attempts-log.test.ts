@@ -18,7 +18,7 @@ import {
   replay,
   type AgentLogEntry,
 } from "./log/index.js";
-import { createAgentRuntime, runToQuiescence } from "./run-agent.js";
+import { createAgentRuntime, runAgent } from "./run-agent.js";
 import { createAgentSchemas, setupAgent } from "./setup-agent.js";
 import type { ChosenEvent } from "./types.js";
 
@@ -85,14 +85,12 @@ describe("decision attempts in the event log", () => {
   test("a guard-rejected first attempt is journaled on the delivered event's entry", async () => {
     const machine = guardedMoveMachine();
     const store = createInMemoryEventLogStore();
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        store,
-        threadId: "moves-1",
-        executors: { decide: healThenAttack() },
-      }),
-      { input: {} },
-    );
+    const result = await runAgent(machine, {
+      store,
+      threadId: "moves-1",
+      executors: { decide: healThenAttack() },
+      input: {},
+    });
 
     expect(result.status).toBe("done");
     const attack = result.events.find((entry) => entry.event.type === "ATTACK")!;
@@ -113,21 +111,16 @@ describe("decision attempts in the event log", () => {
   });
 
   test("a first-try decision journals no attempts field", async () => {
-    const result = await runToQuiescence(
-      createAgentRuntime(guardedMoveMachine(), {
-        executors: { decide: async () => ({ event: { type: "ATTACK", target: "orc" } }) },
-      }),
-      { input: {} },
-    );
+    const result = await runAgent(guardedMoveMachine(), {
+      executors: { decide: async () => ({ event: { type: "ATTACK", target: "orc" } }) },
+      input: {},
+    });
     expect(result.events.some((entry) => entry.attempts !== undefined)).toBe(false);
   });
 
   test("replay ignores decision attempts: the same state hash with the field stripped", async () => {
     const machine = guardedMoveMachine();
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, { executors: { decide: healThenAttack() } }),
-      { input: {} },
-    );
+    const result = await runAgent(machine, { executors: { decide: healThenAttack() }, input: {} });
 
     const tail = result.events[result.events.length - 1]!;
     expect(finalHash(machine, result.events)).toBe(tail.verification!.stateHash);
@@ -138,10 +131,7 @@ describe("decision attempts in the event log", () => {
 
   test("an exhausted decision's xstate.error.actor entry keeps its attempts", async () => {
     const machine = guardedMoveMachine();
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, { executors: { decide: alwaysUnknown } }),
-      { input: {} },
-    );
+    const result = await runAgent(machine, { executors: { decide: alwaysUnknown }, input: {} });
 
     expect(result.snapshot.value).toBe("fumbled");
     const failed = result.events.find((entry) =>
@@ -160,9 +150,7 @@ describe("decision attempts in the event log", () => {
   test("an old-format log (no entry attempts, error without attempts) still replays to the same state", async () => {
     const machine = guardedMoveMachine();
     for (const decide of [healThenAttack(), alwaysUnknown]) {
-      const result = await runToQuiescence(createAgentRuntime(machine, { executors: { decide } }), {
-        input: {},
-      });
+      const result = await runAgent(machine, { executors: { decide }, input: {} });
       const old = stripDecisionData(result.events);
       expect(old.every((entry) => entry.schemaVersion === AGENT_EVENT_SCHEMA_VERSION)).toBe(true);
       expect(finalHash(machine, old)).toBe(finalHash(machine, result.events));
@@ -171,14 +159,8 @@ describe("decision attempts in the event log", () => {
 
   test("getDecisionAttempts lists delivered-entry attempts and exhausted errors in log order", async () => {
     const machine = guardedMoveMachine();
-    const landed = await runToQuiescence(
-      createAgentRuntime(machine, { executors: { decide: healThenAttack() } }),
-      { input: {} },
-    );
-    const exhausted = await runToQuiescence(
-      createAgentRuntime(machine, { executors: { decide: alwaysUnknown } }),
-      { input: {} },
-    );
+    const landed = await runAgent(machine, { executors: { decide: healThenAttack() }, input: {} });
+    const exhausted = await runAgent(machine, { executors: { decide: alwaysUnknown }, input: {} });
 
     const fromLanded = getDecisionAttempts(landed.events);
     expect(fromLanded).toEqual([
@@ -253,10 +235,10 @@ const desk = createMachine({
 });
 
 describe("boundary decisions (decideNext) journaled by the host", () => {
-  test("runToQuiescence({ event, attempts }) records decideNext's attempts on the event's entry", async () => {
+  test("runAgent({ event, attempts }) records decideNext's attempts on the event's entry", async () => {
     const store = createInMemoryEventLogStore();
     const threadId = "desk-1";
-    const opened = await runToQuiescence(createAgentRuntime(desk, { store, threadId }), {});
+    const opened = await runAgent(desk, { store, threadId });
     expect(opened.status).toBe("idle");
 
     // First try: a refund the desk never offered; second try: the offered one.
@@ -275,10 +257,7 @@ describe("boundary decisions (decideNext) journaled by the host", () => {
     });
     expect(attempts).toHaveLength(1);
 
-    const result = await runToQuiescence(createAgentRuntime(desk, { store, threadId }), {
-      event: event!,
-      attempts,
-    });
+    const result = await runAgent(desk, { store, threadId, event: event!, attempts });
 
     expect(result.status).toBe("done");
     const stored = await store.read(threadId);
@@ -292,10 +271,7 @@ describe("boundary decisions (decideNext) journaled by the host", () => {
   });
 
   test("an empty attempts list journals no attempts field", async () => {
-    const result = await runToQuiescence(createAgentRuntime(desk), {
-      event: { type: "desk.escalate" },
-      attempts: [],
-    });
+    const result = await runAgent(desk, { event: { type: "desk.escalate" }, attempts: [] });
     expect(result.events.some((entry) => "attempts" in entry)).toBe(false);
   });
 

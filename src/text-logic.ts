@@ -107,7 +107,7 @@ export interface AgentTextRequest<TMetadata = Record<string, unknown>, TMessage 
 /**
  * Aggregated model-call usage for ONE run — the run-level total
  * attached to every settled {@link AgentRunResult} (and therefore to
- * `runToQuiescence`'s `{ output, snapshot, persist, usage }`).
+ * `runAgent`'s `{ output, snapshot, persist, usage }`).
  *
  * - `modelCalls` counts every model/decision call this run made (each decision
  *   retry counts separately) — the same seam `maxModelCalls` budgets. Always a

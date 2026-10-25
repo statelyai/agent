@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import type { AgentDecisionRequest, ChosenEvent } from "@statelyai/agent";
 import { createMockModelExecutors } from "../mock-model.js";
 import { idlePrompt, MAX_STEPS_PER_COMMAND, runTodoNlExample, todoMachine } from "./index.js";
@@ -185,14 +185,10 @@ describe("todo-nl", () => {
     const { executors } = scriptedDecide([]);
 
     // No commands: the very first run settles idle waiting for COMMAND.
-    const result = await runToQuiescence(
-      createAgentRuntime(todoMachine, {
-        executors,
-      }),
-      {
-        input: { todos: [{ id: 1, title: "existing", done: false }] },
-      },
-    );
+    const result = await runAgent(todoMachine, {
+      executors,
+      input: { todos: [{ id: 1, title: "existing", done: false }] },
+    });
 
     expect(result.status).toBe("idle");
     if (result.status !== "idle") throw new Error("expected idle");
@@ -205,15 +201,11 @@ describe("todo-nl", () => {
 
     // Resuming from the persisted snapshot with COMMAND enters the loop.
     const { executors: quitExecutors } = scriptedDecide([{ type: "QUIT" }]);
-    const resumed = await runToQuiescence(
-      createAgentRuntime(todoMachine, {
-        executors: quitExecutors,
-      }),
-      {
-        snapshot: result.persist(),
-        event: { type: "COMMAND", text: "quit" },
-      },
-    );
+    const resumed = await runAgent(todoMachine, {
+      executors: quitExecutors,
+      snapshot: result.persist(),
+      event: { type: "COMMAND", text: "quit" },
+    });
     expect(resumed.status).toBe("done");
   });
 
@@ -227,26 +219,15 @@ describe("todo-nl", () => {
       { type: "DONE" },
     ]);
 
-    const started = await runToQuiescence(
-      createAgentRuntime(todoMachine, {
-        executors,
-      }),
-      {
-        input: { todos: [] },
-      },
-    );
+    const started = await runAgent(todoMachine, { executors, input: { todos: [] } });
     if (started.status !== "idle") throw new Error("expected idle");
     expect(idlePrompt(started.snapshot)).toBe("What should I do with your list? (list is empty)");
 
-    const result = await runToQuiescence(
-      createAgentRuntime(todoMachine, {
-        executors,
-      }),
-      {
-        snapshot: started.persist(),
-        event: { type: "COMMAND", text: "add pick up laundry and do groceries, laundry is done" },
-      },
-    );
+    const result = await runAgent(todoMachine, {
+      executors,
+      snapshot: started.persist(),
+      event: { type: "COMMAND", text: "add pick up laundry and do groceries, laundry is done" },
+    });
     if (result.status !== "idle") throw new Error("expected idle");
     expect(idlePrompt(result.snapshot)).toBe(
       "What should I do with your list? " +

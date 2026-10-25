@@ -125,8 +125,8 @@ describe("runner execution", () => {
   it("refuses an export the example does not declare as a runner", async () => {
     // The export name arrives from the client. `route-replanning` declares no
     // runners, and calling its exported entry point would spend model calls.
-    await expect(
-      getExampleRunner("route-replanning", "runRouteReplanningExample"),
-    ).rejects.toThrow(/does not declare a runner/);
+    await expect(getExampleRunner("route-replanning", "runRouteReplanningExample")).rejects.toThrow(
+      /does not declare a runner/,
+    );
   });
 });

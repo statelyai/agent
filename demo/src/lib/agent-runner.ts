@@ -13,12 +13,7 @@
  * decision model. Tests import the `*Run` functions directly and inject
  * their own executors and a mock decision model as the `judge`.
  */
-import {
-  createAgentRuntime,
-  runToQuiescence,
-  type AgentRequestExecutors,
-  type AgentRunResult,
-} from "@statelyai/agent";
+import { type AgentRequestExecutors, type AgentRunResult, runAgent } from "@statelyai/agent";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
@@ -333,27 +328,23 @@ export async function startScenarioRun(
     observers.onStep,
   );
   const machine = machineFor(scenarioId);
-  const result = await runToQuiescence(
-    createAgentRuntime(machine, {
-      executors,
-      ...judgeActors(scenarioId, judge),
-      ...(signal ? { signal } : {}),
-      ...(observers.onChunk ? { onChunk: observers.onChunk } : {}),
-      onTransition,
-      on: { "*": onEmitted },
-      onTrace,
-      inspect: maybeCreateRunInspection(
-        observers.inspectionRoom,
-        machine,
-        scenarioSource[scenarioId],
-        "start",
-      ),
-    }),
-    {
-      input: inputFor(scenarioId, prompt),
-      ...judgeActors(scenarioId, judge),
-    },
-  );
+  const result = await runAgent(machine, {
+    executors,
+    ...judgeActors(scenarioId, judge),
+    ...(signal ? { signal } : {}),
+    ...(observers.onChunk ? { onChunk: observers.onChunk } : {}),
+    onTransition,
+    on: { "*": onEmitted },
+    onTrace,
+    inspect: maybeCreateRunInspection(
+      observers.inspectionRoom,
+      machine,
+      scenarioSource[scenarioId],
+      "start",
+    ),
+    input: inputFor(scenarioId, prompt),
+    ...judgeActors(scenarioId, judge),
+  });
   return toResult(scenarioId, model, result as AgentRunResult<AnyStateMachine>, trace);
 }
 
@@ -375,28 +366,24 @@ export async function resumeScenarioRun(
   const machine = machineFor(scenarioId);
   // An event the restored state has no transition for is ignored, not an
   // error: the run settles unchanged and reports `result.ignored`.
-  const result = await runToQuiescence(
-    createAgentRuntime(machine, {
-      executors,
-      ...judgeActors(scenarioId, judge),
-      ...(signal ? { signal } : {}),
-      ...(observers.onChunk ? { onChunk: observers.onChunk } : {}),
-      onTransition,
-      on: { "*": onEmitted },
-      onTrace,
-      inspect: maybeCreateRunInspection(
-        observers.inspectionRoom,
-        machine,
-        scenarioSource[scenarioId],
-        "resume",
-      ),
-    }),
-    {
-      snapshot,
-      event,
-      ...judgeActors(scenarioId, judge),
-    },
-  );
+  const result = await runAgent(machine, {
+    executors,
+    ...judgeActors(scenarioId, judge),
+    ...(signal ? { signal } : {}),
+    ...(observers.onChunk ? { onChunk: observers.onChunk } : {}),
+    onTransition,
+    on: { "*": onEmitted },
+    onTrace,
+    inspect: maybeCreateRunInspection(
+      observers.inspectionRoom,
+      machine,
+      scenarioSource[scenarioId],
+      "resume",
+    ),
+    snapshot,
+    event,
+    ...judgeActors(scenarioId, judge),
+  });
   return toResult(scenarioId, model, result as AgentRunResult<AnyStateMachine>, trace);
 }
 

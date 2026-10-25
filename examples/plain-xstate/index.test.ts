@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { createActor, waitFor } from "xstate";
-import { createAgentRuntime, getStatePath, runToQuiescence } from "@statelyai/agent";
+import { getStatePath, runAgent } from "@statelyai/agent";
 import { createMockModelExecutors } from "../mock-model.js";
 import {
   CANNED_DRAFT_NOTE,
@@ -137,29 +137,26 @@ describe("plain-xstate", () => {
     const drafts = ["Model draft one.", "Model draft two."];
     const executors = createMockModelExecutors({ text: { writeDraft: drafts } });
 
-    const first = await runToQuiescence(
-      createAgentRuntime(plainWriterAgentMachine, { executors }),
-      {
-        input: { topic: "a solar weather station" },
-      },
-    );
+    const first = await runAgent(plainWriterAgentMachine, {
+      executors,
+      input: { topic: "a solar weather station" },
+    });
     expect(first.status).toBe("idle");
     if (first.status !== "idle") throw new Error("expected idle");
     // Settles on the plain machine's own decision point, holding the model's text.
     expect(getStatePath(first.snapshot)).toBe("judging");
     expect(first.snapshot.context.draft).toBe("Model draft one.");
 
-    const second = await runToQuiescence(
-      createAgentRuntime(plainWriterAgentMachine, { executors }),
-      {
-        snapshot: first.persist(),
-        event: { type: "REVISE" },
-      },
-    );
+    const second = await runAgent(plainWriterAgentMachine, {
+      executors,
+      snapshot: first.persist(),
+      event: { type: "REVISE" },
+    });
     if (second.status !== "idle") throw new Error("expected idle");
     expect(second.snapshot.context.draft).toBe("Model draft two.");
 
-    const done = await runToQuiescence(createAgentRuntime(plainWriterAgentMachine, { executors }), {
+    const done = await runAgent(plainWriterAgentMachine, {
+      executors,
       snapshot: second.persist(),
       event: { type: "APPROVE" },
     });
@@ -182,12 +179,7 @@ describe("plain-xstate", () => {
         },
       },
     });
-    const result = await runToQuiescence(
-      createAgentRuntime(plainWriterAgentMachine, { executors }),
-      {
-        input: { topic: "x" },
-      },
-    );
+    const result = await runAgent(plainWriterAgentMachine, { executors, input: { topic: "x" } });
     if (result.status !== "idle") throw new Error(`expected idle, got ${result.status}`);
     expect(result.snapshot.context.retries).toBe(1);
     expect(result.snapshot.context.draft).toBe("Recovered draft.");

@@ -3,7 +3,7 @@
  * The last test runs the same outage through the machine.
  */
 import { describe, expect, test, vi } from "vitest";
-import { createAgentRuntime, runToQuiescence, type AgentTextRequest } from "@statelyai/agent";
+import { type AgentTextRequest, runAgent } from "@statelyai/agent";
 import { runFactory, type FactoryDeps } from "./before.js";
 import { codeReviewLoopMachine, createRunChecks, type Review } from "./environment.js";
 import { createPolicyDecide, loadPolicy, withPolicy } from "./policy.js";
@@ -108,13 +108,11 @@ describe("the hand-rolled loop", () => {
         return review(request);
       },
     });
-    const result = await runToQuiescence(
-      createAgentRuntime(codeReviewLoopMachine, {
-        executors: withPolicy(text, createPolicyDecide(loadPolicy("v0"))),
-        actors: { runChecks: createRunChecks(fakeRunner) },
-      }),
-      { input: { taskId: "slugify" } },
-    );
+    const result = await runAgent(codeReviewLoopMachine, {
+      executors: withPolicy(text, createPolicyDecide(loadPolicy("v0"))),
+      actors: { runChecks: createRunChecks(fakeRunner) },
+      input: { taskId: "slugify" },
+    });
     expect(result.status).toBe("idle");
     expect(result.snapshot.value).toBe("humanReview");
     expect(result.snapshot.context).toMatchObject({ round: 2, patch: reference("slugify") });

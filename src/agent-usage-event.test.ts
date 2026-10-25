@@ -5,10 +5,9 @@ import {
   createTextLogic,
   getAcceptedEvents,
   parseAgentEvent,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type ChosenEvent,
+  runAgent,
 } from "./index.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 
@@ -85,14 +84,10 @@ const textExecutors = {
 
 describe("@agent.usage (reserved per-call usage event)", () => {
   test("folds a text call's tokens into context, so a budget guard can stop the run", async () => {
-    const result = await runToQuiescence(
-      createAgentRuntime(budgetMachine, {
-        executors: textExecutors,
-      }),
-      {
-        input: { maxTokens: 1000 },
-      },
-    );
+    const result = await runAgent(budgetMachine, {
+      executors: textExecutors,
+      input: { maxTokens: 1000 },
+    });
 
     expect(result.status).toBe("done");
     // 3 calls x 400 tokens = 1200 >= 1000.
@@ -107,19 +102,15 @@ describe("@agent.usage (reserved per-call usage event)", () => {
 
   test("carries attribution: kind, invoke id, src, model, and the request name", async () => {
     const delivered: AgentUsageEvent[] = [];
-    await runToQuiescence(
-      createAgentRuntime(budgetMachine, {
-        executors: textExecutors,
-        onTransition: (_snapshot, event) => {
-          if (event.type === AGENT_USAGE_EVENT_TYPE) {
-            delivered.push(event as AgentUsageEvent);
-          }
-        },
-      }),
-      {
-        input: { maxTokens: 400 },
+    await runAgent(budgetMachine, {
+      executors: textExecutors,
+      onTransition: (_snapshot, event) => {
+        if (event.type === AGENT_USAGE_EVENT_TYPE) {
+          delivered.push(event as AgentUsageEvent);
+        }
       },
-    );
+      input: { maxTokens: 400 },
+    });
 
     expect(delivered).toHaveLength(1);
     expect(delivered[0]).toEqual({
@@ -169,16 +160,14 @@ describe("@agent.usage (reserved per-call usage event)", () => {
       },
     });
 
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: {
-          decide: async () => ({
-            event: { type: "GO" } as ChosenEvent,
-            usage: { totalTokens: 77 },
-          }),
-        },
-      }),
-    );
+    const result = await runAgent(machine, {
+      executors: {
+        decide: async () => ({
+          event: { type: "GO" } as ChosenEvent,
+          usage: { totalTokens: 77 },
+        }),
+      },
+    });
 
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({
@@ -210,12 +199,10 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
 
     const seen: string[] = [];
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: textExecutors,
-        onTransition: (_snapshot, event) => seen.push(event.type),
-      }),
-    );
+    const result = await runAgent(machine, {
+      executors: textExecutors,
+      onTransition: (_snapshot, event) => seen.push(event.type),
+    });
 
     expect(result.status).toBe("done");
     expect(seen).not.toContain(AGENT_USAGE_EVENT_TYPE);
@@ -224,14 +211,10 @@ describe("@agent.usage (reserved per-call usage event)", () => {
   });
 
   test("is never offered to a model, even under an allowedEvents wildcard", async () => {
-    const result = await runToQuiescence(
-      createAgentRuntime(budgetMachine, {
-        executors: textExecutors,
-      }),
-      {
-        input: { maxTokens: 400 },
-      },
-    );
+    const result = await runAgent(budgetMachine, {
+      executors: textExecutors,
+      input: { maxTokens: 400 },
+    });
     const snapshot = result.snapshot;
 
     const accepted = getAcceptedEvents(snapshot, { schemas }).map((event) => event.type);
@@ -249,14 +232,10 @@ describe("@agent.usage (reserved per-call usage event)", () => {
   });
 
   test("parseAgentEvent refuses to mint one from a wire payload", async () => {
-    const result = await runToQuiescence(
-      createAgentRuntime(budgetMachine, {
-        executors: textExecutors,
-      }),
-      {
-        input: { maxTokens: 400 },
-      },
-    );
+    const result = await runAgent(budgetMachine, {
+      executors: textExecutors,
+      input: { maxTokens: 400 },
+    });
 
     expect(() =>
       parseAgentEvent(result.snapshot, {
@@ -297,12 +276,10 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
 
     const seen: string[] = [];
-    const result = await runToQuiescence(
-      createAgentRuntime(wildcardMachine, {
-        executors: textExecutors,
-        onTransition: (_snapshot, event) => seen.push(event.type),
-      }),
-    );
+    const result = await runAgent(wildcardMachine, {
+      executors: textExecutors,
+      onTransition: (_snapshot, event) => seen.push(event.type),
+    });
 
     expect(result.status).toBe("done");
     expect(seen).toContain(AGENT_USAGE_EVENT_TYPE);
@@ -344,12 +321,10 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
 
     const seen: string[] = [];
-    const result = await runToQuiescence(
-      createAgentRuntime(bothMachine, {
-        executors: textExecutors,
-        onTransition: (_snapshot, event) => seen.push(event.type),
-      }),
-    );
+    const result = await runAgent(bothMachine, {
+      executors: textExecutors,
+      onTransition: (_snapshot, event) => seen.push(event.type),
+    });
 
     expect(result.status).toBe("done");
     expect(result.snapshot.context.tokens).toBe(400);

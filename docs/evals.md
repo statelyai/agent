@@ -4,7 +4,7 @@ Agent requests are independently executable, while the machine gives them meanin
 
 ## Testing without a provider
 
-A test runs the real machine through `runToQuiescence` and replaces only the model. `@statelyai/agent` ships no model mock. There are two ways to replace the model:
+A test runs the real machine through `runAgent` and replaces only the model. `@statelyai/agent` ships no model mock. There are two ways to replace the model:
 
 - Mock the provider with the AI SDK's `MockLanguageModelV3`. The call still runs through `createAiSdkExecutors`, so the test covers prompt rendering, structured output parsing, and decision tool calls.
 - Pass plain functions as executors. The test covers the machine only.
@@ -68,7 +68,7 @@ const machine = agent.createMachine({
 
 ```ts
 import { MockLanguageModelV3 } from "ai/test";
-import { runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 function mockModel(text: string) {
@@ -88,10 +88,10 @@ function mockModel(text: string) {
 const writer = mockModel("Checkout now supports saved cards.");
 const judge = mockModel(JSON.stringify({ result: { score: 4 } }));
 
-const result = await runToQuiescence(
-  createAgentRuntime(machine, { executors: createAiSdkExecutors({ models: { writer, judge } }) }),
-  { input: { topic: "saved cards at checkout" } },
-);
+const result = await runAgent(machine, {
+  executors: createAiSdkExecutors({ models: { writer, judge } }),
+  input: { topic: "saved cards at checkout" },
+});
 
 if (result.status === "done") {
   console.log(result.output); // { draft: "Checkout now supports saved cards.", score: 4 }
@@ -112,13 +112,11 @@ The mock answers in the provider's format, not the request's:
 An executor is a function of the request. Route on `request.name` to answer each request, and return the output value as `result`.
 
 ```ts
-import { runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 
 const calls: string[] = [];
 
-const result = await runToQuiescence(
-  createAgentRuntime(machine, {
-    executors: {
+const result = await runAgent(machine, { executors: {
       generateText: async (request) => {
         calls.push(request.name ?? "");
         switch (request.name) {
@@ -130,10 +128,7 @@ const result = await runToQuiescence(
             throw new Error(`No answer for request "${request.name}"`);
         }
       },
-    },
-  }),
-  { input: { topic: "saved cards at checkout" } },
-);
+    }, input: { topic: "saved cards at checkout" } });
 
 console.log(calls); // ["draftEmail", "scoreDraft"]
 ```

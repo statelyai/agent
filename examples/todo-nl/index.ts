@@ -54,10 +54,9 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
+  runAgent,
 } from "@statelyai/agent";
 import type { SnapshotFrom } from "xstate";
 
@@ -360,30 +359,22 @@ export async function runTodoNlExample(options?: {
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
   };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(todoMachine, {
-      ...shared,
-    }),
-    {
-      input: { todos: options?.input?.todos ?? [] },
-      ...shared,
-    },
-  );
+  let result = await runAgent(todoMachine, {
+    ...shared,
+    input: { todos: options?.input?.todos ?? [] },
+    ...shared,
+  });
 
   // Each command settles the run idle in `awaitingCommand`. Resume from
   // persisted snapshot from `result.persist()` with the COMMAND interaction.
   while (result.status === "idle") {
     const text = queued.shift() ?? (await promptLine(`${idlePrompt(result.snapshot)}\n> `));
-    result = await runToQuiescence(
-      createAgentRuntime(todoMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: result.persist(),
-        event: { type: "COMMAND", text },
-        ...shared,
-      },
-    );
+    result = await runAgent(todoMachine, {
+      ...shared,
+      snapshot: result.persist(),
+      event: { type: "COMMAND", text },
+      ...shared,
+    });
   }
 
   if (result.status !== "done") {

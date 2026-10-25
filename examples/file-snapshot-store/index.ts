@@ -30,12 +30,11 @@ import { createActor, waitFor, type AnyStateMachine, type Snapshot } from "xstat
 import {
   getStatePath,
   provideExecutors,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 
 /** Instructions for the draft request: the note only, nothing addressed to the reader. */
@@ -153,33 +152,25 @@ export async function runFileSnapshotStoreExample(
   const runId = RUN_ID;
 
   // Request/process one: run until the machine waits for approval.
-  const paused = await runToQuiescence(
-    createAgentRuntime(releaseNoteMachine, {
-      ...(observers as object),
-      executors,
-    }),
-    {
-      ...(observers as object),
-      input: { topic: "application-owned storage" },
-    },
-  );
+  const paused = await runAgent(releaseNoteMachine, {
+    ...(observers as object),
+    executors,
+    ...(observers as object),
+    input: { topic: "application-owned storage" },
+  });
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
   await saveSnapshot(directory, runId, paused.persist());
 
   // Request/process two: load the native snapshot and deliver a normal event.
   const snapshot = await loadSnapshot(directory, runId);
   if (!snapshot) throw new Error(`No snapshot stored for '${runId}'.`);
-  const resumed = await runToQuiescence(
-    createAgentRuntime(releaseNoteMachine, {
-      ...(observers as object),
-      executors,
-    }),
-    {
-      ...(observers as object),
-      snapshot,
-      event: { type: "APPROVE" },
-    },
-  );
+  const resumed = await runAgent(releaseNoteMachine, {
+    ...(observers as object),
+    executors,
+    ...(observers as object),
+    snapshot,
+    event: { type: "APPROVE" },
+  });
   if (resumed.status !== "done") throw new Error(`Expected done, got '${resumed.status}'.`);
   return resumed.output;
 }

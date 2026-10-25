@@ -32,12 +32,11 @@ import { openai } from "@ai-sdk/openai";
 import {
   getInteraction,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
   type AgentRunResult,
+  runAgent,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
@@ -283,15 +282,11 @@ export async function runSwarmHandoffExample(
   };
 
   // Turn 1: the travel agent holds the mic and answers.
-  const first = await runToQuiescence(
-    createAgentRuntime(swarmHandoffMachine, {
-      ...resolved,
-    }),
-    {
-      input: { message: "I want a 3-day trip to Lisbon.", activeAgent: "travel" },
-      ...resolved,
-    },
-  );
+  const first = await runAgent(swarmHandoffMachine, {
+    ...resolved,
+    input: { message: "I want a 3-day trip to Lisbon.", activeAgent: "travel" },
+    ...resolved,
+  });
   if (first.status !== "idle") {
     throw new Error(`Swarm handoff did not settle idle after turn 1: ${first.status}`);
   }
@@ -302,16 +297,12 @@ export async function runSwarmHandoffExample(
 
   // ...later, new process: the human asks a food question. The MODEL decides
   // the travel concierge should hand it to the food concierge.
-  const second = await runToQuiescence(
-    createAgentRuntime(swarmHandoffMachine, {
-      ...resolved,
-    }),
-    {
-      snapshot: persisted,
-      event: { type: "SAY", message: "What are the must-try dishes there?" },
-      ...resolved,
-    },
-  );
+  const second = await runAgent(swarmHandoffMachine, {
+    ...resolved,
+    snapshot: persisted,
+    event: { type: "SAY", message: "What are the must-try dishes there?" },
+    ...resolved,
+  });
   if (second.status !== "idle") {
     throw new Error(`Swarm handoff did not settle idle after turn 2: ${second.status}`);
   }
@@ -354,26 +345,18 @@ async function runInteractive() {
 
   async function runTurn(message: string): Promise<AgentRunResult<typeof swarmHandoffMachine>> {
     if (snapshot) {
-      return runToQuiescence(
-        createAgentRuntime(swarmHandoffMachine, {
-          executors,
-          onTransition,
-        }),
-        {
-          snapshot,
-          event: { type: "SAY" as const, message },
-        },
-      );
-    }
-    return runToQuiescence(
-      createAgentRuntime(swarmHandoffMachine, {
+      return runAgent(swarmHandoffMachine, {
         executors,
         onTransition,
-      }),
-      {
-        input: { message, activeAgent: active },
-      },
-    );
+        snapshot,
+        event: { type: "SAY" as const, message },
+      });
+    }
+    return runAgent(swarmHandoffMachine, {
+      executors,
+      onTransition,
+      input: { message, activeAgent: active },
+    });
   }
 
   await withReadline(async (rl) => {

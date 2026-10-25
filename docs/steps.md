@@ -3,9 +3,9 @@
 <!-- public AgentRuntime loop from src/run-agent.ts -->
 
 `createAgentRuntime(machine, options)` binds executors and returns the operations
-for one run. `runToQuiescence(runtime, init)` drives that loop until the machine
-finishes or no work remains. Use the explicit loop when a host needs to persist,
-schedule, or observe each transition itself.
+for one run. `runAgent(machine, options)` is this loop, driven until the machine
+finishes or no work remains. Write the loop yourself only when a host needs to
+persist, schedule, or observe each transition itself.
 
 ```ts
 import { createAgentRuntime } from "@statelyai/agent";
@@ -38,12 +38,11 @@ Root `after` timers run in process by default. A durable host can provide
 `timers: { schedule, cancel }` to `createAgentRuntime`. The runtime then settles
 with an external timer pending. When it fires, deliver
 `{ type: "xstate.timer", id }` through `transition` or as the `event` passed to
-`runToQuiescence`.
+`runAgent`.
 
 ## Other hosts
 
-- `runToQuiescence(createAgentRuntime(...), init)` for scripts, tests, and
-  request handlers.
+- `runAgent(machine, options)` for scripts, tests, and request handlers.
 - `provideExecutors` when an application owns a live XState actor.
 - An explicit `AgentRuntime` loop when a workflow engine owns persistence,
   retries, messaging, timers, and child execution.

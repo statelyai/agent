@@ -1,10 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
-  createAgentRuntime,
-  runToQuiescence,
   type AgentDecisionExecutor,
   type AgentRequestExecutor,
   type ChosenEvent,
+  runAgent,
 } from "@statelyai/agent";
 import { gameMachine, runAiSdkGameTurn, runAiSdkHostExample } from "./index.js";
 
@@ -35,14 +34,10 @@ const mockSummarizer: AgentRequestExecutor = async (request) => {
 describe("combat machine", () => {
   test("narrates the turn into a readable summary", async () => {
     const chooser = createMockMoveChooser();
-    const result = await runToQuiescence(
-      createAgentRuntime(gameMachine, {
-        executors: { decide: chooser.decide, generateText: mockSummarizer },
-      }),
-      {
-        input: { playerHp: 20, enemyHp: 15 },
-      },
-    );
+    const result = await runAgent(gameMachine, {
+      executors: { decide: chooser.decide, generateText: mockSummarizer },
+      input: { playerHp: 20, enemyHp: 15 },
+    });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") return;
@@ -64,14 +59,10 @@ describe("combat machine", () => {
 
   test("a raised guard halves the counter, and that is a state, not a flag", async () => {
     const chooser = createMockMoveChooser({ type: "DEFEND" });
-    const result = await runToQuiescence(
-      createAgentRuntime(gameMachine, {
-        executors: { decide: chooser.decide, generateText: mockSummarizer },
-      }),
-      {
-        input: { playerHp: 20, enemyHp: 15 },
-      },
-    );
+    const result = await runAgent(gameMachine, {
+      executors: { decide: chooser.decide, generateText: mockSummarizer },
+      input: { playerHp: 20, enemyHp: 15 },
+    });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") return;
@@ -81,14 +72,10 @@ describe("combat machine", () => {
 
   test("a downed goblin never gets a counter-attack", async () => {
     const chooser = createMockMoveChooser();
-    const result = await runToQuiescence(
-      createAgentRuntime(gameMachine, {
-        executors: { decide: chooser.decide, generateText: mockSummarizer },
-      }),
-      {
-        input: { playerHp: 20, enemyHp: 6 },
-      },
-    );
+    const result = await runAgent(gameMachine, {
+      executors: { decide: chooser.decide, generateText: mockSummarizer },
+      input: { playerHp: 20, enemyHp: 6 },
+    });
 
     expect(result.status).toBe("done");
     if (result.status !== "done") return;
@@ -99,25 +86,17 @@ describe("combat machine", () => {
 
   test("allowedEvents widen to include HEAL only at low HP", async () => {
     const healthy = createMockMoveChooser();
-    await runToQuiescence(
-      createAgentRuntime(gameMachine, {
-        executors: { decide: healthy.decide, generateText: mockSummarizer },
-      }),
-      {
-        input: { playerHp: 20, enemyHp: 15 },
-      },
-    );
+    await runAgent(gameMachine, {
+      executors: { decide: healthy.decide, generateText: mockSummarizer },
+      input: { playerHp: 20, enemyHp: 15 },
+    });
     expect(healthy.requests[0]?.allowedEvents).not.toContain("HEAL");
 
     const hurt = createMockMoveChooser();
-    await runToQuiescence(
-      createAgentRuntime(gameMachine, {
-        executors: { decide: hurt.decide, generateText: mockSummarizer },
-      }),
-      {
-        input: { playerHp: 5, enemyHp: 15 },
-      },
-    );
+    await runAgent(gameMachine, {
+      executors: { decide: hurt.decide, generateText: mockSummarizer },
+      input: { playerHp: 5, enemyHp: 15 },
+    });
     expect(hurt.requests[0]?.allowedEvents).toContain("HEAL");
   });
 });

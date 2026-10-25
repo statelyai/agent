@@ -18,12 +18,7 @@
  * Run: OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... npx tsx examples/email-drafter/index.ts
  */
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  eventFromInteraction,
-  getInteraction,
-  createAgentRuntime,
-  runToQuiescence,
-} from "@statelyai/agent";
+import { eventFromInteraction, getInteraction, runAgent } from "@statelyai/agent";
 import { type DrafterEvent, type Interaction, emailDrafter } from "./agent-logic.js";
 
 // Re-exported so existing importers of this module keep working; hosts should
@@ -72,14 +67,7 @@ export async function main() {
 
   await withReadline(async (rl) => {
     // Start the machine; it settles idle at the first interaction state.
-    let result = await runToQuiescence(
-      createAgentRuntime(emailDrafter, {
-        executors,
-      }),
-      {
-        input: undefined,
-      },
-    );
+    let result = await runAgent(emailDrafter, { executors, input: undefined });
 
     while (result.status === "idle") {
       const interaction = getInteraction(result.snapshot);
@@ -98,16 +86,11 @@ export async function main() {
       }
 
       const choice = await promptInteraction(rl, interaction);
-      result = await runToQuiescence(
-        createAgentRuntime(emailDrafter, {
-          executors,
-        }),
-        {
-          snapshot: result.snapshot,
-          // Typed off the snapshot: the machine's own event union, no cast.
-          event: eventFromInteraction(result.snapshot, choice),
-        },
-      );
+      result = await runAgent(emailDrafter, {
+        executors,
+        snapshot: result.snapshot, // Typed off the snapshot: the machine's own event union, no cast.
+        event: eventFromInteraction(result.snapshot, choice),
+      });
     }
 
     if (result.status === "done") {

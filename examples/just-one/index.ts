@@ -55,9 +55,8 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
+  runAgent,
 } from "@statelyai/agent";
 
 /** Concrete, guessable words. Rounds take them in order, so runs are repeatable. */
@@ -573,29 +572,17 @@ export function toGuesserEvent(text: string): GuesserEvent {
 export async function main() {
   const shared = { executors: createAiSdkExecutors(justOneMachine) };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(justOneMachine, {
-      ...shared,
-    }),
-    {
-      input: { rounds: 3 },
-      ...shared,
-    },
-  );
+  let result = await runAgent(justOneMachine, { ...shared, input: { rounds: 3 }, ...shared });
 
   // Every guessing turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
-    result = await runToQuiescence(
-      createAgentRuntime(justOneMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: result.persist(),
-        event: toGuesserEvent(text),
-        ...shared,
-      },
-    );
+    result = await runAgent(justOneMachine, {
+      ...shared,
+      snapshot: result.persist(),
+      event: toGuesserEvent(text),
+      ...shared,
+    });
   }
 
   if (result.status !== "done") throw new Error(`Just One did not complete: ${result.status}`);

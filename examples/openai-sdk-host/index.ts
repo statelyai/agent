@@ -29,7 +29,7 @@
  */
 import type OpenAI from "openai";
 import type { SnapshotFrom } from "xstate";
-import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { createOpenAiExecutors } from "@statelyai/agent/openai";
 import { triageMachine } from "../triage/index.js";
 import { idlePrompt, toPlayerEvent, twentyQuestionsMachine } from "../twenty-questions/index.js";
@@ -50,15 +50,11 @@ const resolveDemoModel = () => "gpt-6-luna";
 
 export async function runTriageDemo(client: OpenAI, ticket: string) {
   const { generateText } = createOpenAiExecutors({ client, resolveModel: resolveDemoModel });
-  const result = await runToQuiescence(
-    createAgentRuntime(triageMachine, {
-      executors: { generateText },
-      onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
-    }),
-    {
-      input: { ticket },
-    },
-  );
+  const result = await runAgent(triageMachine, {
+    executors: { generateText },
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+    input: { ticket },
+  });
   if (result.status !== "done") {
     throw new Error(`Triage demo did not complete: ${result.status}`);
   }
@@ -94,28 +90,20 @@ export async function runTwentyQuestionsDemo(client: OpenAI) {
   const executors = { generateText, decide };
   const onTransition = (snapshot: SnapshotFrom<typeof twentyQuestionsMachine>) =>
     console.log("[state]", JSON.stringify(snapshot.value));
-  let result = await runToQuiescence(
-    createAgentRuntime(twentyQuestionsMachine, {
-      executors,
-      onTransition,
-    }),
-    {
-      input: { questionsRemaining: 20 },
-    },
-  );
+  let result = await runAgent(twentyQuestionsMachine, {
+    executors,
+    onTransition,
+    input: { questionsRemaining: 20 },
+  });
   // Every player turn settles the run idle; resume from the persisted snapshot.
   while (result.status === "idle") {
     const text = await promptAnswer(`${idlePrompt(result.snapshot)}\n> `);
-    result = await runToQuiescence(
-      createAgentRuntime(twentyQuestionsMachine, {
-        executors,
-        onTransition,
-      }),
-      {
-        snapshot: result.persist(),
-        event: toPlayerEvent(result.snapshot, text),
-      },
-    );
+    result = await runAgent(twentyQuestionsMachine, {
+      executors,
+      onTransition,
+      snapshot: result.persist(),
+      event: toPlayerEvent(result.snapshot, text),
+    });
   }
   if (result.status !== "done") {
     throw new Error(`Twenty questions demo did not complete: ${result.status}`);

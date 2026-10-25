@@ -3,7 +3,7 @@
  * boundary and an X opponent function.
  *
  * Each game runs `ticTacToeMachine` through `createAgentRuntime` with an
- * event-log store, one thread per game, and `runToQuiescence` until it is
+ * event-log store, one thread per game, and `runAgent` until it is
  * done. Whenever the game idles:
  *   - in `xTurn`, the opponent picks a cell and the host sends `X.play`;
  *   - in `oTurn`, the host calls `decideNext` with `allowedEvents: ["O.play"]`
@@ -15,14 +15,14 @@
  */
 import {
   AgentDecisionExhaustedError,
-  createAgentRuntime,
   decideNext,
-  runToQuiescence,
   type AgentDecisionExecutor,
   type AgentEventLogStore,
   type AgentLogEntry,
   type ChosenEvent,
+  type AgentRunInit,
   type DecisionAttempt,
+  runAgent,
 } from "@statelyai/agent";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import { boardFeatures } from "./features.js";
@@ -100,8 +100,8 @@ export type PlayGameOptions = {
 export async function playGame(options: PlayGameOptions): Promise<GameResult> {
   const { store, threadId } = options;
   const opponent = OPPONENTS[options.opponent];
-  const run = (init: Parameters<typeof runToQuiescence<typeof ticTacToeMachine>>[1]) =>
-    runToQuiescence(createAgentRuntime(ticTacToeMachine, { store, threadId }), init);
+  const run = (init: AgentRunInit<typeof ticTacToeMachine>) =>
+    runAgent(ticTacToeMachine, { store, threadId, ...init });
 
   let result = await run({ input: {} });
   let forfeit = false;

@@ -60,7 +60,7 @@ const outputSchema = objectSchema<{ result: unknown }>({ result: jsonAny }, ["re
  *   maxSteps: 5,
  * });
  *
- * const result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+ * const result = await runAgent(machine, { executors,
  *   input: { prompt: "What is 42 * 17?" },
  * });
  * // Snapshots and log entries carry machine.version ("1") automatically.

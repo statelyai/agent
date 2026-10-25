@@ -934,10 +934,10 @@ export namespace setupAgent {
    * const { machine, schemas } = setupAgent.fromConfig(workflowConfig, {
    *   compileSchema,
    * });
-   * const result = await runToQuiescence(
-   *   createAgentRuntime(machine, { executors: { generateText, decide } }),
-   *   { input: { ticket } },
-   * );
+   * const result = await runAgent(machine, {
+   *   executors: { generateText, decide },
+   *   input: { ticket },
+   * });
    * const event = parseAgentEvent(result.snapshot, raw, { events: schemas.events });
    * ```
    */

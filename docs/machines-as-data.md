@@ -304,13 +304,11 @@ other agent machine. Pass executors and observation handlers when creating the
 runtime; pass machine input when starting it.
 
 ```ts no-check
-const result = await runToQuiescence(
-  createAgentRuntime(machine, {
-    executors: { decide, generateText },
-    on: { TRIAGED: (event) => console.log(event.route) },
-  }),
-  { input: { ticket: "My download link 404s." } },
-);
+const result = await runAgent(machine, {
+  executors: { decide, generateText },
+  on: { TRIAGED: (event) => console.log(event.route) },
+  input: { ticket: "My download link 404s." },
+});
 ```
 
 Executors return these shapes.
@@ -325,13 +323,10 @@ A run settles in one of two ways.
 - `{ status: 'done', output }`: the machine reached a final state.
 - `{ status: 'idle', snapshot }`: the machine paused at an idle state. Persist `snapshot`, then resume when the event arrives.
 
-<!-- viz: run lifecycle: createAgentRuntime -> runToQuiescence -> done or idle, with idle resuming through a fresh runtime plus snapshot and event -->
+<!-- viz: run lifecycle: createAgentRuntime -> runAgent -> done or idle, with idle resuming through a fresh runtime plus snapshot and event -->
 
 ```ts no-check
-result = await runToQuiescence(createAgentRuntime(machine, { executors }), {
-  snapshot,
-  event: { type: "APPROVE" },
-});
+result = await runAgent(machine, { executors, snapshot, event: { type: "APPROVE" } });
 ```
 
 > **Note:** A run settles idle only after its mailbox is empty and no child,

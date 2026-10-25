@@ -31,12 +31,11 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 
 /** Rejected document rounds allowed before the case is escalated to a human. */
@@ -439,15 +438,11 @@ export async function runLongRunningOnboardingExample(
     ...(options.onTransition ? { onTransition: options.onTransition } : {}),
   };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(longRunningOnboardingMachine, {
-      ...shared,
-    }),
-    {
-      input: { employee },
-      ...shared,
-    },
-  );
+  let result = await runAgent(longRunningOnboardingMachine, {
+    ...shared,
+    input: { employee },
+    ...shared,
+  });
 
   // Days pass between these calls in a real deployment. Each pause persists to
   // JSON and the next call resumes from it.
@@ -461,16 +456,12 @@ export async function runLongRunningOnboardingExample(
     if (!answer)
       throw new Error(`No answer scripted for pause at '${getStatePath(result.snapshot)}'.`);
 
-    result = await runToQuiescence(
-      createAgentRuntime(longRunningOnboardingMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: JSON.parse(JSON.stringify(result.persist())) as Snapshot<unknown>,
-        event: answer,
-        ...shared,
-      },
-    );
+    result = await runAgent(longRunningOnboardingMachine, {
+      ...shared,
+      snapshot: JSON.parse(JSON.stringify(result.persist())) as Snapshot<unknown>,
+      event: answer,
+      ...shared,
+    });
   }
 
   if (result.status !== "done") {

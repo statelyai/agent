@@ -4,13 +4,12 @@ import { createActor, createMachine } from "xstate";
 import { decideNext } from "./decide-next.js";
 import type { AgentDecisionExecutor } from "./decision.js";
 import {
-  createAgentRuntime,
   createAgentSchemas,
-  runToQuiescence,
   serializeTraceEvent,
   setupAgent,
   traceTransitions,
   type AgentTraceEvent,
+  runAgent,
 } from "./index.js";
 import { foldTraces } from "./testing/index.js";
 
@@ -52,13 +51,11 @@ const choose =
 
 async function run(type: string): Promise<AgentTraceEvent[]> {
   const trace: AgentTraceEvent[] = [];
-  await runToQuiescence(
-    createAgentRuntime(desk, {
-      executors: { decide: choose(type) },
-      onTrace: (event) => trace.push(event),
-    }),
-    { input: {} },
-  );
+  await runAgent(desk, {
+    executors: { decide: choose(type) },
+    onTrace: (event) => trace.push(event),
+    input: {},
+  });
   return trace;
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import type { Snapshot } from "xstate";
-import { createAgentRuntime, runToQuiescence, setupAgent } from "./index.js";
+import { setupAgent, runAgent } from "./index.js";
 
 describe("documentation integration recipes", () => {
   test("an app can store an opaque snapshot and resume it with an event", async () => {
@@ -33,13 +33,13 @@ describe("documentation integration recipes", () => {
     });
 
     async function startGeneration(input: { prompt: string }): Promise<{ snapshot: unknown }> {
-      const result = await runToQuiescence(createAgentRuntime(machine), { input });
+      const result = await runAgent(machine, { input });
       if (result.status !== "idle") throw new Error(`Expected idle, got ${result.status}`);
       return { snapshot: result.persist() };
     }
 
     async function resumeGeneration(snapshot: unknown, answer: string): Promise<string> {
-      const result = await runToQuiescence(createAgentRuntime(machine), {
+      const result = await runAgent(machine, {
         snapshot: snapshot as Snapshot<unknown>,
         event: { type: "ANSWER", answer },
       });

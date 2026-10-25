@@ -802,7 +802,7 @@ function toolChoiceOnFirstTurn(keys: string[], later: Record<string, unknown>): 
  * import { openaiText } from '@tanstack/ai-openai';
  *
  * const executors = createTanStackAiExecutors({ models: { quick: openaiText('gpt-6-luna') } });
- * const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+ * const result = await runAgent(machine, { executors, input });
  * ```
  */
 export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(

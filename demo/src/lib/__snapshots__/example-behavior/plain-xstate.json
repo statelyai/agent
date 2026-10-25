@@ -10,20 +10,14 @@
       "response": "Mock reply to: Write a two-sentence launch blurb for: a CLI that turns shel",
       "idle": {
         "prompt": "Approve the draft, or ask for a revision (0 of 2 used; once they are spent, only Approve is accepted).",
-        "events": [
-          "APPROVE",
-          "REVISE"
-        ],
+        "events": ["APPROVE", "REVISE"],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"APPROVE\"}",
       "status": "done",
-      "trace": [
-        "transition @xstate.init -> \"judging\"",
-        "transition APPROVE -> \"approved\""
-      ],
+      "trace": ["transition @xstate.init -> \"judging\"", "transition APPROVE -> \"approved\""],
       "response": "Draft 1 ready: 0 of 2 revisions used, 0 retries after a failed attempt.\n\n- Drafts: 1\n- Revisions: 0\n- Retries: 0"
     }
   ],
@@ -38,20 +32,14 @@
       "response": "Mock reply to: Write a two-sentence launch blurb for: a solar-powered backy",
       "idle": {
         "prompt": "Approve the draft, or ask for a revision (0 of 2 used; once they are spent, only Approve is accepted).",
-        "events": [
-          "APPROVE",
-          "REVISE"
-        ],
+        "events": ["APPROVE", "REVISE"],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"APPROVE\"}",
       "status": "done",
-      "trace": [
-        "transition @xstate.init -> \"judging\"",
-        "transition APPROVE -> \"approved\""
-      ],
+      "trace": ["transition @xstate.init -> \"judging\"", "transition APPROVE -> \"approved\""],
       "response": "Draft 1 ready: 0 of 2 revisions used, 0 retries after a failed attempt.\n\n- Drafts: 1\n- Revisions: 0\n- Retries: 0"
     }
   ],
@@ -66,20 +54,14 @@
       "response": "Mock reply to: Write a two-sentence launch blurb for: a note app that delet",
       "idle": {
         "prompt": "Approve the draft, or ask for a revision (0 of 2 used; once they are spent, only Approve is accepted).",
-        "events": [
-          "APPROVE",
-          "REVISE"
-        ],
+        "events": ["APPROVE", "REVISE"],
         "textEvent": null
       }
     },
     {
       "sent": "{\"type\":\"APPROVE\"}",
       "status": "done",
-      "trace": [
-        "transition @xstate.init -> \"judging\"",
-        "transition APPROVE -> \"approved\""
-      ],
+      "trace": ["transition @xstate.init -> \"judging\"", "transition APPROVE -> \"approved\""],
       "response": "Draft 1 ready: 0 of 2 revisions used, 0 retries after a failed attempt.\n\n- Drafts: 1\n- Revisions: 0\n- Retries: 0"
     }
   ]

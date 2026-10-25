@@ -15,11 +15,10 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 
 const itinerary = z.object({ flight: z.string(), hotel: z.string() });
@@ -262,16 +261,12 @@ export async function runBookingCompensationExample(
     AgentRunInit<typeof bookingCompensationMachine>,
 ) {
   const { executors = liveExecutors(), ...runOptions } = options ?? {};
-  return runToQuiescence(
-    createAgentRuntime(bookingCompensationMachine, {
-      ...runOptions,
-      executors,
-    }),
-    {
-      input: { bookingId: "trip-1", destination: "Lisbon" },
-      ...runOptions,
-    },
-  );
+  return runAgent(bookingCompensationMachine, {
+    ...runOptions,
+    executors,
+    input: { bookingId: "trip-1", destination: "Lisbon" },
+    ...runOptions,
+  });
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {

@@ -6,11 +6,11 @@
 import { describe, expect, test, vi } from "vitest";
 import { createMachine, type AnyMachineSnapshot, type AnyStateMachine } from "xstate";
 import {
-  createAgentRuntime,
   eventFromInteraction,
   getInteraction,
-  runToQuiescence,
+  runAgent,
   type AgentDecisionExecutor,
+  type AgentRunInit,
   type ChosenEvent,
 } from "@statelyai/agent";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
@@ -198,8 +198,9 @@ function runtime(
   const text = mockAuthorAndReviewer();
   return {
     text,
-    create: () =>
-      createAgentRuntime(codeReviewLoopMachine, {
+    create: (init: AgentRunInit<typeof codeReviewLoopMachine>) =>
+      runAgent(codeReviewLoopMachine, {
+        ...init,
         executors: { generateText: text.generateText, decide },
         actors: { runChecks: createRunChecks(fakeRunner) },
         ...(options.store ? { store: options.store, threadId: options.threadId ?? "t" } : {}),
@@ -211,7 +212,7 @@ describe("a run over mock author, reviewer, and checks", () => {
   test("happy path: a correct first patch ships on round 1 without asking the policy", async () => {
     const decide = vi.fn(prefer("RETRY"));
     const { create, text } = runtime(decide);
-    const result = await runToQuiescence(create(), { input: { taskId: "clamp" } });
+    const result = await create({ input: { taskId: "clamp" } });
     expect(result.status).toBe("done");
     if (result.status !== "done") return;
     expect(result.output).toMatchObject({ outcome: "shipped", rounds: 1, humanApproved: false });
@@ -235,7 +236,7 @@ describe("a run over mock author, reviewer, and checks", () => {
       },
       { store, threadId: "slugify" },
     );
-    const result = await runToQuiescence(create(), { input: { taskId: "slugify" } });
+    const result = await create({ input: { taskId: "slugify" } });
     expect(result.status === "done" && result.output).toMatchObject({
       outcome: "shipped",
       rounds: 2,
@@ -275,13 +276,14 @@ describe("a run over mock author, reviewer, and checks", () => {
       offered.push((request.options ?? []).map((o) => o.event.type));
       return prefer("RETRY")(request, info);
     };
-    const novelRuntime = () =>
-      createAgentRuntime(codeReviewLoopMachine, {
+    const novelRun = (init: AgentRunInit<typeof codeReviewLoopMachine>) =>
+      runAgent(codeReviewLoopMachine, {
+        ...init,
         executors: { generateText: text.generateText, decide: decideSpy },
         actors: { runChecks: createRunChecks(fakeRunner) },
       });
 
-    let result = await runToQuiescence(novelRuntime(), { input: { taskId: "round-half" } });
+    let result = await novelRun({ input: { taskId: "round-half" } });
     expect(result.status).toBe("idle");
     expect(result.snapshot.matches("humanReview")).toBe(true);
     // Only ESCALATE was offered, so even a RETRY-first decider escalated.
@@ -303,7 +305,7 @@ describe("a run over mock author, reviewer, and checks", () => {
       notes: "follow the spec",
     });
 
-    result = await runToQuiescence(novelRuntime(), {
+    result = await novelRun({
       snapshot: result.persist(),
       event: { type: "APPROVE" },
     });
@@ -318,7 +320,7 @@ describe("a run over mock author, reviewer, and checks", () => {
   test("the round cap: a decider that always retries is stopped at MAX_ROUNDS and sent to a person", async () => {
     const { create } = runtime(prefer("RETRY"));
     // round-half's draft passes the visible tests but the reviewer never approves it.
-    const result = await runToQuiescence(create(), { input: { taskId: "round-half" } });
+    const result = await create({ input: { taskId: "round-half" } });
     expect(result.status).toBe("idle");
     expect(result.snapshot.matches("humanReview")).toBe(true);
     expect(result.snapshot.context.round).toBe(MAX_ROUNDS);
@@ -327,8 +329,8 @@ describe("a run over mock author, reviewer, and checks", () => {
 
   test("REQUEST_CHANGES grants more rounds, up to the hard ceiling", async () => {
     const { create } = runtime(prefer("RETRY"));
-    let result = await runToQuiescence(create(), { input: { taskId: "round-half" } });
-    result = await runToQuiescence(create(), {
+    let result = await create({ input: { taskId: "round-half" } });
+    result = await create({
       snapshot: result.persist(),
       event: { type: "REQUEST_CHANGES", notes: "follow the spec" },
     });
@@ -403,7 +405,7 @@ describe("the RETRY rules", () => {
         ? { event: { type: "RETRY", feedback: "made up", focus: "all" } }
         : prefer("RETRY")(request, info);
     const { create } = runtime(sloppy, { store, threadId: "sloppy" });
-    const result = await runToQuiescence(create(), { input: { taskId: "chunk" } });
+    const result = await create({ input: { taskId: "chunk" } });
     expect(result.status === "done" && result.output.outcome).toBe("shipped");
     const refused = getDecisionAttempts(await store.read("sloppy"));
     expect(refused).toHaveLength(1);

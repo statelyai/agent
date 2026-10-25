@@ -51,11 +51,10 @@ import {
   getAcceptedEvents,
   getInteraction,
   parseAgentEvent,
-  createAgentRuntime,
-  runToQuiescence,
   type AgentEventLogStore,
   type AgentRequestExecutors,
   type AgentRunResult,
+  runAgent,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
@@ -165,33 +164,27 @@ export class EmailDrafter extends Agent<Env> {
     this.#executors ??= this.createExecutors();
     this.#judgments ??= this.createJudgments();
 
-    const result = await runToQuiescence(
-      createAgentRuntime(emailDrafter, {
-        store: this.#log,
-        threadId: THREAD_ID,
-        executors: this.#executors,
-        actors: this.#judgments,
-        onTransition: (snapshot) => {
-          this.broadcast(
-            JSON.stringify({
-              type: "state",
-              value: snapshot.value,
-              // meta is schema-typed: clients get the interaction protocol
-              // (text / select / confirm) for the current state.
-              meta: snapshot.getMeta(),
-            }),
-          );
-        },
-      }),
-      {
-        // Used only when the thread's log is empty; a resume ignores it.
-        input: undefined,
-        // Already parsed at the boundary by `parseAgentEvent`, so this is the
-        // machine's own event type. If the current state has no transition for
-        // it, the machine ignores it and the turn reports `result.ignored`.
-        ...(event !== undefined ? { event } : {}),
-      },
-    );
+    const result = await runAgent(emailDrafter, {
+      store: this.#log,
+      threadId: THREAD_ID,
+      executors: this.#executors,
+      actors: this.#judgments,
+      onTransition: (snapshot) => {
+        this.broadcast(
+          JSON.stringify({
+            type: "state",
+            value: snapshot.value,
+            // meta is schema-typed: clients get the interaction protocol
+            // (text / select / confirm) for the current state.
+            meta: snapshot.getMeta(),
+          }),
+        );
+      }, // Used only when the thread's log is empty; a resume ignores it.
+      input: undefined, // Already parsed at the boundary by `parseAgentEvent`, so this is the
+      // machine's own event type. If the current state has no transition for
+      // it, the machine ignores it and the turn reports `result.ignored`.
+      ...(event !== undefined ? { event } : {}),
+    });
     // A turn becomes the cached view only once the journal holds it. A rejected
     // write settles the run as `{ status: 'error', cause: 'journal' }` rather
     // than throwing, and caching that would report state the log never

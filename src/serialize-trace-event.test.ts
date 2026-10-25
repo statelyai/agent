@@ -6,13 +6,12 @@ import {
   AgentInvalidEventPayloadError,
   createAgentSchemas,
   createTextLogic,
-  createAgentRuntime,
-  runToQuiescence,
   serializeTraceEvent,
   setupAgent,
   type AgentTraceEvent,
   type JsonSerializableTraceEvent,
   type AgentRunErrorCause,
+  runAgent,
 } from "./index.js";
 import { AgentLintError } from "./testing/index.js";
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -286,12 +285,10 @@ describe("serializeTraceEvent", () => {
     });
 
     const trace: AgentTraceEvent<typeof machine>[] = [];
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        onTrace: (event) => trace.push(event),
-        executors: { generateText: async () => ({ result: "a draft", raw: { provider: {} } }) },
-      }),
-    );
+    const result = await runAgent(machine, {
+      onTrace: (event) => trace.push(event),
+      executors: { generateText: async () => ({ result: "a draft", raw: { provider: {} } }) },
+    });
 
     expect(result.status).toBe("done");
     const jsonl = trace

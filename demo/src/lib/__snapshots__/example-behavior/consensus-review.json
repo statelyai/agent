@@ -25,20 +25,14 @@
       "response": "**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | security |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | maintainability |",
       "idle": {
         "prompt": "Review the votes before accepting this patch. Human review is required when the patch came from an external source, or when fewer than two reviewers approved. To reject it, say why.",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": "REJECT.reason"
       }
     },
     {
       "sent": "{\"type\":\"REJECT\",\"reason\":\"Yes, that works. Please continue.\"}",
       "status": "done",
-      "trace": [
-        "transition @xstate.init -> \"humanReview\"",
-        "transition REJECT -> \"rejected\""
-      ],
+      "trace": ["transition @xstate.init -> \"humanReview\"", "transition REJECT -> \"rejected\""],
       "response": "- Approved: no\n- Human reviewed: yes\n\n**Votes**\n\n| Approve | Reason | Reviewer |\n| --- | --- | --- |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | security |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | reliability |\n| yes | approve (approve 100% · reject 0% · abstain 0%) | maintainability |"
     }
   ],

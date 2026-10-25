@@ -3,15 +3,11 @@
     {
       "sent": "start {}",
       "status": "idle",
-      "trace": [
-        "transition @xstate.init -> \"awaitingUser\""
-      ],
+      "trace": ["transition @xstate.init -> \"awaitingUser\""],
       "response": "",
       "idle": {
         "prompt": "Say something (turn 0 — 0/8 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -26,9 +22,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 1 — 2/8 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -43,9 +37,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 2 — 4/8 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -60,9 +52,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 3 — 6/8 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -77,9 +67,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 4 — 8/8 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -95,9 +83,7 @@
       "response": "**Messages**\n\nMock reply to: Yes, that works. Please continue.\n\n**Summary**\n\nmock summary",
       "idle": {
         "prompt": "Say something (turn 5 — 4/8 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -112,9 +98,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 6 — 6/8 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -129,9 +113,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 7 — 8/8 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     }
@@ -140,15 +122,11 @@
     {
       "sent": "start {}",
       "status": "idle",
-      "trace": [
-        "transition @xstate.init -> \"awaitingUser\""
-      ],
+      "trace": ["transition @xstate.init -> \"awaitingUser\""],
       "response": "",
       "idle": {
         "prompt": "Say something (turn 0 — 0/8 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -163,9 +141,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 1 — 2/8 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -180,9 +156,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 2 — 4/8 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -197,9 +171,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 3 — 6/8 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -214,9 +186,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 4 — 8/8 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -232,9 +202,7 @@
       "response": "**Messages**\n\nMock reply to: Yes, that works. Please continue.\n\n**Summary**\n\nmock summary",
       "idle": {
         "prompt": "Say something (turn 5 — 4/8 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -249,9 +217,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 6 — 6/8 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -266,9 +232,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 7 — 8/8 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     }
@@ -277,15 +241,11 @@
     {
       "sent": "start {\"maxMessages\":4,\"keepRecent\":2}",
       "status": "idle",
-      "trace": [
-        "transition @xstate.init -> \"awaitingUser\""
-      ],
+      "trace": ["transition @xstate.init -> \"awaitingUser\""],
       "response": "",
       "idle": {
         "prompt": "Say something (turn 0 — 0/4 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -300,9 +260,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 1 — 2/4 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -317,9 +275,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 2 — 4/4 messages, no summary yet). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -335,9 +291,7 @@
       "response": "**Messages**\n\nMock reply to: Yes, that works. Please continue.\n\n**Summary**\n\nmock summary",
       "idle": {
         "prompt": "Say something (turn 3 — 2/4 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -352,9 +306,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 4 — 4/4 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -370,9 +322,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 5 — 2/4 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -387,9 +337,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 6 — 4/4 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     },
@@ -405,9 +353,7 @@
       "response": "Mock reply to: Yes, that works. Please continue.",
       "idle": {
         "prompt": "Say something (turn 7 — 2/4 messages, summary active). Type 'exit' to finish.",
-        "events": [
-          "USER_MESSAGE"
-        ],
+        "events": ["USER_MESSAGE"],
         "textEvent": "USER_MESSAGE.text"
       }
     }

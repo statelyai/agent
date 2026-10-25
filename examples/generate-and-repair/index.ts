@@ -31,12 +31,7 @@
 import { z } from "zod";
 import { createAsyncLogic } from "xstate";
 import { openai } from "@ai-sdk/openai";
-import {
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentTextResult,
-} from "@statelyai/agent";
+import { setupAgent, type AgentTextResult, runAgent } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
 /** How many repair rounds one run may spend before giving up. */
@@ -425,20 +420,16 @@ export const generateAndRepairMachine = agentMachine.provide({
 });
 
 export async function runGenerateAndRepairExample(prompt: string) {
-  const result = await runToQuiescence(
-    createAgentRuntime(generateAndRepairMachine, {
-      executors: createAiSdkExecutors(generateAndRepairMachine),
-      onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
-      on: {
-        CANDIDATE_REJECTED: (e) =>
-          console.log(`[rejected] ${e.error} (${e.remaining} candidates left)`),
-        REPAIRING: (e) => console.log(`[repairing] attempt ${e.attempt}: ${e.error}`),
-      },
-    }),
-    {
-      input: { prompt },
+  const result = await runAgent(generateAndRepairMachine, {
+    executors: createAiSdkExecutors(generateAndRepairMachine),
+    onTransition: (snapshot) => console.log("[state]", JSON.stringify(snapshot.value)),
+    on: {
+      CANDIDATE_REJECTED: (e) =>
+        console.log(`[rejected] ${e.error} (${e.remaining} candidates left)`),
+      REPAIRING: (e) => console.log(`[repairing] attempt ${e.attempt}: ${e.error}`),
     },
-  );
+    input: { prompt },
+  });
   if (result.status !== "done") {
     throw new Error(`Generate-and-repair example did not complete: ${result.status}`);
   }

@@ -6,12 +6,8 @@
 import { describe, expect, test, vi } from "vitest";
 import { createMachine, initialTransition, type InspectionEvent } from "xstate";
 import { z } from "zod";
-import {
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "./index.js";
+import { createAgentRuntime, setupAgent, type AgentRequestExecutors, runAgent } from "./index.js";
+import { runToQuiescence } from "./run-agent.js";
 import { replay } from "./log/index.js";
 
 function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -83,7 +79,7 @@ describe("createAgentRuntime", () => {
       },
     });
     const [snapshot] = initialTransition(machine);
-    const result = await runToQuiescence(createAgentRuntime(machine), {
+    const result = await runAgent(machine, {
       snapshot: JSON.parse(JSON.stringify(machine.getPersistedSnapshot(snapshot))),
     });
     expect(result.status).toBe("idle");
@@ -131,12 +127,10 @@ describe("createAgentRuntime", () => {
     const manual = await runtime.finish();
 
     const helperEvents: string[] = [];
-    const helper = await runToQuiescence(
-      createAgentRuntime(sequence, {
-        executors: gatedExecutors().executors,
-        onTransition: (_snapshot, event) => helperEvents.push(event.type),
-      }),
-    );
+    const helper = await runAgent(sequence, {
+      executors: gatedExecutors().executors,
+      onTransition: (_snapshot, event) => helperEvents.push(event.type),
+    });
 
     expect(manual.status).toBe("done");
     expect(manual.status === "done" ? manual.output : undefined).toEqual({
@@ -277,7 +271,7 @@ describe("createAgentRuntime", () => {
     });
 
     const { executors } = gatedExecutors({ research: gate.promise });
-    const result = runToQuiescence(createAgentRuntime(machine, { executors }));
+    const result = runAgent(machine, { executors });
     let settled = false;
     void result.then(() => (settled = true));
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -342,12 +336,9 @@ describe("createAgentRuntime", () => {
     });
 
     const { executors } = gatedExecutors({ research: gate.promise });
-    const first = await runToQuiescence(createAgentRuntime(machine, { executors }));
+    const first = await runAgent(machine, { executors });
     expect(first.status).toBe("idle");
-    const run = runToQuiescence(createAgentRuntime(machine, { executors }), {
-      snapshot: first.persist(),
-      event: { type: "GO" },
-    });
+    const run = runAgent(machine, { executors, snapshot: first.persist(), event: { type: "GO" } });
     setTimeout(() => gate.resolve(), 20);
     const result = await run;
     // The run waited for the child's request instead of settling in `asked`.
@@ -367,7 +358,7 @@ describe("createAgentRuntime", () => {
   });
 
   test("an in-process `after` timer counts as work in flight and fires", async () => {
-    const result = await runToQuiescence(createAgentRuntime(timed));
+    const result = await runAgent(timed);
     expect(result.status).toBe("done");
     expect(result.status === "done" ? result.output : undefined).toEqual({ expired: true });
   });
@@ -379,14 +370,15 @@ describe("createAgentRuntime", () => {
       cancel: () => {},
     };
 
-    const first = await runToQuiescence(createAgentRuntime(timed, { timers: host }));
+    const first = await runAgent(timed, { timers: host });
     // Nothing in the process is waiting on the timer, so the run settles now.
     expect(first.status).toBe("idle");
     expect(scheduled).toHaveLength(1);
     expect(scheduled[0]!.delay).toBe(20);
 
     // Later, the host's durable timer fires and it resumes the run with it.
-    const resumed = await runToQuiescence(createAgentRuntime(timed, { timers: host }), {
+    const resumed = await runAgent(timed, {
+      timers: host,
       snapshot: first.persist(),
       event: { type: "xstate.timer", id: scheduled[0]!.id } as never,
     });
@@ -415,12 +407,13 @@ describe("createAgentRuntime", () => {
       },
     });
 
-    const first = await runToQuiescence(createAgentRuntime(machine, { timers: host }));
+    const first = await runAgent(machine, { timers: host });
     expect(scheduled[0]!.delay).toBe(1000);
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     // Resumed for an unrelated event: the deadline is re-armed for what is left.
-    await runToQuiescence(createAgentRuntime(machine, { timers: host }), {
+    await runAgent(machine, {
+      timers: host,
       snapshot: JSON.parse(JSON.stringify(first.persist())),
       event: { type: "PING" },
     });
@@ -450,12 +443,10 @@ describe("createAgentRuntime", () => {
     });
 
     const seen: string[] = [];
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: { decide: async () => ({ event: { type: "GO" } }) },
-        onTransition: (_snapshot, event) => seen.push(event.type),
-      }),
-    );
+    const result = await runAgent(machine, {
+      executors: { decide: async () => ({ event: { type: "GO" } }) },
+      onTransition: (_snapshot, event) => seen.push(event.type),
+    });
     expect(result.status).toBe("done");
     expect(seen).toContain("GO");
     expect(seen.some((type) => type.startsWith("xstate.done.actor"))).toBe(false);
@@ -493,21 +484,17 @@ describe("createAgentRuntime", () => {
 
   test("resuming a snapshot taken mid-request restarts that request", async () => {
     const controller = new AbortController();
-    const first = runToQuiescence(
-      createAgentRuntime(sequence, {
-        signal: controller.signal,
-        executors: { generateText: () => new Promise(() => {}) },
-      }),
-    );
+    const first = runAgent(sequence, {
+      signal: controller.signal,
+      executors: { generateText: () => new Promise(() => {}) },
+    });
     await new Promise((resolve) => setTimeout(resolve, 5));
     controller.abort();
     const stopped = await first;
     expect(stopped.status).toBe("error");
 
     const { executors, calls } = gatedExecutors();
-    const resumed = await runToQuiescence(createAgentRuntime(sequence, { executors }), {
-      snapshot: stopped.persist(),
-    });
+    const resumed = await runAgent(sequence, { executors, snapshot: stopped.persist() });
     expect(calls).toEqual(["first", "second"]);
     expect(resumed.status === "done" ? resumed.output : undefined).toEqual({
       a: "first done",

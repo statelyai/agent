@@ -6,7 +6,7 @@ import type { AgentDecisionExecutor, AgentDecisionRequest } from "./decision.js"
 import { describeMachine } from "./describe-machine.js";
 import { getAcceptedEvents } from "./events.js";
 import { interactionMetaSchema } from "./interaction.js";
-import { createAgentRuntime, runToQuiescence } from "./run-agent.js";
+import { runAgent } from "./run-agent.js";
 import { createAgentSchemas, setupAgent } from "./setup-agent.js";
 import { explorePaths, lintAgentMachine } from "./verify.js";
 
@@ -61,9 +61,7 @@ describe('transition meta `actor: "human"`', () => {
 
   test("agent.decide never offers a human-tagged event", async () => {
     const { decide, requests } = recording(() => ({ type: "approve" }));
-    const result = await runToQuiescence(createAgentRuntime(review, { executors: { decide } }), {
-      input: {},
-    });
+    const result = await runAgent(review, { executors: { decide }, input: {} });
 
     expect(requests[0]!.events.map((event) => event.type)).toEqual(["revise"]);
     // Choosing it anyway is retried, then the decision fails to onError.
@@ -95,9 +93,7 @@ describe('transition meta `actor: "human"`', () => {
       },
     });
     const { decide, requests } = recording((request) => request.options![0]!.event);
-    const result = await runToQuiescence(createAgentRuntime(closed, { executors: { decide } }), {
-      input: {},
-    });
+    const result = await runAgent(closed, { executors: { decide }, input: {} });
 
     expect(requests[0]!.options!.map((option) => option.event)).toEqual([{ type: "revise" }]);
     expect(requests[0]!.withheld).toEqual([{ type: "approve" }]);

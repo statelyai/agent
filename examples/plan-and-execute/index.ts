@@ -40,11 +40,10 @@
 import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import {
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
@@ -316,16 +315,12 @@ export async function runPlanAndExecuteExample(
   options?: AgentRuntimeOptions<typeof planAndExecuteMachine> &
     AgentRunInit<typeof planAndExecuteMachine>,
 ) {
-  const result = await runToQuiescence(
-    createAgentRuntime(planAndExecuteMachine, {
-      executors: createAiSdkExecutors(planAndExecuteMachine),
-      ...options,
-    }),
-    {
-      input: { goal: "Is a heat pump worth it for a 1920s house?" },
-      ...options,
-    },
-  );
+  const result = await runAgent(planAndExecuteMachine, {
+    executors: createAiSdkExecutors(planAndExecuteMachine),
+    ...options,
+    input: { goal: "Is a heat pump worth it for a 1920s house?" },
+    ...options,
+  });
   if (result.status !== "done") {
     throw new Error(`Plan-and-execute example did not complete: ${result.status}`);
   }

@@ -24,10 +24,9 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentDecisionExecutor,
+  runAgent,
 } from "@statelyai/agent";
 import type { SnapshotFrom } from "xstate";
 
@@ -346,15 +345,11 @@ export async function runRpsExample(options?: {
     maxModelCalls: 30,
   };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(rpsMachine, {
-      ...shared,
-    }),
-    {
-      input: { targetWins: options?.input?.targetWins ?? 3 },
-      ...shared,
-    },
-  );
+  let result = await runAgent(rpsMachine, {
+    ...shared,
+    input: { targetWins: options?.input?.targetWins ?? 3 },
+    ...shared,
+  });
 
   // Every throw settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
@@ -364,16 +359,12 @@ export async function runRpsExample(options?: {
       options?.nextHumanThrow?.(result.snapshot) ??
       queued.shift() ??
       toThrowEvent(await promptLine(`${label}\n(rock/paper/scissors) > `));
-    result = await runToQuiescence(
-      createAgentRuntime(rpsMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: result.persist(),
-        event,
-        ...shared,
-      },
-    );
+    result = await runAgent(rpsMachine, {
+      ...shared,
+      snapshot: result.persist(),
+      event,
+      ...shared,
+    });
   }
 
   if (result.status !== "done") {

@@ -10,7 +10,7 @@ import type { AgentDecisionRequest } from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
-import { AgentTruncatedError, createAgentRuntime, runToQuiescence, setupAgent } from "../index.js";
+import { AgentTruncatedError, setupAgent, runAgent } from "../index.js";
 import {
   createTanStackAiExecutors,
   toDecisionMessages,
@@ -750,10 +750,10 @@ describe("createTanStackAiExecutors with createAgentRuntime", () => {
       },
     });
 
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, { executors: createTanStackAiExecutors({ models }) }),
-      { input: {} },
-    );
+    const result = await runAgent(machine, {
+      executors: createTanStackAiExecutors({ models }),
+      input: {},
+    });
 
     expect(result.status).toBe("done");
     expect(result.usage).toMatchObject({ inputTokens: 5, outputTokens: 2, totalTokens: 7 });

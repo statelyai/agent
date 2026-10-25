@@ -39,11 +39,10 @@ import { createAsyncLogic, setup } from "xstate";
 import { getShortestPaths } from "xstate/graph";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 
 const models = { dispatcher: openai("gpt-6-luna") };
@@ -382,16 +381,12 @@ export async function runRouteReplanningExample(
     AgentRuntimeOptions<typeof routeReplanningMachine> & AgentRunInit<typeof routeReplanningMachine>
   > = {},
 ) {
-  const result = await runToQuiescence(
-    createAgentRuntime(routeReplanningMachine, {
-      executors: createAiSdkExecutors(routeReplanningMachine),
-      ...options,
-    }),
-    {
-      input: { parcel: "a birthday cake" },
-      ...options,
-    },
-  );
+  const result = await runAgent(routeReplanningMachine, {
+    executors: createAiSdkExecutors(routeReplanningMachine),
+    ...options,
+    input: { parcel: "a birthday cake" },
+    ...options,
+  });
   if (result.status !== "done") throw new Error(`Expected done, got '${result.status}'.`);
   return result.output;
 }

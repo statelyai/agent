@@ -84,10 +84,9 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
+  runAgent,
 } from "@statelyai/agent";
 
 const models = {
@@ -472,31 +471,23 @@ export async function runLongTermMemoryExample(
     },
   };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(longTermMemoryMachine, {
-      ...shared,
-    }),
-    {
-      input: { userId, memories },
-      ...shared,
-    },
-  );
+  let result = await runAgent(longTermMemoryMachine, {
+    ...shared,
+    input: { userId, memories },
+    ...shared,
+  });
   while (result.status === "idle") {
     const { reply } = result.snapshot.context;
     if (reply) onReply?.(reply);
     const label = getInteraction(result.snapshot)?.label ?? "";
     const event =
       queued.shift() ?? toHumanEvent(await promptLine(`${reply ? `${reply}\n` : ""}${label}\n> `));
-    result = await runToQuiescence(
-      createAgentRuntime(longTermMemoryMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: result.persist(),
-        event,
-        ...shared,
-      },
-    );
+    result = await runAgent(longTermMemoryMachine, {
+      ...shared,
+      snapshot: result.persist(),
+      event,
+      ...shared,
+    });
   }
 
   if (result.status !== "done") {

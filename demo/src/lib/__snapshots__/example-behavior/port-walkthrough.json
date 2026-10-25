@@ -11,10 +11,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -31,10 +28,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -51,10 +45,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -71,10 +62,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -91,10 +79,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -111,10 +96,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -131,10 +113,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -151,10 +130,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     }
@@ -171,10 +147,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -191,10 +164,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -211,10 +181,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -231,10 +198,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -251,10 +215,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -271,10 +232,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -291,10 +249,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     },
@@ -311,10 +266,7 @@
       "response": "**Draft**\n\n**To**: mock to  \n**Subject**: mock subject  \n**Body**: mock body",
       "idle": {
         "prompt": "Send this email to mock to?",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": null
       }
     }

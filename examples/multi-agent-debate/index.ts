@@ -56,13 +56,7 @@ import { createAsyncLogic } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = {
   debater: openai("gpt-6-luna"),
@@ -401,22 +395,18 @@ export async function runMultiAgentDebateExample(
 ): Promise<MultiAgentDebateResult> {
   const { motion = DEFAULT_MOTION, rounds, generateText, judge, onProgress } = options;
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(multiAgentDebateMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(multiAgentDebateMachine) }),
-      ...(judge ? { actors: { judgeDebate: createJudgeDebate(judge) } } : {}),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { motion, ...(rounds !== undefined ? { rounds } : {}) },
+  const result = await runAgent(multiAgentDebateMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(multiAgentDebateMachine) }),
+    ...(judge ? { actors: { judgeDebate: createJudgeDebate(judge) } } : {}),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { motion, ...(rounds !== undefined ? { rounds } : {}) },
+  });
   if (result.status !== "done") {
     throw new Error(`Multi-agent debate example did not complete: ${result.status}`);
   }

@@ -1,12 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { createActor, createAsyncLogic, createMachine, toPromise } from "xstate";
-import {
-  createAgentRuntime,
-  runToQuiescence,
-  serializeTraceEvent,
-  traceTransitions,
-  type AgentTraceEvent,
-} from "./index.js";
+import { serializeTraceEvent, traceTransitions, type AgentTraceEvent, runAgent } from "./index.js";
 
 const machine = createMachine({
   id: "job",
@@ -31,9 +25,7 @@ function transitions(trace: AgentTraceEvent[]) {
 describe("machine.transition `from`", () => {
   test("the runtime records the state each event arrived in", async () => {
     const trace: AgentTraceEvent[] = [];
-    await runToQuiescence(createAgentRuntime(machine, { onTrace: (event) => trace.push(event) }), {
-      event: { type: "GO" },
-    });
+    await runAgent(machine, { onTrace: (event) => trace.push(event), event: { type: "GO" } });
 
     const [init, ...rest] = transitions(trace);
     // The first transition has no earlier state: it arrives where it starts.
@@ -61,9 +53,7 @@ describe("machine.transition `from`", () => {
 
   test("serializeTraceEvent keeps it", async () => {
     const trace: AgentTraceEvent[] = [];
-    await runToQuiescence(createAgentRuntime(machine, { onTrace: (event) => trace.push(event) }), {
-      event: { type: "GO" },
-    });
+    await runAgent(machine, { onTrace: (event) => trace.push(event), event: { type: "GO" } });
     const go = trace.find(
       (event) => event.type === "machine.transition" && event.event.type === "GO",
     )!;

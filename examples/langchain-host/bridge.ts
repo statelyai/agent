@@ -31,11 +31,10 @@ import { createAgent } from "langchain";
 import {
   getInteraction,
   parseAgentEvent,
-  createAgentRuntime,
-  runToQuiescence,
   type AgentRuntimeOptions,
   type AgentRunInit,
   type AgentRunResult,
+  runAgent,
 } from "@statelyai/agent";
 import {
   createEvaluatePrompt,
@@ -187,15 +186,7 @@ export async function startDraft(
     AgentRunInit<typeof emailDrafter> = currentRunOptions(),
 ): Promise<ToolResult> {
   const handle = `draft-${++nextHandle}`;
-  const opened = await runToQuiescence(
-    createAgentRuntime(emailDrafter, {
-      ...runOptions,
-    }),
-    {
-      ...runOptions,
-      input: undefined,
-    },
-  );
+  const opened = await runAgent(emailDrafter, { ...runOptions, ...runOptions, input: undefined });
   const pending = toToolResult(opened, handle);
   if (pending.status === "done") return pending;
 
@@ -218,16 +209,12 @@ export async function resumeDraft(
   const stored = runs.get(handle);
   if (!stored) throw new Error(`Unknown handle: ${handle}`);
 
-  const result = await runToQuiescence(
-    createAgentRuntime(emailDrafter, {
-      ...runOptions,
-    }),
-    {
-      ...runOptions,
-      snapshot: stored.snapshot,
-      event: buildEvent(stored.interaction, eventType, text),
-    },
-  );
+  const result = await runAgent(emailDrafter, {
+    ...runOptions,
+    ...runOptions,
+    snapshot: stored.snapshot,
+    event: buildEvent(stored.interaction, eventType, text),
+  });
 
   // The state has no transition for the event, so the machine ignored it and
   // nothing happened. That is not a library error: `runAgent` settled

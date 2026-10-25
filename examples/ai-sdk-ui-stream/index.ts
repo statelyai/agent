@@ -39,12 +39,11 @@ import {
 import type { AnyStateMachine } from "xstate";
 import {
   getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutor,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
@@ -168,33 +167,26 @@ export function agentRunToUIMessageStream<TMachine extends AnyStateMachine>(
 
       writer.write({ type: "start" });
 
-      const result = await runToQuiescence(
-        createAgentRuntime(machine, {
-          ...options,
-          // Each streamed chunk becomes a text delta on its request's text part.
-          onChunk: (chunk, { request }) => {
-            if (!openTextParts.has(request.id)) {
-              openTextParts.add(request.id);
-              writer.write({ type: "text-start", id: request.id });
-            }
-            writer.write({ type: "text-delta", id: request.id, delta: chunk });
-          },
-          // A resolved request closes its text part.
-          onResult: (request) => {
-            if (openTextParts.delete(request.id)) {
-              writer.write({ type: "text-end", id: request.id });
-            }
-          },
-          // Every machine transition surfaces as a data part the client can render.
-          onTransition: (snapshot) => {
-            const state = getStatePath(snapshot);
-            writer.write({ type: AGENT_STATE_PART, data: { state } });
-          },
-        }),
-        {
-          ...options,
+      const result = await runAgent(machine, {
+        ...options, // Each streamed chunk becomes a text delta on its request's text part.
+        onChunk: (chunk, { request }) => {
+          if (!openTextParts.has(request.id)) {
+            openTextParts.add(request.id);
+            writer.write({ type: "text-start", id: request.id });
+          }
+          writer.write({ type: "text-delta", id: request.id, delta: chunk });
+        }, // A resolved request closes its text part.
+        onResult: (request) => {
+          if (openTextParts.delete(request.id)) {
+            writer.write({ type: "text-end", id: request.id });
+          }
+        }, // Every machine transition surfaces as a data part the client can render.
+        onTransition: (snapshot) => {
+          const state = getStatePath(snapshot);
+          writer.write({ type: AGENT_STATE_PART, data: { state } });
         },
-      );
+        ...options,
+      });
 
       // Close any part still open (e.g. the run errored mid-stream), surface a
       // non-done outcome as an error frame, then close the message.

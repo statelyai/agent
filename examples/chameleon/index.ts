@@ -47,9 +47,8 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
+  runAgent,
 } from "@statelyai/agent";
 
 /** The table, in speaking order. Index doubles as the player's seat. */
@@ -508,15 +507,11 @@ export function toAccuseEvent(text: string): AccuseEvent | undefined {
 export async function main() {
   const shared = { executors: createAiSdkExecutors(chameleonMachine) };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(chameleonMachine, {
-      ...shared,
-    }),
-    {
-      input: { category: "Ocean creatures", secretWord: "octopus", chameleonIndex: 2 },
-      ...shared,
-    },
-  );
+  let result = await runAgent(chameleonMachine, {
+    ...shared,
+    input: { category: "Ocean creatures", secretWord: "octopus", chameleonIndex: 2 },
+    ...shared,
+  });
 
   // The vote settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
@@ -526,16 +521,12 @@ export async function main() {
       console.log("Name a player or a seat number.");
       continue;
     }
-    result = await runToQuiescence(
-      createAgentRuntime(chameleonMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: result.persist(),
-        event,
-        ...shared,
-      },
-    );
+    result = await runAgent(chameleonMachine, {
+      ...shared,
+      snapshot: result.persist(),
+      event,
+      ...shared,
+    });
   }
 
   if (result.status !== "done") throw new Error(`Chameleon did not complete: ${result.status}`);

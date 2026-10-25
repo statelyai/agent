@@ -20,13 +20,13 @@
  */
 import type { AnyMachineSnapshot } from "xstate";
 import {
-  createAgentRuntime,
-  runToQuiescence,
   type AgentDecisionExecutor,
   type AgentEventLogStore,
   type AgentLogEntry,
   type AgentRequestExecutor,
+  type AgentRunInit,
   type ChosenEvent,
+  runAgent,
 } from "@statelyai/agent";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import type { TestRunner } from "./checks.js";
@@ -128,15 +128,13 @@ export async function runEpisode(task: Task, options: EpisodeOptions): Promise<E
     options.threadId ?? `${task.split}/${options.policyVersion ?? "policy"}/${task.id}`;
   const actors = { runChecks: createRunChecks(options.runner) };
   const run = (init: { input: { taskId: string } } | { event: ChosenEvent }) =>
-    runToQuiescence(
-      createAgentRuntime(codeReviewLoopMachine, {
-        executors: options.executors,
-        actors,
-        store,
-        threadId,
-      }),
-      init as never,
-    );
+    runAgent(codeReviewLoopMachine, {
+      executors: options.executors,
+      actors,
+      store,
+      threadId,
+      ...(init as AgentRunInit<typeof codeReviewLoopMachine>),
+    });
 
   let result = await run({ input: { taskId: task.id } });
   let escalatedAt: number | undefined;

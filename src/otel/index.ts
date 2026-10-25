@@ -154,7 +154,7 @@ function toException(error: unknown): Error | { name: string; message: string } 
  *
  * const onTrace = createOtelTraceHandler({ tracer: trace.getTracer('my-app') });
  * try {
- *   await runToQuiescence(createAgentRuntime(machine, { executors, onTrace }), { input });
+ *   await runAgent(machine, { executors, onTrace, input });
  * } finally {
  *   onTrace.dispose();
  * }

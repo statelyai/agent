@@ -47,7 +47,7 @@ Entries are strict JSON, and plain objects and arrays from another realm (a jest
 
 ## Record a log
 
-`runToQuiescence` returns a complete, self-contained segment as `result.events`. Two ways to get it into storage:
+`runAgent` returns a complete, self-contained segment as `result.events`. Two ways to get it into storage:
 
 |                | `store`                                                                                                  | `onEvent`                                 |
 | -------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
@@ -61,17 +61,14 @@ Entries are strict JSON, and plain objects and arrays from another realm (a jest
 Pass a [store](#stores) and the thread to write to. The run reads that thread as its resume log and appends to it.
 
 ```ts no-check
-const result = await runToQuiescence(
-  createAgentRuntime(machine, { store, threadId: "session-1", executors }),
-  { input },
-);
+const result = await runAgent(machine, { store, threadId: "session-1", executors, input });
 ```
 
 - Each entry is written at its own `index` as `expectedIndex`, so a concurrent writer conflicts instead of interleaving.
 - No model call starts until every entry before it is durable. Pure transitions never wait.
 - A rejected write (an `AgentEventLogConflictError`, or any storage failure) aborts in-flight work and settles the run `{ status: "error", cause: "journal" }`. No further calls run.
 - A `@agent.usage` entry that arrives after the run settled is still written, but the result does not wait for it. Await `result.drain()` before terminating the process if you care about those straggler entries; it resolves once every write issued so far has landed, and never rejects (a failed write already settled the run with `cause: "journal"`).
-- `threadId` is required with a `store`; without it `runToQuiescence` throws `AgentError` with code `missing-thread-id`.
+- `threadId` is required with a `store`; without it `runAgent` throws `AgentError` with code `missing-thread-id`.
 - A thread that already has entries is resumed. `input` that differs from the input the thread started with throws `AgentError` with code `thread-input-mismatch`, since two runs sharing a thread id would otherwise get one result.
 - If an entry cannot be written (an `input` or event that is not JSON), the run settles `{ status: "error", cause: "journal" }` instead of running without a log. Without a store, the log stops at that entry with a `console.warn`, and the run goes on.
 - Passing `events` as well makes that log the resume, and it must BE the thread's log: a different length throws `AgentEventLogConflictError`, and an entry-for-entry mismatch at the same length throws `AgentError` with code `event-log-conflict`.
@@ -83,10 +80,11 @@ const result = await runToQuiescence(
 ```ts no-check
 const appended: AgentLogEntry[] = [];
 
-const result = await runToQuiescence(
-  createAgentRuntime(machine, { executors, onEvent: (entry) => appended.push(entry) }),
-  { input },
-);
+const result = await runAgent(machine, {
+  executors,
+  onEvent: (entry) => appended.push(entry),
+  input,
+});
 ```
 
 ### `recordLog`: a plain actor
@@ -184,7 +182,7 @@ Replayability rests on pure transitions.
 - Journal external inputs only when building entries by hand.
 - Keep context JSON-serializable. Hold sessions, clients, and sockets in closures and store only their ids.
 - Replay against the machine the runtime folded. When actors come in through `createAgentRuntime(machine, { actors })`, call `replay(machine.provide({ actors }), entries)`. The executor-bound machine is never needed; recorded results replace executors.
-- A run whose initial state cannot be serialized to JSON produces no log: `result.events` is empty, `onEvent` never fires, and nothing is written to a `store`. `replay` rejects a log without an init entry, so `runToQuiescence` journals nothing rather than a suffix.
+- A run whose initial state cannot be serialized to JSON produces no log: `result.events` is empty, `onEvent` never fires, and nothing is written to a `store`. `replay` rejects a log without an init entry, so `runAgent` journals nothing rather than a suffix.
 - `onEvent` alone does not make a call append-before-execute. A crash between an entry and the host's flush loses it. Use `store` when that matters.
 
 ## Fork
@@ -235,10 +233,7 @@ A host that decides with `decideNext` sends the event itself. Pass its `attempts
 const { event, attempts } = await decideNext(snapshot, { decide, model, allowedEvents: "desk.*" });
 
 if (event) {
-  await runToQuiescence(createAgentRuntime(machine, { store, threadId }), {
-    event,
-    attempts,
-  });
+  await runAgent(machine, { store, threadId, event, attempts });
 }
 ```
 

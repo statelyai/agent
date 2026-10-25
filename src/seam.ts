@@ -28,7 +28,7 @@ import type {
 } from "xstate";
 import { AgentError } from "./errors.js";
 import { getCallUsage, normalizeGeneratorResult } from "./text-logic.js";
-import { createAgentRuntime, runToQuiescence } from "./run-agent.js";
+import { runAgent } from "./run-agent.js";
 import type { AgentRuntimeOptions, AgentRunInit, AgentRunResult } from "./run-agent.js";
 import { isRecord } from "./internal/is-record.js";
 import type {
@@ -182,7 +182,7 @@ export interface SeamSlice {
 
 /** Options for {@link runSeam}. */
 export interface RunSeamOptions<TMachine extends AnyStateMachine> {
-  /** Machine input, passed straight through to `runToQuiescence`. */
+  /** Machine input, passed straight through to `runAgent`. */
   input?: InputFrom<TMachine>;
   /**
    * The call plan: scripted answers per key, consumed in order. A key is a
@@ -238,7 +238,7 @@ export interface RunSeamOptions<TMachine extends AnyStateMachine> {
 /** What {@link runSeam} returns: the seam's own answer, plus the run it caused. */
 export interface RunSeamResult<TMachine extends AnyStateMachine> {
   /**
-   * The final `runToQuiescence` result. `usage` accounts for the last leg.
+   * The final `runAgent` result. `usage` accounts for the last leg.
    */
   result: AgentRunResult<TMachine>;
   /** What the seam call returned, or `undefined` when the run never reached it. */
@@ -428,27 +428,23 @@ export async function runSeam<TMachine extends AnyStateMachine>(
   const maxTurns = options.maxTurns ?? 12;
 
   for (let turn = 0; turn <= maxTurns; turn++) {
-    result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        ...(options.actors ? { actors: options.actors } : {}),
-        executors,
-        onTransition: (next, causedBy) => {
-          // A resumed leg re-emits the state it restored into under
-          // `@xstate.init`. That is an artifact of the leg structure this helper
-          // owns, not a machine transition, so the path stays the machine's.
-          if (turn > 0 && causedBy.type === "@xstate.init") {
-            return;
-          }
-          events.push(causedBy as TrajectoryEvent);
-          liveEvents = events.length;
-          statePath.push((next as AnyMachineSnapshot).value);
-        },
-      }),
-      {
-        ...(snapshot ? { snapshot } : { input: options.input }),
-        ...(event ? { event } : {}),
+    result = await runAgent(machine, {
+      ...(options.actors ? { actors: options.actors } : {}),
+      executors,
+      onTransition: (next, causedBy) => {
+        // A resumed leg re-emits the state it restored into under
+        // `@xstate.init`. That is an artifact of the leg structure this helper
+        // owns, not a machine transition, so the path stays the machine's.
+        if (turn > 0 && causedBy.type === "@xstate.init") {
+          return;
+        }
+        events.push(causedBy as TrajectoryEvent);
+        liveEvents = events.length;
+        statePath.push((next as AnyMachineSnapshot).value);
       },
-    );
+      ...(snapshot ? { snapshot } : { input: options.input }),
+      ...(event ? { event } : {}),
+    });
 
     if (result.status !== "idle" || turn === maxTurns) {
       break;

@@ -10,9 +10,7 @@
       "response": "**Objective**\n\nmock objective\n\n**Variables**\n\nmock variables\n\n**Constraints**\n\nmock constraints",
       "idle": {
         "prompt": "mock nextQuestion",
-        "events": [
-          "ANSWER"
-        ],
+        "events": ["ANSWER"],
         "textEvent": "ANSWER.text"
       }
     },
@@ -39,9 +37,7 @@
       "response": "**Objective**\n\nmock objective\n\n**Variables**\n\nmock variables\n\n**Constraints**\n\nmock constraints",
       "idle": {
         "prompt": "mock nextQuestion",
-        "events": [
-          "ANSWER"
-        ],
+        "events": ["ANSWER"],
         "textEvent": "ANSWER.text"
       }
     },
@@ -68,9 +64,7 @@
       "response": "**Objective**\n\nmock objective\n\n**Variables**\n\nmock variables\n\n**Constraints**\n\nmock constraints",
       "idle": {
         "prompt": "mock nextQuestion",
-        "events": [
-          "ANSWER"
-        ],
+        "events": ["ANSWER"],
         "textEvent": "ANSWER.text"
       }
     },

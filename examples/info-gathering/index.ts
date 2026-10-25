@@ -70,10 +70,9 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
+  runAgent,
 } from "@statelyai/agent";
 
 const models = {
@@ -402,15 +401,7 @@ export async function runInfoGatheringExample(
     },
   };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(infoGatheringMachine, {
-      ...shared,
-    }),
-    {
-      input: { opener },
-      ...shared,
-    },
-  );
+  let result = await runAgent(infoGatheringMachine, { ...shared, input: { opener }, ...shared });
   while (result.status === "idle") {
     const question = getInteraction(result.snapshot)?.label ?? result.snapshot.context.question;
     onQuestion?.(question);
@@ -418,16 +409,12 @@ export async function runInfoGatheringExample(
       type: "ANSWER" as const,
       text: await promptLine(`${question}\n> `),
     };
-    result = await runToQuiescence(
-      createAgentRuntime(infoGatheringMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: result.persist(),
-        event,
-        ...shared,
-      },
-    );
+    result = await runAgent(infoGatheringMachine, {
+      ...shared,
+      snapshot: result.persist(),
+      event,
+      ...shared,
+    });
   }
 
   if (result.status !== "done") {

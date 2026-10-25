@@ -228,7 +228,7 @@ A decision model is any object that implements the AI SDK's decision-model spec:
 
 ```ts
 import type { Experimental_DecisionModel } from "ai";
-import { runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import { expect, test } from "vitest";
 
 const scripted: Experimental_DecisionModel = {
@@ -246,12 +246,10 @@ const scripted: Experimental_DecisionModel = {
 };
 
 test("routes a double charge to billing", async () => {
-  const result = await runToQuiescence(
-    createAgentRuntime(triageMachine, {
-      actors: { classifyTicket: createClassifyTicket(scripted) },
-    }),
-    { input: { ticket: "I was charged twice this month.", plan: "pro" } },
-  );
+  const result = await runAgent(triageMachine, {
+    actors: { classifyTicket: createClassifyTicket(scripted) },
+    input: { ticket: "I was charged twice this month.", plan: "pro" },
+  });
 
   expect(result.status === "done" && result.output).toEqual({ team: "billing", urgent: false });
 });

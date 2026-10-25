@@ -151,7 +151,7 @@ export type ParsedAgentEvent<TSource> = TSource extends AnyStateMachine
 /**
  * Parses a wire payload (a request body, a socket frame) into an
  * event typed as the machine's event union, so it can go straight to
- * `runToQuiescence(runtime, { event })` / `actor.send(...)` without a cast. Pass the machine
+ * `runAgent(machine, { event })` / `actor.send(...)` without a cast. Pass the machine
  * itself, or any snapshot of it.
  *
  * It checks exactly what a schema can check: the payload is an object with a
@@ -168,8 +168,7 @@ export type ParsedAgentEvent<TSource> = TSource extends AnyStateMachine
  * @example
  * ```ts
  * const event = parseAgentEvent(machine, await request.json());
- * const runtime = createAgentRuntime(machine, { store, threadId, executors });
- * const result = await runToQuiescence(runtime, { event });
+ * const result = await runAgent(machine, { store, threadId, executors, event });
  * ```
  */
 export function parseAgentEvent<TSource extends AnyStateMachine | AnyMachineSnapshot>(

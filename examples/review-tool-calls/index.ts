@@ -63,11 +63,10 @@ import {
   getStatePath,
   interactionMetaSchema,
   messagesSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentMessage,
   type AgentRequestExecutors,
+  runAgent,
 } from "@statelyai/agent";
 
 const models = {
@@ -344,16 +343,12 @@ export async function runReviewToolCallsExample(
   const track = (snapshot: { value: Parameters<typeof getStatePath>[0] }) =>
     onProgress?.(getStatePath(snapshot.value));
 
-  let result = await runToQuiescence(
-    createAgentRuntime(reviewToolCallsMachine, {
-      ...runOptions,
-      onTransition: track,
-    }),
-    {
-      input: { request },
-      ...runOptions,
-    },
-  );
+  let result = await runAgent(reviewToolCallsMachine, {
+    ...runOptions,
+    onTransition: track,
+    input: { request },
+    ...runOptions,
+  });
 
   const proposals: RefundCall[] = [];
   let interactionLabel: string | undefined;
@@ -378,17 +373,13 @@ export async function runReviewToolCallsExample(
       );
     }
     i++;
-    result = await runToQuiescence(
-      createAgentRuntime(reviewToolCallsMachine, {
-        ...runOptions,
-        onTransition: track,
-      }),
-      {
-        snapshot: result.persist(),
-        event,
-        ...runOptions,
-      },
-    );
+    result = await runAgent(reviewToolCallsMachine, {
+      ...runOptions,
+      onTransition: track,
+      snapshot: result.persist(),
+      event,
+      ...runOptions,
+    });
   }
 
   if (result.status !== "done") {
@@ -552,14 +543,7 @@ export async function runToolCallingExample(
   const executors = options.executors ?? createAiSdkExecutors(toolCallingMachine);
   const answers: string[] = [];
 
-  let result = await runToQuiescence(
-    createAgentRuntime(toolCallingMachine, {
-      executors,
-    }),
-    {
-      input: { question },
-    },
-  );
+  let result = await runAgent(toolCallingMachine, { executors, input: { question } });
   // A failed request ends the run in `failed` with nothing to follow up on.
   // The answer and transcript are read off the final snapshot's context, not the output.
   if (result.status === "done") {
@@ -569,15 +553,11 @@ export async function runToolCallingExample(
   for (const followUp of options.followUps ?? []) {
     if (result.status !== "idle") break;
     answers.push(result.snapshot.context.answer ?? "");
-    result = await runToQuiescence(
-      createAgentRuntime(toolCallingMachine, {
-        executors,
-      }),
-      {
-        snapshot: result.persist(),
-        event: { type: "ASK", question: followUp },
-      },
-    );
+    result = await runAgent(toolCallingMachine, {
+      executors,
+      snapshot: result.persist(),
+      event: { type: "ASK", question: followUp },
+    });
   }
 
   if (result.status !== "idle") {
@@ -585,15 +565,11 @@ export async function runToolCallingExample(
   }
   answers.push(result.snapshot.context.answer ?? "");
 
-  const ended = await runToQuiescence(
-    createAgentRuntime(toolCallingMachine, {
-      executors,
-    }),
-    {
-      snapshot: result.persist(),
-      event: { type: "END" },
-    },
-  );
+  const ended = await runAgent(toolCallingMachine, {
+    executors,
+    snapshot: result.persist(),
+    event: { type: "END" },
+  });
   if (ended.status !== "done") throw new Error(`Tool call ended with '${ended.status}'.`);
   const { answer, messages } = ended.snapshot.context;
   return { ...ended.output, answer, messages, answers };
@@ -633,15 +609,11 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
     const executors = createAiSdkExecutors(reviewToolCallsMachine);
     const request = "Customer #A-1000 was double-charged $20 on order ORD-42. Make it right.";
 
-    let result = await runToQuiescence(
-      createAgentRuntime(reviewToolCallsMachine, {
-        executors,
-        onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
-      }),
-      {
-        input: { request },
-      },
-    );
+    let result = await runAgent(reviewToolCallsMachine, {
+      executors,
+      onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
+      input: { request },
+    });
 
     while (result.status === "idle") {
       const snapshot = result.snapshot;
@@ -676,16 +648,12 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
         event = { type: "APPROVE" };
       }
 
-      result = await runToQuiescence(
-        createAgentRuntime(reviewToolCallsMachine, {
-          executors,
-          onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
-        }),
-        {
-          snapshot: persisted,
-          event,
-        },
-      );
+      result = await runAgent(reviewToolCallsMachine, {
+        executors,
+        onTransition: (snapshot) => console.log(`  → ${getStatePath(snapshot)}`),
+        snapshot: persisted,
+        event,
+      });
     }
 
     if (result.status !== "done") {

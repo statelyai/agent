@@ -10,9 +10,7 @@
       "response": "Mock reply to: Draft a proposal: Schedule maintenance",
       "idle": {
         "prompt": "Approve the proposal within the approval window (30000 ms), or it escalates.",
-        "events": [
-          "APPROVE"
-        ],
+        "events": ["APPROVE"],
         "textEvent": null
       }
     },

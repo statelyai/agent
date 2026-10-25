@@ -13,9 +13,7 @@
       "response": "**Words**\n\n| Player | Word |\n| --- | --- |\n| Ada | mock word |\n| Bruno | mock word |\n| Cleo | mock word |\n| Dev | mock word |",
       "idle": {
         "prompt": "Category: Ocean creatures. Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word. Who is the chameleon? (0=Ada, 1=Bruno, 2=Cleo, 3=Dev)",
-        "events": [
-          "ACCUSE"
-        ],
+        "events": ["ACCUSE"],
         "textEvent": null
       }
     },
@@ -43,9 +41,7 @@
       "response": "**Words**\n\n| Player | Word |\n| --- | --- |\n| Ada | mock word |\n| Bruno | mock word |\n| Cleo | mock word |\n| Dev | mock word |",
       "idle": {
         "prompt": "Category: Big cats. Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word. Who is the chameleon? (0=Ada, 1=Bruno, 2=Cleo, 3=Dev)",
-        "events": [
-          "ACCUSE"
-        ],
+        "events": ["ACCUSE"],
         "textEvent": null
       }
     },
@@ -73,9 +69,7 @@
       "response": "**Words**\n\n| Player | Word |\n| --- | --- |\n| Ada | mock word |\n| Bruno | mock word |\n| Cleo | mock word |\n| Dev | mock word |",
       "idle": {
         "prompt": "Category: Musical instruments. Ada: mock word, Bruno: mock word, Cleo: mock word, Dev: mock word. Who is the chameleon? (0=Ada, 1=Bruno, 2=Cleo, 3=Dev)",
-        "events": [
-          "ACCUSE"
-        ],
+        "events": ["ACCUSE"],
         "textEvent": null
       }
     },

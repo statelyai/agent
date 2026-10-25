@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { createActor } from "xstate";
 import {
-  createAgentRuntime,
   eventFromInteraction,
   getInteraction,
-  runToQuiescence,
   type AgentDecisionExecutor,
+  type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 import { createInMemoryEventLogStore } from "@statelyai/agent/log";
 import { lintAgentMachine } from "@statelyai/agent/testing";
@@ -83,8 +83,8 @@ describe("the game (the environment)", () => {
 
   test("a person can play both sides through the interaction choices", async () => {
     const store = createInMemoryEventLogStore();
-    const run = (init: Parameters<typeof runToQuiescence<typeof ticTacToeMachine>>[1]) =>
-      runToQuiescence(createAgentRuntime(ticTacToeMachine, { store, threadId: "person" }), init);
+    const run = (init: AgentRunInit<typeof ticTacToeMachine>) =>
+      runAgent(ticTacToeMachine, { store, threadId: "person", ...init });
     let result = await run({ input: {} });
     const first = getInteraction(result.snapshot)!;
     expect(first.label).toBe("X to move. Board: . . . / . . . / . . .");

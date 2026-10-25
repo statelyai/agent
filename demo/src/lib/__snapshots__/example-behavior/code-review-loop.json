@@ -14,21 +14,14 @@
       "response": "**Notice**\n\nRound 1: checks failed.\n\n**Patch**\n\nMock reply to: ## Spec  \nImplement `clamp(value, min, max)` in `clamp.mjs`.\n\n**Checks**\n\n**Passed**: no  \n**Failing tests**: visible-tests.mjs\n\n**Output**\n\nnot ok - visible-tests.mjs  \n  SyntaxError: Unexpected identifier 'reply'",
       "idle": {
         "prompt": "Escalated: spec is ambiguous or contradictory. After round 1: ship the patch as it is, type the changes you want, or reject the task.",
-        "events": [
-          "APPROVE",
-          "REQUEST_CHANGES",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REQUEST_CHANGES", "REJECT"],
         "textEvent": "REQUEST_CHANGES.notes"
       }
     },
     {
       "sent": "{\"type\":\"APPROVE\"}",
       "status": "done",
-      "trace": [
-        "transition @xstate.init -> \"humanReview\"",
-        "transition APPROVE -> \"shipped\""
-      ],
+      "trace": ["transition @xstate.init -> \"humanReview\"", "transition APPROVE -> \"shipped\""],
       "response": "Shipped clamp.mjs after 1 round(s), approved by a person.\n\n- Outcome: shipped\n- Rounds: 1\n- Human approved: yes"
     }
   ],
@@ -47,21 +40,14 @@
       "response": "**Notice**\n\nRound 1: checks failed.\n\n**Patch**\n\nMock reply to: ## Spec  \nImplement `slugify(text)` in `slugify.mjs`.\n\n- Lower\n\n**Checks**\n\n**Passed**: no  \n**Failing tests**: visible-tests.mjs\n\n**Output**\n\nnot ok - visible-tests.mjs  \n  SyntaxError: Unexpected identifier 'reply'",
       "idle": {
         "prompt": "Escalated: spec is ambiguous or contradictory. After round 1: ship the patch as it is, type the changes you want, or reject the task.",
-        "events": [
-          "APPROVE",
-          "REQUEST_CHANGES",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REQUEST_CHANGES", "REJECT"],
         "textEvent": "REQUEST_CHANGES.notes"
       }
     },
     {
       "sent": "{\"type\":\"APPROVE\"}",
       "status": "done",
-      "trace": [
-        "transition @xstate.init -> \"humanReview\"",
-        "transition APPROVE -> \"shipped\""
-      ],
+      "trace": ["transition @xstate.init -> \"humanReview\"", "transition APPROVE -> \"shipped\""],
       "response": "Shipped slugify.mjs after 1 round(s), approved by a person.\n\n- Outcome: shipped\n- Rounds: 1\n- Human approved: yes"
     }
   ],
@@ -80,21 +66,14 @@
       "response": "**Notice**\n\nRound 1: checks failed.\n\n**Patch**\n\nMock reply to: ## Spec  \nImplement `roundHalf(x)` in `round-half.mjs`.\n\n- Rou\n\n**Checks**\n\n**Passed**: no  \n**Failing tests**: visible-tests.mjs\n\n**Output**\n\nnot ok - visible-tests.mjs  \n  SyntaxError: Unexpected identifier 'reply'",
       "idle": {
         "prompt": "Escalated: spec is ambiguous or contradictory. After round 1: ship the patch as it is, type the changes you want, or reject the task.",
-        "events": [
-          "APPROVE",
-          "REQUEST_CHANGES",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REQUEST_CHANGES", "REJECT"],
         "textEvent": "REQUEST_CHANGES.notes"
       }
     },
     {
       "sent": "{\"type\":\"APPROVE\"}",
       "status": "done",
-      "trace": [
-        "transition @xstate.init -> \"humanReview\"",
-        "transition APPROVE -> \"shipped\""
-      ],
+      "trace": ["transition @xstate.init -> \"humanReview\"", "transition APPROVE -> \"shipped\""],
       "response": "Shipped round-half.mjs after 1 round(s), approved by a person.\n\n- Outcome: shipped\n- Rounds: 1\n- Human approved: yes"
     }
   ]

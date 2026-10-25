@@ -21,10 +21,10 @@ Both libraries represent agent control flow explicitly. Stately Agent uses XStat
 | Conditional edge, a response to an event   | A guarded [transition](machines.md#transitions); when the model picks the branch, `agent.decide` with `allowedEvents`                   |
 | `Annotation` reducer                       | No reducers. A transition returns a partial `context` patch, so the merge is written where the change happens                           |
 | `withStructuredOutput(schema)`             | `schemas: { output }` on the request; the parsed value arrives as `output.result` in the invoke's `onDone`                              |
-| Interrupt                                  | A resting state that settles `runToQuiescence` as idle. See [Human in the loop](human-in-the-loop.md)                                   |
-| `new Command({ resume })`                  | A typed machine event: `runToQuiescence(createAgentRuntime(machine, {}), { snapshot, event })`, or `{ events, event }` from the log     |
+| Interrupt                                  | A resting state that settles `runAgent` as idle. See [Human in the loop](human-in-the-loop.md)                                   |
+| `new Command({ resume })`                  | A typed machine event: `runAgent(machine, { snapshot, event })`, or `{ events, event }` from the log     |
 | Checkpointer                               | A persisted XState snapshot the host stores. See [Persistence](persistence.md)                                                          |
-| `config.configurable.thread_id`            | `runToQuiescence(createAgentRuntime(machine, { store, threadId }), {})`, which reads and appends the thread's [event log](event-log.md) |
+| `config.configurable.thread_id`            | `runAgent(machine, { store, threadId })`, which reads and appends the thread's [event log](event-log.md) |
 | Stream events                              | `onTrace` (`stream.chunk`) plus XState inspection                                                                                       |
 | Subgraph                                   | Invoked child machine                                                                                                                   |
 
@@ -149,7 +149,7 @@ The differences worth planning for:
 - [Persistence](persistence.md) covers the checkpointer and `thread_id`: the event log, `store`, `threadId`, and host-owned `persist()`.
 - [Migrating from a hand-rolled loop](from-a-loop.md) covers the same conversion from a `while` loop.
 
-A machine can run with `runToQuiescence`, an application-owned XState actor, a pure `initialTransition` / `transition` loop, or XState's durable runtime. The artifact does not change. See [Choosing a run mode](choosing-a-run-mode.md).
+A machine can run with `runAgent`, an application-owned XState actor, a pure `initialTransition` / `transition` loop, or XState's durable runtime. The artifact does not change. See [Choosing a run mode](choosing-a-run-mode.md).
 
 ## Ported LangGraph examples
 

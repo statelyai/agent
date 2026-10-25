@@ -62,13 +62,7 @@ import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createAsyncLogic } from "xstate";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = {
   responder: openai("gpt-6-luna"),
@@ -468,21 +462,17 @@ export async function runReflexionExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(reflexionMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(reflexionMachine) }),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { question },
+  const result = await runAgent(reflexionMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(reflexionMachine) }),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { question },
+  });
 
   if (result.status !== "done") {
     throw new Error(`Reflexion example did not complete: ${result.status}`);

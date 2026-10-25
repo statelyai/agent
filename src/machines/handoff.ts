@@ -87,7 +87,7 @@ export function transferEventType(agent: string): string {
  *   },
  * });
  *
- * const next = await runToQuiescence(createAgentRuntime(machine, { executors }), {
+ * const next = await runAgent(machine, { executors,
  *   snapshot,
  *   event: { type: "transfer_to_food", message: "What should I eat there?" },
  * });

@@ -38,10 +38,9 @@ import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   getInteraction,
   parseAgentEvent,
-  createAgentRuntime,
-  runToQuiescence,
   type AgentRequestExecutors,
   type AgentRunResult,
+  runAgent,
 } from "@statelyai/agent";
 import {
   createEvaluatePrompt,
@@ -195,15 +194,7 @@ export function createHost({
    */
   async function startDraft(prompt: string): Promise<ToolResult> {
     const handle = `draft-${++nextHandle}`;
-    const opened = await runToQuiescence(
-      createAgentRuntime(emailDrafter, {
-        ...run,
-      }),
-      {
-        ...run,
-        input: undefined,
-      },
-    );
+    const opened = await runAgent(emailDrafter, { ...run, ...run, input: undefined });
     const pending = toToolResult(opened, handle);
     if (pending.status !== "pending") return pending;
     if (!pending.interaction?.textEvent) {
@@ -227,16 +218,12 @@ export function createHost({
       return { status: "error", error: `Unknown handle: ${handle}. Start a new workflow.` };
     }
 
-    const result = await runToQuiescence(
-      createAgentRuntime(emailDrafter, {
-        ...run,
-      }),
-      {
-        ...run,
-        snapshot: stored.snapshot,
-        event: buildEvent(stored.interaction, eventType, text),
-      },
-    );
+    const result = await runAgent(emailDrafter, {
+      ...run,
+      ...run,
+      snapshot: stored.snapshot,
+      event: buildEvent(stored.interaction, eventType, text),
+    });
     // The state has no transition for the event, so the machine ignored it.
     // Not a library error: `runAgent` settled normally and named the event on
     // `result.ignored`. This host reports it the way it reports a bad handle.

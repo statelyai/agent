@@ -3,18 +3,11 @@
     {
       "sent": "start {\"questionsRemaining\":20}",
       "status": "idle",
-      "trace": [
-        "transition @xstate.init -> \"deciding\"",
-        "transition ASK -> \"awaitingAnswer\""
-      ],
+      "trace": ["transition @xstate.init -> \"deciding\"", "transition ASK -> \"awaitingAnswer\""],
       "response": "",
       "idle": {
         "prompt": "mock question",
-        "events": [
-          "ANSWER_YES",
-          "ANSWER_NO",
-          "ANSWER"
-        ],
+        "events": ["ANSWER_YES", "ANSWER_NO", "ANSWER"],
         "textEvent": "ANSWER.rawAnswer"
       }
     },
@@ -29,11 +22,7 @@
       "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
-        "events": [
-          "GUESS_RIGHT",
-          "GUESS_WRONG",
-          "GUESS_FEEDBACK"
-        ],
+        "events": ["GUESS_RIGHT", "GUESS_WRONG", "GUESS_FEEDBACK"],
         "textEvent": "GUESS_FEEDBACK.rawAnswer"
       }
     },
@@ -47,11 +36,7 @@
       "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
-        "events": [
-          "PLAY_AGAIN_YES",
-          "PLAY_AGAIN_NO",
-          "PLAY_AGAIN"
-        ],
+        "events": ["PLAY_AGAIN_YES", "PLAY_AGAIN_NO", "PLAY_AGAIN"],
         "textEvent": "PLAY_AGAIN.rawAnswer"
       }
     },
@@ -66,11 +51,7 @@
       "response": "",
       "idle": {
         "prompt": "mock question",
-        "events": [
-          "ANSWER_YES",
-          "ANSWER_NO",
-          "ANSWER"
-        ],
+        "events": ["ANSWER_YES", "ANSWER_NO", "ANSWER"],
         "textEvent": "ANSWER.rawAnswer"
       }
     },
@@ -85,11 +66,7 @@
       "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
-        "events": [
-          "GUESS_RIGHT",
-          "GUESS_WRONG",
-          "GUESS_FEEDBACK"
-        ],
+        "events": ["GUESS_RIGHT", "GUESS_WRONG", "GUESS_FEEDBACK"],
         "textEvent": "GUESS_FEEDBACK.rawAnswer"
       }
     },
@@ -103,11 +80,7 @@
       "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
-        "events": [
-          "PLAY_AGAIN_YES",
-          "PLAY_AGAIN_NO",
-          "PLAY_AGAIN"
-        ],
+        "events": ["PLAY_AGAIN_YES", "PLAY_AGAIN_NO", "PLAY_AGAIN"],
         "textEvent": "PLAY_AGAIN.rawAnswer"
       }
     },
@@ -122,11 +95,7 @@
       "response": "",
       "idle": {
         "prompt": "mock question",
-        "events": [
-          "ANSWER_YES",
-          "ANSWER_NO",
-          "ANSWER"
-        ],
+        "events": ["ANSWER_YES", "ANSWER_NO", "ANSWER"],
         "textEvent": "ANSWER.rawAnswer"
       }
     },
@@ -141,11 +110,7 @@
       "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
-        "events": [
-          "GUESS_RIGHT",
-          "GUESS_WRONG",
-          "GUESS_FEEDBACK"
-        ],
+        "events": ["GUESS_RIGHT", "GUESS_WRONG", "GUESS_FEEDBACK"],
         "textEvent": "GUESS_FEEDBACK.rawAnswer"
       }
     }
@@ -154,18 +119,11 @@
     {
       "sent": "start {\"questionsRemaining\":10}",
       "status": "idle",
-      "trace": [
-        "transition @xstate.init -> \"deciding\"",
-        "transition ASK -> \"awaitingAnswer\""
-      ],
+      "trace": ["transition @xstate.init -> \"deciding\"", "transition ASK -> \"awaitingAnswer\""],
       "response": "",
       "idle": {
         "prompt": "mock question",
-        "events": [
-          "ANSWER_YES",
-          "ANSWER_NO",
-          "ANSWER"
-        ],
+        "events": ["ANSWER_YES", "ANSWER_NO", "ANSWER"],
         "textEvent": "ANSWER.rawAnswer"
       }
     },
@@ -180,11 +138,7 @@
       "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
-        "events": [
-          "GUESS_RIGHT",
-          "GUESS_WRONG",
-          "GUESS_FEEDBACK"
-        ],
+        "events": ["GUESS_RIGHT", "GUESS_WRONG", "GUESS_FEEDBACK"],
         "textEvent": "GUESS_FEEDBACK.rawAnswer"
       }
     },
@@ -198,11 +152,7 @@
       "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
-        "events": [
-          "PLAY_AGAIN_YES",
-          "PLAY_AGAIN_NO",
-          "PLAY_AGAIN"
-        ],
+        "events": ["PLAY_AGAIN_YES", "PLAY_AGAIN_NO", "PLAY_AGAIN"],
         "textEvent": "PLAY_AGAIN.rawAnswer"
       }
     },
@@ -217,11 +167,7 @@
       "response": "",
       "idle": {
         "prompt": "mock question",
-        "events": [
-          "ANSWER_YES",
-          "ANSWER_NO",
-          "ANSWER"
-        ],
+        "events": ["ANSWER_YES", "ANSWER_NO", "ANSWER"],
         "textEvent": "ANSWER.rawAnswer"
       }
     },
@@ -236,11 +182,7 @@
       "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
-        "events": [
-          "GUESS_RIGHT",
-          "GUESS_WRONG",
-          "GUESS_FEEDBACK"
-        ],
+        "events": ["GUESS_RIGHT", "GUESS_WRONG", "GUESS_FEEDBACK"],
         "textEvent": "GUESS_FEEDBACK.rawAnswer"
       }
     },
@@ -254,11 +196,7 @@
       "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
-        "events": [
-          "PLAY_AGAIN_YES",
-          "PLAY_AGAIN_NO",
-          "PLAY_AGAIN"
-        ],
+        "events": ["PLAY_AGAIN_YES", "PLAY_AGAIN_NO", "PLAY_AGAIN"],
         "textEvent": "PLAY_AGAIN.rawAnswer"
       }
     },
@@ -273,11 +211,7 @@
       "response": "",
       "idle": {
         "prompt": "mock question",
-        "events": [
-          "ANSWER_YES",
-          "ANSWER_NO",
-          "ANSWER"
-        ],
+        "events": ["ANSWER_YES", "ANSWER_NO", "ANSWER"],
         "textEvent": "ANSWER.rawAnswer"
       }
     },
@@ -292,11 +226,7 @@
       "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
-        "events": [
-          "GUESS_RIGHT",
-          "GUESS_WRONG",
-          "GUESS_FEEDBACK"
-        ],
+        "events": ["GUESS_RIGHT", "GUESS_WRONG", "GUESS_FEEDBACK"],
         "textEvent": "GUESS_FEEDBACK.rawAnswer"
       }
     }
@@ -305,18 +235,11 @@
     {
       "sent": "start {\"questionsRemaining\":5}",
       "status": "idle",
-      "trace": [
-        "transition @xstate.init -> \"deciding\"",
-        "transition ASK -> \"awaitingAnswer\""
-      ],
+      "trace": ["transition @xstate.init -> \"deciding\"", "transition ASK -> \"awaitingAnswer\""],
       "response": "",
       "idle": {
         "prompt": "mock question",
-        "events": [
-          "ANSWER_YES",
-          "ANSWER_NO",
-          "ANSWER"
-        ],
+        "events": ["ANSWER_YES", "ANSWER_NO", "ANSWER"],
         "textEvent": "ANSWER.rawAnswer"
       }
     },
@@ -331,11 +254,7 @@
       "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
-        "events": [
-          "GUESS_RIGHT",
-          "GUESS_WRONG",
-          "GUESS_FEEDBACK"
-        ],
+        "events": ["GUESS_RIGHT", "GUESS_WRONG", "GUESS_FEEDBACK"],
         "textEvent": "GUESS_FEEDBACK.rawAnswer"
       }
     },
@@ -349,11 +268,7 @@
       "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
-        "events": [
-          "PLAY_AGAIN_YES",
-          "PLAY_AGAIN_NO",
-          "PLAY_AGAIN"
-        ],
+        "events": ["PLAY_AGAIN_YES", "PLAY_AGAIN_NO", "PLAY_AGAIN"],
         "textEvent": "PLAY_AGAIN.rawAnswer"
       }
     },
@@ -368,11 +283,7 @@
       "response": "",
       "idle": {
         "prompt": "mock question",
-        "events": [
-          "ANSWER_YES",
-          "ANSWER_NO",
-          "ANSWER"
-        ],
+        "events": ["ANSWER_YES", "ANSWER_NO", "ANSWER"],
         "textEvent": "ANSWER.rawAnswer"
       }
     },
@@ -387,11 +298,7 @@
       "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
-        "events": [
-          "GUESS_RIGHT",
-          "GUESS_WRONG",
-          "GUESS_FEEDBACK"
-        ],
+        "events": ["GUESS_RIGHT", "GUESS_WRONG", "GUESS_FEEDBACK"],
         "textEvent": "GUESS_FEEDBACK.rawAnswer"
       }
     },
@@ -405,11 +312,7 @@
       "response": "",
       "idle": {
         "prompt": "Do you want to play another round?",
-        "events": [
-          "PLAY_AGAIN_YES",
-          "PLAY_AGAIN_NO",
-          "PLAY_AGAIN"
-        ],
+        "events": ["PLAY_AGAIN_YES", "PLAY_AGAIN_NO", "PLAY_AGAIN"],
         "textEvent": "PLAY_AGAIN.rawAnswer"
       }
     },
@@ -424,11 +327,7 @@
       "response": "",
       "idle": {
         "prompt": "mock question",
-        "events": [
-          "ANSWER_YES",
-          "ANSWER_NO",
-          "ANSWER"
-        ],
+        "events": ["ANSWER_YES", "ANSWER_NO", "ANSWER"],
         "textEvent": "ANSWER.rawAnswer"
       }
     },
@@ -443,11 +342,7 @@
       "response": "**Transcript**\n\n- Question: mock question · Answer: yes · Raw answer: yes",
       "idle": {
         "prompt": "My guess is mock guess. Was I right?",
-        "events": [
-          "GUESS_RIGHT",
-          "GUESS_WRONG",
-          "GUESS_FEEDBACK"
-        ],
+        "events": ["GUESS_RIGHT", "GUESS_WRONG", "GUESS_FEEDBACK"],
         "textEvent": "GUESS_FEEDBACK.rawAnswer"
       }
     }

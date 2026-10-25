@@ -1,12 +1,7 @@
 import { expect, test } from "vitest";
 import { z } from "zod";
 import type { ModelMessage } from "ai";
-import {
-  createAgentRuntime,
-  runToQuiescence,
-  type AgentTextRequest,
-  type AgentTool,
-} from "@statelyai/agent";
+import { type AgentTextRequest, type AgentTool, runAgent } from "@statelyai/agent";
 import {
   reviewToolCallsMachine,
   runReviewToolCallsExample,
@@ -277,11 +272,13 @@ test("a failing request ends in `failed` with the transcript so far", async () =
 
 test("the machine's output is the outcome, not a repeat of the answer or the transcript", async () => {
   const executors = { generateText: toolLoop };
-  const answered = await runToQuiescence(createAgentRuntime(toolCallingMachine, { executors }), {
+  const answered = await runAgent(toolCallingMachine, {
+    executors,
     input: { question: "What is 6 times 7?" },
   });
   if (answered.status !== "idle") throw new Error(`Expected idle, got ${answered.status}`);
-  const ended = await runToQuiescence(createAgentRuntime(toolCallingMachine, { executors }), {
+  const ended = await runAgent(toolCallingMachine, {
+    executors,
     snapshot: answered.persist(),
     event: { type: "END" },
   });

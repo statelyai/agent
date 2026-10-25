@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import {
   formatMoney,
   migrateOrderSnapshot,
@@ -13,9 +13,7 @@ import {
 } from "./index.js";
 
 async function persistedV1Snapshot(orderId = "ORD-1", total = 812.5) {
-  const paused = await runToQuiescence(createAgentRuntime(orderApprovalMachineV1), {
-    input: { orderId, total },
-  });
+  const paused = await runAgent(orderApprovalMachineV1, { input: { orderId, total } });
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
   return persistSnapshot(paused.persist());
 }
@@ -46,7 +44,7 @@ test("the machine-owned migrate callback resumes v1 state on v2", async () => {
 });
 
 test("the reviewer sees money, not raw cents", async () => {
-  const paused = await runToQuiescence(createAgentRuntime(orderApprovalMachine), {
+  const paused = await runAgent(orderApprovalMachine, {
     input: { orderId: "ORD-2", amountCents: 2500, currency: "USD" },
   });
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
@@ -84,11 +82,11 @@ test("migration rejects totals that cannot be represented as safe integer cents"
 });
 
 test("a current snapshot resumes without migration", async () => {
-  const paused = await runToQuiescence(createAgentRuntime(orderApprovalMachine), {
+  const paused = await runAgent(orderApprovalMachine, {
     input: { orderId: "ORD-2", amountCents: 2500 },
   });
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
-  const resumed = await runToQuiescence(createAgentRuntime(orderApprovalMachine), {
+  const resumed = await runAgent(orderApprovalMachine, {
     snapshot: persistSnapshot(paused.persist()),
     event: { type: "REJECT", reason: "duplicate order" },
   });

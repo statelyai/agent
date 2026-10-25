@@ -49,11 +49,10 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   systemMessage,
   userMessage,
+  runAgent,
 } from "@statelyai/agent";
 
 // Annotated so the exported const has a portable, nameable type (TS2742).
@@ -338,18 +337,14 @@ export async function runContextCompactionExample(options?: {
     ...(options?.onTransition ? { onTransition: options.onTransition } : {}),
   };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(contextCompactionMachine, {
-      ...shared,
-    }),
-    {
-      input: {
-        maxMessages: options?.input?.maxMessages ?? 8,
-        keepRecent: options?.input?.keepRecent ?? 4,
-      },
-      ...shared,
+  let result = await runAgent(contextCompactionMachine, {
+    ...shared,
+    input: {
+      maxMessages: options?.input?.maxMessages ?? 8,
+      keepRecent: options?.input?.keepRecent ?? 4,
     },
-  );
+    ...shared,
+  });
 
   // Each chat turn settles the run idle. Resume from `result.persist()`.
   while (result.status === "idle") {
@@ -358,16 +353,12 @@ export async function runContextCompactionExample(options?: {
       : options?.userMessages
         ? "exit"
         : await promptLine(`${idlePrompt(result.snapshot)}\n> `);
-    result = await runToQuiescence(
-      createAgentRuntime(contextCompactionMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: result.persist(),
-        event: { type: "USER_MESSAGE", text },
-        ...shared,
-      },
-    );
+    result = await runAgent(contextCompactionMachine, {
+      ...shared,
+      snapshot: result.persist(),
+      event: { type: "USER_MESSAGE", text },
+      ...shared,
+    });
   }
 
   if (result.status !== "done") {

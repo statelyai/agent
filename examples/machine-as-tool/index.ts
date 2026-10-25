@@ -49,8 +49,6 @@ import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   getInteraction,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentInteraction,
   type EventOf,
@@ -58,6 +56,7 @@ import {
   type AgentRunInit,
   type AgentRunResult,
   type SnapshotOf,
+  runAgent,
 } from "@statelyai/agent";
 
 /**
@@ -292,15 +291,7 @@ export async function startTool(
   input: { amount: number; orderId: string },
   runOptions: RefundRunOptions,
 ): Promise<ToolResult> {
-  const result = await runToQuiescence(
-    createAgentRuntime(refundMachine, {
-      ...runOptions,
-    }),
-    {
-      ...runOptions,
-      input,
-    },
-  );
+  const result = await runAgent(refundMachine, { ...runOptions, ...runOptions, input });
   return toToolResult(result);
 }
 
@@ -311,16 +302,7 @@ export async function resumeTool(
   runOptions: RefundRunOptions,
 ): Promise<ToolResult> {
   const snapshot = JSON.parse(handle);
-  const result = await runToQuiescence(
-    createAgentRuntime(refundMachine, {
-      ...runOptions,
-    }),
-    {
-      ...runOptions,
-      snapshot,
-      event,
-    },
-  );
+  const result = await runAgent(refundMachine, { ...runOptions, ...runOptions, snapshot, event });
 
   // The state has no transition for the event, so the machine ignored it and
   // nothing happened. That is not a library error: `runAgent` settled

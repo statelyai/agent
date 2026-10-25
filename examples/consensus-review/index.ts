@@ -18,11 +18,10 @@ import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import {
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 
 /**
@@ -345,20 +344,15 @@ export async function runConsensusReviewExample(
   } = (options ?? {}) as typeof options & {
     input?: unknown;
   };
-  return runToQuiescence(
-    createAgentRuntime(consensusReviewMachine, {
-      ...runOptions,
-      actors: { ...actors, review: actors?.review ?? createReview(judge ?? liveJudge()) },
-    }),
-    {
-      ...runOptions,
-      // Last on purpose: the host-derived input wins over anything spread above.
-      input:
-        patch === undefined
-          ? { patch: BUILT_IN_PATCH, source: "trusted" }
-          : { patch, source: "external" },
-    },
-  );
+  return runAgent(consensusReviewMachine, {
+    ...runOptions,
+    actors: { ...actors, review: actors?.review ?? createReview(judge ?? liveJudge()) },
+    ...runOptions, // Last on purpose: the host-derived input wins over anything spread above.
+    input:
+      patch === undefined
+        ? { patch: BUILT_IN_PATCH, source: "trusted" }
+        : { patch, source: "external" },
+  });
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {

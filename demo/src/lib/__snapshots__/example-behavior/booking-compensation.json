@@ -10,10 +10,7 @@
       "response": "**Itinerary**\n\n**Flight**: mock flight  \n**Hotel**: mock hotel",
       "idle": {
         "prompt": "Approve the itinerary before reserving anything.",
-        "events": [
-          "APPROVE",
-          "CANCEL"
-        ],
+        "events": ["APPROVE", "CANCEL"],
         "textEvent": null
       }
     },
@@ -40,10 +37,7 @@
       "response": "**Itinerary**\n\n**Flight**: mock flight  \n**Hotel**: mock hotel",
       "idle": {
         "prompt": "Approve the itinerary before reserving anything.",
-        "events": [
-          "APPROVE",
-          "CANCEL"
-        ],
+        "events": ["APPROVE", "CANCEL"],
         "textEvent": null
       }
     },

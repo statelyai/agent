@@ -10,11 +10,7 @@
       "response": "",
       "idle": {
         "prompt": "Waiting on Jordan Rivera's signed onboarding documents (packet WELCOME-emp-001). Mark them signed, send them back, or escalate.",
-        "events": [
-          "DOCS_SIGNED",
-          "DOCS_REJECTED",
-          "ESCALATE"
-        ],
+        "events": ["DOCS_SIGNED", "DOCS_REJECTED", "ESCALATE"],
         "textEvent": null
       }
     },
@@ -29,10 +25,7 @@
       "response": "**Accounts**\n\n**Email**: jordan.rivera@example.com  \n**Slack**: @jordan.rivera  \n**Ticket id**: IT-emp-001",
       "idle": {
         "prompt": "Simulated IT provisioning done (ticket IT-emp-001): placeholder mailbox jordan.rivera@example.com and Slack handle @jordan.rivera were derived from the employee's name; no real accounts exist. Waiting on hardware delivery.",
-        "events": [
-          "HARDWARE_DELIVERED",
-          "ESCALATE"
-        ],
+        "events": ["HARDWARE_DELIVERED", "ESCALATE"],
         "textEvent": null
       }
     },

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import { createMockJudge, type MockJudgeCall } from "../mock-judge.js";
 import {
@@ -103,31 +103,23 @@ async function play(options: PlayOptions): Promise<PlayResult> {
   };
 
   const queue = [...options.learnerEvents];
-  let result = await runToQuiescence(
-    createAgentRuntime(chatWithPdfMachine, {
-      executors: { generateText },
-      actors,
-    }),
-    {
-      input: options.input ?? {},
-    },
-  );
+  let result = await runAgent(chatWithPdfMachine, {
+    executors: { generateText },
+    actors,
+    input: options.input ?? {},
+  });
 
   while (result.status === "idle") {
     idleLabels.push(idlePrompt(result.snapshot));
     idleViews.push({ context: result.snapshot.context, passage: passages.at(-1) });
     const event = queue.shift();
     if (!event) break;
-    result = await runToQuiescence(
-      createAgentRuntime(chatWithPdfMachine, {
-        executors: { generateText },
-        actors,
-      }),
-      {
-        snapshot: result.persist(),
-        event,
-      },
-    );
+    result = await runAgent(chatWithPdfMachine, {
+      executors: { generateText },
+      actors,
+      snapshot: result.persist(),
+      event,
+    });
   }
 
   return {

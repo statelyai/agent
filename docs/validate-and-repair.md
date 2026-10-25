@@ -163,10 +163,7 @@ The machine's own cap is `checkingRepairBudget`. It is the one the app reasons a
 `maxModelCalls` is the second cap, and a different kind. It is the host's runaway backstop, it counts every model and decision call in the run, and the machine cannot read it. See [Usage and budgets](usage-and-budgets.md#the-global-backstop-maxmodelcalls).
 
 ```ts no-check
-const result = await runToQuiescence(
-  createAgentRuntime(machine, { executors, maxModelCalls: 10 }),
-  { input },
-);
+const result = await runAgent(machine, { executors, maxModelCalls: 10, input });
 ```
 
 With three author calls and `maxRepairs: 2`, a worst-case run makes five calls, so `result.usage.modelCalls` is `5`.
@@ -182,17 +179,12 @@ const answers: Record<string, string[]> = {
 };
 const calls: string[] = [];
 
-const result = await runToQuiescence(
-  createAgentRuntime(machine, {
-    executors: {
+const result = await runAgent(machine, { executors: {
       generateText: async (request) => {
         calls.push(request.name);
         return { result: answers[request.name].shift() };
       },
-    },
-  }),
-  { input: { prompt: "a turnstile" } },
-);
+    }, input: { prompt: "a turnstile" } });
 
 expect(result.output.repairs).toBe(1);
 expect(calls).toEqual(["generateConfig", "generateConfig", "generateConfig", "repairConfig"]);

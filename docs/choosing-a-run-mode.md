@@ -4,34 +4,34 @@ The machine is the artifact. Runners only decide how one host executes its XStat
 
 | Need                             | Use                                                                    |
 | -------------------------------- | ---------------------------------------------------------------------- |
-| One request/response run         | `runToQuiescence(createAgentRuntime(...), init)`                       |
-| Several idle/resume turns        | `runToQuiescence` in a loop over `result.persist()`                    |
-| Transition-by-transition control | The explicit `AgentRuntime` loop                                       |
+| One request/response run         | `runAgent(machine, options)`                                           |
+| Several idle/resume turns        | `runAgent` again with `{ snapshot: result.persist(), event }`          |
+| Transition-by-transition control | The explicit `createAgentRuntime` loop                                 |
 | A long-lived actor               | `provideExecutors` + XState `createActor`, see [Advanced](advanced.md) |
 
 ## Managed run
 
 ```ts no-check
-const result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+const result = await runAgent(machine, { executors, input });
 
 if (result.status === "idle") {
   await storage.save(result.persist());
 }
 ```
 
-`createAgentRuntime` binds request executors. `runToQuiescence` drives its durable
-transition loop until the run is done, idle, or errors. Storage remains host-owned.
+`runAgent` binds request executors and drives the durable transition loop
+until the run is done, idle, or errors. Storage remains host-owned.
 
 ## Idle/resume loop
 
 ```ts no-check
-let result = await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
+let result = await runAgent(machine, { executors, input });
 
 while (result.status === "idle") {
   const snapshot = result.persist();
   await storage.save(snapshot);
   const event = await nextExternalEvent(result.snapshot);
-  result = await runToQuiescence(createAgentRuntime(machine, { executors }), { snapshot, event });
+  result = await runAgent(machine, { executors, snapshot, event });
 }
 ```
 

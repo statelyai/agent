@@ -40,14 +40,14 @@ import { z } from "zod";
 import { createAsyncLogic, setup, type AnyActorSystem, type SnapshotFrom } from "xstate";
 import {
   AgentDecisionExhaustedError,
-  createAgentRuntime,
   decideNext,
-  runToQuiescence,
   type AgentDecisionExecutor,
   type AgentEventLogStore,
   type AgentLogEntry,
   type ChosenEvent,
+  type AgentRunInit,
   type DecisionAttempt,
+  runAgent,
 } from "@statelyai/agent";
 import { createInMemoryEventLogStore, getDecisionAttempts } from "@statelyai/agent/log";
 import {
@@ -954,8 +954,8 @@ export async function runDeskEpisode(
   const start = { ...(options.counters?.() ?? { modelCalls: 0, judgeCalls: 0 }) };
   const actors = createWorldActors(world);
   // Each pass resumes from the thread: the store is the run's memory.
-  const run = (init: Parameters<typeof runToQuiescence<typeof refundDeskMachine>>[1]) =>
-    runToQuiescence(createAgentRuntime(refundDeskMachine, { actors, store, threadId }), init);
+  const run = (init: AgentRunInit<typeof refundDeskMachine>) =>
+    runAgent(refundDeskMachine, { actors, store, threadId, ...init });
 
   let result = await run({ input: { ticket: scenario.ticket, customerId: scenario.customerId } });
   while (result.status === "idle") {

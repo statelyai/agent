@@ -3,9 +3,7 @@
     {
       "sent": "start {\"ticket\":\"Hi, ORD-1001 arrived broken. Can I get my $40 back? (Ada, ada@example.com)\",\"customerId\":\"C-1\"}",
       "status": "idle",
-      "trace": [
-        "transition @xstate.init -> \"deciding\""
-      ],
+      "trace": ["transition @xstate.init -> \"deciding\""],
       "response": "",
       "idle": {
         "prompt": "Ticket from C-1: \"Hi, ORD-1001 arrived broken. Can I get my $40 back? (Ada, ada@example.com)\" Turn 1: New ticket. Choose the next step.",
@@ -32,9 +30,7 @@
       "response": "**Notice**\n\nAsked the customer to confirm their identity.\n\n**Pending proposal**\n\n**Type**: VERIFY_IDENTITY",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     },
@@ -72,9 +68,7 @@
       "response": "Asked the customer to confirm their identity.",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     },
@@ -112,9 +106,7 @@
       "response": "Asked the customer to confirm their identity.",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     },
@@ -152,9 +144,7 @@
       "response": "Asked the customer to confirm their identity.",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     }
@@ -163,9 +153,7 @@
     {
       "sent": "start {\"ticket\":\"ORD-1002 never shipped and it's been a month. I want a full refund of $240. (Ada, ada@example.com)\",\"customerId\":\"C-1\"}",
       "status": "idle",
-      "trace": [
-        "transition @xstate.init -> \"deciding\""
-      ],
+      "trace": ["transition @xstate.init -> \"deciding\""],
       "response": "",
       "idle": {
         "prompt": "Ticket from C-1: \"ORD-1002 never shipped and it's been a month. I want a full refund of $240. (Ada, ada@example.com)\" Turn 1: New ticket. Choose the next step.",
@@ -192,9 +180,7 @@
       "response": "**Notice**\n\nAsked the customer to confirm their identity.\n\n**Pending proposal**\n\n**Type**: VERIFY_IDENTITY",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     },
@@ -232,9 +218,7 @@
       "response": "Asked the customer to confirm their identity.",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     },
@@ -272,9 +256,7 @@
       "response": "Asked the customer to confirm their identity.",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     },
@@ -312,9 +294,7 @@
       "response": "Asked the customer to confirm their identity.",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     }
@@ -323,9 +303,7 @@
     {
       "sent": "start {\"ticket\":\"Refund ORD-1002 to my account, $240. (Linus, linus@example.com)\",\"customerId\":\"C-3\"}",
       "status": "idle",
-      "trace": [
-        "transition @xstate.init -> \"deciding\""
-      ],
+      "trace": ["transition @xstate.init -> \"deciding\""],
       "response": "",
       "idle": {
         "prompt": "Ticket from C-3: \"Refund ORD-1002 to my account, $240. (Linus, linus@example.com)\" Turn 1: New ticket. Choose the next step.",
@@ -352,9 +330,7 @@
       "response": "**Notice**\n\nAsked the customer to confirm their identity.\n\n**Pending proposal**\n\n**Type**: VERIFY_IDENTITY",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     },
@@ -392,9 +368,7 @@
       "response": "Asked the customer to confirm their identity.",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     },
@@ -432,9 +406,7 @@
       "response": "Asked the customer to confirm their identity.",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     },
@@ -472,9 +444,7 @@
       "response": "Asked the customer to confirm their identity.",
       "idle": {
         "prompt": "Please confirm your identity with a detail from your account: the order date, your card's last four, or your zip code.",
-        "events": [
-          "IDENTITY_CLAIM"
-        ],
+        "events": ["IDENTITY_CLAIM"],
         "textEvent": "IDENTITY_CLAIM.claim"
       }
     }

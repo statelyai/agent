@@ -62,9 +62,8 @@ import {
   createAgentSchemas,
   getInteraction,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
+  runAgent,
 } from "@statelyai/agent";
 
 /**
@@ -868,28 +867,20 @@ export async function main() {
       console.log("[state]", JSON.stringify(snapshot.value)),
   };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(chatWithPdfMachine, {
-      ...shared,
-    }),
-    {
-      input: { maxQuestions: 6, refreshEvery: 3 },
-      ...shared,
-    },
-  );
+  let result = await runAgent(chatWithPdfMachine, {
+    ...shared,
+    input: { maxQuestions: 6, refreshEvery: 3 },
+    ...shared,
+  });
 
   while (result.status === "idle") {
     const text = await promptLine(`${idlePrompt(result.snapshot)}\n> `);
-    result = await runToQuiescence(
-      createAgentRuntime(chatWithPdfMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: result.persist(),
-        event: toLearnerEvent(result.snapshot, text),
-        ...shared,
-      },
-    );
+    result = await runAgent(chatWithPdfMachine, {
+      ...shared,
+      snapshot: result.persist(),
+      event: toLearnerEvent(result.snapshot, text),
+      ...shared,
+    });
   }
 
   if (result.status !== "done") {

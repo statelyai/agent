@@ -17,13 +17,12 @@
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import {
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentEventLogStore,
   type AgentRequestExecutors,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { createInMemoryEventLogStore } from "@statelyai/agent/log";
@@ -187,19 +186,15 @@ export async function runUntilCrash({
 
   // Write-ahead: each entry reaches the store as it is appended, and the outline
   // call cannot start until the entries before it are durable.
-  const crashed = await runToQuiescence(
-    createAgentRuntime(crashRecoveryMachine, {
-      ...(observers as object),
-      store,
-      threadId,
-      executors: observed.executors,
-      signal: runSignal,
-    }),
-    {
-      ...(observers as object),
-      input: { topic },
-    },
-  );
+  const crashed = await runAgent(crashRecoveryMachine, {
+    ...(observers as object),
+    store,
+    threadId,
+    executors: observed.executors,
+    signal: runSignal,
+    ...(observers as object),
+    input: { topic },
+  });
 
   console.log(`crashed with status '${crashed.status}'`);
   console.log(`model calls before the crash: ${observed.calls()}`); // 2 — one completed
@@ -232,18 +227,14 @@ export async function recover({
 
   // No `events`, no snapshot: the store's thread IS the resume, and the run
   // keeps appending to it, so the thread stays replayable end to end.
-  const recovered = await runToQuiescence(
-    createAgentRuntime(crashRecoveryMachine, {
-      ...(observers as object),
-      store,
-      threadId,
-      executors: observed.executors,
-      ...(signal ? { signal } : {}),
-    }),
-    {
-      ...(observers as object),
-    },
-  );
+  const recovered = await runAgent(crashRecoveryMachine, {
+    ...(observers as object),
+    store,
+    threadId,
+    executors: observed.executors,
+    ...(signal ? { signal } : {}),
+    ...(observers as object),
+  });
 
   console.log(`recovered with status '${recovered.status}'`);
   console.log(`model calls during recovery: ${observed.calls()}`); // 1 — only the draft

@@ -21,8 +21,8 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 | API                                         | Purpose                                                  |
 | ------------------------------------------- | -------------------------------------------------------- |
 | `setupAgent`                                | Schema-first XState setup with Agent request actors      |
-| `createAgentRuntime`                        | Bind executors and expose one durable transition loop    |
-| `runToQuiescence`                           | Drive a runtime to done, idle, or error                  |
+| `createAgentRuntime`                        | Drive the transition loop yourself (custom hosts)        |
+| `runAgent`                                  | Run a machine to done, idle, or error                    |
 | `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                   |
 | `decideNext`                                | Ask a model for one event a plain XState machine accepts |
 | `describeMachine`                           | Render a machine as plain text for a model               |

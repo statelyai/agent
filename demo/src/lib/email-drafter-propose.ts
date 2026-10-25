@@ -12,7 +12,7 @@
  * OPENAI_API_KEY=... pnpm exec tsx src/lib/email-drafter-propose.ts
  */
 import { z } from "zod";
-import { createAgentRuntime, runToQuiescence, setupAgent } from "@statelyai/agent";
+import { setupAgent, runAgent } from "@statelyai/agent";
 import { renderEvidence, type MachineSummary } from "./email-drafter-compare";
 
 const proposalSchema = z.object({
@@ -89,14 +89,10 @@ async function main() {
     import("@ai-sdk/openai"),
   ]);
   const model = process.env.OPENAI_PROPOSER_MODEL || "gpt-6.1-sol";
-  const result = await runToQuiescence(
-    createAgentRuntime(proposerMachine, {
-      executors: createAiSdkExecutors({ models: { reasoner: openai(model) } }),
-    }),
-    {
-      input: { source, summary: renderEvidence(v1) },
-    },
-  );
+  const result = await runAgent(proposerMachine, {
+    executors: createAiSdkExecutors({ models: { reasoner: openai(model) } }),
+    input: { source, summary: renderEvidence(v1) },
+  });
   if (result.status !== "done") throw new Error(`Proposer did not finish: ${result.status}`);
 
   console.log(JSON.stringify(result.output, null, 2));

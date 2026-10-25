@@ -2,11 +2,10 @@
 import { z } from "zod";
 import type { AnyStateMachine, ContextFrom, Snapshot } from "xstate";
 import {
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 
 /**
@@ -176,15 +175,11 @@ export async function pauseOnV1(
   options: { orderId?: string; total?: number } & ExampleRunOptions = {},
 ) {
   const { orderId = "ORD-4417", total = 812.5, ...observers } = options;
-  const paused = await runToQuiescence(
-    createAgentRuntime(orderApprovalMachineV1, {
-      ...(observers as object),
-    }),
-    {
-      ...(observers as object),
-      input: { orderId, total },
-    },
-  );
+  const paused = await runAgent(orderApprovalMachineV1, {
+    ...(observers as object),
+    ...(observers as object),
+    input: { orderId, total },
+  });
   if (paused.status !== "idle") throw new Error(`Expected idle, got '${paused.status}'.`);
   return persistSnapshot(paused.persist());
 }
@@ -204,16 +199,12 @@ export async function runSnapshotMigrationExample(
   const persisted = await pauseOnV1({ orderId, total, ...observers });
   // The version bump: the paused snapshot is resumed on a machine that has
   // shipped since, through XState's own `version` + `migrate` contract.
-  const resumed = await runToQuiescence(
-    createAgentRuntime(orderApprovalMachine, {
-      ...(observers as object),
-    }),
-    {
-      ...(observers as object),
-      snapshot: persisted,
-      event: { type: "APPROVE" },
-    },
-  );
+  const resumed = await runAgent(orderApprovalMachine, {
+    ...(observers as object),
+    ...(observers as object),
+    snapshot: persisted,
+    event: { type: "APPROVE" },
+  });
   if (resumed.status !== "done") throw new Error(`Expected done, got '${resumed.status}'.`);
   const { output } = resumed;
   const { amountCents } = resumed.snapshot.context;

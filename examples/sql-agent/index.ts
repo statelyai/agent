@@ -30,11 +30,10 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 
@@ -280,15 +279,7 @@ export async function runSqlAgentExample(
     ...runOptions,
   };
 
-  const first = await runToQuiescence(
-    createAgentRuntime(sqlAgentMachine, {
-      ...resolved,
-    }),
-    {
-      input: { question },
-      ...resolved,
-    },
-  );
+  const first = await runAgent(sqlAgentMachine, { ...resolved, input: { question }, ...resolved });
   // Planning failed: the run is already in `failed`, with nothing to approve.
   if (first.status === "done") {
     return { interaction: undefined, output: first.output };
@@ -298,16 +289,12 @@ export async function runSqlAgentExample(
   }
   const interaction = getInteraction(first.snapshot);
 
-  const second = await runToQuiescence(
-    createAgentRuntime(sqlAgentMachine, {
-      ...resolved,
-    }),
-    {
-      snapshot: first.persist(),
-      event: { type: approval },
-      ...resolved,
-    },
-  );
+  const second = await runAgent(sqlAgentMachine, {
+    ...resolved,
+    snapshot: first.persist(),
+    event: { type: approval },
+    ...resolved,
+  });
   if (second.status !== "done") {
     throw new Error(`SQL agent did not complete: ${second.status}`);
   }

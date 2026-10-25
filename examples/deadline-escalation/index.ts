@@ -22,11 +22,10 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 
 /** The request this example's approval UI is rendered for. */
@@ -127,16 +126,12 @@ export async function runDeadlineEscalationExample(
     AgentRunInit<typeof deadlineEscalationMachine>,
 ) {
   const { executors = liveExecutors(), ...runOptions } = options ?? {};
-  return runToQuiescence(
-    createAgentRuntime(deadlineEscalationMachine, {
-      ...runOptions,
-      executors,
-    }),
-    {
-      input: { requestId: REQUEST_ID, task: "Schedule a maintenance window", windowMs: 60_000 },
-      ...runOptions,
-    },
-  );
+  return runAgent(deadlineEscalationMachine, {
+    ...runOptions,
+    executors,
+    input: { requestId: REQUEST_ID, task: "Schedule a maintenance window", windowMs: 60_000 },
+    ...runOptions,
+  });
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href) {

@@ -23,7 +23,7 @@ import {
   toAiSdkTools,
   toDecisionMessages,
 } from "./mappers.js";
-import { AgentTruncatedError, createAgentRuntime, runToQuiescence, setupAgent } from "../index.js";
+import { AgentTruncatedError, setupAgent, runAgent } from "../index.js";
 import type { AiSdkExecutors, AiSdkModelMap } from "./index.js";
 
 describe("createAiSdkExecutors with core runAgent", () => {
@@ -54,14 +54,10 @@ describe("createAiSdkExecutors with core runAgent", () => {
       },
     });
 
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: createAiSdkExecutors({ models }),
-      }),
-      {
-        input: {},
-      },
-    );
+    const result = await runAgent(machine, {
+      executors: createAiSdkExecutors({ models }),
+      input: {},
+    });
 
     expect(result.status).toBe("done");
     // LanguageModelUsage -> AgentUsage: the flat token fields are folded in,
@@ -291,9 +287,7 @@ describe("createAiSdkExecutors — decide with the `{}` event shorthand", () => 
       },
     });
 
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, { executors: createAiSdkExecutors({ models }) }),
-    );
+    const result = await runAgent(machine, { executors: createAiSdkExecutors({ models }) });
 
     if (result.status === "error") throw result.error;
     expect(result.status).toBe("done");

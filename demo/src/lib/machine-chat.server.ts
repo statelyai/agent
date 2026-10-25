@@ -16,12 +16,11 @@ import {
   getInteraction,
   getStateMeta,
   parseAgentEvent,
-  createAgentRuntime,
-  runToQuiescence,
   type AgentRequest,
   type AgentRequestExecutors,
   type AgentRunResult,
   type AgentTimerScheduler,
+  runAgent,
 } from "@statelyai/agent";
 import type { AnyMachineSnapshot, AnyStateMachine, Snapshot } from "xstate";
 import { z } from "zod";
@@ -875,26 +874,22 @@ export async function startMachineChat(
   const { trace, onTransition, onEmitted, onTrace, changedKeys, latestContext } =
     createTraceRecorder(undefined, limits.onStep);
   const host = createTimerRecorder();
-  const result = await runToQuiescence(
-    createAgentRuntime(machine, {
-      executors: live.executors,
-      timers: host.timers,
-      signal: runSignal(limits),
-      ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
-      onTransition,
-      on: { "*": onEmitted },
-      onTrace,
-      inspect: maybeCreateRunInspection(
-        limits.inspectionRoom,
-        machine,
-        limits.machineSource,
-        "start",
-      ),
-    }),
-    {
-      input: input as never,
-    },
-  );
+  const result = await runAgent(machine, {
+    executors: live.executors,
+    timers: host.timers,
+    signal: runSignal(limits),
+    ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
+    onTransition,
+    on: { "*": onEmitted },
+    onTrace,
+    inspect: maybeCreateRunInspection(
+      limits.inspectionRoom,
+      machine,
+      limits.machineSource,
+      "start",
+    ),
+    input: input as never,
+  });
   return toChatResult(
     machine,
     live.model,
@@ -1001,27 +996,23 @@ export async function resumeMachineChat(
     }
   }
   const host = createTimerRecorder();
-  const result = await runToQuiescence(
-    createAgentRuntime(machine, {
-      executors: live.executors,
-      timers: host.timers,
-      signal: runSignal(limits),
-      ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
-      onTransition,
-      on: { "*": onEmitted },
-      onTrace,
-      inspect: maybeCreateRunInspection(
-        limits.inspectionRoom,
-        machine,
-        limits.machineSource,
-        "resume",
-      ),
-    }),
-    {
-      snapshot,
-      event: parsed as never,
-    },
-  );
+  const result = await runAgent(machine, {
+    executors: live.executors,
+    timers: host.timers,
+    signal: runSignal(limits),
+    ...(limits.onChunk ? { onChunk: limits.onChunk } : {}),
+    onTransition,
+    on: { "*": onEmitted },
+    onTrace,
+    inspect: maybeCreateRunInspection(
+      limits.inspectionRoom,
+      machine,
+      limits.machineSource,
+      "resume",
+    ),
+    snapshot,
+    event: parsed as never,
+  });
   return toChatResult(
     machine,
     live.model,

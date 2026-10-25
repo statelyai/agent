@@ -76,13 +76,7 @@ import { openai } from "@ai-sdk/openai";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = {
   customer: openai("gpt-6-luna"),
@@ -443,22 +437,16 @@ export async function runChatbotSimulationEvalExample(
     onProgress,
   } = options;
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(chatbotSimulationEvalMachine, {
-      executors: generateText
-        ? { generateText }
-        : createAiSdkExecutors(chatbotSimulationEvalMachine),
-      ...(judge ? { actors: { judgeConversation: createJudgeConversation(judge) } } : {}),
-      onTransition: (snapshot: ChatbotSimulationEvalSnapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { persona, instructions, botSystem },
+  const result = await runAgent(chatbotSimulationEvalMachine, {
+    executors: generateText ? { generateText } : createAiSdkExecutors(chatbotSimulationEvalMachine),
+    ...(judge ? { actors: { judgeConversation: createJudgeConversation(judge) } } : {}),
+    onTransition: (snapshot: ChatbotSimulationEvalSnapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { persona, instructions, botSystem },
+  });
   if (result.status !== "done") {
     throw new Error(`Chatbot-simulation-eval example did not complete: ${result.status}`);
   }

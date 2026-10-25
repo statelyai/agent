@@ -37,10 +37,9 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRequestExecutors,
+  runAgent,
 } from "@statelyai/agent";
 
 /** Refunds at or below this settle automatically; above needs a human. */
@@ -445,16 +444,12 @@ export async function runRetrofitExample(
     onProgress?.(state);
   };
 
-  const first = await runToQuiescence(
-    createAgentRuntime(supportMachine, {
-      executors,
-      ...(actors ? { actors } : {}),
-      onTransition: track,
-    }),
-    {
-      input: { ticket },
-    },
-  );
+  const first = await runAgent(supportMachine, {
+    executors,
+    ...(actors ? { actors } : {}),
+    onTransition: track,
+    input: { ticket },
+  });
 
   if (first.status === "done") {
     return { ...first.output, settledIdle: false, progress };
@@ -470,17 +465,13 @@ export async function runRetrofitExample(
   const event = approve
     ? ({ type: "APPROVE" } as const)
     : ({ type: "DENY", reason: denyReason } as const);
-  const second = await runToQuiescence(
-    createAgentRuntime(supportMachine, {
-      executors,
-      ...(actors ? { actors } : {}),
-      onTransition: track,
-    }),
-    {
-      snapshot: first.persist(),
-      event,
-    },
-  );
+  const second = await runAgent(supportMachine, {
+    executors,
+    ...(actors ? { actors } : {}),
+    onTransition: track,
+    snapshot: first.persist(),
+    event,
+  });
   if (second.status !== "done") {
     throw new Error(`Expected done after ${event.type}, got '${second.status}'.`);
   }

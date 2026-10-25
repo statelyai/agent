@@ -42,9 +42,8 @@ import {
   getInteraction,
   getStatePath,
   interactionMetaSchema,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
+  runAgent,
 } from "@statelyai/agent";
 
 export const categorySchema = z.enum(["billing", "technical", "other"]);
@@ -430,34 +429,21 @@ export async function main() {
     onTransition: (snapshot: TriageSnapshot) => console.log("[state]", getStatePath(snapshot)),
   };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(triageMachine, {
-      ...shared,
-    }),
-    {
-      input: { ticket },
-      ...shared,
-    },
-  );
+  let result = await runAgent(triageMachine, { ...shared, input: { ticket }, ...shared });
 
   // A low-confidence classification settles the run idle; resume it with the
   // human's decision.
   while (result.status === "idle") {
     const answer = await promptLine(`${escalationLabel(result.snapshot)}\n> `);
-    result = await runToQuiescence(
-      createAgentRuntime(triageMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: result.persist(),
-        // Unparsed on purpose: the machine explains an unknown category.
-        event:
-          answer === ""
-            ? { type: "CONFIRM" }
-            : { type: "RECLASSIFY", category: answer as z.infer<typeof categorySchema> },
-        ...shared,
-      },
-    );
+    result = await runAgent(triageMachine, {
+      ...shared,
+      snapshot: result.persist(), // Unparsed on purpose: the machine explains an unknown category.
+      event:
+        answer === ""
+          ? { type: "CONFIRM" }
+          : { type: "RECLASSIFY", category: answer as z.infer<typeof categorySchema> },
+      ...shared,
+    });
   }
 
   if (result.status !== "done") {

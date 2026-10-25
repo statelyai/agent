@@ -10,20 +10,14 @@
       "response": "Mock reply to: Write a short announcement about: the new deploy pipeline",
       "idle": {
         "prompt": "Approve the draft to publish it, or type what you want changed (0 of 2 revisions used).",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": "REJECT.text"
       }
     },
     {
       "sent": "{\"type\":\"APPROVE\"}",
       "status": "done",
-      "trace": [
-        "transition @xstate.init -> \"reviewing\"",
-        "transition APPROVE -> \"published\""
-      ],
+      "trace": ["transition @xstate.init -> \"reviewing\"", "transition APPROVE -> \"published\""],
       "response": "Published after 0 revision(s).\n\n- Published: yes"
     }
   ],
@@ -38,20 +32,14 @@
       "response": "Mock reply to: Write a short announcement about: our move to a four-day wor",
       "idle": {
         "prompt": "Approve the draft to publish it, or type what you want changed (0 of 2 revisions used).",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": "REJECT.text"
       }
     },
     {
       "sent": "{\"type\":\"APPROVE\"}",
       "status": "done",
-      "trace": [
-        "transition @xstate.init -> \"reviewing\"",
-        "transition APPROVE -> \"published\""
-      ],
+      "trace": ["transition @xstate.init -> \"reviewing\"", "transition APPROVE -> \"published\""],
       "response": "Published after 0 revision(s).\n\n- Published: yes"
     }
   ]

@@ -46,11 +46,10 @@ import { createAsyncLogic, setup } from "xstate";
 import { getShortestPaths } from "xstate/graph";
 import {
   createAgentSchemas,
-  createAgentRuntime,
-  runToQuiescence,
   setupAgent,
   type AgentRuntimeOptions,
   type AgentRunInit,
+  runAgent,
 } from "@statelyai/agent";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import { describeMachine } from "./describe-machine.js";
@@ -514,16 +513,12 @@ export async function runRiverCrossingExample(
   options?: AgentRuntimeOptions<typeof riverCrossingMachine> &
     AgentRunInit<typeof riverCrossingMachine>,
 ) {
-  const result = await runToQuiescence(
-    createAgentRuntime(riverCrossingMachine, {
-      executors: createAiSdkExecutors(riverCrossingMachine),
-      ...options,
-    }),
-    {
-      input: { maxMoves: 12 },
-      ...options,
-    },
-  );
+  const result = await runAgent(riverCrossingMachine, {
+    executors: createAiSdkExecutors(riverCrossingMachine),
+    ...options,
+    input: { maxMoves: 12 },
+    ...options,
+  });
   if (result.status !== "done") {
     throw new Error(`River crossing did not complete: ${result.status}`);
   }

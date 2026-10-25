@@ -1,11 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import {
-  getInteraction,
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-} from "@statelyai/agent";
+import { getInteraction, getStatePath, runAgent } from "@statelyai/agent";
 import type { AgentRequestExecutor } from "@statelyai/agent";
 import {
   type GuesserEvent,
@@ -79,15 +74,7 @@ async function play(options: PlayOptions) {
   const { executor } = createClueGivers(options.script, options.captured);
   const shared = { executors: { generateText: executor } };
 
-  let result = await runToQuiescence(
-    createAgentRuntime(justOneMachine, {
-      ...shared,
-    }),
-    {
-      input: options.input,
-      ...shared,
-    },
-  );
+  let result = await runAgent(justOneMachine, { ...shared, input: options.input, ...shared });
 
   while (result.status === "idle") {
     // Every idle state must advertise how a host can unblock it.
@@ -100,16 +87,12 @@ async function play(options: PlayOptions) {
     if (!event) throw new Error(`ran out of guesser events at: ${prompts.at(-1)}`);
     expect(result.snapshot.can(event)).toBe(true);
 
-    result = await runToQuiescence(
-      createAgentRuntime(justOneMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: result.persist(),
-        event,
-        ...shared,
-      },
-    );
+    result = await runAgent(justOneMachine, {
+      ...shared,
+      snapshot: result.persist(),
+      event,
+      ...shared,
+    });
   }
 
   if (result.status !== "done") throw new Error(`expected done, got ${result.status}`);
@@ -141,14 +124,10 @@ describe("just-one", () => {
       captured,
     );
 
-    const result = await runToQuiescence(
-      createAgentRuntime(justOneMachine, {
-        executors: { generateText: executor },
-      }),
-      {
-        input: { rounds: 1, deck: ["volcano"] },
-      },
-    );
+    const result = await runAgent(justOneMachine, {
+      executors: { generateText: executor },
+      input: { rounds: 1, deck: ["volcano"] },
+    });
 
     // The run never settles idle: `judging` goes straight to `roundEnd`.
     expect(result.status).toBe("done");
@@ -188,7 +167,8 @@ describe("just-one", () => {
     });
     const shared = { executors: { generateText: executor } };
 
-    let result = await runToQuiescence(createAgentRuntime(justOneMachine, shared), {
+    let result = await runAgent(justOneMachine, {
+      ...shared,
       input: { rounds: 2, deck },
       ...shared,
     });
@@ -202,7 +182,8 @@ describe("just-one", () => {
       ]).toLowerCase();
       expect(shown, `leaked "${secret}": ${shown}`).not.toContain(secret);
 
-      result = await runToQuiescence(createAgentRuntime(justOneMachine, shared), {
+      result = await runAgent(justOneMachine, {
+        ...shared,
         snapshot: result.persist(),
         event: { type: "GUESS", guess: "no idea" },
         ...shared,
@@ -218,13 +199,11 @@ describe("just-one", () => {
     // Every clue follows the rules; the mock still returns `reasoning` naming the secret.
     const { executor } = createClueGivers({ Iris: ["keys"], Milo: ["Mozart"], Nadia: ["pedal"] });
     const events: unknown[] = [];
-    const result = await runToQuiescence(
-      createAgentRuntime(justOneMachine, {
-        executors: { generateText: executor },
-        onTransition: (_snapshot, event) => events.push(event),
-      }),
-      { input: { rounds: 1, deck: ["piano"] } },
-    );
+    const result = await runAgent(justOneMachine, {
+      executors: { generateText: executor },
+      onTransition: (_snapshot, event) => events.push(event),
+      input: { rounds: 1, deck: ["piano"] },
+    });
     expect(result.status).toBe("idle");
     // After the init event, which carries this test's own deck override as input.
     const payloads = JSON.stringify(events.slice(1)).toLowerCase();
@@ -277,15 +256,11 @@ describe("just-one", () => {
     });
     const shared = { executors: { generateText: executor } };
 
-    const firstIdle = await runToQuiescence(
-      createAgentRuntime(justOneMachine, {
-        ...shared,
-      }),
-      {
-        input: { rounds: 2, deck: ["volcano", "honey"] },
-        ...shared,
-      },
-    );
+    const firstIdle = await runAgent(justOneMachine, {
+      ...shared,
+      input: { rounds: 2, deck: ["volcano", "honey"] },
+      ...shared,
+    });
     expect(firstIdle.status).toBe("idle");
     if (firstIdle.status !== "idle") throw new Error("expected idle");
     expect(idlePrompt(firstIdle.snapshot)).toBe(
@@ -293,16 +268,12 @@ describe("just-one", () => {
     );
 
     // Pass on round 1: no score, and the round advances.
-    const secondIdle = await runToQuiescence(
-      createAgentRuntime(justOneMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: firstIdle.persist(),
-        event: { type: "PASS" },
-        ...shared,
-      },
-    );
+    const secondIdle = await runAgent(justOneMachine, {
+      ...shared,
+      snapshot: firstIdle.persist(),
+      event: { type: "PASS" },
+      ...shared,
+    });
     expect(secondIdle.status).toBe("idle");
     if (secondIdle.status !== "idle") throw new Error("expected idle");
     expect(secondIdle.snapshot.context.score).toBe(0);
@@ -312,16 +283,12 @@ describe("just-one", () => {
 
     // Persist mid-guess as JSON, then resume a fresh run from it.
     const serialized = JSON.stringify(secondIdle.persist());
-    const resumed = await runToQuiescence(
-      createAgentRuntime(justOneMachine, {
-        ...shared,
-      }),
-      {
-        snapshot: JSON.parse(serialized),
-        event: { type: "GUESS", guess: "Honey!" },
-        ...shared,
-      },
-    );
+    const resumed = await runAgent(justOneMachine, {
+      ...shared,
+      snapshot: JSON.parse(serialized),
+      event: { type: "GUESS", guess: "Honey!" },
+      ...shared,
+    });
 
     expect(resumed.status).toBe("done");
     if (resumed.status !== "done") throw new Error("expected done");

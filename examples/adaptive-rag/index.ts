@@ -105,13 +105,7 @@ import { createAsyncLogic } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = {
   rag: openai("gpt-6-luna"),
@@ -761,31 +755,27 @@ export async function runAdaptiveRagExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(adaptiveRagMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(adaptiveRagMachine) }),
-      ...(judge
-        ? {
-            actors: {
-              routeQuestion: createRouteQuestion(judge),
-              gradeDocuments: createGradeDocuments(judge),
-              gradeGrounding: createGradeGrounding(judge),
-              gradeUsefulness: createGradeUsefulness(judge),
-            },
-          }
-        : {}),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { question },
+  const result = await runAgent(adaptiveRagMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(adaptiveRagMachine) }),
+    ...(judge
+      ? {
+          actors: {
+            routeQuestion: createRouteQuestion(judge),
+            gradeDocuments: createGradeDocuments(judge),
+            gradeGrounding: createGradeGrounding(judge),
+            gradeUsefulness: createGradeUsefulness(judge),
+          },
+        }
+      : {}),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { question },
+  });
 
   if (result.status !== "done") {
     throw new Error(`Adaptive RAG example did not complete: ${result.status}`);

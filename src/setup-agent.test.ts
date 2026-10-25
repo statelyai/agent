@@ -27,8 +27,6 @@ import {
   getAcceptedEvents,
   messagesSchema,
   parseAgentEvent,
-  createAgentRuntime,
-  runToQuiescence,
   getAgentSchemas,
   setupAgent,
   toolMessage,
@@ -39,6 +37,7 @@ import {
   type DecisionAttempt,
   type SchemaCompiler,
   type StandardSchemaV1,
+  runAgent,
 } from "./index.js";
 import { resolveDecision, type AgentRequest } from "./index.js";
 import { executeAgentRequest } from "./steps.js";
@@ -1638,20 +1637,16 @@ describe("setupAgent", () => {
       answer: "Answered: why agent machines?",
     });
 
-    const runResult = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: {
-          generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
-            result: {
-              answer: `Ran: ${request.prompt}`,
-            },
-          }),
-        },
-      }),
-      {
-        input: { prompt: "why run agents?" },
+    const runResult = await runAgent(machine, {
+      executors: {
+        generateText: (request: AgentTextRequest & { tools: AgentTools }) => ({
+          result: {
+            answer: `Ran: ${request.prompt}`,
+          },
+        }),
       },
-    );
+      input: { prompt: "why run agents?" },
+    });
     expect(runResult.status).toBe("done");
     expect(runResult.status === "done" ? runResult.output : undefined).toEqual({
       answer: "Ran: why run agents?",
@@ -1815,16 +1810,12 @@ describe("setupAgent", () => {
       { compileSchema: ajvCompiler() },
     );
 
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: {
-          generateText: async () => ({ result: { answer: "Because logic matters." } }),
-        },
-      }),
-      {
-        input: { question: "Why statecharts?" },
+    const result = await runAgent(machine, {
+      executors: {
+        generateText: async () => ({ result: { answer: "Because logic matters." } }),
       },
-    );
+      input: { question: "Why statecharts?" },
+    });
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({
@@ -2033,14 +2024,10 @@ describe("setupAgent", () => {
     );
 
     const emitted: unknown[] = [];
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        on: { "*": (event) => emitted.push(event) },
-      }),
-      {
-        input: { score: 1 },
-      },
-    );
+    const result = await runAgent(machine, {
+      on: { "*": (event) => emitted.push(event) },
+      input: { score: 1 },
+    });
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({ passed: true });
@@ -2112,16 +2099,12 @@ describe("setupAgent", () => {
       { compileSchema: ajvCompiler() },
     );
 
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: {
-          generateText: async () => ({ result: { answer: "Because logic matters." } }),
-        },
-      }),
-      {
-        input: { question: "Why statecharts?" },
+    const result = await runAgent(machine, {
+      executors: {
+        generateText: async () => ({ result: { answer: "Because logic matters." } }),
       },
-    );
+      input: { question: "Why statecharts?" },
+    });
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({
@@ -2182,20 +2165,16 @@ describe("setupAgent", () => {
       { compileSchema: ajvCompiler() },
     );
 
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: {
-          generateText: async () => ({ result: {} }),
-          decide: async (input) => {
-            receivedInputs.push(input);
-            return { event: { type: "GUESS", answer: "42" } };
-          },
+    const result = await runAgent(machine, {
+      executors: {
+        generateText: async () => ({ result: {} }),
+        decide: async (input) => {
+          receivedInputs.push(input);
+          return { event: { type: "GUESS", answer: "42" } };
         },
-      }),
-      {
-        input: {},
       },
-    );
+      input: {},
+    });
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output).toEqual({ mode: "guessed" });
@@ -2265,29 +2244,18 @@ describe("setupAgent", () => {
 
     const generateText = async () => ({ result: { draft: "Hello world." } });
 
-    const first = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: { generateText },
-      }),
-      {
-        input: {},
-      },
-    );
+    const first = await runAgent(machine, { executors: { generateText }, input: {} });
     expect(first.status).toBe("idle");
 
     const persisted = JSON.parse(JSON.stringify(first.status === "idle" ? first.snapshot : null));
 
-    const second = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: {
-          generateText,
-        },
-      }),
-      {
-        snapshot: persisted,
-        event: { type: "APPROVE" },
+    const second = await runAgent(machine, {
+      executors: {
+        generateText,
       },
-    );
+      snapshot: persisted,
+      event: { type: "APPROVE" },
+    });
 
     expect(second.status).toBe("done");
     expect(second.status === "done" && second.output).toEqual({ draft: "Hello world." });
@@ -2326,11 +2294,7 @@ describe("setupAgent", () => {
       expect.arrayContaining(["context", "events", "input", "output", "meta"]),
     );
 
-    const first = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: {},
-      }),
-    );
+    const first = await runAgent(machine, { executors: {} });
     expect(first.status).toBe("idle");
     const snapshot = first.status === "idle" ? first.snapshot : undefined;
 
@@ -2423,25 +2387,17 @@ describe("setupAgent", () => {
     );
 
     const emitted: unknown[] = [];
-    const first = await runToQuiescence(
-      createAgentRuntime(machine, {
-        on: { "*": (event) => emitted.push(event) },
-      }),
-      {
-        input: {},
-      },
-    );
+    const first = await runAgent(machine, {
+      on: { "*": (event) => emitted.push(event) },
+      input: {},
+    });
     expect(first.status).toBe("idle");
 
-    const resumed = await runToQuiescence(
-      createAgentRuntime(machine, {
-        on: { "*": (event) => emitted.push(event) },
-      }),
-      {
-        snapshot: JSON.parse(JSON.stringify(first.status === "idle" ? first.snapshot : null)),
-        event: { type: "GO" },
-      },
-    );
+    const resumed = await runAgent(machine, {
+      on: { "*": (event) => emitted.push(event) },
+      snapshot: JSON.parse(JSON.stringify(first.status === "idle" ? first.snapshot : null)),
+      event: { type: "GO" },
+    });
 
     expect(resumed.status).toBe("done");
     expect(resumed.status === "done" && resumed.output).toEqual({ decision: "went" });
@@ -2656,26 +2612,15 @@ describe("setupAgent", () => {
         { compileSchema: ajvCompiler() },
       );
 
-      const result = await runToQuiescence(
-        createAgentRuntime(machine, {
-          executors: {},
-        }),
-        {
-          input: {},
-        },
-      );
+      const result = await runAgent(machine, { executors: {}, input: {} });
       expect(result.status).toBe("idle");
       expect(warn).not.toHaveBeenCalled();
 
-      const resumed = await runToQuiescence(
-        createAgentRuntime(machine, {
-          executors: {},
-        }),
-        {
-          snapshot: result.status === "idle" ? result.snapshot : undefined,
-          event: { type: "APPROVE" },
-        },
-      );
+      const resumed = await runAgent(machine, {
+        executors: {},
+        snapshot: result.status === "idle" ? result.snapshot : undefined,
+        event: { type: "APPROVE" },
+      });
       expect(resumed.status).toBe("done");
     } finally {
       warn.mockRestore();
@@ -2956,19 +2901,15 @@ describe("decision live path (runAgent auto-delivery)", () => {
     // runAgent auto-delivers the chosen event to the invoking actor — no
     // onDone wiring. ATTACK exits `choosingMove`, so the invoke is cancelled
     // and the machine reaches `done-state`.
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: {
-          generateText: async () => ({ result: {} }),
-          decide: async (): Promise<{ event: ChosenEvent }> => ({
-            event: { type: "ATTACK", target: "goblin" },
-          }),
-        },
-      }),
-      {
-        input: {},
+    const result = await runAgent(machine, {
+      executors: {
+        generateText: async () => ({ result: {} }),
+        decide: async (): Promise<{ event: ChosenEvent }> => ({
+          event: { type: "ATTACK", target: "goblin" },
+        }),
       },
-    );
+      input: {},
+    });
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.snapshot.value).toBe("done-state");
@@ -3052,17 +2993,13 @@ describe("inline agent.decide invoke (state-local decisions)", () => {
   test("runs to completion through runAgent with a mock decide", async () => {
     const { machine } = buildMachine();
 
-    const result = await runToQuiescence(
-      createAgentRuntime(machine, {
-        executors: {
-          generateText: async () => ({ result: {} }),
-          decide: async () => ({ event: { type: "ATTACK", target: "goblin" } }),
-        },
-      }),
-      {
-        input: {},
+    const result = await runAgent(machine, {
+      executors: {
+        generateText: async () => ({ result: {} }),
+        decide: async () => ({ event: { type: "ATTACK", target: "goblin" } }),
       },
-    );
+      input: {},
+    });
 
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.snapshot.value).toBe("attacked");

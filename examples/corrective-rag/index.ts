@@ -69,13 +69,7 @@ import { createAsyncLogic } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = {
   crag: openai("gpt-6-luna"),
@@ -503,22 +497,18 @@ export async function runCorrectiveRagExample(
   } = options;
 
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(correctiveRagMachine, {
-      ...(generateText
-        ? { executors: { generateText } }
-        : { executors: createAiSdkExecutors(correctiveRagMachine) }),
-      ...(judge ? { actors: { gradeDocuments: createGradeDocuments(judge) } } : {}),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { question },
+  const result = await runAgent(correctiveRagMachine, {
+    ...(generateText
+      ? { executors: { generateText } }
+      : { executors: createAiSdkExecutors(correctiveRagMachine) }),
+    ...(judge ? { actors: { gradeDocuments: createGradeDocuments(judge) } } : {}),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { question },
+  });
 
   if (result.status !== "done") {
     throw new Error(`Corrective-RAG example did not complete: ${result.status}`);

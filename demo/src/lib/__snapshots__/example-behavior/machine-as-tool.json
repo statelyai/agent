@@ -22,10 +22,7 @@
       "response": "**Check**\n\n**Valid**: yes",
       "idle": {
         "prompt": "Approve the $780 refund on order ORD-9002 or type a reason to reject it.",
-        "events": [
-          "APPROVE",
-          "REJECT"
-        ],
+        "events": ["APPROVE", "REJECT"],
         "textEvent": "REJECT.reason"
       }
     },

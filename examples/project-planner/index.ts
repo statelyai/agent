@@ -77,13 +77,7 @@ import { createAsyncLogic } from "xstate";
 import { experimental_decide, type Experimental_DecisionModel } from "ai";
 import { typeSafeAi } from "@ai-sdk/typesafe-ai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
-import {
-  getStatePath,
-  createAgentRuntime,
-  runToQuiescence,
-  setupAgent,
-  type AgentRequestExecutors,
-} from "@statelyai/agent";
+import { getStatePath, setupAgent, type AgentRequestExecutors, runAgent } from "@statelyai/agent";
 
 const models = {
   planner: openai("gpt-6-luna"),
@@ -619,20 +613,16 @@ export async function runProjectPlannerExample(
     onProgress,
   } = options;
   const progress: string[] = [];
-  const result = await runToQuiescence(
-    createAgentRuntime(projectPlannerMachine, {
-      executors: generateText ? { generateText } : createAiSdkExecutors(projectPlannerMachine),
-      ...(judge ? { actors: { assessRisk: createAssessRisk(judge) } } : {}),
-      onTransition: (snapshot) => {
-        const state = getStatePath(snapshot);
-        progress.push(state);
-        onProgress?.(state);
-      },
-    }),
-    {
-      input: { goal, deadlineDays },
+  const result = await runAgent(projectPlannerMachine, {
+    executors: generateText ? { generateText } : createAiSdkExecutors(projectPlannerMachine),
+    ...(judge ? { actors: { assessRisk: createAssessRisk(judge) } } : {}),
+    onTransition: (snapshot) => {
+      const state = getStatePath(snapshot);
+      progress.push(state);
+      onProgress?.(state);
     },
-  );
+    input: { goal, deadlineDays },
+  });
   if (result.status !== "done") {
     throw new Error(`Project-planner example did not complete: ${result.status}`);
   }
