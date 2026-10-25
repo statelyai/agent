@@ -5318,4 +5318,40 @@ describe("binding decisions", () => {
     expect(result.status).toBe("done");
     expect(offered).toEqual([["GO"]]);
   });
+
+  test("a decision inside a child machine sees the child's event schemas", async () => {
+    const child = setupAgent({
+      context: z.object({}),
+      events: { PICK: z.object({ n: z.number() }) },
+    }).createMachine({
+      context: {},
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: { src: "agent.decide", input: { model: "m", allowedEvents: ["PICK"] } },
+          on: { PICK: { target: "done" } },
+        },
+        done: { type: "final" },
+      },
+    });
+    const parent = setupAgent({ context: z.object({}), actors: { child } }).createMachine({
+      context: {},
+      initial: "delegating",
+      states: {
+        delegating: { invoke: { src: "child", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const seen: AgentDecisionRequest[] = [];
+    const result = await runAgent(parent, {
+      executors: {
+        decide: async (request) => {
+          seen.push(request);
+          return { event: { type: "PICK", n: 1 } };
+        },
+      },
+    });
+    expect(result.status).toBe("done");
+    expect(seen[0]?.events.find((event) => event.type === "PICK")?.inputSchema).toBeDefined();
+  });
 });
