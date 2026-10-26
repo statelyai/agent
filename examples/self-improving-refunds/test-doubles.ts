@@ -10,6 +10,7 @@
  */
 import type {
   AgentDecisionExecutor,
+  AgentDecisionRequest,
   AgentExecutorDecisionRequest,
   ChosenEvent,
   DecisionAttempt,
@@ -82,14 +83,14 @@ export const rightPath: AgentDecisionExecutor = async (request) => ({
  * out if it can, else ask for approval, else look up an order, else verify,
  * else ask; it never closes a ticket on its own.
  */
-export const eagerChoice: MockDecisionEntry = (request) => {
+export const eagerChoice = ((request: AgentDecisionRequest) => {
   const events = (request.options ?? []).map(({ event }) => event);
   for (const type of ["ISSUE_REFUND", "REQUEST_APPROVAL", "LOOKUP_ORDER", "VERIFY_IDENTITY"]) {
     const event = events.find((candidate) => candidate.type === type);
     if (event) return event;
   }
   return events.find((event) => event.type === "ASK_CUSTOMER") ?? events[0]!;
-};
+}) satisfies MockDecisionEntry;
 
 /**
  * A mock Jev: answers the desk's closed choice (`next`) with the right

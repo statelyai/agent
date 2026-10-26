@@ -197,7 +197,7 @@ const failed = verified.gates.find((gate) => !gate.ok);
 Run the candidate on the training scenarios, then on the held-out scenarios. Write every replay to the store under new thread ids that name the split and version, in the scheme `add-traces` set up (`train:v3:<scenario>:r1`, `held-out:v3:<scenario>:r1`), so the next round can list them by prefix. With no persistent store, write each thread's `result.events` to a file.
 
 - Run the current policy and the candidate on the same scenarios, the same world state, and the same model refs.
-- Model calls are nondeterministic. Run each scenario k times (k ≥ 3 when calls are not cached) and compare means.
+- Model calls are nondeterministic. Run each scenario k times (k ≥ 3 when calls are not cached) with `repeatRuns` (from `@statelyai/agent/testing`), and compare `passHat(k)` as well as the mean. A candidate that raises the mean but lowers pass^k made the agent less reliable.
 - Compute the objective, invariant violations, and cost per split, for both versions.
 
 ## 7. Recommend or discard
