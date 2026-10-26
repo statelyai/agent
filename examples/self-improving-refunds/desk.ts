@@ -46,6 +46,7 @@ import {
   type AgentDecisionExecutor,
   type AgentEventLogStore,
   type AgentLogEntry,
+  type AgentTraceEvent,
   type ChosenEvent,
   type DecisionAttempt,
 } from "@statelyai/agent";
@@ -934,6 +935,8 @@ export type DeskEpisodeOptions = {
   threadId?: string;
   /** Reads the decider's call counters; diffed across the episode. */
   counters?: Counters;
+  /** Receives the episode's trace events, across every resumed pass. */
+  onTrace?: (event: AgentTraceEvent) => void;
 };
 
 /**
@@ -955,7 +958,10 @@ export async function runDeskEpisode(
   const actors = createWorldActors(world);
   // Each pass resumes from the thread: the store is the run's memory.
   const run = (init: Parameters<typeof runToQuiescence<typeof refundDeskMachine>>[1]) =>
-    runToQuiescence(createAgentRuntime(refundDeskMachine, { actors, store, threadId }), init);
+    runToQuiescence(
+      createAgentRuntime(refundDeskMachine, { actors, store, threadId, onTrace: options.onTrace }),
+      init,
+    );
 
   let result = await run({ input: { ticket: scenario.ticket, customerId: scenario.customerId } });
   while (result.status === "idle") {

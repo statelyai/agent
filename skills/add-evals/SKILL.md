@@ -125,9 +125,15 @@ export function objective(runs: Array<{ scenario: Scenario; outcome: string; ref
 
 Read the terminal state from the event logs `add-traces` recorded (`replay(machine, entries).snapshot`, `replay` from `@statelyai/agent/log`). Effects and violations live in the world, not the log: save them next to the thread id when the run ends, so the objective can be recomputed without running anything. Use `matchesTrajectory` only for an ordering a person requires (approval before payment), never to pin the whole path; build its input from the `machine.transition` trace events' `snapshot.value`.
 
-**Stats.** `foldTraces(traces, { failed })` (from `@statelyai/agent/testing`) returns `{ state, visits, failures, withheld }` per state. A failed run counts against **every** state it visited, so states after a bad decision rank as high as the decision itself. Use the table to see which states failing runs pass through, then look at the decision states among them, their `withheld` counts, and their decision attempts. `failed` sees only the trace: to judge a run against its label, keep a map from trace to scenario.
+**Reliability.** A live model is measured over repeated runs. `repeatRuns({ scenarios, k, run, passed })` (from `@statelyai/agent/testing`) runs each scenario `k` times and reports `passes`, `passAll` (pass^k), `distinctPaths`, and `divergedAt`, the state where its runs went different ways. Report `report.passHat(k)` next to `report.passHat(1)`. For runs recorded elsewhere, `summarizeRepeats` takes them per scenario.
+
+**Judged evals.** Where a model grades text because no ground truth exists, measure the judge first: `judgeAgreement(rows, { positive })` over confirmed labels, grouped by the state or request it judges. Report the true positive and true negative rates, and gate on the judge only after the user accepts them. Use `report.correct(p)` to turn the judge's rate on unlabeled runs into an estimate.
+
+**Stats.** `foldTraces(traces, { failed, blame })` (from `@statelyai/agent/testing`) returns `{ state, visits, failures, withheld, ignored, blamed }` per state. A failed run counts in `failures` against **every** state it visited, so states after a bad decision rank as high as the decision itself. `blame` counts each failed run once, against the state it started failing in: `blame: (trace) => firstDivergence(trace, reference)?.state`, where the reference is a passing run of the same scenario or the trajectory a person expects. Sort by `blamed`, then look at the decision states among the top rows, their `withheld` counts, and their decision attempts. `failed` sees only the trace: to judge a run against its label, keep a map from trace to scenario.
 
 ## 5. Coverage
+
+Run `traceCoverage(machine, traces, { reachable })` (from `@statelyai/agent/testing`) over the traces of every scenario, with `reachable` set to an `explorePaths` report. List its `unvisitedStates` and `unvisitedHandlers`: each one is a part of the machine no scenario exercises. Draft a scenario for each, as below. Handlers in `unobservable` (`always` transitions) do not show in traces; say so, and do not draft scenarios for them.
 
 If every decider scores the same on the confirmed scenarios, the scenarios cannot tell a better decider from a worse one. Draft scenarios on the boundaries the evals found (an amount just under and over a threshold, a partial request), label them as drafts, and ask the user to confirm them and add them to the scenario set. They become part of the train or held-out split only once confirmed.
 
@@ -139,6 +145,6 @@ Run every eval once on the current machine and record the numbers: which pass, t
 
 1. The state mapping from step 2.
 2. The evals by level, each named by state.
-3. The baseline numbers, train and held-out separately.
+3. The baseline numbers, train and held-out separately, with pass^k for live-model evals and the coverage ratios.
 4. Every failing eval and the state it points at.
 5. Next step: `improve-machine`, with the objective from step 4 as its scorer.
