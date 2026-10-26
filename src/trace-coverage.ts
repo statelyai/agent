@@ -1,7 +1,7 @@
 import type { AnyStateMachine, AnyStateNode, AnyTransitionDefinition } from "xstate";
 import { isRecord } from "./internal/is-record.js";
 import { statePaths, traceSteps } from "./internal/trace-states.js";
-import type { AgentPathReport } from "./verify.js";
+import { isExplorationComplete, type AgentPathReport } from "./verify.js";
 
 /** One state's row in a {@link CoverageReport}. */
 export interface StateCoverage {
@@ -45,15 +45,28 @@ export interface CoverageReport {
   unvisitedHandlers: HandlerRef[];
   /** `always` handlers: they fire inside a macrostep, which a trace does not record. */
   unobservable: HandlerRef[];
-  /** With `reachable`: states no explored path reached. They leave the state denominator. */
+  /**
+   * With a complete `reachable` report: states no explored path reached and
+   * no trace visited. They leave the state denominator.
+   */
   unreachable?: string[];
+  /**
+   * With `reachable`: whether the report explored every path. When `false`,
+   * a state it missed may still be reachable, so `unreachable` is absent and
+   * every state stays in the denominator.
+   */
+  reachableComplete?: boolean;
   /** Visited over total, for states and for handlers (unobservable excluded). 1 when the total is 0. */
   ratio: { states: number; handlers: number };
 }
 
 /** Options for {@link traceCoverage}. */
 export interface TraceCoverageOptions {
-  /** An `explorePaths` report. States it never reached drop out of the state denominator. */
+  /**
+   * An `explorePaths` report. When it explored every path (no cap hit, every
+   * payload expanded, no branch stopped early), states it never reached drop
+   * out of the state denominator.
+   */
   reachable?: AgentPathReport;
 }
 
@@ -202,10 +215,17 @@ export function traceCoverage<TTrace extends readonly { readonly type: string }[
     );
   }
 
+  // A partial report proves nothing about the states it missed, and a state a
+  // trace visited is reachable whatever the report says.
+  const reachableComplete = options.reachable
+    ? isExplorationComplete(options.reachable)
+    : undefined;
   let unreachable: string[] | undefined;
-  if (options.reachable) {
+  if (options.reachable && reachableComplete) {
     const reached = new Set(options.reachable.reachedStates.flatMap((value) => statePaths(value)));
-    unreachable = states.filter((row) => !reached.has(row.state)).map((row) => row.state);
+    unreachable = states
+      .filter((row) => !reached.has(row.state) && row.runs === 0)
+      .map((row) => row.state);
   }
   const counted = unreachable ? states.filter((row) => !unreachable.includes(row.state)) : states;
   const unvisitedStates = counted.filter((row) => row.runs === 0).map((row) => row.state);
@@ -220,6 +240,7 @@ export function traceCoverage<TTrace extends readonly { readonly type: string }[
     unvisitedHandlers,
     unobservable,
     ...(unreachable ? { unreachable } : {}),
+    ...(reachableComplete === undefined ? {} : { reachableComplete }),
     ratio: {
       states: ratioOf(counted.length - unvisitedStates.length, counted.length),
       handlers: ratioOf(handlers.length - unvisitedHandlers.length, handlers.length),

@@ -373,6 +373,41 @@ describe("traceCoverage", () => {
     expect(traceCoverage(machine, []).unreachable).toBeUndefined();
   });
 
+  test("a partial `reachable` report narrows nothing", async () => {
+    const machine = createMachine({
+      schemas: { events: { go: z.object({}) } },
+      initial: "a",
+      states: { a: { on: { go: { target: "b" } } }, b: { on: { go: { target: "c" } } }, c: {} },
+    });
+
+    const report = traceCoverage(machine, [], {
+      reachable: await explorePaths(machine, { maxDepth: 1 }),
+    });
+
+    expect(report.reachableComplete).toBe(false);
+    expect(report.unreachable).toBeUndefined();
+    expect(report.unvisitedStates).toEqual(["a", "b", "c"]);
+  });
+
+  test("a state a trace visited is never unreachable", async () => {
+    const machine = createMachine({
+      schemas: { events: { go: z.object({}) } },
+      initial: "a",
+      states: { a: { on: { go: { target: "b" } } }, b: {}, orphan: {} },
+    });
+    const explored = await explorePaths(machine);
+    const missingB = {
+      ...explored,
+      reachedStates: explored.reachedStates.filter((v) => v !== "b"),
+    };
+
+    const report = traceCoverage(machine, [[step("a", "go", "b")]], { reachable: missingB });
+
+    expect(report.reachableComplete).toBe(true);
+    expect(report.unreachable).toEqual(["orphan"]);
+    expect(report.states).toContainEqual({ state: "b", runs: 1 });
+  });
+
   test("serialized traces give the same report", async () => {
     const traces = [await run("refund"), await run("escalate")];
     const json = traces.map((trace) =>

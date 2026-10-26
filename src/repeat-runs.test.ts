@@ -158,6 +158,30 @@ describe("summarizeRepeats", () => {
     }
   });
 
+  test("an empty first trace does not abort the summary", () => {
+    const moved = [
+      {
+        type: "machine.transition",
+        from: { value: "a" },
+        event: { type: "GO" },
+        snapshot: { value: "b" },
+      },
+    ];
+
+    const [row] = summarizeRepeats([
+      {
+        id: "a",
+        scenario: {},
+        runs: [
+          { passed: false, trace: [] },
+          { passed: true, trace: moved },
+        ],
+      },
+    ]).scenarios;
+
+    expect(row).toMatchObject({ distinctPaths: 2, divergedAt: "a" });
+  });
+
   test("untraced runs count toward passes but not paths", () => {
     const [row] = summarizeRepeats([group("a", [true, false])]).scenarios;
 

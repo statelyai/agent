@@ -1823,14 +1823,24 @@ export async function canReach(
       ...(resolvedTarget ? { target: resolvedTarget } : {}),
     };
   }
-  // `done`, `idle`, and `error` end a branch the machine itself ended; any
-  // other terminal stopped a branch the search did not explore.
-  const complete =
+  const complete = isExplorationComplete(report);
+  return { reachable: false, complete, ...(resolvedTarget ? { target: resolvedTarget } : {}) };
+}
+
+/**
+ * Whether an `explorePaths` report covers every path: no cap cut it short,
+ * every payload was expanded, and every branch ended on its own. `done`,
+ * `idle`, and `error` end a branch the machine itself ended; any other
+ * terminal stopped a branch the search did not explore.
+ * @internal
+ */
+export function isExplorationComplete(report: AgentPathReport): boolean {
+  return (
     !report.hitPathCap &&
     report.unexpandedEvents.length === 0 &&
     report.terminals.every(
       (terminal) =>
         terminal.status === "done" || terminal.status === "idle" || terminal.status === "error",
-    );
-  return { reachable: false, complete, ...(resolvedTarget ? { target: resolvedTarget } : {}) };
+    )
+  );
 }

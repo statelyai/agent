@@ -99,7 +99,7 @@ export function judgeAgreement<TRow extends AgreementRow>(
       if (members) members.push(row);
       else grouped.set(key, [row]);
     }
-    const groups: Record<string, AgreementSummary> = {};
+    const groups: Record<string, AgreementSummary> = Object.create(null);
     for (const [key, members] of grouped) groups[key] = summarize(members, options.positive);
     report.groups = groups;
   }
@@ -107,17 +107,16 @@ export function judgeAgreement<TRow extends AgreementRow>(
 }
 
 function summarize(rows: readonly AgreementRow[], positive: string | undefined): AgreementSummary {
-  const perLabel: AgreementSummary["perLabel"] = {};
-  const confusion: AgreementSummary["confusion"] = {};
+  // Null-prototype records, so a label such as `__proto__` is an own key.
+  const perLabel: AgreementSummary["perLabel"] = Object.create(null);
+  const confusion: AgreementSummary["confusion"] = Object.create(null);
   const disagreements: AgreementSummary["disagreements"] = [];
   let agreed = 0;
   for (const { id, human, judge } of rows) {
-    const label = Object.hasOwn(perLabel, human)
-      ? perLabel[human]!
-      : (perLabel[human] = { human: 0, agreed: 0 });
-    const row = Object.hasOwn(confusion, human) ? confusion[human]! : (confusion[human] = {});
+    const label = (perLabel[human] ??= { human: 0, agreed: 0 });
+    const row = (confusion[human] ??= Object.create(null) as Record<string, number>);
     label.human++;
-    row[judge] = (Object.hasOwn(row, judge) ? row[judge]! : 0) + 1;
+    row[judge] = (row[judge] ?? 0) + 1;
     if (human === judge) {
       label.agreed++;
       agreed++;

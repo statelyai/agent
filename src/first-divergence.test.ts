@@ -145,6 +145,16 @@ describe("firstDivergence", () => {
     });
   });
 
+  test("an empty reference is a trace with no steps", () => {
+    const actual = [step("a", "@xstate.init", "a"), step("a", "GO", "b")];
+
+    expect(firstDivergence(actual, [])).toMatchObject({ index: 0, state: "a" });
+    expect(firstDivergence([], [])).toBeUndefined();
+    expect(firstDivergence(actual, [{ type: "run.start" }, { type: "run.end" }])).toMatchObject({
+      index: 0,
+    });
+  });
+
   test("identical runs do not diverge, ignored steps aside", async () => {
     const trace = await run("refund");
     const noisy = [...trace];

@@ -31,8 +31,15 @@ export interface Divergence {
 
 const defaultKey = (step: TraceStep) => `${step.from.join(",")}|${step.event}|${step.to.join(",")}`;
 
+// An empty reference is a trace with no steps. A trace that ended before its
+// first transition still carries `run.*` events, which no trajectory holds.
 const isTrace = (items: readonly unknown[]) =>
-  items.some((item) => isRecord(item) && item.type === "machine.transition");
+  items.length === 0 ||
+  items.some(
+    (item) =>
+      isRecord(item) &&
+      (item.type === "machine.transition" || item.type === "run.start" || item.type === "run.end"),
+  );
 
 /**
  * Finds the first step where a run departs from a reference, so a failure is
@@ -48,6 +55,7 @@ const isTrace = (items: readonly unknown[]) =>
  *   is the divergence, blamed on the step after the last item it did reach. A
  *   run that goes on past the trajectory has not diverged.
  *
+ * An empty reference is a trace with no steps, so any step diverges from it.
  * A trace is one run's events, live or serialized. Steps the machine ignored
  * changed nothing and are left out on both sides. Returns `undefined` when the
  * run does not diverge.

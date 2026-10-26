@@ -297,7 +297,7 @@ report.handlers[0];
 - A step credits one handler per active leaf: the nearest state, from the leaf up, whose descriptor matches the event. Exact descriptors come first, then partial (`task.*`) and wildcard (`*`) ones, longest first, as XState orders them. A done or error event credits a state only when its invoke's id matches the event's. Guards are not replayed, so a step whose nearest handler a guard rejected is credited to that handler anyway.
 - `targets.declared` lists the targets of a handler's object transitions, or is `"dynamic"` when any is a function transition. `targets.seen` lists the active states after the steps credited to it. `targets.unreached` lists declared targets no run landed in.
 - `always` handlers are listed in `unobservable`, never as unvisited. A trace records one step per macrostep, so an eventless transition inside one does not show.
-- `reachable` takes an `explorePaths` report. States it never reached are listed in `unreachable` and leave the state denominator, so `ratio.states` counts only states a run could visit.
+- `reachable` takes an `explorePaths` report. When the report explored every path (no cap hit, every payload expanded, no branch stopped early), states it never reached and no trace visited are listed in `unreachable` and leave the state denominator, so `ratio.states` counts only states a run could visit. `reachableComplete` says whether it did. A partial report narrows nothing: `unreachable` is absent and every state stays in the denominator.
 - `ratio` is visited over total, for states and for handlers. It is 1 when the total is 0.
 - Ignored steps credit no handler. Traces may be live or serialized, and a trace may span several resumed passes.
 
@@ -324,6 +324,7 @@ const stats = foldTraces(traces, {
 - `state` is the first active state before the diverging step. `decision` is the name of the decision request that chose that step's event, when one did. A different output from a text request is blamed on the state that invoked it.
 - Steps the machine ignored are left out on both sides. `@xstate.init` is not a step.
 - `key` projects a step to the string traces are compared by. The default is `from|event|to`. Override it to leave out a region that may differ between equivalent runs. Steps are still compared in order, so two runs whose parallel regions settle in a different order diverge.
+- An empty reference is a trace with no steps, so the run's first step diverges from it.
 - Returns `undefined` when the run does not diverge.
 - In `foldTraces`, `blame` is called for failed runs only. `undefined` blames no state.
 

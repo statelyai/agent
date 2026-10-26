@@ -172,4 +172,17 @@ describe("judgeAgreement", () => {
       expect.objectContaining({ code: "empty-agreement-rows" }),
     );
   });
+
+  it("keeps a label named __proto__ as its own entry", () => {
+    const report = judgeAgreement([
+      { id: "one", human: "__proto__", judge: "pass" },
+      { id: "two", human: "__proto__", judge: "__proto__", group: "__proto__" },
+    ]);
+
+    expect(Object.hasOwn(report.perLabel, "__proto__")).toBe(true);
+    expect(report.perLabel["__proto__"]).toEqual({ human: 2, agreed: 1 });
+    expect(report.confusion["__proto__"]?.["pass"]).toBe(1);
+    expect(report.confusion["__proto__"]?.["__proto__"]).toBe(1);
+    expect(Object.hasOwn(report.groups!, "__proto__")).toBe(true);
+  });
 });
