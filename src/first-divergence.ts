@@ -113,7 +113,8 @@ function againstTrace(
     const step = steps[index];
     const want = reference[index];
     if (step && want && key(step) === key(want)) continue;
-    return diverged(steps, index, want);
+    // A run with no steps departed from where the reference started.
+    return diverged(steps, index, want, steps[0]?.fromValue ?? reference[0]?.fromValue);
   }
   return undefined;
 }

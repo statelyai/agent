@@ -182,6 +182,31 @@ describe("summarizeRepeats", () => {
     expect(row).toMatchObject({ distinctPaths: 2, divergedAt: "a" });
   });
 
+  test("a first trace with no transitions is not the reference", () => {
+    const moved = [
+      {
+        type: "machine.transition",
+        from: { value: "a" },
+        event: { type: "GO" },
+        snapshot: { value: "b" },
+      },
+    ];
+    const partial = [{ type: "request.start", request: { kind: "text" } }];
+
+    const [row] = summarizeRepeats<object, readonly { type: string }[]>([
+      {
+        id: "a",
+        scenario: {},
+        runs: [
+          { passed: false, trace: partial },
+          { passed: true, trace: moved },
+        ],
+      },
+    ]).scenarios;
+
+    expect(row).toMatchObject({ distinctPaths: 2, divergedAt: "a" });
+  });
+
   test("untraced runs count toward passes but not paths", () => {
     const [row] = summarizeRepeats([group("a", [true, false])]).scenarios;
 

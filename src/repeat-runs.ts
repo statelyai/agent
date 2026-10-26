@@ -35,7 +35,7 @@ export interface RepeatResult<TScenario, TTrace extends AnyTrace = AnyTrace> ext
   passAll: boolean;
   /** Distinct state paths the traced runs took. 1 when every run went the same way. */
   distinctPaths: number;
-  /** The state where the runs first went different ways, judged against the first traced run. */
+  /** The state where the runs first went different ways, judged against the first run whose trace has a transition. */
   divergedAt?: string;
 }
 
@@ -174,10 +174,15 @@ function summarize<TScenario, TTrace extends AnyTrace>(
         .join(" "),
     ),
   );
-  // The earliest step any run leaves the first run's path at.
+  // The earliest step any run leaves the reference's path at. The reference is
+  // the first trace with a transition, so it can't be read as a trajectory.
+  const reference = traces.find((trace) =>
+    trace.some((event) => event.type === "machine.transition"),
+  );
   let earliest: { index: number; state: string } | undefined;
-  for (const trace of traces.slice(1)) {
-    const divergence = firstDivergence(trace, traces[0]!);
+  for (const trace of reference ? traces : []) {
+    if (trace === reference) continue;
+    const divergence = firstDivergence(trace, reference!);
     if (divergence && (!earliest || divergence.index < earliest.index)) earliest = divergence;
   }
   return {
