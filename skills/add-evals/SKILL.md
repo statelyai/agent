@@ -39,21 +39,21 @@ List:
 
 Turn the user's words into states. "Evals for the approval logic" means every state and guard that touches approval: the guard that routes a refund over the threshold, the approval step and each answer to it, the sentinel check before the payment, and the final states they lead to. Write the mapping down:
 
-| Asked about | States and guards                                                                                  |
-| ----------- | -------------------------------------------------------------------------------------------------- |
+| Asked about | States and guards                                                                                                                             |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | approval    | `deciding` (REFUND: over threshold → `awaitingApproval`), `awaitingApproval` (APPROVE, REJECT), `paying` (sentinel check), `issued`, `closed` |
 
 If the request names nothing ("write evals"), cover every decision state, every sentinel, and the run as a whole.
 
 ## 3. Pick the level
 
-| Level        | Catches                                              | Runs a model          | Tools                                                              |
-| ------------ | ---------------------------------------------------- | --------------------- | ------------------------------------------------------------------ |
-| **Rule**     | A guard, an ordering, an invariant that must hold    | No                    | Exported guard functions, `canReach`, `explorePaths`, `simulateAgent` |
-| **Decision** | A wrong choice at one decision state                 | The decider under test | The decider called on recorded or written decision requests        |
-| **Request**  | A bad text output from one request                   | That request          | `runSeam`, scored on `seamOutput` and the path after it. Not applicable when the machine has no text requests; say so |
-| **Outcome**  | A wrong end result for a whole scenario              | The whole agent       | Scenarios, the runner, an objective over terminal states and effects |
-| **Stats**    | Which state the failures cluster in                  | No (reads traces)     | `foldTraces`                                                       |
+| Level        | Catches                                           | Runs a model           | Tools                                                                                                                 |
+| ------------ | ------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Rule**     | A guard, an ordering, an invariant that must hold | No                     | Exported guard functions, `canReach`, `explorePaths`, `simulateAgent`                                                 |
+| **Decision** | A wrong choice at one decision state              | The decider under test | The decider called on recorded or written decision requests                                                           |
+| **Request**  | A bad text output from one request                | That request           | `runSeam`, scored on `seamOutput` and the path after it. Not applicable when the machine has no text requests; say so |
+| **Outcome**  | A wrong end result for a whole scenario           | The whole agent        | Scenarios, the runner, an objective over terminal states and effects                                                  |
+| **Stats**    | Which state the failures cluster in               | No (reads traces)      | `foldTraces`                                                                                                          |
 
 A guard or ordering is always a rule eval. Use a decision eval when the guards leave more than one legal option. Use an outcome eval when a person can label the right end result.
 
@@ -73,7 +73,11 @@ test("paying: no refund over 100 dollars issues without approval", async () => {
 });
 
 test("deciding: REFUND over the order amount never reaches paying", async () => {
-  const result = await canReach(machine, (s) => s.matches("paying") && s.context.amount > s.context.order.amount, { input, payloads, outputs });
+  const result = await canReach(
+    machine,
+    (s) => s.matches("paying") && s.context.amount > s.context.order.amount,
+    { input, payloads, outputs },
+  );
   expect(result.complete).toBe(true);
   expect(result.reachable).toBe(false);
 });
@@ -114,9 +118,20 @@ Which deciders gate CI: a deterministic reference decider (a scripted or rules-b
 **Outcome evals.** One function over a batch of scenario runs, reading ground truth. Score the effects as well as the outcome: a run that ends `issued` with the wrong amount is wrong.
 
 ```ts
-export function objective(runs: Array<{ scenario: Scenario; outcome: string; refund?: Refund; violations: number; modelCalls: number }>) {
+export function objective(
+  runs: Array<{
+    scenario: Scenario;
+    outcome: string;
+    refund?: Refund;
+    violations: number;
+    modelCalls: number;
+  }>,
+) {
   return {
-    accuracy: runs.filter((r) => r.outcome === r.scenario.expected && sameRefund(r.refund, r.scenario.expectedRefund)).length / runs.length,
+    accuracy:
+      runs.filter(
+        (r) => r.outcome === r.scenario.expected && sameRefund(r.refund, r.scenario.expectedRefund),
+      ).length / runs.length,
     violations: runs.reduce((n, r) => n + r.violations, 0), // must be 0
     modelCalls: runs.reduce((n, r) => n + r.modelCalls, 0), // cost
   };

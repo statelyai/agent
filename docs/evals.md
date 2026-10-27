@@ -284,7 +284,9 @@ expect(report.ok).toBe(true); // no regressions
 ```ts no-check
 import { explorePaths, traceCoverage } from "@statelyai/agent/testing";
 
-const report = traceCoverage(machine, traces, { reachable: await explorePaths(machine, { input }) });
+const report = traceCoverage(machine, traces, {
+  reachable: await explorePaths(machine, { input }),
+});
 report.unvisitedStates; // ["refunded"]
 report.unvisitedHandlers; // [{ state: "deciding", event: "AUTO_APPROVE" }]
 report.ratio; // { states: 0.75, handlers: 0.8 }
@@ -368,7 +370,14 @@ For runs collected elsewhere, such as CI shards or production replays, `summariz
 import { summarizeRepeats } from "@statelyai/agent/testing";
 
 const report = summarizeRepeats([
-  { id: "duplicate-charge", scenario, runs: [{ passed: true, trace }, { passed: false, trace: other }] },
+  {
+    id: "duplicate-charge",
+    scenario,
+    runs: [
+      { passed: true, trace },
+      { passed: false, trace: other },
+    ],
+  },
 ]);
 ```
 
@@ -380,7 +389,12 @@ const report = summarizeRepeats([
 import { judgeAgreement } from "@statelyai/agent/testing";
 
 const report = judgeAgreement(
-  confirmed.map((row) => ({ id: row.id, human: row.label, judge: verdicts[row.id], group: row.state })),
+  confirmed.map((row) => ({
+    id: row.id,
+    human: row.label,
+    judge: verdicts[row.id],
+    group: row.state,
+  })),
   { positive: "fail" },
 );
 report.accuracy; // 0.92

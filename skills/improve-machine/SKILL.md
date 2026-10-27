@@ -27,12 +27,12 @@ This is step 4 of 4, after `loop-to-machine`, `add-traces`, and `add-evals`. To 
 
 The rounds are the same for both formats. What differs is what the diff may touch and how it is gated.
 
-| | TypeScript policy | JSON policy |
-| --- | --- | --- |
-| The policy | A `setupAgent` machine in its own file(s), with a declared `version` | An `AgentWorkflowConfig` file |
+|            | TypeScript policy                                                                                                                                                        | JSON policy                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| The policy | A `setupAgent` machine in its own file(s), with a declared `version`                                                                                                     | An `AgentWorkflowConfig` file       |
 | May change | The policy file(s) and their `CHANGELOG.md`; once, the line in the runner that routes the decision to the policy; tests that pin measured numbers (see the pull request) | The config's `states` and `context` |
-| Gates | `tsc`, `lintAgentMachine`, `explorePaths` on the policy, the environment check, the overfit check | `verifyAgentConfig` |
-| Vocabulary | What the policy file imports and the events the environment offers | The `allow` lists |
+| Gates      | `tsc`, `lintAgentMachine`, `explorePaths` on the policy, the environment check, the overfit check                                                                        | `verifyAgentConfig`                 |
+| Vocabulary | What the policy file imports and the events the environment offers                                                                                                       | The `allow` lists                   |
 
 **No policy yet.** `loop-to-machine` leaves a single model decision inside the environment when the old code had no policy logic. Then:
 
