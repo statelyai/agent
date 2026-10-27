@@ -12,18 +12,27 @@ export interface StateStats {
   withheld: number;
   /** Events this state ignored (`machine.transition` with `ignored`), summed over runs. */
   ignored: number;
+  /** Failed runs `blame` attributed to this state. 0 without `blame`. */
+  blamed: number;
 }
 
 /** Options for {@link foldTraces}. */
 export interface FoldTracesOptions<TTrace> {
   /** Whether a run failed, judged from its whole trace. */
   failed: (trace: TTrace) => boolean;
+  /**
+   * The state a failed run's failure started in, usually
+   * `firstDivergence(trace, reference)?.state`. Called for failed runs only;
+   * `undefined` blames no state.
+   */
+  blame?: (trace: TTrace) => string | undefined;
 }
 
 /**
  * Folds many runs' traces into per-state stats: how many runs visited each
  * state, how many of those failed, how many options the guards withheld
- * at decisions made there, and how many events it ignored. Pure; reads only:
+ * at decisions made there, how many events it ignored, and how many failures
+ * `blame` traced back to it. Pure; reads only:
  *
  * - `machine.transition`: the run visited `from.value` and `snapshot.value`;
  *   with `ignored`, each of those states ignored one event.
@@ -35,6 +44,10 @@ export interface FoldTracesOptions<TTrace> {
  * (`serializeTraceEvent`). A host-driven `decideNext` traces nothing; push
  * `{ type: 'request.start', request: result.request }` onto the trace before
  * sending its event. Parallel states count once per active leaf.
+ *
+ * `failures` counts a failed run against every state it visited, so states
+ * after a bad decision rank as high as the decision. Sort by `blamed` to see
+ * where failures start.
  *
  * @example
  * ```ts no-check
@@ -51,7 +64,7 @@ export function foldTraces<TTrace extends readonly { readonly type: string }[]>(
   const statsFor = (state: string): StateStats => {
     let entry = stats.get(state);
     if (!entry) {
-      entry = { state, visits: 0, failures: 0, withheld: 0, ignored: 0 };
+      entry = { state, visits: 0, failures: 0, withheld: 0, ignored: 0, blamed: 0 };
       stats.set(state, entry);
     }
     return entry;
@@ -84,6 +97,8 @@ export function foldTraces<TTrace extends readonly { readonly type: string }[]>(
       entry.visits++;
       if (failed) entry.failures++;
     }
+    const blamed = failed ? options.blame?.(trace) : undefined;
+    if (blamed !== undefined) statsFor(blamed).blamed++;
   }
   return [...stats.values()];
 }
