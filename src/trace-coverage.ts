@@ -119,9 +119,10 @@ const sameLeaves = (a: unknown, b: unknown) =>
  * transition left before the step ended, which no traced snapshot holds.
  * Re-derived with XState's pure `getMicrosteps` from the snapshot before each
  * step (the previous step's, or the fresh start's microsteps from its input).
- * A step that cannot be recomputed (no prior snapshot, a guard that reads live
- * children), or whose recomputation ends elsewhere than the traced snapshot,
- * adds none.
+ * A step that cannot be recomputed, or whose recomputation ends elsewhere
+ * than the traced snapshot, adds none. Only `value` and `context` are rebuilt,
+ * so a guard that reads live children can take another route to the same
+ * leaves, and that route is credited.
  */
 function passedThrough(
   machine: AnyStateMachine,
