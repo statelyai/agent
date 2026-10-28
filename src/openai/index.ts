@@ -1,8 +1,10 @@
 /**
  * The raw `openai` package adapter: builds the `{ generateText, streamText,
- * decide }` executor set consumed by `createAgentRuntime`/`executeAgentRequest`, mapped
- * onto the Chat Completions API (not `responses` — `chat.completions` is the
- * canonical/stable surface) with no Vercel AI SDK in between.
+ * decide }` executor set consumed by `createAgentRuntime`/`executeAgentRequest`,
+ * with no Vercel AI SDK in between. Calls that carry function tools — every
+ * `decide`, and a `generateText` with tools — go through the Responses API,
+ * because reasoning models such as `gpt-6-luna` reject function tools on Chat
+ * Completions. Tool-free calls stay on Chat Completions.
  *
  * `openai` is an OPTIONAL peer dependency and is imported for TYPES ONLY: the
  * client is injected, so nothing here pulls the package into a bundle at
@@ -17,10 +19,16 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
   ChatCompletionMessageParam,
-  // `ChatCompletionTool` spans the whole supported `openai` peer range; the
-  // narrower `ChatCompletionFunctionTool` name only exists in later releases.
-  ChatCompletionTool,
 } from "openai/resources/chat/completions/completions.js";
+import type {
+  FunctionTool,
+  Response,
+  ResponseCreateParamsNonStreaming,
+  ResponseFunctionToolCall,
+  ResponseInputContent,
+  ResponseInputItem,
+  ResponseUsage,
+} from "openai/resources/responses/responses.js";
 import {
   AGENT_USAGE_TOKEN_FIELDS,
   providerOutputSchema,
@@ -224,8 +232,10 @@ function staticDescription(descriptor: AgentTool): string | undefined {
   return typeof descriptor.description === "string" ? descriptor.description : undefined;
 }
 
-/** One OpenAI function tool per `AgentTools` entry. */
-export function toOpenAiTools(tools: AgentTools): ChatCompletionTool[] {
+/** One Responses API function tool per `AgentTools` entry. `strict` is sent as
+ * `false` because the Responses API defaults it to `true`, and arbitrary JSON
+ * Schema (e.g. from Zod) may fall outside OpenAI's strict-mode subset. */
+export function toOpenAiTools(tools: AgentTools): FunctionTool[] {
   return Object.entries(tools).flatMap(([name, descriptor]) => {
     if (!descriptor) {
       return [];
@@ -234,20 +244,19 @@ export function toOpenAiTools(tools: AgentTools): ChatCompletionTool[] {
     return [
       {
         type: "function" as const,
-        function: {
-          name,
-          description: staticDescription(descriptor),
-          parameters:
-            (isStandardSchema(inputSchema) ? getJsonSchemaSync(inputSchema) : undefined) ?? {},
-        },
+        name,
+        description: staticDescription(descriptor),
+        parameters:
+          (isStandardSchema(inputSchema) ? getJsonSchemaSync(inputSchema) : undefined) ?? {},
+        strict: false,
       },
     ];
   });
 }
 
 /**
- * Maps an {@link AgentToolChoice} onto OpenAI's `tool_choice` —
- * `{ type: 'tool', name }` becomes `{ type: 'function', function: { name } }`;
+ * Maps an {@link AgentToolChoice} onto the Responses API's `tool_choice` —
+ * `{ type: 'tool', name }` becomes `{ type: 'function', name }`;
  * `'auto'`/`'none'`/`'required'` are OpenAI's own vocabulary and pass through.
  * `undefined` stays `undefined`, so the key is omitted.
  */
@@ -256,21 +265,100 @@ export function toOpenAiToolChoice(toolChoice: AgentToolChoice | undefined) {
     return undefined;
   }
   return typeof toolChoice === "object"
-    ? { type: "function" as const, function: { name: toolChoice.name } }
+    ? { type: "function" as const, name: toolChoice.name }
     : toolChoice;
 }
 
-/** One OpenAI function tool per candidate decision event — the "tool-per-event
- * + tool_choice: 'required'" recipe, mirroring `toAiSdkEventTools`. */
-export function toOpenAiEventTools(events: AgentEventDescriptor[]): ChatCompletionTool[] {
+/** One Responses API function tool per candidate decision event — the
+ * "tool-per-event + tool_choice: 'required'" recipe, mirroring `toAiSdkEventTools`. */
+export function toOpenAiEventTools(events: AgentEventDescriptor[]): FunctionTool[] {
   return events.map((event) => ({
     type: "function" as const,
-    function: {
-      name: event.toolName,
-      description: `Choose the '${event.type}' move.`,
-      parameters: getJsonSchemaSync(event.inputSchema) ?? {},
-    },
+    name: event.toolName,
+    description: `Choose the '${event.type}' move.`,
+    parameters: getJsonSchemaSync(event.inputSchema) ?? {},
+    strict: false,
   }));
+}
+
+/** A Chat Completions content part as a Responses input part. `toOpenAiMessages`
+ * only emits text and image parts. */
+function toResponsesContentPart(part: ChatCompletionContentPart): ResponseInputContent {
+  switch (part.type) {
+    case "text":
+      return { type: "input_text", text: part.text };
+    case "image_url":
+      return {
+        type: "input_image",
+        image_url: part.image_url.url,
+        detail: part.image_url.detail ?? "auto",
+      };
+    default:
+      return unsupportedPart("user", part.type);
+  }
+}
+
+// The text of a Chat Completions message's content, string or text parts.
+function contentText(content: string | Array<{ type: string; text?: string }> | null | undefined) {
+  if (typeof content === "string" || content == null) {
+    return content ?? "";
+  }
+  return content.map((part) => part.text ?? "").join("");
+}
+
+/**
+ * Maps the Chat Completions messages {@link toOpenAiMessages} builds onto
+ * Responses API input items: assistant `tool_calls` become `function_call`
+ * items and tool messages become `function_call_output` items. Reusing the
+ * Chat Completions mapping keeps one place that decides what a message part
+ * means.
+ */
+export function toResponsesInput(messages: ChatCompletionMessageParam[]): ResponseInputItem[] {
+  return messages.flatMap((message): ResponseInputItem[] => {
+    switch (message.role) {
+      case "system":
+      case "developer":
+        return [{ role: message.role, content: contentText(message.content) }];
+      case "user":
+        return [
+          {
+            role: "user",
+            content:
+              typeof message.content === "string"
+                ? message.content
+                : message.content.map(toResponsesContentPart),
+          },
+        ];
+      case "assistant": {
+        const text = contentText(message.content);
+        return [
+          ...(text ? [{ role: "assistant" as const, content: text }] : []),
+          ...(message.tool_calls ?? []).flatMap((call) =>
+            call.type === "function"
+              ? [
+                  {
+                    type: "function_call" as const,
+                    call_id: call.id,
+                    name: call.function.name,
+                    arguments: call.function.arguments,
+                  },
+                ]
+              : [],
+          ),
+        ];
+      }
+      case "tool":
+        return [
+          {
+            type: "function_call_output",
+            call_id: message.tool_call_id,
+            output: contentText(message.content),
+          },
+        ];
+      default:
+        return unsupportedPart(message.role, "message");
+    }
+  });
 }
 
 /**
@@ -338,6 +426,98 @@ export function toAgentFinishReason(
   }
 }
 
+// The function calls a Responses API response asked for, in order.
+function functionCalls(response: Pick<Response, "output">): ResponseFunctionToolCall[] {
+  return (response.output ?? []).filter(
+    (item): item is ResponseFunctionToolCall => item.type === "function_call",
+  );
+}
+
+// The concatenated `output_text` of a Responses API response.
+function outputText(response: Pick<Response, "output">): string {
+  let text = "";
+  for (const item of response.output ?? []) {
+    if (item.type === "message") {
+      for (const part of item.content) {
+        if (part.type === "output_text") {
+          text += part.text;
+        }
+      }
+    }
+  }
+  return text;
+}
+
+/** {@link toAgentCallUsage} for a Responses API usage payload, which names its
+ * fields `input_tokens`/`output_tokens`. */
+export function toAgentResponseUsage(
+  usage: ResponseUsage | null | undefined,
+): AgentCallUsage | undefined {
+  if (!usage) {
+    return undefined;
+  }
+  const reasoningTokens = usage.output_tokens_details?.reasoning_tokens;
+  const cachedInputTokens = usage.input_tokens_details?.cached_tokens;
+  return {
+    ...(usage.input_tokens !== undefined ? { inputTokens: usage.input_tokens } : {}),
+    ...(usage.output_tokens !== undefined ? { outputTokens: usage.output_tokens } : {}),
+    ...(usage.total_tokens !== undefined ? { totalTokens: usage.total_tokens } : {}),
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+  };
+}
+
+/**
+ * The portable {@link AgentFinishReason} of a Responses API response, which has
+ * no `finish_reason`: an `incomplete` status carries the reason, and a
+ * completed response that asked for function calls stopped for them.
+ */
+export function toAgentResponseFinishReason(
+  response: Pick<Response, "status" | "incomplete_details" | "output">,
+): AgentFinishReason {
+  if (response.status === "incomplete") {
+    switch (response.incomplete_details?.reason) {
+      case "max_output_tokens":
+        return "length";
+      case "content_filter":
+        return "content-filter";
+      default:
+        return "other";
+    }
+  }
+  if (functionCalls(response).length > 0) {
+    return "tool-calls";
+  }
+  return response.status === "completed" ? "stop" : "other";
+}
+
+/**
+ * Translates Chat Completions settings onto the Responses API's names:
+ * `reasoning_effort` becomes `reasoning.effort`, `max_completion_tokens` (or
+ * `max_tokens`) becomes `max_output_tokens`, and `verbosity` becomes
+ * `text.verbosity`. The Responses API has no `seed` or `stop`, so those are
+ * dropped, the way the AI SDK's Responses provider drops them. Anything else
+ * passes through unchanged.
+ */
+function toResponsesSettings(settings: OpenAiCallSettings) {
+  const {
+    reasoning_effort,
+    max_completion_tokens,
+    max_tokens,
+    verbosity,
+    seed: _seed,
+    stop: _stop,
+    ...rest
+  } = settings;
+  const maxOutputTokens = max_completion_tokens ?? max_tokens;
+  return {
+    ...rest,
+    ...(reasoning_effort != null ? { reasoning: { effort: reasoning_effort } } : {}),
+    ...(maxOutputTokens != null ? { max_output_tokens: maxOutputTokens } : {}),
+    ...(verbosity != null ? { text: { verbosity } } : {}),
+  };
+}
+
 // ─── createOpenAiExecutors ───
 
 /**
@@ -345,7 +525,9 @@ export function toAgentFinishReason(
  * the machine asked for — `reasoning_effort`, `service_tier`,
  * `max_completion_tokens`, and anything else the API accepts. Typed straight
  * off the installed `openai` package, so it tracks that version instead of
- * restating its vocabulary.
+ * restating its vocabulary. Calls that go through the Responses API translate
+ * `reasoning_effort`, `max_completion_tokens`, and `verbosity` onto its names
+ * and drop `seed` and `stop`.
  *
  * The request's own fields are excluded: `model`, `messages`, `tools`,
  * `tool_choice`, `response_format`, `n`, and the streaming switches belong to
@@ -536,12 +718,15 @@ function toToolContent(output: unknown): string {
 
 /**
  * Builds the `{ generateText, streamText, decide }` executor set for the raw
- * `openai` package's Chat Completions API. Compare `createAiSdkExecutors` —
- * same shape, different SDK underneath.
+ * `openai` package. Compare `createAiSdkExecutors` — same shape, different SDK
+ * underneath.
  *
- * Structured output uses `response_format: { type: 'json_schema' }` around the
- * `{ result, reasoning? }` provider output schema, and decisions force a tool call
- * with `tool_choice: 'required'`, one function tool per candidate event.
+ * Calls with function tools use the Responses API, which reasoning models
+ * require for tools: decisions force a call with `tool_choice: 'required'`, one
+ * function tool per candidate event, and `generateText` runs its tool loop
+ * there. Tool-free calls use Chat Completions. Structured output wraps the
+ * `{ result, reasoning? }` provider output schema in a `json_schema` format on
+ * either API.
  *
  * @example
  * ```ts
@@ -555,24 +740,29 @@ function toToolContent(output: unknown): string {
 export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): OpenAiExecutors {
   const { client, resolveModel = (modelRef: string) => modelRef } = options;
 
-  // Params every text call shares. Host `settings` sit UNDER the request's own
-  // settings, which are `defined()`-filtered so an unset request field can
-  // never erase a host one. `model`/`messages` are written first and are not
-  // settable, so the cast only re-asserts what the spreads preserve.
-  const textParams = (
-    request: AgentTextRequest & { tools: AgentTools },
-    messages: ChatCompletionMessageParam[],
-    extra: Partial<ChatCompletionCreateParamsNonStreaming> = {},
-  ): ChatCompletionCreateParamsNonStreaming => {
-    const tools = toOpenAiTools(request.tools);
-    return {
-      model: resolveModel(request.model),
-      messages,
+  // Params every Responses API call shares. Host `settings` sit UNDER the
+  // request's own settings, which are `defined()`-filtered so an unset request
+  // field can never erase a host one. `store: false` matches Chat Completions,
+  // which keeps nothing unless asked; a host can still set `store: true`.
+  // `model`/`input` are written first and are not settable, so the cast only
+  // re-asserts what the spreads preserve.
+  const responsesParams = (
+    request: AgentTextRequest | AgentDecisionRequest,
+    input: ResponseInputItem[],
+    extra: Partial<ResponseCreateParamsNonStreaming>,
+  ): ResponseCreateParamsNonStreaming => {
+    const settings = toResponsesSettings({
       ...callSettings(options, request),
       ...toOpenAiCallSettings(request),
-      ...(tools.length > 0 ? { tools } : {}),
+    });
+    return {
+      model: resolveModel(request.model),
+      input,
+      store: false,
+      ...settings,
       ...extra,
-    } as ChatCompletionCreateParamsNonStreaming;
+      ...(settings.text || extra.text ? { text: { ...settings.text, ...extra.text } } : {}),
+    } as ResponseCreateParamsNonStreaming;
   };
 
   // The JSON Schema for the `{ result, reasoning? }` provider output, or `undefined`
@@ -591,86 +781,128 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     );
   };
 
-  const generateText = async (
-    request: AgentTextRequest & { tools: AgentTools },
-    info?: AgentRequestExecutorInfo,
-  ): Promise<OpenAiGenerateResult> => {
-    const jsonSchema = await structuredSchema(request);
-    const responseFormat: Partial<ChatCompletionCreateParamsNonStreaming> = jsonSchema
-      ? {
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "output",
-              schema: jsonSchema,
-              // Arbitrary JSON Schema (e.g. from Zod) may use features
-              // outside OpenAI's strict-mode subset (defaults, unions, …) —
-              // leaving strict mode off keeps this general rather than
-              // requiring schema authors to hand-tune for OpenAI.
-              strict: false,
-            },
-          },
-        }
-      : {};
+  type TextCallOutcome = {
+    content: string | null | undefined;
+    finishReason: AgentFinishReason;
+    usage: AgentCallUsage | undefined;
+    raw: unknown;
+  };
 
-    // The host-side tool loop. `maxSteps` bounds the number of OpenAI calls
-    // (default 1, single-step, like the AI SDK adapter): each step that comes
-    // back with tool calls runs them, appends the assistant `tool_calls`
-    // message and one tool message per result, and asks again. The loop ends on
-    // a step with no tool calls, on the step budget, or on a tool with no
-    // `execute` — a client-side tool, whose call belongs to the caller, so the
-    // result comes back with `finishReason: 'tool-calls'` and the raw response.
-    // A non-finite `maxSteps` (NaN, Infinity) would never satisfy the bound
-    // check below and let a model that keeps calling tools run unbounded, so
-    // it falls back to the single-call default like an absent value.
+  // A tool-free text call: one Chat Completions request.
+  const chatCompletion = async (
+    request: AgentTextRequest,
+    jsonSchema: Record<string, unknown> | undefined,
+    info?: AgentRequestExecutorInfo,
+  ): Promise<TextCallOutcome> => {
+    const response = (await client.chat.completions.create(
+      {
+        model: resolveModel(request.model),
+        messages: toOpenAiMessages(request),
+        ...callSettings(options, request),
+        ...toOpenAiCallSettings(request),
+        ...(jsonSchema
+          ? {
+              response_format: {
+                type: "json_schema",
+                json_schema: {
+                  name: "output",
+                  schema: jsonSchema,
+                  // Arbitrary JSON Schema (e.g. from Zod) may use features
+                  // outside OpenAI's strict-mode subset (defaults, unions, …) —
+                  // leaving strict mode off keeps this general rather than
+                  // requiring schema authors to hand-tune for OpenAI.
+                  strict: false,
+                },
+              },
+            }
+          : {}),
+      } as ChatCompletionCreateParamsNonStreaming,
+      { signal: info?.signal },
+    )) as ChatCompletion;
+    const choice = response.choices[0];
+    return {
+      content: choice?.message.content,
+      finishReason: toAgentFinishReason(choice?.finish_reason),
+      usage: toAgentCallUsage(response.usage),
+      raw: response,
+    };
+  };
+
+  // The host-side tool loop, over the Responses API. `maxSteps` bounds the
+  // number of OpenAI calls (default 1, single-step, like the AI SDK adapter):
+  // each step that comes back with function calls runs them, appends the calls
+  // and one `function_call_output` per result, and asks again. The loop ends on
+  // a step with no function calls, on the step budget, or on a tool with no
+  // `execute` — a client-side tool, whose call belongs to the caller, so the
+  // result comes back with `finishReason: 'tool-calls'` and the raw response.
+  // A non-finite `maxSteps` (NaN, Infinity) would never satisfy the bound
+  // check below and let a model that keeps calling tools run unbounded, so
+  // it falls back to the single-call default like an absent value.
+  const responsesToolLoop = async (
+    request: AgentTextRequest & { tools: AgentTools },
+    tools: FunctionTool[],
+    jsonSchema: Record<string, unknown> | undefined,
+    info?: AgentRequestExecutorInfo,
+  ): Promise<TextCallOutcome> => {
     const maxSteps =
       typeof request.maxSteps === "number" && Number.isFinite(request.maxSteps)
         ? Math.max(1, Math.floor(request.maxSteps))
         : 1;
-    const messages = toOpenAiMessages(request);
+    const input = toResponsesInput(toOpenAiMessages(request));
     const toolChoice = toOpenAiToolChoice(request.toolChoice);
-    let response: ChatCompletion;
+    let response: Response;
     let usage: AgentCallUsage | undefined;
     let step = 0;
 
     for (;;) {
       step++;
-      response = (await client.chat.completions.create(
-        textParams(request, messages, {
-          ...responseFormat,
+      response = (await client.responses.create(
+        responsesParams(request, [...input], {
+          tools,
+          ...(jsonSchema
+            ? {
+                // `strict: false` for the same reason as the tools above.
+                text: {
+                  format: {
+                    type: "json_schema",
+                    name: "output",
+                    schema: jsonSchema,
+                    strict: false,
+                  },
+                },
+              }
+            : {}),
           // A forced choice applies to the FIRST step only: re-sending
           // `'required'` after a tool ran would force another call every step
           // and burn the budget without ever producing an answer.
           ...(step === 1 && toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
         }),
         { signal: info?.signal },
-      )) as ChatCompletion;
-      usage = addAgentCallUsage(usage, toAgentCallUsage(response.usage));
+      )) as Response;
+      usage = addAgentCallUsage(usage, toAgentResponseUsage(response.usage));
 
-      const message = response.choices[0]?.message;
-      const toolCalls = message?.tool_calls ?? [];
-      if (toolCalls.length === 0 || step >= maxSteps) {
+      const calls = functionCalls(response);
+      if (calls.length === 0 || step >= maxSteps) {
         break;
       }
       // An offered tool with no `execute` hands the call back: the loop ends.
       // A tool that was not offered is answered with an error result below.
       const offered = (name: string) =>
         Object.hasOwn(request.tools, name) && request.tools[name] !== undefined;
-      if (
-        toolCalls.some(
-          (call) =>
-            call.type !== "function" ||
-            (offered(call.function.name) && !toolExecutor(request.tools, call.function.name)),
-        )
-      ) {
+      if (calls.some((call) => offered(call.name) && !toolExecutor(request.tools, call.name))) {
         break;
       }
 
-      messages.push(message as ChatCompletionMessageParam);
-      for (const call of toolCalls) {
-        if (call.type !== "function") continue;
-        const { name, arguments: args } = call.function;
-        let content: string;
+      // Replay the step statelessly: the model's text and calls go back without
+      // their item ids, and reasoning items are left out, since with
+      // `store: false` there is no stored item for an id to point at.
+      const text = outputText(response);
+      if (text) {
+        input.push({ role: "assistant", content: text });
+      }
+      for (const { call_id, name, arguments: args } of calls) {
+        input.push({ type: "function_call", call_id, name, arguments: args });
+        let output: string;
         try {
           if (!offered(name)) {
             throw new Error(
@@ -679,32 +911,43 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
                 .join(", ")}`,
             );
           }
-          let input: unknown = {};
+          let toolInput: unknown = {};
           if (args) {
             try {
-              input = JSON.parse(args);
+              toolInput = JSON.parse(args);
             } catch {
               throw new Error(`the arguments for tool '${name}' were not valid JSON`);
             }
           }
-          content = toToolContent(await toolExecutor(request.tools, name)!(input));
+          output = toToolContent(await toolExecutor(request.tools, name)!(toolInput));
         } catch (error) {
           // A thrown tool, a tool that was not offered, or arguments that are
           // not JSON go back to the model as an error result, the way the AI
           // SDK's loop reports them, rather than failing the request.
-          content = `Error: ${error instanceof Error ? error.message : String(error)}`;
+          output = `Error: ${error instanceof Error ? error.message : String(error)}`;
         }
-        messages.push({ role: "tool", tool_call_id: call.id, content });
+        input.push({ type: "function_call_output", call_id, output });
       }
     }
 
-    // Validated parse of the `{ result, reasoning? }` provider output — no cast.
-    const unwrap = (content: string | null | undefined) =>
-      parseProviderOutput(request, content ? JSON.parse(content) : undefined);
+    return {
+      content: outputText(response),
+      finishReason: toAgentResponseFinishReason(response),
+      usage,
+      raw: response,
+    };
+  };
 
-    const choice = response.choices[0];
-    const finishReason = toAgentFinishReason(choice?.finish_reason);
-    const content = choice?.message.content;
+  const generateText = async (
+    request: AgentTextRequest & { tools: AgentTools },
+    info?: AgentRequestExecutorInfo,
+  ): Promise<OpenAiGenerateResult> => {
+    const jsonSchema = await structuredSchema(request);
+    const tools = toOpenAiTools(request.tools);
+    const { content, finishReason, usage, raw } =
+      tools.length > 0
+        ? await responsesToolLoop(request, tools, jsonSchema, info)
+        : await chatCompletion(request, jsonSchema, info);
 
     if (jsonSchema) {
       // A structured request that ran out of tokens has no usable output: the
@@ -712,15 +955,16 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       // model stopped mid-thought. Either way, not a final answer for a
       // machine — `partialOutput` carries whatever text did arrive.
       if (finishReason === "length") {
-        throw truncated(request, info, content ?? undefined);
+        throw truncated(request, info, content || undefined);
       }
-      const parsed = unwrap(content);
+      // Validated parse of the `{ result, reasoning? }` provider output — no cast.
+      const parsed = parseProviderOutput(request, content ? JSON.parse(content) : undefined);
       return {
         result: parsed.result,
         ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
         ...usageField(usage),
         finishReason,
-        raw: response,
+        raw,
       };
     }
 
@@ -730,7 +974,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       result: content ?? "",
       ...usageField(usage),
       finishReason,
-      raw: response,
+      raw,
     };
   };
 
@@ -796,32 +1040,26 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     request: AgentDecisionRequest,
     info?: AgentRequestExecutorInfo,
   ): Promise<OpenAiDecideResult> => {
-    const response = (await client.chat.completions.create(
-      {
-        model: resolveModel(request.model),
-        messages: toDecisionMessages(request),
-        ...callSettings(options, request),
-        ...toOpenAiCallSettings(request),
+    const response = (await client.responses.create(
+      responsesParams(request, toResponsesInput(toDecisionMessages(request)), {
         tools: toOpenAiEventTools(request.events),
         tool_choice: "required",
-      } as ChatCompletionCreateParamsNonStreaming,
+      }),
       { signal: info?.signal },
-    )) as ChatCompletion;
+    )) as Response;
 
-    const toolCall = response.choices[0]?.message.tool_calls?.[0];
-    if (!toolCall || toolCall.type !== "function") {
+    const toolCall = functionCalls(response)[0];
+    if (!toolCall) {
       throw new Error("createOpenAiExecutors: decide — model did not call an event tool.");
     }
-    const chosenEvent = request.events.find((event) => event.toolName === toolCall.function.name);
+    const chosenEvent = request.events.find((event) => event.toolName === toolCall.name);
     if (!chosenEvent) {
       throw new Error(
-        `createOpenAiExecutors: decide — model called unknown tool '${toolCall.function.name}'.`,
+        `createOpenAiExecutors: decide — model called unknown tool '${toolCall.name}'.`,
       );
     }
 
-    const args: unknown = toolCall.function.arguments
-      ? JSON.parse(toolCall.function.arguments)
-      : {};
+    const args: unknown = toolCall.arguments ? JSON.parse(toolCall.arguments) : {};
 
     return {
       // The event's own `type` is spread LAST so it always wins: a stray
@@ -831,8 +1069,8 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         ...(args && typeof args === "object" ? args : {}),
         type: chosenEvent.type,
       } as ChosenEvent,
-      ...usageField(toAgentCallUsage(response.usage)),
-      finishReason: toAgentFinishReason(response.choices[0]?.finish_reason),
+      ...usageField(toAgentResponseUsage(response.usage)),
+      finishReason: toAgentResponseFinishReason(response),
       raw: response,
     };
   };
