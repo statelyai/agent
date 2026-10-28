@@ -1149,6 +1149,38 @@ type PersistedWithChildren = {
   children?: Record<string, { snapshot: PersistedWithChildren } | undefined>;
 };
 
+// Counts, per site, every actor in `after`'s tree that `before`'s tree does
+// not hold: the invocations this step started.
+function countStarts(
+  before: AnyMachineSnapshot | undefined,
+  after: AnyMachineSnapshot,
+  path: readonly string[],
+  starts: Map<string, number>,
+): void {
+  const known = new Set<string>();
+  const collect = (snapshot: AnyMachineSnapshot) => {
+    for (const ref of Object.values((snapshot.children ?? {}) as Record<string, FoldedActor>)) {
+      if (ref === undefined) continue;
+      known.add(ref.sessionId);
+      const childSnapshot: unknown = ref.getSnapshot();
+      if (isMachineSnapshot(childSnapshot)) collect(childSnapshot as AnyMachineSnapshot);
+    }
+  };
+  if (before !== undefined) collect(before);
+  const walk = (snapshot: AnyMachineSnapshot, at: readonly string[]) => {
+    for (const [id, ref] of Object.entries(
+      (snapshot.children ?? {}) as Record<string, FoldedActor | undefined>,
+    )) {
+      if (ref === undefined) continue;
+      const site = [...at, id].join("/");
+      if (!known.has(ref.sessionId)) starts.set(site, (starts.get(site) ?? 0) + 1);
+      const childSnapshot: unknown = ref.getSnapshot();
+      if (isMachineSnapshot(childSnapshot)) walk(childSnapshot as AnyMachineSnapshot, [...at, id]);
+    }
+  };
+  walk(after, path);
+}
+
 // Pairs each actor's session before a restore with its session after it, by
 // invoke id, through every level of the tree.
 function collectSessionRemints(
@@ -1249,6 +1281,12 @@ export interface LogFold {
   readonly persistedSnapshot: AgentPersistedSnapshot;
   /** Folds `entry`, appended after everything folded so far, without verifying it. */
   apply(entry: AgentLogEntry): AgentPersistedSnapshot;
+  /**
+   * How many times the fold has started an actor at `site` (invoke ids from
+   * the root, joined with `/`), cancelled ones included. The `n` of the call
+   * key for the invocation started last.
+   */
+  starts(site: string): number;
 }
 
 /**
@@ -1282,6 +1320,8 @@ export function foldLog(
   ) as AnyMachineSnapshot;
   let persisted = machine.getPersistedSnapshot(snapshot) as AgentPersistedSnapshot;
   verifyEntry(entries[0]!, persisted, options.verify);
+  const starts = new Map<string, number>();
+  countStarts(undefined, snapshot, [], starts);
 
   // Per receiving actor (`actorPath`, "" for the root): recorded session →
   // the session this fold minted for it.
@@ -1299,10 +1339,12 @@ export function foldLog(
       const event = restoreJournaledEvent(
         rebindActorSession(entry.event, snapshot, sessionsOf([])),
       );
+      const before = snapshot;
       [snapshot] = transition(machine, snapshot as never, event as never) as [
         AnyMachineSnapshot,
         unknown,
       ];
+      countStarts(before, snapshot, [], starts);
     }
     persisted = machine.getPersistedSnapshot(snapshot) as AgentPersistedSnapshot;
     return persisted;
@@ -1325,10 +1367,19 @@ export function foldLog(
       owner = childSnapshot as AnyMachineSnapshot;
     }
     const event = restoreJournaledEvent(rebindActorSession(entry.event, owner, sessionsOf(path)));
-    const [next] = transition(child!.logic, owner as never, event as never) as [
-      AnyMachineSnapshot,
-      unknown,
-    ];
+    let next: AnyMachineSnapshot;
+    try {
+      [next] = transition(child!.logic, owner as never, event as never) as [
+        AnyMachineSnapshot,
+        unknown,
+      ];
+    } catch {
+      // The live child failed this step too. It either recovers through an
+      // error event (journaled next) or errors out, which reaches the root
+      // as `xstate.error.actor`; either way its snapshot did not move here.
+      return;
+    }
+    countStarts(owner, next, path, starts);
     const root = machine.getPersistedSnapshot(snapshot) as AgentPersistedSnapshot;
     let holder = root as PersistedWithChildren;
     for (const id of path.slice(0, -1)) holder = holder.children![id]!.snapshot;
@@ -1363,6 +1414,7 @@ export function foldLog(
       return persisted;
     },
     apply,
+    starts: (site) => starts.get(site) ?? 0,
   };
 }
 

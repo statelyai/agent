@@ -264,4 +264,121 @@ describe("a long-lived child machine across resumes", () => {
       createReplayEntry(machine, events, { type: "GO" }, { actorPath: [], verification: false }),
     ).toThrow(/actorPath/);
   });
+
+  test("a call re-entered after a cancel keeps its own key across a crash", async () => {
+    const draft = createTextLogic({ model: "test-model", prompt: "Draft." });
+    const worker = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({}),
+        events: { GO: z.object({}), CANCEL: z.object({}) },
+      }),
+      actors: { draft },
+    }).createMachine({
+      context: {},
+      initial: "idle",
+      states: {
+        idle: { on: { GO: { target: "drafting" } } },
+        drafting: {
+          invoke: { id: "draft", src: "draft", onDone: { target: "idle" } },
+          on: { CANCEL: { target: "idle" } },
+        },
+      },
+    });
+    const machine = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({}),
+        events: { WORK: z.object({}), STOP: z.object({}) },
+      }),
+      actors: { worker },
+    }).createMachine({
+      context: {},
+      invoke: { id: "worker", src: "worker" },
+      on: {
+        WORK: ({ children }, enq) => enq.sendTo(children.worker as never, { type: "GO" }),
+        STOP: ({ children }, enq) => enq.sendTo(children.worker as never, { type: "CANCEL" }),
+      },
+    });
+    const store = createInMemoryEventLogStore();
+    const keys: Array<string | undefined> = [];
+    const controller = new AbortController();
+    let started!: () => void;
+    const firstStarted = new Promise<void>((resolve) => (started = resolve));
+    const runtime = createAgentRuntime(machine, {
+      store,
+      threadId: "t",
+      signal: controller.signal,
+      executors: {
+        generateText: async (_request, info) => {
+          keys.push(info?.callKey);
+          if (keys.length === 1) started();
+          else controller.abort();
+          return await new Promise<never>(() => {});
+        },
+      },
+    });
+    let [state, effects] = await runtime.start({ input: undefined });
+    await runtime.execute(effects);
+    for (const type of ["WORK", "STOP", "WORK"] as const) {
+      [state, effects] = runtime.transition(state, { type });
+      await runtime.execute(effects);
+      if (keys.length === 0) await firstStarted;
+    }
+    for (let event; (event = await runtime.nextEvent());) {
+      [state, effects] = runtime.transition(state, event);
+      await runtime.execute(effects);
+    }
+    expect((await runtime.finish()).status).toBe("error");
+
+    await runToQuiescence(
+      createAgentRuntime(machine, { store, threadId: "t", executors: executors(keys) }),
+    );
+    expect(siteKeys(keys)).toEqual(["worker/draft#1", "worker/draft#2", "worker/draft#2"]);
+  });
+
+  test("a child step that throws does not break replay", async () => {
+    const worker = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: { BOOM: z.object({}) } }),
+    }).createMachine({
+      context: {},
+      on: {
+        BOOM: () => {
+          throw new Error("boom");
+        },
+      },
+    });
+    const machine = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ failed: z.boolean() }),
+        events: { WORK: z.object({}) },
+      }),
+      actors: { worker },
+    }).createMachine({
+      context: { failed: false },
+      initial: "running",
+      states: {
+        running: {
+          invoke: {
+            id: "worker",
+            src: "worker",
+            onError: { target: "failed", context: { failed: true } },
+          },
+          on: {
+            WORK: ({ children }, enq) => enq.sendTo(children.worker as never, { type: "BOOM" }),
+          },
+        },
+        failed: {},
+      },
+    });
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        store: createInMemoryEventLogStore(),
+        threadId: "t",
+        executors: executors([]),
+      }),
+      { input: undefined, event: { type: "WORK" } } as AgentRunInit<typeof machine>,
+    );
+    expect(result.snapshot.context).toEqual({ failed: true });
+    expect(result.events.some((entry) => entry.actorPath !== undefined)).toBe(true);
+    expect(replay(machine, result.events).snapshot.context).toEqual({ failed: true });
+  });
 });

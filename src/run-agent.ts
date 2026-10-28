@@ -2424,7 +2424,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // and all) in the live snapshot while its own completion still waits in the
   // mailbox; replay never starts children, so it holds that child `active`.
   // Built lazily from the log so far; `null` once the log cannot be folded,
-  // and later entries go unverified rather than failing the run.
+  // and later entries go unverified (and call keys fall back to counting
+  // completions) rather than failing the run.
   let logFold: LogFold | null | undefined;
 
   // A value the log cannot hold. With a store the caller asked for a durable
@@ -2485,10 +2486,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       stopLogging(error);
       return undefined;
     }
-    if (verificationEnabled && logFold !== null) {
+    // Folded even when unverified: call keys count invocations on it.
+    if (logFold !== null) {
       try {
         logFold ??= foldLog(logMachine, logEntries, { machineVersion, verify: false });
-        entry.verification = { stateHash: getSnapshotStateHash(logFold.apply(entry)) };
+        const folded = logFold.apply(entry);
+        if (verificationEnabled) entry.verification = { stateHash: getSnapshotStateHash(folded) };
       } catch {
         logFold = null;
       }
@@ -3220,7 +3223,21 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         const startedHere = siteCallCounts.get(site) ?? 0;
         siteCallCounts.set(site, startedHere + 1);
         openDecisions.delete(site);
-        const key = `${logExecutionId}:${site}#${agentCallOccurrence(resumedHistory, siteId, actorPath) + startedHere}`;
+        if (logFold === undefined && loggingEnabled && logEntries.length > 0) {
+          try {
+            logFold = foldLog(logMachine, logEntries, { machineVersion, verify: false });
+          } catch {
+            logFold = null;
+          }
+        }
+        // The fold has applied the entry that started this call, so its start
+        // count at the site is this invocation's ordinal, cancelled ones
+        // included. Without a fold, completions in the log stand in.
+        const n =
+          logFold && loggingEnabled
+            ? logFold.starts(site)
+            : agentCallOccurrence(resumedHistory, siteId, actorPath) + startedHere;
+        const key = `${logExecutionId}:${site}#${n}`;
         if (self !== undefined) {
           mintedCallKeys.set(self, key);
         }
