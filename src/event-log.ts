@@ -18,8 +18,10 @@
 import { isError, isPlainObject } from "./internal/is-record.js";
 import {
   initialTransition,
+  isMachineSnapshot,
   transition,
   type Actor,
+  type AnyActorRef,
   type AnyMachineSnapshot,
   type AnyStateMachine,
   type EventObject,
@@ -102,6 +104,14 @@ export interface AgentLogEntry {
    * {@link agentCallOccurrence} counts it from this. Replay-ignored.
    */
   decidedBy?: string;
+  /**
+   * The invoked child machine this entry was delivered to, as the invoke ids
+   * from the root down (`["worker"]`, `["worker", "review"]`). Omitted for an
+   * entry the root received. A child's own inputs (events sent to it, its
+   * invokes' completions, its timers) are journaled so a fold reproduces the
+   * child's state, not just the root's.
+   */
+  actorPath?: string[];
 }
 
 /** The payload of the reserved {@link AGENT_INIT_EVENT_TYPE} first entry. */
@@ -337,6 +347,16 @@ export function assertAgentLogEntry(entry: unknown): asserts entry is AgentLogEn
   }
   if (candidate.decidedBy !== undefined) {
     requireNonEmptyString(candidate.decidedBy, "entry.decidedBy", " when present");
+  }
+  if (
+    candidate.actorPath !== undefined &&
+    (!Array.isArray(candidate.actorPath) ||
+      candidate.actorPath.length === 0 ||
+      !candidate.actorPath.every((id) => typeof id === "string" && id !== ""))
+  ) {
+    throw new AgentEventLogError(
+      "Agent event entry.actorPath must be a non-empty array of invoke ids when present.",
+    );
   }
 }
 
@@ -602,6 +622,8 @@ export interface CreateReplayEntryOptions {
   attempts?: DecisionAttempt[];
   /** The `agent.decide` call (`${siteId}#${n}`) this entry settles. */
   decidedBy?: string;
+  /** The invoked child machine that received `event`; omitted for the root. */
+  actorPath?: string[];
   /** Record `verification.stateHash` (default `true`). */
   verification?: boolean;
   /**
@@ -667,6 +689,7 @@ export function createReplayEntry(
       ? { attempts: options.attempts }
       : {}),
     ...(options.decidedBy !== undefined ? { decidedBy: options.decidedBy } : {}),
+    ...(options.actorPath !== undefined ? { actorPath: [...options.actorPath] } : {}),
   };
   assertAgentLogEntry(entry);
   // Copied once validated as JSON: a host that later mutates its array must
@@ -917,26 +940,32 @@ function toEvents(history: readonly (EventObject | AgentLogEntry)[] | undefined)
  * or a distinct `entry.decidedBy` call at that site: a decision settles by
  * sending its chosen event, which usually ends the invoke before it completes.
  * Entries marked `decidedBy` are counted once per call, never as completions.
+ * A site inside an invoked child machine is named by that child's
+ * `actorPath` too, and only entries delivered to that child count.
  * The one counting rule behind every `${siteId}#${n}` call key, so a live run
  * and a replay derive the same `n` by construction.
  */
 export function agentCallOccurrence(
   history: readonly (EventObject | AgentLogEntry)[] | undefined,
   siteId: string,
+  actorPath: readonly string[] = [],
 ): number {
   let count = 0;
   const decided = new Set<string>();
+  const site = [...actorPath, siteId].join("/");
   for (const item of history ?? []) {
     const event = toEvents([item])[0]!;
     // Only an entry (not a bare event, whose payload is the machine's) is marked.
-    const decidedBy = event === item ? undefined : (item as AgentLogEntry).decidedBy;
-    if (decidedBy !== undefined) {
-      if (decidedBy.slice(0, decidedBy.lastIndexOf("#")) === siteId) decided.add(decidedBy);
+    const entry = event === item ? undefined : (item as AgentLogEntry);
+    if (entry?.decidedBy !== undefined) {
+      const { decidedBy } = entry;
+      if (decidedBy.slice(0, decidedBy.lastIndexOf("#")) === site) decided.add(decidedBy);
       continue;
     }
     if (
       (event.type === DONE_ACTOR_EVENT_TYPE || event.type === ERROR_ACTOR_EVENT_TYPE) &&
-      (event as EventObject & { actorId?: unknown }).actorId === siteId
+      (event as EventObject & { actorId?: unknown }).actorId === siteId &&
+      (entry?.actorPath ?? []).join("/") === actorPath.join("/")
     ) {
       count++;
     }
@@ -1115,6 +1144,33 @@ function toError(normalized: { name: string; message: string; cause?: unknown })
   return Object.assign(error, rest);
 }
 
+type FoldedActor = AnyActorRef & { logic: AnyStateMachine; sessionId: string };
+type PersistedWithChildren = {
+  children?: Record<string, { snapshot: PersistedWithChildren } | undefined>;
+};
+
+// Pairs each actor's session before a restore with its session after it, by
+// invoke id, through every level of the tree.
+function collectSessionRemints(
+  before: AnyMachineSnapshot,
+  after: AnyMachineSnapshot,
+  out: Map<string, string>,
+): void {
+  const afterChildren = (after.children ?? {}) as Record<string, FoldedActor | undefined>;
+  for (const [id, old] of Object.entries(
+    (before.children ?? {}) as Record<string, FoldedActor | undefined>,
+  )) {
+    const now = afterChildren[id];
+    if (old === undefined || now === undefined) continue;
+    out.set(old.sessionId, now.sessionId);
+    const oldSnapshot = old.getSnapshot() as AnyMachineSnapshot | undefined;
+    const nowSnapshot = now.getSnapshot() as AnyMachineSnapshot | undefined;
+    if (oldSnapshot?.children && nowSnapshot?.children) {
+      collectSessionRemints(oldSnapshot, nowSnapshot, out);
+    }
+  }
+}
+
 /** Options for {@link replay}. */
 export interface ReplayOptions {
   /** Explicit expected machine version; defaults to the machine's resolved version. */
@@ -1227,15 +1283,72 @@ export function foldLog(
   let persisted = machine.getPersistedSnapshot(snapshot) as AgentPersistedSnapshot;
   verifyEntry(entries[0]!, persisted, options.verify);
 
-  const sessions = new Map<string, string>();
+  // Per receiving actor (`actorPath`, "" for the root): recorded session →
+  // the session this fold minted for it.
+  const sessions = new Map<string, Map<string, string>>();
+  const sessionsOf = (path: readonly string[]) => {
+    const key = path.join("\0");
+    let map = sessions.get(key);
+    if (map === undefined) sessions.set(key, (map = new Map()));
+    return map;
+  };
   const apply = (entry: AgentLogEntry): AgentPersistedSnapshot => {
-    const event = restoreJournaledEvent(rebindActorSession(entry.event, snapshot, sessions));
-    [snapshot] = transition(machine, snapshot as never, event as never) as [
+    if (entry.actorPath !== undefined) {
+      applyToChild(entry, entry.actorPath);
+    } else {
+      const event = restoreJournaledEvent(
+        rebindActorSession(entry.event, snapshot, sessionsOf([])),
+      );
+      [snapshot] = transition(machine, snapshot as never, event as never) as [
+        AnyMachineSnapshot,
+        unknown,
+      ];
+    }
+    persisted = machine.getPersistedSnapshot(snapshot) as AgentPersistedSnapshot;
+    return persisted;
+  };
+  // A child's entry steps that child's snapshot with its own logic, purely,
+  // and writes it back into the root's persisted snapshot. Restoring the root
+  // from that re-mints every session below it, so the session maps follow.
+  const applyToChild = (entry: AgentLogEntry, path: readonly string[]): void => {
+    let child: FoldedActor | undefined;
+    let owner: AnyMachineSnapshot = snapshot;
+    for (const id of path) {
+      child = (owner.children as Record<string, FoldedActor | undefined>)[id];
+      const childSnapshot: unknown = child?.getSnapshot();
+      if (child === undefined || !isMachineSnapshot(childSnapshot)) {
+        throw new AgentEventLogError(
+          `Agent event entry '${entry.id}' (index ${entry.index}) is addressed to child machine ` +
+            `'${path.join(" > ")}', which the fold has no machine actor for at that point.`,
+        );
+      }
+      owner = childSnapshot as AnyMachineSnapshot;
+    }
+    const event = restoreJournaledEvent(rebindActorSession(entry.event, owner, sessionsOf(path)));
+    const [next] = transition(child!.logic, owner as never, event as never) as [
       AnyMachineSnapshot,
       unknown,
     ];
-    persisted = machine.getPersistedSnapshot(snapshot) as AgentPersistedSnapshot;
-    return persisted;
+    const root = machine.getPersistedSnapshot(snapshot) as AgentPersistedSnapshot;
+    let holder = root as PersistedWithChildren;
+    for (const id of path.slice(0, -1)) holder = holder.children![id]!.snapshot;
+    holder.children![path[path.length - 1]!]!.snapshot = child!.logic.getPersistedSnapshot(
+      next,
+    ) as PersistedWithChildren;
+    const before = snapshot;
+    snapshot = (
+      machine as unknown as {
+        restoreSnapshot(persisted: AgentPersistedSnapshot): AnyMachineSnapshot;
+      }
+    ).restoreSnapshot(root);
+    const reminted = new Map<string, string>();
+    collectSessionRemints(before, snapshot, reminted);
+    for (const map of sessions.values()) {
+      for (const [recorded, current] of map) {
+        const now = reminted.get(current);
+        if (now !== undefined) map.set(recorded, now);
+      }
+    }
   };
   for (let index = 1; index < entries.length; index++) {
     const entry = entries[index]!;

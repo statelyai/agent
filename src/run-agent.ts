@@ -1069,6 +1069,12 @@ interface RunAgentBindContext {
    * off the runtime path.
    */
   noteDecision?: (event: object, attempts: DecisionAttempt[], decidedBy?: string) => void;
+  /**
+   * Called as an invoked child machine starts processing `event`, before its
+   * snapshot moves, so the runtime can journal it in processing order. Unset
+   * off the runtime path.
+   */
+  onChildEvent?: (self: AnyActorRef, event: EventObject) => void;
 }
 
 /**
@@ -1160,6 +1166,19 @@ function selfIdAndSrc(self: BoundActorSelf | undefined): { id: string; src: stri
     id: typeof self?.id === "string" ? self.id : "",
     src: typeof self?.src === "string" ? self.src : "",
   };
+}
+
+/**
+ * The invoke ids from the root down to `actor` (`[]` for the root itself, or
+ * an actor outside the run's tree).
+ */
+function actorPathOf(actor: AnyActorRef | undefined): string[] {
+  const path: string[] = [];
+  for (let at = actor as BoundActorSelf | undefined; at?._parent !== undefined; at = at._parent) {
+    if (typeof at.id !== "string") return [];
+    path.unshift(at.id);
+  }
+  return path;
 }
 
 /** True for a request inside an invoked child machine rather than the root. */
@@ -1502,9 +1521,7 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       // `run` — not a re-evaluated transition function — so it fires exactly
       // once regardless of v6-alpha transition re-evaluation.
       // The memoized invoke-level key, without its execution id.
-      // A child's chosen event never reaches the root log, so only a root
-      // decision is marked.
-      const callKey = id !== "" && !isChildRequest(self) ? runCtx.callKey?.(id, self) : undefined;
+      const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
       runCtx.noteDecision?.(
         chosen,
         priorAttempts,
@@ -1866,9 +1883,31 @@ function rebindChildMachine(
     // Non-agent actors and placeholders pass through untouched.
   }
 
-  return Object.keys(wrapped).length > 0
-    ? (childMachine.provide({ actors: wrapped as never }) as AnyStateMachine)
-    : childMachine;
+  const rebound =
+    Object.keys(wrapped).length > 0
+      ? (childMachine.provide({ actors: wrapped as never }) as AnyStateMachine)
+      : childMachine;
+  return runCtx.onChildEvent ? journaledMachine(rebound, runCtx.onChildEvent) : rebound;
+}
+
+/**
+ * `machine`, reporting each event an actor of it starts processing. An actor
+ * calls its logic's `transition` once per event it processes (raised events
+ * stay inside that step), and before anything moves, so a parent that
+ * receives a child's completion mid-step is reported after the child.
+ */
+function journaledMachine(
+  machine: AnyStateMachine,
+  onEvent: (self: AnyActorRef, event: EventObject) => void,
+): AnyStateMachine {
+  return Object.create(machine, {
+    transition: {
+      value: (...args: Parameters<AnyStateMachine["transition"]>) => {
+        onEvent(args[2].self, args[1]);
+        return machine.transition(...args);
+      },
+    },
+  }) as AnyStateMachine;
 }
 
 /**
@@ -2145,6 +2184,7 @@ function assertThreadMatchesEvents(
       canonicalEventJson(storedEntry.event) === canonicalEventJson(givenEntry.event) &&
       // Replay ignores it, but call keys are counted from it.
       storedEntry.decidedBy === givenEntry.decidedBy &&
+      storedEntry.actorPath?.join("\0") === givenEntry.actorPath?.join("\0") &&
       (storedHash === undefined || givenHash === undefined || storedHash === givenHash) &&
       // A fork differs from its parent only here: its init entry's lineage id.
       (index > 0 || getLogExecutionId([storedEntry]) === getLogExecutionId([givenEntry]));
@@ -2404,7 +2444,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     );
   };
 
-  const takeDecidedBy = (event: EventObject): string | undefined => {
+  const takeDecidedBy = (
+    event: EventObject,
+    actorPath: readonly string[] = [],
+  ): string | undefined => {
     const chosen = decidedByEvent.get(event);
     if (chosen !== undefined) return chosen;
     const { actorId } = event as EventObject & { actorId?: unknown };
@@ -2412,8 +2455,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       (event.type === "xstate.done.actor" || event.type === "xstate.error.actor") &&
       typeof actorId === "string"
     ) {
-      const settled = openDecisions.get(actorId);
-      openDecisions.delete(actorId);
+      const site = [...actorPath, actorId].join("/");
+      const settled = openDecisions.get(site);
+      openDecisions.delete(site);
       return settled;
     }
     return undefined;
@@ -2423,6 +2467,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     event: EventObject,
     attempts?: DecisionAttempt[],
     decidedBy?: string,
+    actorPath?: string[],
   ): AgentLogEntry | undefined => {
     if (!loggingEnabled) {
       return undefined;
@@ -2434,6 +2479,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         verification: false,
         ...(attempts !== undefined ? { attempts } : {}),
         ...(decidedBy !== undefined ? { decidedBy } : {}),
+        ...(actorPath !== undefined ? { actorPath } : {}),
       });
     } catch (error) {
       stopLogging(error);
@@ -2555,6 +2601,17 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     awaitJournal,
     runId,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
+    // What an invoked child machine processes is journaled with its
+    // `actorPath`: the root's transitions are pure and journaled where they
+    // happen, but a child runs live, and a fold reproduces its state only from
+    // its own inputs. Stopping a child is the root's doing, which the root's
+    // own entries already fold.
+    onChildEvent: (self, event) => {
+      if (finished || event.type === "xstate.stop") return;
+      const actorPath = actorPathOf(self);
+      if (actorPath.length === 0) return;
+      appendLogEntry(event, attemptsByEvent.get(event), takeDecidedBy(event, actorPath), actorPath);
+    },
     noteDecision: (event, attempts, decidedBy) => {
       if (decidedBy !== undefined) {
         decidedByEvent.set(event, decidedBy);
@@ -3144,44 +3201,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // crash recovery whose log holds one completion re-executes the
       // in-flight call as `#2`, exactly the id a replay derives for it.
       //
-      // A call inside an invoked child machine is keyed under the machine that
-      // owns it: `${executionId}:worker#2/pick#1`. The child's own completions
-      // never reach the root log, so its calls are counted per child instance,
-      // and the instance takes its occurrence from the one entry that does: the
-      // root-level child's `xstate.done.actor`. A resumed child restarts from
-      // its initial state, so its calls re-run under the keys they had.
+      // A call inside an invoked child machine names that child too:
+      // `${executionId}:worker/pick#2`. The child's own inputs are journaled
+      // with its `actorPath`, so its sites count the same way the root's do.
       const resumedHistory: readonly AgentLogEntry[] = [...logEntries];
       const siteCallCounts = new Map<string, number>();
       const mintedCallKeys = new WeakMap<object, string>();
-      // Per root-level child site, the last occurrence minted this run: a
-      // child stopped without completing leaves no entry to count.
-      const lastChildOccurrence = new Map<string, number>();
-      const childCallCounts = new WeakMap<object, Map<string, number>>();
-      const childMachineKey = (owner: BoundActorSelf): string => {
-        const memoized = mintedCallKeys.get(owner);
-        if (memoized !== undefined) return memoized;
-        const { id } = selfIdAndSrc(owner);
-        let key: string;
-        if (isChildRequest(owner)) {
-          key = childCallKey(owner._parent as BoundActorSelf, id);
-        } else {
-          const n = Math.max(
-            agentCallOccurrence(logEntries, id),
-            (lastChildOccurrence.get(id) ?? 0) + 1,
-          );
-          lastChildOccurrence.set(id, n);
-          key = `${logExecutionId}:${id}#${n}`;
-        }
-        mintedCallKeys.set(owner, key);
-        return key;
-      };
-      const childCallKey = (owner: BoundActorSelf, siteId: string): string => {
-        let counts = childCallCounts.get(owner);
-        if (counts === undefined) childCallCounts.set(owner, (counts = new Map()));
-        const n = (counts.get(siteId) ?? 0) + 1;
-        counts.set(siteId, n);
-        return `${childMachineKey(owner)}/${siteId}#${n}`;
-      };
       runCtx.callKey = (siteId: string, self?: object) => {
         if (logExecutionId === undefined) {
           return undefined;
@@ -3190,15 +3215,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         if (memoized !== undefined) {
           return memoized;
         }
-        if (isChildRequest(self)) {
-          const key = childCallKey((self as BoundActorSelf)._parent as BoundActorSelf, siteId);
-          mintedCallKeys.set(self!, key);
-          return key;
-        }
-        const startedHere = siteCallCounts.get(siteId) ?? 0;
-        siteCallCounts.set(siteId, startedHere + 1);
-        openDecisions.delete(siteId);
-        const key = `${logExecutionId}:${siteId}#${agentCallOccurrence(resumedHistory, siteId) + startedHere}`;
+        const actorPath = actorPathOf((self as BoundActorSelf | undefined)?._parent);
+        const site = [...actorPath, siteId].join("/");
+        const startedHere = siteCallCounts.get(site) ?? 0;
+        siteCallCounts.set(site, startedHere + 1);
+        openDecisions.delete(site);
+        const key = `${logExecutionId}:${site}#${agentCallOccurrence(resumedHistory, siteId, actorPath) + startedHere}`;
         if (self !== undefined) {
           mintedCallKeys.set(self, key);
         }
