@@ -652,25 +652,43 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       if (toolCalls.length === 0 || step >= maxSteps) {
         break;
       }
-      const executors = toolCalls.map((call) =>
-        call.type === "function" ? toolExecutor(request.tools, call.function.name) : undefined,
-      );
-      if (executors.some((execute) => !execute)) {
+      // An offered tool with no `execute` hands the call back: the loop ends.
+      // A tool that was not offered is answered with an error result below.
+      const offered = (name: string) => Object.hasOwn(request.tools, name);
+      if (
+        toolCalls.some(
+          (call) =>
+            call.type !== "function" ||
+            (offered(call.function.name) && !toolExecutor(request.tools, call.function.name)),
+        )
+      ) {
         break;
       }
 
       messages.push(message as ChatCompletionMessageParam);
-      for (const [index, call] of toolCalls.entries()) {
-        const input: unknown =
-          call.type === "function" && call.function.arguments
-            ? JSON.parse(call.function.arguments)
-            : {};
+      for (const call of toolCalls) {
+        if (call.type !== "function") continue;
+        const { name, arguments: args } = call.function;
         let content: string;
         try {
-          content = toToolContent(await executors[index]!(input));
+          if (!offered(name)) {
+            throw new Error(
+              `tool '${name}' was not offered; valid tools: ${Object.keys(request.tools).join(", ")}`,
+            );
+          }
+          let input: unknown = {};
+          if (args) {
+            try {
+              input = JSON.parse(args);
+            } catch {
+              throw new Error(`the arguments for tool '${name}' were not valid JSON`);
+            }
+          }
+          content = toToolContent(await toolExecutor(request.tools, name)!(input));
         } catch (error) {
-          // A thrown tool goes back to the model as an error result, the way
-          // the AI SDK's loop reports one, rather than failing the request.
+          // A thrown tool, a tool that was not offered, or arguments that are
+          // not JSON go back to the model as an error result, the way the AI
+          // SDK's loop reports them, rather than failing the request.
           content = `Error: ${error instanceof Error ? error.message : String(error)}`;
         }
         messages.push({ role: "tool", tool_call_id: call.id, content });

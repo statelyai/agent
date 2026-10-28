@@ -417,6 +417,56 @@ describe("traceCoverage", () => {
     expect(traceCoverage(desk, json)).toEqual(traceCoverage(desk, traces));
   });
 
+  test("states an `always` transition passes through count as visited", async () => {
+    const routing = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ amount: z.number() }),
+        input: z.object({}),
+        events: { go: z.object({ amount: z.number() }) },
+      }),
+    }).createMachine({
+      context: { amount: 0 },
+      initial: "check",
+      on: { go: ({ event }) => ({ target: ".routing", context: { amount: event.amount } }) },
+      states: {
+        check: { always: { target: "idle" } },
+        idle: {},
+        // Passed through: no traced snapshot is ever in it.
+        routing: {
+          always: ({ context }) => ({ target: context.amount <= 50 ? "small" : "large" }),
+        },
+        small: {},
+        large: {},
+      },
+    });
+    const runFrom = async (init: { input: object } | { snapshot: unknown }, amount: number) => {
+      const trace: AgentTraceEvent[] = [];
+      const result = await runToQuiescence(
+        createAgentRuntime(routing, { onTrace: (event) => trace.push(event) }),
+        { ...init, event: { type: "go", amount } } as never,
+      );
+      return { trace, snapshot: result.snapshot };
+    };
+
+    const fresh = await runFrom({ input: {} }, 20);
+    // A resumed run does not pass through the initial `check` again.
+    const resumed = await runFrom({ snapshot: routing.getPersistedSnapshot(fresh.snapshot) }, 80);
+    const report = traceCoverage(routing, [fresh.trace, resumed.trace]);
+
+    expect(report.states).toEqual([
+      { state: "check", runs: 1 },
+      { state: "idle", runs: 1 },
+      { state: "routing", runs: 2 },
+      { state: "small", runs: 2 },
+      { state: "large", runs: 1 },
+    ]);
+    expect(report.unvisitedStates).toEqual([]);
+    const json = [fresh.trace, resumed.trace].map((trace) =>
+      trace.map((event) => JSON.parse(JSON.stringify(serializeTraceEvent(event)))),
+    );
+    expect(traceCoverage(routing, json)).toEqual(report);
+  });
+
   test("no traces leave everything unvisited", () => {
     const report = traceCoverage(desk, []);
 

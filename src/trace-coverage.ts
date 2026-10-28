@@ -1,6 +1,12 @@
-import type { AnyStateMachine, AnyStateNode, AnyTransitionDefinition } from "xstate";
+import {
+  getInitialMicrosteps,
+  getMicrosteps,
+  type AnyStateMachine,
+  type AnyStateNode,
+  type AnyTransitionDefinition,
+} from "xstate";
 import { isRecord } from "./internal/is-record.js";
-import { statePaths, traceSteps } from "./internal/trace-states.js";
+import { statePaths, traceSteps, valueOf } from "./internal/trace-states.js";
 import { isExplorationComplete, type AgentPathReport } from "./verify.js";
 
 /** One state's row in a {@link CoverageReport}. */
@@ -105,6 +111,52 @@ function candidateAt(node: AnyStateNode, type: string, event: unknown): string |
 
 const pathOf = (node: AnyStateNode) => node.path.join(".");
 
+const sameLeaves = (a: unknown, b: unknown) =>
+  statePaths(a).sort().join("|") === statePaths(b).sort().join("|");
+
+/**
+ * The leaves a trace passed through inside its macrosteps: states an `always`
+ * transition left before the step ended, which no traced snapshot holds.
+ * Re-derived with XState's pure `getMicrosteps` from the snapshot before each
+ * step (the previous step's, or the fresh start's microsteps from its input).
+ * A step that cannot be recomputed (no prior snapshot, a guard that reads live
+ * children) adds none.
+ */
+function passedThrough(
+  machine: AnyStateMachine,
+  trace: readonly Record<string, unknown>[],
+): Set<string> {
+  const leaves = new Set<string>();
+  let resumed = false;
+  let previous: Record<string, unknown> | undefined;
+  for (const event of trace) {
+    if (event.type === "run.start") resumed = event.snapshot !== undefined;
+    if (event.type !== "machine.transition" || !isRecord(event.event)) continue;
+    const snapshot = isRecord(event.snapshot) ? event.snapshot : undefined;
+    try {
+      const microsteps =
+        event.event.type === "@xstate.init"
+          ? resumed
+            ? []
+            : getInitialMicrosteps(machine, event.event.input as never)
+          : previous && sameLeaves(previous.value, valueOf(event.from))
+            ? getMicrosteps(
+                machine,
+                machine.resolveState({ value: previous.value, context: previous.context } as never),
+                event.event as never,
+              )
+            : [];
+      for (const [step] of microsteps) {
+        for (const leaf of statePaths(step.value)) leaves.add(leaf);
+      }
+    } catch {
+      // Not recomputable from the trace alone.
+    }
+    previous = snapshot;
+  }
+  return leaves;
+}
+
 const ratioOf = (visited: number, total: number) => (total === 0 ? 1 : visited / total);
 
 /**
@@ -123,7 +175,8 @@ const ratioOf = (visited: number, total: number) => (total === 0 ? 1 : visited /
  * bare type (`xstate.done.actor`), one per state however many invokes; a
  * definition's `matches` (an invoke's `actorId`) must accept the traced event
  * for its state to be credited. Ignored steps credit no handler. `always`
- * handlers are listed as `unobservable`, never as unvisited.
+ * handlers are listed as `unobservable`, never as unvisited; a state one
+ * passes through is visited, re-derived from each step's microsteps.
  *
  * @example
  * ```ts no-check
@@ -175,6 +228,11 @@ export function traceCoverage<TTrace extends readonly { readonly type: string }[
       if (event.type !== "machine.transition" || !isRecord(event.event)) continue;
       if (event.event.type !== "@xstate.init" || !isRecord(event.snapshot)) continue;
       for (const leaf of statePaths(event.snapshot.value)) visited.add(leaf);
+    }
+    if (unobservable.length > 0) {
+      for (const leaf of passedThrough(machine, trace as readonly Record<string, unknown>[])) {
+        visited.add(leaf);
+      }
     }
     const credited = new Set<HandlerCoverage>();
     for (const step of steps) {

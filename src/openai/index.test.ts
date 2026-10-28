@@ -595,6 +595,53 @@ describe("createOpenAiExecutors: tool loop", () => {
     expect(result.result).toBe("Sorry, the lookup failed.");
   });
 
+  test("an unknown tool or arguments that are not JSON go back to the model as error results", async () => {
+    const create = vi.fn(async (_params: any) =>
+      create.mock.calls.length === 1
+        ? {
+            choices: [
+              {
+                ...toolCallChoice("lookup", {}),
+                message: {
+                  role: "assistant",
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_1",
+                      type: "function",
+                      function: { name: "search", arguments: "{}" },
+                    },
+                    {
+                      id: "call_2",
+                      type: "function",
+                      function: { name: "lookup", arguments: "{q:" },
+                    },
+                  ],
+                },
+              },
+            ],
+          }
+        : { choices: [choice("Let me try again.")] },
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+
+    const result = await generateText(textRequest({ tools, maxSteps: 2 } as never));
+
+    expect(create.mock.calls[1]![0].messages.slice(-2)).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "call_1",
+        content: "Error: tool 'search' was not offered; valid tools: lookup",
+      },
+      {
+        role: "tool",
+        tool_call_id: "call_2",
+        content: "Error: the arguments for tool 'lookup' were not valid JSON",
+      },
+    ]);
+    expect(result.result).toBe("Let me try again.");
+  });
+
   test("`toolChoice` is mapped onto OpenAI's `tool_choice`, on the first step only", async () => {
     const create = vi.fn(async (_params: any) =>
       create.mock.calls.length === 1
