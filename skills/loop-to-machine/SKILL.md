@@ -16,7 +16,7 @@ This is step 1 of 4. Next: `add-traces`, then `add-evals`, then `improve-machine
 ## Hard rules
 
 - **Pin the baseline before you change anything.** The parity test runs against the old code, which stays in the repo, untouched, until a person deletes it.
-- **Never promise "behaves exactly like".** Promise what the parity report shows: same outcome and effects on these scenarios, with every difference labeled.
+- **Never promise "behaves exactly like".** Promise what the parity report and the replayed recordings show: equivalent effects on these scenarios, with every difference labeled.
 - **Never copy a rule break.** Where the old code broke a rule, the machine blocks it. That difference is `intended`, not a regression.
 - **Rules are code, not prompt text.** A rule that lived only in a system prompt becomes a guard. Keep the prompt line only as context for the model.
 - **Business rules belong to people.** If a rule is ambiguous (which threshold, which order of checks), ask. Never pick one silently.
@@ -55,7 +55,20 @@ The parity test exists before the machine does.
 2. **Deterministic stand-in models.** Parity with a live model drifts between runs. Use the code's scripted or mock models if it has them; otherwise write one: a function from the request (its prompt, or its `name`) to a fixed answer. ([`examples/mock-model.ts`](https://github.com/statelyai/agent/blob/next/examples/mock-model.ts) in the `statelyai/agent` repo is one, built on the AI SDK's `MockLanguageModelV3`; it is not in the package.) You want two: one that follows the rules, and one that breaks them. A seeded random model needs its seed derived from the scenario id and a fresh instance per run, or every scenario replays the same draws.
 3. **Ground truth.** Read outcomes and effects from the world, not from the agent's own report. `effects` holds **every write the world records**: the refunds, and also the approvals, the verifications, the questions asked, the escalations. A refund issued without its approval looks correct if `effects` holds only refunds. Text a model wrote (an escalation reason) differs on every run: compare its count or presence, not the text. If the world can check rules after the fact, return those violations. If it cannot, write the check as a plain function over the effects.
 4. **A baseline with no function to call.** When the loop lives inline in a framework handler (a tRPC procedure, a route), call the handler itself in the test, with its model client and storage replaced by the stand-ins (a module mock, or the framework's test caller). Do not extract the loop into a function first: that changes the code you are trying to pin.
-5. **The harness check.** Run the old code on both sides with each stand-in model. Each row's baseline must equal its candidate (the runs are deterministic), and with the rule-following model every row must be `same`. With a rule-breaking model, rows are `regression` by design: the candidate breaks rules.
+5. **Record golden runs.** When the code calls the model through the AI SDK or the `openai` client, record each scenario's effects: every model call, every tool call with its arguments and result, and the output. Wrap the model and tools with a recorder from `@statelyai/agent/testing`, run the old code, and save the recording as a JSON fixture. Step 7 replays it against the machine with no API key and no side effects.
+
+```ts
+import { createRecorder } from "@statelyai/agent/testing";
+
+const recorder = createRecorder();
+const model = recorder.model(openai("gpt-5")); // or recorder.openai(new OpenAI())
+const tools = recorder.tools(appTools); // AI SDK tools; recorder.tool(name, fn) for plain functions
+recorder.output(await runLoop({ ...scenario, model, tools }));
+writeFileSync(`fixtures/${scenario.id}.json`, JSON.stringify(recorder.recording));
+```
+
+   Record with the live model to capture real answers, or with a stand-in model. Either way the recording is the script for replay. One recording per scenario and per stand-in.
+6. **The harness check.** Run the old code on both sides with each stand-in model. Each row's baseline must equal its candidate (the runs are deterministic), and with the rule-following model every row must be `same`. With a rule-breaking model, rows are `regression` by design: the candidate breaks rules.
 
 ```ts
 import { compareRuns, type ParityResult, type ParityRun } from "@statelyai/agent/testing";
@@ -193,6 +206,30 @@ const REVIEWED: Record<string, (row: ParityResult<Scenario>) => void> = {
   // "no-order-id-no-reply": (row) => { /* accepted by <name>: asks once, not three times */ expect(row.candidate.outcome).toBe(row.baseline.outcome); ... },
 };
 ```
+
+Then prove effect equivalence on every recording from step 2. Replay answers each model and tool call from the recording, so the machine needs no key and causes no side effects:
+
+```ts
+import { compareRecordings, createRecorder, type EffectDivergence, type Recording } from "@statelyai/agent/testing";
+
+test.each(SCENARIOS)("equivalent to the recorded loop: $id", async (scenario) => {
+  const recording: Recording = JSON.parse(readFileSync(`fixtures/${scenario.id}.json`, "utf8"));
+  const replay = createRecorder({ replay: recording });
+  const model = replay.model(openai("gpt-5")); // never called in replay
+  replay.output(await runMachine({ ...scenario, model, tools: replay.tools(appTools) }));
+  const report = compareRecordings(recording, replay.recording);
+  expect(report.divergence ?? INTENDED[scenario.id]).toEqual(INTENDED[scenario.id]);
+});
+
+// Differences a person accepted: who, and the exact divergence.
+const INTENDED: Record<string, EffectDivergence | undefined> = {};
+```
+
+- Equivalent means the same model calls (count and shape: offered tool names, response format), the same tool calls with the same arguments, and the same output. Prompts and states may differ. Tool calls between two model calls compare in any order.
+- Values that differ on every run (generated ids, branch names, timestamps) fail `tool-input`. Pass `compareRecordings(a, b, { normalize })` to redact them on both sides; never edit the fixtures.
+- In replay, a model call past the recorded ones or a tool call the old code never made throws `RecordingDivergenceError`, and `compareRecordings` names it.
+- `model-call-shape`: the machine changed a call's tools or output format, for example a model-picked action that became `agent.decide`. The recorded answer does not fit the new call, so equivalence ends there. Port the call unchanged first, prove equivalence, then change it in a separate step whose divergences are `INTENDED`.
+- A guard that blocks a rule break diverges on purpose. List it in `INTENDED` with the exact divergence.
 
 - Every `regression` row: fix the machine, or, when the old behavior was wrong but broke no rule, ask the user. If the outcomes differ, the answer may become the scenario's `expected`. If only effects differ (the loop asked three times, the machine once), list the row in a reviewed-differences list in the test, with the exact difference asserted and the person who accepted it. Never edit a scenario to make a row pass.
 - Every `intended` row: check that its reason is a real rule. A candidate that fixed a rule break with the same outcome is `intended` too.
