@@ -491,6 +491,20 @@ export function toAgentResponseFinishReason(
   return response.status === "completed" ? "stop" : "other";
 }
 
+/**
+ * Throws for a `failed` Responses API response. The SDK returns one without
+ * throwing, and passing it on would record an empty result as a success.
+ */
+function assertNotFailed(response: Response, executor: string): void {
+  if (response.status === "failed") {
+    throw new Error(
+      `createOpenAiExecutors: ${executor} — the Responses API call failed` +
+        (response.error ? ` (${response.error.code}: ${response.error.message})` : "") +
+        ".",
+    );
+  }
+}
+
 // The Chat Completions settings the Responses API accepts under the same name.
 const RESPONSES_SHARED_SETTINGS = [
   "metadata",
@@ -918,6 +932,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         }),
         { signal: info?.signal },
       )) as Response;
+      assertNotFailed(response, "generateText");
       usage = addAgentCallUsage(usage, toAgentResponseUsage(response.usage));
 
       const calls = functionCalls(response);
@@ -1090,6 +1105,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       }),
       { signal: info?.signal },
     )) as Response;
+    assertNotFailed(response, "decide");
 
     // An incomplete turn did not finish choosing, so its call is not a choice.
     if (response.status === "incomplete") {

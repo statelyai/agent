@@ -34,7 +34,7 @@ function stubResponsesClient(create: (params: any, options?: any) => unknown) {
 // A Responses API response, shaped the way `responses.create` returns it.
 const responseWith = (
   output: unknown[],
-  extra: { status?: string; incomplete_details?: unknown; usage?: unknown } = {},
+  extra: { status?: string; incomplete_details?: unknown; usage?: unknown; error?: unknown } = {},
 ) => ({ object: "response", status: "completed", output, ...extra });
 const textOutput = (text: string) => ({
   type: "message",
@@ -495,6 +495,20 @@ describe("createOpenAiExecutors: decide", () => {
     await expect(decide(decisionRequest)).rejects.toThrow(/incomplete \(max_output_tokens\)/);
   });
 
+  test("a failed response is an error", async () => {
+    const { decide } = createOpenAiExecutors({
+      client: stubResponsesClient(async () =>
+        responseWith([], {
+          status: "failed",
+          error: { code: "server_error", message: "The model failed." },
+        }),
+      ),
+    });
+    await expect(decide(decisionRequest)).rejects.toThrow(
+      "decide — the Responses API call failed (server_error: The model failed.)",
+    );
+  });
+
   test("a reply with no tool call is an error", async () => {
     const { decide } = createOpenAiExecutors({
       client: stubResponsesClient(async () => responseWith([textOutput("I would rather not.")])),
@@ -767,6 +781,20 @@ describe("createOpenAiExecutors: tool loop", () => {
     expect(execute).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledTimes(1);
     expect(result.finishReason).toBe("length");
+  });
+
+  test("a failed step is an error, not an empty result", async () => {
+    const { generateText } = createOpenAiExecutors({
+      client: stubResponsesClient(async () =>
+        responseWith([], {
+          status: "failed",
+          error: { code: "server_error", message: "The model failed." },
+        }),
+      ),
+    });
+    await expect(
+      generateText(textRequest({ tools: { lookup: { inputSchema: z.object({}) } } } as never)),
+    ).rejects.toThrow("generateText — the Responses API call failed");
   });
 
   test("`maxSteps` bounds the loop; the default is a single call", async () => {
