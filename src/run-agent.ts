@@ -1061,11 +1061,12 @@ interface RunAgentBindContext {
   schemas?: AgentSchemas;
   /**
    * Called by a decision wrap just before it sends its chosen `event`, with
-   * the failed attempts that preceded it. The runtime records them on the log
-   * entry for that same event object, if it reaches the root. Unset off the
-   * runtime path.
+   * the failed attempts that preceded it and the call it settles
+   * (`${siteId}#${n}`, when the run has call keys). The runtime records them on
+   * the log entry for that same event object, if it reaches the root. Unset
+   * off the runtime path.
    */
-  noteDecision?: (event: object, attempts: DecisionAttempt[]) => void;
+  noteDecision?: (event: object, attempts: DecisionAttempt[], decidedBy?: string) => void;
 }
 
 /**
@@ -1492,9 +1493,13 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       // `chosen` as its output. The send happens in this actor's own async
       // `run` — not a re-evaluated transition function — so it fires exactly
       // once regardless of v6-alpha transition re-evaluation.
-      if (priorAttempts.length > 0) {
-        runCtx.noteDecision?.(chosen, priorAttempts);
-      }
+      // The memoized invoke-level key, without its execution id.
+      const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+      runCtx.noteDecision?.(
+        chosen,
+        priorAttempts,
+        callKey === undefined ? undefined : callKey.slice(callKey.indexOf(":") + 1),
+      );
       actorRef?.send(chosen as never);
       // Let the applied transition commit (and let xstate cancel this invoke if
       // the event exited the state) before completing.
@@ -2128,6 +2133,8 @@ function assertThreadMatchesEvents(
       storedEntry.id === givenEntry.id &&
       storedEntry.index === givenEntry.index &&
       canonicalEventJson(storedEntry.event) === canonicalEventJson(givenEntry.event) &&
+      // Replay ignores it, but call keys are counted from it.
+      storedEntry.decidedBy === givenEntry.decidedBy &&
       (storedHash === undefined || givenHash === undefined || storedHash === givenHash) &&
       // A fork differs from its parent only here: its init entry's lineage id.
       (index > 0 || getLogExecutionId([storedEntry]) === getLogExecutionId([givenEntry]));
@@ -2352,6 +2359,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // keyed by that event object: the mailbox hands the same object to
   // `transition`, which journals them on its entry.
   const attemptsByEvent = new WeakMap<object, DecisionAttempt[]>();
+  // The decision call (`${siteId}#${n}`) each chosen event settles, keyed the
+  // same way, and per site the last one noted: a chosen event that leaves the
+  // invoke running is followed by its `xstate.done.actor`, which settles the
+  // same call. The next call minted at the site clears it.
+  const decidedByEvent = new WeakMap<object, string>();
+  const openDecisions = new Map<string, string>();
 
   // The pure fold of `logEntries` — the state `replay` reaches — advanced
   // with every append. Each entry's `verification.stateHash` is taken from
@@ -2381,9 +2394,25 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     );
   };
 
+  const takeDecidedBy = (event: EventObject): string | undefined => {
+    const chosen = decidedByEvent.get(event);
+    if (chosen !== undefined) return chosen;
+    const { actorId } = event as EventObject & { actorId?: unknown };
+    if (
+      (event.type === "xstate.done.actor" || event.type === "xstate.error.actor") &&
+      typeof actorId === "string"
+    ) {
+      const settled = openDecisions.get(actorId);
+      openDecisions.delete(actorId);
+      return settled;
+    }
+    return undefined;
+  };
+
   const appendLogEntry = (
     event: EventObject,
     attempts?: DecisionAttempt[],
+    decidedBy?: string,
   ): AgentLogEntry | undefined => {
     if (!loggingEnabled) {
       return undefined;
@@ -2394,6 +2423,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         machineVersion,
         verification: false,
         ...(attempts !== undefined ? { attempts } : {}),
+        ...(decidedBy !== undefined ? { decidedBy } : {}),
       });
     } catch (error) {
       stopLogging(error);
@@ -2515,7 +2545,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     awaitJournal,
     runId,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
-    noteDecision: (event, attempts) => {
+    noteDecision: (event, attempts, decidedBy) => {
+      if (decidedBy !== undefined) {
+        decidedByEvent.set(event, decidedBy);
+        openDecisions.set(decidedBy.slice(0, decidedBy.lastIndexOf("#")), decidedBy);
+      }
+      if (attempts.length === 0) return;
       // Model-produced attempts that are not strict JSON are dropped rather
       // than failing the entry for the event that did land.
       try {
@@ -3111,6 +3146,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         }
         const startedHere = siteCallCounts.get(siteId) ?? 0;
         siteCallCounts.set(siteId, startedHere + 1);
+        openDecisions.delete(siteId);
         const key = `${logExecutionId}:${siteId}#${agentCallOccurrence(resumedHistory, siteId) + startedHere}`;
         if (self !== undefined) {
           mintedCallKeys.set(self, key);
@@ -3215,7 +3251,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       if (ignored) {
         ignoredEvent = event as EventObject;
       }
-      appendLogEntry(event as EventObject, attempts);
+      appendLogEntry(event as EventObject, attempts, takeDecidedBy(event as EventObject));
       // The store refused the entry and the run stopped: the transition never
       // happened, so the result stays at the last journaled state.
       if (stopReason !== undefined) {
