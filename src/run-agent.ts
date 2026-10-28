@@ -74,6 +74,7 @@ import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import {
   AgentMachineVersionMismatchError,
   agentCallOccurrence,
+  agentCallSite,
   createReplayEntry,
   foldLog,
   getLogExecutionId,
@@ -2456,7 +2457,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       (event.type === "xstate.done.actor" || event.type === "xstate.error.actor") &&
       typeof actorId === "string"
     ) {
-      const site = [...actorPath, actorId].join("/");
+      const site = agentCallSite(actorPath, actorId);
       const settled = openDecisions.get(site);
       openDecisions.delete(site);
       return settled;
@@ -3219,7 +3220,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           return memoized;
         }
         const actorPath = actorPathOf((self as BoundActorSelf | undefined)?._parent);
-        const site = [...actorPath, siteId].join("/");
+        const site = agentCallSite(actorPath, siteId);
         const startedHere = siteCallCounts.get(site) ?? 0;
         siteCallCounts.set(site, startedHere + 1);
         openDecisions.delete(site);

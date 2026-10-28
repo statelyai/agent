@@ -381,4 +381,51 @@ describe("a long-lived child machine across resumes", () => {
     expect(result.events.some((entry) => entry.actorPath !== undefined)).toBe(true);
     expect(replay(machine, result.events).snapshot.context).toEqual({ failed: true });
   });
+
+  test("an invoke id holding a slash does not read as a child path", async () => {
+    const draft = createTextLogic({ model: "test-model", prompt: "Draft." });
+    const worker = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: { GO: z.object({}) } }),
+      actors: { draft },
+    }).createMachine({
+      context: {},
+      initial: "idle",
+      states: {
+        idle: { on: { GO: { target: "drafting" } } },
+        drafting: { invoke: { id: "draft", src: "draft", onDone: { target: "idle" } } },
+      },
+    });
+    const machine = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: { WORK: z.object({}) } }),
+      actors: { worker, draft },
+    }).createMachine({
+      context: {},
+      type: "parallel",
+      states: {
+        child: {
+          invoke: { id: "worker", src: "worker" },
+          on: {
+            WORK: ({ children }, enq) => enq.sendTo(children.worker as never, { type: "GO" }),
+          },
+        },
+        root: {
+          initial: "idle",
+          states: {
+            idle: { on: { WORK: { target: "drafting" } } },
+            drafting: { invoke: { id: "worker/draft", src: "draft", onDone: { target: "idle" } } },
+          },
+        },
+      },
+    });
+    const keys: Array<string | undefined> = [];
+    await runToQuiescence(
+      createAgentRuntime(machine, {
+        store: createInMemoryEventLogStore(),
+        threadId: "t",
+        executors: executors(keys),
+      }),
+      { input: undefined, event: { type: "WORK" } } as AgentRunInit<typeof machine>,
+    );
+    expect(new Set(siteKeys(keys))).toEqual(new Set(["worker%2Fdraft#1", "worker/draft#1"]));
+  });
 });

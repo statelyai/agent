@@ -934,6 +934,17 @@ function toEvents(history: readonly (EventObject | AgentLogEntry)[] | undefined)
 }
 
 /**
+ * An invoke site as call keys name it: the invoke ids from the root down,
+ * joined with `/`, each id escaped so an id holding a `/` cannot read as a
+ * child path. @internal
+ */
+export function agentCallSite(actorPath: readonly string[], siteId: string): string {
+  return [...actorPath, siteId]
+    .map((id) => id.replaceAll("%", "%25").replaceAll("/", "%2F"))
+    .join("/");
+}
+
+/**
  * The 1-based occurrence `n` for the NEXT call at invoke site `siteId`:
  * `1 + completions`, where a completion is a journaled `xstate.done.actor` OR
  * `xstate.error.actor` for that `actorId` (an error is a semantic completion),
@@ -952,7 +963,7 @@ export function agentCallOccurrence(
 ): number {
   let count = 0;
   const decided = new Set<string>();
-  const site = [...actorPath, siteId].join("/");
+  const site = agentCallSite(actorPath, siteId);
   for (const item of history ?? []) {
     const event = toEvents([item])[0]!;
     // Only an entry (not a bare event, whose payload is the machine's) is marked.
@@ -965,7 +976,7 @@ export function agentCallOccurrence(
     if (
       (event.type === DONE_ACTOR_EVENT_TYPE || event.type === ERROR_ACTOR_EVENT_TYPE) &&
       (event as EventObject & { actorId?: unknown }).actorId === siteId &&
-      (entry?.actorPath ?? []).join("/") === actorPath.join("/")
+      (entry?.actorPath ?? []).join("\0") === actorPath.join("\0")
     ) {
       count++;
     }
@@ -1172,7 +1183,7 @@ function countStarts(
       (snapshot.children ?? {}) as Record<string, FoldedActor | undefined>,
     )) {
       if (ref === undefined) continue;
-      const site = [...at, id].join("/");
+      const site = agentCallSite(at, id);
       if (!known.has(ref.sessionId)) starts.set(site, (starts.get(site) ?? 0) + 1);
       const childSnapshot: unknown = ref.getSnapshot();
       if (isMachineSnapshot(childSnapshot)) walk(childSnapshot as AnyMachineSnapshot, [...at, id]);
@@ -1282,8 +1293,8 @@ export interface LogFold {
   /** Folds `entry`, appended after everything folded so far, without verifying it. */
   apply(entry: AgentLogEntry): AgentPersistedSnapshot;
   /**
-   * How many times the fold has started an actor at `site` (invoke ids from
-   * the root, joined with `/`), cancelled ones included. The `n` of the call
+   * How many times the fold has started an actor at `site` (an
+   * {@link agentCallSite}), cancelled ones included. The `n` of the call
    * key for the invocation started last.
    */
   starts(site: string): number;
