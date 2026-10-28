@@ -625,7 +625,10 @@ describe("createOpenAiExecutors: tool loop", () => {
     );
     const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
 
-    const result = await generateText(textRequest({ tools, maxSteps: 2 } as never));
+    // An `undefined` entry is not sent to OpenAI, so it is not offered either.
+    const result = await generateText(
+      textRequest({ tools: { ...tools, search: undefined }, maxSteps: 2 } as never),
+    );
 
     expect(create.mock.calls[1]![0].messages.slice(-2)).toEqual([
       {

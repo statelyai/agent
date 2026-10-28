@@ -654,7 +654,8 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       }
       // An offered tool with no `execute` hands the call back: the loop ends.
       // A tool that was not offered is answered with an error result below.
-      const offered = (name: string) => Object.hasOwn(request.tools, name);
+      const offered = (name: string) =>
+        Object.hasOwn(request.tools, name) && request.tools[name] !== undefined;
       if (
         toolCalls.some(
           (call) =>
@@ -673,7 +674,9 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         try {
           if (!offered(name)) {
             throw new Error(
-              `tool '${name}' was not offered; valid tools: ${Object.keys(request.tools).join(", ")}`,
+              `tool '${name}' was not offered; valid tools: ${Object.keys(request.tools)
+                .filter(offered)
+                .join(", ")}`,
             );
           }
           let input: unknown = {};

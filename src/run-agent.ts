@@ -2133,6 +2133,8 @@ function assertThreadMatchesEvents(
       storedEntry.id === givenEntry.id &&
       storedEntry.index === givenEntry.index &&
       canonicalEventJson(storedEntry.event) === canonicalEventJson(givenEntry.event) &&
+      // Replay ignores it, but call keys are counted from it.
+      storedEntry.decidedBy === givenEntry.decidedBy &&
       (storedHash === undefined || givenHash === undefined || storedHash === givenHash) &&
       // A fork differs from its parent only here: its init entry's lineage id.
       (index > 0 || getLogExecutionId([storedEntry]) === getLogExecutionId([givenEntry]));

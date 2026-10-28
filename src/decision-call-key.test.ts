@@ -76,6 +76,25 @@ describe("decision callKeys", () => {
     expect(siteKeys(keys)).toEqual(["pick#1.0", "pick#2.0", "pick#3.0"]);
   });
 
+  test("a resume log that drops a stored decidedBy is not this thread's log", async () => {
+    const machine = createPickMachine();
+    const store = createInMemoryEventLogStore();
+    await runToQuiescence(
+      createAgentRuntime(machine, { store, threadId: "t", executors: { decide: recording([]) } }),
+      { input: undefined, event: { type: "PICK" } },
+    );
+    const stored = await store.read("t");
+    expect(stored.some((entry) => entry.decidedBy === "pick#1")).toBe(true);
+    const events = stored.map(({ decidedBy: _decidedBy, ...entry }) => entry);
+
+    await expect(
+      runToQuiescence(
+        createAgentRuntime(machine, { store, threadId: "t", executors: { decide: recording([]) } }),
+        { events, event: { type: "PICK" } },
+      ),
+    ).rejects.toMatchObject({ code: "event-log-conflict" });
+  });
+
   test("a decision in flight at a crash re-runs under its own key, not the completed one's", async () => {
     const machine = createPickMachine();
     const store = createInMemoryEventLogStore();
