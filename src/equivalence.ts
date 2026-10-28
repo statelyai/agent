@@ -52,6 +52,8 @@ export interface RecordedToolCall {
   input: unknown;
   output?: unknown;
   error?: RecordedError;
+  /** The tool returned without a Promise; replay answers synchronously too. */
+  sync?: true;
 }
 
 /** The run's final result. */
@@ -78,7 +80,24 @@ export interface CreateRecorderOptions {
    * what it returned.
    */
   tools?: "replay" | "live";
+  /**
+   * In replay, which model calls a recorded answer may serve. `"shape"`
+   * (default) refuses a call whose offered tools or response format changed,
+   * since the recorded answer may not fit it; see {@link ModelCallMatch}.
+   */
+  modelCalls?: ModelCallMatch;
 }
+
+/**
+ * When two model calls count as the same: `"shape"` compares offered tool
+ * names and response format, `"none"` only that a call happened, and a
+ * function decides per call (allow the changes you made on purpose and fall
+ * back to {@link sameModelCallShape}).
+ */
+export type ModelCallMatch =
+  | "shape"
+  | "none"
+  | ((expected: RecordedModelCall, actual: RecordedModelCall) => boolean);
 
 /** The structural slice of an AI SDK `LanguageModelV3` the recorder wraps. */
 export interface RecordableLanguageModel {
@@ -229,6 +248,9 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         `Model call #${effect.call} uses ${effect.method}; the recorded run used ${recorded.method}.`,
       );
     }
+    if (!modelCallsMatch(options.modelCalls, recorded, effect)) {
+      throw new RecordingDivergenceError(shapeMessage(recorded, effect));
+    }
     return recorded;
   }
 
@@ -315,7 +337,7 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     fn: TFn,
     inputOf = (args: unknown[]) => (args.length === 1 ? args[0] : args),
   ): TFn {
-    return (async (...args: unknown[]) => {
+    return ((...args: unknown[]) => {
       const input = toJson(inputOf(args));
       const effect: RecordedToolCall = { kind: "tool", name, step: modelCalls, input };
       effects.push(effect);
@@ -328,29 +350,56 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
             candidate.name === name &&
             jsonEqual(candidate.input, input),
         );
-        if (!recorded) {
-          const error = new RecordingDivergenceError(
-            `Tool '${name}' was called with ${JSON.stringify(input)} ${effect.step === 0 ? "before any model call" : `after model call #${effect.step - 1}`}; the recorded run made no such call.`,
-          );
-          effect.error = toRecordedError(error);
-          throw error;
-        }
-        usedTools.add(recorded);
-        if (recorded.error) {
-          effect.error = recorded.error;
-          throw fromRecordedError(recorded.error);
-        }
-        effect.output = recorded.output;
-        return structuredClone(recorded.output);
+        // A tool the original ran synchronously stays synchronous.
+        const settle = (value: () => unknown) => {
+          if (recorded?.sync) return value();
+          try {
+            return Promise.resolve(value());
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        };
+        return settle(() => {
+          if (!recorded) {
+            const error = new RecordingDivergenceError(
+              `Tool '${name}' was called with ${JSON.stringify(input)} ${effect.step === 0 ? "before any model call" : `after model call #${effect.step - 1}`}; the recorded run made no such call.`,
+            );
+            effect.error = toRecordedError(error);
+            throw error;
+          }
+          usedTools.add(recorded);
+          if (recorded.sync) effect.sync = true;
+          if (recorded.error) {
+            effect.error = recorded.error;
+            throw fromRecordedError(recorded.error);
+          }
+          effect.output = recorded.output;
+          return structuredClone(recorded.output);
+        });
       }
+      let output: unknown;
       try {
-        const output = await (fn as unknown as (...args: unknown[]) => unknown)(...args);
-        effect.output = toJson(output);
-        return output;
+        output = (fn as unknown as (...args: unknown[]) => unknown)(...args);
       } catch (error) {
+        effect.sync = true;
         effect.error = toRecordedError(error);
         throw error;
       }
+      if (!(output instanceof Promise)) {
+        effect.sync = true;
+        effect.output = toJson(output);
+        return output;
+      }
+      return output.then(
+        (value) => {
+          effect.output = toJson(value);
+          return value;
+        },
+        (error: unknown) => {
+          effect.error = toRecordedError(error);
+          throw error;
+        },
+      );
     }) as unknown as TFn;
   }
 
@@ -459,23 +508,44 @@ export interface EffectDivergence {
 /** The result of {@link compareRecordings}. */
 export interface EquivalenceReport {
   equivalent: boolean;
+  /** The first divergence, by position in the original's effects. */
   divergence?: EffectDivergence;
+  /** Every divergence, in order. Effects both runs made line up between them. */
+  divergences: EffectDivergence[];
 }
 
 /** Options for {@link compareRecordings}. */
 export interface CompareRecordingsOptions {
-  /**
-   * How model calls are compared. `"shape"` (default) requires the same
-   * offered tool names and response format, since a recorded answer only fits
-   * a call of the same shape. `"none"` compares only that a call happened.
-   */
-  modelCalls?: "shape" | "none";
+  /** When two model calls count as the same. Default `"shape"`. */
+  modelCalls?: ModelCallMatch;
   /**
    * Maps each effect before comparing, on both sides: redact values that
    * differ on every run (generated ids, timestamps) or project a tool's input
    * to the fields that matter.
    */
   normalize?: (effect: RecordedEffect) => RecordedEffect;
+}
+
+/** True when two model calls offer the same tool names and response format. */
+export function sameModelCallShape(
+  expected: RecordedModelCall,
+  actual: RecordedModelCall,
+): boolean {
+  return jsonEqual(modelCallShape(expected), modelCallShape(actual));
+}
+
+function modelCallsMatch(
+  match: ModelCallMatch | undefined,
+  expected: RecordedModelCall,
+  actual: RecordedModelCall,
+): boolean {
+  if (match === "none") return true;
+  if (typeof match === "function") return match(expected, actual);
+  return sameModelCallShape(expected, actual);
+}
+
+function shapeMessage(expected: RecordedModelCall, actual: RecordedModelCall): string {
+  return `Model call #${expected.call} changed shape: ${JSON.stringify(modelCallShape(expected))} → ${JSON.stringify(modelCallShape(actual))}. A recorded answer only fits a call of the same shape.`;
 }
 
 /** Offered tool names and the response format: what a recorded answer depends on. */
@@ -539,9 +609,56 @@ function describe(effect: RecordedEffect): string {
   }
 }
 
+/** Why two effects differ, or `undefined` when they are the same. */
+function differ(
+  left: RecordedEffect,
+  right: RecordedEffect,
+  options: CompareRecordingsOptions,
+): { reason: EffectDivergenceReason; message: string } | undefined {
+  if (left.kind !== right.kind) {
+    return {
+      reason: "kind",
+      message: `Expected ${describe(left)}; the port made ${describe(right)}.`,
+    };
+  }
+  if (left.kind === "model" && right.kind === "model") {
+    return modelCallsMatch(options.modelCalls, left, right)
+      ? undefined
+      : { reason: "model-call-shape", message: shapeMessage(left, right) };
+  }
+  if (left.kind === "tool" && right.kind === "tool") {
+    if (left.name !== right.name) {
+      return {
+        reason: "tool-name",
+        message: `Expected ${describe(left)}; the port made ${describe(right)}.`,
+      };
+    }
+    if (!jsonEqual(left.input, right.input)) {
+      return {
+        reason: "tool-input",
+        message: `Expected ${describe(left)}; the port passed ${JSON.stringify(right.input)}.`,
+      };
+    }
+    if (!jsonEqual(left.output, right.output) || !jsonEqual(left.error, right.error)) {
+      return { reason: "tool-result", message: `Tool '${left.name}' returned a different result.` };
+    }
+    return undefined;
+  }
+  if (left.kind === "output" && right.kind === "output" && !jsonEqual(left.value, right.value)) {
+    return {
+      reason: "output",
+      message: `Expected ${describe(left)}; the port returned ${JSON.stringify(right.value)}.`,
+    };
+  }
+  return undefined;
+}
+
 /**
- * Compares two recordings effect by effect and reports the first difference.
- * `expected` is the original's recording, `actual` the port's.
+ * Compares two recordings and reports every effect that differs. `expected`
+ * is the original's recording, `actual` the port's. Effects that are the same
+ * on both sides are lined up first (longest common subsequence), so one extra
+ * call does not shift every effect after it; between them, effects of the same
+ * kind pair up and report what changed, and the rest are missing or extra.
  */
 export function compareRecordings(
   expected: Recording,
@@ -551,68 +668,69 @@ export function compareRecordings(
   const map = options.normalize ?? ((effect: RecordedEffect) => effect);
   const a = normalize(expected.effects.map(map));
   const b = normalize(actual.effects.map(map));
-  for (let index = 0; index < Math.max(a.length, b.length); index++) {
-    const left = a[index];
-    const right = b[index];
-    const diverge = (reason: EffectDivergenceReason, message: string): EquivalenceReport => ({
-      equivalent: false,
-      divergence: { index, reason, expected: left, actual: right, message },
-    });
-    if (!right) return diverge("missing-effect", `The port never made ${describe(left!)}.`);
-    if (!left)
-      return diverge(
-        "extra-effect",
-        `The port made ${describe(right)}, which the original never made.`,
-      );
-    if (right.kind === "model" && left.kind !== "model") {
-      return diverge(
-        "extra-effect",
-        `The port made ${describe(right)} where the original made ${describe(left)}.`,
-      );
-    }
-    if (left.kind === "model" && right.kind !== "model") {
-      return diverge(
-        "missing-effect",
-        `The port never made ${describe(left)}; it made ${describe(right)}.`,
-      );
-    }
-    if (left.kind !== right.kind) {
-      return diverge("kind", `Expected ${describe(left)}; the port made ${describe(right)}.`);
-    }
-    if (left.kind === "model" && right.kind === "model") {
-      if (
-        options.modelCalls !== "none" &&
-        !jsonEqual(modelCallShape(left), modelCallShape(right))
-      ) {
-        return diverge(
-          "model-call-shape",
-          `Model call #${left.call} changed shape: ${JSON.stringify(modelCallShape(left))} → ${JSON.stringify(modelCallShape(right))}. A recorded answer only fits a call of the same shape.`,
-        );
-      }
-    } else if (left.kind === "tool" && right.kind === "tool") {
-      if (left.name !== right.name) {
-        return diverge(
-          "tool-name",
-          `Expected ${describe(left)}; the port made ${describe(right)}.`,
-        );
-      }
-      if (!jsonEqual(left.input, right.input)) {
-        return diverge(
-          "tool-input",
-          `Expected ${describe(left)}; the port passed ${JSON.stringify(right.input)}.`,
-        );
-      }
-      if (!jsonEqual(left.output, right.output) || !jsonEqual(left.error, right.error)) {
-        return diverge("tool-result", `Tool '${left.name}' returned a different result.`);
-      }
-    } else if (left.kind === "output" && right.kind === "output") {
-      if (!jsonEqual(left.value, right.value)) {
-        return diverge(
-          "output",
-          `Expected ${describe(left)}; the port returned ${JSON.stringify(right.value)}.`,
-        );
-      }
+  const same = a.map((left) => b.map((right) => !differ(left, right, options)));
+  const lcs = Array.from({ length: a.length + 1 }, () =>
+    Array.from({ length: b.length + 1 }, () => 0),
+  );
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      lcs[i]![j] = same[i]![j]
+        ? lcs[i + 1]![j + 1]! + 1
+        : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
     }
   }
-  return { equivalent: true };
+  const divergences: EffectDivergence[] = [];
+  let lefts: number[] = [];
+  let rights: number[] = [];
+  // `at` is where the gap ends in the original: an extra effect sits there.
+  const flushGap = (at: number) => {
+    const unpairedRights = [...rights];
+    const changed: EffectDivergence[] = [];
+    for (const index of lefts) {
+      const left = a[index]!;
+      const k = unpairedRights.findIndex((j) => b[j]!.kind === left.kind);
+      if (k === -1) {
+        changed.push({
+          index,
+          reason: "missing-effect",
+          expected: left,
+          message: `The port never made ${describe(left)}.`,
+        });
+        continue;
+      }
+      const right = b[unpairedRights.splice(k, 1)[0]!]!;
+      const difference = differ(left, right, options);
+      if (difference) changed.push({ index, expected: left, actual: right, ...difference });
+    }
+    // An extra effect comes first: it is usually the cause of what follows.
+    for (const j of unpairedRights) {
+      divergences.push({
+        index: lefts[0] ?? at,
+        reason: "extra-effect",
+        actual: b[j],
+        message: `The port made ${describe(b[j]!)}, which the original never made.`,
+      });
+    }
+    divergences.push(...changed);
+    lefts = [];
+    rights = [];
+  };
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && same[i]![j]) {
+      flushGap(i);
+      i++;
+      j++;
+    } else if (j < b.length && (i === a.length || lcs[i]![j + 1]! >= lcs[i + 1]![j]!)) {
+      rights.push(j++);
+    } else {
+      lefts.push(i++);
+    }
+  }
+  flushGap(i);
+  divergences.sort((x, y) => x.index - y.index);
+  return divergences.length
+    ? { equivalent: false, divergence: divergences[0], divergences }
+    : { equivalent: true, divergences };
 }

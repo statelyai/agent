@@ -1,8 +1,8 @@
 /**
  * The raw `openai` package adapter: builds the `{ generateText, streamText,
  * decide }` executor set consumed by `createAgentRuntime`/`executeAgentRequest`, mapped
- * onto the Chat Completions API (not `responses` — `chat.completions` is the
- * canonical/stable surface) with no Vercel AI SDK in between.
+ * onto the Chat Completions API by default, or the Responses API with
+ * `api: 'responses'`, with no Vercel AI SDK in between.
  *
  * `openai` is an OPTIONAL peer dependency and is imported for TYPES ONLY: the
  * client is injected, so nothing here pulls the package into a bundle at
@@ -338,6 +338,177 @@ export function toAgentFinishReason(
   }
 }
 
+// ─── Responses API shim ───
+//
+// With `api: 'responses'`, each Chat Completions request the executors build is
+// translated to a `responses.create` request, and the response translated back
+// to the Chat Completions shape the executors read, so the tool loop, structured
+// output, and decision logic stay single-sourced. `raw` still carries the
+// untouched Responses payload.
+
+type Loose = Record<string, any>;
+
+/** Chat messages → Responses `input` items. Tool calls and results become
+ * `function_call`/`function_call_output` items. */
+function toResponsesInput(messages: ChatCompletionMessageParam[]): Loose[] {
+  return messages.flatMap((message: Loose): Loose[] => {
+    switch (message.role) {
+      case "tool":
+        return [
+          { type: "function_call_output", call_id: message.tool_call_id, output: message.content },
+        ];
+      case "assistant": {
+        const items: Loose[] = message.content
+          ? [{ role: "assistant", content: message.content }]
+          : [];
+        for (const call of message.tool_calls ?? []) {
+          items.push({
+            type: "function_call",
+            call_id: call.id,
+            name: call.function.name,
+            arguments: call.function.arguments,
+          });
+        }
+        return items;
+      }
+      case "user":
+        return [
+          {
+            role: "user",
+            content:
+              typeof message.content === "string"
+                ? message.content
+                : message.content.map((part: Loose) =>
+                    part.type === "image_url"
+                      ? { type: "input_image", image_url: part.image_url.url, detail: "auto" }
+                      : { type: "input_text", text: part.text },
+                  ),
+          },
+        ];
+      default:
+        return [{ role: message.role, content: message.content }];
+    }
+  });
+}
+
+/** Chat Completions params → Responses params. `seed`/`stop` have no Responses
+ * equivalent and are dropped. */
+function toResponsesParams(params: Loose): Loose {
+  const {
+    messages,
+    tools,
+    tool_choice,
+    response_format,
+    max_completion_tokens,
+    reasoning_effort,
+    seed: _seed,
+    stop: _stop,
+    stream_options: _streamOptions,
+    ...rest
+  } = params;
+  return {
+    ...rest,
+    input: toResponsesInput(messages),
+    ...(tools
+      ? {
+          tools: tools.map(({ function: fn }: Loose) => ({
+            type: "function",
+            name: fn.name,
+            description: fn.description,
+            parameters: fn.parameters,
+            strict: false,
+          })),
+        }
+      : {}),
+    ...(tool_choice !== undefined
+      ? {
+          tool_choice:
+            typeof tool_choice === "object"
+              ? { type: "function", name: tool_choice.function.name }
+              : tool_choice,
+        }
+      : {}),
+    ...(response_format?.type === "json_schema"
+      ? { text: { format: { type: "json_schema", ...response_format.json_schema } } }
+      : {}),
+    ...(max_completion_tokens !== undefined ? { max_output_tokens: max_completion_tokens } : {}),
+    ...(reasoning_effort !== undefined ? { reasoning: { effort: reasoning_effort } } : {}),
+  };
+}
+
+/** Responses usage → the Chat Completions usage field names. */
+function fromResponsesUsage(usage: Loose | undefined): OpenAiUsage | undefined {
+  if (!usage) {
+    return undefined;
+  }
+  return defined({
+    prompt_tokens: usage.input_tokens,
+    completion_tokens: usage.output_tokens,
+    total_tokens: usage.total_tokens,
+    completion_tokens_details: usage.output_tokens_details,
+    prompt_tokens_details: usage.input_tokens_details,
+  }) as OpenAiUsage;
+}
+
+/** A Responses `status`/`incomplete_details` as a Chat Completions finish reason. */
+function fromResponsesFinish(response: Loose, hasToolCalls: boolean): string {
+  if (response.status === "incomplete") {
+    return response.incomplete_details?.reason === "content_filter" ? "content_filter" : "length";
+  }
+  return hasToolCalls ? "tool_calls" : "stop";
+}
+
+/** A Responses response → a Chat Completions-shaped one, with `raw` attached. */
+function fromResponsesResponse(response: Loose): Loose {
+  const output: Loose[] = response.output ?? [];
+  const text = output
+    .filter((item) => item.type === "message")
+    .flatMap((item) => item.content ?? [])
+    .filter((part: Loose) => part.type === "output_text")
+    .map((part: Loose) => part.text)
+    .join("");
+  const toolCalls = output
+    .filter((item) => item.type === "function_call")
+    .map((item) => ({
+      id: item.call_id,
+      type: "function",
+      function: { name: item.name, arguments: item.arguments },
+    }));
+  return {
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: text || null,
+          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+        },
+        finish_reason: fromResponsesFinish(response, toolCalls.length > 0),
+      },
+    ],
+    usage: fromResponsesUsage(response.usage),
+    raw: response,
+  };
+}
+
+/** Responses stream events → Chat Completions-shaped chunks: text deltas, then
+ * one final chunk with the finish reason and usage from `response.completed`. */
+async function* fromResponsesStream(events: AsyncIterable<Loose>): AsyncIterable<Loose> {
+  for await (const event of events) {
+    if (event.type === "response.output_text.delta") {
+      yield { choices: [{ index: 0, delta: { content: event.delta } }] };
+    } else if (event.type === "response.completed" || event.type === "response.incomplete") {
+      yield {
+        choices: [
+          { index: 0, delta: {}, finish_reason: fromResponsesFinish(event.response, false) },
+        ],
+        usage: fromResponsesUsage(event.response.usage),
+        raw: event.response,
+      };
+    }
+  }
+}
+
 // ─── createOpenAiExecutors ───
 
 /**
@@ -378,6 +549,9 @@ export type OpenAiCallSettings = Omit<
  */
 export type CreateOpenAiExecutorsOptions = {
   client: OpenAI;
+  /** Which OpenAI API the calls go to: `'chat'` (default, `chat.completions.create`)
+   * or `'responses'` (`responses.create`), for hosts whose recorded traffic uses it. */
+  api?: "chat" | "responses";
   resolveModel?: (modelRef: string) => string;
   settings?:
     | Record<string, OpenAiCallSettings>
@@ -553,7 +727,24 @@ function toToolContent(output: unknown): string {
  * ```
  */
 export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): OpenAiExecutors {
-  const { client, resolveModel = (modelRef: string) => modelRef } = options;
+  const { client, api = "chat", resolveModel = (modelRef: string) => modelRef } = options;
+
+  // The one call site every executor goes through: Chat Completions as-is, or
+  // translated to and from the Responses API.
+  const create = async (params: Loose, requestOptions: { signal?: AbortSignal }) => {
+    if (api === "chat") {
+      return client.chat.completions.create(params as never, requestOptions);
+    }
+    const result: unknown = await client.responses.create(
+      toResponsesParams(params) as never,
+      requestOptions,
+    );
+    return params.stream
+      ? fromResponsesStream(result as AsyncIterable<Loose>)
+      : fromResponsesResponse(result as Loose);
+  };
+  // `raw` is the untouched provider payload: the Responses one when shimmed.
+  const rawOf = (value: unknown) => (value as Loose | undefined)?.raw ?? value;
 
   // Params every text call shares. Host `settings` sit UNDER the request's own
   // settings, which are `defined()`-filtered so an unset request field can
@@ -635,7 +826,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
 
     for (;;) {
       step++;
-      response = (await client.chat.completions.create(
+      response = (await create(
         textParams(request, messages, {
           ...responseFormat,
           // A forced choice applies to the FIRST step only: re-sending
@@ -699,7 +890,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
         ...usageField(usage),
         finishReason,
-        raw: response,
+        raw: rawOf(response),
       };
     }
 
@@ -709,7 +900,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       result: content ?? "",
       ...usageField(usage),
       finishReason,
-      raw: response,
+      raw: rawOf(response),
     };
   };
 
@@ -734,7 +925,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       );
     }
 
-    const stream = (await client.chat.completions.create(
+    const stream = (await create(
       {
         model: resolveModel(request.model),
         messages: toOpenAiMessages(request),
@@ -768,14 +959,14 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       }
     }
 
-    return { result: text, ...usageField(toAgentCallUsage(usage)), finishReason, raw: last };
+    return { result: text, ...usageField(toAgentCallUsage(usage)), finishReason, raw: rawOf(last) };
   };
 
   const decide = async (
     request: AgentDecisionRequest,
     info?: AgentRequestExecutorInfo,
   ): Promise<OpenAiDecideResult> => {
-    const response = (await client.chat.completions.create(
+    const response = (await create(
       {
         model: resolveModel(request.model),
         messages: toDecisionMessages(request),
@@ -812,7 +1003,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       } as ChosenEvent,
       ...usageField(toAgentCallUsage(response.usage)),
       finishReason: toAgentFinishReason(response.choices[0]?.finish_reason),
-      raw: response,
+      raw: rawOf(response),
     };
   };
 

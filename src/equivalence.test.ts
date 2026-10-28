@@ -11,6 +11,8 @@ import {
   createRecorder,
   RecordingDivergenceError,
   type RecordedEffect,
+  type RecordedModelCall,
+  sameModelCallShape,
   type Recorder,
   type Recording,
 } from "./testing/index.js";
@@ -143,7 +145,10 @@ describe("verified equivalence (AI SDK)", () => {
     const recording = await recordOriginal();
     const replay = createRecorder({ replay: recording });
     await port(replay);
-    expect(compareRecordings(recording, replay.recording)).toEqual({ equivalent: true });
+    expect(compareRecordings(recording, replay.recording)).toEqual({
+      equivalent: true,
+      divergences: [],
+    });
   });
 
   test("a port that changes the output is caught at the output", async () => {
@@ -169,7 +174,7 @@ describe("verified equivalence (AI SDK)", () => {
     );
     expect(
       compareRecordings(recording, replay.recording, { modelCalls: "none" }).divergence?.reason,
-    ).toBe("kind");
+    ).toBe("missing-effect");
   });
 
   test("an extra model call throws in replay and shows up as an extra effect", async () => {
@@ -228,7 +233,10 @@ describe("verified equivalence (AI SDK)", () => {
     const second = streamText({ model: replay.model(new MockLanguageModelV3()), prompt: "hi" });
     replay.output(await second.text);
     expect(await second.text).toBe("Hello");
-    expect(compareRecordings(recording, replay.recording)).toEqual({ equivalent: true });
+    expect(compareRecordings(recording, replay.recording)).toEqual({
+      equivalent: true,
+      divergences: [],
+    });
   });
 
   test("normalize redacts values that differ on every run", async () => {
@@ -241,7 +249,78 @@ describe("verified equivalence (AI SDK)", () => {
         : effect;
     expect(compareRecordings(recording, replay.recording, { normalize: redact })).toEqual({
       equivalent: true,
+      divergences: [],
     });
+  });
+
+  test("every divergence is listed, and one extra effect does not shift the rest", () => {
+    const model = (call: number) => ({
+      kind: "model" as const,
+      seam: "ai-sdk" as const,
+      method: "doGenerate",
+      call,
+      request: {},
+    });
+    const tool = (name: string, input: unknown, step: number) => ({
+      kind: "tool" as const,
+      name,
+      step,
+      input,
+      output: null,
+    });
+    const original: Recording = {
+      version: 1,
+      effects: [
+        model(0),
+        tool("lookup", 1, 1),
+        model(1),
+        tool("pay", 10, 2),
+        { kind: "output", value: "ok" },
+      ],
+    };
+    const port: Recording = {
+      version: 1,
+      effects: [
+        model(0),
+        tool("lookup", 1, 1),
+        tool("audit", 1, 1),
+        model(1),
+        tool("pay", 11, 2),
+        { kind: "output", value: "ok" },
+      ],
+    };
+    const report = compareRecordings(original, port);
+    expect(report.divergences.map((d) => d.reason)).toEqual(["extra-effect", "tool-input"]);
+    expect(report.divergence).toBe(report.divergences[0]);
+  });
+
+  test("a per-call match allows a shape change made on purpose, in replay and in comparison", async () => {
+    const recording = await recordOriginal();
+    const allowFirst = (expected: RecordedModelCall, actual: RecordedModelCall) =>
+      expected.call === 0 || sameModelCallShape(expected, actual);
+
+    const strict = createRecorder({ replay: recording });
+    await expect(
+      generateText({ model: strict.model(new MockLanguageModelV3()), prompt: "no tools" }),
+    ).rejects.toThrow(RecordingDivergenceError);
+
+    const lenient = createRecorder({ replay: recording, modelCalls: allowFirst });
+    await generateText({
+      model: lenient.model(new MockLanguageModelV3()),
+      prompt: "no tools",
+    }).catch(() => undefined);
+    const report = compareRecordings(recording, lenient.recording, { modelCalls: allowFirst });
+    expect(report.divergences.map((d) => d.reason)).not.toContain("model-call-shape");
+  });
+
+  test("a tool the original ran synchronously replays synchronously", () => {
+    const recorder = createRecorder();
+    const add = recorder.tool("add", (pair: [number, number]) => pair[0] + pair[1]);
+    expect(add([1, 2])).toBe(3);
+    const replay = createRecorder({ replay: JSON.parse(JSON.stringify(recorder.recording)) });
+    const replayed = replay.tool("add", (pair: [number, number]) => pair[0] + pair[1]);
+    expect(replayed([1, 2])).toBe(3);
+    expect(compareRecordings(recorder.recording, replay.recording).equivalent).toBe(true);
   });
 
   test("parallel tool calls compare equal in any finishing order", () => {
@@ -261,7 +340,7 @@ describe("verified equivalence (AI SDK)", () => {
     };
     const a: Recording = { version: 1, effects: [model, tool("a", 1), tool("b", 2)] };
     const b: Recording = { version: 1, effects: [model, tool("b", 2), tool("a", 1)] };
-    expect(compareRecordings(a, b)).toEqual({ equivalent: true });
+    expect(compareRecordings(a, b)).toEqual({ equivalent: true, divergences: [] });
   });
 });
 
@@ -335,7 +414,10 @@ describe("verified equivalence (openai client)", () => {
       }),
     );
     replay.output(result.status === "done" ? result.output : undefined);
-    expect(compareRecordings(recording, replay.recording)).toEqual({ equivalent: true });
+    expect(compareRecordings(recording, replay.recording)).toEqual({
+      equivalent: true,
+      divergences: [],
+    });
   });
 
   test("streamed chunks record and replay as an async iterable", async () => {
@@ -359,7 +441,10 @@ describe("verified equivalence (openai client)", () => {
     for await (const chunk of replayed) again += chunk.choices[0]?.delta.content ?? "";
     replay.output(again);
     expect(again).toBe("Hi there");
-    expect(compareRecordings(recorder.recording, replay.recording)).toEqual({ equivalent: true });
+    expect(compareRecordings(recorder.recording, replay.recording)).toEqual({
+      equivalent: true,
+      divergences: [],
+    });
   });
 
   test("prototype methods that call create through this, like responses.parse, survive and record", async () => {

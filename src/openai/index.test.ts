@@ -622,3 +622,162 @@ describe("createOpenAiExecutors: tool loop", () => {
     expect(create.mock.calls[0]![0]).not.toHaveProperty("tool_choice");
   });
 });
+
+describe("createOpenAiExecutors: api 'responses'", () => {
+  function responsesClient(create: (params: any, options?: any) => unknown) {
+    return { responses: { create } } as never;
+  }
+  const message = (text: string) => ({
+    type: "message",
+    role: "assistant",
+    content: [{ type: "output_text", text }],
+  });
+  const functionCall = (name: string, args: unknown, call_id = "call_1") => ({
+    type: "function_call",
+    call_id,
+    name,
+    arguments: typeof args === "string" ? args : JSON.stringify(args),
+  });
+  const usage = { input_tokens: 3, output_tokens: 2, total_tokens: 5 };
+
+  test("generateText: text via responses.create with input items and mapped usage", async () => {
+    const create = vi.fn(async (_params: any) => ({
+      status: "completed",
+      output: [message("hello")],
+      usage,
+    }));
+    const { generateText } = createOpenAiExecutors({
+      client: responsesClient(create),
+      api: "responses",
+    });
+    const result = await generateText(
+      textRequest({ system: "Be terse.", maxOutputTokens: 10 } as never),
+    );
+    expect(create.mock.calls[0]![0]).toMatchObject({
+      model: "quick",
+      input: [
+        { role: "system", content: "Be terse." },
+        { role: "user", content: "hi" },
+      ],
+      max_output_tokens: 10,
+    });
+    expect(result).toMatchObject({
+      result: "hello",
+      usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+      finishReason: "stop",
+    });
+    expect(result.raw).toEqual(await create.mock.results[0]!.value);
+  });
+
+  test("generateText: structured output goes through text.format json_schema", async () => {
+    const create = vi.fn(async (_params: any) => ({
+      status: "completed",
+      output: [message(JSON.stringify({ result: { answer: "42" } }))],
+    }));
+    const { generateText } = createOpenAiExecutors({
+      client: responsesClient(create),
+      api: "responses",
+    });
+    const result = await generateText(textRequest({ outputSchema } as never));
+    expect(create.mock.calls[0]![0].text.format).toMatchObject({
+      type: "json_schema",
+      name: "output",
+    });
+    expect(result.result).toEqual({ answer: "42" });
+  });
+
+  test("generateText: tool loop via function_call / function_call_output, bounded by maxSteps", async () => {
+    const create = vi.fn(async (_params: any) =>
+      create.mock.calls.length === 1
+        ? { status: "completed", output: [functionCall("lookup", { q: "cats" })], usage }
+        : { status: "completed", output: [message("Cats are great.")], usage },
+    );
+    const { generateText } = createOpenAiExecutors({
+      client: responsesClient(create),
+      api: "responses",
+    });
+    const result = await generateText(
+      textRequest({
+        tools: {
+          lookup: {
+            description: "Look it up",
+            inputSchema: z.object({ q: z.string() }),
+            execute: ({ q }: { q: string }) => ({ found: q }),
+          },
+        },
+        maxSteps: 3,
+      } as never),
+    );
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[0]![0].tools[0]).toMatchObject({
+      type: "function",
+      name: "lookup",
+      description: "Look it up",
+    });
+    expect(create.mock.calls[1]![0].input.slice(-2)).toEqual([
+      { type: "function_call", call_id: "call_1", name: "lookup", arguments: '{"q":"cats"}' },
+      { type: "function_call_output", call_id: "call_1", output: '{"found":"cats"}' },
+    ]);
+    expect(result.result).toBe("Cats are great.");
+    expect(result.usage).toEqual({ inputTokens: 6, outputTokens: 4, totalTokens: 10 });
+  });
+
+  test("streamText: forwards output_text deltas and takes usage from response.completed", async () => {
+    const create = vi.fn(async function* (_params: any) {
+      yield { type: "response.output_text.delta", delta: "Hel" };
+      yield { type: "response.output_text.delta", delta: "lo" };
+      yield { type: "response.completed", response: { status: "completed", output: [], usage } };
+    });
+    const { streamText } = createOpenAiExecutors({
+      client: responsesClient((params) => create(params)),
+      api: "responses",
+    });
+    const chunks: string[] = [];
+    const result = await streamText(textRequest(), {
+      onChunk: (c: string) => chunks.push(c),
+    } as never);
+    expect(create.mock.calls[0]![0].stream).toBe(true);
+    expect(chunks).toEqual(["Hel", "lo"]);
+    expect(result).toMatchObject({
+      result: "Hello",
+      usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+      finishReason: "stop",
+    });
+  });
+
+  const decisionRequest = {
+    name: "pick",
+    model: "quick",
+    prompt: "choose",
+    events: [{ type: "approve", toolName: "approve", inputSchema: z.object({ note: z.string() }) }],
+    attempts: [],
+  } as unknown as AgentDecisionRequest;
+
+  test("decide: forces a function tool and maps the call back to an event", async () => {
+    const create = vi.fn(async (_params: any) => ({
+      status: "completed",
+      output: [functionCall("approve", { note: "ok", type: "nope" })],
+    }));
+    const { decide } = createOpenAiExecutors({ client: responsesClient(create), api: "responses" });
+    const result = await decide(decisionRequest);
+    expect(create.mock.calls[0]![0]).toMatchObject({
+      tool_choice: "required",
+      tools: [{ type: "function", name: "approve" }],
+    });
+    expect(result.event).toEqual({ type: "approve", note: "ok" });
+    expect(result.finishReason).toBe("tool-calls");
+  });
+
+  test("decide: an unknown tool or non-JSON arguments fail like the chat path", async () => {
+    const unknown = createOpenAiExecutors({
+      client: responsesClient(async () => ({ output: [functionCall("other", {})] })),
+      api: "responses",
+    });
+    await expect(unknown.decide(decisionRequest)).rejects.toThrow(/unknown tool 'other'/);
+    const invalid = createOpenAiExecutors({
+      client: responsesClient(async () => ({ output: [functionCall("approve", "{not json")] })),
+      api: "responses",
+    });
+    await expect(invalid.decide(decisionRequest)).rejects.toThrow(SyntaxError);
+  });
+});
