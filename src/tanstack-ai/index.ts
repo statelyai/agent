@@ -35,6 +35,7 @@ import {
 } from "../text-logic.js";
 import { AgentTruncatedError } from "../errors.js";
 import { renderDecisionAttempts, type AgentDecisionRequest } from "../decision.js";
+import { unnamedEvent } from "../internal/unnamed-event.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type {
   AgentMessage,
@@ -397,7 +398,13 @@ export function toAgentFinishReason(finishReason: string | null | undefined): Ag
 }
 
 /** A model's tool call, as read off the run's `TOOL_CALL_*` events. */
-export type TanStackAiToolCall = { toolCallId: string; toolName: string; input: unknown };
+export type TanStackAiToolCall = {
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  /** The arguments were not JSON; `input` is their raw text. */
+  invalid?: true;
+};
 
 /** What one `chat()` run produced, folded from its chunks. */
 type RunSummary = {
@@ -405,6 +412,7 @@ type RunSummary = {
   structured: unknown;
   usage: AgentCallUsage | undefined;
   finishReason: AgentFinishReason;
+  modelCalls: number;
   toolCalls: TanStackAiToolCall[];
   messages: AgentMessage[];
   chunks: StreamChunk[];
@@ -448,6 +456,7 @@ async function readRun(
     structured: undefined,
     usage: undefined,
     finishReason: "other",
+    modelCalls: 0,
     toolCalls: [],
     messages: [],
     chunks: [],
@@ -521,6 +530,7 @@ async function readRun(
           chunk.finishReason ??
           (chunk.metadata?.tanstack as { finishReason?: string | null } | undefined)?.finishReason;
         summary.finishReason = toAgentFinishReason(finishReason);
+        summary.modelCalls++;
         if (chunk.usage && !Array.isArray(chunk.usage)) {
           summary.usage = addUsage(summary.usage, toAgentCallUsage(chunk.usage));
         }
@@ -530,8 +540,14 @@ async function readRun(
         throw new TanStackAiRunError(chunk.message, chunk.code ?? chunk.error?.code);
     }
   }
+  const invalid = new Set<string>();
   for (const { part, json } of args.values()) {
-    part.input = json ? JSON.parse(json) : {};
+    try {
+      part.input = json ? JSON.parse(json) : {};
+    } catch {
+      part.input = json;
+      invalid.add(part.toolCallId);
+    }
   }
   flushAssistant();
   flushResults();
@@ -539,6 +555,7 @@ async function readRun(
     toolCallId: part.toolCallId,
     toolName: part.toolName,
     input: part.input,
+    ...(invalid.has(part.toolCallId) ? { invalid: true as const } : {}),
   }));
   return summary;
 }
@@ -624,6 +641,8 @@ export type TanStackAiGenerateResult = {
   usage?: AgentCallUsage;
   /** Why the run stopped, normalized to the portable {@link AgentFinishReason}. */
   finishReason: AgentFinishReason;
+  /** Model turns the run made: one per tool-loop iteration. */
+  modelCalls: number;
   /** Every tool call the model made during the run. */
   toolCalls: TanStackAiToolCall[];
   /** The run's response messages — each turn's assistant text and tool
@@ -641,6 +660,8 @@ export type TanStackAiStreamResult = {
   result: string;
   usage?: AgentCallUsage;
   finishReason: AgentFinishReason;
+  /** Model turns the run made, as on {@link TanStackAiGenerateResult}. */
+  modelCalls: number;
   /** The run's response messages, as on {@link TanStackAiGenerateResult}. */
   messages: AgentMessage[];
   raw: StreamChunk[];
@@ -923,6 +944,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
         ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
         ...usageField(run.usage),
         finishReason: run.finishReason,
+        modelCalls: run.modelCalls,
         toolCalls: run.toolCalls,
         messages: run.messages,
         raw: run.chunks,
@@ -935,6 +957,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
       result: run.text,
       ...usageField(run.usage),
       finishReason: run.finishReason,
+      modelCalls: run.modelCalls,
       toolCalls: run.toolCalls,
       messages: run.messages,
       raw: run.chunks,
@@ -973,6 +996,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
       result: run.text,
       ...usageField(run.usage),
       finishReason: run.finishReason,
+      modelCalls: run.modelCalls,
       messages: run.messages,
       raw: run.chunks,
     };
@@ -995,15 +1019,23 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
     );
 
     const toolCall = run.toolCalls[0];
-    if (!toolCall) {
-      throw new Error("createTanStackAiExecutors: decide — model did not call an event tool.");
-    }
+    // An answer that names no candidate is retried, not thrown.
+    const unnamed = (call?: {
+      toolName: string;
+      invalidJson?: boolean;
+    }): TanStackAiDecideResult => ({
+      event: unnamedEvent(
+        call,
+        request.events.map((event) => event.toolName),
+      ),
+      ...usageField(run.usage),
+      finishReason: run.finishReason,
+      raw: run.chunks,
+    });
+    if (!toolCall) return unnamed();
     const chosenEvent = request.events.find((event) => event.toolName === toolCall.toolName);
-    if (!chosenEvent) {
-      throw new Error(
-        `createTanStackAiExecutors: decide — model called unknown tool '${toolCall.toolName}'.`,
-      );
-    }
+    if (!chosenEvent) return unnamed(toolCall);
+    if (toolCall.invalid) return unnamed({ toolName: toolCall.toolName, invalidJson: true });
 
     return {
       // The event's own `type` is spread LAST so it always wins: a stray

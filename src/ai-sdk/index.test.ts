@@ -10,7 +10,11 @@ type LanguageModelStreamPart = MockStreamResult extends { stream: ReadableStream
   ? P
   : never;
 import { tool, type Experimental_DecisionModel } from "ai";
-import { resolveDecision, type AgentDecisionRequest } from "../decision.js";
+import {
+  AgentDecisionExhaustedError,
+  resolveDecision,
+  type AgentDecisionRequest,
+} from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools } from "../types.js";
 import { createAiSdkExecutors, parseModelRef } from "./index.js";
@@ -562,6 +566,7 @@ describe("maxSteps (multi-step tool loops)", () => {
 
     expect(calls).toBe(3);
     expect(result.result).toBe("done");
+    expect(result.modelCalls).toBe(3);
   });
 
   test("streamText stays single-step when maxSteps is absent (regression: was ignored)", async () => {
@@ -822,6 +827,7 @@ describe("maxSteps (multi-step tool loops)", () => {
 
     expect(calls).toBe(3);
     expect(result.result).toBe("done");
+    expect(result.modelCalls).toBe(3);
   });
 
   test("only the typed maxSteps controls the tool loop", async () => {
@@ -849,6 +855,7 @@ describe("maxSteps (multi-step tool loops)", () => {
 
     expect(calls).toBe(3);
     expect(result.result).toBe("done");
+    expect(result.modelCalls).toBe(3);
   });
 });
 
@@ -1290,6 +1297,105 @@ describe("createAiSdkExecutors model sources", () => {
     expect(() => createAiSdkExecutors(bareMachine)).toThrow(
       /got a machine whose setupAgent\(\.\.\.\) declared no models/,
     );
+  });
+});
+
+describe("createAiSdkExecutors — decide answers that name no candidate", () => {
+  type Answer = { toolName: string; input: string } | string;
+  // One answer per model call, in order: a tool call, or plain text.
+  function answering(...answers: Answer[]) {
+    let call = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        const answer = answers[call++]!;
+        return {
+          content: [
+            typeof answer === "string"
+              ? { type: "text" as const, text: answer }
+              : { type: "tool-call" as const, toolCallId: `call-${call}`, ...answer },
+          ],
+          finishReason: { unified: "tool-calls" as const, raw: "tool_calls" },
+          usage: {
+            inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 1, text: 1, reasoning: 0 },
+          },
+          warnings: [],
+        };
+      },
+    });
+    return createAiSdkExecutors({ models: { m: model } }).decide;
+  }
+  const request: AgentDecisionRequest = {
+    kind: "decision",
+    id: "d1",
+    model: "m",
+    prompt: "choose",
+    events: [
+      {
+        type: "approve",
+        toolName: "send_event_approve",
+        inputSchema: z.object({ note: z.string() }),
+      },
+      { type: "reject", toolName: "send_event_reject" },
+    ],
+    attempts: [],
+  };
+  const reject = { toolName: "send_event_reject", input: "{}" };
+  async function resolveWith(...answers: Answer[]) {
+    const decide = answering(...answers);
+    const seen: AgentDecisionRequest[] = [];
+    const event = await resolveDecision(request, {
+      decide: (attempt, info) => (seen.push(attempt), decide(attempt, info)),
+    });
+    return { event, reasons: seen.at(-1)!.attempts.map((attempt) => attempt.reason) };
+  }
+
+  test("a text answer is retried, its usage still reported", async () => {
+    const result = await answering("I approve.")(request);
+    expect(result.event.type).toBe(
+      "no tool was called (call exactly one of: send_event_approve, send_event_reject)",
+    );
+    expect(result.usage).toMatchObject({ inputTokens: 3, outputTokens: 1 });
+
+    expect(await resolveWith("I approve.", reject)).toEqual({
+      event: { type: "reject" },
+      reasons: [
+        "'no tool was called (call exactly one of: send_event_approve, send_event_reject)' is " +
+          "not among the currently allowed events: approve, reject.",
+      ],
+    });
+  });
+
+  test("a call to an unknown tool is retried, naming the valid tools", async () => {
+    expect(await resolveWith({ toolName: "send_event_quit", input: "{}" }, reject)).toEqual({
+      event: { type: "reject" },
+      reasons: [
+        "'tool 'send_event_quit' was not offered (valid tools: send_event_approve, " +
+          "send_event_reject)' is not among the currently allowed events: approve, reject.",
+      ],
+    });
+  });
+
+  test("malformed tool arguments are retried with a reason that says so", async () => {
+    const { event, reasons } = await resolveWith(
+      { toolName: "send_event_approve", input: '{"note": "LG' },
+      reject,
+    );
+    expect(event).toEqual({ type: "reject" });
+    expect(reasons).toEqual([
+      expect.stringContaining("the arguments for tool 'send_event_approve' were not valid JSON"),
+    ]);
+  });
+
+  test("answers that never name a candidate exhaust the retries", async () => {
+    const decide = answering("no", "no", "no");
+    const error = await resolveDecision(request, { decide }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
+    expect((error as AgentDecisionExhaustedError).attempts.map((a) => a.failure)).toEqual([
+      "unknown-event",
+      "unknown-event",
+      "unknown-event",
+    ]);
   });
 });
 

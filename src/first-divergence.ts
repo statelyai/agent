@@ -1,3 +1,4 @@
+import { canonicalEventJson } from "./event-log.js";
 import { isRecord } from "./internal/is-record.js";
 import { statePaths, traceSteps, type TraceStep } from "./internal/trace-states.js";
 import { matchesTrajectory, type TrajectoryItem } from "./trajectory.js";
@@ -11,8 +12,13 @@ export interface FirstDivergenceOptions {
    * `from|event|to`. Override to leave out what may differ between equivalent
    * runs, such as a parallel region that only logs. Steps are still compared
    * in order. Trace references only.
+   *
+   * `"payload"` also compares the event's payload, such as an actor's output,
+   * as key-order-independent JSON without its `sessionId`, and with errors as
+   * `{ name, message }`. Use it for deterministic or mocked runs; live model
+   * outputs differ on every run.
    */
-  key?: (step: TraceStep) => string;
+  key?: ((step: TraceStep) => string) | "payload";
 }
 
 /** Where a run first departs from its reference. See {@link firstDivergence}. */
@@ -30,6 +36,18 @@ export interface Divergence {
 }
 
 const defaultKey = (step: TraceStep) => `${step.from.join(",")}|${step.event}|${step.to.join(",")}`;
+
+// `sessionId` differs between equivalent runs. An error is an `Error` in a live
+// trace and `{ name, message, stack }` in a serialized one.
+const payloadKey = (step: TraceStep) => {
+  if (!isRecord(step.payload)) return `${defaultKey(step)}|${canonicalEventJson(step.payload)}`;
+  const { sessionId: _sessionId, ...payload } = step.payload;
+  const error: unknown = payload.error;
+  if (error instanceof Error || isRecord(error)) {
+    payload.error = { name: error.name, message: error.message };
+  }
+  return `${defaultKey(step)}|${canonicalEventJson(payload)}`;
+};
 
 // An empty reference is a trace with no steps. A trace that ended before its
 // first transition still carries `run.*` events, which no trajectory holds.
@@ -80,7 +98,7 @@ export function firstDivergence(
         traceSteps(reference as readonly { readonly type: string }[]).filter(
           (step) => !step.ignored,
         ),
-        options.key ?? defaultKey,
+        options.key === "payload" ? payloadKey : (options.key ?? defaultKey),
       )
     : againstTrajectory(actual, steps, reference as readonly TrajectoryItem[]);
 }

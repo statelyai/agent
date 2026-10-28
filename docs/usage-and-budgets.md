@@ -32,16 +32,18 @@ result.usage.modelCalls; // number, always present
 result.usage.totalTokens; // number | undefined (only calls that reported it)
 ```
 
-| Field                                                                                | Meaning                                                                                         |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `modelCalls`                                                                         | Model and decision calls this run made. Always a number. Each decision retry counts separately. |
-| `inputTokens`, `outputTokens`, `totalTokens`, `reasoningTokens`, `cachedInputTokens` | Partial sums. See the notes below.                                                              |
+| Field                                                                                | Meaning                                                                                                                 |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `modelCalls`                                                                         | Model and decision calls this run made. Always a number. Each decision retry and each tool-loop step counts separately. |
+| `inputTokens`, `outputTokens`, `totalTokens`, `reasoningTokens`, `cachedInputTokens` | Partial sums. See the notes below.                                                                                      |
 
 Four things affect how you read these numbers.
 
 - Token fields are partial sums. Each field sums only the calls that reported it, and is `undefined` only when no call reported it. A run that mixes a real SDK executor, which reports usage, with a scripted mock, which does not, yields a sum over the reporting subset only. Do not treat a token total as the whole run unless every executor reports usage.
 - `modelCalls` is always present, even when nothing reports tokens.
 - Usage is per run, not per conversation. A resumed run counts only its own calls, not the history behind `snapshot` or `events`. Add prior results' totals yourself for a conversation-wide figure.
+- A tool loop is one request but several model calls. An executor reports its steps as `modelCalls` on its result, and the adapters do. An executor that reports none counts as one call.
+- Judgments are not counted. An `experimental_decide` actor is an ordinary actor, so its calls appear in neither `usage` nor `maxModelCalls`. See [Judgments](judgments.md).
 - Usage comes from your executor. `runToQuiescence` reads `usage` from the raw executor result. That is the `usage` field alongside `result`, on the flat field names the AI SDK also uses, from an adapter or any custom executor following that shape. Non-finite values are dropped.
 
 ### Billing
@@ -118,7 +120,22 @@ if (result.status === "error" && result.cause === "max-model-calls") {
 - The overrun is thrown into the invoke that would have made the call, as an `AgentMaxModelCallsExceededError` with `code: 'max-model-calls'`. If nothing handles it, the run settles as `{ status: 'error', cause: 'max-model-calls' }`, with `usage`, `snapshot`, and `events` intact.
 - An `onError` on that invoke catches the overrun like any other failure. Branch on the code to route the budget breach separately from a model or tool failure.
 - A blanket `onError: { target: 'someState' }` also catches the overrun, so the run settles `done` at the cap instead of `error`. That is a valid choice, as long as it is deliberate.
-- `maxModelCalls` counts calls, not tokens or dollars. It is host-owned, so the machine cannot read how much budget is left.
+- `maxModelCalls` counts calls, not tokens or dollars. A tool loop's steps are counted after its request returns, so the loop can pass the cap and the next call is the one refused.
+- The machine reads the budget from [`@agent.usage`](#the-agentusage-event): each event carries `budget.modelCalls` and `budget.maxModelCalls`. Guard on the difference to keep a call in reserve, such as for a final report.
+
+### A budget across turns
+
+`maxModelCalls` is per run. For a conversation that resumes once per turn, pass the calls earlier turns spent as `modelCallsSpent`. They count against `maxModelCalls` and appear in `budget.modelCalls`, but not in this run's `usage.modelCalls`.
+
+```ts no-check
+const result = await runToQuiescence(
+  createAgentRuntime(machine, { executors, maxModelCalls: 30, modelCallsSpent: thread.modelCalls }),
+  { snapshot, event },
+);
+thread.modelCalls += result.usage.modelCalls;
+```
+
+`runAgent` with `onIdle` does this between its passes, so `maxModelCalls` bounds the whole call.
 
 ```ts no-check
 onError: [
@@ -160,7 +177,7 @@ await runToQuiescence(createAgentRuntime(machine, { executors: withBudget(execut
 });
 ```
 
-A wrapper is still host-side. The machine cannot read the remaining budget or react to it. For that, use `@agent.usage` and a guard.
+A wrapper is still host-side. The machine cannot read its counts or react to them. For that, use `@agent.usage` and a guard.
 
 ## The `@agent.usage` event
 
@@ -184,6 +201,7 @@ The payload has this shape.
   src?: string,                         // the request's invoke src
   model?: string,                       // the model ref it targeted
   name?: string,                        // a text request's registered name
+  budget?: { modelCalls, maxModelCalls }, // counted against maxModelCalls so far, this call included
 }
 ```
 

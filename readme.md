@@ -65,14 +65,15 @@ Requirements:
 - TypeScript 5.4 or newer. Older versions accept the code, but callback parameters in `createMachine` silently become `any`.
 - A [Standard Schema](https://standardschema.dev) library: zod 4, zod 3.24 or newer, Valibot, or ArkType. `setupAgent` throws `invalid-schema` for zod 3.23 and earlier.
 - The package is ESM-first. CommonJS builds are published too, so `require()` works. Subpath imports (`@statelyai/agent/testing`) resolve under every `moduleResolution`, including `node`.
-- `@statelyai/agent/ai-sdk` needs `ai` 7.0.128 or newer. Provider packages must match your `ai` major: `@ai-sdk/openai@^4` pairs with `ai@^7`. A bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch the `ai` peer. `@statelyai/agent/openai` needs `openai` 5 or newer.
+- `@statelyai/agent/ai-sdk` needs `ai` 7.0.128 or newer. Provider packages must match your `ai` major: `@ai-sdk/openai@^4` pairs with `ai@^7`. A bare `@ai-sdk/openai` resolves to `@latest`, which can mismatch your `ai`. `@statelyai/agent/openai` needs `openai` 5 or newer, and `@statelyai/agent/tanstack-ai` needs `@tanstack/ai` 0.66 or newer.
+- Adapter SDKs (`ai`, `openai`, `@tanstack/ai`, `ajv`) are optional peers with no version range, so an app on an older SDK installs the core without `--legacy-peer-deps`. An adapter used with an older SDK fails when imported or called, not at install.
 
 An app that already uses XState 4 or 5 keeps it: put the agent in its own workspace package. See [Use in an XState 4 or 5 app](https://github.com/statelyai/agent/blob/next/docs/xstate-4-and-5-apps.md). If both versions land in one `node_modules`, the package fails with errors that do not mention a version:
 
-| Error | Cause |
-| --- | --- |
-| `createAsyncLogic is not a function` | `xstate` resolved to 4 or 5 from CommonJS |
-| `Cannot find module '…/node_modules/xstate/durable'` | `xstate` resolved to 4 or 5 from ESM |
+| Error                                                                                                                           | Cause                                       |
+| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `createAsyncLogic is not a function`                                                                                            | `xstate` resolved to 4 or 5 from CommonJS   |
+| `Cannot find module '…/node_modules/xstate/durable'`                                                                            | `xstate` resolved to 4 or 5 from ESM        |
 | `unmet peer dependency "xstate@6.0.0-alpha.69"` (pnpm, npm) or `has incorrect peer dependency "xstate@6.0.0-alpha.69"` (yarn 1) | The install's only warning of the two above |
 
 ## Agent skills
@@ -84,14 +85,14 @@ mkdir -p .claude/skills
 cp -R node_modules/@statelyai/agent/skills/* .claude/skills/
 ```
 
-| Skill | What it does |
-| --- | --- |
-| [`graph-engineering`](https://github.com/statelyai/agent/blob/next/skills/graph-engineering/SKILL.md) | Finds which step a project is at and routes to the next skill |
-| [`loop-to-machine`](https://github.com/statelyai/agent/blob/next/skills/loop-to-machine/SKILL.md) | Converts existing agent code into a machine and checks parity with `compareRuns` |
-| [`generate-machine`](https://github.com/statelyai/agent/blob/next/skills/generate-machine/SKILL.md) | Authors a JSON policy machine from scratch and runs `verifyAgentConfig` |
-| [`add-traces`](https://github.com/statelyai/agent/blob/next/skills/add-traces/SKILL.md) | Stamps and persists every run so it replays |
-| [`add-evals`](https://github.com/statelyai/agent/blob/next/skills/add-evals/SKILL.md) | Writes evals per state, at the cheapest level that catches the failure |
-| [`improve-machine`](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md) | Improves a policy from traces and hands the change to a person as a pull request |
+| Skill                                                                                                 | What it does                                                                     |
+| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [`graph-engineering`](https://github.com/statelyai/agent/blob/next/skills/graph-engineering/SKILL.md) | Finds which step a project is at and routes to the next skill                    |
+| [`loop-to-machine`](https://github.com/statelyai/agent/blob/next/skills/loop-to-machine/SKILL.md)     | Converts existing agent code into a machine and checks parity with `compareRuns` |
+| [`generate-machine`](https://github.com/statelyai/agent/blob/next/skills/generate-machine/SKILL.md)   | Authors a JSON policy machine from scratch and runs `verifyAgentConfig`          |
+| [`add-traces`](https://github.com/statelyai/agent/blob/next/skills/add-traces/SKILL.md)               | Stamps and persists every run so it replays                                      |
+| [`add-evals`](https://github.com/statelyai/agent/blob/next/skills/add-evals/SKILL.md)                 | Writes evals per state, at the cheapest level that catches the failure           |
+| [`improve-machine`](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md)     | Improves a policy from traces and hands the change to a person as a pull request |
 
 ## Quick start
 

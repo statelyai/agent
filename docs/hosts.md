@@ -91,7 +91,7 @@ const executors = createOpenAiExecutors({
 await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 ```
 
-`client` is injected, so the API key, base URL, and transport stay with the host. `openai` is an optional peer dependency, accepted at `>=5.0.0 <8`, and is imported for types only.
+`client` is injected, so the API key, base URL, and transport stay with the host. `openai` 5 or newer is required. It is an optional peer dependency with no version range, so an app on `openai` 4 still installs the core, and it is imported for types only.
 
 `resolveModel` maps a machine's model ref to a real OpenAI model id. It defaults to identity, for machines whose refs are already ids.
 

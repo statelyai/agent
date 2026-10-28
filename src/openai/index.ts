@@ -33,6 +33,7 @@ import {
 } from "../text-logic.js";
 import { AgentTruncatedError } from "../errors.js";
 import { renderDecisionAttempts, type AgentDecisionRequest } from "../decision.js";
+import { unnamedEvent } from "../internal/unnamed-event.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type {
   AgentMessage,
@@ -424,6 +425,8 @@ export type OpenAiGenerateResult = {
   usage?: AgentCallUsage;
   /** Why the call stopped, normalized to the portable {@link AgentFinishReason}. OpenAI's own value stays on `raw`. */
   finishReason: AgentFinishReason;
+  /** OpenAI calls the tool loop made. */
+  modelCalls: number;
   /** The untouched OpenAI response. */
   raw: unknown;
 };
@@ -699,6 +702,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
         ...usageField(usage),
         finishReason,
+        modelCalls: step,
         raw: response,
       };
     }
@@ -709,6 +713,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       result: content ?? "",
       ...usageField(usage),
       finishReason,
+      modelCalls: step,
       raw: response,
     };
   };
@@ -788,19 +793,27 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     )) as ChatCompletion;
 
     const toolCall = response.choices[0]?.message.tool_calls?.[0];
-    if (!toolCall || toolCall.type !== "function") {
-      throw new Error("createOpenAiExecutors: decide — model did not call an event tool.");
-    }
-    const chosenEvent = request.events.find((event) => event.toolName === toolCall.function.name);
-    if (!chosenEvent) {
-      throw new Error(
-        `createOpenAiExecutors: decide — model called unknown tool '${toolCall.function.name}'.`,
-      );
-    }
+    // An answer that names no candidate is retried, not thrown.
+    const unnamed = (call?: { toolName: string; invalidJson?: boolean }): OpenAiDecideResult => ({
+      event: unnamedEvent(
+        call,
+        request.events.map((event) => event.toolName),
+      ),
+      ...usageField(toAgentCallUsage(response.usage)),
+      finishReason: toAgentFinishReason(response.choices[0]?.finish_reason),
+      raw: response,
+    });
+    if (!toolCall || toolCall.type !== "function") return unnamed();
+    const toolName = toolCall.function.name;
+    const chosenEvent = request.events.find((event) => event.toolName === toolName);
+    if (!chosenEvent) return unnamed({ toolName });
 
-    const args: unknown = toolCall.function.arguments
-      ? JSON.parse(toolCall.function.arguments)
-      : {};
+    let args: unknown = {};
+    try {
+      if (toolCall.function.arguments) args = JSON.parse(toolCall.function.arguments);
+    } catch {
+      return unnamed({ toolName, invalidJson: true });
+    }
 
     return {
       // The event's own `type` is spread LAST so it always wins: a stray

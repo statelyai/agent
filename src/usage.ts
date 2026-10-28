@@ -13,4 +13,10 @@ export interface AgentUsageEvent extends EventObject {
   src?: string;
   model?: string;
   name?: string;
+  /**
+   * The run's model-call budget after this call: `modelCalls` counted against
+   * `maxModelCalls` so far, including `modelCallsSpent`. Guard on
+   * `maxModelCalls - modelCalls` to keep calls in reserve.
+   */
+  budget?: { modelCalls: number; maxModelCalls: number };
 }

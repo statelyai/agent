@@ -6,11 +6,13 @@ import {
   Output,
   streamText as aiStreamText,
   stepCountIs,
+  ToolChoiceViolationError,
   type Experimental_DecisionModel,
   type FinishReason,
   type FlexibleSchema,
   type JSONValue,
   type LanguageModel,
+  type LanguageModelUsage,
   type ModelMessage,
   type ToolSet,
   type TypedToolCall,
@@ -32,6 +34,7 @@ import {
   type AgentDecisionRequest,
 } from "../decision.js";
 import { isRecord } from "../internal/is-record.js";
+import { unnamedEvent } from "../internal/unnamed-event.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
 import {
   defined,
@@ -273,6 +276,8 @@ export type AiSdkGenerateResult = {
   usage: AiSdkCallUsage;
   /** Why the call stopped, normalized to the portable {@link AgentFinishReason}. The SDK's own value stays on `raw`. */
   finishReason: AgentFinishReason;
+  /** Model calls the SDK made: one per tool-loop step. */
+  modelCalls: number;
   toolCalls: TypedToolCall<ToolSet>[];
   toolResults: TypedToolResult<ToolSet>[];
   /** AI SDK response messages, including tool calls/results from every step. */
@@ -287,6 +292,8 @@ export type AiSdkStreamResult = {
   usage: AiSdkCallUsage;
   /** Why the stream stopped, normalized to the portable {@link AgentFinishReason}. The SDK's own value stays on `raw`. */
   finishReason: AgentFinishReason;
+  /** Model calls the SDK made: one per tool-loop step. */
+  modelCalls: number;
   /** AI SDK response messages, including tool calls/results from every step. */
   messages: ModelMessage[];
   /** The untouched AI SDK result. */
@@ -430,6 +437,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
         ...(parsed.reasoning !== undefined ? { reasoning: parsed.reasoning } : {}),
         usage: toAgentCallUsage(result.usage),
         finishReason: toAgentFinishReason(result.finishReason),
+        modelCalls: result.steps.length,
         toolCalls: result.toolCalls,
         toolResults: result.toolResults,
         messages: result.responseMessages,
@@ -444,6 +452,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       result: result.text,
       usage: toAgentCallUsage(result.usage),
       finishReason: toAgentFinishReason(result.finishReason),
+      modelCalls: result.steps.length,
       toolCalls: result.toolCalls,
       toolResults: result.toolResults,
       messages: result.responseMessages,
@@ -473,6 +482,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       result: await result.text,
       usage: toAgentCallUsage(await result.usage),
       finishReason: toAgentFinishReason(await result.finishReason),
+      modelCalls: (await result.steps).length,
       messages: await result.responseMessages,
       raw: result,
     } satisfies AiSdkStreamResult;
@@ -487,11 +497,29 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const tools = choice ? choice.tools : toAiSdkEventTools(request.events);
     const messages = toDecisionMessages(request);
 
+    const settings = { ...callSettings(options, request), ...defined(modelSettings ?? {}) };
+    const toolNames = Object.keys(tools);
+    // The call's usage, kept for an answer the SDK rejects by throwing.
+    let callEnd: { usage: LanguageModelUsage; finishReason: FinishReason } | undefined;
+    // An answer that names no candidate is retried, not thrown.
+    const unnamed = (
+      ended: { usage: LanguageModelUsage; finishReason: FinishReason },
+      call?: { toolName: string; invalidJson?: boolean },
+    ) =>
+      ({
+        event: unnamedEvent(call, toolNames),
+        usage: toAgentCallUsage(ended.usage),
+        finishReason: ended.finishReason,
+      }) satisfies AiSdkDecideResult;
+
     const result = await aiGenerateText({
       model,
       abortSignal: info?.signal,
-      ...callSettings(options, request),
-      ...defined(modelSettings ?? {}),
+      ...settings,
+      onLanguageModelCallEnd: (event) => {
+        callEnd = event;
+        return settings.onLanguageModelCallEnd?.(event);
+      },
       system: request.system,
       ...(messages ? { messages, allowSystemInMessages: true } : { prompt: request.prompt ?? "" }),
       tools,
@@ -500,11 +528,22 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       // Shared with the text path, so a decision cannot drift back into
       // writing these unconditionally and erasing the layers above.
       ...toAiSdkGenerationSettings(request),
+    }).catch((error: unknown) => {
+      // A text answer breaks `toolChoice: 'required'`, which the SDK throws.
+      if (ToolChoiceViolationError.isInstance(error) && callEnd) return undefined;
+      throw error;
     });
+    if (!result) return unnamed(callEnd!);
 
     const toolCall = result.toolCalls[0];
-    if (!toolCall) {
-      throw new Error("createAiSdkExecutors: decide — model did not call an event tool.");
+    if (!toolCall) return unnamed(result);
+    // An invalid call keeps its raw text as `input` when that text is not JSON.
+    if (
+      toolCall.invalid &&
+      typeof toolCall.input === "string" &&
+      toolNames.includes(toolCall.toolName)
+    ) {
+      return unnamed(result, { toolName: toolCall.toolName, invalidJson: true });
     }
     if (choice) {
       return {
@@ -514,11 +553,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       } satisfies AiSdkDecideResult;
     }
     const chosenEvent = request.events.find((event) => event.toolName === toolCall.toolName);
-    if (!chosenEvent) {
-      throw new Error(
-        `createAiSdkExecutors: decide — model called unknown tool '${toolCall.toolName}'.`,
-      );
-    }
+    if (!chosenEvent) return unnamed(result, toolCall);
 
     return {
       // The event's own `type` (from the chosen event descriptor) is spread

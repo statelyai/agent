@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
+import { createAsyncLogic } from "xstate";
 import type { AgentDecisionExecutor } from "./decision.js";
 import {
   createAgentRuntime,
@@ -217,6 +218,73 @@ describe("firstDivergence", () => {
     expect(firstDivergence(serialize(actual), serialize(reference))).toEqual(
       firstDivergence(actual, reference),
     );
+  });
+
+  describe('key: "payload"', () => {
+    const agent = setupAgent({
+      input: z.object({}),
+      context: z.object({}),
+      actors: {
+        lookup: createAsyncLogic<{ id: number }>({ run: async () => ({ id: 7 }) }),
+        boom: createAsyncLogic({
+          run: async () => {
+            throw new Error("down");
+          },
+        }),
+      },
+      requests: {
+        classify: {
+          model: "quick",
+          schemas: { input: z.object({}), output: z.string() },
+          prompt: () => "Classify.",
+        },
+      },
+    });
+    // Every output leads to the same states, so only the data differs.
+    const machine = agent.createMachine({
+      context: {},
+      initial: "failing",
+      states: {
+        failing: { invoke: { src: "boom", onError: { target: "looking" } } },
+        looking: { invoke: { src: "lookup", onDone: { target: "classifying" } } },
+        classifying: { invoke: { src: "classify", input: {}, onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const traceOf = async (label: string) => {
+      const trace: AgentTraceEvent[] = [];
+      await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: { generateText: async () => ({ result: label }) },
+          onTrace: (event) => trace.push(event),
+        }),
+        { input: {} },
+      );
+      return trace;
+    };
+
+    test("finds a data-only fault the default key misses", async () => {
+      const actual = await traceOf("review");
+      const reference = await traceOf("alert");
+
+      expect(firstDivergence(actual, reference)).toBeUndefined();
+      expect(firstDivergence(actual, reference, { key: "payload" })).toMatchObject({
+        index: 2,
+        state: "classifying",
+        actual: { payload: { output: { result: "review" } } },
+        expected: { payload: { output: { result: "alert" } } },
+      });
+    });
+
+    test("equivalent runs do not diverge, live or serialized", async () => {
+      const serialize = (trace: AgentTraceEvent[]) =>
+        trace.map((event) => JSON.parse(JSON.stringify(serializeTraceEvent(event))));
+      const actual = await traceOf("alert");
+      const reference = await traceOf("alert");
+
+      expect(firstDivergence(actual, reference, { key: "payload" })).toBeUndefined();
+      expect(firstDivergence(serialize(actual), reference, { key: "payload" })).toBeUndefined();
+    });
   });
 });
 

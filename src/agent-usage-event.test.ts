@@ -130,6 +130,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
       model: "test-model",
       name: "researchStep",
       usage: { totalTokens: 400, inputTokens: 300 },
+      budget: { modelCalls: 1, maxModelCalls: 100 },
     });
   });
 
