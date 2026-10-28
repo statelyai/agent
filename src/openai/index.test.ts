@@ -436,6 +436,8 @@ describe("createOpenAiExecutors: decide", () => {
           verbosity: "low",
           seed: 1,
           stop: ["END"],
+          logprobs: true,
+          prediction: { type: "content", content: "x" },
           service_tier: "flex",
         },
       },
@@ -449,9 +451,29 @@ describe("createOpenAiExecutors: decide", () => {
       text: { verbosity: "low" },
       service_tier: "flex",
     });
-    for (const key of ["reasoning_effort", "max_completion_tokens", "verbosity", "seed", "stop"]) {
+    for (const key of [
+      "reasoning_effort",
+      "max_completion_tokens",
+      "verbosity",
+      "seed",
+      "stop",
+      "logprobs",
+      "prediction",
+    ]) {
       expect(params).not.toHaveProperty(key);
     }
+  });
+
+  test("an incomplete response's call is not accepted as a choice", async () => {
+    const { decide } = createOpenAiExecutors({
+      client: stubResponsesClient(async () =>
+        responseWith([functionCallOutput("send_event_ASK", {})], {
+          status: "incomplete",
+          incomplete_details: { reason: "max_output_tokens" },
+        }),
+      ),
+    });
+    await expect(decide(decisionRequest)).rejects.toThrow(/incomplete \(max_output_tokens\)/);
   });
 
   test("a reply with no tool call is an error", async () => {
@@ -683,6 +705,27 @@ describe("createOpenAiExecutors: tool loop", () => {
     );
     expect(error).toBeInstanceOf(AgentTruncatedError);
     expect(error).toMatchObject({ partialOutput: '{"result":{"answ' });
+  });
+
+  test("an incomplete turn never runs its calls", async () => {
+    const execute = vi.fn(() => "charged");
+    const create = vi.fn(async (_params: any) =>
+      responseWith([functionCallOutput("charge", {})], {
+        status: "incomplete",
+        incomplete_details: { reason: "max_output_tokens" },
+      }),
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+
+    const result = await generateText(
+      textRequest({
+        tools: { charge: { inputSchema: z.object({}), execute } },
+        maxSteps: 2,
+      } as never),
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(result.finishReason).toBe("length");
   });
 
   test("`maxSteps` bounds the loop; the default is a single call", async () => {

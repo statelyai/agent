@@ -491,27 +491,41 @@ export function toAgentResponseFinishReason(
   return response.status === "completed" ? "stop" : "other";
 }
 
+// The Chat Completions settings the Responses API accepts under the same name.
+const RESPONSES_SHARED_SETTINGS = [
+  "metadata",
+  "moderation",
+  "parallel_tool_calls",
+  "prompt_cache_key",
+  "prompt_cache_options",
+  "prompt_cache_retention",
+  "safety_identifier",
+  "service_tier",
+  "store",
+  "temperature",
+  "top_logprobs",
+  "top_p",
+  "user",
+];
+
 /**
- * Translates Chat Completions settings onto the Responses API's names:
- * `reasoning_effort` becomes `reasoning.effort`, `max_completion_tokens` (or
- * `max_tokens`) becomes `max_output_tokens`, and `verbosity` becomes
- * `text.verbosity`. The Responses API has no `seed` or `stop`, so those are
- * dropped, the way the AI SDK's Responses provider drops them. Anything else
- * passes through unchanged.
+ * Translates Chat Completions settings onto the Responses API: the settings it
+ * shares by name pass through, `reasoning_effort` becomes `reasoning.effort`,
+ * `max_completion_tokens` (or `max_tokens`) becomes `max_output_tokens`, and
+ * `verbosity` becomes `text.verbosity`. Everything else is Chat-only (`seed`,
+ * `stop`, `logprobs`, `prediction`, …) and is dropped, the way the AI SDK's
+ * Responses provider drops what it cannot send, rather than failing the call.
  */
 function toResponsesSettings(settings: OpenAiCallSettings) {
-  const {
-    reasoning_effort,
-    max_completion_tokens,
-    max_tokens,
-    verbosity,
-    seed: _seed,
-    stop: _stop,
-    ...rest
-  } = settings;
+  const { reasoning_effort, max_completion_tokens, max_tokens, verbosity } = settings;
+  const shared = Object.fromEntries(
+    Object.entries(settings).filter(
+      ([key, value]) => value !== undefined && RESPONSES_SHARED_SETTINGS.includes(key),
+    ),
+  );
   const maxOutputTokens = max_completion_tokens ?? max_tokens;
   return {
-    ...rest,
+    ...shared,
     ...(reasoning_effort != null ? { reasoning: { effort: reasoning_effort } } : {}),
     ...(maxOutputTokens != null ? { max_output_tokens: maxOutputTokens } : {}),
     ...(verbosity != null ? { text: { verbosity } } : {}),
@@ -527,7 +541,8 @@ function toResponsesSettings(settings: OpenAiCallSettings) {
  * off the installed `openai` package, so it tracks that version instead of
  * restating its vocabulary. Calls that go through the Responses API translate
  * `reasoning_effort`, `max_completion_tokens`, and `verbosity` onto its names
- * and drop `seed` and `stop`.
+ * and drop the settings it has no equivalent for, such as `seed`, `stop`,
+ * `logprobs`, and `prediction`.
  *
  * The request's own fields are excluded: `model`, `messages`, `tools`,
  * `tool_choice`, `response_format`, `n`, and the streaming switches belong to
@@ -882,7 +897,10 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       usage = addAgentCallUsage(usage, toAgentResponseUsage(response.usage));
 
       const calls = functionCalls(response);
-      if (calls.length === 0 || step >= maxSteps) {
+      // An incomplete turn (e.g. cut off at `max_output_tokens`) never runs its
+      // calls: the model did not finish deciding them. It ends the loop with
+      // its finish reason, so a structured request still reports truncation.
+      if (calls.length === 0 || step >= maxSteps || response.status === "incomplete") {
         break;
       }
       // An offered tool with no `execute` hands the call back: the loop ends.
@@ -1048,6 +1066,13 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
       { signal: info?.signal },
     )) as Response;
 
+    // An incomplete turn did not finish choosing, so its call is not a choice.
+    if (response.status === "incomplete") {
+      throw new Error(
+        "createOpenAiExecutors: decide — the response was incomplete " +
+          `(${response.incomplete_details?.reason ?? "unknown reason"}), so no event was chosen.`,
+      );
+    }
     const toolCall = functionCalls(response)[0];
     if (!toolCall) {
       throw new Error("createOpenAiExecutors: decide — model did not call an event tool.");
