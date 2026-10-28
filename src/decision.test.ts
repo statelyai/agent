@@ -112,3 +112,25 @@ describe("createDecisionRequest", () => {
     expect(chosen).toEqual({ type: "REVISE" });
   });
 });
+
+describe("resolveDecision: rejected answers", () => {
+  const request = {
+    id: "pick",
+    events: [{ type: "ASK", toolName: "send_event_ASK" }],
+    attempts: [],
+  } as never;
+
+  test("records an executor's rejection as written and asks again", async () => {
+    const seen: unknown[] = [];
+    const answers = [
+      { rejected: { failure: "invalid-payload" as const, reason: "arguments were not JSON" } },
+      { event: { type: "ASK" } },
+    ];
+    const chosen = await resolveDecision(request, {
+      decide: async (attempt) => (seen.push(attempt.attempts), answers.shift()!),
+    });
+
+    expect(chosen).toEqual({ type: "ASK" });
+    expect(seen[1]).toEqual([{ failure: "invalid-payload", reason: "arguments were not JSON" }]);
+  });
+});

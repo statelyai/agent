@@ -421,37 +421,32 @@ describe("createTanStackAiExecutors — decide", () => {
       models: { quick: new FakeTextAdapter([{ text: "I approve." }]) },
     });
     const result = await decide(decisionRequest());
-    expect(result.event.type).toBe("no tool was called (call exactly one of: approve, reject)");
+    expect(result.rejected).toEqual({
+      failure: "unknown-event",
+      reason: "no tool was called; call exactly one of: approve, reject",
+    });
     expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 2, totalTokens: 7 });
 
     expect(await resolveWith([{ text: "I approve." }, reject])).toEqual({
       event: { type: "REJECT" },
-      reasons: [
-        "'no tool was called (call exactly one of: approve, reject)' is not among the " +
-          "currently allowed events: APPROVE, REJECT.",
-      ],
+      reasons: ["no tool was called; call exactly one of: approve, reject"],
     });
   });
 
   test("a call to an unknown tool is retried, naming the valid tools", async () => {
     expect(await resolveWith([{ toolCalls: [{ name: "escalate" }] }, reject])).toEqual({
       event: { type: "REJECT" },
-      reasons: [
-        "'tool 'escalate' was not offered (valid tools: approve, reject)' is not among the " +
-          "currently allowed events: APPROVE, REJECT.",
-      ],
+      reasons: ["tool 'escalate' was not offered; valid tools: approve, reject"],
     });
   });
 
-  test("malformed tool arguments are retried with a reason that says so", async () => {
+  test("malformed tool arguments are retried as an invalid payload", async () => {
     const { event, reasons } = await resolveWith([
       { toolCalls: [{ name: "approve", args: '{"note": "LG' }] },
       reject,
     ]);
     expect(event).toEqual({ type: "REJECT" });
-    expect(reasons).toEqual([
-      expect.stringContaining("the arguments for tool 'approve' were not valid JSON"),
-    ]);
+    expect(reasons).toEqual(["the arguments for tool 'approve' were not valid JSON"]);
   });
 
   test("answers that never name a candidate exhaust the retries", async () => {

@@ -121,7 +121,7 @@ if (result.status === "error" && result.cause === "max-model-calls") {
 - An `onError` on that invoke catches the overrun like any other failure. Branch on the code to route the budget breach separately from a model or tool failure.
 - A blanket `onError: { target: 'someState' }` also catches the overrun, so the run settles `done` at the cap instead of `error`. That is a valid choice, as long as it is deliberate.
 - `maxModelCalls` counts calls, not tokens or dollars. A tool loop's steps are counted after its request returns, so the loop can pass the cap and the next call is the one refused.
-- The machine reads the budget from [`@agent.usage`](#the-agentusage-event): each event carries `budget.modelCalls` and `budget.maxModelCalls`. Guard on the difference to keep a call in reserve, such as for a final report. Under `provideExecutors`, which has no budget, `budget` is absent.
+- The machine reads the budget from [`@agent.usage`](#the-agentusage-event): each event carries `budget.modelCalls` and `budget.maxModelCalls`. Guard on the difference to keep a call in reserve, such as for a final report. Under `provideExecutors`, which has no budget, `budget` is absent. A decision's `@agent.usage` arrives after the event it chose, so a budget guard that reads it cannot reject that event; when the event ends the machine, the context counter never sees that call, but `result.usage` does.
 
 ### A budget across turns
 

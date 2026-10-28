@@ -34,8 +34,12 @@ import {
   type AgentTextRequest,
 } from "../text-logic.js";
 import { AgentTruncatedError } from "../errors.js";
-import { renderDecisionAttempts, type AgentDecisionRequest } from "../decision.js";
-import { unnamedEvent } from "../internal/unnamed-event.js";
+import {
+  renderDecisionAttempts,
+  type AgentDecisionRejection,
+  type AgentDecisionRequest,
+} from "../decision.js";
+import { rejectedAnswer } from "../internal/rejected-answer.js";
 import { withModelCalls } from "../internal/with-model-calls.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type {
@@ -676,8 +680,10 @@ export type TanStackAiStreamResult = {
 
 /** Raw result shape from {@link TanStackAiExecutors.decide} — the chosen event
  * plus the call metadata, delivered per decision attempt to `onResult`. */
-export type TanStackAiDecideResult = {
-  event: ChosenEvent;
+export type TanStackAiDecideResult = (
+  | { event: ChosenEvent; rejected?: undefined }
+  | { event?: undefined; rejected: AgentDecisionRejection }
+) & {
   usage?: AgentCallUsage;
   finishReason: AgentFinishReason;
   raw: StreamChunk[];
@@ -1036,7 +1042,7 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
       toolName: string;
       invalidJson?: boolean;
     }): TanStackAiDecideResult => ({
-      event: unnamedEvent(
+      rejected: rejectedAnswer(
         call,
         request.events.map((event) => event.toolName),
       ),

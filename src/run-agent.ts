@@ -1305,10 +1305,12 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
 
 // Wraps runCtx's `decide` executor with model-call budgeting and tracing.
 // `self` is the invoking decision leaf actor, threaded to `onTrace` so the
-// provide path can attribute the event to its root actor.
+// provide path can attribute the event to its root actor. Usage is recorded
+// through `recordLater`, so the caller can deliver it after the chosen event.
 function createCountingDecide(
   runCtx: RunAgentBindContext,
   self: BoundActorSelf | undefined,
+  recordLater: (record: () => void) => void,
 ): AgentDecisionExecutor {
   return async (attemptRequest, info) => {
     runCtx.consumeModelCall();
@@ -1345,15 +1347,17 @@ function createCountingDecide(
       const finishReason = getCallFinishReason(result);
       if (usage) {
         const { src } = selfIdAndSrc(self);
-        runCtx.recordUsage?.(
-          usage,
-          {
-            kind: "decision",
-            ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
-            ...(src !== "" ? { src } : {}),
-            model: attemptRequest.model,
-          },
-          self,
+        recordLater(() =>
+          runCtx.recordUsage?.(
+            usage,
+            {
+              kind: "decision",
+              ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
+              ...(src !== "" ? { src } : {}),
+              model: attemptRequest.model,
+            },
+            self,
+          ),
         );
       }
       runCtx.emitTrace?.(
@@ -1481,36 +1485,44 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
 
       // The last attempt's `request.attempts` are the failures before the
       // choice that landed: journaled with the delivered event below.
-      const decide = createCountingDecide(runCtx, self);
+      // Usage is delivered after the chosen event, so a budget guard reading
+      // this decision's own `@agent.usage` cannot reject the event it chose.
+      const usageRecords: Array<() => void> = [];
+      const decide = createCountingDecide(runCtx, self, (record) => usageRecords.push(record));
       let priorAttempts: DecisionAttempt[] = [];
-      const chosen = await resolveDecision(
-        request,
-        {
-          decide: (attemptRequest, info) => {
-            priorAttempts = attemptRequest.attempts;
-            return decide(attemptRequest, info);
+      let chosen: ChosenEvent;
+      try {
+        chosen = await resolveDecision(
+          request,
+          {
+            decide: (attemptRequest, info) => {
+              priorAttempts = attemptRequest.attempts;
+              return decide(attemptRequest, info);
+            },
           },
-        },
-        {
-          // The invoke's own input (agent.decide inline `maxRetries`) wins over
-          // the logic's configured budget.
-          maxRetries: lowered.maxRetries ?? logic.maxRetries,
-          signal,
-          canTake: agentCan,
-        },
-      );
+          {
+            // The invoke's own input (agent.decide inline `maxRetries`) wins over
+            // the logic's configured budget.
+            maxRetries: lowered.maxRetries ?? logic.maxRetries,
+            signal,
+            canTake: agentCan,
+          },
+        );
 
-      // Auto-deliver: send the chosen event to the invoking actor, then
-      // complete with it as output. The delivered event's transition typically
-      // EXITS the invoking state, which cancels this invoke — so `onDone` never
-      // fires on that path. If the transition stays in-state instead, the invoke completes and `onDone` (if any) observes
-      // `chosen` as its output. The send happens in this actor's own async
-      // `run` — not a re-evaluated transition function — so it fires exactly
-      // once regardless of v6-alpha transition re-evaluation.
-      if (priorAttempts.length > 0) {
-        runCtx.noteDecision?.(chosen, priorAttempts);
+        // Auto-deliver: send the chosen event to the invoking actor, then
+        // complete with it as output. The delivered event's transition typically
+        // EXITS the invoking state, which cancels this invoke — so `onDone` never
+        // fires on that path. If the transition stays in-state instead, the invoke completes and `onDone` (if any) observes
+        // `chosen` as its output. The send happens in this actor's own async
+        // `run` — not a re-evaluated transition function — so it fires exactly
+        // once regardless of v6-alpha transition re-evaluation.
+        if (priorAttempts.length > 0) {
+          runCtx.noteDecision?.(chosen, priorAttempts);
+        }
+        actorRef?.send(chosen as never);
+      } finally {
+        for (const record of usageRecords) record();
       }
-      actorRef?.send(chosen as never);
       // Let the applied transition commit (and let xstate cancel this invoke if
       // the event exited the state) before completing.
       await Promise.resolve();

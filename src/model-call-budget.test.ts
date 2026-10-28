@@ -8,8 +8,11 @@ import {
   runAgent,
   runToQuiescence,
   setupAgent,
+  type AgentTraceEvent,
   type AgentUsageEvent,
+  type ChosenEvent,
 } from "./index.js";
+import { traceSteps } from "./internal/trace-states.js";
 
 // A loop of `step` requests that records each `@agent.usage` budget it sees.
 function createLoopMachine() {
@@ -157,6 +160,56 @@ describe("model-call budget", () => {
     expect(result.status === "done" ? result.output.budgets : undefined).toEqual([
       { modelCalls: 1, maxModelCalls: 2 },
       { modelCalls: 2, maxModelCalls: 2 },
+    ]);
+  });
+
+  test("a decision's own usage cannot reject the event it chose", async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ left: z.number() }),
+      output: z.object({ left: z.number() }),
+      events: { GO: z.object({}) },
+    });
+    const machine = setupAgent({ schemas }).createMachine({
+      context: () => ({ left: 1 }),
+      on: {
+        [AGENT_USAGE_EVENT_TYPE]: ({ event }) => ({
+          context: { left: event.budget!.maxModelCalls - event.budget!.modelCalls },
+        }),
+      },
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: {
+            id: "choose",
+            src: "agent.decide",
+            input: { model: "test-model", prompt: "pick", allowedEvents: ["GO"] as const },
+          },
+          // Spending the last call is allowed; it was not spent when GO was chosen.
+          on: { GO: ({ context }) => (context.left > 0 ? { target: "chosen" } : undefined) },
+        },
+        chosen: {},
+      },
+    });
+
+    const trace: AgentTraceEvent[] = [];
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        maxModelCalls: 1,
+        executors: {
+          decide: async () => ({ event: { type: "GO" } as ChosenEvent, usage: { totalTokens: 1 } }),
+        },
+        onTrace: (event) => trace.push(event),
+      }),
+    );
+
+    expect(result.status).toBe("idle");
+    expect(result.snapshot.value).toBe("chosen");
+    expect(result.snapshot.context).toEqual({ left: 0 });
+    // The decision names the step it chose, not the usage step that followed.
+    const steps = traceSteps(trace).filter((step) => !step.ignored);
+    expect(steps.map((step) => [step.event, step.decision])).toEqual([
+      ["GO", "choose"],
+      [AGENT_USAGE_EVENT_TYPE, undefined],
     ]);
   });
 });

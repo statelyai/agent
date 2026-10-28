@@ -220,6 +220,27 @@ describe("firstDivergence", () => {
     );
   });
 
+  test("a usage step between a decision and its choice does not take the decision's name", () => {
+    const transition = (type: string, from: string, to: string) => ({
+      type: "machine.transition",
+      from: { value: from },
+      event: { type },
+      snapshot: { value: to },
+    });
+    const trace = [
+      { type: "request.start", request: { kind: "decision", name: "route" } },
+      transition("@agent.usage", "deciding", "deciding"),
+      transition("ESCALATE", "deciding", "escalated"),
+    ];
+    const reference = [transition("@agent.usage", "deciding", "deciding")];
+
+    expect(firstDivergence(trace, reference)).toMatchObject({
+      index: 1,
+      state: "deciding",
+      decision: "route",
+    });
+  });
+
   describe('key: "payload"', () => {
     let boomCode = "EDOWN";
     const agent = setupAgent({

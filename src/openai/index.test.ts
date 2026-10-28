@@ -422,9 +422,10 @@ describe("createOpenAiExecutors: decide", () => {
   test("a reply with no tool call is retried, its usage still reported", async () => {
     const { decide } = replies("I would rather not.", ask);
     const result = await decide(decisionRequest);
-    expect(result.event.type).toBe(
-      "no tool was called (call exactly one of: send_event_ASK, send_event_GUESS)",
-    );
+    expect(result.rejected).toEqual({
+      failure: "unknown-event",
+      reason: "no tool was called; call exactly one of: send_event_ASK, send_event_GUESS",
+    });
     expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 1, totalTokens: 4 });
 
     const seen: AgentDecisionRequest[] = [];
@@ -436,8 +437,7 @@ describe("createOpenAiExecutors: decide", () => {
     expect(reasons(seen[1]!)).toEqual([
       [
         "unknown-event",
-        "'no tool was called (call exactly one of: send_event_ASK, send_event_GUESS)' is not " +
-          "among the currently allowed events: ASK, GUESS.",
+        "no tool was called; call exactly one of: send_event_ASK, send_event_GUESS",
       ],
     ]);
   });
@@ -452,22 +452,21 @@ describe("createOpenAiExecutors: decide", () => {
     expect(reasons(seen[1]!)).toEqual([
       [
         "unknown-event",
-        "'tool 'send_event_QUIT' was not offered (valid tools: send_event_ASK, send_event_GUESS)' " +
-          "is not among the currently allowed events: ASK, GUESS.",
+        "tool 'send_event_QUIT' was not offered; valid tools: send_event_ASK, send_event_GUESS",
       ],
     ]);
   });
 
-  test("malformed tool arguments are retried with a reason that says so", async () => {
+  test("malformed tool arguments are retried as an invalid payload", async () => {
     const seen: AgentDecisionRequest[] = [];
     const { decide } = replies({ name: "send_event_GUESS", arguments: '{"guess": "a c' }, ask);
     const event = await resolveDecision(decisionRequest, {
       decide: (attempt, info) => (seen.push(attempt), decide(attempt, info)),
     });
     expect(event).toEqual({ type: "ASK" });
-    expect(seen[1]!.attempts[0]!.reason).toContain(
-      "the arguments for tool 'send_event_GUESS' were not valid JSON",
-    );
+    expect(reasons(seen[1]!)).toEqual([
+      ["invalid-payload", "the arguments for tool 'send_event_GUESS' were not valid JSON"],
+    ]);
   });
 
   test("answers that never name a candidate exhaust the retries", async () => {

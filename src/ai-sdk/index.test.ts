@@ -1378,17 +1378,15 @@ describe("createAiSdkExecutors — decide answers that name no candidate", () =>
 
   test("a text answer is retried, its usage still reported", async () => {
     const result = await answering("I approve.")(request);
-    expect(result.event.type).toBe(
-      "no tool was called (call exactly one of: send_event_approve, send_event_reject)",
-    );
+    expect(result.rejected).toEqual({
+      failure: "unknown-event",
+      reason: "no tool was called; call exactly one of: send_event_approve, send_event_reject",
+    });
     expect(result.usage).toMatchObject({ inputTokens: 3, outputTokens: 1 });
 
     expect(await resolveWith("I approve.", reject)).toEqual({
       event: { type: "reject" },
-      reasons: [
-        "'no tool was called (call exactly one of: send_event_approve, send_event_reject)' is " +
-          "not among the currently allowed events: approve, reject.",
-      ],
+      reasons: ["no tool was called; call exactly one of: send_event_approve, send_event_reject"],
     });
   });
 
@@ -1396,20 +1394,23 @@ describe("createAiSdkExecutors — decide answers that name no candidate", () =>
     expect(await resolveWith({ toolName: "send_event_quit", input: "{}" }, reject)).toEqual({
       event: { type: "reject" },
       reasons: [
-        "'tool 'send_event_quit' was not offered (valid tools: send_event_approve, " +
-          "send_event_reject)' is not among the currently allowed events: approve, reject.",
+        "tool 'send_event_quit' was not offered; valid tools: send_event_approve, send_event_reject",
       ],
     });
   });
 
-  test("malformed tool arguments are retried with a reason that says so", async () => {
-    const { event, reasons } = await resolveWith(
-      { toolName: "send_event_approve", input: '{"note": "LG' },
-      reject,
-    );
+  test("malformed tool arguments are retried as an invalid payload", async () => {
+    const decide = answering({ toolName: "send_event_approve", input: '{"note": "LG' }, reject);
+    const seen: AgentDecisionRequest[] = [];
+    const event = await resolveDecision(request, {
+      decide: (attempt, info) => (seen.push(attempt), decide(attempt, info)),
+    });
     expect(event).toEqual({ type: "reject" });
-    expect(reasons).toEqual([
-      expect.stringContaining("the arguments for tool 'send_event_approve' were not valid JSON"),
+    expect(seen.at(-1)!.attempts).toEqual([
+      {
+        failure: "invalid-payload",
+        reason: "the arguments for tool 'send_event_approve' were not valid JSON",
+      },
     ]);
   });
 
@@ -1524,16 +1525,8 @@ describe("createAiSdkExecutors — decide over closed-choice options", () => {
 
     expect(event).toEqual({ type: "escalate" });
     expect(seen[2]!.attempts.map((attempt) => [attempt.failure, attempt.reason])).toEqual([
-      [
-        "unknown-event",
-        `'option "refund:99" was not offered (valid ids: refund:20, escalate)' is not among ` +
-          "the currently allowed events: refund, escalate.",
-      ],
-      [
-        "unknown-event",
-        `'tool 'send_event_refund' was not offered (valid ids: refund:20, escalate)' is not ` +
-          "among the currently allowed events: refund, escalate.",
-      ],
+      ["unknown-event", `option "refund:99" was not offered; valid ids: refund:20, escalate`],
+      ["unknown-event", `tool 'send_event_refund' was not offered; valid ids: refund:20, escalate`],
     ]);
   });
 });
@@ -1637,9 +1630,7 @@ describe("createAiSdkExecutors — decision models in the models map", () => {
     expect(seen[1]!.attempts).toEqual([
       expect.objectContaining({
         failure: "unknown-event",
-        reason: expect.stringContaining(
-          `option "refund:99" was not offered (valid ids: refund:20, escalate)`,
-        ),
+        reason: `option "refund:99" was not offered; valid ids: refund:20, escalate`,
       }),
     ]);
   });

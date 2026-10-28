@@ -32,8 +32,12 @@ import {
   type AgentTextRequest,
 } from "../text-logic.js";
 import { AgentTruncatedError } from "../errors.js";
-import { renderDecisionAttempts, type AgentDecisionRequest } from "../decision.js";
-import { unnamedEvent } from "../internal/unnamed-event.js";
+import {
+  renderDecisionAttempts,
+  type AgentDecisionRejection,
+  type AgentDecisionRequest,
+} from "../decision.js";
+import { rejectedAnswer } from "../internal/rejected-answer.js";
 import { withModelCalls } from "../internal/with-model-calls.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type {
@@ -442,9 +446,11 @@ export type OpenAiStreamResult = {
   raw: unknown;
 };
 
-/** Raw result shape from {@link OpenAiExecutors.decide} — the chosen event plus the call metadata, delivered per decision attempt to `onResult`. */
-export type OpenAiDecideResult = {
-  event: ChosenEvent;
+/** Raw result shape from {@link OpenAiExecutors.decide} — the chosen event (or the answer's rejection) plus the call metadata, delivered per decision attempt to `onResult`. */
+export type OpenAiDecideResult = (
+  | { event: ChosenEvent; rejected?: undefined }
+  | { event?: undefined; rejected: AgentDecisionRejection }
+) & {
   usage?: AgentCallUsage;
   finishReason: AgentFinishReason;
   raw: unknown;
@@ -800,7 +806,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     const toolCall = response.choices[0]?.message.tool_calls?.[0];
     // An answer that names no candidate is retried, not thrown.
     const unnamed = (call?: { toolName: string; invalidJson?: boolean }): OpenAiDecideResult => ({
-      event: unnamedEvent(
+      rejected: rejectedAnswer(
         call,
         request.events.map((event) => event.toolName),
       ),

@@ -32,10 +32,11 @@ import { AgentTruncatedError } from "../errors.js";
 import {
   decisionOptionIds,
   renderDecisionAttempts,
+  type AgentDecisionRejection,
   type AgentDecisionRequest,
 } from "../decision.js";
 import { isRecord } from "../internal/is-record.js";
-import { unnamedEvent } from "../internal/unnamed-event.js";
+import { rejectedAnswer } from "../internal/rejected-answer.js";
 import { withModelCalls } from "../internal/with-model-calls.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
 import {
@@ -302,8 +303,10 @@ export type AiSdkStreamResult = {
   raw: unknown;
 };
 /** Raw result shape from {@link AiSdkExecutors.decide} — the chosen event plus the AI SDK call metadata, delivered per decision attempt to `onResult`. */
-export type AiSdkDecideResult = {
-  event: ChosenEvent;
+export type AiSdkDecideResult = (
+  | { event: ChosenEvent; rejected?: undefined }
+  | { event?: undefined; rejected: AgentDecisionRejection }
+) & {
   /** This attempt's usage; aggregated into the run result's `AgentUsage`. */
   usage: AiSdkCallUsage;
   /** `'stop'` for a decision model, which reports no finish reason. */
@@ -526,7 +529,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       call?: { toolName: string; invalidJson?: boolean },
     ) =>
       ({
-        event: unnamedEvent(call, toolNames),
+        rejected: rejectedAnswer(call, toolNames),
         usage: toAgentCallUsage(ended.usage),
         finishReason: ended.finishReason,
       }) satisfies AiSdkDecideResult;
@@ -566,7 +569,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     }
     if (choice) {
       return {
-        event: fromAiSdkOptionCall(toolCall, request.options!, choice.ids),
+        ...fromAiSdkOptionCall(toolCall, request.options!, choice.ids),
         usage: toAgentCallUsage(result.usage),
         finishReason: result.finishReason,
       } satisfies AiSdkDecideResult;
@@ -643,29 +646,31 @@ async function decideWithDecisionModel(
     // no candidate has instead, so the choice is retried.
     const chosen = unofferedChoice(error, ids);
     if (chosen === undefined) throw error;
-    return decisionResult(unofferedOption(`option ${JSON.stringify(chosen)}`, ids));
+    return decisionResult({ rejected: unofferedOption(`option ${JSON.stringify(chosen)}`, ids) });
   }
 
   const answer = result.answers[DECISION_QUESTION_ID]!;
   const option = offered[ids.indexOf(answer.choice)];
   if (!option) {
-    return decisionResult(unofferedOption(`option ${JSON.stringify(answer.choice)}`, ids));
+    return decisionResult({
+      rejected: unofferedOption(`option ${JSON.stringify(answer.choice)}`, ids),
+    });
   }
   const reported = (
     result.providerMetadata?.typesafe?.confidence as Record<string, unknown> | undefined
   )?.[DECISION_QUESTION_ID];
   const confidence =
     typeof reported === "number" ? reported : answer.probabilities?.[answer.choice];
-  return decisionResult(option.event, result.usage, confidence);
+  return decisionResult({ event: option.event }, result.usage, confidence);
 }
 
 function decisionResult(
-  event: ChosenEvent,
+  answer: { event: ChosenEvent } | { rejected: AgentDecisionRejection },
   usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } = {},
   confidence?: number,
 ): AiSdkDecideResult {
   return {
-    event,
+    ...answer,
     usage: toAgentCallUsage({
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,

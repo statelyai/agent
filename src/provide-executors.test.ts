@@ -549,8 +549,10 @@ describe("provideExecutors + '@agent.usage'", () => {
             src: "agent.decide",
             input: { model: "test-model", prompt: "pick", allowedEvents: ["GO"] as const },
           },
-          on: { GO: { target: "done" } },
+          on: { GO: { target: "chosen" } },
         },
+        // A decision's usage arrives after the event it chose.
+        chosen: { always: ({ context }) => (context.tokens > 0 ? { target: "done" } : undefined) },
         done: {
           type: "final",
           output: ({ context }) => ({ tokens: context.tokens, kinds: context.kinds }),
