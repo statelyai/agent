@@ -919,7 +919,8 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         input.push({ role: "assistant", content: text });
       }
       for (const { call_id, name, arguments: args } of calls) {
-        input.push({ type: "function_call", call_id, name, arguments: args });
+        // A zero-argument call may come back with `""`; replay it as the JSON object it means.
+        input.push({ type: "function_call", call_id, name, arguments: args || "{}" });
         let output: string;
         try {
           if (!offered(name)) {

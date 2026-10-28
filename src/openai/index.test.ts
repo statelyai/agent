@@ -707,6 +707,28 @@ describe("createOpenAiExecutors: tool loop", () => {
     expect(error).toMatchObject({ partialOutput: '{"result":{"answ' });
   });
 
+  test("a zero-argument call with empty arguments is replayed as `{}`", async () => {
+    const create = vi.fn(async (_params: any) =>
+      create.mock.calls.length === 1
+        ? responseWith([{ type: "function_call", call_id: "call_1", name: "ping", arguments: "" }])
+        : responseWith([textOutput("pong")]),
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+
+    await generateText(
+      textRequest({
+        tools: { ping: { inputSchema: z.object({}), execute: () => "ok" } },
+        maxSteps: 2,
+      } as never),
+    );
+    expect(create.mock.calls[1]![0].input).toContainEqual({
+      type: "function_call",
+      call_id: "call_1",
+      name: "ping",
+      arguments: "{}",
+    });
+  });
+
   test("an incomplete turn never runs its calls", async () => {
     const execute = vi.fn(() => "charged");
     const create = vi.fn(async (_params: any) =>
