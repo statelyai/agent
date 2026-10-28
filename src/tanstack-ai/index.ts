@@ -36,6 +36,7 @@ import {
 import { AgentTruncatedError } from "../errors.js";
 import { renderDecisionAttempts, type AgentDecisionRequest } from "../decision.js";
 import { unnamedEvent } from "../internal/unnamed-event.js";
+import { withModelCalls } from "../internal/with-model-calls.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type {
   AgentMessage,
@@ -481,64 +482,70 @@ async function readRun(
     return (assistant ??= []);
   };
 
-  for await (const chunk of stream) {
-    summary.chunks.push(chunk);
-    switch (chunk.type) {
-      case "TEXT_MESSAGE_CONTENT": {
-        summary.text += chunk.delta;
-        onDelta?.(chunk.delta);
-        const parts = assistantParts();
-        const last = parts.at(-1);
-        if (last?.type === "text") last.text += chunk.delta;
-        else parts.push({ type: "text", text: chunk.delta });
-        break;
-      }
-      case "TOOL_CALL_START": {
-        const part: ToolCallPart = {
-          type: "tool-call",
-          toolCallId: chunk.toolCallId,
-          toolName: chunk.toolCallName,
-          input: {},
-        };
-        assistantParts().push(part);
-        args.set(chunk.toolCallId, { part, json: "" });
-        break;
-      }
-      case "TOOL_CALL_ARGS": {
-        const call = args.get(chunk.toolCallId);
-        if (call) call.json += chunk.delta;
-        break;
-      }
-      case "TOOL_CALL_RESULT": {
-        flushAssistant();
-        (results ??= []).push({
-          type: "tool-result",
-          toolCallId: chunk.toolCallId,
-          toolName: args.get(chunk.toolCallId)?.part.toolName ?? "",
-          output: toToolResultOutput(chunk.content),
-        });
-        break;
-      }
-      case "CUSTOM":
-        if (chunk.name === "structured-output.complete") {
-          summary.structured = (chunk.value as { object?: unknown } | undefined)?.object;
+  try {
+    for await (const chunk of stream) {
+      summary.chunks.push(chunk);
+      switch (chunk.type) {
+        case "TEXT_MESSAGE_CONTENT": {
+          summary.text += chunk.delta;
+          onDelta?.(chunk.delta);
+          const parts = assistantParts();
+          const last = parts.at(-1);
+          if (last?.type === "text") last.text += chunk.delta;
+          else parts.push({ type: "text", text: chunk.delta });
+          break;
         }
-        break;
-      case "RUN_FINISHED": {
-        // In process, the finish reason rides on `metadata.tanstack`.
-        const finishReason =
-          chunk.finishReason ??
-          (chunk.metadata?.tanstack as { finishReason?: string | null } | undefined)?.finishReason;
-        summary.finishReason = toAgentFinishReason(finishReason);
-        summary.modelCalls++;
-        if (chunk.usage && !Array.isArray(chunk.usage)) {
-          summary.usage = addUsage(summary.usage, toAgentCallUsage(chunk.usage));
+        case "TOOL_CALL_START": {
+          const part: ToolCallPart = {
+            type: "tool-call",
+            toolCallId: chunk.toolCallId,
+            toolName: chunk.toolCallName,
+            input: {},
+          };
+          assistantParts().push(part);
+          args.set(chunk.toolCallId, { part, json: "" });
+          break;
         }
-        break;
+        case "TOOL_CALL_ARGS": {
+          const call = args.get(chunk.toolCallId);
+          if (call) call.json += chunk.delta;
+          break;
+        }
+        case "TOOL_CALL_RESULT": {
+          flushAssistant();
+          (results ??= []).push({
+            type: "tool-result",
+            toolCallId: chunk.toolCallId,
+            toolName: args.get(chunk.toolCallId)?.part.toolName ?? "",
+            output: toToolResultOutput(chunk.content),
+          });
+          break;
+        }
+        case "CUSTOM":
+          if (chunk.name === "structured-output.complete") {
+            summary.structured = (chunk.value as { object?: unknown } | undefined)?.object;
+          }
+          break;
+        case "RUN_FINISHED": {
+          // In process, the finish reason rides on `metadata.tanstack`.
+          const finishReason =
+            chunk.finishReason ??
+            (chunk.metadata?.tanstack as { finishReason?: string | null } | undefined)
+              ?.finishReason;
+          summary.finishReason = toAgentFinishReason(finishReason);
+          summary.modelCalls++;
+          if (chunk.usage && !Array.isArray(chunk.usage)) {
+            summary.usage = addUsage(summary.usage, toAgentCallUsage(chunk.usage));
+          }
+          break;
+        }
+        case "RUN_ERROR":
+          throw new TanStackAiRunError(chunk.message, chunk.code ?? chunk.error?.code);
       }
-      case "RUN_ERROR":
-        throw new TanStackAiRunError(chunk.message, chunk.code ?? chunk.error?.code);
     }
+  } catch (error) {
+    // The failed turn was a call too.
+    throw withModelCalls(error, summary.modelCalls + 1);
   }
   const invalid = new Set<string>();
   for (const { part, json } of args.values()) {
@@ -933,12 +940,17 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
       // A structured output the model DID close, but only because it stopped
       // mid-thought, is not something to hand a machine as a final answer.
       if (run.finishReason === "length") {
-        throw truncated(request, info, run.structured ?? run.text);
+        throw withModelCalls(truncated(request, info, run.structured ?? run.text), run.modelCalls);
       }
-      const parsed = parseProviderOutput(
-        request,
-        run.structured !== undefined ? run.structured : JSON.parse(run.text),
-      );
+      let parsed: ReturnType<typeof parseProviderOutput>;
+      try {
+        parsed = parseProviderOutput(
+          request,
+          run.structured !== undefined ? run.structured : JSON.parse(run.text),
+        );
+      } catch (error) {
+        throw withModelCalls(error, run.modelCalls);
+      }
       return {
         result: parsed.result,
         ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),

@@ -34,6 +34,7 @@ import {
 import { AgentTruncatedError } from "../errors.js";
 import { renderDecisionAttempts, type AgentDecisionRequest } from "../decision.js";
 import { unnamedEvent } from "../internal/unnamed-event.js";
+import { withModelCalls } from "../internal/with-model-calls.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type {
   AgentMessage,
@@ -636,86 +637,90 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     let usage: AgentCallUsage | undefined;
     let step = 0;
 
-    for (;;) {
-      step++;
-      response = (await client.chat.completions.create(
-        textParams(request, messages, {
-          ...responseFormat,
-          // A forced choice applies to the FIRST step only: re-sending
-          // `'required'` after a tool ran would force another call every step
-          // and burn the budget without ever producing an answer.
-          ...(step === 1 && toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
-        }),
-        { signal: info?.signal },
-      )) as ChatCompletion;
-      usage = addAgentCallUsage(usage, toAgentCallUsage(response.usage));
+    try {
+      for (;;) {
+        step++;
+        response = (await client.chat.completions.create(
+          textParams(request, messages, {
+            ...responseFormat,
+            // A forced choice applies to the FIRST step only: re-sending
+            // `'required'` after a tool ran would force another call every step
+            // and burn the budget without ever producing an answer.
+            ...(step === 1 && toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+          }),
+          { signal: info?.signal },
+        )) as ChatCompletion;
+        usage = addAgentCallUsage(usage, toAgentCallUsage(response.usage));
 
-      const message = response.choices[0]?.message;
-      const toolCalls = message?.tool_calls ?? [];
-      if (toolCalls.length === 0 || step >= maxSteps) {
-        break;
-      }
-      const executors = toolCalls.map((call) =>
-        call.type === "function" ? toolExecutor(request.tools, call.function.name) : undefined,
-      );
-      if (executors.some((execute) => !execute)) {
-        break;
-      }
-
-      messages.push(message as ChatCompletionMessageParam);
-      for (const [index, call] of toolCalls.entries()) {
-        const input: unknown =
-          call.type === "function" && call.function.arguments
-            ? JSON.parse(call.function.arguments)
-            : {};
-        let content: string;
-        try {
-          content = toToolContent(await executors[index]!(input));
-        } catch (error) {
-          // A thrown tool goes back to the model as an error result, the way
-          // the AI SDK's loop reports one, rather than failing the request.
-          content = `Error: ${error instanceof Error ? error.message : String(error)}`;
+        const message = response.choices[0]?.message;
+        const toolCalls = message?.tool_calls ?? [];
+        if (toolCalls.length === 0 || step >= maxSteps) {
+          break;
         }
-        messages.push({ role: "tool", tool_call_id: call.id, content });
+        const executors = toolCalls.map((call) =>
+          call.type === "function" ? toolExecutor(request.tools, call.function.name) : undefined,
+        );
+        if (executors.some((execute) => !execute)) {
+          break;
+        }
+
+        messages.push(message as ChatCompletionMessageParam);
+        for (const [index, call] of toolCalls.entries()) {
+          const input: unknown =
+            call.type === "function" && call.function.arguments
+              ? JSON.parse(call.function.arguments)
+              : {};
+          let content: string;
+          try {
+            content = toToolContent(await executors[index]!(input));
+          } catch (error) {
+            // A thrown tool goes back to the model as an error result, the way
+            // the AI SDK's loop reports one, rather than failing the request.
+            content = `Error: ${error instanceof Error ? error.message : String(error)}`;
+          }
+          messages.push({ role: "tool", tool_call_id: call.id, content });
+        }
       }
-    }
 
-    // Validated parse of the `{ result, reasoning? }` provider output — no cast.
-    const unwrap = (content: string | null | undefined) =>
-      parseProviderOutput(request, content ? JSON.parse(content) : undefined);
+      // Validated parse of the `{ result, reasoning? }` provider output — no cast.
+      const unwrap = (content: string | null | undefined) =>
+        parseProviderOutput(request, content ? JSON.parse(content) : undefined);
 
-    const choice = response.choices[0];
-    const finishReason = toAgentFinishReason(choice?.finish_reason);
-    const content = choice?.message.content;
+      const choice = response.choices[0];
+      const finishReason = toAgentFinishReason(choice?.finish_reason);
+      const content = choice?.message.content;
 
-    if (jsonSchema) {
-      // A structured request that ran out of tokens has no usable output: the
-      // JSON object never closed, and even a closed one only closed because the
-      // model stopped mid-thought. Either way, not a final answer for a
-      // machine — `partialOutput` carries whatever text did arrive.
-      if (finishReason === "length") {
-        throw truncated(request, info, content ?? undefined);
+      if (jsonSchema) {
+        // A structured request that ran out of tokens has no usable output: the
+        // JSON object never closed, and even a closed one only closed because the
+        // model stopped mid-thought. Either way, not a final answer for a
+        // machine — `partialOutput` carries whatever text did arrive.
+        if (finishReason === "length") {
+          throw truncated(request, info, content ?? undefined);
+        }
+        const parsed = unwrap(content);
+        return {
+          result: parsed.result,
+          ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
+          ...usageField(usage),
+          finishReason,
+          modelCalls: step,
+          raw: response,
+        };
       }
-      const parsed = unwrap(content);
+
+      // A text request that ran out of tokens still has its text. It comes back
+      // with `finishReason: 'length'` — the machine decides what that is worth.
       return {
-        result: parsed.result,
-        ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
+        result: content ?? "",
         ...usageField(usage),
         finishReason,
         modelCalls: step,
         raw: response,
       };
+    } catch (error) {
+      throw withModelCalls(error, step);
     }
-
-    // A text request that ran out of tokens still has its text. It comes back
-    // with `finishReason: 'length'` — the machine decides what that is worth.
-    return {
-      result: content ?? "",
-      ...usageField(usage),
-      finishReason,
-      modelCalls: step,
-      raw: response,
-    };
   };
 
   const streamText = async (

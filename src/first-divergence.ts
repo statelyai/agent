@@ -15,7 +15,7 @@ export interface FirstDivergenceOptions {
    *
    * `"payload"` also compares the event's payload, such as an actor's output,
    * as key-order-independent JSON without its `sessionId`, and with errors as
-   * `{ name, message }`. Use it for deterministic or mocked runs; live model
+   * `{ name, message, code?, cause? }`. Use it for deterministic or mocked runs; live model
    * outputs differ on every run.
    */
   key?: ((step: TraceStep) => string) | "payload";
@@ -38,14 +38,23 @@ export interface Divergence {
 const defaultKey = (step: TraceStep) => `${step.from.join(",")}|${step.event}|${step.to.join(",")}`;
 
 // `sessionId` differs between equivalent runs. An error is an `Error` in a live
-// trace and `{ name, message, stack }` in a serialized one.
+// trace and `{ name, message, stack?, code?, cause? }` in a serialized one, so
+// both compare by name, message, string code, and cause.
+const errorKey = (error: unknown, depth = 0): unknown => {
+  if (!(error instanceof Error || isRecord(error))) return error;
+  const { name, message, code, cause } = error as Record<string, unknown>;
+  return {
+    name,
+    message,
+    ...(typeof code === "string" ? { code } : {}),
+    ...(cause !== undefined && depth < 8 ? { cause: errorKey(cause, depth + 1) } : {}),
+  };
+};
+
 const payloadKey = (step: TraceStep) => {
   if (!isRecord(step.payload)) return `${defaultKey(step)}|${canonicalEventJson(step.payload)}`;
   const { sessionId: _sessionId, ...payload } = step.payload;
-  const error: unknown = payload.error;
-  if (error instanceof Error || isRecord(error)) {
-    payload.error = { name: error.name, message: error.message };
-  }
+  if (payload.error !== undefined) payload.error = errorKey(payload.error);
   return `${defaultKey(step)}|${canonicalEventJson(payload)}`;
 };
 

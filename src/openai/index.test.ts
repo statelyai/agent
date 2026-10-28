@@ -582,6 +582,21 @@ describe("createOpenAiExecutors: tool loop", () => {
     },
   } as unknown as AgentTools;
 
+  test("a loop that fails after a step reports the calls it made on the error", async () => {
+    const create = vi.fn(async (_params: any) => {
+      if (create.mock.calls.length === 1) {
+        return { choices: [toolCallChoice("lookup", { q: "cats" })] };
+      }
+      throw new Error("upstream down");
+    });
+    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+
+    await expect(generateText(textRequest({ tools, maxSteps: 4 } as never))).rejects.toMatchObject({
+      message: "upstream down",
+      modelCalls: 2,
+    });
+  });
+
   test("runs the tool, feeds the result back, and returns the model's final text", async () => {
     const create = vi.fn(async (_params: any) =>
       create.mock.calls.length === 1

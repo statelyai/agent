@@ -783,6 +783,32 @@ describe("maxSteps (multi-step tool loops)", () => {
     expect(JSON.stringify(sentResponseFormat)).not.toContain("reasoning");
   });
 
+  test("generateText that fails mid-loop reports the calls it made on the error", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls++;
+        if (calls > 1) throw new Error("upstream down");
+        return {
+          content: [
+            { type: "tool-call" as const, toolCallId: "call-1", toolName: "ping", input: "{}" },
+          ],
+          finishReason: { unified: "tool-calls" as const, raw: "tool_calls" },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+            outputTokens: { total: 1, text: 1, reasoning: 0 },
+          },
+          warnings: [],
+        };
+      },
+    });
+    const { generateText } = createAiSdkExecutors({ models: { m: model } });
+
+    await expect(
+      generateText({ model: "m", prompt: "hi", maxSteps: 5, tools: pingTool }),
+    ).rejects.toMatchObject({ modelCalls: 2 });
+  });
+
   test("generateText honors the typed maxSteps (symmetry check)", async () => {
     let calls = 0;
     const model = new MockLanguageModelV3({

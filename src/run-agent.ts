@@ -1295,6 +1295,8 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
 
       return { result: output, messages: responseMessagesOf(raw) };
     } catch (error) {
+      // A tool loop that failed after some steps still made them.
+      runCtx.countModelCalls?.(getCallModelCalls(error) - 1);
       runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
       throw error;
     }

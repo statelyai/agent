@@ -221,6 +221,7 @@ describe("firstDivergence", () => {
   });
 
   describe('key: "payload"', () => {
+    let boomCode = "EDOWN";
     const agent = setupAgent({
       input: z.object({}),
       context: z.object({}),
@@ -228,7 +229,7 @@ describe("firstDivergence", () => {
         lookup: createAsyncLogic<{ id: number }>({ run: async () => ({ id: 7 }) }),
         boom: createAsyncLogic({
           run: async () => {
-            throw new Error("down");
+            throw Object.assign(new Error("down"), { code: boomCode });
           },
         }),
       },
@@ -251,7 +252,8 @@ describe("firstDivergence", () => {
         done: { type: "final" },
       },
     });
-    const traceOf = async (label: string) => {
+    const traceOf = async (label: string, code = "EDOWN") => {
+      boomCode = code;
       const trace: AgentTraceEvent[] = [];
       await runToQuiescence(
         createAgentRuntime(machine, {
@@ -273,6 +275,17 @@ describe("firstDivergence", () => {
         state: "classifying",
         actual: { payload: { output: { result: "review" } } },
         expected: { payload: { output: { result: "alert" } } },
+      });
+    });
+
+    test("errors that differ only by code diverge", async () => {
+      const actual = await traceOf("alert", "ETIMEDOUT");
+      const reference = await traceOf("alert", "ECONNRESET");
+
+      expect(firstDivergence(actual, reference)).toBeUndefined();
+      expect(firstDivergence(actual, reference, { key: "payload" })).toMatchObject({
+        index: 0,
+        state: "failing",
       });
     });
 

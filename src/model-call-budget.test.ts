@@ -71,6 +71,22 @@ describe("model-call budget", () => {
     ]);
   });
 
+  test("a tool loop that throws after some steps still counts them", async () => {
+    const result = await runToQuiescence(
+      createAgentRuntime(createLoopMachine(), {
+        executors: {
+          generateText: async () => {
+            throw Object.assign(new Error("bad final output"), { modelCalls: 4 });
+          },
+        },
+      }),
+      { input: {} },
+    );
+
+    expect(result.status).toBe("done");
+    expect(result.usage.modelCalls).toBe(4);
+  });
+
   test("modelCallsSpent counts earlier turns against maxModelCalls but not in this run's usage", async () => {
     let calls = 0;
     const result = await runToQuiescence(
