@@ -1,5 +1,5 @@
 import { canonicalEventJson } from "./event-log.js";
-import { isRecord } from "./internal/is-record.js";
+import { isError, isPlainObject, isRecord } from "./internal/is-record.js";
 import { statePaths, traceSteps, type TraceStep } from "./internal/trace-states.js";
 import { matchesTrajectory, type TrajectoryItem } from "./trajectory.js";
 
@@ -39,23 +39,35 @@ const defaultKey = (step: TraceStep) => `${step.from.join(",")}|${step.event}|${
 
 // `sessionId` differs between equivalent runs. An error is an `Error` in a live
 // trace and `{ name, message, stack?, code?, cause? }` in a serialized one, so
-// both compare by name, message, string code, and cause.
-const errorKey = (error: unknown, depth = 0): unknown => {
-  if (!(error instanceof Error || isRecord(error))) return error;
-  const { name, message, code, cause } = error as Record<string, unknown>;
-  return {
-    name,
-    message,
-    ...(typeof code === "string" ? { code } : {}),
-    ...(cause !== undefined && depth < 8 ? { cause: errorKey(cause, depth + 1) } : {}),
-  };
+// both compare by name, message, string code, and cause, wherever they sit.
+// A record that lacks a string name or message is data, compared as is.
+const isErrorLike = (value: unknown): value is Record<string, unknown> =>
+  isError(value) ||
+  (isRecord(value) && typeof value.name === "string" && typeof value.message === "string");
+
+const normalizeErrors = (value: unknown, depth = 0): unknown => {
+  if (depth > 32 || value === null || typeof value !== "object") return value;
+  if (isErrorLike(value) && (isError(value) || "stack" in value || "code" in value)) {
+    const { name, message, code, cause } = value;
+    return {
+      name,
+      message,
+      ...(typeof code === "string" ? { code } : {}),
+      ...(cause !== undefined ? { cause: normalizeErrors(cause, depth + 1) } : {}),
+    };
+  }
+  if (Array.isArray(value)) return value.map((item) => normalizeErrors(item, depth + 1));
+  // Dates, Maps, and other instances are left to the canonicalizer.
+  if (!isPlainObject(value)) return value;
+  const copy: Record<string, unknown> = Object.create(null);
+  for (const key of Object.keys(value)) copy[key] = normalizeErrors(value[key], depth + 1);
+  return copy;
 };
 
 const payloadKey = (step: TraceStep) => {
   if (!isRecord(step.payload)) return `${defaultKey(step)}|${canonicalEventJson(step.payload)}`;
   const { sessionId: _sessionId, ...payload } = step.payload;
-  if (payload.error !== undefined) payload.error = errorKey(payload.error);
-  return `${defaultKey(step)}|${canonicalEventJson(payload)}`;
+  return `${defaultKey(step)}|${canonicalEventJson(normalizeErrors(payload))}`;
 };
 
 // An empty reference is a trace with no steps. A trace that ended before its

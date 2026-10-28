@@ -289,6 +289,29 @@ describe("firstDivergence", () => {
       });
     });
 
+    test("plain error records, nested errors, and own __proto__ keys still compare", () => {
+      const trace = (payload: Record<string, unknown>) => [
+        {
+          type: "machine.transition",
+          from: { value: "a" },
+          event: { type: "FAIL", ...payload },
+          snapshot: { value: "b" },
+        },
+      ];
+      const diverges = (a: Record<string, unknown>, b: Record<string, unknown>) =>
+        firstDivergence(trace(a), trace(b), { key: "payload" }) !== undefined;
+
+      expect(diverges({ error: { code: "E1" } }, { error: { code: "E2" } })).toBe(true);
+      const nested = (code: string) => ({
+        output: { failures: [Object.assign(new Error("down"), { code })] },
+      });
+      expect(diverges(nested("E1"), nested("E2"))).toBe(true);
+      expect(diverges(nested("E1"), nested("E1"))).toBe(false);
+      expect(
+        diverges(JSON.parse('{"data":{"__proto__":1}}'), JSON.parse('{"data":{"__proto__":2}}')),
+      ).toBe(true);
+    });
+
     test("equivalent runs do not diverge, live or serialized", async () => {
       const serialize = (trace: AgentTraceEvent[]) =>
         trace.map((event) => JSON.parse(JSON.stringify(serializeTraceEvent(event))));
