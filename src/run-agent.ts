@@ -1040,7 +1040,9 @@ interface RunAgentBindContext {
   runId?: string;
   /**
    * Mints the per-call idempotency key threaded to executors as
-   * `info.callKey` (`${executionId}:${siteId}#${n}`). Memoized per invoked
+   * `info.callKey` (`${executionId}:${siteId}#${n}`, or
+   * `${executionId}:${childId}#${m}/${siteId}#${k}` inside an invoked child
+   * machine). Memoized per invoked
    * leaf actor (`self`), so every attempt of one decision invoke shares this
    * invoke-level key; the decision wrap appends the attempt ordinal
    * (`…#${n}.${attempts.length}`) so retries do not collide in a cache.
@@ -1160,6 +1162,12 @@ function selfIdAndSrc(self: BoundActorSelf | undefined): { id: string; src: stri
   };
 }
 
+/** True for a request inside an invoked child machine rather than the root. */
+function isChildRequest(self: object | undefined): boolean {
+  const parent = (self as BoundActorSelf | undefined)?._parent as BoundActorSelf | undefined;
+  return parent?._parent !== undefined;
+}
+
 /**
  * The machine actor that INVOKED a decision request — the actor whose
  * live snapshot supplies the candidate events and drives `canTake`/`send`.
@@ -1173,9 +1181,9 @@ function invokingActorOf(
   self: BoundActorSelf | undefined,
   runCtx: RunAgentBindContext,
 ): AnyActorRef | undefined {
-  const parent = self?._parent as (AnyActorRef & { _parent?: unknown }) | undefined;
+  const parent = self?._parent;
   // A request inside an invoked child machine reads and drives that child.
-  if (parent !== undefined && parent._parent !== undefined) {
+  if (parent !== undefined && isChildRequest(self)) {
     return parent;
   }
   // A top-level request reads the run's root. Under the agent loop every root
@@ -1494,7 +1502,9 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       // `run` — not a re-evaluated transition function — so it fires exactly
       // once regardless of v6-alpha transition re-evaluation.
       // The memoized invoke-level key, without its execution id.
-      const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+      // A child's chosen event never reaches the root log, so only a root
+      // decision is marked.
+      const callKey = id !== "" && !isChildRequest(self) ? runCtx.callKey?.(id, self) : undefined;
       runCtx.noteDecision?.(
         chosen,
         priorAttempts,
@@ -3133,9 +3143,45 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // advanced by the calls this run has already started at that site. A
       // crash recovery whose log holds one completion re-executes the
       // in-flight call as `#2`, exactly the id a replay derives for it.
+      //
+      // A call inside an invoked child machine is keyed under the machine that
+      // owns it: `${executionId}:worker#2/pick#1`. The child's own completions
+      // never reach the root log, so its calls are counted per child instance,
+      // and the instance takes its occurrence from the one entry that does: the
+      // root-level child's `xstate.done.actor`. A resumed child restarts from
+      // its initial state, so its calls re-run under the keys they had.
       const resumedHistory: readonly AgentLogEntry[] = [...logEntries];
       const siteCallCounts = new Map<string, number>();
       const mintedCallKeys = new WeakMap<object, string>();
+      // Per root-level child site, the last occurrence minted this run: a
+      // child stopped without completing leaves no entry to count.
+      const lastChildOccurrence = new Map<string, number>();
+      const childCallCounts = new WeakMap<object, Map<string, number>>();
+      const childMachineKey = (owner: BoundActorSelf): string => {
+        const memoized = mintedCallKeys.get(owner);
+        if (memoized !== undefined) return memoized;
+        const { id } = selfIdAndSrc(owner);
+        let key: string;
+        if (isChildRequest(owner)) {
+          key = childCallKey(owner._parent as BoundActorSelf, id);
+        } else {
+          const n = Math.max(
+            agentCallOccurrence(logEntries, id),
+            (lastChildOccurrence.get(id) ?? 0) + 1,
+          );
+          lastChildOccurrence.set(id, n);
+          key = `${logExecutionId}:${id}#${n}`;
+        }
+        mintedCallKeys.set(owner, key);
+        return key;
+      };
+      const childCallKey = (owner: BoundActorSelf, siteId: string): string => {
+        let counts = childCallCounts.get(owner);
+        if (counts === undefined) childCallCounts.set(owner, (counts = new Map()));
+        const n = (counts.get(siteId) ?? 0) + 1;
+        counts.set(siteId, n);
+        return `${childMachineKey(owner)}/${siteId}#${n}`;
+      };
       runCtx.callKey = (siteId: string, self?: object) => {
         if (logExecutionId === undefined) {
           return undefined;
@@ -3143,6 +3189,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         const memoized = self === undefined ? undefined : mintedCallKeys.get(self);
         if (memoized !== undefined) {
           return memoized;
+        }
+        if (isChildRequest(self)) {
+          const key = childCallKey((self as BoundActorSelf)._parent as BoundActorSelf, siteId);
+          mintedCallKeys.set(self!, key);
+          return key;
         }
         const startedHere = siteCallCounts.get(siteId) ?? 0;
         siteCallCounts.set(siteId, startedHere + 1);

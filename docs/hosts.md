@@ -30,6 +30,7 @@ Execution is at-least-once. A host runs the request and then journals its comple
 
 - `executionId` is the log's lineage id, pinned in the reserved `@agent.init` entry's `metadata` and inherited by every resume.
 - `requestId` is the invoke site, and `n` counts that site's completions in the log — each iteration of a looped state gets its own key. A decision counts once its chosen event is journaled, even when that event ends the invoke before it completes.
+- A call inside an invoked child machine is keyed under the root-level child that owns it: `<executionId>:<childId>#<m>/<requestId>#<k>`, one `/` segment per nesting level. `m` counts the child's completions in the log, and `k` counts that site's calls within that child instance. The log holds none of the child's own events, so a resumed child restarts from its initial state and re-runs its calls under the keys they had.
 - A decision retry appends its attempt ordinal: `<executionId>:<requestId>#<n>.<attempt>`, where `attempt` is the number of prior failed attempts. Each retry is a different request, so it gets a different key.
 - A resumed run re-executing an in-flight request passes the same `callKey` as the original attempt.
 - A fork mints its own lineage id (see [Fork](event-log.md#fork)), so none of its calls shares a key with its parent's.
