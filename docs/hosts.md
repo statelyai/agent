@@ -105,7 +105,7 @@ await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 - `max_completion_tokens` becomes `max_output_tokens`.
 - `verbosity` becomes `text.verbosity`.
 - Settings the Responses API shares by name, such as `temperature` and `service_tier`, pass through.
-- Chat-only settings, such as `seed`, `stop`, `logprobs`, and `prediction`, are dropped.
+- Chat-only settings, such as `seed`, `stop`, `logprobs`, and `prediction`, are dropped. This includes a request's `seed` and `stopSequences`. Each dropped key logs one `console.warn` per `createOpenAiExecutors` instance.
 - `store` defaults to `false`, matching Chat Completions.
 
 Structured output sends the declared schema wrapped as `{ result, reasoning? }`, as `response_format: { type: 'json_schema' }` on Chat Completions or `text.format` on the Responses API. The parsed `result` is what the machine validates. Decisions force a tool call with `tool_choice: 'required'`, one function tool per candidate event. Function tools are sent with `strict: false`, since the Responses API defaults strict mode on and arbitrary JSON Schema may fall outside it.

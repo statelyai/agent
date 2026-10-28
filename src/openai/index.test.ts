@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 import { z } from "zod";
 import { AgentTruncatedError } from "../errors.js";
 import type { AgentDecisionRequest } from "../decision.js";
@@ -424,6 +424,8 @@ describe("createOpenAiExecutors: decide", () => {
   });
 
   test("host Chat Completions settings are translated onto Responses API names", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
     const create = vi.fn(async (_params: any) =>
       responseWith([functionCallOutput("send_event_ASK", {})]),
     );
@@ -462,6 +464,23 @@ describe("createOpenAiExecutors: decide", () => {
     ]) {
       expect(params).not.toHaveProperty(key);
     }
+  });
+
+  test("dropped settings warn once per key per executors instance", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
+    const { decide } = createOpenAiExecutors({
+      client: stubResponsesClient(async () =>
+        responseWith([functionCallOutput("send_event_ASK", {})]),
+      ),
+      settings: { quick: { logprobs: true, service_tier: "flex" } },
+    });
+    const seeded = { ...decisionRequest, seed: 7, stopSequences: ["END"] };
+
+    await decide(seeded);
+    await decide(seeded);
+    const dropped = warn.mock.calls.map(([message]) => String(message).match(/`(\w+)`/)?.[1]);
+    expect(dropped.sort()).toEqual(["logprobs", "seed", "stop"]);
   });
 
   test("an incomplete response's call is not accepted as a choice", async () => {

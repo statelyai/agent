@@ -508,21 +508,41 @@ const RESPONSES_SHARED_SETTINGS = [
   "user",
 ];
 
+/** Chat Completions settings `toResponsesSettings` renames onto the Responses API. */
+const RESPONSES_TRANSLATED_SETTINGS = [
+  "max_completion_tokens",
+  "max_tokens",
+  "reasoning_effort",
+  "verbosity",
+];
+
 /**
  * Translates Chat Completions settings onto the Responses API: the settings it
  * shares by name pass through, `reasoning_effort` becomes `reasoning.effort`,
  * `max_completion_tokens` (or `max_tokens`) becomes `max_output_tokens`, and
  * `verbosity` becomes `text.verbosity`. Everything else is Chat-only (`seed`,
- * `stop`, `logprobs`, `prediction`, …) and is dropped, the way the AI SDK's
- * Responses provider drops what it cannot send, rather than failing the call.
+ * `stop`, `logprobs`, `prediction`, …) and is dropped with a warning, the way
+ * the AI SDK's Responses provider drops what it cannot send, rather than
+ * failing the call. `warned` holds the keys already warned about, so a tool
+ * loop warns once per key, not once per step.
  */
-function toResponsesSettings(settings: OpenAiCallSettings) {
+function toResponsesSettings(settings: OpenAiCallSettings, warned: Set<string>) {
   const { reasoning_effort, max_completion_tokens, max_tokens, verbosity } = settings;
+  const entries = Object.entries(settings).filter(([, value]) => value !== undefined);
   const shared = Object.fromEntries(
-    Object.entries(settings).filter(
-      ([key, value]) => value !== undefined && RESPONSES_SHARED_SETTINGS.includes(key),
-    ),
+    entries.filter(([key]) => RESPONSES_SHARED_SETTINGS.includes(key)),
   );
+  for (const [key] of entries) {
+    if (RESPONSES_SHARED_SETTINGS.includes(key) || RESPONSES_TRANSLATED_SETTINGS.includes(key)) {
+      continue;
+    }
+    if (warned.has(key)) continue;
+    warned.add(key);
+    console.warn(
+      `@statelyai/agent/openai: the Responses API has no \`${key}\` parameter, so it was dropped ` +
+        `from this call. A request's \`seed\` and \`stopSequences\` map to \`seed\` and \`stop\`.`,
+    );
+  }
   const maxOutputTokens = max_completion_tokens ?? max_tokens;
   return {
     ...shared,
@@ -541,7 +561,7 @@ function toResponsesSettings(settings: OpenAiCallSettings) {
  * off the installed `openai` package, so it tracks that version instead of
  * restating its vocabulary. Calls that go through the Responses API translate
  * `reasoning_effort`, `max_completion_tokens`, and `verbosity` onto its names
- * and drop the settings it has no equivalent for, such as `seed`, `stop`,
+ * and drop, with a warning, the settings it has no equivalent for, such as `seed`, `stop`,
  * `logprobs`, and `prediction`.
  *
  * The request's own fields are excluded: `model`, `messages`, `tools`,
@@ -754,6 +774,7 @@ function toToolContent(output: unknown): string {
  */
 export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): OpenAiExecutors {
   const { client, resolveModel = (modelRef: string) => modelRef } = options;
+  const warnedSettings = new Set<string>();
 
   // Params every Responses API call shares. Host `settings` sit UNDER the
   // request's own settings, which are `defined()`-filtered so an unset request
@@ -766,10 +787,13 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     input: ResponseInputItem[],
     extra: Partial<ResponseCreateParamsNonStreaming>,
   ): ResponseCreateParamsNonStreaming => {
-    const settings = toResponsesSettings({
-      ...callSettings(options, request),
-      ...toOpenAiCallSettings(request),
-    });
+    const settings = toResponsesSettings(
+      {
+        ...callSettings(options, request),
+        ...toOpenAiCallSettings(request),
+      },
+      warnedSettings,
+    );
     return {
       model: resolveModel(request.model),
       input,
