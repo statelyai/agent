@@ -177,6 +177,7 @@ export type {
   ImagePart,
   InferInput,
   InferOutput,
+  NormalizedEventSchemas,
   StandardSchemaV1,
   SystemMessage,
   TextPart,

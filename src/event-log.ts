@@ -94,6 +94,14 @@ export interface AgentLogEntry {
    * does not change the fold.
    */
   attempts?: DecisionAttempt[];
+  /**
+   * The `agent.decide` call this entry settles, as `${siteId}#${n}` (its call
+   * key without the execution id): the chosen event it sent, and its
+   * `xstate.done.actor` when the event left the invoke running. A decision
+   * that settles by sending its event has no completion of its own, so
+   * {@link agentCallOccurrence} counts it from this. Replay-ignored.
+   */
+  decidedBy?: string;
 }
 
 /** The payload of the reserved {@link AGENT_INIT_EVENT_TYPE} first entry. */
@@ -326,6 +334,9 @@ export function assertAgentLogEntry(entry: unknown): asserts entry is AgentLogEn
   }
   if (candidate.attempts !== undefined) {
     assertLogAttempts(candidate.attempts);
+  }
+  if (candidate.decidedBy !== undefined) {
+    requireNonEmptyString(candidate.decidedBy, "entry.decidedBy", " when present");
   }
 }
 
@@ -590,6 +601,8 @@ export interface CreateReplayEntryOptions {
   metadata?: Record<string, JsonValue>;
   /** Rejected decision attempts that preceded `event`; omitted when empty. */
   attempts?: DecisionAttempt[];
+  /** The `agent.decide` call (`${siteId}#${n}`) this entry settles. */
+  decidedBy?: string;
   /** Record `verification.stateHash` (default `true`). */
   verification?: boolean;
   /**
@@ -654,6 +667,7 @@ export function createReplayEntry(
     ...(options.attempts !== undefined && options.attempts.length > 0
       ? { attempts: options.attempts }
       : {}),
+    ...(options.decidedBy !== undefined ? { decidedBy: options.decidedBy } : {}),
   };
   assertAgentLogEntry(entry);
   // Copied once validated as JSON: a host that later mutates its array must
@@ -900,7 +914,10 @@ function toEvents(history: readonly (EventObject | AgentLogEntry)[] | undefined)
 /**
  * The 1-based occurrence `n` for the NEXT call at invoke site `siteId`:
  * `1 + completions`, where a completion is a journaled `xstate.done.actor` OR
- * `xstate.error.actor` for that `actorId` (an error is a semantic completion).
+ * `xstate.error.actor` for that `actorId` (an error is a semantic completion),
+ * or a distinct `entry.decidedBy` call at that site: a decision settles by
+ * sending its chosen event, which usually ends the invoke before it completes.
+ * Entries marked `decidedBy` are counted once per call, never as completions.
  * The one counting rule behind every `${siteId}#${n}` call key, so a live run
  * and a replay derive the same `n` by construction.
  */
@@ -909,7 +926,15 @@ export function agentCallOccurrence(
   siteId: string,
 ): number {
   let count = 0;
-  for (const event of toEvents(history)) {
+  const decided = new Set<string>();
+  for (const item of history ?? []) {
+    const event = toEvents([item])[0]!;
+    // Only an entry (not a bare event, whose payload is the machine's) is marked.
+    const decidedBy = event === item ? undefined : (item as AgentLogEntry).decidedBy;
+    if (decidedBy !== undefined) {
+      if (decidedBy.slice(0, decidedBy.lastIndexOf("#")) === siteId) decided.add(decidedBy);
+      continue;
+    }
     if (
       (event.type === DONE_ACTOR_EVENT_TYPE || event.type === ERROR_ACTOR_EVENT_TYPE) &&
       (event as EventObject & { actorId?: unknown }).actorId === siteId
@@ -917,7 +942,7 @@ export function agentCallOccurrence(
       count++;
     }
   }
-  return count + 1;
+  return count + decided.size + 1;
 }
 
 /**

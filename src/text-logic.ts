@@ -813,7 +813,9 @@ export interface AgentRequestExecutorInfo {
    * the first attempt's result instead of paying for it twice. A decision
    * retry appends its attempt ordinal (`${executionId}:${requestId}#${n}.${a}`,
    * `a` being the number of prior failed attempts), so a retry never collides
-   * with the rejected attempt it is replacing.
+   * with the rejected attempt it is replacing. A call inside an invoked child
+   * machine is keyed under the root-level child that owns it:
+   * `${executionId}:${childId}#${m}/${requestId}#${k}`.
    *
    * It identifies the CALL SITE, not the request: a version bridge keeps the
    * lineage id, so a migrated machine can ask something else under the same

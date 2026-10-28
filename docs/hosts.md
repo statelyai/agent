@@ -29,7 +29,8 @@ Execution is at-least-once. A host runs the request and then journals its comple
 `info.callKey` makes the duplicate safe to drop. Its format is `<executionId>:<requestId>#<n>`:
 
 - `executionId` is the log's lineage id, pinned in the reserved `@agent.init` entry's `metadata` and inherited by every resume.
-- `requestId` is the invoke site, and `n` counts that site's completions in the log — each iteration of a looped state gets its own key.
+- `requestId` is the invoke site, and `n` counts that site's completions in the log — each iteration of a looped state gets its own key. A decision counts once its chosen event is journaled, even when that event ends the invoke before it completes.
+- A call inside an invoked child machine is keyed under the root-level child that owns it: `<executionId>:<childId>#<m>/<requestId>#<k>`, one `/` segment per nesting level. `m` counts the child's completions in the log, and `k` counts that site's calls within that child instance. The log holds none of the child's own events, so a resumed child restarts from its initial state and re-runs its calls under the keys they had.
 - A decision retry appends its attempt ordinal: `<executionId>:<requestId>#<n>.<attempt>`, where `attempt` is the number of prior failed attempts. Each retry is a different request, so it gets a different key.
 - A resumed run re-executing an in-flight request passes the same `callKey` as the original attempt.
 - A fork mints its own lineage id (see [Fork](event-log.md#fork)), so none of its calls shares a key with its parent's.
@@ -99,7 +100,7 @@ await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 
 Structured output goes through `response_format: { type: 'json_schema' }` with the declared schema wrapped as `{ result, reasoning? }`, and the parsed `result` is what the machine validates. Decisions force a tool call with `tool_choice: 'required'`, one function tool per candidate event.
 
-`generateText` runs the tool loop host-side. Each step that comes back with tool calls runs the request's tools, appends the assistant `tool_calls` message and one tool message per result, and asks again. The request's `maxSteps` bounds the number of OpenAI calls; the default is one, so a single-step request behaves as before. A tool that throws goes back to the model as an error result. The loop also ends early on a tool with no `execute` — a client-side tool, whose call is handed back with `finishReason: 'tool-calls'` and the raw response. Every step's `usage` is summed onto the one result the run aggregates.
+`generateText` runs the tool loop host-side. Each step that comes back with tool calls runs the request's tools, appends the assistant `tool_calls` message and one tool message per result, and asks again. The request's `maxSteps` bounds the number of OpenAI calls; the default is one, so a single-step request behaves as before. A tool that throws, a call to a tool the request did not offer, and arguments that are not JSON go back to the model as error results. The loop also ends early on a tool with no `execute` — a client-side tool, whose call is handed back with `finishReason: 'tool-calls'` and the raw response. Every step's `usage` is summed onto the one result the run aggregates.
 
 `toolChoice` maps onto `tool_choice`: `'auto'`, `'none'`, and `'required'` pass through, and `{ type: 'tool', name }` becomes `{ type: 'function', function: { name } }`. It is sent on the first step only, so a forced choice cannot re-fire every step and burn the step budget.
 
