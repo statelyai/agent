@@ -120,7 +120,8 @@ const sameLeaves = (a: unknown, b: unknown) =>
  * Re-derived with XState's pure `getMicrosteps` from the snapshot before each
  * step (the previous step's, or the fresh start's microsteps from its input).
  * A step that cannot be recomputed (no prior snapshot, a guard that reads live
- * children) adds none.
+ * children), or whose recomputation ends elsewhere than the traced snapshot,
+ * adds none.
  */
 function passedThrough(
   machine: AnyStateMachine,
@@ -146,8 +147,13 @@ function passedThrough(
                 event.event as never,
               )
             : [];
-      for (const [step] of microsteps) {
-        for (const leaf of statePaths(step.value)) leaves.add(leaf);
+      // A recomputation that lands somewhere the trace did not (a guard that
+      // read live state the snapshot does not hold) took another route.
+      const last = microsteps.at(-1)?.[0];
+      if (last && snapshot && sameLeaves(last.value, snapshot.value)) {
+        for (const [step] of microsteps) {
+          for (const leaf of statePaths(step.value)) leaves.add(leaf);
+        }
       }
     } catch {
       // Not recomputable from the trace alone.

@@ -465,6 +465,26 @@ describe("traceCoverage", () => {
       trace.map((event) => JSON.parse(JSON.stringify(serializeTraceEvent(event)))),
     );
     expect(traceCoverage(routing, json)).toEqual(report);
+
+    // A recomputed route that lands elsewhere than the trace credits nothing.
+    const diverged = traceCoverage(routing, [
+      [
+        {
+          type: "machine.transition",
+          event: { type: "@xstate.init" },
+          from: { value: "idle" },
+          snapshot: { value: "idle", context: { amount: 0 } },
+        },
+        { type: "run.start", snapshot: {} },
+        {
+          type: "machine.transition",
+          event: { type: "go", amount: 20 },
+          from: { value: "idle" },
+          snapshot: { value: "large", context: { amount: 20 } },
+        },
+      ],
+    ]);
+    expect(diverged.unvisitedStates).toEqual(["routing", "small"]);
   });
 
   test("no traces leave everything unvisited", () => {
