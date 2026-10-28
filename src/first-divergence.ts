@@ -45,23 +45,29 @@ const isErrorLike = (value: unknown): value is Record<string, unknown> =>
   isError(value) ||
   (isRecord(value) && typeof value.name === "string" && typeof value.message === "string");
 
-const normalizeErrors = (value: unknown, depth = 0): unknown => {
-  if (depth > 32 || value === null || typeof value !== "object") return value;
-  if (isErrorLike(value) && (isError(value) || "stack" in value || "code" in value)) {
-    const { name, message, code, cause } = value;
-    return {
-      name,
-      message,
-      ...(typeof code === "string" ? { code } : {}),
-      ...(cause !== undefined ? { cause: normalizeErrors(cause, depth + 1) } : {}),
-    };
+const normalizeErrors = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[circular]";
+  seen.add(value);
+  try {
+    if (isErrorLike(value) && (isError(value) || "stack" in value || "code" in value)) {
+      const { name, message, code, cause } = value;
+      return {
+        name,
+        message,
+        ...(typeof code === "string" ? { code } : {}),
+        ...(cause !== undefined ? { cause: normalizeErrors(cause, seen) } : {}),
+      };
+    }
+    if (Array.isArray(value)) return value.map((item) => normalizeErrors(item, seen));
+    // Dates, Maps, and other instances are left to the canonicalizer.
+    if (!isPlainObject(value)) return value;
+    const copy: Record<string, unknown> = Object.create(null);
+    for (const key of Object.keys(value)) copy[key] = normalizeErrors(value[key], seen);
+    return copy;
+  } finally {
+    seen.delete(value);
   }
-  if (Array.isArray(value)) return value.map((item) => normalizeErrors(item, depth + 1));
-  // Dates, Maps, and other instances are left to the canonicalizer.
-  if (!isPlainObject(value)) return value;
-  const copy: Record<string, unknown> = Object.create(null);
-  for (const key of Object.keys(value)) copy[key] = normalizeErrors(value[key], depth + 1);
-  return copy;
 };
 
 const payloadKey = (step: TraceStep) => {

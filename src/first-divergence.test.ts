@@ -307,6 +307,13 @@ describe("firstDivergence", () => {
       });
       expect(diverges(nested("E1"), nested("E2"))).toBe(true);
       expect(diverges(nested("E1"), nested("E1"))).toBe(false);
+      const cyclic = (message: string) => {
+        const error = new Error(message);
+        error.cause = Object.assign(new Error("inner"), { cause: error });
+        return { error };
+      };
+      expect(diverges(cyclic("a"), cyclic("a"))).toBe(false);
+      expect(diverges(cyclic("a"), cyclic("b"))).toBe(true);
       expect(
         diverges(JSON.parse('{"data":{"__proto__":1}}'), JSON.parse('{"data":{"__proto__":2}}')),
       ).toBe(true);
