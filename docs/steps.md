@@ -40,6 +40,9 @@ with an external timer pending. When it fires, deliver
 `{ type: "xstate.timer", id }` through `transition` or as the `event` passed to
 `runToQuiescence`.
 
+An invoked child machine's `after` timers always run in process, and the run
+waits for them, whichever `timers` option you pass.
+
 ## Other hosts
 
 - `runToQuiescence(createAgentRuntime(...), init)` for scripts, tests, and
