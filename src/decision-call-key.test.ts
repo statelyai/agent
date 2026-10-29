@@ -132,8 +132,8 @@ describe("decision callKeys", () => {
 });
 
 // Each WORK runs the `worker` child machine: a text call at `draft`, then a
-// decision at `pick`. The child's own completions and chosen events stay
-// inside the child; only its `xstate.done.actor` reaches the root log.
+// decision at `pick`. The child's own inputs are journaled with its
+// `actorPath`, so its sites count across turns like the root's.
 function createWorkerMachine() {
   const childSchemas = createAgentSchemas({
     context: z.object({}),
@@ -202,12 +202,12 @@ describe("callKeys inside an invoked child machine", () => {
       expect(result.snapshot.context).toEqual({ rounds: turn + 1 });
     }
     expect(siteKeys(keys)).toEqual([
-      "worker#1/draft#1",
-      "worker#1/pick#1.0",
-      "worker#2/draft#1",
-      "worker#2/pick#1.0",
-      "worker#3/draft#1",
-      "worker#3/pick#1.0",
+      "worker/draft#1",
+      "worker/pick#1.0",
+      "worker/draft#2",
+      "worker/pick#2.0",
+      "worker/draft#3",
+      "worker/pick#3.0",
     ]);
     expect(new Set(keys).size).toBe(keys.length);
   });
@@ -244,15 +244,14 @@ describe("callKeys inside an invoked child machine", () => {
       createAgentRuntime(machine, { store, threadId: "t", executors: executors(keys) }),
     );
     expect(resumed.snapshot.context).toEqual({ rounds: 2 });
-    // The resumed child restarts from its initial state, so its draft re-runs
-    // too, under the key the crashed attempt used.
+    // The child resumes where it was: its draft settled, so only the decision
+    // re-runs, under the key the crashed attempt used.
     expect(siteKeys(keys)).toEqual([
-      "worker#1/draft#1",
-      "worker#1/pick#1.0",
-      "worker#2/draft#1",
-      "worker#2/pick#1.0",
-      "worker#2/draft#1",
-      "worker#2/pick#1.0",
+      "worker/draft#1",
+      "worker/pick#1.0",
+      "worker/draft#2",
+      "worker/pick#2.0",
+      "worker/pick#2.0",
     ]);
   });
 
@@ -287,6 +286,6 @@ describe("callKeys inside an invoked child machine", () => {
     }
     const result = await runtime.finish();
     expect(result.snapshot.context).toEqual({ rounds: 1 });
-    expect(siteKeys(keys)).toEqual(["worker#1/draft#1", "worker#2/draft#1", "worker#2/pick#1.0"]);
+    expect(siteKeys(keys)).toEqual(["worker/draft#1", "worker/draft#2", "worker/pick#1.0"]);
   });
 });

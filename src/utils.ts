@@ -136,6 +136,12 @@ export function resolveMachineVersion(machine: AnyStateMachine): string {
 // undefined/symbol values omitted, cycles collapsed. Not reversible — only used
 // as hash input, so the exact string shape is irrelevant as long as it is
 // stable for a given structural config.
+//
+// A config can reach a child machine's state nodes (through its actors), and
+// XState fills a state node's `_candidateCache` the first time a transition
+// walks it. That cache is never structure, so it is skipped: otherwise folding
+// a child would change the root's version.
+const STRUCTURAL_CACHE_KEYS = new Set(["_candidateCache"]);
 function stableStructuralString(value: unknown, seen: WeakSet<object> = new WeakSet()): string {
   if (value === null) {
     return "null";
@@ -168,7 +174,12 @@ function stableStructuralString(value: unknown, seen: WeakSet<object> = new Weak
       // Skip function/undefined/symbol values: their key must not perturb the
       // hash either, so drop the whole entry rather than emit an empty value.
       const childType = typeof child;
-      if (childType === "function" || childType === "undefined" || childType === "symbol") {
+      if (
+        childType === "function" ||
+        childType === "undefined" ||
+        childType === "symbol" ||
+        STRUCTURAL_CACHE_KEYS.has(key)
+      ) {
         continue;
       }
       parts.push(`${JSON.stringify(key)}:${stableStructuralString(child, seen)}`);
