@@ -31,9 +31,9 @@ export interface RecordedError {
   name: string;
   message: string;
   code?: unknown;
-  /** The error's own string, number, and boolean fields, such as `statusCode`
-   * and `isRetryable`; replay restores them. */
-  data?: Record<string, string | number | boolean>;
+  /** The error's own number and boolean fields, such as `statusCode` and
+   * `isRetryable`; replay restores them. */
+  data?: Record<string, number | boolean>;
   /** `Symbol.for` keys set to `true` on the error, such as the AI SDK's
    * `vercel.ai.error.AI_APICallError`; replay restores them, so checks like
    * `APICallError.isInstance` still pass. */
@@ -234,21 +234,18 @@ export class RecordingDivergenceError extends Error {
   override name = "RecordingDivergenceError";
 }
 
-const ERROR_FIELDS = new Set(["name", "message", "code", "stack", "cause"]);
-
 function toRecordedError(error: unknown): RecordedError {
   if (!(error instanceof Error)) return { name: "Error", message: String(error) };
   const recorded: RecordedError = { name: error.name, message: error.message };
   const code = (error as { code?: unknown }).code;
   if (code !== undefined) recorded.code = toJson(code);
-  // Only primitive fields: object fields (an AI SDK error's request body)
-  // would copy the whole prompt into the recording.
+  // Only number and boolean fields: string and object fields (a URL with a
+  // key in it, a response body, the request) can carry secrets or the prompt.
   const data = Object.fromEntries(
     Object.entries(error).filter(
-      ([key, value]) =>
-        !ERROR_FIELDS.has(key) && ["string", "number", "boolean"].includes(typeof value),
+      ([key, value]) => key !== "code" && (typeof value === "number" || typeof value === "boolean"),
     ),
-  ) as Record<string, string | number | boolean>;
+  ) as Record<string, number | boolean>;
   if (Object.keys(data).length) recorded.data = data;
   const markers = new Set<string>();
   for (let holder: object | null = error; holder; holder = Object.getPrototypeOf(holder)) {
@@ -507,13 +504,11 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
           !usedTools.has(candidate) &&
           candidate.name === name &&
           jsonEqual((normalizeEffect(candidate, replay) as RecordedToolCall).input, wanted);
-        // Same name and input, preferably after as many model calls; a port
-        // that makes more or fewer model calls still gets the recorded result.
-        const recorded =
-          replay.find(
-            (candidate): candidate is RecordedToolCall =>
-              matches(candidate) && candidate.step === effect.step,
-          ) ?? replay.find(matches);
+        // The earliest unused call with the same name and input, at any step:
+        // a port that makes more or fewer model calls still gets the recorded
+        // results, in the order they were recorded (a polled status still
+        // reads `pending` before `ready`).
+        const recorded = replay.find(matches);
         if (!recorded && options.fallback?.tools) {
           effect.unrecorded = true;
           return runLive(effect, args);
@@ -794,9 +789,14 @@ function modelCallShape(effect: RecordedModelCall): unknown {
       questions: Object.entries(questions as Record<string, Record<string, unknown>>)
         .map(([name, question]) => {
           const criteria = question["criteria"];
-          return question["type"] === "choice" && criteria && typeof criteria === "object"
-            ? [name, question["type"], Object.keys(criteria).sort()]
-            : [name, question["type"]];
+          // A choice answers by option name, a score by level index.
+          if (question["type"] === "choice" && criteria && typeof criteria === "object") {
+            return [name, question["type"], Object.keys(criteria).sort()];
+          }
+          if (question["type"] === "score" && Array.isArray(criteria)) {
+            return [name, question["type"], criteria.length];
+          }
+          return [name, question["type"]];
         })
         .sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
     };

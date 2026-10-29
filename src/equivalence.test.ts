@@ -619,6 +619,35 @@ describe("verified equivalence (ports that change on purpose)", () => {
     ).resolves.toBe("saved");
   });
 
+  test("repeated identical tool calls get their results in recorded order", async () => {
+    const poll = (step: number, output: string): RecordedEffect => ({
+      kind: "tool",
+      name: "status",
+      step,
+      input: { id: 1 },
+      output,
+    });
+    const recording: Recording = {
+      version: 1,
+      effects: [poll(0, "pending"), modelEffect(0), poll(1, "ready")],
+    };
+    const replay = createRecorder({ replay: recording });
+    const status = replay.tool("status", async (_input: { id: number }) => "live");
+    await replayModel(replay).doGenerate(offering()); // the port asks the model first
+    await expect(status({ id: 1 })).resolves.toBe("pending");
+    await expect(status({ id: 1 })).resolves.toBe("ready");
+  });
+
+  test("a score question with another number of levels changes shape", () => {
+    const grade = (criteria: unknown[]) =>
+      modelEffect(0, {
+        method: "doDecide",
+        request: { questions: { grade: { type: "score", instructions: "", criteria } } },
+      });
+    expect(sameModelCallShape(grade(["bad", "good"]), grade(["poor", "fine"]))).toBe(true);
+    expect(sameModelCallShape(grade(["bad", "good"]), grade(["bad", "ok", "good"]))).toBe(false);
+  });
+
   test("translate adapts a recorded answer to a call changed on purpose, and the pair compares equal", async () => {
     const recording: Recording = {
       version: 1,
@@ -768,6 +797,7 @@ describe("verified equivalence (ports that change on purpose)", () => {
       data: { statusCode: 529, isRetryable: true },
     });
     expect(JSON.stringify(recorded.error)).not.toContain("a long prompt");
+    expect(JSON.stringify(recorded.error)).not.toContain("api.example");
 
     const replay = createRecorder({ replay: recorder.recording });
     const error = await replayModel(replay)
