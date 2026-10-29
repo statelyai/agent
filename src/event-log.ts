@@ -543,7 +543,8 @@ function canonicalizeForHash(
         : position === "child"
           ? CHILD_VOLATILE_KEYS
           : undefined;
-    const result: Record<string, unknown> = {};
+    // Null prototype, so an own `__proto__` key stays a key.
+    const result: Record<string, unknown> = Object.create(null);
     for (const key of Object.keys(value).sort()) {
       if (volatileKeys?.has(key)) continue;
       const child = (value as Record<string, unknown>)[key];

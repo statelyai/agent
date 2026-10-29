@@ -1,7 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { AgentTruncatedError } from "../errors.js";
-import type { AgentDecisionRequest } from "../decision.js";
+import {
+  AgentDecisionExhaustedError,
+  resolveDecision,
+  type AgentDecisionRequest,
+} from "../decision.js";
 import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
 import {
@@ -388,11 +392,93 @@ describe("createOpenAiExecutors: decide", () => {
     expect(result.usage).toEqual({ inputTokens: 8, outputTokens: 2, totalTokens: 10 });
   });
 
-  test("a reply with no tool call is an error", async () => {
-    const { decide } = createOpenAiExecutors({
-      client: stubClient(async () => ({ choices: [choice("I would rather not.")] })),
+  // One reply per model call, in order; each is a tool call or plain text.
+  const replies = (...messages: Array<{ name: string; arguments: string } | string>) => {
+    const create = vi.fn(async () => {
+      const reply = messages[create.mock.calls.length - 1]!;
+      return {
+        choices: [
+          typeof reply === "string"
+            ? choice(reply)
+            : {
+                index: 0,
+                finish_reason: "tool_calls",
+                message: {
+                  role: "assistant",
+                  content: null,
+                  tool_calls: [{ id: "call_1", type: "function", function: reply }],
+                },
+              },
+        ],
+        usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+      };
     });
-    await expect(decide(decisionRequest)).rejects.toThrow("did not call an event tool");
+    return createOpenAiExecutors({ client: stubClient(create) });
+  };
+  const ask = { name: "send_event_ASK", arguments: "{}" };
+  const reasons = (request: AgentDecisionRequest) =>
+    request.attempts.map((attempt) => [attempt.failure, attempt.reason]);
+
+  test("a reply with no tool call is retried, its usage still reported", async () => {
+    const { decide } = replies("I would rather not.", ask);
+    const result = await decide(decisionRequest);
+    expect(result.rejected).toEqual({
+      failure: "unknown-event",
+      reason: "no tool was called; call exactly one of: send_event_ASK, send_event_GUESS",
+    });
+    expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 1, totalTokens: 4 });
+
+    const seen: AgentDecisionRequest[] = [];
+    const { decide: retrying } = replies("I would rather not.", ask);
+    const event = await resolveDecision(decisionRequest, {
+      decide: (attempt, info) => (seen.push(attempt), retrying(attempt, info)),
+    });
+    expect(event).toEqual({ type: "ASK" });
+    expect(reasons(seen[1]!)).toEqual([
+      [
+        "unknown-event",
+        "no tool was called; call exactly one of: send_event_ASK, send_event_GUESS",
+      ],
+    ]);
+  });
+
+  test("a call to an unknown tool is retried, naming the valid tools", async () => {
+    const seen: AgentDecisionRequest[] = [];
+    const { decide } = replies({ name: "send_event_QUIT", arguments: "{}" }, ask);
+    const event = await resolveDecision(decisionRequest, {
+      decide: (attempt, info) => (seen.push(attempt), decide(attempt, info)),
+    });
+    expect(event).toEqual({ type: "ASK" });
+    expect(reasons(seen[1]!)).toEqual([
+      [
+        "unknown-event",
+        "tool 'send_event_QUIT' was not offered; valid tools: send_event_ASK, send_event_GUESS",
+      ],
+    ]);
+  });
+
+  test("malformed tool arguments are retried as an invalid payload", async () => {
+    const seen: AgentDecisionRequest[] = [];
+    const { decide } = replies({ name: "send_event_GUESS", arguments: '{"guess": "a c' }, ask);
+    const event = await resolveDecision(decisionRequest, {
+      decide: (attempt, info) => (seen.push(attempt), decide(attempt, info)),
+    });
+    expect(event).toEqual({ type: "ASK" });
+    expect(reasons(seen[1]!)).toEqual([
+      ["invalid-payload", "the arguments for tool 'send_event_GUESS' were not valid JSON"],
+    ]);
+  });
+
+  test("answers that never name a candidate exhaust the retries", async () => {
+    const { decide } = replies("no", "still no", "never");
+    const error = await resolveDecision(decisionRequest, { decide }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
+    expect((error as AgentDecisionExhaustedError).attempts).toHaveLength(3);
+    expect((error as AgentDecisionExhaustedError).attempts.map((a) => a.failure)).toEqual([
+      "unknown-event",
+      "unknown-event",
+      "unknown-event",
+    ]);
   });
 });
 
@@ -495,6 +581,21 @@ describe("createOpenAiExecutors: tool loop", () => {
     },
   } as unknown as AgentTools;
 
+  test("a loop that fails after a step reports the calls it made on the error", async () => {
+    const create = vi.fn(async (_params: any) => {
+      if (create.mock.calls.length === 1) {
+        return { choices: [toolCallChoice("lookup", { q: "cats" })] };
+      }
+      throw new Error("upstream down");
+    });
+    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+
+    await expect(generateText(textRequest({ tools, maxSteps: 4 } as never))).rejects.toMatchObject({
+      message: "upstream down",
+      modelCalls: 2,
+    });
+  });
+
   test("runs the tool, feeds the result back, and returns the model's final text", async () => {
     const create = vi.fn(async (_params: any) =>
       create.mock.calls.length === 1
@@ -512,6 +613,7 @@ describe("createOpenAiExecutors: tool loop", () => {
     const result = await generateText(textRequest({ tools, maxSteps: 4 } as never));
 
     expect(create).toHaveBeenCalledTimes(2);
+    expect(result.modelCalls).toBe(2);
     expect(result.result).toBe("Cats have 9 lives.");
     expect(result.finishReason).toBe("stop");
     // The second call carries the assistant tool_calls message and the result.

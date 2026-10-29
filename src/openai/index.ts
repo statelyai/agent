@@ -32,7 +32,13 @@ import {
   type AgentTextRequest,
 } from "../text-logic.js";
 import { AgentTruncatedError } from "../errors.js";
-import { renderDecisionAttempts, type AgentDecisionRequest } from "../decision.js";
+import {
+  renderDecisionAttempts,
+  type AgentDecisionRejection,
+  type AgentDecisionRequest,
+} from "../decision.js";
+import { rejectedAnswer } from "../internal/rejected-answer.js";
+import { withModelCalls } from "../internal/with-model-calls.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type {
   AgentMessage,
@@ -424,6 +430,8 @@ export type OpenAiGenerateResult = {
   usage?: AgentCallUsage;
   /** Why the call stopped, normalized to the portable {@link AgentFinishReason}. OpenAI's own value stays on `raw`. */
   finishReason: AgentFinishReason;
+  /** OpenAI calls the tool loop made. */
+  modelCalls: number;
   /** The untouched OpenAI response. */
   raw: unknown;
 };
@@ -438,9 +446,11 @@ export type OpenAiStreamResult = {
   raw: unknown;
 };
 
-/** Raw result shape from {@link OpenAiExecutors.decide} — the chosen event plus the call metadata, delivered per decision attempt to `onResult`. */
-export type OpenAiDecideResult = {
-  event: ChosenEvent;
+/** Raw result shape from {@link OpenAiExecutors.decide} — the chosen event (or the answer's rejection) plus the call metadata, delivered per decision attempt to `onResult`. */
+export type OpenAiDecideResult = (
+  | { event: ChosenEvent; rejected?: undefined }
+  | { event?: undefined; rejected: AgentDecisionRejection }
+) & {
   usage?: AgentCallUsage;
   finishReason: AgentFinishReason;
   raw: unknown;
@@ -633,105 +643,111 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     let usage: AgentCallUsage | undefined;
     let step = 0;
 
-    for (;;) {
-      step++;
-      response = (await client.chat.completions.create(
-        textParams(request, messages, {
-          ...responseFormat,
-          // A forced choice applies to the FIRST step only: re-sending
-          // `'required'` after a tool ran would force another call every step
-          // and burn the budget without ever producing an answer.
-          ...(step === 1 && toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
-        }),
-        { signal: info?.signal },
-      )) as ChatCompletion;
-      usage = addAgentCallUsage(usage, toAgentCallUsage(response.usage));
+    try {
+      for (;;) {
+        step++;
+        response = (await client.chat.completions.create(
+          textParams(request, messages, {
+            ...responseFormat,
+            // A forced choice applies to the FIRST step only: re-sending
+            // `'required'` after a tool ran would force another call every step
+            // and burn the budget without ever producing an answer.
+            ...(step === 1 && toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+          }),
+          { signal: info?.signal },
+        )) as ChatCompletion;
+        usage = addAgentCallUsage(usage, toAgentCallUsage(response.usage));
 
-      const message = response.choices[0]?.message;
-      const toolCalls = message?.tool_calls ?? [];
-      if (toolCalls.length === 0 || step >= maxSteps) {
-        break;
-      }
-      // An offered tool with no `execute` hands the call back: the loop ends.
-      // A tool that was not offered is answered with an error result below.
-      const offered = (name: string) =>
-        Object.hasOwn(request.tools, name) && request.tools[name] !== undefined;
-      if (
-        toolCalls.some(
-          (call) =>
-            call.type !== "function" ||
-            (offered(call.function.name) && !toolExecutor(request.tools, call.function.name)),
-        )
-      ) {
-        break;
-      }
-
-      messages.push(message as ChatCompletionMessageParam);
-      for (const call of toolCalls) {
-        if (call.type !== "function") continue;
-        const { name, arguments: args } = call.function;
-        let content: string;
-        try {
-          if (!offered(name)) {
-            throw new Error(
-              `tool '${name}' was not offered; valid tools: ${Object.keys(request.tools)
-                .filter(offered)
-                .join(", ")}`,
-            );
-          }
-          let input: unknown = {};
-          if (args) {
-            try {
-              input = JSON.parse(args);
-            } catch {
-              throw new Error(`the arguments for tool '${name}' were not valid JSON`);
-            }
-          }
-          content = toToolContent(await toolExecutor(request.tools, name)!(input));
-        } catch (error) {
-          // A thrown tool, a tool that was not offered, or arguments that are
-          // not JSON go back to the model as an error result, the way the AI
-          // SDK's loop reports them, rather than failing the request.
-          content = `Error: ${error instanceof Error ? error.message : String(error)}`;
+        const message = response.choices[0]?.message;
+        const toolCalls = message?.tool_calls ?? [];
+        if (toolCalls.length === 0 || step >= maxSteps) {
+          break;
         }
-        messages.push({ role: "tool", tool_call_id: call.id, content });
+        // An offered tool with no `execute` hands the call back: the loop ends.
+        // A tool that was not offered is answered with an error result below.
+        const offered = (name: string) =>
+          Object.hasOwn(request.tools, name) && request.tools[name] !== undefined;
+        if (
+          toolCalls.some(
+            (call) =>
+              call.type !== "function" ||
+              (offered(call.function.name) && !toolExecutor(request.tools, call.function.name)),
+          )
+        ) {
+          break;
+        }
+
+        messages.push(message as ChatCompletionMessageParam);
+        for (const call of toolCalls) {
+          if (call.type !== "function") continue;
+          const { name, arguments: args } = call.function;
+          let content: string;
+          try {
+            if (!offered(name)) {
+              throw new Error(
+                `tool '${name}' was not offered; valid tools: ${Object.keys(request.tools)
+                  .filter(offered)
+                  .join(", ")}`,
+              );
+            }
+            let input: unknown = {};
+            if (args) {
+              try {
+                input = JSON.parse(args);
+              } catch {
+                throw new Error(`the arguments for tool '${name}' were not valid JSON`);
+              }
+            }
+            content = toToolContent(await toolExecutor(request.tools, name)!(input));
+          } catch (error) {
+            // A thrown tool, a tool that was not offered, or arguments that are
+            // not JSON go back to the model as an error result, the way the AI
+            // SDK's loop reports them, rather than failing the request.
+            content = `Error: ${error instanceof Error ? error.message : String(error)}`;
+          }
+          messages.push({ role: "tool", tool_call_id: call.id, content });
+        }
       }
-    }
 
-    // Validated parse of the `{ result, reasoning? }` provider output — no cast.
-    const unwrap = (content: string | null | undefined) =>
-      parseProviderOutput(request, content ? JSON.parse(content) : undefined);
+      // Validated parse of the `{ result, reasoning? }` provider output — no cast.
+      const unwrap = (content: string | null | undefined) =>
+        parseProviderOutput(request, content ? JSON.parse(content) : undefined);
 
-    const choice = response.choices[0];
-    const finishReason = toAgentFinishReason(choice?.finish_reason);
-    const content = choice?.message.content;
+      const choice = response.choices[0];
+      const finishReason = toAgentFinishReason(choice?.finish_reason);
+      const content = choice?.message.content;
 
-    if (jsonSchema) {
-      // A structured request that ran out of tokens has no usable output: the
-      // JSON object never closed, and even a closed one only closed because the
-      // model stopped mid-thought. Either way, not a final answer for a
-      // machine — `partialOutput` carries whatever text did arrive.
-      if (finishReason === "length") {
-        throw truncated(request, info, content ?? undefined);
+      if (jsonSchema) {
+        // A structured request that ran out of tokens has no usable output: the
+        // JSON object never closed, and even a closed one only closed because the
+        // model stopped mid-thought. Either way, not a final answer for a
+        // machine — `partialOutput` carries whatever text did arrive.
+        if (finishReason === "length") {
+          throw truncated(request, info, content ?? undefined);
+        }
+        const parsed = unwrap(content);
+        return {
+          result: parsed.result,
+          ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
+          ...usageField(usage),
+          finishReason,
+          modelCalls: step,
+          raw: response,
+        };
       }
-      const parsed = unwrap(content);
+
+      // A text request that ran out of tokens still has its text. It comes back
+      // with `finishReason: 'length'` — the machine decides what that is worth.
       return {
-        result: parsed.result,
-        ...(typeof parsed.reasoning === "string" ? { reasoning: parsed.reasoning } : {}),
+        result: content ?? "",
         ...usageField(usage),
         finishReason,
+        modelCalls: step,
         raw: response,
       };
+    } catch (error) {
+      throw withModelCalls(error, step);
     }
-
-    // A text request that ran out of tokens still has its text. It comes back
-    // with `finishReason: 'length'` — the machine decides what that is worth.
-    return {
-      result: content ?? "",
-      ...usageField(usage),
-      finishReason,
-      raw: response,
-    };
   };
 
   const streamText = async (
@@ -809,19 +825,27 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     )) as ChatCompletion;
 
     const toolCall = response.choices[0]?.message.tool_calls?.[0];
-    if (!toolCall || toolCall.type !== "function") {
-      throw new Error("createOpenAiExecutors: decide — model did not call an event tool.");
-    }
-    const chosenEvent = request.events.find((event) => event.toolName === toolCall.function.name);
-    if (!chosenEvent) {
-      throw new Error(
-        `createOpenAiExecutors: decide — model called unknown tool '${toolCall.function.name}'.`,
-      );
-    }
+    // An answer that names no candidate is retried, not thrown.
+    const unnamed = (call?: { toolName: string; invalidJson?: boolean }): OpenAiDecideResult => ({
+      rejected: rejectedAnswer(
+        call,
+        request.events.map((event) => event.toolName),
+      ),
+      ...usageField(toAgentCallUsage(response.usage)),
+      finishReason: toAgentFinishReason(response.choices[0]?.finish_reason),
+      raw: response,
+    });
+    if (!toolCall || toolCall.type !== "function") return unnamed();
+    const toolName = toolCall.function.name;
+    const chosenEvent = request.events.find((event) => event.toolName === toolName);
+    if (!chosenEvent) return unnamed({ toolName });
 
-    const args: unknown = toolCall.function.arguments
-      ? JSON.parse(toolCall.function.arguments)
-      : {};
+    let args: unknown = {};
+    try {
+      if (toolCall.function.arguments) args = JSON.parse(toolCall.function.arguments);
+    } catch {
+      return unnamed({ toolName, invalidJson: true });
+    }
 
     return {
       // The event's own `type` is spread LAST so it always wins: a stray

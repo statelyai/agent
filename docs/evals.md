@@ -284,7 +284,9 @@ expect(report.ok).toBe(true); // no regressions
 ```ts no-check
 import { explorePaths, traceCoverage } from "@statelyai/agent/testing";
 
-const report = traceCoverage(machine, traces, { reachable: await explorePaths(machine, { input }) });
+const report = traceCoverage(machine, traces, {
+  reachable: await explorePaths(machine, { input }),
+});
 report.unvisitedStates; // ["refunded"]
 report.unvisitedHandlers; // [{ state: "deciding", event: "AUTO_APPROVE" }]
 report.ratio; // { states: 0.75, handlers: 0.8 }
@@ -322,9 +324,11 @@ const stats = foldTraces(traces, {
 - The reference is a trace, such as a passing run of the same scenario, or an expected trajectory (`TrajectoryItem[]`, as for `matchesTrajectory`).
 - Against a trace, steps are compared in order. A step is one `machine.transition`: the active states before it, the event type, and the active states after it. The first step that differs is the divergence, and so is the point where either trace ends early.
 - Against a trajectory, the run is laid out as its initial state, then each step's event and new state. The first expected item the run never reaches is the divergence, blamed on the step after the last item it did reach. A run that goes on past the trajectory has not diverged.
-- `state` is the first active state before the diverging step. `decision` is the name of the decision request that chose that step's event, when one did. A different output from a text request is blamed on the state that invoked it.
+- `state` is the first active state before the diverging step. `decision` is the name of the decision request that chose that step's event, when one did. An output that routes elsewhere is blamed on the state that invoked it.
 - Steps the machine ignored are left out on both sides. `@xstate.init` is not a step.
 - `key` projects a step to the string traces are compared by. The default is `from|event|to`. Override it to leave out a region that may differ between equivalent runs. Steps are still compared in order, so two runs whose parallel regions settle in a different order diverge.
+- `key: "payload"` also compares each step's event payload, such as an actor's output or a decision's payload, as key-order-independent JSON. It leaves out `sessionId`, which differs between equivalent runs, and compares errors (an `Error`, or a serialized one with `stack` or `code`) by `name`, `message`, string `code`, and `cause`. Without it, an output that changes no state, such as `"review"` instead of `"alert"` from a classifier that always moves on, does not diverge.
+- Use `key: "payload"` for deterministic or mocked runs and fault localization. In live-vs-live comparisons a model's output usually differs between runs, so the first model call usually diverges; use it there only when output-only differences matter.
 - An empty reference is a trace with no steps, so the run's first step diverges from it.
 - Returns `undefined` when the run does not diverge.
 - In `foldTraces`, `blame` is called for failed runs only. `undefined` blames no state.
@@ -369,7 +373,14 @@ For runs collected elsewhere, such as CI shards or production replays, `summariz
 import { summarizeRepeats } from "@statelyai/agent/testing";
 
 const report = summarizeRepeats([
-  { id: "duplicate-charge", scenario, runs: [{ passed: true, trace }, { passed: false, trace: other }] },
+  {
+    id: "duplicate-charge",
+    scenario,
+    runs: [
+      { passed: true, trace },
+      { passed: false, trace: other },
+    ],
+  },
 ]);
 ```
 
@@ -381,7 +392,12 @@ const report = summarizeRepeats([
 import { judgeAgreement } from "@statelyai/agent/testing";
 
 const report = judgeAgreement(
-  confirmed.map((row) => ({ id: row.id, human: row.label, judge: verdicts[row.id], group: row.state })),
+  confirmed.map((row) => ({
+    id: row.id,
+    human: row.label,
+    judge: verdicts[row.id],
+    group: row.state,
+  })),
   { positive: "fail" },
 );
 report.accuracy; // 0.92

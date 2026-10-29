@@ -1,4 +1,5 @@
-import { isRecord } from "./internal/is-record.js";
+import { canonicalEventJson } from "./event-log.js";
+import { isError, isPlainObject, isRecord } from "./internal/is-record.js";
 import { statePaths, traceSteps, type TraceStep } from "./internal/trace-states.js";
 import { matchesTrajectory, type TrajectoryItem } from "./trajectory.js";
 
@@ -11,8 +12,14 @@ export interface FirstDivergenceOptions {
    * `from|event|to`. Override to leave out what may differ between equivalent
    * runs, such as a parallel region that only logs. Steps are still compared
    * in order. Trace references only.
+   *
+   * `"payload"` also compares the event's payload, such as an actor's output,
+   * as key-order-independent JSON without its `sessionId`, and with errors as
+   * `{ name, message, code?, cause? }` (an `Error`, or a serialized one with `stack` or
+   * `code`). Use it for deterministic or mocked runs; live model outputs usually differ
+   * between runs.
    */
-  key?: (step: TraceStep) => string;
+  key?: ((step: TraceStep) => string) | "payload";
 }
 
 /** Where a run first departs from its reference. See {@link firstDivergence}. */
@@ -30,6 +37,45 @@ export interface Divergence {
 }
 
 const defaultKey = (step: TraceStep) => `${step.from.join(",")}|${step.event}|${step.to.join(",")}`;
+
+// `sessionId` differs between equivalent runs. An error is an `Error` in a live
+// trace and `{ name, message, stack?, code?, cause? }` in a serialized one, so
+// both compare by name, message, string code, and cause, wherever they sit.
+// A record that lacks a string name or message is data, compared as is.
+const isErrorLike = (value: unknown): value is Record<string, unknown> =>
+  isError(value) ||
+  (isRecord(value) && typeof value.name === "string" && typeof value.message === "string");
+
+const normalizeErrors = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[circular]";
+  seen.add(value);
+  try {
+    if (isErrorLike(value) && (isError(value) || "stack" in value || "code" in value)) {
+      const { name, message, code, cause } = value;
+      return {
+        name,
+        message,
+        ...(typeof code === "string" ? { code } : {}),
+        ...(cause !== undefined ? { cause: normalizeErrors(cause, seen) } : {}),
+      };
+    }
+    if (Array.isArray(value)) return value.map((item) => normalizeErrors(item, seen));
+    // Dates, Maps, and other instances are left to the canonicalizer.
+    if (!isPlainObject(value)) return value;
+    const copy: Record<string, unknown> = Object.create(null);
+    for (const key of Object.keys(value)) copy[key] = normalizeErrors(value[key], seen);
+    return copy;
+  } finally {
+    seen.delete(value);
+  }
+};
+
+const payloadKey = (step: TraceStep) => {
+  if (!isRecord(step.payload)) return `${defaultKey(step)}|${canonicalEventJson(step.payload)}`;
+  const { sessionId: _sessionId, ...payload } = step.payload;
+  return `${defaultKey(step)}|${canonicalEventJson(normalizeErrors(payload))}`;
+};
 
 // An empty reference is a trace with no steps. A trace that ended before its
 // first transition still carries `run.*` events, which no trajectory holds.
@@ -80,7 +126,7 @@ export function firstDivergence(
         traceSteps(reference as readonly { readonly type: string }[]).filter(
           (step) => !step.ignored,
         ),
-        options.key ?? defaultKey,
+        options.key === "payload" ? payloadKey : (options.key ?? defaultKey),
       )
     : againstTrajectory(actual, steps, reference as readonly TrajectoryItem[]);
 }

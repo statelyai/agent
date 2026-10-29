@@ -40,6 +40,7 @@ import { getAcceptedEvents, getHumanEventTypes, type AgentSchemas } from "./even
 import {
   GENERATE_TEXT_ACTOR,
   getCallFinishReason,
+  getCallModelCalls,
   getCallUsage,
   isTextLogic,
   normalizeGeneratorResult,
@@ -570,9 +571,16 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * invoke that would have made the call, as an
    * {@link AgentMaxModelCallsExceededError} with `code: 'max-model-calls'` — so
    * an `onError` can branch on it and route to a degraded state. Unhandled, it
-   * settles `{ status: 'error', cause: 'max-model-calls' }`.
+   * settles `{ status: 'error', cause: 'max-model-calls' }`. A tool loop
+   * counts one call per step, so the call after it is the one refused.
    */
   maxModelCalls?: number; // default 100
+  /**
+   * Model calls already spent against `maxModelCalls` before this run, such as
+   * earlier turns of the same conversation (sum their `usage.modelCalls`).
+   * Default 0. Not added to this run's `usage.modelCalls`.
+   */
+  modelCallsSpent?: number;
   /** Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with `signal.reason` as the error. */
   signal?: AbortSignal;
   /** Where root `after` timers live. Default `"in-process"`. See {@link AgentTimerScheduler}. */
@@ -1021,6 +1029,8 @@ interface RunAgentBindContext {
    */
   emitTrace?: TraceDispatch;
   consumeModelCall: () => void;
+  /** Counts provider calls a request made beyond the one `consumeModelCall` admitted (a tool loop's later steps). */
+  countModelCalls?: (extra: number) => void;
   /**
    * Folds one completed call's reported usage into the run-level
    * {@link AgentUsage} AND — when the machine declares a transition for it —
@@ -1278,6 +1288,9 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
       const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
       const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
 
+      // Before usage is recorded, so its `budget` includes this call's steps.
+      runCtx.countModelCalls?.(getCallModelCalls(raw) - 1);
+
       // Fold this call's reported tokens into the run-level AgentUsage, and
       // surface them per-call on the request.end trace.
       const usage = getCallUsage(raw);
@@ -1311,6 +1324,8 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
 
       return { result: output, messages: responseMessagesOf(raw) };
     } catch (error) {
+      // A tool loop that failed after some steps still made them.
+      runCtx.countModelCalls?.(getCallModelCalls(error) - 1);
       runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
       throw error;
     }
@@ -1319,10 +1334,12 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
 
 // Wraps runCtx's `decide` executor with model-call budgeting and tracing.
 // `self` is the invoking decision leaf actor, threaded to `onTrace` so the
-// provide path can attribute the event to its root actor.
+// provide path can attribute the event to its root actor. Usage is recorded
+// through `recordLater`, so the caller can deliver it after the chosen event.
 function createCountingDecide(
   runCtx: RunAgentBindContext,
   self: BoundActorSelf | undefined,
+  recordLater: (record: () => void) => void,
 ): AgentDecisionExecutor {
   return async (attemptRequest, info) => {
     runCtx.consumeModelCall();
@@ -1359,15 +1376,17 @@ function createCountingDecide(
       const finishReason = getCallFinishReason(result);
       if (usage) {
         const { src } = selfIdAndSrc(self);
-        runCtx.recordUsage?.(
-          usage,
-          {
-            kind: "decision",
-            ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
-            ...(src !== "" ? { src } : {}),
-            model: attemptRequest.model,
-          },
-          self,
+        recordLater(() =>
+          runCtx.recordUsage?.(
+            usage,
+            {
+              kind: "decision",
+              ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
+              ...(src !== "" ? { src } : {}),
+              model: attemptRequest.model,
+            },
+            self,
+          ),
         );
       }
       runCtx.emitTrace?.(
@@ -1495,40 +1514,48 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
 
       // The last attempt's `request.attempts` are the failures before the
       // choice that landed: journaled with the delivered event below.
-      const decide = createCountingDecide(runCtx, self);
+      // Usage is delivered after the chosen event, so a budget guard reading
+      // this decision's own `@agent.usage` cannot reject the event it chose.
+      const usageRecords: Array<() => void> = [];
+      const decide = createCountingDecide(runCtx, self, (record) => usageRecords.push(record));
       let priorAttempts: DecisionAttempt[] = [];
-      const chosen = await resolveDecision(
-        request,
-        {
-          decide: (attemptRequest, info) => {
-            priorAttempts = attemptRequest.attempts;
-            return decide(attemptRequest, info);
+      let chosen: ChosenEvent;
+      try {
+        chosen = await resolveDecision(
+          request,
+          {
+            decide: (attemptRequest, info) => {
+              priorAttempts = attemptRequest.attempts;
+              return decide(attemptRequest, info);
+            },
           },
-        },
-        {
-          // The invoke's own input (agent.decide inline `maxRetries`) wins over
-          // the logic's configured budget.
-          maxRetries: lowered.maxRetries ?? logic.maxRetries,
-          signal,
-          canTake: agentCan,
-        },
-      );
+          {
+            // The invoke's own input (agent.decide inline `maxRetries`) wins over
+            // the logic's configured budget.
+            maxRetries: lowered.maxRetries ?? logic.maxRetries,
+            signal,
+            canTake: agentCan,
+          },
+        );
 
-      // Auto-deliver: send the chosen event to the invoking actor, then
-      // complete with it as output. The delivered event's transition typically
-      // EXITS the invoking state, which cancels this invoke — so `onDone` never
-      // fires on that path. If the transition stays in-state instead, the invoke completes and `onDone` (if any) observes
-      // `chosen` as its output. The send happens in this actor's own async
-      // `run` — not a re-evaluated transition function — so it fires exactly
-      // once regardless of v6-alpha transition re-evaluation.
-      // The memoized invoke-level key, without its execution id.
-      const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
-      runCtx.noteDecision?.(
-        chosen,
-        priorAttempts,
-        callKey === undefined ? undefined : callKey.slice(callKey.indexOf(":") + 1),
-      );
-      actorRef?.send(chosen as never);
+        // Auto-deliver: send the chosen event to the invoking actor, then
+        // complete with it as output. The delivered event's transition typically
+        // EXITS the invoking state, which cancels this invoke — so `onDone` never
+        // fires on that path. If the transition stays in-state instead, the invoke completes and `onDone` (if any) observes
+        // `chosen` as its output. The send happens in this actor's own async
+        // `run` — not a re-evaluated transition function — so it fires exactly
+        // once regardless of v6-alpha transition re-evaluation.
+        // The memoized invoke-level key, without its execution id.
+        const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+        runCtx.noteDecision?.(
+          chosen,
+          priorAttempts,
+          callKey === undefined ? undefined : callKey.slice(callKey.indexOf(":") + 1),
+        );
+        actorRef?.send(chosen as never);
+      } finally {
+        for (const record of usageRecords) record();
+      }
       // Let the applied transition commit (and let xstate cancel this invoke if
       // the event exited the state) before completing.
       await Promise.resolve();
@@ -2136,10 +2163,9 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   const { onIdle, ...rest } = options;
   let result = await runToQuiescence(createAgentRuntime(machine, rest), rest);
   if (!onIdle) return result;
-  // The budget is for the whole call: each pass gets what the earlier passes
-  // left, since every runtime counts only its own calls.
-  const maxModelCalls = rest.maxModelCalls ?? 100;
-  let modelCalls = result.usage.modelCalls;
+  // The budget is for the whole call: each pass starts from what the earlier
+  // passes spent, since every runtime counts only its own calls.
+  let modelCallsSpent = (rest.modelCallsSpent ?? 0) + result.usage.modelCalls;
   // `attempts` explain the opening `event` only, never an `onIdle` answer.
   const { input: _input, events: _events, attempts: _attempts, ...resumeOptions } = rest;
   // An ignored event (the opening `event`, or an answer) leaves the run where
@@ -2147,7 +2173,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   while (result.status === "idle" && result.ignored === undefined) {
     const event = await onIdle(result.snapshot);
     result = await runToQuiescence(
-      createAgentRuntime(machine, { ...resumeOptions, maxModelCalls: maxModelCalls - modelCalls }),
+      createAgentRuntime(machine, { ...resumeOptions, modelCallsSpent }),
       {
         ...resumeOptions,
         // Without a store the log travels with the result, so the final
@@ -2158,7 +2184,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         event,
       },
     );
-    modelCalls += result.usage.modelCalls;
+    modelCallsSpent += result.usage.modelCalls;
   }
   return result;
 }
@@ -2245,6 +2271,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   options: AgentRuntimeOptions<TMachine> = {},
 ): AgentRuntime<TMachine> {
   const maxModelCalls = options.maxModelCalls ?? 100;
+  const modelCallsSpent = options.modelCallsSpent ?? 0;
   let modelCallCount = 0;
   let budgetExceeded = false;
   // Dev-only serialization guard: warn at most once per run when idle context
@@ -2292,11 +2319,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     }
     // Count only calls the budget actually admits, so `usage.modelCalls`
     // reports calls MADE (the rejected attempt never reaches an executor).
-    if (modelCallCount + 1 > maxModelCalls) {
+    if (modelCallsSpent + modelCallCount + 1 > maxModelCalls) {
       budgetExceeded = true;
       throw new AgentMaxModelCallsExceededError(maxModelCalls);
     }
     modelCallCount += 1;
+  };
+  // A tool loop's later steps were already made, so they are counted, not admitted.
+  const countModelCalls = (extra: number) => {
+    modelCallCount += extra;
   };
 
   // ─── The replayable event log ───
@@ -2518,7 +2549,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // so a late arrival can never affect an already-returned result. Dropped
   // stragglers are visible on `onTrace` as `usage.dropped`.
   const recordUsage = (usage: AgentCallUsage, source: AgentUsageEventSource = {}) => {
-    const event: AgentUsageEvent = { type: AGENT_USAGE_EVENT_TYPE, ...source, usage };
+    const event: AgentUsageEvent = {
+      type: AGENT_USAGE_EVENT_TYPE,
+      ...source,
+      usage,
+      budget: { modelCalls: modelCallsSpent + modelCallCount, maxModelCalls },
+    };
     let delivered = false;
     deliverUsageEvent(
       event,
@@ -2600,6 +2636,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     decide: executors.decide,
     emitTrace: onTrace as TraceDispatch,
     consumeModelCall,
+    countModelCalls,
     recordUsage,
     actorHolder,
     awaitJournal,
@@ -3391,6 +3428,14 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           "runtime-finished",
           "createAgentRuntime: `finish` was already called.",
         );
+      }
+      // A decision's usage is queued after the event it chose; when that event
+      // ends the machine, the usage is never handed out. Journal it out of
+      // band, like usage the machine declares no transition for.
+      for (const event of mailbox) {
+        if (event.type === AGENT_USAGE_EVENT_TYPE) {
+          appendLogEntry(event);
+        }
       }
       const snapshot = current as AnyMachineSnapshot;
       let outcome: AgentRunOutcome<TMachine>;

@@ -91,7 +91,7 @@ describe("v1: one offered proposal per branch, no text model", () => {
     const { event } = await decide(request);
     expect(event).toEqual(expected);
     // Exactly one of the options the desk offered.
-    expect(isOffered(request, event)).toBe(true);
+    expect(isOffered(request, event!)).toBe(true);
     expect(decide.counters.modelCalls).toBe(0);
   });
 
@@ -115,7 +115,7 @@ describe("v1: one offered proposal per branch, no text model", () => {
       ]),
     );
     // Without the merge, v1 would propose VERIFY_IDENTITY again.
-    expect(event.type).toBe("ESCALATE");
+    expect(event!.type).toBe("ESCALATE");
   });
 });
 
@@ -127,7 +127,7 @@ describe("v0: the model chooses among the offered options", () => {
     const { event } = await decide(request);
     // ISSUE_REFUND is not legal yet, so the eager model cannot pick it.
     expect(event).toEqual({ type: "LOOKUP_ORDER", orderId: "ORD-1001" });
-    expect(isOffered(request, event)).toBe(true);
+    expect(isOffered(request, event!)).toBe(true);
     expect(decide.counters).toEqual({ modelCalls: 1, judgeCalls: 0 });
     expect(
       (model.calls[0]!.request as AgentDecisionRequest).options?.map(({ event: e }) => e),
@@ -157,7 +157,7 @@ describe("v0: the model chooses among the offered options", () => {
     const request = await requestAt(facts());
     const { event } = await decide(request);
     expect(event).toEqual({ type: "ESCALATE", reason: "needs a person" });
-    expect(isOffered(request, event)).toBe(true);
+    expect(isOffered(request, event!)).toBe(true);
     expect(decide.counters.modelCalls).toBe(3);
   });
 });
