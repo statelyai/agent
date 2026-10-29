@@ -4,7 +4,8 @@
  * with no Vercel AI SDK in between. Calls that carry function tools — every
  * `decide`, and a `generateText` with tools — go through the Responses API,
  * because reasoning models such as `gpt-6-luna` reject function tools on Chat
- * Completions. Tool-free calls stay on Chat Completions.
+ * Completions. Tool-free calls stay on Chat Completions unless `api: 'responses'`
+ * sends them to the Responses API too.
  *
  * `openai` is an OPTIONAL peer dependency and is imported for TYPES ONLY: the
  * client is injected, so nothing here pulls the package into a bundle at
@@ -27,6 +28,7 @@ import type {
   ResponseFunctionToolCall,
   ResponseInputContent,
   ResponseInputItem,
+  ResponseStreamEvent,
   ResponseUsage,
 } from "openai/resources/responses/responses.js";
 import {
@@ -634,6 +636,10 @@ export type OpenAiCallSettings = Omit<
  */
 export type CreateOpenAiExecutorsOptions = {
   client: OpenAI;
+  /** Where tool-free text calls go: `'chat'` (default, `chat.completions.create`)
+   * or `'responses'` (`responses.create`), for a host whose recorded traffic uses
+   * it. Decisions and tool calls always use the Responses API. */
+  api?: "chat" | "responses";
   resolveModel?: (modelRef: string) => string;
   settings?:
     | Record<string, OpenAiCallSettings>
@@ -816,7 +822,7 @@ function toToolContent(output: unknown): string {
  * ```
  */
 export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): OpenAiExecutors {
-  const { client, resolveModel = (modelRef: string) => modelRef } = options;
+  const { client, api = "chat", resolveModel = (modelRef: string) => modelRef } = options;
   const warnedSettings = new Set<string>();
   // Resolved model id → the settings it rejected. A model learns each rejected
   // setting once; later calls to it leave the setting out.
@@ -943,7 +949,8 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     };
   };
 
-  // The host-side tool loop, over the Responses API. `maxSteps` bounds the
+  // The host-side tool loop, over the Responses API; with `api: 'responses'`, a
+  // tool-free call is its single step. `maxSteps` bounds the
   // number of OpenAI calls (default 1, single-step, like the AI SDK adapter):
   // each step that comes back with function calls runs them, appends the calls
   // and one `function_call_output` per result, and asks again. The loop ends on
@@ -974,7 +981,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         step++;
         response = await createResponse(
           responsesParams(request, [...input], {
-            tools,
+            ...(tools.length > 0 ? { tools } : {}),
             ...(jsonSchema
               ? {
                   // `strict: false` for the same reason as the tools above.
@@ -1070,7 +1077,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     const jsonSchema = await structuredSchema(request);
     const tools = toOpenAiTools(request.tools);
     const { content, finishReason, usage, modelCalls, raw } =
-      tools.length > 0
+      tools.length > 0 || api === "responses"
         ? await responsesToolLoop(request, tools, jsonSchema, info)
         : await chatCompletion(request, jsonSchema, info);
 
@@ -1128,6 +1135,39 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         "createOpenAiExecutors: streamText is text-only \u2014 a request declaring tools must be " +
           "routed to generateText.",
       );
+    }
+
+    if (api === "responses") {
+      const events = (await client.responses.create(
+        {
+          ...responsesParams(request, toResponsesInput(toOpenAiMessages(request)), {}),
+          stream: true,
+        },
+        { signal: info?.signal },
+      )) as AsyncIterable<ResponseStreamEvent>;
+      let text = "";
+      let response: Response | undefined;
+      for await (const event of events) {
+        if (event.type === "response.output_text.delta") {
+          text += event.delta;
+          info?.onChunk?.(event.delta);
+        } else if (
+          event.type === "response.completed" ||
+          event.type === "response.incomplete" ||
+          event.type === "response.failed"
+        ) {
+          response = event.response;
+        }
+      }
+      if (response) {
+        assertNotFailed(response, "streamText");
+      }
+      return {
+        result: text,
+        ...usageField(toAgentResponseUsage(response?.usage)),
+        finishReason: response ? toAgentResponseFinishReason(response) : "other",
+        raw: response,
+      };
     }
 
     const stream = (await client.chat.completions.create(

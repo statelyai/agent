@@ -95,7 +95,7 @@ const executors = createOpenAiExecutors({
 await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 ```
 
-`client` is injected, so the API key, base URL, and transport stay with the host. `openai` 5 or newer is required. It is an optional peer dependency with no version range, so an app on `openai` 4 still installs the core, and it is imported for types only. A client wrapper must forward both `responses.create` and `chat.completions.create`, and an OpenAI-compatible server needs `/v1/responses` for tool calls.
+`client` is injected, so the API key, base URL, and transport stay with the host. `openai` 5 or newer is required. It is an optional peer dependency with no version range, so an app on `openai` 4 still installs the core, and it is imported for types only. A client wrapper must forward both `responses.create` and `chat.completions.create`, and an OpenAI-compatible server needs `/v1/responses` for tool calls. Decisions and tool calls use `client.responses.create`, and other calls use Chat Completions. Pass `api: "responses"` to send every call to `client.responses.create`.
 
 `resolveModel` maps a machine's model ref to a real OpenAI model id. It defaults to identity, for machines whose refs are already ids.
 
