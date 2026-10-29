@@ -1,6 +1,6 @@
 {
   "name": "@statelyai/agent",
-  "version": "2.0.0-alpha.33",
+  "version": "2.0.0-alpha.34",
   "description": "Make invalid agent actions impossible. Agent logic as state machines: deterministic, inspectable, resumable, runs anywhere.",
   "keywords": [
     "agent",
@@ -212,10 +212,10 @@
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1",
-    "@tanstack/ai": ">=0.66.0 <1",
-    "ai": "^7.0.128",
-    "ajv": "^8.20.0",
-    "openai": ">=5.0.0 <8",
+    "@tanstack/ai": "*",
+    "ai": "*",
+    "ajv": "*",
+    "openai": "*",
     "xstate": "6.0.0-alpha.69"
   },
   "peerDependenciesMeta": {

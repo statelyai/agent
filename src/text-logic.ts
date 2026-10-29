@@ -176,6 +176,12 @@ export function getCallFinishReason(raw: unknown): AgentFinishReason | undefined
   return AGENT_FINISH_REASONS.has(value) ? (value as AgentFinishReason) : undefined;
 }
 
+/** Provider calls a raw executor result reports (`modelCalls`, a whole number of at least 1), else 1. @internal */
+export function getCallModelCalls(raw: unknown): number {
+  const value = (raw as { modelCalls?: unknown } | null | undefined)?.modelCalls;
+  return typeof value === "number" && Number.isInteger(value) && value > 1 ? value : 1;
+}
+
 /** The token fields {@link AgentUsage} aggregates. @internal */
 export const AGENT_USAGE_TOKEN_FIELDS = [
   "inputTokens",
@@ -772,6 +778,8 @@ export type AgentRequestExecutorResult<TOutput = unknown, TMessage = unknown> = 
   usage?: AgentCallUsage;
   /** Why this call stopped, normalized (see {@link AgentFinishReason}). Surfaced on the `request.end` trace event. */
   finishReason?: AgentFinishReason;
+  /** Provider calls this request made: a tool loop's steps. Default 1. Counted in `usage.modelCalls` and against `maxModelCalls`. */
+  modelCalls?: number;
   [key: string]: unknown;
 };
 
@@ -805,7 +813,9 @@ export interface AgentRequestExecutorInfo {
    * the first attempt's result instead of paying for it twice. A decision
    * retry appends its attempt ordinal (`${executionId}:${requestId}#${n}.${a}`,
    * `a` being the number of prior failed attempts), so a retry never collides
-   * with the rejected attempt it is replacing.
+   * with the rejected attempt it is replacing. A call inside an invoked child
+   * machine is keyed under the root-level child that owns it:
+   * `${executionId}:${childId}#${m}/${requestId}#${k}`.
    *
    * It identifies the CALL SITE, not the request: a version bridge keeps the
    * lineage id, so a migrated machine can ask something else under the same

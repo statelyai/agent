@@ -81,34 +81,28 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
 
   test("decide: tool_choice required, tool call maps back to a machine event", async () => {
     const stubClient = {
+      // `decide` goes through the Responses API, which reasoning models
+      // require for function tools.
+      responses: {
+        create: async (params: { tool_choice?: unknown; tools: Array<{ name: string }> }) => {
+          expect(params.tool_choice).toBe("required");
+          const guessTool = params.tools.find((t) => t.name === "send_event_GUESS");
+          return {
+            status: "completed",
+            output: [
+              {
+                type: "function_call",
+                call_id: "call_1",
+                name: guessTool!.name,
+                arguments: JSON.stringify({ guess: "a cat" }),
+              },
+            ],
+          };
+        },
+      },
       chat: {
         completions: {
-          create: async (params: { tool_choice?: unknown; tools?: unknown[] }) => {
-            if (params.tool_choice === "required") {
-              const guessTool = (params.tools as Array<{ function: { name: string } }>).find(
-                (t) => t.function.name === "send_event_GUESS",
-              );
-              return {
-                choices: [
-                  {
-                    finish_reason: "tool_calls",
-                    message: {
-                      content: null,
-                      tool_calls: [
-                        {
-                          id: "call_1",
-                          type: "function",
-                          function: {
-                            name: guessTool!.function.name,
-                            arguments: JSON.stringify({ guess: "a cat" }),
-                          },
-                        },
-                      ],
-                    },
-                  },
-                ],
-              };
-            }
+          create: async () => {
             // classifyAnswer / classifyGuessFeedback / classifyPlayAgain text requests
             return {
               choices: [

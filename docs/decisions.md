@@ -170,6 +170,12 @@ Retry behavior:
 
 Core validates and retries. It never calls a model. Coercing the model into choosing exactly one option is the host's responsibility. Hosts do this with one tool per event and a forced tool choice, or with structured output over an event union. The shipped `createAiSdkExecutors` provides a `decide` executor for the Vercel AI SDK. The raw-SDK examples force the choice with `tool_choice`. See [Hosts](hosts.md).
 
+An executor returns an answer it cannot read as an event as `rejected: { failure, reason }` instead of `event`. Core records it as a failed attempt, feeds `reason` back to the model as written, and asks again. The shipped AI SDK, OpenAI, and TanStack AI executors do this instead of throwing:
+
+- No tool call: an `unknown-event` attempt whose reason lists the tools to call.
+- A call to a tool that was not offered: an `unknown-event` attempt whose reason lists the valid tools.
+- Tool arguments that are not valid JSON: an `invalid-payload` attempt whose reason names the tool.
+
 > **Note:** Decisions are state-local, so prefer authoring one-off decisions inline on the invoke.
 
 ## The decide loop for multi-event commands

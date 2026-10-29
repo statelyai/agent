@@ -29,7 +29,8 @@ Execution is at-least-once. A host runs the request and then journals its comple
 `info.callKey` makes the duplicate safe to drop. Its format is `<executionId>:<requestId>#<n>`:
 
 - `executionId` is the log's lineage id, pinned in the reserved `@agent.init` entry's `metadata` and inherited by every resume.
-- `requestId` is the invoke site, and `n` counts that site's completions in the log — each iteration of a looped state gets its own key.
+- `requestId` is the invoke site, and `n` is the invocation's ordinal there: how many times a fold of the log has started that invoke, a cancelled invocation included. Each iteration of a looped state gets its own key, and so does a call re-entered after a cancel. A run whose log cannot be folded counts the site's completions instead, a decision counting once its chosen event is journaled.
+- A call inside an invoked child machine names the child's path: `<executionId>:<childId>/<requestId>#<n>`, one `/` segment per nesting level. A `%` or `/` inside an id is escaped as `%25` or `%2F`. The child's own entries (its `actorPath`) are folded too, so `n` keeps counting across turns and across invocations of the child.
 - A decision retry appends its attempt ordinal: `<executionId>:<requestId>#<n>.<attempt>`, where `attempt` is the number of prior failed attempts. Each retry is a different request, so it gets a different key.
 - A resumed run re-executing an in-flight request passes the same `callKey` as the original attempt.
 - A fork mints its own lineage id (see [Fork](event-log.md#fork)), so none of its calls shares a key with its parent's.
@@ -70,7 +71,10 @@ Passing the same `models` map to `setupAgent({ models })` types the machine's mo
 
 ## OpenAI SDK adapter
 
-`@statelyai/agent/openai` maps the same three executors onto the raw `openai` package's Chat Completions API, with no AI SDK in between.
+`@statelyai/agent/openai` maps the same three executors onto the raw `openai` package, with no AI SDK in between.
+
+- Calls that carry function tools use the Responses API: every `decide`, and `generateText` with tools. Reasoning models such as `gpt-6-luna` reject function tools on Chat Completions.
+- Tool-free calls use Chat Completions: `generateText` without tools, and `streamText`.
 
 ```sh
 pnpm add openai
@@ -91,23 +95,31 @@ const executors = createOpenAiExecutors({
 await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 ```
 
-`client` is injected, so the API key, base URL, and transport stay with the host. `openai` is an optional peer dependency, accepted at `>=5.0.0 <8`, and is imported for types only.
+`client` is injected, so the API key, base URL, and transport stay with the host. `openai` 5 or newer is required. It is an optional peer dependency with no version range, so an app on `openai` 4 still installs the core, and it is imported for types only. A client wrapper must forward both `responses.create` and `chat.completions.create`, and an OpenAI-compatible server needs `/v1/responses` for tool calls. Decisions and tool calls use `client.responses.create`, and other calls use Chat Completions. Pass `api: "responses"` to send every call to `client.responses.create`.
 
 `resolveModel` maps a machine's model ref to a real OpenAI model id. It defaults to identity, for machines whose refs are already ids.
 
-`settings` carries the provider knobs that belong to the host rather than the machine, such as `reasoning_effort` or `service_tier`. Key it by model ref to give a ref a persona, or pass a function of the request to vary settings per call. Settings merge under what the request declared, so a request that set `maxOutputTokens` wins.
+`settings` carries the provider knobs that belong to the host rather than the machine, such as `reasoning_effort` or `service_tier`. Key it by model ref to give a ref a persona, or pass a function of the request to vary settings per call. Settings merge under what the request declared, so a request that set `maxOutputTokens` wins. Settings use Chat Completions names. On Responses calls:
 
-Structured output goes through `response_format: { type: 'json_schema' }` with the declared schema wrapped as `{ result, reasoning? }`, and the parsed `result` is what the machine validates. Decisions force a tool call with `tool_choice: 'required'`, one function tool per candidate event.
+- `reasoning_effort` becomes `reasoning.effort`.
+- `max_completion_tokens` becomes `max_output_tokens`.
+- `verbosity` becomes `text.verbosity`.
+- Settings the Responses API shares by name, such as `temperature` and `service_tier`, pass through.
+- Chat-only settings, such as `seed`, `stop`, `logprobs`, and `prediction`, are dropped. This includes a request's `seed` and `stopSequences`. Each dropped key logs one `console.warn` per `createOpenAiExecutors` instance.
+- `store` defaults to `false`, matching Chat Completions.
+- A sampling setting the model rejects, such as `temperature` or `top_p` on a reasoning model like `gpt-6-luna`, is dropped for that model after its first 400. The call is retried without it, and one warning is logged. The rejected request still counts against an HTTP-level budget.
 
-`generateText` runs the tool loop host-side. Each step that comes back with tool calls runs the request's tools, appends the assistant `tool_calls` message and one tool message per result, and asks again. The request's `maxSteps` bounds the number of OpenAI calls; the default is one, so a single-step request behaves as before. A tool that throws goes back to the model as an error result. The loop also ends early on a tool with no `execute` — a client-side tool, whose call is handed back with `finishReason: 'tool-calls'` and the raw response. Every step's `usage` is summed onto the one result the run aggregates.
+Structured output sends the declared schema wrapped as `{ result, reasoning? }`, as `response_format: { type: 'json_schema' }` on Chat Completions or `text.format` on the Responses API. The parsed `result` is what the machine validates. Decisions force a tool call with `tool_choice: 'required'`, one function tool per candidate event. An answer that calls no tool, calls a tool that was not offered, or passes arguments that are not JSON comes back as `rejected`, and the runtime retries it. Function tools are sent with `strict: false`, since the Responses API defaults strict mode on and arbitrary JSON Schema may fall outside it.
 
-`toolChoice` maps onto `tool_choice`: `'auto'`, `'none'`, and `'required'` pass through, and `{ type: 'tool', name }` becomes `{ type: 'function', function: { name } }`. It is sent on the first step only, so a forced choice cannot re-fire every step and burn the step budget.
+`generateText` runs the tool loop host-side. Each step that comes back with function calls runs the request's tools, appends the calls and one `function_call_output` item per result, and asks again. The replay is stateless: calls go back without their item ids, and reasoning items are left out. An incomplete turn, such as one cut off at `max_output_tokens`, never runs its calls, and an incomplete decision throws instead of choosing. A `failed` response throws on both paths, with its error code and message. The request's `maxSteps` bounds the number of OpenAI calls; the default is one, so a single-step request behaves as before. A tool that throws, a call to a tool the request did not offer, and arguments that are not JSON go back to the model as error results. The loop also ends early on a tool with no `execute` — a client-side tool, whose call is handed back with `finishReason: 'tool-calls'` and the raw response. Every step's `usage` is summed onto the one result the run aggregates. `modelCalls` reports the steps, and a loop that throws after a step records them on the error, so the run's budget counts them.
 
-Messages map part by part. Text and image parts become OpenAI content parts (`image_url`, with bytes and bare base64 wrapped in a data URL), assistant tool-call parts become `tool_calls`, and tool results become tool messages carrying their `tool_call_id`. A part Chat Completions cannot carry, such as a file part, throws rather than being dropped.
+`toolChoice` maps onto `tool_choice`: `'auto'`, `'none'`, and `'required'` pass through, and `{ type: 'tool', name }` becomes `{ type: 'function', name }`. It is sent on the first step only, so a forced choice cannot re-fire every step and burn the step budget.
+
+Messages map part by part. Text and image parts become OpenAI content parts (`image_url`, or `input_image` on the Responses API, with bytes and bare base64 wrapped in a data URL). Assistant tool-call parts become `tool_calls`, or `function_call` items. Tool results become tool messages carrying their `tool_call_id`, or `function_call_output` items. A part the adapter cannot carry, such as a file part, throws rather than being dropped.
 
 `streamText` is text-only. A request that declares tools or a structured output schema is refused, not silently downgraded; route it to `generateText`.
 
-Every result reports `usage` on the flat `AgentCallUsage` field names, with `reasoning_tokens` and `cached_tokens` folded onto `reasoningTokens` and `cachedInputTokens`, plus the normalized `finishReason` and the untouched response on `raw`. Streams ask for `stream_options: { include_usage: true }`, so a stream reports usage too.
+Every result reports `usage` on the flat `AgentCallUsage` field names, with `reasoning_tokens` and `cached_tokens` folded onto `reasoningTokens` and `cachedInputTokens`, plus the normalized `finishReason` and the untouched response on `raw`. A Responses API response has no `finish_reason`: an `incomplete` status maps `max_output_tokens` to `'length'`, and a completed response with function calls maps to `'tool-calls'`. Streams ask for `stream_options: { include_usage: true }`, so a stream reports usage too.
 
 ## TanStack AI adapter
 

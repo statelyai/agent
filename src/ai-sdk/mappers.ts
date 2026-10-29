@@ -16,7 +16,11 @@ import {
 } from "../text-logic.js";
 import { isStandardSchema } from "../utils.js";
 import { decisionOptionIds, renderDecisionAttempts } from "../decision.js";
-import type { AgentDecisionOption, AgentDecisionRequest } from "../decision.js";
+import type {
+  AgentDecisionOption,
+  AgentDecisionRejection,
+  AgentDecisionRequest,
+} from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTools, ChosenEvent, StandardSchemaV1 } from "../types.js";
 import { isRecord } from "../internal/is-record.js";
@@ -311,30 +315,33 @@ export function toAiSdkOptionTool(options: readonly AgentDecisionOption[]): {
 
 /**
  * The event a closed-choice tool call names: the offered option whose id is
- * `input.option`. A call to another tool, or an id that is not offered, maps
- * to {@link unofferedOption}, so the choice is retried instead of thrown.
+ * `input.option`. A call to another tool, or an id that is not offered, is
+ * rejected with {@link unofferedOption}, so the choice is retried instead of thrown.
  */
 export function fromAiSdkOptionCall(
   toolCall: { toolName: string; input: unknown },
   options: readonly AgentDecisionOption[],
   ids: readonly string[],
-): ChosenEvent {
+): { event: ChosenEvent } | { rejected: AgentDecisionRejection } {
   if (toolCall.toolName !== OPTION_TOOL_NAME) {
-    return unofferedOption(`tool '${toolCall.toolName}'`, ids);
+    return { rejected: unofferedOption(`tool '${toolCall.toolName}'`, ids) };
   }
   const id = isRecord(toolCall.input) ? toolCall.input.option : undefined;
   const option = typeof id === "string" ? options[ids.indexOf(id)] : undefined;
-  return option ? option.event : unofferedOption(`option ${JSON.stringify(id)}`, ids);
+  return option
+    ? { event: option.event }
+    : { rejected: unofferedOption(`option ${JSON.stringify(id)}`, ids) };
 }
 
 /**
- * A stand-in event for a closed-choice answer that names no offered option.
- * Its `type` is no candidate event, so `resolveDecision` records it as a
- * failed `'unknown-event'` attempt (the type, which names the answer and the
- * valid ids, is the attempt's reason) and asks again.
+ * The rejection for a closed-choice answer that names no offered option, so
+ * `resolveDecision` records a failed `'unknown-event'` attempt and asks again.
  */
-export function unofferedOption(answer: string, ids: readonly string[]): ChosenEvent {
-  return { type: `${answer} was not offered (valid ids: ${ids.join(", ") || "none"})` };
+export function unofferedOption(answer: string, ids: readonly string[]): AgentDecisionRejection {
+  return {
+    failure: "unknown-event",
+    reason: `${answer} was not offered; valid ids: ${ids.join(", ") || "none"}`,
+  };
 }
 
 /**

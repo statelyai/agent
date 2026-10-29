@@ -1,3 +1,4 @@
+import { AGENT_USAGE_EVENT_TYPE } from "../usage.js";
 import { isRecord } from "./is-record.js";
 
 /** The `value` of a trace event's `from` or `snapshot`. @internal */
@@ -50,7 +51,7 @@ export interface TraceStep {
 /**
  * A trace's `machine.transition` events as steps, skipping `@xstate.init`.
  * A first-attempt decision's `request.start` names the decision on the step
- * that follows it. Reads live and serialized traces alike.
+ * that follows it, skipping `@agent.usage` steps. Reads live and serialized traces alike.
  * @internal
  */
 export function traceSteps(trace: Iterable<{ readonly type: string }>): TraceStep[] {
@@ -75,9 +76,10 @@ export function traceSteps(trace: Iterable<{ readonly type: string }>): TraceSte
       to: statePaths(toValue),
       toValue,
       ignored: event.ignored === true,
-      ...(decision === undefined ? {} : { decision }),
+      // A usage record is never what a decision chose; the label waits for the next step.
+      ...(decision === undefined || type === AGENT_USAGE_EVENT_TYPE ? {} : { decision }),
     });
-    decision = undefined;
+    if (type !== AGENT_USAGE_EVENT_TYPE) decision = undefined;
   }
   return steps;
 }

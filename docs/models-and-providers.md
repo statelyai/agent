@@ -210,9 +210,9 @@ await runToQuiescence(
 
 To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and use the endpoint's real `apiKey`. Nothing else changes.
 
-For OpenAI itself, `@statelyai/agent/openai` maps the three executors onto the raw `openai` package's Chat Completions API, with no `ai` dependency. See [Hosts](hosts.md#openai-sdk-adapter).
+For OpenAI itself, `@statelyai/agent/openai` maps the three executors onto the raw `openai` package, with no `ai` dependency. Calls with function tools use the Responses API, and tool-free calls use Chat Completions. See [Hosts](hosts.md#openai-sdk-adapter).
 
-To avoid depending on `ai` or `openai`, write the three executors over raw `fetch` against the same Chat Completions endpoint. Build the request body from the plain `AgentTextRequest` fields. For structured output, `providerOutputSchema` and `getJsonSchema` from `@statelyai/agent` build the `{ result, reasoning? }` schema to send; on the way back, `parseProviderOutput` validates the model's JSON against it and returns `{ result, reasoning? }`, which is already the shape an executor returns. Use `parseOutput` when you validate a bare value on its own, against the schema the request declared. Use `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
+To avoid depending on `ai` or `openai`, write the three executors over raw `fetch` against the same OpenAI endpoints. Build the request body from the plain `AgentTextRequest` fields. For structured output, `providerOutputSchema` and `getJsonSchema` from `@statelyai/agent` build the `{ result, reasoning? }` schema to send; on the way back, `parseProviderOutput` validates the model's JSON against it and returns `{ result, reasoning? }`, which is already the shape an executor returns. Use `parseOutput` when you validate a bare value on its own, against the schema the request declared. Use `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
 
 ## Testing with a mock model
 
@@ -259,7 +259,7 @@ Each example is a runnable host for one provider stack.
 | Example                                                                       | Backing                                                                                                           |
 | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | [ai-sdk-host](../examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the optional adapter                                                                       |
-| [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | `createOpenAiExecutors` from `@statelyai/agent/openai`, over the raw `openai` package (Chat Completions)          |
+| [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | `createOpenAiExecutors` from `@statelyai/agent/openai`, over the raw `openai` package (Responses + Chat Completions) |
 | [tanstack-ai-stream](../examples/tanstack-ai-stream/index.ts)                 | `createTanStackAiExecutors` from `@statelyai/agent/tanstack-ai`, streamed to a `useChat` client over AG-UI        |
 | [anthropic-sdk-host](../examples/anthropic-sdk-host/index.ts)                 | raw `@anthropic-ai/sdk` (Messages); structured via forced tool call, decisions via `tool_choice: { type: 'any' }` |
 | [langchain-host](../examples/langchain-host/index.ts)                         | LangChain `BaseChatModel` (`@langchain/core`), wrapped into the executor contract                                 |

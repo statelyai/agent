@@ -34,6 +34,7 @@ export type {
   AgentExecutorDecisionRequest,
   AgentDecisionRequest,
   AgentDecisionExecutor,
+  AgentDecisionRejection,
   AgentDecisionOption,
   DecisionAttempt,
   // Return type of `createDecisionLogic`, so declaration emit can name it.
@@ -176,6 +177,7 @@ export type {
   ImagePart,
   InferInput,
   InferOutput,
+  NormalizedEventSchemas,
   StandardSchemaV1,
   SystemMessage,
   TextPart,

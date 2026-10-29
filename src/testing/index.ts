@@ -86,3 +86,25 @@ export type {
   ParityResult,
   ParityRun,
 } from "../compare-runs.js";
+export {
+  compareRecordings,
+  createRecorder,
+  RecordingDivergenceError,
+  sameModelCallShape,
+} from "../equivalence.js";
+export type {
+  CompareRecordingsOptions,
+  CreateRecorderOptions,
+  EffectDivergence,
+  EffectDivergenceReason,
+  EquivalenceReport,
+  ModelCallMatch,
+  RecordableLanguageModel,
+  RecordedEffect,
+  RecordedError,
+  RecordedModelCall,
+  RecordedOutput,
+  RecordedToolCall,
+  Recorder,
+  Recording,
+} from "../equivalence.js";
