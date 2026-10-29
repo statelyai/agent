@@ -1,5 +1,6 @@
 import {
   createAsyncLogic,
+  deliverEvent,
   getNextTransitions,
   isMachineSnapshot,
   stopActor,
@@ -40,6 +41,7 @@ import { getAcceptedEvents, getHumanEventTypes, type AgentSchemas } from "./even
 import {
   GENERATE_TEXT_ACTOR,
   getCallFinishReason,
+  getCallModelCalls,
   getCallUsage,
   isTextLogic,
   normalizeGeneratorResult,
@@ -74,6 +76,7 @@ import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import {
   AgentMachineVersionMismatchError,
   agentCallOccurrence,
+  agentCallSite,
   createReplayEntry,
   foldLog,
   getLogExecutionId,
@@ -569,9 +572,16 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * invoke that would have made the call, as an
    * {@link AgentMaxModelCallsExceededError} with `code: 'max-model-calls'` — so
    * an `onError` can branch on it and route to a degraded state. Unhandled, it
-   * settles `{ status: 'error', cause: 'max-model-calls' }`.
+   * settles `{ status: 'error', cause: 'max-model-calls' }`. A tool loop
+   * counts one call per step, so the call after it is the one refused.
    */
   maxModelCalls?: number; // default 100
+  /**
+   * Model calls already spent against `maxModelCalls` before this run, such as
+   * earlier turns of the same conversation (sum their `usage.modelCalls`).
+   * Default 0. Not added to this run's `usage.modelCalls`.
+   */
+  modelCallsSpent?: number;
   /** Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with `signal.reason` as the error. */
   signal?: AbortSignal;
   /** Where root `after` timers live. Default `"in-process"`. See {@link AgentTimerScheduler}. */
@@ -1020,6 +1030,8 @@ interface RunAgentBindContext {
    */
   emitTrace?: TraceDispatch;
   consumeModelCall: () => void;
+  /** Counts provider calls a request made beyond the one `consumeModelCall` admitted (a tool loop's later steps). */
+  countModelCalls?: (extra: number) => void;
   /**
    * Folds one completed call's reported usage into the run-level
    * {@link AgentUsage} AND — when the machine declares a transition for it —
@@ -1069,6 +1081,12 @@ interface RunAgentBindContext {
    * off the runtime path.
    */
   noteDecision?: (event: object, attempts: DecisionAttempt[], decidedBy?: string) => void;
+  /**
+   * Called as an invoked child machine starts processing `event`, before its
+   * snapshot moves, so the runtime can journal it in processing order. Unset
+   * off the runtime path.
+   */
+  onChildEvent?: (self: AnyActorRef, event: EventObject) => void;
 }
 
 /**
@@ -1160,6 +1178,19 @@ function selfIdAndSrc(self: BoundActorSelf | undefined): { id: string; src: stri
     id: typeof self?.id === "string" ? self.id : "",
     src: typeof self?.src === "string" ? self.src : "",
   };
+}
+
+/**
+ * The invoke ids from the root down to `actor` (`[]` for the root itself, or
+ * an actor outside the run's tree).
+ */
+function actorPathOf(actor: AnyActorRef | undefined): string[] {
+  const path: string[] = [];
+  for (let at = actor as BoundActorSelf | undefined; at?._parent !== undefined; at = at._parent) {
+    if (typeof at.id !== "string") return [];
+    path.unshift(at.id);
+  }
+  return path;
 }
 
 /** True for a request inside an invoked child machine rather than the root. */
@@ -1258,6 +1289,9 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
       const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
       const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
 
+      // Before usage is recorded, so its `budget` includes this call's steps.
+      runCtx.countModelCalls?.(getCallModelCalls(raw) - 1);
+
       // Fold this call's reported tokens into the run-level AgentUsage, and
       // surface them per-call on the request.end trace.
       const usage = getCallUsage(raw);
@@ -1291,6 +1325,8 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
 
       return { result: output, messages: responseMessagesOf(raw) };
     } catch (error) {
+      // A tool loop that failed after some steps still made them.
+      runCtx.countModelCalls?.(getCallModelCalls(error) - 1);
       runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
       throw error;
     }
@@ -1299,10 +1335,12 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
 
 // Wraps runCtx's `decide` executor with model-call budgeting and tracing.
 // `self` is the invoking decision leaf actor, threaded to `onTrace` so the
-// provide path can attribute the event to its root actor.
+// provide path can attribute the event to its root actor. Usage is recorded
+// through `recordLater`, so the caller can deliver it after the chosen event.
 function createCountingDecide(
   runCtx: RunAgentBindContext,
   self: BoundActorSelf | undefined,
+  recordLater: (record: () => void) => void,
 ): AgentDecisionExecutor {
   return async (attemptRequest, info) => {
     runCtx.consumeModelCall();
@@ -1339,15 +1377,17 @@ function createCountingDecide(
       const finishReason = getCallFinishReason(result);
       if (usage) {
         const { src } = selfIdAndSrc(self);
-        runCtx.recordUsage?.(
-          usage,
-          {
-            kind: "decision",
-            ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
-            ...(src !== "" ? { src } : {}),
-            model: attemptRequest.model,
-          },
-          self,
+        recordLater(() =>
+          runCtx.recordUsage?.(
+            usage,
+            {
+              kind: "decision",
+              ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
+              ...(src !== "" ? { src } : {}),
+              model: attemptRequest.model,
+            },
+            self,
+          ),
         );
       }
       runCtx.emitTrace?.(
@@ -1475,42 +1515,48 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
 
       // The last attempt's `request.attempts` are the failures before the
       // choice that landed: journaled with the delivered event below.
-      const decide = createCountingDecide(runCtx, self);
+      // Usage is delivered after the chosen event, so a budget guard reading
+      // this decision's own `@agent.usage` cannot reject the event it chose.
+      const usageRecords: Array<() => void> = [];
+      const decide = createCountingDecide(runCtx, self, (record) => usageRecords.push(record));
       let priorAttempts: DecisionAttempt[] = [];
-      const chosen = await resolveDecision(
-        request,
-        {
-          decide: (attemptRequest, info) => {
-            priorAttempts = attemptRequest.attempts;
-            return decide(attemptRequest, info);
+      let chosen: ChosenEvent;
+      try {
+        chosen = await resolveDecision(
+          request,
+          {
+            decide: (attemptRequest, info) => {
+              priorAttempts = attemptRequest.attempts;
+              return decide(attemptRequest, info);
+            },
           },
-        },
-        {
-          // The invoke's own input (agent.decide inline `maxRetries`) wins over
-          // the logic's configured budget.
-          maxRetries: lowered.maxRetries ?? logic.maxRetries,
-          signal,
-          canTake: agentCan,
-        },
-      );
+          {
+            // The invoke's own input (agent.decide inline `maxRetries`) wins over
+            // the logic's configured budget.
+            maxRetries: lowered.maxRetries ?? logic.maxRetries,
+            signal,
+            canTake: agentCan,
+          },
+        );
 
-      // Auto-deliver: send the chosen event to the invoking actor, then
-      // complete with it as output. The delivered event's transition typically
-      // EXITS the invoking state, which cancels this invoke — so `onDone` never
-      // fires on that path. If the transition stays in-state instead, the invoke completes and `onDone` (if any) observes
-      // `chosen` as its output. The send happens in this actor's own async
-      // `run` — not a re-evaluated transition function — so it fires exactly
-      // once regardless of v6-alpha transition re-evaluation.
-      // The memoized invoke-level key, without its execution id.
-      // A child's chosen event never reaches the root log, so only a root
-      // decision is marked.
-      const callKey = id !== "" && !isChildRequest(self) ? runCtx.callKey?.(id, self) : undefined;
-      runCtx.noteDecision?.(
-        chosen,
-        priorAttempts,
-        callKey === undefined ? undefined : callKey.slice(callKey.indexOf(":") + 1),
-      );
-      actorRef?.send(chosen as never);
+        // Auto-deliver: send the chosen event to the invoking actor, then
+        // complete with it as output. The delivered event's transition typically
+        // EXITS the invoking state, which cancels this invoke — so `onDone` never
+        // fires on that path. If the transition stays in-state instead, the invoke completes and `onDone` (if any) observes
+        // `chosen` as its output. The send happens in this actor's own async
+        // `run` — not a re-evaluated transition function — so it fires exactly
+        // once regardless of v6-alpha transition re-evaluation.
+        // The memoized invoke-level key, without its execution id.
+        const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+        runCtx.noteDecision?.(
+          chosen,
+          priorAttempts,
+          callKey === undefined ? undefined : callKey.slice(callKey.indexOf(":") + 1),
+        );
+        actorRef?.send(chosen as never);
+      } finally {
+        for (const record of usageRecords) record();
+      }
       // Let the applied transition commit (and let xstate cancel this invoke if
       // the event exited the state) before completing.
       await Promise.resolve();
@@ -1866,9 +1912,31 @@ function rebindChildMachine(
     // Non-agent actors and placeholders pass through untouched.
   }
 
-  return Object.keys(wrapped).length > 0
-    ? (childMachine.provide({ actors: wrapped as never }) as AnyStateMachine)
-    : childMachine;
+  const rebound =
+    Object.keys(wrapped).length > 0
+      ? (childMachine.provide({ actors: wrapped as never }) as AnyStateMachine)
+      : childMachine;
+  return runCtx.onChildEvent ? journaledMachine(rebound, runCtx.onChildEvent) : rebound;
+}
+
+/**
+ * `machine`, reporting each event an actor of it starts processing. An actor
+ * calls its logic's `transition` once per event it processes (raised events
+ * stay inside that step), and before anything moves, so a parent that
+ * receives a child's completion mid-step is reported after the child.
+ */
+function journaledMachine(
+  machine: AnyStateMachine,
+  onEvent: (self: AnyActorRef, event: EventObject) => void,
+): AnyStateMachine {
+  return Object.create(machine, {
+    transition: {
+      value: (...args: Parameters<AnyStateMachine["transition"]>) => {
+        onEvent(args[2].self, args[1]);
+        return machine.transition(...args);
+      },
+    },
+  }) as AnyStateMachine;
 }
 
 /**
@@ -1884,7 +1952,8 @@ export type AgentEffects = Parameters<DurableExecution<AnyStateMachine>["execute
  * durable timers (a Temporal timer, a Durable Object alarm, an Inngest sleep)
  * passes `schedule`/`cancel`: the loop then treats a pending timer as the
  * outside world's business, and the host delivers `{ type: "xstate.timer", id }`
- * through {@link AgentRuntime.transition} when it fires.
+ * through {@link AgentRuntime.transition} when it fires. Only root timers go
+ * to the host: an invoked child machine's timers are always in-process.
  */
 export type AgentTimerScheduler =
   | "in-process"
@@ -2096,10 +2165,9 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   const { onIdle, ...rest } = options;
   let result = await runToQuiescence(createAgentRuntime(machine, rest), rest);
   if (!onIdle) return result;
-  // The budget is for the whole call: each pass gets what the earlier passes
-  // left, since every runtime counts only its own calls.
-  const maxModelCalls = rest.maxModelCalls ?? 100;
-  let modelCalls = result.usage.modelCalls;
+  // The budget is for the whole call: each pass starts from what the earlier
+  // passes spent, since every runtime counts only its own calls.
+  let modelCallsSpent = (rest.modelCallsSpent ?? 0) + result.usage.modelCalls;
   // `attempts` explain the opening `event` only, never an `onIdle` answer.
   const { input: _input, events: _events, attempts: _attempts, ...resumeOptions } = rest;
   // An ignored event (the opening `event`, or an answer) leaves the run where
@@ -2107,7 +2175,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   while (result.status === "idle" && result.ignored === undefined) {
     const event = await onIdle(result.snapshot);
     result = await runToQuiescence(
-      createAgentRuntime(machine, { ...resumeOptions, maxModelCalls: maxModelCalls - modelCalls }),
+      createAgentRuntime(machine, { ...resumeOptions, modelCallsSpent }),
       {
         ...resumeOptions,
         // Without a store the log travels with the result, so the final
@@ -2118,7 +2186,7 @@ export async function runAgent<TMachine extends AnyStateMachine>(
         event,
       },
     );
-    modelCalls += result.usage.modelCalls;
+    modelCallsSpent += result.usage.modelCalls;
   }
   return result;
 }
@@ -2145,6 +2213,7 @@ function assertThreadMatchesEvents(
       canonicalEventJson(storedEntry.event) === canonicalEventJson(givenEntry.event) &&
       // Replay ignores it, but call keys are counted from it.
       storedEntry.decidedBy === givenEntry.decidedBy &&
+      storedEntry.actorPath?.join("\0") === givenEntry.actorPath?.join("\0") &&
       (storedHash === undefined || givenHash === undefined || storedHash === givenHash) &&
       // A fork differs from its parent only here: its init entry's lineage id.
       (index > 0 || getLogExecutionId([storedEntry]) === getLogExecutionId([givenEntry]));
@@ -2204,6 +2273,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   options: AgentRuntimeOptions<TMachine> = {},
 ): AgentRuntime<TMachine> {
   const maxModelCalls = options.maxModelCalls ?? 100;
+  const modelCallsSpent = options.modelCallsSpent ?? 0;
   let modelCallCount = 0;
   let budgetExceeded = false;
   // Dev-only serialization guard: warn at most once per run when idle context
@@ -2251,11 +2321,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     }
     // Count only calls the budget actually admits, so `usage.modelCalls`
     // reports calls MADE (the rejected attempt never reaches an executor).
-    if (modelCallCount + 1 > maxModelCalls) {
+    if (modelCallsSpent + modelCallCount + 1 > maxModelCalls) {
       budgetExceeded = true;
       throw new AgentMaxModelCallsExceededError(maxModelCalls);
     }
     modelCallCount += 1;
+  };
+  // A tool loop's later steps were already made, so they are counted, not admitted.
+  const countModelCalls = (extra: number) => {
+    modelCallCount += extra;
   };
 
   // ─── The replayable event log ───
@@ -2384,7 +2458,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // and all) in the live snapshot while its own completion still waits in the
   // mailbox; replay never starts children, so it holds that child `active`.
   // Built lazily from the log so far; `null` once the log cannot be folded,
-  // and later entries go unverified rather than failing the run.
+  // and later entries go unverified (and call keys fall back to counting
+  // completions) rather than failing the run.
   let logFold: LogFold | null | undefined;
 
   // A value the log cannot hold. With a store the caller asked for a durable
@@ -2404,7 +2479,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     );
   };
 
-  const takeDecidedBy = (event: EventObject): string | undefined => {
+  const takeDecidedBy = (
+    event: EventObject,
+    actorPath: readonly string[] = [],
+  ): string | undefined => {
     const chosen = decidedByEvent.get(event);
     if (chosen !== undefined) return chosen;
     const { actorId } = event as EventObject & { actorId?: unknown };
@@ -2412,8 +2490,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       (event.type === "xstate.done.actor" || event.type === "xstate.error.actor") &&
       typeof actorId === "string"
     ) {
-      const settled = openDecisions.get(actorId);
-      openDecisions.delete(actorId);
+      const site = agentCallSite(actorPath, actorId);
+      const settled = openDecisions.get(site);
+      openDecisions.delete(site);
       return settled;
     }
     return undefined;
@@ -2423,6 +2502,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     event: EventObject,
     attempts?: DecisionAttempt[],
     decidedBy?: string,
+    actorPath?: string[],
   ): AgentLogEntry | undefined => {
     if (!loggingEnabled) {
       return undefined;
@@ -2434,15 +2514,18 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         verification: false,
         ...(attempts !== undefined ? { attempts } : {}),
         ...(decidedBy !== undefined ? { decidedBy } : {}),
+        ...(actorPath !== undefined ? { actorPath } : {}),
       });
     } catch (error) {
       stopLogging(error);
       return undefined;
     }
-    if (verificationEnabled && logFold !== null) {
+    // Folded even when unverified: call keys count invocations on it.
+    if (logFold !== null) {
       try {
         logFold ??= foldLog(logMachine, logEntries, { machineVersion, verify: false });
-        entry.verification = { stateHash: getSnapshotStateHash(logFold.apply(entry)) };
+        const folded = logFold.apply(entry);
+        if (verificationEnabled) entry.verification = { stateHash: getSnapshotStateHash(folded) };
       } catch {
         logFold = null;
       }
@@ -2468,7 +2551,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // so a late arrival can never affect an already-returned result. Dropped
   // stragglers are visible on `onTrace` as `usage.dropped`.
   const recordUsage = (usage: AgentCallUsage, source: AgentUsageEventSource = {}) => {
-    const event: AgentUsageEvent = { type: AGENT_USAGE_EVENT_TYPE, ...source, usage };
+    const event: AgentUsageEvent = {
+      type: AGENT_USAGE_EVENT_TYPE,
+      ...source,
+      usage,
+      budget: { modelCalls: modelCallsSpent + modelCallCount, maxModelCalls },
+    };
     let delivered = false;
     deliverUsageEvent(
       event,
@@ -2550,11 +2638,23 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     decide: executors.decide,
     emitTrace: onTrace as TraceDispatch,
     consumeModelCall,
+    countModelCalls,
     recordUsage,
     actorHolder,
     awaitJournal,
     runId,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
+    // What an invoked child machine processes is journaled with its
+    // `actorPath`: the root's transitions are pure and journaled where they
+    // happen, but a child runs live, and a fold reproduces its state only from
+    // its own inputs. Stopping a child is the root's doing, which the root's
+    // own entries already fold.
+    onChildEvent: (self, event) => {
+      if (finished || event.type === "xstate.stop") return;
+      const actorPath = actorPathOf(self);
+      if (actorPath.length === 0) return;
+      appendLogEntry(event, attemptsByEvent.get(event), takeDecidedBy(event, actorPath), actorPath);
+    },
     noteDecision: (event, attempts, decidedBy) => {
       if (decidedBy !== undefined) {
         decidedByEvent.set(event, decidedBy);
@@ -2642,7 +2742,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   const timerKey = (source: AnyActorRef | undefined, id: string) =>
     `${(source as { address?: string } | undefined)?.address ?? "(root)"}::${id}`;
   // Arms one timer. A root timer fires into the mailbox; a child's timer is
-  // delivered to that child, which resolves it from its own snapshot.
+  // delivered to that child as a self-send, which resolves it from its own
+  // snapshot (`xstate.timer` is internal, so a send from outside is dropped).
   const armTimer = (
     source: AnyActorRef | undefined,
     isRoot: boolean,
@@ -2664,7 +2765,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         if (isRoot) {
           enqueue(timerEvent);
         } else {
-          source?.send(timerEvent as never);
+          if (source) deliverEvent(source as AnyActor, source as AnyActor, timerEvent);
         }
         recheck();
       }, delay),
@@ -2675,8 +2776,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   //
   // Work is in flight while any child is still running — a request, a plain
   // async actor, a child machine whose own children are running — or an
-  // in-process timer is armed. A child machine at rest is waiting for events,
-  // not doing work, so it does not count.
+  // in-process timer is armed (a child machine's timers are always
+  // in-process). A child machine at rest is waiting for events, not doing
+  // work, so it does not count.
   const childrenBusy = (snapshot: AnyMachineSnapshot | undefined): boolean =>
     Object.values((snapshot?.children ?? {}) as Record<string, AnyActorRef | undefined>).some(
       (child) => {
@@ -2687,8 +2789,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         return isMachineSnapshot(childSnapshot) ? childrenBusy(childSnapshot) : true;
       },
     );
-  const workInFlight = (): boolean =>
-    childrenBusy(current) || (inProcessTimers && timerHandles.size > 0);
+  const workInFlight = (): boolean => childrenBusy(current) || timerHandles.size > 0;
 
   // Re-checked whenever anything the run started changes, so the loop stops
   // waiting once the last bit of work settles — even work that never messages
@@ -3144,44 +3245,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // crash recovery whose log holds one completion re-executes the
       // in-flight call as `#2`, exactly the id a replay derives for it.
       //
-      // A call inside an invoked child machine is keyed under the machine that
-      // owns it: `${executionId}:worker#2/pick#1`. The child's own completions
-      // never reach the root log, so its calls are counted per child instance,
-      // and the instance takes its occurrence from the one entry that does: the
-      // root-level child's `xstate.done.actor`. A resumed child restarts from
-      // its initial state, so its calls re-run under the keys they had.
+      // A call inside an invoked child machine names that child too:
+      // `${executionId}:worker/pick#2`. The child's own inputs are journaled
+      // with its `actorPath`, so its sites count the same way the root's do.
       const resumedHistory: readonly AgentLogEntry[] = [...logEntries];
       const siteCallCounts = new Map<string, number>();
       const mintedCallKeys = new WeakMap<object, string>();
-      // Per root-level child site, the last occurrence minted this run: a
-      // child stopped without completing leaves no entry to count.
-      const lastChildOccurrence = new Map<string, number>();
-      const childCallCounts = new WeakMap<object, Map<string, number>>();
-      const childMachineKey = (owner: BoundActorSelf): string => {
-        const memoized = mintedCallKeys.get(owner);
-        if (memoized !== undefined) return memoized;
-        const { id } = selfIdAndSrc(owner);
-        let key: string;
-        if (isChildRequest(owner)) {
-          key = childCallKey(owner._parent as BoundActorSelf, id);
-        } else {
-          const n = Math.max(
-            agentCallOccurrence(logEntries, id),
-            (lastChildOccurrence.get(id) ?? 0) + 1,
-          );
-          lastChildOccurrence.set(id, n);
-          key = `${logExecutionId}:${id}#${n}`;
-        }
-        mintedCallKeys.set(owner, key);
-        return key;
-      };
-      const childCallKey = (owner: BoundActorSelf, siteId: string): string => {
-        let counts = childCallCounts.get(owner);
-        if (counts === undefined) childCallCounts.set(owner, (counts = new Map()));
-        const n = (counts.get(siteId) ?? 0) + 1;
-        counts.set(siteId, n);
-        return `${childMachineKey(owner)}/${siteId}#${n}`;
-      };
       runCtx.callKey = (siteId: string, self?: object) => {
         if (logExecutionId === undefined) {
           return undefined;
@@ -3190,15 +3259,26 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         if (memoized !== undefined) {
           return memoized;
         }
-        if (isChildRequest(self)) {
-          const key = childCallKey((self as BoundActorSelf)._parent as BoundActorSelf, siteId);
-          mintedCallKeys.set(self!, key);
-          return key;
+        const actorPath = actorPathOf((self as BoundActorSelf | undefined)?._parent);
+        const site = agentCallSite(actorPath, siteId);
+        const startedHere = siteCallCounts.get(site) ?? 0;
+        siteCallCounts.set(site, startedHere + 1);
+        openDecisions.delete(site);
+        if (logFold === undefined && loggingEnabled && logEntries.length > 0) {
+          try {
+            logFold = foldLog(logMachine, logEntries, { machineVersion, verify: false });
+          } catch {
+            logFold = null;
+          }
         }
-        const startedHere = siteCallCounts.get(siteId) ?? 0;
-        siteCallCounts.set(siteId, startedHere + 1);
-        openDecisions.delete(siteId);
-        const key = `${logExecutionId}:${siteId}#${agentCallOccurrence(resumedHistory, siteId) + startedHere}`;
+        // The fold has applied the entry that started this call, so its start
+        // count at the site is this invocation's ordinal, cancelled ones
+        // included. Without a fold, completions in the log stand in.
+        const n =
+          logFold && loggingEnabled
+            ? logFold.starts(site)
+            : agentCallOccurrence(resumedHistory, siteId, actorPath) + startedHere;
+        const key = `${logExecutionId}:${site}#${n}`;
         if (self !== undefined) {
           mintedCallKeys.set(self, key);
         }
@@ -3351,6 +3431,14 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           "runtime-finished",
           "createAgentRuntime: `finish` was already called.",
         );
+      }
+      // A decision's usage is queued after the event it chose; when that event
+      // ends the machine, the usage is never handed out. Journal it out of
+      // band, like usage the machine declares no transition for.
+      for (const event of mailbox) {
+        if (event.type === AGENT_USAGE_EVENT_TYPE) {
+          appendLogEntry(event);
+        }
       }
       const snapshot = current as AnyMachineSnapshot;
       let outcome: AgentRunOutcome<TMachine>;

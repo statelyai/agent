@@ -597,6 +597,12 @@ export interface DecisionAttempt {
   reason: string;
 }
 
+const DECISION_FAILURES = new Set<DecisionAttempt["failure"]>([
+  "unknown-event",
+  "invalid-payload",
+  "rejected-by-guard",
+]);
+
 /**
  * Thrown by {@link resolveDecision} when every attempt (up to
  * `maxRetries + 1` of them) fails one of the three checks recorded in
@@ -660,17 +666,38 @@ export function renderDecisionAttempts(
  * …) flow untouched to `onResult`'s `raw`; `usage` is the one core reads —
  * report this attempt's tokens there and the runtime folds them into the run's
  * aggregated {@link AgentUsage}.
+ *
+ * An answer that names no valid event (no tool call, a tool that was not
+ * offered, arguments that are not JSON) is returned as `rejected` instead of
+ * `event`: {@link resolveDecision} records it as a failed attempt with that
+ * reason and asks again.
  */
 export type AgentDecisionExecutor = (
   request: AgentExecutorDecisionRequest,
   info?: AgentRequestExecutorInfo,
-) => PromiseLike<{
-  event: ChosenEvent;
-  reason?: string;
-  /** This attempt's token usage, aggregated into the run result's {@link AgentUsage}. */
-  usage?: AgentCallUsage;
-  [key: string]: unknown;
-}>;
+) => PromiseLike<
+  (
+    | { event: ChosenEvent; rejected?: undefined }
+    | { event?: undefined; rejected: AgentDecisionRejection }
+  ) & {
+    reason?: string;
+    /** This attempt's token usage, aggregated into the run result's {@link AgentUsage}. */
+    usage?: AgentCallUsage;
+    [key: string]: unknown;
+  }
+>;
+
+/**
+ * An answer a decide executor could not read as a candidate event, returned as
+ * `rejected` (see {@link AgentDecisionExecutor}). `reason` is fed back to the
+ * model as written.
+ */
+export type AgentDecisionRejection = {
+  failure: "unknown-event" | "invalid-payload";
+  reason: string;
+  /** What the model sent, as far as it could be read. */
+  event?: ChosenEvent;
+};
 
 /**
  * Options for {@link resolveDecision}. The `TEvent` parameter (the machine's
@@ -766,6 +793,27 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
       },
     );
 
+    const rejected = (result as { rejected?: unknown } | null | undefined)?.rejected;
+    if (rejected !== undefined) {
+      // Checked field by field: a cast or plain-JS executor must not put a
+      // malformed attempt into the retry prompt or the event log.
+      if (
+        !isRecord(rejected) ||
+        typeof rejected.reason !== "string" ||
+        !DECISION_FAILURES.has(rejected.failure as DecisionAttempt["failure"]) ||
+        (rejected.event !== undefined &&
+          (!isRecord(rejected.event) || typeof rejected.event.type !== "string"))
+      ) {
+        throw new Error(
+          "decide executor's `rejected` must be { failure: 'unknown-event' | 'invalid-payload' | " +
+            `'rejected-by-guard', reason: string, event?: { type: string } }; got ${JSON.stringify(rejected)}.`,
+        );
+      }
+      const { failure, reason, event } = rejected as AgentDecisionRejection;
+      attempts.push({ ...(event ? { event } : {}), failure, reason });
+      continue;
+    }
+
     // Fail fast (and descriptively) on the common executor mistake of
     // returning a bare event (`{ type: 'SAFE' }`) instead of the required
     // `{ event: { type, ... } }` envelope — otherwise `event` is `undefined`
@@ -783,7 +831,8 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
           `${JSON.stringify(result)}. Wrap the chosen event: return { event: { type: 'SAFE' } }.`,
       );
     }
-    const { event } = result;
+    // Checked above: an executor that rejected nothing returned an event.
+    const event = result.event as ChosenEvent;
 
     const descriptor = eventsByType.get(event.type);
     if (!descriptor) {

@@ -6,7 +6,11 @@ import {
   type StructuredOutputOptions,
   type StructuredOutputResult,
 } from "@tanstack/ai/adapters";
-import type { AgentDecisionRequest } from "../decision.js";
+import {
+  AgentDecisionExhaustedError,
+  resolveDecision,
+  type AgentDecisionRequest,
+} from "../decision.js";
 import type { AgentEventDescriptor } from "../events.js";
 import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
@@ -22,7 +26,8 @@ import {
 
 type FakeResponse = {
   text?: string;
-  toolCalls?: Array<{ name: string; input?: unknown }>;
+  // `args` is the raw argument text, when it should not be `input` as JSON.
+  toolCalls?: Array<{ name: string; input?: unknown; args?: string }>;
   finishReason?: "stop" | "length" | "tool_calls" | "content_filter";
   usage?: TokenUsage;
   error?: { message: string; code?: string };
@@ -95,7 +100,7 @@ class FakeTextAdapter extends BaseTextAdapter<string, Record<string, any>, ["tex
       yield {
         type: EventType.TOOL_CALL_ARGS,
         toolCallId,
-        delta: JSON.stringify(call.input ?? {}),
+        delta: call.args ?? JSON.stringify(call.input ?? {}),
         ...base,
       } as StreamChunk;
       yield { type: EventType.TOOL_CALL_END, toolCallId, ...base } as StreamChunk;
@@ -398,11 +403,63 @@ describe("createTanStackAiExecutors — decide", () => {
     expect(adapter.requests[0]!.modelOptions).toEqual({ tool_choice: "required", temperature: 0 });
   });
 
-  test("a model that answers in text instead of a tool call throws", async () => {
-    const adapter = new FakeTextAdapter([{ text: "I approve." }]);
-    const { decide } = createTanStackAiExecutors({ models: { quick: adapter } });
+  // Resolves a decision against `responses`, one per model call.
+  async function resolveWith(responses: FakeResponse[]) {
+    const { decide } = createTanStackAiExecutors({
+      models: { quick: new FakeTextAdapter(responses) },
+    });
+    const seen: AgentDecisionRequest[] = [];
+    const event = await resolveDecision(decisionRequest(), {
+      decide: (attempt, info) => (seen.push(attempt), decide(attempt, info)),
+    });
+    return { event, reasons: seen.at(-1)!.attempts.map((attempt) => attempt.reason) };
+  }
+  const reject: FakeResponse = { toolCalls: [{ name: "reject" }] };
 
-    await expect(decide(decisionRequest())).rejects.toThrow("did not call an event tool");
+  test("a text answer instead of a tool call is retried, its usage still reported", async () => {
+    const { decide } = createTanStackAiExecutors({
+      models: { quick: new FakeTextAdapter([{ text: "I approve." }]) },
+    });
+    const result = await decide(decisionRequest());
+    expect(result.rejected).toEqual({
+      failure: "unknown-event",
+      reason: "no tool was called; call exactly one of: approve, reject",
+    });
+    expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 2, totalTokens: 7 });
+
+    expect(await resolveWith([{ text: "I approve." }, reject])).toEqual({
+      event: { type: "REJECT" },
+      reasons: ["no tool was called; call exactly one of: approve, reject"],
+    });
+  });
+
+  test("a call to an unknown tool is retried, naming the valid tools", async () => {
+    expect(await resolveWith([{ toolCalls: [{ name: "escalate" }] }, reject])).toEqual({
+      event: { type: "REJECT" },
+      reasons: ["tool 'escalate' was not offered; valid tools: approve, reject"],
+    });
+  });
+
+  test("malformed tool arguments are retried as an invalid payload", async () => {
+    const { event, reasons } = await resolveWith([
+      { toolCalls: [{ name: "approve", args: '{"note": "LG' }] },
+      reject,
+    ]);
+    expect(event).toEqual({ type: "REJECT" });
+    expect(reasons).toEqual(["the arguments for tool 'approve' were not valid JSON"]);
+  });
+
+  test("answers that never name a candidate exhaust the retries", async () => {
+    const { decide } = createTanStackAiExecutors({
+      models: { quick: new FakeTextAdapter([{ text: "no" }, { text: "no" }, { text: "no" }]) },
+    });
+    const error = await resolveDecision(decisionRequest(), { decide }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
+    expect((error as AgentDecisionExhaustedError).attempts.map((a) => a.failure)).toEqual([
+      "unknown-event",
+      "unknown-event",
+      "unknown-event",
+    ]);
   });
 
   test("failed attempts are appended as user messages", () => {

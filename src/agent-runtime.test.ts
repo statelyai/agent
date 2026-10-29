@@ -430,6 +430,44 @@ describe("createAgentRuntime", () => {
     expect(rearmed.delay).toBeGreaterThan(500);
   });
 
+  const childTimed = setupAgent({
+    context: z.object({}),
+    output: z.object({ expired: z.boolean() }),
+    actors: {
+      worker: createMachine({
+        initial: "waiting",
+        states: {
+          waiting: { after: { 20: { target: "expired" } } },
+          expired: { type: "final" },
+        },
+      }),
+    },
+  }).createMachine({
+    context: {},
+    initial: "running",
+    states: {
+      running: { invoke: { src: "worker", id: "worker", onDone: { target: "expired" } } },
+      expired: { type: "final", output: () => ({ expired: true }) },
+    },
+  });
+
+  test("a child machine's `after` timer fires and keeps the loop reading", async () => {
+    const result = await runToQuiescence(createAgentRuntime(childTimed));
+    expect(result.status).toBe("done");
+    expect(result.status === "done" ? result.output : undefined).toEqual({ expired: true });
+  });
+
+  test("host-owned timers: a child machine's timer still runs in process", async () => {
+    const scheduled: Array<{ id: string; delay: number }> = [];
+    const host = {
+      schedule: (timer: { id: string; delay: number }) => scheduled.push(timer),
+      cancel: () => {},
+    };
+    const result = await runToQuiescence(createAgentRuntime(childTimed, { timers: host }));
+    expect(result.status).toBe("done");
+    expect(scheduled).toEqual([]);
+  });
+
   test("a decision's completion after its chosen event moved the machine on is ignored", async () => {
     const machine = setupAgent({
       context: z.object({}),
