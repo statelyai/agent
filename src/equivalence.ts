@@ -15,6 +15,12 @@
  *    side effects, and records what the port did.
  * 3. `compareRecordings(original, port)` reports the first effect that differs.
  *
+ * A port that changes how it calls the model on purpose (a model-picked action
+ * that became `agent.decide`, a stream that became `doGenerate`) still replays:
+ * `translate` turns the recorded answer into one that fits, `fallback` answers
+ * the calls the original never made, and `compareRecordings(…, { kinds })`
+ * compares only tool calls and output.
+ *
  * Provider-free: both seams are wrapped structurally, so this module imports
  * neither `ai` nor `openai`.
  * @module
@@ -25,6 +31,13 @@ export interface RecordedError {
   name: string;
   message: string;
   code?: unknown;
+  /** The error's own string, number, and boolean fields, such as `statusCode`
+   * and `isRetryable`; replay restores them. */
+  data?: Record<string, string | number | boolean>;
+  /** `Symbol.for` keys set to `true` on the error, such as the AI SDK's
+   * `vercel.ai.error.AI_APICallError`; replay restores them, so checks like
+   * `APICallError.isInstance` still pass. */
+  markers?: string[];
 }
 
 /** One model call. `call` is its 0-based position among model calls. */
@@ -32,7 +45,7 @@ export interface RecordedModelCall {
   kind: "model";
   /** Which wrapper saw it. */
   seam: "ai-sdk" | "openai";
-  /** `doGenerate`/`doStream`, or `chat.completions.create`/`responses.create`. */
+  /** `doGenerate`/`doStream`/`doDecide`, or `chat.completions.create`/`responses.create`. */
   method: string;
   call: number;
   /** The call options or params, JSON-safe (abort signals and headers dropped). */
@@ -42,6 +55,12 @@ export interface RecordedModelCall {
   /** The stream's parts or chunks, in order. */
   stream?: unknown[];
   error?: RecordedError;
+  /** In replay, the recorded call (its `call`) whose answer served this one. */
+  replayed?: number;
+  /** In replay, `translate` adapted the recorded answer to this call. */
+  translated?: true;
+  /** In replay, no recorded call fit, so `fallback` answered it. */
+  unrecorded?: true;
 }
 
 /** One tool call. `step` is the number of model calls made before it. */
@@ -57,6 +76,8 @@ export interface RecordedToolCall {
   /** Started while an earlier tool call was still running. Concurrent calls
    * may finish in either order; sequential ones must keep theirs. */
   concurrent?: true;
+  /** In replay, no recorded call matched, so `fallback.tools` ran the tool. */
+  unrecorded?: true;
 }
 
 /** The run's final result. */
@@ -92,10 +113,59 @@ export interface CreateRecorderOptions {
   /**
    * In replay, maps the recorded and the new tool call before matching them,
    * like {@link CompareRecordingsOptions.normalize}: redact a generated id in a
-   * tool's input so the recorded result still answers it.
+   * tool's input so the recorded result still answers it. A dropped
+   * (`undefined`) effect matches as recorded.
    */
-  normalize?: (effect: RecordedEffect) => RecordedEffect;
+  normalize?: NormalizeEffect;
+  /**
+   * In replay, adapts a recorded answer to a model call you changed on
+   * purpose. Called with each unused recorded call, in order, until it
+   * returns an answer; that answer serves the call regardless of method and
+   * shape, and {@link compareRecordings} counts the pair as the same call.
+   * Return `undefined` to leave a recorded call to the usual matching.
+   *
+   * @example
+   * ```ts
+   * // The original streamed; the port generates.
+   * translate: (recorded, actual) =>
+   *   actual.method === "doGenerate" && recorded.method === "doStream"
+   *     ? { response: toGenerateResult(recorded.stream) }
+   *     : undefined,
+   * ```
+   */
+  translate?: (recorded: RecordedModelCall, actual: RecordedModelCall) => ModelAnswer | undefined;
+  /**
+   * In replay, answers what the recording cannot, instead of throwing
+   * {@link RecordingDivergenceError}: a model call no recorded call fits (the
+   * port's retry or an added call) goes to `model` (AI SDK seam) or `openai`
+   * (client seam), and with `tools: true` a tool call no recorded call matches
+   * runs the wrapped tool. Such effects are marked `unrecorded` and still
+   * count as extra in {@link compareRecordings}.
+   */
+  fallback?: {
+    model?: RecordableModel;
+    openai?: object;
+    tools?: boolean;
+  };
 }
+
+/** A model call's answer: the result, the stream's parts, or an error. */
+export interface ModelAnswer {
+  response?: unknown;
+  stream?: unknown[];
+  error?: RecordedError;
+}
+
+/**
+ * Maps an effect before matching or comparing; `undefined` drops it.
+ * `index` and `effects` are its position in the whole recording, so a repeat
+ * of an earlier effect (an idempotent write made again) can be dropped.
+ */
+export type NormalizeEffect = (
+  effect: RecordedEffect,
+  index: number,
+  effects: readonly RecordedEffect[],
+) => RecordedEffect | undefined;
 
 /**
  * When two model calls count as the same: `"shape"` compares offered tool
@@ -114,6 +184,14 @@ export interface RecordableLanguageModel {
   doStream(options: never): PromiseLike<{ stream: ReadableStream<unknown> }>;
 }
 
+/** The structural slice of an AI SDK decision model (`experimental_decide`). */
+export interface RecordableDecisionModel {
+  doDecide(options: never): PromiseLike<unknown>;
+}
+
+/** An AI SDK model the recorder can wrap. */
+export type RecordableModel = RecordableLanguageModel | RecordableDecisionModel;
+
 type AnyFunction = (...args: never[]) => unknown;
 
 /** The slice of the `openai` SDK's `APIPromise` the recorder keeps. */
@@ -124,11 +202,11 @@ type APIPromiseLike = PromiseLike<unknown> & {
 /** Records (or replays) the effects of one run. */
 export interface Recorder {
   /**
-   * Wraps an AI SDK `LanguageModelV3` (`openai("gpt-…")`, `anthropic(…)`),
-   * keeping its type. In replay the model is never called, so a provider
-   * model built with no API key works.
+   * Wraps an AI SDK `LanguageModelV3` (`openai("gpt-…")`, `anthropic(…)`) or
+   * decision model (`doDecide`), keeping its type. In replay the model is
+   * never called, so a provider model built with no API key works.
    */
-  model<TModel extends RecordableLanguageModel>(model: TModel): TModel;
+  model<TModel extends RecordableModel>(model: TModel): TModel;
   /**
    * Wraps an `openai` client's `chat.completions.create` and
    * `responses.create`, keeping its type. A streamed result is an async
@@ -156,18 +234,46 @@ export class RecordingDivergenceError extends Error {
   override name = "RecordingDivergenceError";
 }
 
+const ERROR_FIELDS = new Set(["name", "message", "code", "stack", "cause"]);
+
 function toRecordedError(error: unknown): RecordedError {
-  if (error instanceof Error) {
-    const code = (error as { code?: unknown }).code;
-    return code === undefined
-      ? { name: error.name, message: error.message }
-      : { name: error.name, message: error.message, code: toJson(code) };
+  if (!(error instanceof Error)) return { name: "Error", message: String(error) };
+  const recorded: RecordedError = { name: error.name, message: error.message };
+  const code = (error as { code?: unknown }).code;
+  if (code !== undefined) recorded.code = toJson(code);
+  // Only primitive fields: object fields (an AI SDK error's request body)
+  // would copy the whole prompt into the recording.
+  const data = Object.fromEntries(
+    Object.entries(error).filter(
+      ([key, value]) =>
+        !ERROR_FIELDS.has(key) && ["string", "number", "boolean"].includes(typeof value),
+    ),
+  ) as Record<string, string | number | boolean>;
+  if (Object.keys(data).length) recorded.data = data;
+  const markers = new Set<string>();
+  for (let holder: object | null = error; holder; holder = Object.getPrototypeOf(holder)) {
+    for (const symbol of Object.getOwnPropertySymbols(holder)) {
+      const key = Symbol.keyFor(symbol);
+      if (key !== undefined && (error as unknown as Record<symbol, unknown>)[symbol] === true) {
+        markers.add(key);
+      }
+    }
   }
-  return { name: "Error", message: String(error) };
+  if (markers.size) recorded.markers = [...markers];
+  return recorded;
 }
 
-function fromRecordedError(error: RecordedError): Error {
-  return Object.assign(new Error(error.message), error);
+function fromRecordedError({ data, markers, ...fields }: RecordedError): Error {
+  const error = Object.assign(new Error(fields.message), fields, data);
+  for (const marker of markers ?? []) {
+    (error as unknown as Record<symbol, boolean>)[Symbol.for(marker)] = true;
+  }
+  return error;
+}
+
+/** What two runs compare of an error: its data and markers may differ. */
+function errorIdentity(error: RecordedError | undefined): unknown {
+  return error && { name: error.name, message: error.message, code: error.code };
 }
 
 /** A JSON-safe copy: Dates become ISO strings, Errors become {@link RecordedError}. */
@@ -247,36 +353,56 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
   const replayedModels = replay?.filter(
     (effect): effect is RecordedModelCall => effect.kind === "model",
   );
+  const usedModels = new Set<RecordedModelCall>();
   const usedTools = new Set<RecordedToolCall>();
-  const normalizeEffect = options.normalize ?? ((effect: RecordedEffect) => effect);
+  const normalizeEffect = (effect: RecordedEffect, list: readonly RecordedEffect[]) =>
+    options.normalize?.(effect, list.indexOf(effect), list) ?? effect;
   let modelCalls = 0;
   let toolsInFlight = 0;
 
-  function nextReplayedModel(effect: RecordedModelCall): RecordedModelCall {
-    const recorded = replayedModels![effect.call];
-    if (!recorded) {
-      throw new RecordingDivergenceError(
-        `Model call #${effect.call} was never made by the recorded run (it made ${replayedModels!.length}).`,
-      );
+  /**
+   * The earliest unused recorded call that fits this one: one `translate`
+   * adapts, or one with the same method and shape. Not by position, so a call
+   * the port added or dropped does not shift every answer after it.
+   */
+  function nextReplayedModel(
+    effect: RecordedModelCall,
+  ): { recorded: RecordedModelCall; answer: ModelAnswer } | undefined {
+    for (const recorded of replayedModels!) {
+      if (usedModels.has(recorded)) continue;
+      const translated = options.translate?.(structuredClone(recorded), effect);
+      if (translated) {
+        effect.translated = true;
+        return { recorded, answer: translated };
+      }
+      if (
+        recorded.method === effect.method &&
+        modelCallsMatch(options.modelCalls, recorded, effect)
+      ) {
+        return { recorded, answer: recorded };
+      }
     }
-    if (recorded.method !== effect.method) {
-      throw new RecordingDivergenceError(
-        `Model call #${effect.call} uses ${effect.method}; the recorded run used ${recorded.method}.`,
-      );
-    }
-    if (!modelCallsMatch(options.modelCalls, recorded, effect)) {
-      throw new RecordingDivergenceError(shapeMessage(recorded, effect));
-    }
-    return recorded;
+    return undefined;
   }
 
-  /** Records a model call around `run`, or answers it from the recording. */
+  function noAnswerMessage(effect: RecordedModelCall): string {
+    const unused = replayedModels!.filter((recorded) => !usedModels.has(recorded));
+    return unused.length
+      ? `Model call #${effect.call} (${effect.method}, ${JSON.stringify(modelCallShape(effect))}) fits no unused recorded call: ${unused.map((recorded) => `#${recorded.call} (${recorded.method}, ${JSON.stringify(modelCallShape(recorded))})`).join(", ")}. A recorded answer only fits a call of the same method and shape; pass \`translate\` to adapt one.`
+      : `Model call #${effect.call} was never made by the recorded run (it made ${replayedModels!.length}).`;
+  }
+
+  /**
+   * Records a model call around `run`, or answers it from the recording.
+   * `fallback` runs it on the stand-in when the recording has no answer.
+   */
   async function modelCall(
     seam: RecordedModelCall["seam"],
     method: string,
     request: unknown,
     streamed: boolean,
     run: () => Promise<unknown>,
+    fallback?: () => Promise<unknown>,
   ): Promise<unknown> {
     const effect: RecordedModelCall = {
       kind: "model",
@@ -287,28 +413,34 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     };
     effects.push(effect);
     if (replay) {
-      let recorded: RecordedModelCall;
-      try {
-        recorded = nextReplayedModel(effect);
-      } catch (error) {
+      const replayed = nextReplayedModel(effect);
+      if (replayed) {
+        const { recorded, answer } = replayed;
+        usedModels.add(recorded);
+        effect.replayed = recorded.call;
+        if (answer.error) {
+          effect.error = answer.error;
+          throw fromRecordedError(answer.error);
+        }
+        effect.response = answer.response;
+        effect.stream = answer.stream;
+        if (seam === "openai") {
+          return streamed ? iterate(answer.stream ?? []) : structuredClone(answer.response);
+        }
+        return streamed
+          ? {
+              ...reviveTimestamps(structuredClone(answer.response) ?? {}),
+              stream: streamFrom(answer.stream ?? []),
+            }
+          : reviveTimestamps(structuredClone(answer.response));
+      }
+      if (!fallback) {
+        const error = new RecordingDivergenceError(noAnswerMessage(effect));
         effect.error = toRecordedError(error);
         throw error;
       }
-      if (recorded.error) {
-        effect.error = recorded.error;
-        throw fromRecordedError(recorded.error);
-      }
-      effect.response = recorded.response;
-      effect.stream = recorded.stream;
-      if (seam === "openai") {
-        return streamed ? iterate(recorded.stream ?? []) : structuredClone(recorded.response);
-      }
-      return streamed
-        ? {
-            ...reviveTimestamps(structuredClone(recorded.response) ?? {}),
-            stream: streamFrom(recorded.stream ?? []),
-          }
-        : reviveTimestamps(structuredClone(recorded.response));
+      effect.unrecorded = true;
+      run = fallback;
     }
     let result: unknown;
     try {
@@ -369,15 +501,23 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     function call(effect: RecordedToolCall, args: unknown[]): unknown {
       const { input } = effect;
       if (replay && options.tools !== "live") {
-        const wanted = (normalizeEffect(effect) as RecordedToolCall).input;
-        const recorded = replay.find(
-          (candidate): candidate is RecordedToolCall =>
-            candidate.kind === "tool" &&
-            !usedTools.has(candidate) &&
-            candidate.step === effect.step &&
-            candidate.name === name &&
-            jsonEqual((normalizeEffect(candidate) as RecordedToolCall).input, wanted),
-        );
+        const wanted = (normalizeEffect(effect, effects) as RecordedToolCall).input;
+        const matches = (candidate: RecordedEffect): candidate is RecordedToolCall =>
+          candidate.kind === "tool" &&
+          !usedTools.has(candidate) &&
+          candidate.name === name &&
+          jsonEqual((normalizeEffect(candidate, replay) as RecordedToolCall).input, wanted);
+        // Same name and input, preferably after as many model calls; a port
+        // that makes more or fewer model calls still gets the recorded result.
+        const recorded =
+          replay.find(
+            (candidate): candidate is RecordedToolCall =>
+              matches(candidate) && candidate.step === effect.step,
+          ) ?? replay.find(matches);
+        if (!recorded && options.fallback?.tools) {
+          effect.unrecorded = true;
+          return runLive(effect, args);
+        }
         // A tool the original ran synchronously stays synchronous.
         const settle = (value: () => unknown) => {
           if (recorded?.sync) return value();
@@ -390,7 +530,7 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         return settle(() => {
           if (!recorded) {
             const error = new RecordingDivergenceError(
-              `Tool '${name}' was called with ${JSON.stringify(input)} ${effect.step === 0 ? "before any model call" : `after model call #${effect.step - 1}`}; the recorded run made no such call.`,
+              `Tool '${name}' was called with ${JSON.stringify(input)}; the recorded run made no such call.`,
             );
             effect.error = toRecordedError(error);
             throw error;
@@ -405,6 +545,10 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
           return structuredClone(recorded.output);
         });
       }
+      return runLive(effect, args);
+    }
+
+    function runLive(effect: RecordedToolCall, args: unknown[]): unknown {
       let output: unknown;
       try {
         output = (fn as unknown as (...args: unknown[]) => unknown)(...args);
@@ -446,15 +590,26 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
   return {
     model(model) {
       const base = model as unknown as Record<string, unknown>;
+      const stand = options.fallback?.model as Record<string, unknown> | undefined;
       const wrapped = Object.create(base) as Record<string, unknown>;
-      wrapped["doGenerate"] = (callOptions: unknown) =>
-        modelCall("ai-sdk", "doGenerate", callOptions, false, () =>
-          (base["doGenerate"] as (o: unknown) => Promise<unknown>).call(base, callOptions),
-        );
-      wrapped["doStream"] = (callOptions: unknown) =>
-        modelCall("ai-sdk", "doStream", callOptions, true, () =>
-          (base["doStream"] as (o: unknown) => Promise<unknown>).call(base, callOptions),
-        );
+      // Only the methods the model has: the AI SDK tells a decision model
+      // (`doDecide`, or the deprecated `doEvaluate`) by which ones exist.
+      for (const method of ["doGenerate", "doStream", "doDecide", "doEvaluate"]) {
+        if (typeof base[method] !== "function") continue;
+        const invoke = (target: Record<string, unknown>, callOptions: unknown) =>
+          (target[method] as (o: unknown) => Promise<unknown>).call(target, callOptions);
+        wrapped[method] = (callOptions: unknown) =>
+          modelCall(
+            "ai-sdk",
+            method,
+            callOptions,
+            method === "doStream",
+            () => invoke(base, callOptions),
+            stand && typeof stand[method] === "function"
+              ? () => invoke(stand, callOptions)
+              : undefined,
+          );
+      }
       return wrapped as never;
     },
     openai(client) {
@@ -467,14 +622,21 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
             if (key !== "create") return Reflect.get(target, key, receiver);
             return (params: { stream?: boolean }, requestOptions?: unknown) => {
               let api: APIPromiseLike | undefined;
-              const promise = modelCall("openai", method, params, params?.stream === true, () => {
-                api = (Reflect.get(target, "create") as (p: unknown, o?: unknown) => unknown).call(
-                  target,
-                  params,
-                  requestOptions,
-                ) as APIPromiseLike;
+              const create = (resource: object) => () => {
+                api = (
+                  Reflect.get(resource, "create") as (p: unknown, o?: unknown) => unknown
+                ).call(resource, params, requestOptions) as APIPromiseLike;
                 return Promise.resolve(api);
-              });
+              };
+              const stand = fallbackResource(method);
+              const promise = modelCall(
+                "openai",
+                method,
+                params,
+                params?.stream === true,
+                create(target),
+                stand && create(stand),
+              );
               // The SDK's `create` returns an `APIPromise`; keep its
               // `withResponse()`. In replay there is no HTTP response.
               return Object.assign(promise, {
@@ -491,6 +653,14 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
             };
           },
         });
+      // The fallback client's resource for `method`, by the same path.
+      const fallbackResource = (method: string): object | undefined => {
+        let value: unknown = options.fallback?.openai;
+        for (const key of method.split(".").slice(0, -1)) {
+          value = (value as Record<string, unknown> | undefined)?.[key];
+        }
+        return value && typeof value === "object" ? value : undefined;
+      };
       const wrapped = new Map<PropertyKey, object>();
       const wrap = (key: PropertyKey, make: () => object) => {
         if (!wrapped.has(key)) wrapped.set(key, make());
@@ -578,10 +748,16 @@ export interface CompareRecordingsOptions {
   modelCalls?: ModelCallMatch;
   /**
    * Maps each effect before comparing, on both sides: redact values that
-   * differ on every run (generated ids, timestamps) or project a tool's input
-   * to the fields that matter.
+   * differ on every run (generated ids, timestamps), project a tool's input
+   * to the fields that matter, or return `undefined` to drop the effect.
    */
-  normalize?: (effect: RecordedEffect) => RecordedEffect;
+  normalize?: NormalizeEffect;
+  /**
+   * Which kinds of effect to compare. Default all. `["tool", "output"]`
+   * compares a port that calls the model differently (another protocol, a
+   * structured draft instead of a tool loop) by what it did, not how it asked.
+   */
+  kinds?: readonly RecordedEffect["kind"][];
 }
 
 /** True when two model calls offer the same tool names and response format. */
@@ -606,9 +782,25 @@ function shapeMessage(expected: RecordedModelCall, actual: RecordedModelCall): s
   return `Model call #${expected.call} changed shape: ${JSON.stringify(modelCallShape(expected))} → ${JSON.stringify(modelCallShape(actual))}. A recorded answer only fits a call of the same shape.`;
 }
 
-/** Offered tool names and the response format: what a recorded answer depends on. */
+/**
+ * Offered tool names and the response format, or a decision's questions and
+ * their options: what a recorded answer depends on.
+ */
 function modelCallShape(effect: RecordedModelCall): unknown {
   const request = (effect.request ?? {}) as Record<string, unknown>;
+  const questions = request["questions"];
+  if (questions && typeof questions === "object") {
+    return {
+      questions: Object.entries(questions as Record<string, Record<string, unknown>>)
+        .map(([name, question]) => {
+          const criteria = question["criteria"];
+          return question["type"] === "choice" && criteria && typeof criteria === "object"
+            ? [name, question["type"], Object.keys(criteria).sort()]
+            : [name, question["type"]];
+        })
+        .sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
+    };
+  }
   const tools = Array.isArray(request["tools"])
     ? (request["tools"] as Record<string, unknown>[])
     : [];
@@ -682,6 +874,8 @@ function differ(
     };
   }
   if (left.kind === "model" && right.kind === "model") {
+    // `translate` adapted this recorded call's answer: the change is intended.
+    if (right.translated && right.replayed === left.call) return undefined;
     if (left.method !== right.method) {
       return {
         reason: "model-method",
@@ -691,7 +885,7 @@ function differ(
     if (!modelCallsMatch(options.modelCalls, left, right)) {
       return { reason: "model-call-shape", message: shapeMessage(left, right) };
     }
-    if (!jsonEqual(left.error, right.error)) {
+    if (!jsonEqual(errorIdentity(left.error), errorIdentity(right.error))) {
       const outcome = (error?: RecordedError) =>
         error ? `failed with ${error.name}: ${error.message}` : "succeeded";
       return {
@@ -714,7 +908,10 @@ function differ(
         message: `Expected ${describe(left)}; the port passed ${JSON.stringify(right.input)}.`,
       };
     }
-    if (!jsonEqual(left.output, right.output) || !jsonEqual(left.error, right.error)) {
+    if (
+      !jsonEqual(left.output, right.output) ||
+      !jsonEqual(errorIdentity(left.error), errorIdentity(right.error))
+    ) {
       return { reason: "tool-result", message: `Tool '${left.name}' returned a different result.` };
     }
     return undefined;
@@ -740,9 +937,16 @@ export function compareRecordings(
   actual: Recording,
   options: CompareRecordingsOptions = {},
 ): EquivalenceReport {
-  const map = options.normalize ?? ((effect: RecordedEffect) => effect);
-  const a = normalize(expected.effects.map(map));
-  const b = normalize(actual.effects.map(map));
+  const select = (effects: RecordedEffect[]) =>
+    normalize(
+      effects.flatMap((effect, index) => {
+        if (options.kinds && !options.kinds.includes(effect.kind)) return [];
+        const mapped = options.normalize ? options.normalize(effect, index, effects) : effect;
+        return mapped ? [mapped] : [];
+      }),
+    );
+  const a = select(expected.effects);
+  const b = select(actual.effects);
   const same = a.map((left) => b.map((right) => !differ(left, right, options)));
   const lcs = Array.from({ length: a.length + 1 }, () =>
     Array.from({ length: b.length + 1 }, () => 0),
