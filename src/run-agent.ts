@@ -3429,6 +3429,14 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           "createAgentRuntime: `finish` was already called.",
         );
       }
+      // A decision's usage is queued after the event it chose; when that event
+      // ends the machine, the usage is never handed out. Journal it out of
+      // band, like usage the machine declares no transition for.
+      for (const event of mailbox) {
+        if (event.type === AGENT_USAGE_EVENT_TYPE) {
+          appendLogEntry(event);
+        }
+      }
       const snapshot = current as AnyMachineSnapshot;
       let outcome: AgentRunOutcome<TMachine>;
       if (stopReason !== undefined) {

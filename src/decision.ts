@@ -597,6 +597,12 @@ export interface DecisionAttempt {
   reason: string;
 }
 
+const DECISION_FAILURES = new Set<DecisionAttempt["failure"]>([
+  "unknown-event",
+  "invalid-payload",
+  "rejected-by-guard",
+]);
+
 /**
  * Thrown by {@link resolveDecision} when every attempt (up to
  * `maxRetries + 1` of them) fails one of the three checks recorded in
@@ -788,7 +794,21 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
     );
 
     const rejected = (result as { rejected?: unknown } | null | undefined)?.rejected;
-    if (isRecord(rejected) && typeof rejected.reason === "string") {
+    if (rejected !== undefined) {
+      // Checked field by field: a cast or plain-JS executor must not put a
+      // malformed attempt into the retry prompt or the event log.
+      if (
+        !isRecord(rejected) ||
+        typeof rejected.reason !== "string" ||
+        !DECISION_FAILURES.has(rejected.failure as DecisionAttempt["failure"]) ||
+        (rejected.event !== undefined &&
+          (!isRecord(rejected.event) || typeof rejected.event.type !== "string"))
+      ) {
+        throw new Error(
+          "decide executor's `rejected` must be { failure: 'unknown-event' | 'invalid-payload' | " +
+            `'rejected-by-guard', reason: string, event?: { type: string } }; got ${JSON.stringify(rejected)}.`,
+        );
+      }
       const { failure, reason, event } = rejected as AgentDecisionRejection;
       attempts.push({ ...(event ? { event } : {}), failure, reason });
       continue;

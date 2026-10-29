@@ -15,8 +15,9 @@ export interface FirstDivergenceOptions {
    *
    * `"payload"` also compares the event's payload, such as an actor's output,
    * as key-order-independent JSON without its `sessionId`, and with errors as
-   * `{ name, message, code?, cause? }`. Use it for deterministic or mocked runs; live model
-   * outputs differ on every run.
+   * `{ name, message, code?, cause? }` (an `Error`, or a serialized one with `stack` or
+   * `code`). Use it for deterministic or mocked runs; live model outputs usually differ
+   * between runs.
    */
   key?: ((step: TraceStep) => string) | "payload";
 }

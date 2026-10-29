@@ -133,4 +133,14 @@ describe("resolveDecision: rejected answers", () => {
     expect(chosen).toEqual({ type: "ASK" });
     expect(seen[1]).toEqual([{ failure: "invalid-payload", reason: "arguments were not JSON" }]);
   });
+
+  test.each([
+    ["an unknown failure", { failure: "timeout", reason: "slow" }],
+    ["an event without a type", { failure: "invalid-payload", reason: "bad", event: {} }],
+    ["no reason", { failure: "invalid-payload" }],
+  ])("throws on a rejection with %s instead of recording it", async (_label, rejected) => {
+    await expect(
+      resolveDecision(request, { decide: async () => ({ rejected }) as never }),
+    ).rejects.toThrow("decide executor's `rejected` must be");
+  });
 });

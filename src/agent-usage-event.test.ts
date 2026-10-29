@@ -190,6 +190,48 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     });
   });
 
+  test("keeps a decision's usage when the chosen event ends the machine", async () => {
+    const schemas = createAgentSchemas({
+      context: z.object({ tokens: z.number() }),
+      events: { GO: z.object({}) },
+    });
+    const machine = setupAgent({ schemas }).createMachine({
+      context: { tokens: 0 },
+      on: {
+        [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
+          context: { tokens: context.tokens + (event.usage.totalTokens ?? 0) },
+        }),
+      },
+      initial: "deciding",
+      states: {
+        deciding: {
+          invoke: {
+            id: "choose",
+            src: "agent.decide",
+            input: { model: "test-model", prompt: "pick", allowedEvents: ["GO"] as const },
+          },
+          on: { GO: { target: "done" } },
+        },
+        done: { type: "final" },
+      },
+    });
+
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: {
+          decide: async () => ({
+            event: { type: "GO" } as ChosenEvent,
+            usage: { totalTokens: 77 },
+          }),
+        },
+      }),
+    );
+
+    expect(result.status).toBe("done");
+    expect(result.usage).toEqual({ totalTokens: 77, modelCalls: 1 });
+    expect(result.events.map((entry) => entry.event.type)).toContain(AGENT_USAGE_EVENT_TYPE);
+  });
+
   test("a machine that declares no handler is untouched", async () => {
     const plainSchemas = createAgentSchemas({
       context: z.object({ note: z.string() }),
