@@ -561,6 +561,25 @@ describe("agentCallOccurrence", () => {
     expect(agentCallOccurrence(buildLog(), "job")).toBe(2);
   });
 
+  test("counts a decision once per decidedBy call, whether or not it completed", () => {
+    const [init, go, done] = buildLog();
+    const pickDone = { ...done!, event: { ...done!.event, actorId: "pick" } };
+    const history = [
+      init!,
+      // Call 1 sent its event and was cancelled; call 2 sent its event, then completed.
+      { ...go!, decidedBy: "pick#1" },
+      { ...go!, decidedBy: "pick#2" },
+      { ...pickDone, decidedBy: "pick#2" },
+      { ...go!, decidedBy: "other#1" },
+      // A bare event's own `decidedBy` field is payload, not a marker.
+      journaled({ type: "GO", decidedBy: "pick#9" }),
+    ];
+
+    expect(agentCallOccurrence(history, "pick")).toBe(3);
+    expect(agentCallOccurrence([...history, pickDone], "pick")).toBe(4);
+    expect(agentCallOccurrence(history, "other")).toBe(2);
+  });
+
   test("does not unwrap a bare event that carries its own `event` payload", () => {
     const history = [
       journaled({ type: "WRAPPED", event: { type: "xstate.done.actor", actorId: "job" } }),

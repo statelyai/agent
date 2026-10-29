@@ -10,7 +10,8 @@ This page lists the breaking changes an app on an earlier 2.0 alpha is most like
 ## Peer versions
 
 - **XState:** exactly the version in the package's `peerDependencies` (`6.0.0-alpha.69` today). Upgrade it in the same change as the agent package.
-- **AI SDK:** `ai` 7.0.128 or newer for `@statelyai/agent/ai-sdk`, which imports `experimental_decide`. An older `ai` fails at import time with `does not provide an export named 'experimental_decide'`.
+- **AI SDK:** `ai` 7.0.128 or newer for `@statelyai/agent/ai-sdk`, which imports `experimental_decide`. An older `ai` fails at import time with `does not provide an export named 'experimental_decide'`. Adapter SDKs are optional peers with no version range, so npm installs the core next to any `ai`, `openai`, `@tanstack/ai`, or `ajv`.
+- **Ajv:** `ajv` 8.20.0 or newer for `@statelyai/agent/validate`, which imports `ajv/dist/2020.js`. Ajv 6 installs, then fails when that subpath is imported.
 
 ## Removed and moved APIs
 

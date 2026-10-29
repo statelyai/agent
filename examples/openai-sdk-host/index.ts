@@ -4,9 +4,10 @@
  * The mapping itself now ships in the package as
  * `@statelyai/agent/openai` — `createOpenAiExecutors` implements the
  * framework's `{ generateText, streamText, decide }` executor contract
- * directly against the raw `openai` package's Chat Completions API (not the
- * `responses` API — chat.completions is the canonical/stable surface), with
- * no Vercel AI SDK in between. Proof that the executor contract is "three
+ * directly against the raw `openai` package, with no Vercel AI SDK in
+ * between. Calls with function tools (`decide`, and `generateText` with
+ * tools) use the Responses API, which reasoning models require for tools;
+ * tool-free calls use Chat Completions. Proof that the executor contract is "three
  * plain functions," not an AI-SDK-specific shape. Compare
  * `@statelyai/agent/ai-sdk` (same contract, mapped through the AI SDK).
  *

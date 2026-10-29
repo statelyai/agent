@@ -54,6 +54,9 @@ export interface RecordedToolCall {
   error?: RecordedError;
   /** The tool returned without a Promise; replay answers synchronously too. */
   sync?: true;
+  /** Started while an earlier tool call was still running. Concurrent calls
+   * may finish in either order; sequential ones must keep theirs. */
+  concurrent?: true;
 }
 
 /** The run's final result. */
@@ -86,6 +89,12 @@ export interface CreateRecorderOptions {
    * since the recorded answer may not fit it; see {@link ModelCallMatch}.
    */
   modelCalls?: ModelCallMatch;
+  /**
+   * In replay, maps the recorded and the new tool call before matching them,
+   * like {@link CompareRecordingsOptions.normalize}: redact a generated id in a
+   * tool's input so the recorded result still answers it.
+   */
+  normalize?: (effect: RecordedEffect) => RecordedEffect;
 }
 
 /**
@@ -106,6 +115,11 @@ export interface RecordableLanguageModel {
 }
 
 type AnyFunction = (...args: never[]) => unknown;
+
+/** The slice of the `openai` SDK's `APIPromise` the recorder keeps. */
+type APIPromiseLike = PromiseLike<unknown> & {
+  withResponse?: () => Promise<{ response: Response; request_id: string | null }>;
+};
 
 /** Records (or replays) the effects of one run. */
 export interface Recorder {
@@ -234,7 +248,9 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     (effect): effect is RecordedModelCall => effect.kind === "model",
   );
   const usedTools = new Set<RecordedToolCall>();
+  const normalizeEffect = options.normalize ?? ((effect: RecordedEffect) => effect);
   let modelCalls = 0;
+  let toolsInFlight = 0;
 
   function nextReplayedModel(effect: RecordedModelCall): RecordedModelCall {
     const recorded = replayedModels![effect.call];
@@ -339,16 +355,28 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
   ): TFn {
     return ((...args: unknown[]) => {
       const input = toJson(inputOf(args));
-      const effect: RecordedToolCall = { kind: "tool", name, step: modelCalls, input };
+      const effect: RecordedToolCall = {
+        kind: "tool",
+        name,
+        step: modelCalls,
+        input,
+        ...(toolsInFlight > 0 ? { concurrent: true as const } : {}),
+      };
       effects.push(effect);
+      return track(call(effect, args));
+    }) as unknown as TFn;
+
+    function call(effect: RecordedToolCall, args: unknown[]): unknown {
+      const { input } = effect;
       if (replay && options.tools !== "live") {
+        const wanted = (normalizeEffect(effect) as RecordedToolCall).input;
         const recorded = replay.find(
           (candidate): candidate is RecordedToolCall =>
             candidate.kind === "tool" &&
             !usedTools.has(candidate) &&
             candidate.step === effect.step &&
             candidate.name === name &&
-            jsonEqual(candidate.input, input),
+            jsonEqual((normalizeEffect(candidate) as RecordedToolCall).input, wanted),
         );
         // A tool the original ran synchronously stays synchronous.
         const settle = (value: () => unknown) => {
@@ -400,7 +428,19 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
           throw error;
         },
       );
-    }) as unknown as TFn;
+    }
+  }
+
+  /** Counts an async tool call as running until it settles. */
+  function track(result: unknown): unknown {
+    if (result instanceof Promise) {
+      toolsInFlight++;
+      const settled = () => {
+        toolsInFlight--;
+      };
+      result.then(settled, settled);
+    }
+    return result;
   }
 
   return {
@@ -425,14 +465,30 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         new Proxy(resource, {
           get(target, key, receiver) {
             if (key !== "create") return Reflect.get(target, key, receiver);
-            return (params: { stream?: boolean }, requestOptions?: unknown) =>
-              modelCall("openai", method, params, params?.stream === true, async () =>
-                (Reflect.get(target, "create") as (p: unknown, o?: unknown) => unknown).call(
+            return (params: { stream?: boolean }, requestOptions?: unknown) => {
+              let api: APIPromiseLike | undefined;
+              const promise = modelCall("openai", method, params, params?.stream === true, () => {
+                api = (Reflect.get(target, "create") as (p: unknown, o?: unknown) => unknown).call(
                   target,
                   params,
                   requestOptions,
-                ),
-              );
+                ) as APIPromiseLike;
+                return Promise.resolve(api);
+              });
+              // The SDK's `create` returns an `APIPromise`; keep its
+              // `withResponse()`. In replay there is no HTTP response.
+              return Object.assign(promise, {
+                withResponse: async () => {
+                  const data = await promise;
+                  const meta = await api?.withResponse?.();
+                  return {
+                    data,
+                    response: meta?.response ?? new Response(null),
+                    request_id: meta?.request_id ?? null,
+                  };
+                },
+              });
+            };
           },
         });
       const wrapped = new Map<PropertyKey, object>();
@@ -488,7 +544,9 @@ export type EffectDivergenceReason =
   | "missing-effect"
   | "extra-effect"
   | "kind"
+  | "model-method"
   | "model-call-shape"
+  | "model-error"
   | "tool-name"
   | "tool-input"
   | "tool-result"
@@ -572,8 +630,10 @@ function modelCallShape(effect: RecordedModelCall): unknown {
 }
 
 /**
- * Puts each run of tool calls between two model calls in a stable order, so
- * parallel tool calls that finished in a different order still compare equal.
+ * Puts each group of concurrent tool calls in a stable order, so parallel tool
+ * calls that finished in a different order still compare equal. A tool call
+ * that started after the previous one settled begins a new group, so
+ * sequential calls keep their order.
  */
 function normalize(effects: RecordedEffect[]): RecordedEffect[] {
   const result: RecordedEffect[] = [];
@@ -587,10 +647,10 @@ function normalize(effects: RecordedEffect[]): RecordedEffect[] {
     batch = [];
   };
   for (const effect of effects) {
+    if (effect.kind !== "tool" || !effect.concurrent) flush();
     if (effect.kind === "tool") {
       batch.push(effect);
     } else {
-      flush();
       result.push(effect);
     }
   }
@@ -622,9 +682,24 @@ function differ(
     };
   }
   if (left.kind === "model" && right.kind === "model") {
-    return modelCallsMatch(options.modelCalls, left, right)
-      ? undefined
-      : { reason: "model-call-shape", message: shapeMessage(left, right) };
+    if (left.method !== right.method) {
+      return {
+        reason: "model-method",
+        message: `Model call #${left.call} used ${left.method}; the port used ${right.method}.`,
+      };
+    }
+    if (!modelCallsMatch(options.modelCalls, left, right)) {
+      return { reason: "model-call-shape", message: shapeMessage(left, right) };
+    }
+    if (!jsonEqual(left.error, right.error)) {
+      const outcome = (error?: RecordedError) =>
+        error ? `failed with ${error.name}: ${error.message}` : "succeeded";
+      return {
+        reason: "model-error",
+        message: `Model call #${left.call} ${outcome(left.error)}; in the port it ${outcome(right.error)}.`,
+      };
+    }
+    return undefined;
   }
   if (left.kind === "tool" && right.kind === "tool") {
     if (left.name !== right.name) {

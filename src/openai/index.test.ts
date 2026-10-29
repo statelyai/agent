@@ -1,7 +1,11 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 import { z } from "zod";
 import { AgentTruncatedError } from "../errors.js";
-import type { AgentDecisionRequest } from "../decision.js";
+import {
+  AgentDecisionExhaustedError,
+  resolveDecision,
+  type AgentDecisionRequest,
+} from "../decision.js";
 import type { AgentTextRequest } from "../text-logic.js";
 import type { AgentTools } from "../types.js";
 import {
@@ -13,13 +17,41 @@ import {
   toOpenAiEventTools,
   toOpenAiMessages,
   toOpenAiTools,
+  toResponsesInput,
 } from "./index.js";
 
-// A stubbed `OpenAI` client: only `chat.completions.create` is ever called, so
-// the whole SDK surface reduces to one function. No network.
+// A stubbed `OpenAI` client for tool-free calls: only `chat.completions.create`
+// is ever called, so the whole SDK surface reduces to one function. No network.
 function stubClient(create: (params: any, options?: any) => unknown) {
   return { chat: { completions: { create } } } as never;
 }
+
+// A stubbed `OpenAI` client for calls with function tools, which go through
+// `responses.create`. A Chat Completions call fails the test.
+function stubResponsesClient(create: (params: any, options?: any) => unknown) {
+  const chatCreate = () => {
+    throw new Error("a call with function tools must not use Chat Completions");
+  };
+  return { responses: { create }, chat: { completions: { create: chatCreate } } } as never;
+}
+
+// A Responses API response, shaped the way `responses.create` returns it.
+const responseWith = (
+  output: unknown[],
+  extra: { status?: string; incomplete_details?: unknown; usage?: unknown; error?: unknown } = {},
+) => ({ object: "response", status: "completed", output, ...extra });
+const textOutput = (text: string) => ({
+  type: "message",
+  role: "assistant",
+  content: [{ type: "output_text", text, annotations: [] }],
+});
+const functionCallOutput = (name: string, args: unknown, call_id = "call_1") => ({
+  type: "function_call",
+  id: `fc_${call_id}`,
+  call_id,
+  name,
+  arguments: JSON.stringify(args),
+});
 
 const textRequest = (overrides: Partial<AgentTextRequest> = {}) =>
   ({
@@ -111,9 +143,13 @@ describe("request -> OpenAI param mapping (pure helpers)", () => {
       lookup: { description: "Looks something up.", inputSchema: z.object({ query: z.string() }) },
     });
     expect(tools).toHaveLength(1);
+    // Flat Responses API shape, with strict mode explicitly off (the
+    // Responses API defaults it on).
     expect(tools[0]).toMatchObject({
       type: "function",
-      function: { name: "lookup", description: "Looks something up." },
+      name: "lookup",
+      description: "Looks something up.",
+      strict: false,
     });
   });
 
@@ -122,10 +158,7 @@ describe("request -> OpenAI param mapping (pure helpers)", () => {
       { type: "ASK", toolName: "send_event_ASK" },
       { type: "GUESS", toolName: "send_event_GUESS" },
     ]);
-    expect(tools.map((t) => (t as { function: { name: string } }).function.name)).toEqual([
-      "send_event_ASK",
-      "send_event_GUESS",
-    ]);
+    expect(tools.map((t) => t.name)).toEqual(["send_event_ASK", "send_event_GUESS"]);
   });
 
   test("toDecisionMessages appends attempt feedback as user messages", () => {
@@ -354,57 +387,252 @@ describe("createOpenAiExecutors: decide", () => {
     attempts: [],
   } as unknown as AgentDecisionRequest;
 
-  test("forces a tool call and maps it back to a machine event", async () => {
-    const create = vi.fn(async (_params: any) => ({
-      choices: [
-        {
-          index: 0,
-          finish_reason: "tool_calls",
-          message: {
-            role: "assistant",
-            content: null,
-            tool_calls: [
-              {
-                id: "call_1",
-                type: "function",
-                function: {
-                  name: "send_event_GUESS",
-                  arguments: JSON.stringify({ guess: "a cat", type: "SPOOF" }),
-                },
-              },
-            ],
-          },
+  test("forces a tool call through the Responses API and maps it back to a machine event", async () => {
+    const create = vi.fn(async (_params: any) =>
+      responseWith([functionCallOutput("send_event_GUESS", { guess: "a cat", type: "SPOOF" })], {
+        usage: {
+          input_tokens: 8,
+          output_tokens: 2,
+          total_tokens: 10,
+          output_tokens_details: { reasoning_tokens: 1 },
         },
-      ],
-      usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 },
-    }));
-    const { decide } = createOpenAiExecutors({ client: stubClient(create) });
+      }),
+    );
+    const { decide } = createOpenAiExecutors({
+      client: stubResponsesClient(create),
+      resolveModel: () => "gpt-6-luna",
+    });
 
     const result = await decide(decisionRequest);
-    expect(create.mock.calls[0]![0]).toMatchObject({ tool_choice: "required" });
+    const params = create.mock.calls[0]![0];
+    expect(params).toMatchObject({
+      model: "gpt-6-luna",
+      input: [{ role: "user", content: "Pick a move." }],
+      tool_choice: "required",
+      store: false,
+    });
+    expect(params.tools).toEqual([
+      expect.objectContaining({ type: "function", name: "send_event_ASK", strict: false }),
+      expect.objectContaining({ type: "function", name: "send_event_GUESS", strict: false }),
+    ]);
+    expect(params).not.toHaveProperty("messages");
     // The event descriptor's own `type` wins over a stray `type` in the input.
     expect(result.event).toEqual({ guess: "a cat", type: "GUESS" });
     expect(result.finishReason).toBe("tool-calls");
-    expect(result.usage).toEqual({ inputTokens: 8, outputTokens: 2, totalTokens: 10 });
-  });
-
-  test("a reply with no tool call is an error", async () => {
-    const { decide } = createOpenAiExecutors({
-      client: stubClient(async () => ({ choices: [choice("I would rather not.")] })),
+    expect(result.usage).toEqual({
+      inputTokens: 8,
+      outputTokens: 2,
+      totalTokens: 10,
+      reasoningTokens: 1,
     });
-    await expect(decide(decisionRequest)).rejects.toThrow("did not call an event tool");
   });
-});
 
-// One choice whose message is a tool call, shaped the way OpenAI returns it.
-const toolCallChoice = (name: string, args: unknown, id = "call_1") => ({
-  index: 0,
-  finish_reason: "tool_calls",
-  message: {
-    role: "assistant",
-    content: null,
-    tool_calls: [{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }],
-  },
+  test("host Chat Completions settings are translated onto Responses API names", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
+    const create = vi.fn(async (_params: any) =>
+      responseWith([functionCallOutput("send_event_ASK", {})]),
+    );
+    const { decide } = createOpenAiExecutors({
+      client: stubResponsesClient(create),
+      settings: {
+        quick: {
+          reasoning_effort: "high",
+          max_completion_tokens: 500,
+          verbosity: "low",
+          seed: 1,
+          stop: ["END"],
+          logprobs: true,
+          prediction: { type: "content", content: "x" },
+          service_tier: "flex",
+        },
+      },
+    });
+
+    await decide(decisionRequest);
+    const params = create.mock.calls[0]![0];
+    expect(params).toMatchObject({
+      reasoning: { effort: "high" },
+      max_output_tokens: 500,
+      text: { verbosity: "low" },
+      service_tier: "flex",
+    });
+    for (const key of [
+      "reasoning_effort",
+      "max_completion_tokens",
+      "verbosity",
+      "seed",
+      "stop",
+      "logprobs",
+      "prediction",
+    ]) {
+      expect(params).not.toHaveProperty(key);
+    }
+  });
+
+  test("dropped settings warn once per key per executors instance", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
+    const { decide } = createOpenAiExecutors({
+      client: stubResponsesClient(async () =>
+        responseWith([functionCallOutput("send_event_ASK", {})]),
+      ),
+      settings: { quick: { logprobs: true, service_tier: "flex" } },
+    });
+    const seeded = { ...decisionRequest, seed: 7, stopSequences: ["END"] };
+
+    await decide(seeded);
+    await decide(seeded);
+    const dropped = warn.mock.calls.map(([message]) => String(message).match(/`(\w+)`/)?.[1]);
+    expect(dropped.sort()).toEqual(["logprobs", "seed", "stop"]);
+  });
+
+  test("a setting the model rejects is dropped for that model and retried once", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
+    const create = vi.fn(async (params: any) => {
+      if ("temperature" in params) {
+        throw Object.assign(
+          new Error("400 Unsupported parameter: 'temperature' is not supported with this model."),
+          { status: 400, code: "unsupported_parameter", param: "temperature" },
+        );
+      }
+      return responseWith([functionCallOutput("send_event_ASK", {})]);
+    });
+    const { decide } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+    const warm = { ...decisionRequest, temperature: 0.3 };
+
+    expect((await decide(warm)).event).toEqual({ type: "ASK" });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]![0]).not.toHaveProperty("temperature");
+
+    // The model remembers the rejection: no second 400, no second warning.
+    await decide(warm);
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toContain("`quick` does not support `temperature`");
+  });
+
+  test("other 400s are not retried", async () => {
+    const create = vi.fn(async () => {
+      throw Object.assign(new Error("400 Unsupported parameter: 'input'"), {
+        status: 400,
+        param: "input",
+      });
+    });
+    const { decide } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+    await expect(decide({ ...decisionRequest, temperature: 0.3 } as never)).rejects.toThrow(
+      "Unsupported parameter: 'input'",
+    );
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  test("an incomplete response's call is not accepted as a choice", async () => {
+    const { decide } = createOpenAiExecutors({
+      client: stubResponsesClient(async () =>
+        responseWith([functionCallOutput("send_event_ASK", {})], {
+          status: "incomplete",
+          incomplete_details: { reason: "max_output_tokens" },
+        }),
+      ),
+    });
+    await expect(decide(decisionRequest)).rejects.toThrow(/incomplete \(max_output_tokens\)/);
+  });
+
+  test("a failed response is an error", async () => {
+    const { decide } = createOpenAiExecutors({
+      client: stubResponsesClient(async () =>
+        responseWith([], {
+          status: "failed",
+          error: { code: "server_error", message: "The model failed." },
+        }),
+      ),
+    });
+    await expect(decide(decisionRequest)).rejects.toThrow(
+      "decide — the Responses API call failed (server_error: The model failed.)",
+    );
+  });
+
+  // One reply per model call, in order; each is a function call or plain text.
+  const replies = (...messages: Array<{ name: string; arguments: string } | string>) => {
+    const create = vi.fn(async () => {
+      const reply = messages[create.mock.calls.length - 1]!;
+      return responseWith(
+        [
+          typeof reply === "string"
+            ? textOutput(reply)
+            : { type: "function_call", call_id: "call_1", ...reply },
+        ],
+        { usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 } },
+      );
+    });
+    return createOpenAiExecutors({ client: stubResponsesClient(create) });
+  };
+  const ask = { name: "send_event_ASK", arguments: "{}" };
+  const reasons = (request: AgentDecisionRequest) =>
+    request.attempts.map((attempt) => [attempt.failure, attempt.reason]);
+
+  test("a reply with no tool call is retried, its usage still reported", async () => {
+    const { decide } = replies("I would rather not.", ask);
+    const result = await decide(decisionRequest);
+    expect(result.rejected).toEqual({
+      failure: "unknown-event",
+      reason: "no tool was called; call exactly one of: send_event_ASK, send_event_GUESS",
+    });
+    expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 1, totalTokens: 4 });
+
+    const seen: AgentDecisionRequest[] = [];
+    const { decide: retrying } = replies("I would rather not.", ask);
+    const event = await resolveDecision(decisionRequest, {
+      decide: (attempt, info) => (seen.push(attempt), retrying(attempt, info)),
+    });
+    expect(event).toEqual({ type: "ASK" });
+    expect(reasons(seen[1]!)).toEqual([
+      [
+        "unknown-event",
+        "no tool was called; call exactly one of: send_event_ASK, send_event_GUESS",
+      ],
+    ]);
+  });
+
+  test("a call to an unknown tool is retried, naming the valid tools", async () => {
+    const seen: AgentDecisionRequest[] = [];
+    const { decide } = replies({ name: "send_event_QUIT", arguments: "{}" }, ask);
+    const event = await resolveDecision(decisionRequest, {
+      decide: (attempt, info) => (seen.push(attempt), decide(attempt, info)),
+    });
+    expect(event).toEqual({ type: "ASK" });
+    expect(reasons(seen[1]!)).toEqual([
+      [
+        "unknown-event",
+        "tool 'send_event_QUIT' was not offered; valid tools: send_event_ASK, send_event_GUESS",
+      ],
+    ]);
+  });
+
+  test("malformed tool arguments are retried as an invalid payload", async () => {
+    const seen: AgentDecisionRequest[] = [];
+    const { decide } = replies({ name: "send_event_GUESS", arguments: '{"guess": "a c' }, ask);
+    const event = await resolveDecision(decisionRequest, {
+      decide: (attempt, info) => (seen.push(attempt), decide(attempt, info)),
+    });
+    expect(event).toEqual({ type: "ASK" });
+    expect(reasons(seen[1]!)).toEqual([
+      ["invalid-payload", "the arguments for tool 'send_event_GUESS' were not valid JSON"],
+    ]);
+  });
+
+  test("answers that never name a candidate exhaust the retries", async () => {
+    const { decide } = replies("no", "still no", "never");
+    const error = await resolveDecision(decisionRequest, { decide }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AgentDecisionExhaustedError);
+    expect((error as AgentDecisionExhaustedError).attempts).toHaveLength(3);
+    expect((error as AgentDecisionExhaustedError).attempts.map((a) => a.failure)).toEqual([
+      "unknown-event",
+      "unknown-event",
+      "unknown-event",
+    ]);
+  });
 });
 
 describe("message conversion: multi-part content", () => {
@@ -472,6 +700,59 @@ describe("message conversion: multi-part content", () => {
     ]);
   });
 
+  test("toResponsesInput maps tool calls, tool results, and images onto Responses items", () => {
+    const input = toResponsesInput(
+      toOpenAiMessages({
+        messages: [
+          { role: "system", content: "sys" },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "What is this?" },
+              { type: "image", image: "https://example.com/cat.png" },
+            ],
+          },
+          {
+            role: "assistant",
+            content: [
+              { type: "text", text: "Looking it up." },
+              { type: "tool-call", toolCallId: "call_1", toolName: "lookup", input: { q: "cats" } },
+            ],
+          },
+          {
+            role: "tool",
+            content: [
+              {
+                type: "tool-result",
+                toolCallId: "call_1",
+                toolName: "lookup",
+                output: { type: "text", value: "9 lives" },
+              },
+            ],
+          },
+        ],
+      } as Pick<AgentTextRequest, "system" | "prompt" | "messages">),
+    );
+    expect(input).toEqual([
+      { role: "system", content: "sys" },
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "What is this?" },
+          { type: "input_image", image_url: "https://example.com/cat.png", detail: "auto" },
+        ],
+      },
+      { role: "assistant", content: "Looking it up." },
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "lookup",
+        arguments: JSON.stringify({ q: "cats" }),
+      },
+      { type: "function_call_output", call_id: "call_1", output: "9 lives" },
+    ]);
+  });
+
   test("a part Chat Completions cannot carry throws instead of being dropped", () => {
     expect(() =>
       toOpenAiMessages({
@@ -495,39 +776,166 @@ describe("createOpenAiExecutors: tool loop", () => {
     },
   } as unknown as AgentTools;
 
-  test("runs the tool, feeds the result back, and returns the model's final text", async () => {
+  test("a loop that fails after a step reports the calls it made on the error", async () => {
+    const create = vi.fn(async (_params: any) => {
+      if (create.mock.calls.length === 1) {
+        return responseWith([functionCallOutput("lookup", { q: "cats" })]);
+      }
+      throw new Error("upstream down");
+    });
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+
+    await expect(generateText(textRequest({ tools, maxSteps: 4 } as never))).rejects.toMatchObject({
+      message: "upstream down",
+      modelCalls: 2,
+    });
+  });
+
+  test("runs the tool over the Responses API, feeds the result back, and returns the final text", async () => {
     const create = vi.fn(async (_params: any) =>
       create.mock.calls.length === 1
-        ? {
-            choices: [toolCallChoice("lookup", { q: "cats" })],
-            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-          }
-        : {
-            choices: [choice("Cats have 9 lives.")],
-            usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
-          },
+        ? responseWith(
+            [
+              { type: "reasoning", id: "rs_1", summary: [] },
+              functionCallOutput("lookup", { q: "cats" }),
+            ],
+            {
+              usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+            },
+          )
+        : responseWith([textOutput("Cats have 9 lives.")], {
+            usage: { input_tokens: 20, output_tokens: 4, total_tokens: 24 },
+          }),
     );
-    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+    const { generateText } = createOpenAiExecutors({
+      client: stubResponsesClient(create),
+      resolveModel: () => "gpt-6-luna",
+    });
 
     const result = await generateText(textRequest({ tools, maxSteps: 4 } as never));
 
     expect(create).toHaveBeenCalledTimes(2);
+    expect(result.modelCalls).toBe(2);
+    expect(create.mock.calls[0]![0]).toMatchObject({
+      model: "gpt-6-luna",
+      input: [{ role: "user", content: "hi" }],
+      tools: [expect.objectContaining({ type: "function", name: "lookup", strict: false })],
+      store: false,
+    });
     expect(result.result).toBe("Cats have 9 lives.");
     expect(result.finishReason).toBe("stop");
-    // The second call carries the assistant tool_calls message and the result.
-    expect(create.mock.calls[1]![0].messages.slice(-2)).toEqual([
-      expect.objectContaining({ role: "assistant" }),
-      { role: "tool", tool_call_id: "call_1", content: "cats: 9 lives" },
+    // The second call replays the call without its item id or the reasoning
+    // item (nothing is stored), then the tool's output.
+    expect(create.mock.calls[1]![0].input).toEqual([
+      { role: "user", content: "hi" },
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "lookup",
+        arguments: JSON.stringify({ q: "cats" }),
+      },
+      { type: "function_call_output", call_id: "call_1", output: "cats: 9 lives" },
     ]);
     // Every step's usage is folded into the one result the run aggregates.
     expect(result.usage).toEqual({ inputTokens: 30, outputTokens: 9, totalTokens: 39 });
   });
 
+  test("structured output with tools uses a Responses `text.format` json_schema", async () => {
+    const create = vi.fn(async (_params: any) =>
+      responseWith([textOutput(JSON.stringify({ result: { answer: "42" } }))]),
+    );
+    const { generateText } = createOpenAiExecutors({
+      client: stubResponsesClient(create),
+      settings: { quick: { verbosity: "low" } },
+    });
+
+    const result = await generateText(textRequest({ tools, outputSchema } as never));
+    expect(create.mock.calls[0]![0].text).toMatchObject({
+      verbosity: "low",
+      format: { type: "json_schema", name: "output", strict: false },
+    });
+    expect(result.result).toEqual({ answer: "42" });
+  });
+
+  test("a structured request with tools that hits max_output_tokens throws AgentTruncatedError", async () => {
+    const { generateText } = createOpenAiExecutors({
+      client: stubResponsesClient(async () =>
+        responseWith([textOutput('{"result":{"answ')], {
+          status: "incomplete",
+          incomplete_details: { reason: "max_output_tokens" },
+        }),
+      ),
+    });
+
+    const error = await generateText(textRequest({ tools, outputSchema } as never)).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(AgentTruncatedError);
+    expect(error).toMatchObject({ partialOutput: '{"result":{"answ' });
+  });
+
+  test("a zero-argument call with empty arguments is replayed as `{}`", async () => {
+    const create = vi.fn(async (_params: any) =>
+      create.mock.calls.length === 1
+        ? responseWith([{ type: "function_call", call_id: "call_1", name: "ping", arguments: "" }])
+        : responseWith([textOutput("pong")]),
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+
+    await generateText(
+      textRequest({
+        tools: { ping: { inputSchema: z.object({}), execute: () => "ok" } },
+        maxSteps: 2,
+      } as never),
+    );
+    expect(create.mock.calls[1]![0].input).toContainEqual({
+      type: "function_call",
+      call_id: "call_1",
+      name: "ping",
+      arguments: "{}",
+    });
+  });
+
+  test("an incomplete turn never runs its calls", async () => {
+    const execute = vi.fn(() => "charged");
+    const create = vi.fn(async (_params: any) =>
+      responseWith([functionCallOutput("charge", {})], {
+        status: "incomplete",
+        incomplete_details: { reason: "max_output_tokens" },
+      }),
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+
+    const result = await generateText(
+      textRequest({
+        tools: { charge: { inputSchema: z.object({}), execute } },
+        maxSteps: 2,
+      } as never),
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(result.finishReason).toBe("length");
+  });
+
+  test("a failed step is an error, not an empty result", async () => {
+    const { generateText } = createOpenAiExecutors({
+      client: stubResponsesClient(async () =>
+        responseWith([], {
+          status: "failed",
+          error: { code: "server_error", message: "The model failed." },
+        }),
+      ),
+    });
+    await expect(
+      generateText(textRequest({ tools: { lookup: { inputSchema: z.object({}) } } } as never)),
+    ).rejects.toThrow("generateText — the Responses API call failed");
+  });
+
   test("`maxSteps` bounds the loop; the default is a single call", async () => {
-    const create = vi.fn(async (_params: any) => ({
-      choices: [toolCallChoice("lookup", { q: "cats" })],
-    }));
-    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+    const create = vi.fn(async (_params: any) =>
+      responseWith([functionCallOutput("lookup", { q: "cats" })]),
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
 
     const bounded = await generateText(textRequest({ tools, maxSteps: 3 } as never));
     expect(create).toHaveBeenCalledTimes(3);
@@ -539,10 +947,10 @@ describe("createOpenAiExecutors: tool loop", () => {
   });
 
   test("a non-finite `maxSteps` falls back to the single-call default", async () => {
-    const create = vi.fn(async (_params: any) => ({
-      choices: [toolCallChoice("lookup", { q: "cats" })],
-    }));
-    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+    const create = vi.fn(async (_params: any) =>
+      responseWith([functionCallOutput("lookup", { q: "cats" })]),
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
 
     for (const maxSteps of [Number.NaN, Number.POSITIVE_INFINITY, -1, 2.7]) {
       create.mockClear();
@@ -552,10 +960,10 @@ describe("createOpenAiExecutors: tool loop", () => {
   });
 
   test("a tool with no `execute` ends the loop and hands the call back", async () => {
-    const create = vi.fn(async (_params: any) => ({
-      choices: [toolCallChoice("clientSide", {})],
-    }));
-    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+    const create = vi.fn(async (_params: any) =>
+      responseWith([functionCallOutput("clientSide", {})]),
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
 
     const result = await generateText(
       textRequest({
@@ -570,10 +978,10 @@ describe("createOpenAiExecutors: tool loop", () => {
   test("a thrown tool goes back to the model as an error result", async () => {
     const create = vi.fn(async (_params: any) =>
       create.mock.calls.length === 1
-        ? { choices: [toolCallChoice("lookup", { q: "cats" })] }
-        : { choices: [choice("Sorry, the lookup failed.")] },
+        ? responseWith([functionCallOutput("lookup", { q: "cats" })])
+        : responseWith([textOutput("Sorry, the lookup failed.")]),
     );
-    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
 
     const result = await generateText(
       textRequest({
@@ -588,28 +996,61 @@ describe("createOpenAiExecutors: tool loop", () => {
         maxSteps: 2,
       } as never),
     );
-    expect(create.mock.calls[1]![0].messages.at(-1)).toMatchObject({
-      role: "tool",
-      content: "Error: boom",
+    expect(create.mock.calls[1]![0].input.at(-1)).toEqual({
+      type: "function_call_output",
+      call_id: "call_1",
+      output: "Error: boom",
     });
     expect(result.result).toBe("Sorry, the lookup failed.");
   });
 
-  test("`toolChoice` is mapped onto OpenAI's `tool_choice`, on the first step only", async () => {
+  test("an unknown tool or arguments that are not JSON go back to the model as error results", async () => {
     const create = vi.fn(async (_params: any) =>
       create.mock.calls.length === 1
-        ? { choices: [toolCallChoice("lookup", { q: "cats" })] }
-        : { choices: [choice("done")] },
+        ? responseWith([
+            { type: "function_call", call_id: "call_1", name: "search", arguments: "{}" },
+            { type: "function_call", call_id: "call_2", name: "lookup", arguments: "{q:" },
+          ])
+        : responseWith([textOutput("Let me try again.")]),
     );
-    const { generateText } = createOpenAiExecutors({ client: stubClient(create) });
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+
+    // An `undefined` entry is not sent to OpenAI, so it is not offered either.
+    const result = await generateText(
+      textRequest({ tools: { ...tools, search: undefined }, maxSteps: 2 } as never),
+    );
+
+    expect(
+      create.mock.calls[1]![0].input.filter(
+        (item: { type?: string }) => item.type === "function_call_output",
+      ),
+    ).toEqual([
+      {
+        type: "function_call_output",
+        call_id: "call_1",
+        output: "Error: tool 'search' was not offered; valid tools: lookup",
+      },
+      {
+        type: "function_call_output",
+        call_id: "call_2",
+        output: "Error: the arguments for tool 'lookup' were not valid JSON",
+      },
+    ]);
+    expect(result.result).toBe("Let me try again.");
+  });
+
+  test("`toolChoice` is mapped onto the Responses `tool_choice`, on the first step only", async () => {
+    const create = vi.fn(async (_params: any) =>
+      create.mock.calls.length === 1
+        ? responseWith([functionCallOutput("lookup", { q: "cats" })])
+        : responseWith([textOutput("done")]),
+    );
+    const { generateText } = createOpenAiExecutors({ client: stubResponsesClient(create) });
 
     await generateText(
       textRequest({ tools, maxSteps: 3, toolChoice: { type: "tool", name: "lookup" } } as never),
     );
-    expect(create.mock.calls[0]![0].tool_choice).toEqual({
-      type: "function",
-      function: { name: "lookup" },
-    });
+    expect(create.mock.calls[0]![0].tool_choice).toEqual({ type: "function", name: "lookup" });
     // Re-forcing a tool every step would burn the budget without an answer.
     expect(create.mock.calls[1]![0]).not.toHaveProperty("tool_choice");
 
@@ -768,16 +1209,20 @@ describe("createOpenAiExecutors: api 'responses'", () => {
     expect(result.finishReason).toBe("tool-calls");
   });
 
-  test("decide: an unknown tool or non-JSON arguments fail like the chat path", async () => {
+  test("decide: an unknown tool or non-JSON arguments come back rejected, to be retried", async () => {
     const unknown = createOpenAiExecutors({
       client: responsesClient(async () => ({ output: [functionCall("other", {})] })),
       api: "responses",
     });
-    await expect(unknown.decide(decisionRequest)).rejects.toThrow(/unknown tool 'other'/);
+    expect((await unknown.decide(decisionRequest)).rejected).toMatchObject({
+      failure: "unknown-event",
+    });
     const invalid = createOpenAiExecutors({
       client: responsesClient(async () => ({ output: [functionCall("approve", "{not json")] })),
       api: "responses",
     });
-    await expect(invalid.decide(decisionRequest)).rejects.toThrow(SyntaxError);
+    expect((await invalid.decide(decisionRequest)).rejected).toMatchObject({
+      failure: "invalid-payload",
+    });
   });
 });

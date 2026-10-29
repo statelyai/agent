@@ -6,11 +6,14 @@ import {
   Output,
   streamText as aiStreamText,
   stepCountIs,
+  ToolChoiceViolationError,
   type Experimental_DecisionModel,
   type FinishReason,
   type FlexibleSchema,
   type JSONValue,
   type LanguageModel,
+  type LanguageModelCallStartEvent,
+  type LanguageModelUsage,
   type ModelMessage,
   type ToolSet,
   type TypedToolCall,
@@ -29,9 +32,12 @@ import { AgentTruncatedError } from "../errors.js";
 import {
   decisionOptionIds,
   renderDecisionAttempts,
+  type AgentDecisionRejection,
   type AgentDecisionRequest,
 } from "../decision.js";
 import { isRecord } from "../internal/is-record.js";
+import { rejectedAnswer } from "../internal/rejected-answer.js";
+import { withModelCalls } from "../internal/with-model-calls.js";
 import type { AgentTools, ChosenEvent } from "../types.js";
 import {
   defined,
@@ -273,6 +279,8 @@ export type AiSdkGenerateResult = {
   usage: AiSdkCallUsage;
   /** Why the call stopped, normalized to the portable {@link AgentFinishReason}. The SDK's own value stays on `raw`. */
   finishReason: AgentFinishReason;
+  /** Model calls the SDK made: one per tool-loop step. */
+  modelCalls: number;
   toolCalls: TypedToolCall<ToolSet>[];
   toolResults: TypedToolResult<ToolSet>[];
   /** AI SDK response messages, including tool calls/results from every step. */
@@ -287,14 +295,18 @@ export type AiSdkStreamResult = {
   usage: AiSdkCallUsage;
   /** Why the stream stopped, normalized to the portable {@link AgentFinishReason}. The SDK's own value stays on `raw`. */
   finishReason: AgentFinishReason;
+  /** Model calls the SDK made: one per tool-loop step. */
+  modelCalls: number;
   /** AI SDK response messages, including tool calls/results from every step. */
   messages: ModelMessage[];
   /** The untouched AI SDK result. */
   raw: unknown;
 };
 /** Raw result shape from {@link AiSdkExecutors.decide} — the chosen event plus the AI SDK call metadata, delivered per decision attempt to `onResult`. */
-export type AiSdkDecideResult = {
-  event: ChosenEvent;
+export type AiSdkDecideResult = (
+  | { event: ChosenEvent; rejected?: undefined }
+  | { event?: undefined; rejected: AgentDecisionRejection }
+) & {
   /** This attempt's usage; aggregated into the run result's `AgentUsage`. */
   usage: AiSdkCallUsage;
   /** `'stop'` for a decision model, which reports no finish reason. */
@@ -378,77 +390,88 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     info?: AgentRequestExecutorInfo,
   ): Promise<AiSdkGenerateResult> => {
     const { model, settings: modelSettings } = resolveLanguageModel(options, request);
+    const settings = { ...callSettings(options, request), ...defined(modelSettings ?? {}) };
+    // Counted for a request that throws: `steps` only exists on a result.
+    let calls = 0;
     const common = {
       model,
       abortSignal: info?.signal,
-      ...callSettings(options, request),
-      ...defined(modelSettings ?? {}),
+      ...settings,
+      onLanguageModelCallStart: (event: LanguageModelCallStartEvent) => {
+        calls++;
+        return settings.onLanguageModelCallStart?.(event);
+      },
       ...toAiSdkCallSettings(request),
       ...maxStepsSetting(request),
     };
-
-    if (isStructuredOutputRequest(request)) {
-      // Every structured request is sent as `{ result, reasoning? }` — a root
-      // object is universally accepted, unlike a bare union/array root. The
-      // parsed `result` is what the machine validates against the declared
-      // schema; `reasoning` rides along on the raw result only.
-      const outputSchema = providerOutputSchema(request.outputSchema!, {
-        reasoning: request.includeReasoning,
-      });
-      const structuredOutput = withJsonRepair(
-        Output.object({
-          schema: outputSchema as FlexibleSchema<unknown>,
-        }),
-      );
-      // A structured request that ran out of tokens has no usable output: the
-      // JSON object never closed. The SDK reports that either by rejecting the
-      // call or by throwing when the parsed output is read, and both become an
-      // AgentTruncatedError a machine can branch on.
-      const result = await aiGenerateText({ ...common, output: structuredOutput }).catch(
-        (error: unknown) => {
-          throw NoObjectGeneratedError.isInstance(error) && error.finishReason === "length"
-            ? truncated(request, info, error.text, error)
-            : error;
-        },
-      );
-      const parsed = ((): ProviderStructuredOutput => {
-        try {
-          return result.output as ProviderStructuredOutput;
-        } catch (error) {
-          throw result.finishReason === "length"
-            ? truncated(request, info, result.text, error)
-            : error;
+    try {
+      if (isStructuredOutputRequest(request)) {
+        // Every structured request is sent as `{ result, reasoning? }` — a root
+        // object is universally accepted, unlike a bare union/array root. The
+        // parsed `result` is what the machine validates against the declared
+        // schema; `reasoning` rides along on the raw result only.
+        const outputSchema = providerOutputSchema(request.outputSchema!, {
+          reasoning: request.includeReasoning,
+        });
+        const structuredOutput = withJsonRepair(
+          Output.object({
+            schema: outputSchema as FlexibleSchema<unknown>,
+          }),
+        );
+        // A structured request that ran out of tokens has no usable output: the
+        // JSON object never closed. The SDK reports that either by rejecting the
+        // call or by throwing when the parsed output is read, and both become an
+        // AgentTruncatedError a machine can branch on.
+        const result = await aiGenerateText({ ...common, output: structuredOutput }).catch(
+          (error: unknown) => {
+            throw NoObjectGeneratedError.isInstance(error) && error.finishReason === "length"
+              ? truncated(request, info, error.text, error)
+              : error;
+          },
+        );
+        const parsed = ((): ProviderStructuredOutput => {
+          try {
+            return result.output as ProviderStructuredOutput;
+          } catch (error) {
+            throw result.finishReason === "length"
+              ? truncated(request, info, result.text, error)
+              : error;
+          }
+        })();
+        // A structured output the model DID close, but only because it stopped
+        // mid-thought, is not something to hand a machine as a final answer.
+        if (result.finishReason === "length") {
+          throw truncated(request, info, parsed.result);
         }
-      })();
-      // A structured output the model DID close, but only because it stopped
-      // mid-thought, is not something to hand a machine as a final answer.
-      if (result.finishReason === "length") {
-        throw truncated(request, info, parsed.result);
+        return {
+          result: parsed.result,
+          ...(parsed.reasoning !== undefined ? { reasoning: parsed.reasoning } : {}),
+          usage: toAgentCallUsage(result.usage),
+          finishReason: toAgentFinishReason(result.finishReason),
+          modelCalls: result.steps.length,
+          toolCalls: result.toolCalls,
+          toolResults: result.toolResults,
+          messages: result.responseMessages,
+          raw: result,
+        } satisfies AiSdkGenerateResult;
       }
+
+      // A text request that ran out of tokens still has its text. It comes back
+      // with `finishReason: 'length'` — the machine decides what that is worth.
+      const result = await aiGenerateText(common);
       return {
-        result: parsed.result,
-        ...(parsed.reasoning !== undefined ? { reasoning: parsed.reasoning } : {}),
+        result: result.text,
         usage: toAgentCallUsage(result.usage),
         finishReason: toAgentFinishReason(result.finishReason),
+        modelCalls: result.steps.length,
         toolCalls: result.toolCalls,
         toolResults: result.toolResults,
         messages: result.responseMessages,
         raw: result,
       } satisfies AiSdkGenerateResult;
+    } catch (error) {
+      throw withModelCalls(error, calls);
     }
-
-    // A text request that ran out of tokens still has its text. It comes back
-    // with `finishReason: 'length'` — the machine decides what that is worth.
-    const result = await aiGenerateText(common);
-    return {
-      result: result.text,
-      usage: toAgentCallUsage(result.usage),
-      finishReason: toAgentFinishReason(result.finishReason),
-      toolCalls: result.toolCalls,
-      toolResults: result.toolResults,
-      messages: result.responseMessages,
-      raw: result,
-    } satisfies AiSdkGenerateResult;
   };
 
   const streamText = async (
@@ -456,26 +479,35 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     info?: AgentRequestExecutorInfo,
   ) => {
     const { model, settings: modelSettings } = resolveLanguageModel(options, request);
+    const settings = { ...callSettings(options, request), ...defined(modelSettings ?? {}) };
+    let calls = 0;
     const result = aiStreamText({
       model,
       abortSignal: info?.signal,
-      ...callSettings(options, request),
-      ...defined(modelSettings ?? {}),
+      ...settings,
+      onLanguageModelCallStart: (event) => {
+        calls++;
+        return settings.onLanguageModelCallStart?.(event);
+      },
       ...toAiSdkCallSettings(request),
       ...maxStepsSetting(request),
     });
+    try {
+      for await (const chunk of result.textStream) {
+        info?.onChunk?.(chunk);
+      }
 
-    for await (const chunk of result.textStream) {
-      info?.onChunk?.(chunk);
+      return {
+        result: await result.text,
+        usage: toAgentCallUsage(await result.usage),
+        finishReason: toAgentFinishReason(await result.finishReason),
+        modelCalls: (await result.steps).length,
+        messages: await result.responseMessages,
+        raw: result,
+      } satisfies AiSdkStreamResult;
+    } catch (error) {
+      throw withModelCalls(error, calls);
     }
-
-    return {
-      result: await result.text,
-      usage: toAgentCallUsage(await result.usage),
-      finishReason: toAgentFinishReason(await result.finishReason),
-      messages: await result.responseMessages,
-      raw: result,
-    } satisfies AiSdkStreamResult;
   };
 
   const decide = async (request: AgentDecisionRequest, info?: AgentRequestExecutorInfo) => {
@@ -487,11 +519,29 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
     const tools = choice ? choice.tools : toAiSdkEventTools(request.events);
     const messages = toDecisionMessages(request);
 
+    const settings = { ...callSettings(options, request), ...defined(modelSettings ?? {}) };
+    const toolNames = Object.keys(tools);
+    // The call's usage, kept for an answer the SDK rejects by throwing.
+    let callEnd: { usage: LanguageModelUsage; finishReason: FinishReason } | undefined;
+    // An answer that names no candidate is retried, not thrown.
+    const unnamed = (
+      ended: { usage: LanguageModelUsage; finishReason: FinishReason },
+      call?: { toolName: string; invalidJson?: boolean },
+    ) =>
+      ({
+        rejected: rejectedAnswer(call, toolNames),
+        usage: toAgentCallUsage(ended.usage),
+        finishReason: ended.finishReason,
+      }) satisfies AiSdkDecideResult;
+
     const result = await aiGenerateText({
       model,
       abortSignal: info?.signal,
-      ...callSettings(options, request),
-      ...defined(modelSettings ?? {}),
+      ...settings,
+      onLanguageModelCallEnd: (event) => {
+        callEnd = event;
+        return settings.onLanguageModelCallEnd?.(event);
+      },
       system: request.system,
       ...(messages ? { messages, allowSystemInMessages: true } : { prompt: request.prompt ?? "" }),
       tools,
@@ -500,25 +550,32 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       // Shared with the text path, so a decision cannot drift back into
       // writing these unconditionally and erasing the layers above.
       ...toAiSdkGenerationSettings(request),
+    }).catch((error: unknown) => {
+      // A text answer breaks `toolChoice: 'required'`, which the SDK throws.
+      if (ToolChoiceViolationError.isInstance(error) && callEnd) return undefined;
+      throw error;
     });
+    if (!result) return unnamed(callEnd!);
 
     const toolCall = result.toolCalls[0];
-    if (!toolCall) {
-      throw new Error("createAiSdkExecutors: decide — model did not call an event tool.");
+    if (!toolCall) return unnamed(result);
+    // An invalid call keeps its raw text as `input` when that text is not JSON.
+    if (
+      toolCall.invalid &&
+      typeof toolCall.input === "string" &&
+      toolNames.includes(toolCall.toolName)
+    ) {
+      return unnamed(result, { toolName: toolCall.toolName, invalidJson: true });
     }
     if (choice) {
       return {
-        event: fromAiSdkOptionCall(toolCall, request.options!, choice.ids),
+        ...fromAiSdkOptionCall(toolCall, request.options!, choice.ids),
         usage: toAgentCallUsage(result.usage),
         finishReason: result.finishReason,
       } satisfies AiSdkDecideResult;
     }
     const chosenEvent = request.events.find((event) => event.toolName === toolCall.toolName);
-    if (!chosenEvent) {
-      throw new Error(
-        `createAiSdkExecutors: decide — model called unknown tool '${toolCall.toolName}'.`,
-      );
-    }
+    if (!chosenEvent) return unnamed(result, toolCall);
 
     return {
       // The event's own `type` (from the chosen event descriptor) is spread
@@ -589,29 +646,31 @@ async function decideWithDecisionModel(
     // no candidate has instead, so the choice is retried.
     const chosen = unofferedChoice(error, ids);
     if (chosen === undefined) throw error;
-    return decisionResult(unofferedOption(`option ${JSON.stringify(chosen)}`, ids));
+    return decisionResult({ rejected: unofferedOption(`option ${JSON.stringify(chosen)}`, ids) });
   }
 
   const answer = result.answers[DECISION_QUESTION_ID]!;
   const option = offered[ids.indexOf(answer.choice)];
   if (!option) {
-    return decisionResult(unofferedOption(`option ${JSON.stringify(answer.choice)}`, ids));
+    return decisionResult({
+      rejected: unofferedOption(`option ${JSON.stringify(answer.choice)}`, ids),
+    });
   }
   const reported = (
     result.providerMetadata?.typesafe?.confidence as Record<string, unknown> | undefined
   )?.[DECISION_QUESTION_ID];
   const confidence =
     typeof reported === "number" ? reported : answer.probabilities?.[answer.choice];
-  return decisionResult(option.event, result.usage, confidence);
+  return decisionResult({ event: option.event }, result.usage, confidence);
 }
 
 function decisionResult(
-  event: ChosenEvent,
+  answer: { event: ChosenEvent } | { rejected: AgentDecisionRejection },
   usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } = {},
   confidence?: number,
 ): AiSdkDecideResult {
   return {
-    event,
+    ...answer,
     usage: toAgentCallUsage({
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,

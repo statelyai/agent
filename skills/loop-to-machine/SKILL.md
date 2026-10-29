@@ -226,7 +226,7 @@ const INTENDED: Record<string, Array<Pick<EffectDivergence, "reason" | "message"
 ```
 
 - Equivalent means the same model calls (count and shape: offered tool names, response format), the same tool calls with the same arguments, and the same output. Prompts and states may differ. Tool calls between two model calls compare in any order.
-- Values that differ on every run (generated ids, branch names, timestamps) fail `tool-input`. Pass `compareRecordings(a, b, { normalize })` to redact them on both sides; never edit the fixtures.
+- Values that differ on every run (generated ids, branch names, timestamps) fail `tool-input`. Pass the same `normalize` to `createRecorder({ replay, normalize })` and `compareRecordings(a, b, { normalize })` to redact them on both sides; never edit the fixtures.
 - `divergences` lists every difference, lined up so one extra call does not shift the rest; `divergence` is the first.
 - In replay, a model call past the recorded ones or a tool call the old code never made throws `RecordingDivergenceError`, and `compareRecordings` names it.
 - `model-call-shape`: the machine changed a call's tools or output format, for example a model-picked action that became `agent.decide`. The recorded answer does not fit the new call, so equivalence ends there. Port the call unchanged first, prove equivalence, then change it in a separate step whose divergences are `INTENDED`. To keep replaying past a call you changed on purpose, pass the same `modelCalls` function to `createRecorder({ replay, modelCalls })` and `compareRecordings`: `(expected, actual) => expected.call === 2 || sameModelCallShape(expected, actual)`. The recorded answer must still fit the new call.

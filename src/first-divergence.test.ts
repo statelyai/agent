@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
+import { createAsyncLogic } from "xstate";
 import type { AgentDecisionExecutor } from "./decision.js";
 import {
   createAgentRuntime,
@@ -217,6 +218,137 @@ describe("firstDivergence", () => {
     expect(firstDivergence(serialize(actual), serialize(reference))).toEqual(
       firstDivergence(actual, reference),
     );
+  });
+
+  test("a usage step between a decision and its choice does not take the decision's name", () => {
+    const transition = (type: string, from: string, to: string) => ({
+      type: "machine.transition",
+      from: { value: from },
+      event: { type },
+      snapshot: { value: to },
+    });
+    const trace = [
+      { type: "request.start", request: { kind: "decision", name: "route" } },
+      transition("@agent.usage", "deciding", "deciding"),
+      transition("ESCALATE", "deciding", "escalated"),
+    ];
+    const reference = [transition("@agent.usage", "deciding", "deciding")];
+
+    expect(firstDivergence(trace, reference)).toMatchObject({
+      index: 1,
+      state: "deciding",
+      decision: "route",
+    });
+  });
+
+  describe('key: "payload"', () => {
+    let boomCode = "EDOWN";
+    const agent = setupAgent({
+      input: z.object({}),
+      context: z.object({}),
+      actors: {
+        lookup: createAsyncLogic<{ id: number }>({ run: async () => ({ id: 7 }) }),
+        boom: createAsyncLogic({
+          run: async () => {
+            throw Object.assign(new Error("down"), { code: boomCode });
+          },
+        }),
+      },
+      requests: {
+        classify: {
+          model: "quick",
+          schemas: { input: z.object({}), output: z.string() },
+          prompt: () => "Classify.",
+        },
+      },
+    });
+    // Every output leads to the same states, so only the data differs.
+    const machine = agent.createMachine({
+      context: {},
+      initial: "failing",
+      states: {
+        failing: { invoke: { src: "boom", onError: { target: "looking" } } },
+        looking: { invoke: { src: "lookup", onDone: { target: "classifying" } } },
+        classifying: { invoke: { src: "classify", input: {}, onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const traceOf = async (label: string, code = "EDOWN") => {
+      boomCode = code;
+      const trace: AgentTraceEvent[] = [];
+      await runToQuiescence(
+        createAgentRuntime(machine, {
+          executors: { generateText: async () => ({ result: label }) },
+          onTrace: (event) => trace.push(event),
+        }),
+        { input: {} },
+      );
+      return trace;
+    };
+
+    test("finds a data-only fault the default key misses", async () => {
+      const actual = await traceOf("review");
+      const reference = await traceOf("alert");
+
+      expect(firstDivergence(actual, reference)).toBeUndefined();
+      expect(firstDivergence(actual, reference, { key: "payload" })).toMatchObject({
+        index: 2,
+        state: "classifying",
+        actual: { payload: { output: { result: "review" } } },
+        expected: { payload: { output: { result: "alert" } } },
+      });
+    });
+
+    test("errors that differ only by code diverge", async () => {
+      const actual = await traceOf("alert", "ETIMEDOUT");
+      const reference = await traceOf("alert", "ECONNRESET");
+
+      expect(firstDivergence(actual, reference)).toBeUndefined();
+      expect(firstDivergence(actual, reference, { key: "payload" })).toMatchObject({
+        index: 0,
+        state: "failing",
+      });
+    });
+
+    test("plain error records, nested errors, and own __proto__ keys still compare", () => {
+      const trace = (payload: Record<string, unknown>) => [
+        {
+          type: "machine.transition",
+          from: { value: "a" },
+          event: { type: "FAIL", ...payload },
+          snapshot: { value: "b" },
+        },
+      ];
+      const diverges = (a: Record<string, unknown>, b: Record<string, unknown>) =>
+        firstDivergence(trace(a), trace(b), { key: "payload" }) !== undefined;
+
+      expect(diverges({ error: { code: "E1" } }, { error: { code: "E2" } })).toBe(true);
+      const nested = (code: string) => ({
+        output: { failures: [Object.assign(new Error("down"), { code })] },
+      });
+      expect(diverges(nested("E1"), nested("E2"))).toBe(true);
+      expect(diverges(nested("E1"), nested("E1"))).toBe(false);
+      const cyclic = (message: string) => {
+        const error = new Error(message);
+        error.cause = Object.assign(new Error("inner"), { cause: error });
+        return { error };
+      };
+      expect(diverges(cyclic("a"), cyclic("a"))).toBe(false);
+      expect(diverges(cyclic("a"), cyclic("b"))).toBe(true);
+      expect(
+        diverges(JSON.parse('{"data":{"__proto__":1}}'), JSON.parse('{"data":{"__proto__":2}}')),
+      ).toBe(true);
+    });
+
+    test("equivalent runs do not diverge, live or serialized", async () => {
+      const serialize = (trace: AgentTraceEvent[]) =>
+        trace.map((event) => JSON.parse(JSON.stringify(serializeTraceEvent(event))));
+      const actual = await traceOf("alert");
+      const reference = await traceOf("alert");
+
+      expect(firstDivergence(actual, reference, { key: "payload" })).toBeUndefined();
+      expect(firstDivergence(serialize(actual), reference, { key: "payload" })).toBeUndefined();
+    });
   });
 });
 

@@ -222,6 +222,14 @@ const route = confidence >= ROUTING_CONFIDENCE ? answers.team.choice : "needsHum
 
 Return the confidence from the actor next to `answers`, such as `{ answers, confidence }`, and compare it against the exported constant in `onDone` or a guard.
 
+## Judgments and budgets
+
+A judgment actor calls the AI SDK itself, so the runtime never sees the call.
+
+- Its calls are not in `result.usage` and do not count against `maxModelCalls`.
+- No `@agent.usage` event is delivered for it.
+- To cap judgments, count them in `context`: increment a counter in the invoke's `onDone` and guard the transition that starts the next one. See [Budgets as guards](usage-and-budgets.md#budgets-as-guards).
+
 ## Testing without a key
 
 A decision model is any object that implements the AI SDK's decision-model spec: `specificationVersion: "v4"`, `provider`, `modelId`, `supportedQuestionTypes`, and `doDecide`. An object that answers from a script runs `experimental_decide`'s own validation and result shaping, with no key and no network. Pass it to the actor factory and bind the actor through `createAgentRuntime(machine, { actors })` to replace the registered default.

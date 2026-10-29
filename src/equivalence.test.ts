@@ -174,7 +174,7 @@ describe("verified equivalence (AI SDK)", () => {
     );
     expect(
       compareRecordings(recording, replay.recording, { modelCalls: "none" }).divergence?.reason,
-    ).toBe("missing-effect");
+    ).toBe("model-error"); // the refused call failed in the port
   });
 
   test("an extra model call throws in replay and shows up as an extra effect", async () => {
@@ -338,9 +338,79 @@ describe("verified equivalence (AI SDK)", () => {
       call: 0,
       request: {},
     };
-    const a: Recording = { version: 1, effects: [model, tool("a", 1), tool("b", 2)] };
-    const b: Recording = { version: 1, effects: [model, tool("b", 2), tool("a", 1)] };
+    const concurrent = { concurrent: true as const };
+    const a: Recording = {
+      version: 1,
+      effects: [model, tool("a", 1), { ...tool("b", 2), ...concurrent }],
+    };
+    const b: Recording = {
+      version: 1,
+      effects: [model, tool("b", 2), { ...tool("a", 1), ...concurrent }],
+    };
     expect(compareRecordings(a, b)).toEqual({ equivalent: true, divergences: [] });
+  });
+
+  test("sequential tool calls in a different order diverge", () => {
+    const tool = (name: string) => ({ kind: "tool" as const, name, step: 0, input: {}, output: 1 });
+    const a: Recording = { version: 1, effects: [tool("charge"), tool("ship")] };
+    const b: Recording = { version: 1, effects: [tool("ship"), tool("charge")] };
+    expect(compareRecordings(a, b).equivalent).toBe(false);
+  });
+
+  test("a tool call that starts while another runs is recorded as concurrent", async () => {
+    const recorder = createRecorder();
+    const wait = recorder.tool("wait", async (name: string) => name);
+    await Promise.all([wait("a"), wait("b")]);
+    await wait("c");
+    expect(
+      recorder.recording.effects.map((effect) => effect.kind === "tool" && effect.concurrent),
+    ).toEqual([undefined, true, undefined]);
+  });
+
+  test("replay matches tool calls through normalize, so a generated id still replays", async () => {
+    const recorder = createRecorder();
+    await recorder.tool(
+      "save",
+      async (row: { id: string; text: string }) => row.text,
+    )({
+      id: "id-1",
+      text: "hi",
+    });
+    const redact = (effect: RecordedEffect): RecordedEffect =>
+      effect.kind === "tool"
+        ? { ...effect, input: { ...(effect.input as object), id: "?" } }
+        : effect;
+    const replay = createRecorder({ replay: recorder.recording, normalize: redact });
+    const saved = await replay.tool(
+      "save",
+      async (_row: { id: string; text: string }) => "unused",
+    )({ id: "id-2", text: "hi" });
+    expect(saved).toBe("hi");
+    expect(
+      compareRecordings(recorder.recording, replay.recording, { normalize: redact }).equivalent,
+    ).toBe(true);
+  });
+
+  test("a model call that fails on one side only, or uses another method, diverges", () => {
+    const model = (extra: Partial<RecordedModelCall>): RecordedModelCall => ({
+      kind: "model",
+      seam: "openai",
+      method: "chat.completions.create",
+      call: 0,
+      request: {},
+      ...extra,
+    });
+    const run = (effect: RecordedModelCall): Recording => ({
+      version: 1,
+      effects: [effect, { kind: "output", value: "ok" }],
+    });
+    const failed = compareRecordings(
+      run(model({})),
+      run(model({ error: { name: "APIError", message: "500" } })),
+    );
+    expect(failed.divergence?.reason).toBe("model-error");
+    const moved = compareRecordings(run(model({})), run(model({ method: "responses.create" })));
+    expect(moved.divergence?.reason).toBe("model-method");
   });
 });
 
@@ -445,6 +515,26 @@ describe("verified equivalence (openai client)", () => {
       equivalent: true,
       divergences: [],
     });
+  });
+
+  test("create keeps the SDK's withResponse, in record and in replay", async () => {
+    const response = new Response(null, { headers: { "x-request-id": "req_1" } });
+    const create = (params: unknown) =>
+      Object.assign(Promise.resolve({ echo: params }), {
+        withResponse: async () => ({ data: { echo: params }, response, request_id: "req_1" }),
+      });
+    const recorder = createRecorder();
+    const client = recorder.openai({ responses: { create } });
+    const recorded = await client.responses.create({ input: "hi" }).withResponse();
+    expect(recorded).toEqual({ data: { echo: { input: "hi" } }, response, request_id: "req_1" });
+
+    const replay = createRecorder({ replay: recorder.recording });
+    const replayed = await replay
+      .openai({ responses: { create } })
+      .responses.create({ input: "hi" })
+      .withResponse();
+    expect(replayed.data).toEqual({ echo: { input: "hi" } });
+    expect(replayed.request_id).toBeNull();
   });
 
   test("prototype methods that call create through this, like responses.parse, survive and record", async () => {

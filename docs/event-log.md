@@ -13,8 +13,11 @@ Only external inputs, in the order the run accepted them:
 - Child completions: `xstate.done.actor` and `xstate.error.actor`, with output inline.
 - Timer firings.
 - `@agent.usage` spend records.
+- What an invoked child machine processes, marked with the child's `actorPath`: events sent to it, its own invokes' completions, and its decisions' chosen events.
 
 Raised and internal events are never journaled. Replay re-derives them from the machine's own logic, so journaling them would apply them twice.
+
+A fold steps each child machine through its own entries, so a child that outlives a turn resumes where it was. Only a child the runtime binds is journaled, which means a child invoked through a string-keyed actor source. A child invoked from a direct object, or one in a run recorded with `recordLog`, has no entries of its own, and a fold holds it at its initial state. A child event that is not JSON stops the log the same way a root event does.
 
 Recorded results are never re-executed. A model call whose completion is in the log runs zero times on replay.
 
@@ -33,15 +36,19 @@ interface AgentLogEntry {
   metadata?: Record<string, JsonValue>;
   verification?: { stateHash: string };
   attempts?: DecisionAttempt[];
+  decidedBy?: string;
+  actorPath?: string[];
 }
 ```
 
 - `recordedAt` is acceptance metadata, not machine time. A transition that needs time takes it from the event.
 - `machineVersion` is the machine's declared `version`, or its structural hash when none is declared.
-- `verification.stateHash` is the hash of the persisted snapshot `replay` folds to after the entry is applied. A run records replay's fold, not its live snapshot: replay never starts children, so a live child that already settled while its completion waits to be delivered is not part of the hash. So the hash checks each entry against the fold of the entries before it, not that the log is complete or that the fold matches the live run. A dropped last entry leaves the remaining hashes intact, an altered event that folds to the same state still matches, and a machine that reads something the log does not keep can replay to a different state. Compare the replayed context and output with the live result in a test.
+- `verification.stateHash` is the hash of the persisted snapshot `replay` folds to after the entry is applied. A run records replay's fold, not its live snapshot: replay never starts children (a child machine moves only on its own entries), so a live child that already settled while its completion waits to be delivered is not part of the hash. So the hash checks each entry against the fold of the entries before it, not that the log is complete or that the fold matches the live run. A dropped last entry leaves the remaining hashes intact, an altered event that folds to the same state still matches, and a machine that reads something the log does not keep can replay to a different state. Compare the replayed context and output with the live result in a test.
 - `metadata` is host-owned and stored verbatim. The init entry's `metadata.executionId` names the lineage; read it with `getLogExecutionId(entries)`.
 - To stamp a run with what produced it (a policy version, model ids, a scenario), pass `metadata` to `createAgentRuntime` or `runAgent`. It lands on the init entry next to `executionId`, which is reserved. A resume keeps the stamp of the run that started the log; a version bridge opens a new segment stamped with the bridging run's `metadata`. A value that is not JSON throws before the run starts.
 - `attempts` holds the decision attempts the machine did not accept before this entry's event landed. Replay ignores it. See [Decision attempts](#decision-attempts).
+- `decidedBy` names the `agent.decide` call an entry settles, as `<requestId>#<n>`: the chosen event, and the invoke's `xstate.done.actor` when the event left it running. A decision usually ends by sending its event, so its invoke never completes; a [`callKey`](hosts.md#idempotency-keys) for a log that cannot be folded counts it from this field. Inside an invoked child machine the call is named by the child's path, as `<childId>/<requestId>#<n>`. Replay ignores it.
+- `actorPath` names the invoked child machine an entry was delivered to, as the invoke ids from the root down (`["worker"]`, `["worker", "review"]`). It is omitted for an entry the root received. Replay applies the event to that child's snapshot with the child's own logic.
 
 Entries are strict JSON, and plain objects and arrays from another realm (a jest test's vm context) count as JSON. Object fields set to `undefined` in an input or event are dropped, as `JSON.stringify` drops them. `createReplayEntry`, `initEntry`, and every store append reject the other values JSON would drop or coerce (functions, symbols, bigint, non-finite numbers, `Date`, `Map`, `Set`, class instances, cycles, `undefined` array items) with `NonSerializableAgentEventError`, which carries the offending `path`. `Error` payloads on `xstate.error.actor` are normalized to `{ name, message, code?, cause?, "@error": true }`, keeping `code` when it is a string or a number; an `AgentDecisionExhaustedError` also keeps its `attempts`. `replay` turns objects marked `"@error"` back into `Error` objects, so an `onError` that checks `instanceof Error` takes the same branch on replay. A thrown plain object stays a plain object. Other properties of the thrown value are not kept. Use `assertJsonSerializable` and `assertAgentLogEntry` at custom transport boundaries.
 
