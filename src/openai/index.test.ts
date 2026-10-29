@@ -483,6 +483,46 @@ describe("createOpenAiExecutors: decide", () => {
     expect(dropped.sort()).toEqual(["logprobs", "seed", "stop"]);
   });
 
+  test("a setting the model rejects is dropped for that model and retried once", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
+    const create = vi.fn(async (params: any) => {
+      if ("temperature" in params) {
+        throw Object.assign(
+          new Error("400 Unsupported parameter: 'temperature' is not supported with this model."),
+          { status: 400, code: "unsupported_parameter", param: "temperature" },
+        );
+      }
+      return responseWith([functionCallOutput("send_event_ASK", {})]);
+    });
+    const { decide } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+    const warm = { ...decisionRequest, temperature: 0.3 };
+
+    expect((await decide(warm)).event).toEqual({ type: "ASK" });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]![0]).not.toHaveProperty("temperature");
+
+    // The model remembers the rejection: no second 400, no second warning.
+    await decide(warm);
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toContain("`quick` does not support `temperature`");
+  });
+
+  test("other 400s are not retried", async () => {
+    const create = vi.fn(async () => {
+      throw Object.assign(new Error("400 Unsupported parameter: 'input'"), {
+        status: 400,
+        param: "input",
+      });
+    });
+    const { decide } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+    await expect(decide({ ...decisionRequest, temperature: 0.3 } as never)).rejects.toThrow(
+      "Unsupported parameter: 'input'",
+    );
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
   test("an incomplete response's call is not accepted as a choice", async () => {
     const { decide } = createOpenAiExecutors({
       client: stubResponsesClient(async () =>

@@ -107,6 +107,7 @@ await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 - Settings the Responses API shares by name, such as `temperature` and `service_tier`, pass through.
 - Chat-only settings, such as `seed`, `stop`, `logprobs`, and `prediction`, are dropped. This includes a request's `seed` and `stopSequences`. Each dropped key logs one `console.warn` per `createOpenAiExecutors` instance.
 - `store` defaults to `false`, matching Chat Completions.
+- A sampling setting the model rejects, such as `temperature` or `top_p` on a reasoning model like `gpt-6-luna`, is dropped for that model after its first 400. The call is retried without it, and one warning is logged. The rejected request still counts against an HTTP-level budget.
 
 Structured output sends the declared schema wrapped as `{ result, reasoning? }`, as `response_format: { type: 'json_schema' }` on Chat Completions or `text.format` on the Responses API. The parsed `result` is what the machine validates. Decisions force a tool call with `tool_choice: 'required'`, one function tool per candidate event. Function tools are sent with `strict: false`, since the Responses API defaults strict mode on and arbitrary JSON Schema may fall outside it.
 

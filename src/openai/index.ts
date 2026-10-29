@@ -505,6 +505,25 @@ function assertNotFailed(response: Response, executor: string): void {
   }
 }
 
+// Sampling settings a model may reject (reasoning models reject `temperature`
+// and `top_p`; older models reject `reasoning`). See `createResponse`.
+const REJECTABLE_SETTINGS = ["temperature", "top_p", "top_logprobs", "reasoning"];
+
+/** The top-level parameter an OpenAI `unsupported_parameter` 400 names, if any. */
+function unsupportedParameter(error: unknown): string | undefined {
+  const { status, param, message } = (error ?? {}) as {
+    status?: unknown;
+    param?: unknown;
+    message?: unknown;
+  };
+  if (status !== 400) return undefined;
+  const named =
+    typeof param === "string"
+      ? param
+      : /Unsupported parameter: '([\w.]+)'/.exec(String(message))?.[1];
+  return named?.split(".")[0];
+}
+
 // The Chat Completions settings the Responses API accepts under the same name.
 const RESPONSES_SHARED_SETTINGS = [
   "metadata",
@@ -789,6 +808,37 @@ function toToolContent(output: unknown): string {
 export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): OpenAiExecutors {
   const { client, resolveModel = (modelRef: string) => modelRef } = options;
   const warnedSettings = new Set<string>();
+  // Resolved model id → the settings it rejected. A model learns each rejected
+  // setting once; later calls to it leave the setting out.
+  const rejectedSettings = new Map<string, Set<string>>();
+
+  // `client.responses.create`, minus the sampling settings the model rejects.
+  // OpenAI answers a setting a model does not support (`temperature` on a
+  // reasoning model) with a 400 rather than ignoring it, so the first such 400
+  // drops that setting for the model, warns once, and retries without it.
+  const createResponse = async (
+    params: ResponseCreateParamsNonStreaming,
+    signal: AbortSignal | undefined,
+  ): Promise<Response> => {
+    const rejected = rejectedSettings.get(params.model as string) ?? new Set<string>();
+    const sent = Object.fromEntries(
+      Object.entries(params).filter(([key]) => !rejected.has(key)),
+    ) as ResponseCreateParamsNonStreaming;
+    try {
+      return (await client.responses.create(sent, { signal })) as Response;
+    } catch (error) {
+      const param = unsupportedParameter(error);
+      if (param === undefined || !REJECTABLE_SETTINGS.includes(param) || !(param in sent)) {
+        throw error;
+      }
+      rejectedSettings.set(params.model as string, rejected.add(param));
+      console.warn(
+        `@statelyai/agent/openai: \`${params.model}\` does not support \`${param}\`, so it is ` +
+          `dropped from this executor's calls to that model.`,
+      );
+      return createResponse(params, signal);
+    }
+  };
 
   // Params every Responses API call shares. Host `settings` sit UNDER the
   // request's own settings, which are `defined()`-filtered so an unset request
@@ -909,7 +959,7 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
 
     for (;;) {
       step++;
-      response = (await client.responses.create(
+      response = await createResponse(
         responsesParams(request, [...input], {
           tools,
           ...(jsonSchema
@@ -930,8 +980,8 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
           // and burn the budget without ever producing an answer.
           ...(step === 1 && toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
         }),
-        { signal: info?.signal },
-      )) as Response;
+        info?.signal,
+      );
       assertNotFailed(response, "generateText");
       usage = addAgentCallUsage(usage, toAgentResponseUsage(response.usage));
 
@@ -1098,13 +1148,13 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     request: AgentDecisionRequest,
     info?: AgentRequestExecutorInfo,
   ): Promise<OpenAiDecideResult> => {
-    const response = (await client.responses.create(
+    const response = await createResponse(
       responsesParams(request, toResponsesInput(toDecisionMessages(request)), {
         tools: toOpenAiEventTools(request.events),
         tool_choice: "required",
       }),
-      { signal: info?.signal },
-    )) as Response;
+      info?.signal,
+    );
     assertNotFailed(response, "decide");
 
     // An incomplete turn did not finish choosing, so its call is not a choice.
