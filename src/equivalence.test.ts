@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { generateText, stepCountIs, streamText, tool, type LanguageModel } from "ai";
+import { APICallError, generateText, stepCountIs, streamText, tool, type LanguageModel } from "ai";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
 import OpenAI from "openai";
 import { createAgentRuntime, runToQuiescence, setupAgent } from "./index.js";
@@ -554,5 +554,261 @@ describe("verified equivalence (openai client)", () => {
     expect(recorder.recording.effects).toMatchObject([
       { kind: "model", method: "responses.create" },
     ]);
+  });
+});
+
+describe("verified equivalence (ports that change on purpose)", () => {
+  const offering = (...names: string[]) => ({
+    prompt: [],
+    tools: names.map((name) => ({ type: "function", name, inputSchema: {} })),
+  });
+  const answer = (text: string) => ({
+    content: [{ type: "text", text }],
+    finishReason: { unified: "stop", raw: "stop" },
+    usage,
+    warnings: [],
+  });
+  const modelEffect = (
+    call: number,
+    extra: Partial<RecordedModelCall> = {},
+  ): RecordedModelCall => ({
+    kind: "model",
+    seam: "ai-sdk",
+    method: "doGenerate",
+    call,
+    request: offering(),
+    response: answer(`answer ${call}`),
+    ...extra,
+  });
+  // A replay model whose calls take untyped options, for driving the seam directly.
+  const replayModel = (recorder: Recorder) =>
+    recorder.model(new MockLanguageModelV3()) as unknown as {
+      doGenerate(options: unknown): Promise<{ content: { text: string }[] }>;
+    };
+
+  test("replay finds each answer by shape, so a dropped call does not shift the rest", async () => {
+    const recording: Recording = {
+      version: 1,
+      effects: [
+        modelEffect(0, { request: offering("plan") }),
+        modelEffect(1, { request: offering("write") }),
+      ],
+    };
+    const replay = createRecorder({ replay: recording });
+    const result = await replayModel(replay).doGenerate(offering("write"));
+    expect(result.content[0]!.text).toBe("answer 1");
+    expect(replay.recording.effects[0]).toMatchObject({ call: 0, replayed: 1 });
+    expect(compareRecordings(recording, replay.recording).divergences).toMatchObject([
+      { reason: "missing-effect", expected: { call: 0 } },
+    ]);
+  });
+
+  test("replay answers a tool call made after a different number of model calls", async () => {
+    const recording: Recording = {
+      version: 1,
+      effects: [
+        modelEffect(0),
+        modelEffect(1),
+        { kind: "tool", name: "save", step: 2, input: { id: 1 }, output: "saved" },
+      ],
+    };
+    const replay = createRecorder({ replay: recording });
+    await replayModel(replay).doGenerate(offering());
+    await expect(
+      replay.tool("save", async (_row: { id: number }) => "live")({ id: 1 }),
+    ).resolves.toBe("saved");
+  });
+
+  test("repeated identical tool calls get their results in recorded order", async () => {
+    const poll = (step: number, output: string): RecordedEffect => ({
+      kind: "tool",
+      name: "status",
+      step,
+      input: { id: 1 },
+      output,
+    });
+    const recording: Recording = {
+      version: 1,
+      effects: [poll(0, "pending"), modelEffect(0), poll(1, "ready")],
+    };
+    const replay = createRecorder({ replay: recording });
+    const status = replay.tool("status", async (_input: { id: number }) => "live");
+    await replayModel(replay).doGenerate(offering()); // the port asks the model first
+    await expect(status({ id: 1 })).resolves.toBe("pending");
+    await expect(status({ id: 1 })).resolves.toBe("ready");
+  });
+
+  test("a score question with another number of levels changes shape", () => {
+    const grade = (criteria: unknown[]) =>
+      modelEffect(0, {
+        method: "doDecide",
+        request: { questions: { grade: { type: "score", instructions: "", criteria } } },
+      });
+    expect(sameModelCallShape(grade(["bad", "good"]), grade(["poor", "fine"]))).toBe(true);
+    expect(sameModelCallShape(grade(["bad", "good"]), grade(["bad", "ok", "good"]))).toBe(false);
+  });
+
+  test("translate adapts a recorded answer to a call changed on purpose, and the pair compares equal", async () => {
+    const recording: Recording = {
+      version: 1,
+      effects: [
+        modelEffect(0, {
+          method: "doStream",
+          response: {},
+          stream: [{ type: "text-delta", id: "t", delta: "streamed" }],
+        }),
+        { kind: "output", value: "streamed" },
+      ],
+    };
+    const replay = createRecorder({
+      replay: recording,
+      translate: (recorded, actual) =>
+        recorded.method === "doStream" && actual.method === "doGenerate"
+          ? {
+              response: answer(
+                (recorded.stream as { delta?: string }[]).map((part) => part.delta ?? "").join(""),
+              ),
+            }
+          : undefined,
+    });
+    const result = await replayModel(replay).doGenerate(offering("decide"));
+    replay.output(result.content[0]!.text);
+    expect(replay.recording.effects[0]).toMatchObject({ translated: true, replayed: 0 });
+    expect(compareRecordings(recording, replay.recording)).toMatchObject({ equivalent: true });
+  });
+
+  test("fallback answers what the recording cannot, and those effects still count as extra", async () => {
+    const recording: Recording = { version: 1, effects: [modelEffect(0)] };
+    const replay = createRecorder({
+      replay: recording,
+      fallback: {
+        model: new MockLanguageModelV3({ doGenerate: async () => answer("stand-in") as never }),
+        tools: true,
+      },
+    });
+    const model = replayModel(replay);
+    await model.doGenerate(offering());
+    const retry = await model.doGenerate(offering());
+    expect(retry.content[0]!.text).toBe("stand-in");
+    await expect(replay.tool("check", async (n: number) => n * 2)(21)).resolves.toBe(42);
+    expect(replay.recording.effects.slice(1)).toMatchObject([
+      { kind: "model", unrecorded: true },
+      { kind: "tool", unrecorded: true, output: 42 },
+    ]);
+    expect(compareRecordings(recording, replay.recording).divergences.map((d) => d.reason)).toEqual(
+      ["extra-effect", "extra-effect"],
+    );
+  });
+
+  test("kinds compares only what a port did, not how it asked the model", () => {
+    const tools: RecordedEffect[] = [
+      { kind: "tool", name: "send", step: 1, input: { to: "a" }, output: "ok" },
+      { kind: "output", value: "sent" },
+    ];
+    const original: Recording = {
+      version: 1,
+      effects: [modelEffect(0, { method: "doStream" }), ...tools],
+    };
+    const port: Recording = {
+      version: 1,
+      effects: [modelEffect(0), modelEffect(1, { request: offering("decide") }), ...tools],
+    };
+    expect(compareRecordings(original, port).equivalent).toBe(false);
+    expect(compareRecordings(original, port, { kinds: ["tool", "output"] }).equivalent).toBe(true);
+  });
+
+  test("normalize can drop an effect, such as a repeat of an idempotent write", () => {
+    const write: RecordedEffect = {
+      kind: "tool",
+      name: "saveUrls",
+      step: 0,
+      input: ["a"],
+      output: null,
+    };
+    const original: Recording = {
+      version: 1,
+      effects: [write, { ...write, step: 1 }, { kind: "output", value: "done" }],
+    };
+    const port: Recording = { version: 1, effects: [write, { kind: "output", value: "done" }] };
+    const sameWrite = (x: RecordedEffect, y: RecordedEffect) =>
+      x.kind === "tool" &&
+      y.kind === "tool" &&
+      x.name === y.name &&
+      JSON.stringify(x.input) === JSON.stringify(y.input);
+    const dropRepeats = (
+      effect: RecordedEffect,
+      index: number,
+      effects: readonly RecordedEffect[],
+    ) =>
+      effects.slice(0, index).some((earlier) => sameWrite(earlier, effect)) ? undefined : effect;
+    expect(compareRecordings(original, port).equivalent).toBe(false);
+    expect(compareRecordings(original, port, { normalize: dropRepeats }).equivalent).toBe(true);
+  });
+
+  test("a decision model's doDecide is recorded and replayed, and matched by its questions", async () => {
+    const decide = {
+      questions: {
+        route: { type: "choice", instructions: "", criteria: { faq: null, seat: null } },
+      },
+    };
+    const result = { answers: { route: { type: "choice", choice: "seat" } } };
+    const decisionModel = (doDecide: (options: unknown) => Promise<unknown>) => ({
+      specificationVersion: "v4",
+      supportedQuestionTypes: ["choice"],
+      doDecide,
+    });
+    const recorder = createRecorder();
+    await recorder.model(decisionModel(async () => result)).doDecide(decide as never);
+    expect(recorder.recording.effects[0]).toMatchObject({ method: "doDecide", response: result });
+    expect("doGenerate" in recorder.model(decisionModel(async () => result))).toBe(false);
+
+    const replay = createRecorder({ replay: recorder.recording });
+    const replayed = replay.model(
+      decisionModel(async () => {
+        throw new Error("the real model was called");
+      }),
+    );
+    await expect(replayed.doDecide(decide as never)).resolves.toEqual(result);
+    const changed = {
+      questions: { route: { ...decide.questions.route, criteria: { faq: null } } },
+    };
+    await expect(replayed.doDecide(changed as never)).rejects.toThrow(RecordingDivergenceError);
+  });
+
+  test("a replayed error keeps its AI SDK identity, and compares by name and message only", async () => {
+    const recorder = createRecorder();
+    const failing = recorder.model(
+      new MockLanguageModelV3({
+        doGenerate: async () => {
+          throw new APICallError({
+            message: "overloaded",
+            url: "https://api.example/v1",
+            requestBodyValues: { prompt: "a long prompt" },
+            statusCode: 529,
+            isRetryable: true,
+          });
+        },
+      }),
+    ) as unknown as { doGenerate(options: unknown): Promise<unknown> };
+    await failing.doGenerate(offering()).catch(() => {});
+    const recorded = recorder.recording.effects[0] as RecordedModelCall;
+    expect(recorded.error).toMatchObject({
+      name: "AI_APICallError",
+      data: { statusCode: 529, isRetryable: true },
+    });
+    expect(JSON.stringify(recorded.error)).not.toContain("a long prompt");
+    expect(JSON.stringify(recorded.error)).not.toContain("api.example");
+
+    const replay = createRecorder({ replay: recorder.recording });
+    const error = await replayModel(replay)
+      .doGenerate(offering())
+      .catch((e: unknown) => e);
+    expect(APICallError.isInstance(error)).toBe(true);
+    expect((error as APICallError).isRetryable).toBe(true);
+    const port: Recording = {
+      version: 1,
+      effects: [{ ...recorded, error: { name: "AI_APICallError", message: "overloaded" } }],
+    };
+    expect(compareRecordings(recorder.recording, port).equivalent).toBe(true);
   });
 });
