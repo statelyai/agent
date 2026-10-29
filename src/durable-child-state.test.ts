@@ -428,4 +428,46 @@ describe("a long-lived child machine across resumes", () => {
     );
     expect(new Set(siteKeys(keys))).toEqual(new Set(["worker%2Fdraft#1", "worker/draft#1"]));
   });
+
+  test("a fired child timer is journaled, so the log reproduces where it moved the child", async () => {
+    const worker = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}) }),
+    }).createMachine({
+      context: {},
+      initial: "waiting",
+      states: { waiting: { after: { 20: { target: "armed" } } }, armed: {} },
+    });
+    const machine = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: { PING: z.object({}) } }),
+      actors: { worker },
+    }).createMachine({
+      context: {},
+      invoke: { id: "worker", src: "worker" },
+      on: { PING: {} },
+    });
+    const store = createInMemoryEventLogStore();
+    const workerValue = (persisted: unknown) =>
+      (persisted as { children: { worker: { snapshot: { value: string } } } }).children.worker
+        .snapshot.value;
+
+    const first = await runToQuiescence(createAgentRuntime(machine, { store, threadId: "t" }), {
+      input: undefined,
+    } as AgentRunInit<typeof machine>);
+    expect(workerValue(first.persist())).toBe("armed");
+    expect(
+      first.events?.some(
+        (entry) => entry.event.type === "xstate.timer" && entry.actorPath?.[0] === "worker",
+      ),
+    ).toBe(true);
+    expect(workerValue(replay(machine, first.events!).persistedSnapshot)).toBe("armed");
+
+    // Resumed from the log alone, the child stays where its timer moved it.
+    const second = await runToQuiescence(createAgentRuntime(machine, { store, threadId: "t" }), {
+      event: { type: "PING" },
+    } as AgentRunInit<typeof machine>);
+    expect(workerValue(second.persist())).toBe("armed");
+    const timers = (events: typeof first.events) =>
+      events?.filter((entry) => entry.event.type === "xstate.timer").length;
+    expect(timers(second.events)).toBe(timers(first.events));
+  });
 });
