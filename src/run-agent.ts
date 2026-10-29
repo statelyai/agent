@@ -1,5 +1,6 @@
 import {
   createAsyncLogic,
+  deliverEvent,
   getNextTransitions,
   isMachineSnapshot,
   stopActor,
@@ -1951,7 +1952,8 @@ export type AgentEffects = Parameters<DurableExecution<AnyStateMachine>["execute
  * durable timers (a Temporal timer, a Durable Object alarm, an Inngest sleep)
  * passes `schedule`/`cancel`: the loop then treats a pending timer as the
  * outside world's business, and the host delivers `{ type: "xstate.timer", id }`
- * through {@link AgentRuntime.transition} when it fires.
+ * through {@link AgentRuntime.transition} when it fires. Only root timers go
+ * to the host: an invoked child machine's timers are always in-process.
  */
 export type AgentTimerScheduler =
   | "in-process"
@@ -2740,7 +2742,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   const timerKey = (source: AnyActorRef | undefined, id: string) =>
     `${(source as { address?: string } | undefined)?.address ?? "(root)"}::${id}`;
   // Arms one timer. A root timer fires into the mailbox; a child's timer is
-  // delivered to that child, which resolves it from its own snapshot.
+  // delivered to that child as a self-send, which resolves it from its own
+  // snapshot (`xstate.timer` is internal, so a send from outside is dropped).
   const armTimer = (
     source: AnyActorRef | undefined,
     isRoot: boolean,
@@ -2762,7 +2765,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         if (isRoot) {
           enqueue(timerEvent);
         } else {
-          source?.send(timerEvent as never);
+          if (source) deliverEvent(source as AnyActor, source as AnyActor, timerEvent);
         }
         recheck();
       }, delay),
@@ -2773,8 +2776,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   //
   // Work is in flight while any child is still running — a request, a plain
   // async actor, a child machine whose own children are running — or an
-  // in-process timer is armed. A child machine at rest is waiting for events,
-  // not doing work, so it does not count.
+  // in-process timer is armed (a child machine's timers are always
+  // in-process). A child machine at rest is waiting for events, not doing
+  // work, so it does not count.
   const childrenBusy = (snapshot: AnyMachineSnapshot | undefined): boolean =>
     Object.values((snapshot?.children ?? {}) as Record<string, AnyActorRef | undefined>).some(
       (child) => {
@@ -2785,8 +2789,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         return isMachineSnapshot(childSnapshot) ? childrenBusy(childSnapshot) : true;
       },
     );
-  const workInFlight = (): boolean =>
-    childrenBusy(current) || (inProcessTimers && timerHandles.size > 0);
+  const workInFlight = (): boolean => childrenBusy(current) || timerHandles.size > 0;
 
   // Re-checked whenever anything the run started changes, so the loop stops
   // waiting once the last bit of work settles — even work that never messages
