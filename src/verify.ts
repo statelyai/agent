@@ -48,6 +48,7 @@ import {
 // Well-known builtin invoke srcs (kept local to avoid widening the public
 // surface of text-logic/decision internals).
 const DECIDE_SRC = "agent.decide";
+const ACT_SRC = "agent.act";
 
 // ─── Diagnostics ───
 
@@ -278,7 +279,9 @@ function checkDecideAllowsHumanEvent(ctx: LintContext): AgentLintDiagnostic[] {
   const out: AgentLintDiagnostic[] = [];
   for (const node of ctx.index.values()) {
     for (const [index, invoke] of node.invokes.entries()) {
-      if (!isDecisionInvoke(invoke.src, ctx.actors)) {
+      // `agent.act` also offers only non-human events as its tools.
+      const isAct = invoke.src === ACT_SRC;
+      if (!isAct && !isDecisionInvoke(invoke.src, ctx.actors)) {
         continue;
       }
       const allowedEvents = literalAllowedEvents(ctx.json, node.path, index);
@@ -303,7 +306,7 @@ function checkDecideAllowsHumanEvent(ctx: LintContext): AgentLintDiagnostic[] {
           severity: "error",
           path: node.path,
           message:
-            `State '${node.path}' lets a decision choose '${type}', but a transition tagged ` +
+            `State '${node.path}' lets ${isAct ? "'agent.act'" : "a decision"} choose '${type}', but a transition tagged ` +
             `'meta: { actor: "human" }' handles it, so the model is never offered it. Remove ` +
             `'${type}' from 'allowedEvents', or drop the tag if a model may send it.`,
         });

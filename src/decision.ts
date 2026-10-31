@@ -264,6 +264,12 @@ export interface DecisionLogicConfig<
   /** Framework-native messages, passed through without conversion. */
   messages?: ResolveTextLogicValue<any[] | undefined, InferOutput<TInputSchema>>;
   allowedEvents?: AllowedEvents<TEvent, InferOutput<TInputSchema>>;
+  /** How the decision is split into model calls. Default `'auto'`; see {@link DecisionStrategy}. */
+  strategy?: DecisionStrategy;
+  /** Model ref that fills open payload fields under `'pick-then-fill'` (and selects it under `'auto'`). */
+  fillModel?: TModel;
+  /** Named groups of event types for `'grouped'`; the rest group by prefix before the first `.`. */
+  groups?: Record<string, readonly TEvent[]>;
   maxRetries?: number; // default 2
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   maxOutputTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -369,6 +375,9 @@ export function createDecisionLogic<
         type,
         toolName: sanitizeEventToolName(type),
       })),
+      ...(config.strategy !== undefined ? { strategy: config.strategy } : {}),
+      ...(config.fillModel !== undefined ? { fillModel: config.fillModel } : {}),
+      ...(config.groups !== undefined ? { groups: config.groups } : {}),
       attempts: [],
       temperature: resolveTextLogicValue(config.temperature, args),
       maxOutputTokens: resolveTextLogicValue(config.maxOutputTokens, args),

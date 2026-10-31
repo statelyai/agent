@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
+  createDecisionLogic,
   createDecisionRequest,
   resolveDecision,
   type AgentDecisionExecutor,
@@ -337,5 +338,20 @@ test("agent.decide types strategy, fillModel, and groups against the machine's e
         },
       },
     },
+  });
+});
+
+test("createDecisionLogic carries strategy, fillModel, and groups onto its request", () => {
+  const logic = createDecisionLogic({
+    model: "m",
+    allowedEvents: ["cart.add", "cart.clear"],
+    strategy: "grouped",
+    fillModel: "filler",
+    groups: { cart: ["cart.add", "cart.clear"] },
+  });
+  expect(logic.request({} as never)).toMatchObject({
+    strategy: "grouped",
+    fillModel: "filler",
+    groups: { cart: ["cart.add", "cart.clear"] },
   });
 });

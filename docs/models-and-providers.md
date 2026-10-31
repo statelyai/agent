@@ -95,7 +95,7 @@ Precedence is global `settings`, then model-entry settings, then portable genera
 
 <!-- decision-model entries from src/ai-sdk/index.ts (decideWithDecisionModel) -->
 
-An AI SDK decision model, such as TypeSafe's Jev, goes in the same models map as the language models. A decide request whose model ref names it is answered through `experimental_decide` instead of a tool call.
+An AI SDK decision model, such as TypeSafe's Jev, goes in the same models map as the language models. A decide request whose model ref names it is answered through `experimental_decide` instead of a structured-output object or tool call.
 
 ```ts no-check
 import { openai } from "@ai-sdk/openai";
@@ -210,7 +210,7 @@ await runToQuiescence(
 
 To use Groq, vLLM, Together, OpenRouter, or LM Studio, change `baseURL` and use the endpoint's real `apiKey`. Nothing else changes.
 
-For OpenAI itself, `@statelyai/agent/openai` maps the three executors onto the raw `openai` package, with no `ai` dependency. Calls with function tools use the Responses API, and tool-free calls use Chat Completions. See [Hosts](hosts.md#openai-sdk-adapter).
+For OpenAI itself, `@statelyai/agent/openai` maps the three executors onto the raw `openai` package, with no `ai` dependency. By default, calls with function tools use the Responses API, and tool-free calls use Chat Completions. `api: "chat"` sends every call to Chat Completions. See [Hosts](hosts.md#openai-sdk-adapter).
 
 To avoid depending on `ai` or `openai`, write the three executors over raw `fetch` against the same OpenAI endpoints. Build the request body from the plain `AgentTextRequest` fields. For structured output, `providerOutputSchema` and `getJsonSchema` from `@statelyai/agent` build the `{ result, reasoning? }` schema to send; on the way back, `parseProviderOutput` validates the model's JSON against it and returns `{ result, reasoning? }`, which is already the shape an executor returns. Use `parseOutput` when you validate a bare value on its own, against the schema the request declared. Use `renderDecisionAttempts` for decision retries. See [Hosts](hosts.md).
 
@@ -250,7 +250,7 @@ When the adapter is not what is under test, a plain function executor that route
 | `createTanStackAiExecutors` | yes            | yes          | yes      | yes               |
 | Hand-written executors      | yes            | yes          | yes      | yes (you map it)  |
 
-The `decide` executor maps each machine event to a forced tool call, or a closed choice to one tool over the option ids (one `choice` question for a decision model), and structured output is requested as `{ result, reasoning? }`. Both live in the adapter layer, so an executor is either an adapter's or a function of yours that returns `{ result }`. See [Text requests](text-requests.md) and [Decisions](decisions.md).
+The `decide` executor asks for one structured-output object naming the event, or a closed choice's option id (one `choice` question for a decision model). `decideMode: 'tool'` maps each event to a forced tool call instead. Structured output is requested as `{ result, reasoning? }`. Both live in the adapter layer, so an executor is either an adapter's or a function of yours that returns `{ result }`. See [Text requests](text-requests.md) and [Decisions](decisions.md).
 
 ## Reference hosts by provider
 
