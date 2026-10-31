@@ -298,3 +298,48 @@ describe("verifyAgentConfig", () => {
     expect(result.gates.at(-1)!.detail).toMatch(/path \[RETRY, RETRY, RETRY\] hit maxDepth 3/);
   });
 });
+
+describe("verifyAgentConfig decide strategies", () => {
+  const strategyConfig = (input: Record<string, unknown>) => {
+    const config = refundConfig();
+    config.schemas = {
+      events: {
+        APPROVE: {
+          type: "object",
+          properties: { note: { type: "string" } },
+          required: ["note"],
+        },
+        DENY: {
+          type: "object",
+          properties: { final: { type: "boolean" } },
+          required: ["final"],
+        },
+      },
+    };
+    Object.assign(config.states.triage.invoke.input, input);
+    return config;
+  };
+  const lowerGate = async (input: Record<string, unknown>) =>
+    (await verifyAgentConfig(strategyConfig(input), options({ explore: undefined }))).gates.find(
+      (gate) => gate.name === "lower",
+    );
+
+  test("pick-then-fill over an open payload without fillModel fails the lower gate", async () => {
+    expect(await lowerGate({ strategy: "pick-then-fill" })).toEqual({
+      name: "lower",
+      ok: false,
+      detail:
+        "state 'triage': agent.decide uses strategy 'pick-then-fill' but APPROVE has open payload fields and no fillModel is set",
+    });
+  });
+
+  test("pick-then-fill with a fillModel, or over finite payloads, passes", async () => {
+    expect(await lowerGate({ strategy: "pick-then-fill", fillModel: MODEL })).toEqual({
+      name: "lower",
+      ok: true,
+    });
+    const config = strategyConfig({ strategy: "pick-then-fill", allowedEvents: ["DENY"] });
+    const result = await verifyAgentConfig(config, options({ explore: undefined }));
+    expect(result.gates.find((gate) => gate.name === "lower")).toEqual({ name: "lower", ok: true });
+  });
+});

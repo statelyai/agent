@@ -1409,6 +1409,69 @@ function createCountingDecide(
   };
 }
 
+// A decision strategy's `fillModel` call: a structured text call, budgeted,
+// traced, and usage-recorded like the decide calls beside it. `info.callKey`
+// arrives from the strategy (`…#n.<attempt>.fill`).
+function createCountingFill(
+  runCtx: RunAgentBindContext,
+  self: BoundActorSelf | undefined,
+  recordLater: (record: () => void) => void,
+): AgentRequestExecutor {
+  return async (request, info) => {
+    const { id, src } = selfIdAndSrc(self);
+    const agentRequest: AgentRequest = {
+      kind: "text",
+      id,
+      src,
+      mode: "generate",
+      input: request,
+      tools: request.tools,
+      events: [],
+    };
+    runCtx.consumeModelCall();
+    runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
+    try {
+      await runCtx.awaitJournal?.();
+      const raw = await runCtx.generateText!(request, {
+        ...info,
+        ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
+        ...(info?.requestId === undefined && id !== "" ? { requestId: id } : {}),
+      });
+      const usage = getCallUsage(raw);
+      const finishReason = getCallFinishReason(raw);
+      if (usage) {
+        recordLater(() =>
+          runCtx.recordUsage?.(
+            usage,
+            {
+              kind: "decision",
+              ...(id !== "" ? { id } : {}),
+              ...(src !== "" ? { src } : {}),
+              model: request.model,
+            },
+            self,
+          ),
+        );
+      }
+      runCtx.emitTrace?.(
+        {
+          type: "request.end",
+          request: agentRequest,
+          output: raw.result,
+          raw,
+          ...(usage !== undefined ? { usage } : {}),
+          ...(finishReason !== undefined ? { finishReason } : {}),
+        },
+        self,
+      );
+      return raw;
+    } catch (error) {
+      runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
+      throw error;
+    }
+  };
+}
+
 /**
  * Builds the decision actor logic the runtime installs in place of a
  * `DecisionLogic`/`agent.decide` source. `DecisionLogic.withExecutor(...)`
@@ -1518,7 +1581,13 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
       // Usage is delivered after the chosen event, so a budget guard reading
       // this decision's own `@agent.usage` cannot reject the event it chose.
       const usageRecords: Array<() => void> = [];
-      const decide = createCountingDecide(runCtx, self, (record) => usageRecords.push(record));
+      const recordLater = (record: () => void) => usageRecords.push(record);
+      const decide = createCountingDecide(runCtx, self, recordLater);
+      const generateText = runCtx.generateText
+        ? createCountingFill(runCtx, self, recordLater)
+        : undefined;
+      // The invoke-level key: resolveDecision appends each attempt's ordinal.
+      const invokeCallKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
       let priorAttempts: DecisionAttempt[] = [];
       let chosen: ChosenEvent;
       try {
@@ -1529,8 +1598,10 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
               priorAttempts = attemptRequest.attempts;
               return decide(attemptRequest, info);
             },
+            ...(generateText ? { generateText } : {}),
           },
           {
+            ...(invokeCallKey !== undefined ? { callKey: invokeCallKey } : {}),
             // The invoke's own input (agent.decide inline `maxRetries`) wins over
             // the logic's configured budget.
             maxRetries: lowered.maxRetries ?? logic.maxRetries,
@@ -1547,11 +1618,12 @@ function bindDecisionLogic(logic: DecisionLogic, runCtx: RunAgentBindContext): D
         // `run` — not a re-evaluated transition function — so it fires exactly
         // once regardless of v6-alpha transition re-evaluation.
         // The memoized invoke-level key, without its execution id.
-        const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
         runCtx.noteDecision?.(
           chosen,
           priorAttempts,
-          callKey === undefined ? undefined : callKey.slice(callKey.indexOf(":") + 1),
+          invokeCallKey === undefined
+            ? undefined
+            : invokeCallKey.slice(invokeCallKey.indexOf(":") + 1),
         );
         actorRef?.send(chosen as never);
       } finally {

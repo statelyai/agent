@@ -5,6 +5,7 @@
  * can feed a failed gate straight back to the model.
  */
 import type { AnyActorLogic, AnyStateMachine } from "xstate";
+import { payloadNeedsFillModel } from "../decision-strategy.js";
 import { DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR } from "../text-logic.js";
 import { explorePaths, lintAgentMachine, type ExplorePathsOptions } from "../verify.js";
 import {
@@ -170,7 +171,7 @@ export async function verifyAgentConfig(
     record("lower", [errorMessage(error)]);
     return fail({ config: typed });
   }
-  record("lower", []);
+  if (!record("lower", checkFillModels(typed))) return fail({ config: typed });
 
   const diagnostics = lintAgentMachine(machine).map((d) => ({
     failing: d.severity === "error" || options.lint?.warnings === true,
@@ -188,6 +189,37 @@ export async function verifyAgentConfig(
   }
 
   return { ok: true, gates, config: typed, machine };
+}
+
+// ─── lower: decide strategies ───
+
+/**
+ * An `agent.decide` invoke whose strategy is `'pick-then-fill'` (explicit, or
+ * `'auto'` with a `fillModel`) needs a `fillModel` when any literal
+ * `allowedEvents` entry has open payload fields. Templated or omitted inputs
+ * are checked at run time instead.
+ */
+function checkFillModels(config: AgentWorkflowConfig): string[] {
+  const schemas = (config.schemas?.events ?? {}) as Record<string, Record<string, unknown>>;
+  const problems: string[] = [];
+  for (const { path, state } of walkStates(config.states)) {
+    for (const invoke of nodes(state.invoke)) {
+      if (invoke.src !== DECIDE_ACTOR || !isPlainObject(invoke.input)) continue;
+      const input = invoke.input as ConfigNode;
+      if (input.strategy !== "pick-then-fill" || input.fillModel !== undefined) continue;
+      if (input.payloads !== undefined || !Array.isArray(input.allowedEvents)) continue;
+      const open = input.allowedEvents.filter(
+        (type): type is string => typeof type === "string" && payloadNeedsFillModel(schemas[type]),
+      );
+      if (open.length) {
+        problems.push(
+          `state '${path}': agent.decide uses strategy 'pick-then-fill' but ${list(open)} ` +
+            "has open payload fields and no fillModel is set",
+        );
+      }
+    }
+  }
+  return problems;
 }
 
 // ─── vocabulary ───
@@ -291,6 +323,8 @@ function checkVocabulary(config: AgentWorkflowConfig, allow: AgentConfigVocabula
         continue;
       }
       checkModel(`state '${path}': '${src}'`, (input as ConfigNode | undefined)?.model);
+      const fillModel = (input as ConfigNode | undefined)?.fillModel;
+      if (fillModel !== undefined) checkModel(`state '${path}': '${src}' fillModel`, fillModel);
       if (src !== DECIDE_ACTOR || !allow.events) continue;
       const allowedEvents = (input as ConfigNode).allowedEvents;
       if (!Array.isArray(allowedEvents) || allowedEvents.length === 0) {

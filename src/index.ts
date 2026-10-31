@@ -43,6 +43,8 @@ export type {
   CreateDecisionRequestOptions,
   ResolveDecisionOptions,
 } from "./decision.js";
+export { GROUPED_EVENT_THRESHOLD, MAX_FINITE_PAYLOADS } from "./decision-strategy.js";
+export type { DecisionStrategy } from "./decision-strategy.js";
 export { AgentInvalidEventPayloadError, getAcceptedEvents, parseAgentEvent } from "./events.js";
 export { eventFromInteraction, getInteraction, interactionMetaSchema } from "./interaction.js";
 export type {
