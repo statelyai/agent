@@ -362,7 +362,7 @@ report.passHat(5); // the chance 5 runs of a scenario all pass
 
 - `passAny` is pass@k for the scenario, and `passAll` is pass^k.
 - `passHat(j)` estimates the suite's pass^j without running more: per scenario, C(passes, j) / C(runs, j), averaged over scenarios. Scenarios with fewer than `j` runs are left out. A `j` that is not a whole number from 1 to the most runs any scenario has throws an `AgentError` with code `pass-hat-out-of-range`.
-- `distinctPaths` counts the different step sequences the runs took. `divergedAt` is the earliest state where a run left the first run's path, found with `firstDivergence`. A scenario that passes 3 of 5 runs and diverges at `deciding` points at one decision.
+- `distinctPaths` counts the different step sequences the runs took. `divergedAt` is the earliest state where a run left the first trace that contains a machine transition, found with `firstDivergence`. A scenario that passes 3 of 5 runs and diverges at `deciding` points at one decision.
 - Runs are sequential, scenario by scenario. A run that throws fails, with its message as `error` and no trace.
 - `report.traces` holds every recorded trace, ready for `foldTraces` or `traceCoverage`.
 - `k` below 1 throws an `AgentError` with code `invalid-repeat-count`.
