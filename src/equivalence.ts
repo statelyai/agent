@@ -55,6 +55,8 @@ export interface RecordedModelCall {
   /** The stream's parts or chunks, in order. */
   stream?: unknown[];
   error?: RecordedError;
+  /** The stream failed while being read, after the saved parts. */
+  streamError?: RecordedError;
   /** In replay, the recorded call (its `call`) whose answer served this one. */
   replayed?: number;
   /** In replay, `translate` adapted the recorded answer to this call. */
@@ -154,6 +156,8 @@ export interface ModelAnswer {
   response?: unknown;
   stream?: unknown[];
   error?: RecordedError;
+  /** Fail while reading the stream, after its saved parts, rather than before returning it. */
+  streamError?: RecordedError;
 }
 
 /**
@@ -327,17 +331,27 @@ function jsonEqual(a: unknown, b: unknown): boolean {
   return stableStringify(toJson(a)) === stableStringify(toJson(b));
 }
 
-function streamFrom(parts: unknown[]): ReadableStream<unknown> {
-  return new ReadableStream({
-    start(controller) {
-      for (const part of parts) controller.enqueue(reviveTimestamps(structuredClone(part)));
-      controller.close();
+function streamFrom(parts: unknown[], error?: () => Error): ReadableStream<unknown> {
+  let index = 0;
+  return new ReadableStream(
+    {
+      pull(controller) {
+        if (index < parts.length) {
+          controller.enqueue(reviveTimestamps(structuredClone(parts[index++])));
+        } else if (error) {
+          controller.error(error());
+        } else {
+          controller.close();
+        }
+      },
     },
-  });
+    { highWaterMark: 0 },
+  );
 }
 
-async function* iterate(chunks: unknown[]): AsyncGenerator<unknown> {
+async function* iterate(chunks: unknown[], error?: () => Error): AsyncGenerator<unknown> {
   for (const chunk of chunks) yield structuredClone(chunk);
+  if (error) throw error();
 }
 
 /**
@@ -421,13 +435,22 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         }
         effect.response = answer.response;
         effect.stream = answer.stream;
+        const streamError = answer.streamError;
+        const failStream = streamError
+          ? () => {
+              effect.streamError = streamError;
+              return fromRecordedError(streamError);
+            }
+          : undefined;
         if (seam === "openai") {
-          return streamed ? iterate(answer.stream ?? []) : structuredClone(answer.response);
+          return streamed
+            ? iterate(answer.stream ?? [], failStream)
+            : structuredClone(answer.response);
         }
         return streamed
           ? {
               ...reviveTimestamps(structuredClone(answer.response) ?? {}),
-              stream: streamFrom(answer.stream ?? []),
+              stream: streamFrom(answer.stream ?? [], failStream),
             }
           : reviveTimestamps(structuredClone(answer.response));
       }
@@ -455,23 +478,61 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     if (seam === "openai") {
       const source = result as AsyncIterable<unknown>;
       return (async function* () {
-        for await (const chunk of source) {
-          parts.push(toJson(chunk));
-          yield chunk;
+        try {
+          for await (const chunk of source) {
+            parts.push(toJson(chunk));
+            yield chunk;
+          }
+        } catch (error) {
+          effect.streamError = toRecordedError(error);
+          throw error;
         }
       })();
     }
     const { stream, ...rest } = result as { stream: ReadableStream<unknown> };
     effect.response = toJson(rest);
-    return {
-      ...rest,
-      stream: stream.pipeThrough(
+    const reader = stream
+      .pipeThrough(
         new TransformStream({
           transform(part, controller) {
             parts.push(toJson(part));
             controller.enqueue(part);
           },
         }),
+      )
+      .getReader();
+    let cancelled = false;
+    return {
+      ...rest,
+      stream: new ReadableStream(
+        {
+          async pull(controller) {
+            try {
+              const { done, value } = await reader.read();
+              if (cancelled) return;
+              if (done) {
+                reader.releaseLock();
+                controller.close();
+              } else {
+                controller.enqueue(value);
+              }
+            } catch (error) {
+              if (cancelled) return;
+              effect.streamError = toRecordedError(error);
+              reader.releaseLock();
+              controller.error(error);
+            }
+          },
+          async cancel(reason) {
+            cancelled = true;
+            try {
+              await reader.cancel(reason);
+            } finally {
+              reader.releaseLock();
+            }
+          },
+        },
+        { highWaterMark: 0 },
       ),
     };
   }
@@ -885,12 +946,21 @@ function differ(
     if (!modelCallsMatch(options.modelCalls, left, right)) {
       return { reason: "model-call-shape", message: shapeMessage(left, right) };
     }
-    if (!jsonEqual(errorIdentity(left.error), errorIdentity(right.error))) {
-      const outcome = (error?: RecordedError) =>
-        error ? `failed with ${error.name}: ${error.message}` : "succeeded";
+    if (
+      !jsonEqual(
+        [errorIdentity(left.error), errorIdentity(left.streamError)],
+        [errorIdentity(right.error), errorIdentity(right.streamError)],
+      )
+    ) {
+      const outcome = (effect: RecordedModelCall) => {
+        const error = effect.error ?? effect.streamError;
+        return error
+          ? `failed${effect.streamError ? " while streaming" : ""} with ${error.name}: ${error.message}`
+          : "succeeded";
+      };
       return {
         reason: "model-error",
-        message: `Model call #${left.call} ${outcome(left.error)}; in the port it ${outcome(right.error)}.`,
+        message: `Model call #${left.call} ${outcome(left)}; in the port it ${outcome(right)}.`,
       };
     }
     return undefined;
