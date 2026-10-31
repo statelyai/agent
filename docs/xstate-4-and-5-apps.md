@@ -31,7 +31,7 @@ Put the agent in a workspace package that owns its own dependencies, and give th
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "dependencies": {
-    "@statelyai/agent": "2.0.0-alpha.34",
+    "@statelyai/agent": "2.0.0-alpha.35",
     "@ai-sdk/openai": "^4.0.0",
     "ai": "^7.0.128",
     "xstate": "6.0.0-alpha.69",
