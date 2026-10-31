@@ -6,6 +6,14 @@ const asyncResults: [string, (promise: Promise<unknown>) => PromiseLike<unknown>
   ["native Promise", (promise) => promise],
   ["thenable", (promise) => ({ then: promise.then.bind(promise) })],
   [
+    "thenable with a null-prototype then function",
+    (promise) => ({ then: Object.setPrototypeOf(promise.then.bind(promise), null) }),
+  ],
+  [
+    "thenable with a shadowed bind property",
+    (promise) => ({ then: Object.assign(promise.then.bind(promise), { bind: undefined }) }),
+  ],
+  [
     "callable thenable",
     (promise) => Object.assign(() => undefined, { then: promise.then.bind(promise) }),
   ],

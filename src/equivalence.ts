@@ -568,7 +568,10 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
       }
       // Read `then` only once, preserving its receiver, and let Promise
       // assimilation handle settlement. track receives a native Promise too.
-      return Promise.resolve({ then: then.bind(output) }).then(
+      const promiseLike: PromiseLike<unknown> = {
+        then: (resolve, reject) => Reflect.apply(then, output, [resolve, reject]),
+      };
+      return Promise.resolve(promiseLike).then(
         (value) => {
           effect.output = toJson(value);
           return value;
