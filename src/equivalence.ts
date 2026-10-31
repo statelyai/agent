@@ -552,18 +552,23 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         effect.error = toRecordedError(error);
         throw error;
       }
-      if (
-        output === null ||
-        (typeof output !== "object" && typeof output !== "function") ||
-        typeof (output as PromiseLike<unknown>).then !== "function"
-      ) {
+      let then: PromiseLike<unknown>["then"] | undefined;
+      try {
+        if (output !== null && (typeof output === "object" || typeof output === "function")) {
+          then = (output as PromiseLike<unknown>).then;
+        }
+      } catch (error) {
+        effect.error = toRecordedError(error);
+        return Promise.reject(error);
+      }
+      if (typeof then !== "function") {
         effect.sync = true;
         effect.output = toJson(output);
         return output;
       }
-      // Assimilate thenables and promises from other realms before recording
-      // their settled result. This also gives track a native Promise to follow.
-      return Promise.resolve(output).then(
+      // Read `then` only once, preserving its receiver, and let Promise
+      // assimilation handle settlement. track receives a native Promise too.
+      return Promise.resolve({ then: then.bind(output) }).then(
         (value) => {
           effect.output = toJson(value);
           return value;

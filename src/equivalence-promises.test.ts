@@ -80,6 +80,43 @@ test("ordinary values, including a non-callable then property, stay synchronous"
   }
 });
 
+test("reads a then accessor once and preserves its receiver", async () => {
+  const recorder = createRecorder();
+  let reads = 0;
+  const thenable = {
+    get then() {
+      const value = ++reads;
+      return function (this: unknown, resolve: (value: unknown) => void) {
+        expect(this).toBe(thenable);
+        resolve(value);
+      };
+    },
+  };
+  await expect(recorder.tool("lookup", () => thenable)()).resolves.toBe(1);
+  expect(reads).toBe(1);
+  const recording = JSON.parse(JSON.stringify(recorder.recording));
+  await expect(
+    createRecorder({ replay: recording }).tool("lookup", () => thenable)(),
+  ).resolves.toBe(1);
+  expect(reads).toBe(1);
+});
+
+test("a throwing then accessor is recorded as an asynchronous rejection", async () => {
+  const recorder = createRecorder();
+  const error = new Error("cannot read then");
+  const result = recorder.tool("lookup", () => ({
+    get then() {
+      throw error;
+    },
+  }))();
+  await expect(result).rejects.toBe(error);
+  const recording = JSON.parse(JSON.stringify(recorder.recording));
+  expect(recording.effects[0].sync).toBeUndefined();
+  await expect(
+    createRecorder({ replay: recording }).tool("lookup", () => undefined)(),
+  ).rejects.toThrow("cannot read then");
+});
+
 test("ordinary throws stay synchronous during recording and replay", () => {
   const recorder = createRecorder();
   const error = new TypeError("invalid input");
