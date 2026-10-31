@@ -552,12 +552,26 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         effect.error = toRecordedError(error);
         throw error;
       }
-      if (!(output instanceof Promise)) {
+      let then: PromiseLike<unknown>["then"] | undefined;
+      try {
+        if (output !== null && (typeof output === "object" || typeof output === "function")) {
+          then = (output as PromiseLike<unknown>).then;
+        }
+      } catch (error) {
+        effect.error = toRecordedError(error);
+        return Promise.reject(error);
+      }
+      if (typeof then !== "function") {
         effect.sync = true;
         effect.output = toJson(output);
         return output;
       }
-      return output.then(
+      // Read `then` only once, preserving its receiver, and let Promise
+      // assimilation handle settlement. track receives a native Promise too.
+      const promiseLike: PromiseLike<unknown> = {
+        then: (resolve, reject) => Reflect.apply(then, output, [resolve, reject]),
+      };
+      return Promise.resolve(promiseLike).then(
         (value) => {
           effect.output = toJson(value);
           return value;
