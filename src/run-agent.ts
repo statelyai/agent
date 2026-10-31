@@ -20,7 +20,7 @@ import {
   type StateValue,
   type TimerKey,
 } from "xstate";
-import { canonicalJson } from "./internal/is-record.js";
+import { canonicalJson, isPlainObject } from "./internal/is-record.js";
 import { createDurable, type DurableExecution } from "xstate/durable";
 import type {
   AgentTools,
@@ -52,13 +52,16 @@ import {
   type AgentExecutorTextRequest,
   type AgentRequestExecutor,
   type AgentRequestExecutors,
+  type AgentRequestMode,
   type AgentTextRequest,
   type TextLogic,
+  ACT_ACTOR,
   responseMessagesOf,
 } from "./text-logic.js";
 import {
   AgentDecisionExhaustedError,
   isDecisionLogic,
+  resolveAllowedEventTypes,
   resolveDecision,
   acceptedDecisionOptions,
   type AgentDecisionExecutor,
@@ -67,6 +70,14 @@ import {
   type DecisionLogic,
 } from "./decision.js";
 import type { AgentRequest, AgentStepRequest } from "./steps.js";
+import {
+  ACT_STATE_EXITED,
+  DEFAULT_ACT_MAX_STEPS,
+  isActLogic,
+  type ActLogic,
+  type AgentActInput,
+} from "./act.js";
+import { describeSnapshotDelta } from "./decide-next.js";
 import {
   executorBoundLogics,
   getRegisteredAgentExecutionOptions,
@@ -888,6 +899,19 @@ function assertMachineBindable(
       continue;
     }
 
+    if (isActLogic(logic)) {
+      if (!ctx.rebindable) {
+        throw unrebindableChildRequestError(ctx.childPath, stateName, src, "text");
+      }
+      if (!executors.generateText) {
+        throw new Error(
+          `createAgentRuntime: ${where} '${stateName}' invokes '${src}' but no ` +
+            `'generateText' executor was provided to createAgentRuntime(...).`,
+        );
+      }
+      continue;
+    }
+
     if (isDecisionLogic(logic)) {
       // A decision source with its own bound executor runs itself.
       if (executorBoundLogics.has(logic as object)) {
@@ -1082,6 +1106,12 @@ interface RunAgentBindContext {
    */
   noteDecision?: (event: object, attempts: DecisionAttempt[], decidedBy?: string) => void;
   /**
+   * Resolves once the root has committed `event` (sent through the run's root
+   * facade), so `agent.act` can report what it did. Unset off the runtime
+   * path, where a send commits synchronously.
+   */
+  awaitDelivery?: (event: object) => Promise<void>;
+  /**
    * Called as an invoked child machine starts processing `event`, before its
    * snapshot moves, so the runtime can journal it in processing order. Unset
    * off the runtime path.
@@ -1231,7 +1261,7 @@ function invokingActorOf(
  * identical event shapes by construction. @internal
  */
 function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic {
-  return logic.withExecutor(async ({ request: rawRequest, self: selfArg, signal }) => {
+  return logic.withExecutor(({ request: rawRequest, self: selfArg, signal }) => {
     const self = selfArg as BoundActorSelf | undefined;
     const { id, src } = selfIdAndSrc(self);
     // A request authored with no `name` (bare `createTextLogic({ model })`)
@@ -1246,91 +1276,244 @@ function bindTextLogic(logic: TextLogic, runCtx: RunAgentBindContext): TextLogic
         rawRequest.name ??
         (src !== "" && src !== GENERATE_TEXT_ACTOR && src !== STREAM_TEXT_ACTOR ? src : id || src),
     };
-    const executor = logic.mode === "stream" ? runCtx.streamText : runCtx.generateText;
-    if (!executor) {
-      throw new Error(
-        `No '${logic.mode === "stream" ? "streamText" : "generateText"}' ` + "executor provided.",
-      );
-    }
+    return runTextRequest(runCtx, logic.mode, request, self, signal);
+  });
+}
 
-    const requestWithTools: AgentTextRequest & { tools: AgentTools } = {
-      ...request,
-      tools: request.tools ?? {},
-    };
-    const agentRequest: AgentRequest = {
-      kind: "text",
-      id,
-      src,
-      mode: logic.mode,
-      input: request,
-      tools: requestWithTools.tools,
-      events: [],
-    };
+/**
+ * Runs one text/stream request through `runCtx`'s executor with the run's
+ * accounting: budgeted, traced (`request.start`/`stream.chunk`/`request.end`/
+ * `request.error`), call-keyed, usage-recorded. Shared by text requests and
+ * `agent.act`. @internal
+ */
+async function runTextRequest(
+  runCtx: RunAgentBindContext,
+  mode: AgentRequestMode,
+  request: AgentTextRequest,
+  self: BoundActorSelf | undefined,
+  signal: AbortSignal,
+): Promise<{ result: unknown; messages: ReturnType<typeof responseMessagesOf> }> {
+  const { id, src } = selfIdAndSrc(self);
+  const executor = mode === "stream" ? runCtx.streamText : runCtx.generateText;
+  if (!executor) {
+    throw new Error(
+      `No '${mode === "stream" ? "streamText" : "generateText"}' ` + "executor provided.",
+    );
+  }
 
-    runCtx.consumeModelCall();
-    runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
-    try {
-      const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
-      // Write-ahead: the log up to this point must be durable before the call.
-      await runCtx.awaitJournal?.();
-      const raw = await executor(requestWithTools as AgentExecutorTextRequest, {
-        onChunk: (chunk: string) => {
-          runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
-        },
-        signal,
-        ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
-        ...(id !== "" ? { requestId: id } : {}),
-        ...(callKey !== undefined ? { callKey } : {}),
-      });
-      const output = await normalizeGeneratorResult(raw, id);
+  const requestWithTools: AgentTextRequest & { tools: AgentTools } = {
+    ...request,
+    tools: request.tools ?? {},
+  };
+  const agentRequest: AgentRequest = {
+    kind: "text",
+    id,
+    src,
+    mode,
+    input: request,
+    tools: requestWithTools.tools,
+    events: [],
+  };
 
-      // Lift `reasoning` off the raw executor result (the provider output's
-      // opt-in field) onto the request.end trace — never into machine output.
-      const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
-      const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
+  runCtx.consumeModelCall();
+  runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
+  try {
+    const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
+    // Write-ahead: the log up to this point must be durable before the call.
+    await runCtx.awaitJournal?.();
+    const raw = await executor(requestWithTools as AgentExecutorTextRequest, {
+      onChunk: (chunk: string) => {
+        runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
+      },
+      signal,
+      ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
+      ...(id !== "" ? { requestId: id } : {}),
+      ...(callKey !== undefined ? { callKey } : {}),
+    });
+    const output = await normalizeGeneratorResult(raw, id);
 
-      // Before usage is recorded, so its `budget` includes this call's steps.
-      runCtx.countModelCalls?.(getCallModelCalls(raw) - 1);
+    // Lift `reasoning` off the raw executor result (the provider output's
+    // opt-in field) onto the request.end trace — never into machine output.
+    const rawReasoning = (raw as { reasoning?: unknown } | null | undefined)?.reasoning;
+    const reasoning = typeof rawReasoning === "string" ? rawReasoning : undefined;
 
-      // Fold this call's reported tokens into the run-level AgentUsage, and
-      // surface them per-call on the request.end trace.
-      const usage = getCallUsage(raw);
-      const finishReason = getCallFinishReason(raw);
-      if (usage) {
-        runCtx.recordUsage?.(
-          usage,
-          {
-            kind: "text",
-            ...(id !== "" ? { id } : {}),
-            ...(src !== "" ? { src } : {}),
-            model: request.model,
-            ...(request.name !== undefined ? { name: request.name } : {}),
-          },
-          self,
-        );
-      }
+    // Before usage is recorded, so its `budget` includes this call's steps.
+    runCtx.countModelCalls?.(getCallModelCalls(raw) - 1);
 
-      runCtx.emitTrace?.(
+    // Fold this call's reported tokens into the run-level AgentUsage, and
+    // surface them per-call on the request.end trace.
+    const usage = getCallUsage(raw);
+    const finishReason = getCallFinishReason(raw);
+    if (usage) {
+      runCtx.recordUsage?.(
+        usage,
         {
-          type: "request.end",
-          request: agentRequest,
-          output,
-          raw,
-          ...(reasoning !== undefined ? { reasoning } : {}),
-          ...(usage !== undefined ? { usage } : {}),
-          ...(finishReason !== undefined ? { finishReason } : {}),
+          kind: "text",
+          ...(id !== "" ? { id } : {}),
+          ...(src !== "" ? { src } : {}),
+          model: request.model,
+          ...(request.name !== undefined ? { name: request.name } : {}),
         },
         self,
       );
-
-      return { result: output, messages: responseMessagesOf(raw) };
-    } catch (error) {
-      // A tool loop that failed after some steps still made them.
-      runCtx.countModelCalls?.(getCallModelCalls(error) - 1);
-      runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
-      throw error;
     }
+
+    runCtx.emitTrace?.(
+      {
+        type: "request.end",
+        request: agentRequest,
+        output,
+        raw,
+        ...(reasoning !== undefined ? { reasoning } : {}),
+        ...(usage !== undefined ? { usage } : {}),
+        ...(finishReason !== undefined ? { finishReason } : {}),
+      },
+      self,
+    );
+
+    return { result: output, messages: responseMessagesOf(raw) };
+  } catch (error) {
+    // A tool loop that failed after some steps still made them.
+    runCtx.countModelCalls?.(getCallModelCalls(error) - 1);
+    runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
+    throw error;
+  }
+}
+
+/**
+ * Builds the actor logic the runtime installs in place of the `agent.act`
+ * builtin: ONE `generateText` call (the host's tool loop, `maxSteps` default
+ * 20) whose tools are the invoking state's accepted, non-human events plus the
+ * input's plain `tools`. Each event tool call, in call order:
+ *
+ * 1. validates its payload against the event schema (error result on failure);
+ * 2. answers "not allowed" when the live snapshot cannot take the event;
+ * 3. otherwise sends it to the invoking actor (journaled like any delivered
+ *    event), waits for it to commit, and answers with the delta
+ *    `{ state?, changed? }` it caused.
+ *
+ * Once the invoking state exits (the invoke's `signal` aborts), every later
+ * call answers {@link ACT_STATE_EXITED} and the executor's signal aborts, so
+ * the loop stops. Completes with the final text when the state is still active.
+ *
+ * Not resumable mid-loop: a crash during the tool loop replays the events it
+ * already delivered from the journal, but the act invoke itself restarts from
+ * scratch (a fresh model call) if its state is still active.
+ */
+function bindActLogic(runCtx: RunAgentBindContext): ActLogic {
+  const logic = createAsyncLogic<unknown, AgentActInput>({
+    run: async ({ input, signal, self: selfArg }) => {
+      const self = selfArg as BoundActorSelf | undefined;
+      const { id, src } = selfIdAndSrc(self);
+      // See bindDecisionLogic: let the invoking transition commit first.
+      await Promise.resolve();
+      const actorRef = invokingActorOf(self, runCtx);
+      if (!actorRef) {
+        throw new Error(`'${ACT_ACTOR}' needs the invoking actor's snapshot.`);
+      }
+      // The root's sends land in the run's mailbox and commit later; a child
+      // actor (and the provideExecutors path) processes a send synchronously.
+      const awaitDelivery =
+        !isChildRequest(self) && actorRef === runCtx.actorHolder.actorRef
+          ? runCtx.awaitDelivery
+          : undefined;
+      const snapshot = actorRef.getSnapshot() as AnyMachineSnapshot;
+      const events = getAcceptedEvents(snapshot, {
+        schemas: runCtx.schemas,
+        eventTypes: resolveAllowedEventTypes(input.allowedEvents, input),
+        actor: "agent",
+      });
+
+      // Aborts the executor once the state exits: the loop has nothing left to drive.
+      const loop = new AbortController();
+      const exited = () => signal.aborted || loop.signal.aborted;
+      if (signal.aborted) loop.abort(signal.reason);
+      else signal.addEventListener("abort", () => loop.abort(signal.reason), { once: true });
+
+      const callEvent = async (
+        type: string,
+        schema: StandardSchemaV1 | undefined,
+        args: unknown,
+      ) => {
+        if (exited()) return ACT_STATE_EXITED;
+        // A model echoing `type` in its arguments cannot retarget the call.
+        let payload: Record<string, unknown> = isPlainObject(args) ? { ...args } : {};
+        delete payload.type;
+        if (schema) {
+          try {
+            payload = validateSchemaSync(schema, payload) as Record<string, unknown>;
+          } catch (error) {
+            return `'${type}' payload failed validation: ${error instanceof Error ? error.message : String(error)}`;
+          }
+        }
+        const event = { ...payload, type };
+        const before = actorRef.getSnapshot() as AnyMachineSnapshot;
+        let accepted: boolean;
+        try {
+          accepted = !getHumanEventTypes(before).has(type) && before.can(event);
+        } catch {
+          accepted = false;
+        }
+        if (!accepted) {
+          return `'${type}' is not allowed in state ${JSON.stringify(before.value)}`;
+        }
+        const delivered = awaitDelivery?.(event);
+        actorRef.send(event as never);
+        await delivered;
+        // Let a synchronous send's effects (the invoke's own cancellation) settle.
+        await Promise.resolve();
+        const delta = describeSnapshotDelta(before, actorRef.getSnapshot() as AnyMachineSnapshot);
+        if (signal.aborted) loop.abort(signal.reason);
+        return delta;
+      };
+
+      // Calls run one at a time, in call order, whatever the host's concurrency.
+      let queue: Promise<unknown> = Promise.resolve();
+      const serialized =
+        (run: (args: unknown) => Promise<unknown>) =>
+        (args: unknown): Promise<unknown> => {
+          const result = queue.then(() => run(args));
+          queue = result.catch(() => {});
+          return result;
+        };
+
+      const tools: AgentTools = { ...input.tools };
+      for (const descriptor of events) {
+        tools[descriptor.toolName] = {
+          description: `Send '${descriptor.type}'. Answers with what it changed.`,
+          ...(descriptor.inputSchema ? { inputSchema: descriptor.inputSchema } : {}),
+          execute: serialized((args) => callEvent(descriptor.type, descriptor.inputSchema, args)),
+        };
+      }
+
+      const request: AgentTextRequest = {
+        name: input.name ?? (id || src),
+        input,
+        model: input.model,
+        system: input.system,
+        prompt: input.prompt,
+        messages: input.messages,
+        tools,
+        maxSteps: input.maxSteps ?? DEFAULT_ACT_MAX_STEPS,
+        temperature: input.temperature,
+        maxOutputTokens: input.maxOutputTokens,
+        topP: input.topP,
+        topK: input.topK,
+        seed: input.seed,
+        stopSequences: input.stopSequences,
+        metadata: input.metadata,
+      };
+      try {
+        const { result } = await runTextRequest(runCtx, "generate", request, self, loop.signal);
+        return result;
+      } catch (error) {
+        // The state exited mid-loop: nobody is left to receive this invoke's outcome.
+        if (exited()) return undefined;
+        throw error;
+      }
+    },
   });
+  return Object.assign(logic, { kind: "statelyai.actLogic" as const });
 }
 
 // Wraps runCtx's `decide` executor with model-call budgeting and tracing.
@@ -1857,6 +2040,18 @@ export function bindDecisionForProvide(
 }
 
 /**
+ * Host-binds the `agent.act` builtin for {@link provideExecutors}: the
+ * runtime's act wrapper with the same request-level tracing. @internal
+ */
+export function bindActForProvide(
+  machine: AnyStateMachine,
+  executors: Partial<AgentRequestExecutors>,
+  options: ProvideBindOptions,
+): ActLogic {
+  return bindActLogic(provideBindContext(machine, executors, options));
+}
+
+/**
  * Recursively binds an invoked child state machine for {@link provideExecutors},
  * with the same semantics `createAgentRuntime` applies ({@link rebindChildMachine}):
  * string-keyed text/decision sources at any depth inherit the host executors,
@@ -1962,6 +2157,10 @@ function rebindChildMachine(
   const wrapped: Record<string, AnyActorLogic> = {};
 
   for (const [key, logic] of Object.entries(sources)) {
+    if (isActLogic(logic)) {
+      wrapped[key] = bindActLogic(runCtx);
+      continue;
+    }
     if (isDecisionLogic(logic)) {
       if (!executorBoundLogics.has(logic as object)) {
         wrapped[key] = bindDecisionLogic(logic, runCtx);
@@ -2704,6 +2903,21 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       },
     }) as unknown as AnyActorRef;
   const actorHolder: { actorRef: AnyActorRef | undefined } = { actorRef: rootFacade() };
+  // `agent.act` waits on each event it sends: released once the event's
+  // transition AND its effects (an exited state cancelling the act) have run,
+  // or when the run stops or finishes without processing it.
+  const deliveryWaiters = new Map<object, () => void>();
+  let committedWaiters: Array<() => void> = [];
+  const releaseCommitted = () => {
+    const released = committedWaiters;
+    committedWaiters = [];
+    for (const release of released) release();
+  };
+  const releaseAllDeliveries = () => {
+    committedWaiters.push(...deliveryWaiters.values());
+    deliveryWaiters.clear();
+    releaseCommitted();
+  };
   const runCtx: RunAgentBindContext = {
     generateText: executors.generateText,
     streamText: executors.streamText,
@@ -2714,6 +2928,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     recordUsage,
     actorHolder,
     awaitJournal,
+    awaitDelivery: (event) =>
+      new Promise<void>((resolve) => {
+        if (finished || stopReason !== undefined) resolve();
+        else deliveryWaiters.set(event, resolve);
+      }),
     runId,
     schemas: getRegisteredAgentExecutionOptions(machine).schemas,
     // What an invoked child machine processes is journaled with its
@@ -2752,6 +2971,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // rebindChildMachine). Every other source (plain actors, non-agent logic)
   // passes through untouched.
   for (const [key, logic] of Object.entries(effectiveSources)) {
+    if (isActLogic(logic)) {
+      wrappedSources[key] = bindActLogic(runCtx);
+      continue;
+    }
     if (isDecisionLogic(logic)) {
       wrappedSources[key] = bindDecisionLogic(logic, runCtx);
       continue;
@@ -2921,6 +3144,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // `finish` persists (and reports the failure) itself.
     }
     stopChildren(current);
+    releaseAllDeliveries();
     recheck();
   };
 
@@ -3455,6 +3679,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         ignoredEvent = event as EventObject;
       }
       appendLogEntry(event as EventObject, attempts, takeDecidedBy(event as EventObject));
+      const waiter = deliveryWaiters.get(event as object);
+      if (waiter) {
+        deliveryWaiters.delete(event as object);
+        committedWaiters.push(waiter);
+      }
       // The store refused the entry and the run stopped: the transition never
       // happened, so the result stays at the last journaled state.
       if (stopReason !== undefined) {
@@ -3466,6 +3695,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
 
     async execute(effects) {
       if (stopReason !== undefined || finished || effects.length === 0) {
+        releaseCommitted();
         return;
       }
       try {
@@ -3473,6 +3703,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       } catch (error) {
         stopRun({ cause: "machine", error });
       }
+      releaseCommitted();
       recheck();
     },
 
@@ -3587,6 +3818,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       };
 
       finished = true;
+      releaseAllDeliveries();
       // Every write queued so far: the result waits for these. A straggler
       // entry appended after this point is still written, but not awaited.
       const journalAtSettle = journalChain;

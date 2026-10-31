@@ -294,8 +294,8 @@ export interface DecisionLogic<
 }
 
 // Resolves a declared `AllowedEvents` (single entry, array, or resolver) to a concrete
-// list of types/patterns; undefined means "all legal events."
-function resolveAllowedEventTypes(
+// list of types/patterns; undefined means "all legal events." @internal
+export function resolveAllowedEventTypes(
   allowedEvents: AllowedEvents | undefined,
   input: unknown,
 ): readonly string[] | undefined {

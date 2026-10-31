@@ -6,7 +6,7 @@
  */
 import type { AnyActorLogic, AnyStateMachine } from "xstate";
 import { payloadNeedsFillModel } from "../decision-strategy.js";
-import { DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR } from "../text-logic.js";
+import { ACT_ACTOR, DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR } from "../text-logic.js";
 import { explorePaths, lintAgentMachine, type ExplorePathsOptions } from "../verify.js";
 import {
   setupAgentFromConfig,
@@ -51,7 +51,7 @@ export interface AgentConfigVocabulary {
   guards?: string[];
   /** Named action types (`{ type: "notify" }`). */
   actions?: string[];
-  /** Event types an `agent.decide` invoke may list in `allowedEvents`. */
+  /** Event types an `agent.decide`/`agent.act` invoke may list in `allowedEvents`. */
   events?: string[];
   /** Model refs. Each must be a literal string (not a `{{ }}` template) in this set. */
   models?: string[];
@@ -100,7 +100,12 @@ export interface VerifyAgentConfigResult {
   config?: AgentWorkflowConfig;
 }
 
-const BUILTIN_SRCS: readonly string[] = [DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR];
+const BUILTIN_SRCS: readonly string[] = [
+  DECIDE_ACTOR,
+  ACT_ACTOR,
+  GENERATE_TEXT_ACTOR,
+  STREAM_TEXT_ACTOR,
+];
 const MAX_DETAIL_LINES = 10;
 
 /**
@@ -318,25 +323,30 @@ function checkVocabulary(config: AgentWorkflowConfig, allow: AgentConfigVocabula
       }
       if (!BUILTIN_SRCS.includes(src)) continue;
       const input = invoke.input;
-      if ((allow.models || (src === DECIDE_ACTOR && allow.events)) && !isPlainObject(input)) {
+      if (
+        (allow.models || ((src === DECIDE_ACTOR || src === ACT_ACTOR) && allow.events)) &&
+        !isPlainObject(input)
+      ) {
         problems.push(`state '${path}': '${src}' input must be a literal object`);
         continue;
       }
       checkModel(`state '${path}': '${src}'`, (input as ConfigNode | undefined)?.model);
       const fillModel = (input as ConfigNode | undefined)?.fillModel;
       if (fillModel !== undefined) checkModel(`state '${path}': '${src}' fillModel`, fillModel);
-      if (src !== DECIDE_ACTOR || !allow.events) continue;
-      const allowedEvents = (input as ConfigNode).allowedEvents;
+      if ((src !== DECIDE_ACTOR && src !== ACT_ACTOR) || !allow.events) continue;
+      const allowedEvents = (input as ConfigNode | undefined)?.allowedEvents;
+      // `agent.act` may omit the list: it then offers what the state accepts.
+      if (src === ACT_ACTOR && allowedEvents === undefined) continue;
       if (!Array.isArray(allowedEvents) || allowedEvents.length === 0) {
         problems.push(
-          `state '${path}': agent.decide needs a literal, non-empty allowedEvents list; allowed: ${list(allow.events)}`,
+          `state '${path}': ${src} needs a literal, non-empty allowedEvents list; allowed: ${list(allow.events)}`,
         );
         continue;
       }
       for (const type of allowedEvents) {
         if (typeof type !== "string" || !allow.events.includes(type)) {
           problems.push(
-            `state '${path}': agent.decide allowedEvents entry '${String(type)}' is not allowed; allowed: ${list(allow.events)}`,
+            `state '${path}': ${src} allowedEvents entry '${String(type)}' is not allowed; allowed: ${list(allow.events)}`,
           );
         }
       }

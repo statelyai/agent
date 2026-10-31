@@ -10,6 +10,7 @@ import type {
 import { getJsonSchemaSync, validateSchemaSync } from "./utils.js";
 import type { AgentDecisionExecutor, AgentDecisionInput } from "./decision.js";
 import type { ChosenEvent } from "./types.js";
+import type { AgentActInput } from "./act.js";
 import { executorBoundLogics } from "./internal/registry.js";
 
 // Well-known invoke `src` for the builtin human-input actor.
@@ -19,6 +20,8 @@ export const GENERATE_TEXT_ACTOR = "agent.generateText" as const;
 export const STREAM_TEXT_ACTOR = "agent.streamText" as const;
 // Well-known invoke `src` for the builtin decision actor.
 export const DECIDE_ACTOR = "agent.decide" as const;
+// Well-known invoke `src` for the builtin act actor (accepted events as tools).
+export const ACT_ACTOR = "agent.act" as const;
 
 /** Whether a text request should be resolved with `generateText` (one-shot) or `streamText` (chunked, via `onChunk`). */
 export type AgentRequestMode = "generate" | "stream";
@@ -273,7 +276,7 @@ function dropUndefined(value: unknown): unknown {
   return value;
 }
 
-/** The three `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
+/** The `agent.*` builtin actor logics every setupAgent-built machine registers. @internal */
 export type BuiltinAgentActors<TEvent extends string = string, TModel extends string = string> = {
   [GENERATE_TEXT_ACTOR]: AsyncActorLogic<AgentTextResult, AgentTextRequest>;
   [STREAM_TEXT_ACTOR]: AsyncActorLogic<AgentTextResult, AgentTextRequest>;
@@ -281,6 +284,7 @@ export type BuiltinAgentActors<TEvent extends string = string, TModel extends st
     ChosenEvent,
     AgentDecisionInput<TEvent, Record<string, unknown>, TModel>
   >;
+  [ACT_ACTOR]: AsyncActorLogic<unknown, AgentActInput<TEvent, Record<string, unknown>, TModel>>;
 };
 
 // Returns the exclusivity error message for a request that resolved both a

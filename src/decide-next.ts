@@ -230,25 +230,61 @@ function describeEffect(
   event: ChosenEvent,
   keys: readonly string[] | undefined,
 ): string | undefined {
-  const maxLength = 120;
   let next: AnyMachineSnapshot;
   try {
     [next] = transition(snapshot.machine, snapshot, event as never);
   } catch {
     return undefined;
   }
-  const changes: string[] = [];
-  if (canonicalEventJson(snapshot.value) !== canonicalEventJson(next.value)) {
-    changes.push(`state: ${short(snapshot.value, maxLength)} → ${short(next.value, maxLength)}`);
+  const changes = snapshotChanges(snapshot, next, keys).map(
+    ({ key, before, after }) =>
+      `${key}: ${short(before, EFFECT_MAX_LENGTH)} → ${short(after, EFFECT_MAX_LENGTH)}`,
+  );
+  return changes.length ? changes.join("; ") : "nothing changes";
+}
+
+// How long one reported before/after value may be.
+const EFFECT_MAX_LENGTH = 120;
+
+// What moved between two snapshots: `state` (the value) first, then each
+// top-level context key (`keys`, or every key) whose value differs.
+function snapshotChanges(
+  before: AnyMachineSnapshot,
+  after: AnyMachineSnapshot,
+  keys?: readonly string[],
+): Array<{ key: string; before: unknown; after: unknown; isState?: true }> {
+  const changes: Array<{ key: string; before: unknown; after: unknown; isState?: true }> = [];
+  if (canonicalEventJson(before.value) !== canonicalEventJson(after.value)) {
+    changes.push({ key: "state", before: before.value, after: after.value, isState: true });
   }
-  const before = isRecord(snapshot.context) ? snapshot.context : {};
-  const after = isRecord(next.context) ? next.context : {};
-  for (const key of keys ?? new Set([...Object.keys(before), ...Object.keys(after)])) {
-    if (canonicalEventJson(before[key]) !== canonicalEventJson(after[key])) {
-      changes.push(`${key}: ${short(before[key], maxLength)} → ${short(after[key], maxLength)}`);
+  const from = isRecord(before.context) ? before.context : {};
+  const to = isRecord(after.context) ? after.context : {};
+  for (const key of keys ?? new Set([...Object.keys(from), ...Object.keys(to)])) {
+    if (canonicalEventJson(from[key]) !== canonicalEventJson(to[key])) {
+      changes.push({ key, before: from[key], after: to[key] });
     }
   }
-  return changes.length ? changes.join("; ") : "nothing changes";
+  return changes;
+}
+
+/**
+ * What one delivered event did, as a model reads it: the new state value when
+ * it moved, and each changed top-level context key's new value. A value whose
+ * JSON exceeds 120 characters is cut to a string. @internal
+ */
+export function describeSnapshotDelta(
+  before: AnyMachineSnapshot,
+  after: AnyMachineSnapshot,
+): { state?: unknown; changed?: Record<string, unknown> } {
+  const delta: { state?: unknown; changed?: Record<string, unknown> } = {};
+  for (const change of snapshotChanges(before, after)) {
+    const full = short(change.after, Infinity);
+    const value =
+      full.length > EFFECT_MAX_LENGTH ? short(change.after, EFFECT_MAX_LENGTH) : change.after;
+    if (change.isState) delta.state = value;
+    else (delta.changed ??= {})[change.key] = value;
+  }
+  return delta;
 }
 
 function short(value: unknown, max = 60): string {
