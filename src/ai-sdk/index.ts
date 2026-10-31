@@ -649,6 +649,12 @@ async function decideWithObject(
     model,
     abortSignal: info?.signal,
     ...settings,
+    // `@ai-sdk/openai` sends schemas strict by default, and strict mode rejects
+    // the decision schema's open payload branches. Host keys still win.
+    providerOptions: {
+      ...settings.providerOptions,
+      openai: { strictJsonSchema: false, ...settings.providerOptions?.openai },
+    },
     system: request.system,
     ...(messages ? { messages, allowSystemInMessages: true } : { prompt: request.prompt ?? "" }),
     output: Output.object({

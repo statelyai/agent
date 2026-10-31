@@ -1767,6 +1767,8 @@ describe("createAiSdkExecutors — decideMode", () => {
       ["refund"],
       ["deny"],
     ]);
+    // OpenAI strict mode rejects the open payload branches.
+    expect(call.providerOptions?.openai).toEqual({ strictJsonSchema: false });
   });
 
   test("object mode: a closed choice sends a `{ choice }` enum and maps the id back", async () => {
