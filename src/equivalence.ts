@@ -479,12 +479,28 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
       const source = result as AsyncIterable<unknown>;
       const observed: AsyncIterable<unknown> = {
         [Symbol.asyncIterator]() {
-          const iterator = source[Symbol.asyncIterator]();
-          const next = iterator.next;
+          let iterator: AsyncIterator<unknown>;
+          let next: AsyncIterator<unknown>["next"];
+          try {
+            iterator = source[Symbol.asyncIterator]();
+            next = iterator.next;
+          } catch (error) {
+            effect.streamError = toRecordedError(error);
+            throw error;
+          }
           return {
             async next() {
               try {
-                return await Reflect.apply(next, iterator, []);
+                const result = await Reflect.apply(next, iterator, []);
+                if (
+                  result === null ||
+                  (typeof result !== "object" && typeof result !== "function")
+                ) {
+                  throw new TypeError("Iterator result is not an object");
+                }
+                return result.done
+                  ? { done: true as const, value: undefined }
+                  : { done: false as const, value: result.value };
               } catch (error) {
                 effect.streamError = toRecordedError(error);
                 throw error;

@@ -11,6 +11,19 @@ const chunk = { type: "text-delta", id: "text0", delta: "partial" };
 const seams = ["ai-sdk", "chat", "responses"] as const;
 type Seam = (typeof seams)[number];
 
+function openaiStream(
+  recorder: Recorder,
+  seam: "chat" | "responses",
+  run: () => Promise<AsyncIterable<unknown>>,
+): Promise<AsyncIterable<unknown>> {
+  const create = (_params: { stream: boolean }) => run();
+  return seam === "chat"
+    ? recorder
+        .openai({ chat: { completions: { create } } })
+        .chat.completions.create({ stream: true })
+    : recorder.openai({ responses: { create } }).responses.create({ stream: true });
+}
+
 function source(seam: Seam, parts: unknown[], error?: Error, requestError?: Error) {
   let stopped!: () => void;
   const cancellation = new Promise<void>((resolve) => {
@@ -50,12 +63,7 @@ function source(seam: Seam, parts: unknown[], error?: Error, requestError?: Erro
       });
       return (await model.doStream({})).stream;
     }
-    const create = async (_params: { stream: boolean }) => (await run()) as AsyncIterable<unknown>;
-    return seam === "chat"
-      ? recorder
-          .openai({ chat: { completions: { create } } })
-          .chat.completions.create({ stream: true })
-      : recorder.openai({ responses: { create } }).responses.create({ stream: true });
+    return openaiStream(recorder, seam, async () => (await run()) as AsyncIterable<unknown>);
   };
   return { load, run, cancelled, cancellation };
 }
@@ -260,5 +268,49 @@ test.each(["chat", "responses"] as const)(
       parts: [chunk],
       error: undefined,
     });
+  },
+);
+
+test.each(["chat", "responses"] as const)(
+  "records %s iterator acquisition and result access errors at consumption",
+  async (seam) => {
+    for (const failure of ["factory", "next-getter", "done-getter", "value-getter"]) {
+      const error = new Error(`source ${failure} failed`);
+      let index = 0;
+      const stream: AsyncIterable<unknown> = {
+        [Symbol.asyncIterator]() {
+          if (failure === "factory") throw error;
+          return {
+            get next() {
+              if (failure === "next-getter") throw error;
+              return async () => {
+                if (index++ === 0) return { done: false as const, value: chunk };
+                return {
+                  get done() {
+                    if (failure === "done-getter") throw error;
+                    return false as const;
+                  },
+                  get value() {
+                    throw error;
+                  },
+                };
+              };
+            },
+          };
+        },
+      };
+      const recorder = createRecorder();
+      const live = await openaiStream(recorder, seam, async () => stream);
+      const actual = await consume(live);
+      const parts = failure === "factory" || failure === "next-getter" ? [] : [chunk];
+      expect(actual).toEqual({ parts, error });
+      const saved = JSON.parse(JSON.stringify(recorder.recording));
+      expect(saved.effects[0]).toMatchObject({ streamError: { message: error.message } });
+      expect(saved.effects[0].error).toBeUndefined();
+      const replay = createRecorder({ replay: saved });
+      const replayed = await consume(await openaiStream(replay, seam, async () => stream));
+      expect(replayed.parts).toEqual(parts);
+      expect(replayed.error).toMatchObject({ message: error.message });
+    }
   },
 );
