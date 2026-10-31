@@ -137,17 +137,19 @@ describe("todo-nl", () => {
   test("DONE and QUIT are told apart: 'I'm done' quits, 'mark X done' toggles", async () => {
     // QA regression: "that's all, I'm done" chose DONE, which loops back to
     // awaitingCommand. The system prompt maps finishing phrases to QUIT, and
-    // each event's payload schema carries a description on its tool.
-    const toolDescriptions: Record<string, unknown> = {};
+    // each event's payload schema carries a description on its branch.
+    const eventDescriptions: Record<string, unknown> = {};
     const executors = createMockModelExecutors({
       decisions: {
         planStep: (request, options) => {
-          for (const tool of options.tools ?? []) {
-            if (tool.type === "function") {
-              toolDescriptions[tool.name] = (
-                tool.inputSchema as { description?: string }
-              ).description;
-            }
+          // Object mode: one `{ event }` schema, a branch per candidate.
+          const schema =
+            options.responseFormat?.type === "json" ? options.responseFormat.schema : {};
+          const branches = (
+            schema as { properties?: { event?: { anyOf?: Array<Record<string, any>> } } }
+          ).properties?.event?.anyOf;
+          for (const branch of branches ?? []) {
+            eventDescriptions[branch.properties.type.enum[0]] = branch.description;
           }
           expect(request.system).toContain("'I'm done'");
           return { type: "QUIT" };
@@ -162,7 +164,7 @@ describe("todo-nl", () => {
     });
 
     expect(output.todos).toEqual([]);
-    const described = Object.entries(toolDescriptions);
+    const described = Object.entries(eventDescriptions);
     expect(described.find(([name]) => name.includes("QUIT"))?.[1]).toMatch(/I'm done/);
     expect(described.find(([name]) => name.includes("DONE"))?.[1]).toMatch(/Not for 'mark X done'/);
   });

@@ -39,6 +39,14 @@ import {
   type AgentDecisionRejection,
   type AgentDecisionRequest,
 } from "../decision.js";
+import {
+  decisionObjectSchema,
+  fromDecisionObject,
+  multipleCallsRejection,
+  resolveDecisionMode,
+  type DecisionModeOption,
+} from "../internal/decision-object.js";
+import { isRecord } from "../internal/is-record.js";
 import { rejectedAnswer } from "../internal/rejected-answer.js";
 import { withModelCalls } from "../internal/with-model-calls.js";
 import type { AgentEventDescriptor } from "../events.js";
@@ -623,6 +631,14 @@ export type TanStackAiModelMap<TKey extends string = string> = Record<TKey, TanS
 export type CreateTanStackAiExecutorsOptions<
   TModels extends TanStackAiModelMap = TanStackAiModelMap,
 > = {
+  /**
+   * How a `decide` request is answered: `'object'` (default), one
+   * structured-output object naming the event; or `'tool'`, one tool per
+   * candidate event under a forced tool choice, with parallel tool calls
+   * turned off where the provider allows it (`openai`, `anthropic`) and a
+   * multi-call answer rejected. A function picks per request.
+   */
+  decideMode?: DecisionModeOption;
   settings?:
     | TanStackAiCallSettings
     | ((request: AgentTextRequest | AgentDecisionRequest) => TanStackAiCallSettings | undefined);
@@ -748,6 +764,26 @@ function isTruncationError(error: unknown): boolean {
   return code === "max_tokens" || code === "incomplete" || message === "max_output_tokens";
 }
 
+// A tool-mode decision's `modelOptions` with parallel tool calls turned off,
+// for the providers that expose the switch. The host's own value wins.
+function withParallelToolCallsOff(
+  adapter: Pick<AnyTextAdapter, "name">,
+  modelOptions: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  switch (adapter.name) {
+    case "openai":
+      return { parallel_tool_calls: false, ...modelOptions };
+    case "anthropic": {
+      const choice = modelOptions?.tool_choice;
+      return isRecord(choice)
+        ? { ...modelOptions, tool_choice: { disable_parallel_tool_use: true, ...choice } }
+        : modelOptions;
+    }
+    default:
+      return modelOptions;
+  }
+}
+
 // The `usage` key, present only when the run reported one.
 function usageField(usage: AgentCallUsage | undefined): { usage?: AgentCallUsage } {
   return usage ? { usage } : {};
@@ -823,9 +859,11 @@ function toolChoiceOnFirstTurn(keys: string[], later: Record<string, unknown>): 
  * - Tools run in `chat()`'s own loop, for `generateText` and `streamText`
  *   alike, bounded by the request's `maxSteps` (default 1). A tool with no
  *   `execute` stops the run at its call.
- * - Decisions offer one tool per candidate event, with no `execute`, so the
- *   run stops at the model's first call; the tool choice is forced where the
- *   provider supports it (see {@link toTanStackAiModelOptions}).
+ * - Decisions are one structured-output object by default (`decideMode`).
+ *   Under `decideMode: 'tool'` they offer one tool per candidate event, with
+ *   no `execute`, so the run stops at the model's first call; the tool choice
+ *   is forced where the provider supports it (see
+ *   {@link toTanStackAiModelOptions}).
  *
  * Pass the options object, or pass the machine (or its `setupAgent(...)`
  * result) to reuse the `models` declared in `setupAgent({ models })`. Anything
@@ -1020,14 +1058,60 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
     };
   };
 
+  // An object-mode decision: one structured-output run whose answer is
+  // `{ event }` (or `{ choice }`), read by `fromDecisionObject`.
+  const decideWithObject = async (
+    request: AgentDecisionRequest,
+    info?: AgentRequestExecutorInfo,
+  ): Promise<TanStackAiDecideResult> => {
+    const { adapter, settings } = resolve(request, request);
+    let run: RunSummary;
+    try {
+      run = await runChat(
+        {
+          ...settings,
+          adapter,
+          ...toDecisionMessages(request),
+          outputSchema: decisionObjectSchema(request),
+          stream: true,
+          agentLoopStrategy: maxIterations(1),
+        },
+        info?.signal,
+      );
+    } catch (error) {
+      // An answer cut off at the token limit, or one that is not JSON, is
+      // rejected and retried, like a tool call cut off mid-arguments.
+      const notJson =
+        (error as { code?: unknown } | undefined)?.code === "structured-output-parse-failed";
+      if (isTruncationError(error) || notJson) {
+        return {
+          rejected: { failure: "invalid-payload", reason: "the answer was not valid JSON" },
+          finishReason: isTruncationError(error) ? "length" : "other",
+          raw: [],
+        };
+      }
+      throw error;
+    }
+    return {
+      ...fromDecisionObject(request, run.structured !== undefined ? run.structured : run.text),
+      ...usageField(run.usage),
+      finishReason: run.finishReason,
+      raw: run.chunks,
+    };
+  };
+
   const decide = async (
     request: AgentDecisionRequest,
     info?: AgentRequestExecutorInfo,
   ): Promise<TanStackAiDecideResult> => {
+    if (resolveDecisionMode(options.decideMode, request) === "object") {
+      return decideWithObject(request, info);
+    }
     const { adapter, settings } = resolve(request, { ...request, toolChoice: "required" });
     const run = await runChat(
       {
         ...settings,
+        modelOptions: withParallelToolCallsOff(adapter, settings.modelOptions),
         adapter,
         ...toDecisionMessages(request),
         tools: toTanStackAiEventTools(request.events),
@@ -1051,6 +1135,15 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
       raw: run.chunks,
     });
     if (!toolCall) return unnamed();
+    // A decision sends exactly one event, so a second call is retried too.
+    if (run.toolCalls.length > 1) {
+      return {
+        rejected: multipleCallsRejection(run.toolCalls.map((call) => call.toolName)),
+        ...usageField(run.usage),
+        finishReason: run.finishReason,
+        raw: run.chunks,
+      };
+    }
     const chosenEvent = request.events.find((event) => event.toolName === toolCall.toolName);
     if (!chosenEvent) return unnamed(toolCall);
     if (toolCall.invalid) return unnamed({ toolName: toolCall.toolName, invalidJson: true });

@@ -124,7 +124,10 @@ describe("createOpenAiExecutors + runAgent (stubbed client, no network)", () => 
       },
     };
 
-    const { generateText, decide } = createOpenAiExecutors({ client: stubClient as never });
+    const { generateText, decide } = createOpenAiExecutors({
+      client: stubClient as never,
+      decideMode: "tool",
+    });
     const executors = { generateText, decide };
 
     // The decide round-trip (tool_choice required → machine event) leaves the

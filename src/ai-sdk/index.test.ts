@@ -296,7 +296,9 @@ describe("createAiSdkExecutors — decide with the `{}` event shorthand", () => 
     });
 
     const result = await runToQuiescence(
-      createAgentRuntime(machine, { executors: createAiSdkExecutors({ models }) }),
+      createAgentRuntime(machine, {
+        executors: createAiSdkExecutors({ models, decideMode: "tool" }),
+      }),
     );
 
     if (result.status === "error") throw result.error;
@@ -459,7 +461,7 @@ describe("onResult metadata enrichment", () => {
       },
     });
 
-    const executors = createAiSdkExecutors({ models: { m: model } });
+    const executors = createAiSdkExecutors({ models: { m: model }, decideMode: "tool" });
     const result = await executors.decide({
       kind: "decision",
       id: "d1",
@@ -499,7 +501,7 @@ describe("onResult metadata enrichment", () => {
       },
     });
 
-    const executors = createAiSdkExecutors({ models: { m: model } });
+    const executors = createAiSdkExecutors({ models: { m: model }, decideMode: "tool" });
     const result = await executors.decide({
       kind: "decision",
       id: "d1",
@@ -1349,7 +1351,7 @@ describe("createAiSdkExecutors — decide answers that name no candidate", () =>
         };
       },
     });
-    return createAiSdkExecutors({ models: { m: model } }).decide;
+    return createAiSdkExecutors({ models: { m: model }, decideMode: "tool" }).decide;
   }
   const request: AgentDecisionRequest = {
     kind: "decision",
@@ -1447,7 +1449,7 @@ describe("createAiSdkExecutors — decide over closed-choice options", () => {
       },
     });
 
-    const { decide } = createAiSdkExecutors({ models: { m: model } });
+    const { decide } = createAiSdkExecutors({ models: { m: model }, decideMode: "tool" });
     const result = await decide({
       kind: "decision",
       id: "d1",
@@ -1505,7 +1507,7 @@ describe("createAiSdkExecutors — decide over closed-choice options", () => {
         };
       },
     });
-    const { decide } = createAiSdkExecutors({ models: { m: model } });
+    const { decide } = createAiSdkExecutors({ models: { m: model }, decideMode: "tool" });
     const request: AgentDecisionRequest = {
       kind: "decision",
       id: "d1",
@@ -1690,7 +1692,10 @@ describe("createAiSdkExecutors — decision models in the models map", () => {
         warnings: [],
       },
     });
-    const { decide } = createAiSdkExecutors({ models: { desk, judge: judgeModel } });
+    const { decide } = createAiSdkExecutors({
+      models: { desk, judge: judgeModel },
+      decideMode: "tool",
+    });
     const result = await decide({ ...request, model: "desk" });
     expect(result.event).toEqual({ type: "refund", amount: 20 });
     expect(result).not.toHaveProperty("confidence");
@@ -1710,5 +1715,141 @@ describe("createAiSdkExecutors — decision models in the models map", () => {
     expectTypeOf(
       createAiSdkExecutors(agentSetup.createMachine({ context: {} })),
     ).toEqualTypeOf<AiSdkExecutors>();
+  });
+});
+
+describe("createAiSdkExecutors — decideMode", () => {
+  const usage = {
+    inputTokens: { total: 2, noCache: 2, cacheRead: 0, cacheWrite: 0 },
+    outputTokens: { total: 1, text: 1, reasoning: 0 },
+  };
+  function textModel(text: string) {
+    return new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ type: "text", text }],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage,
+        warnings: [],
+      },
+    });
+  }
+  const open: AgentDecisionRequest = {
+    kind: "decision",
+    id: "d1",
+    model: "m",
+    prompt: "choose",
+    events: [
+      {
+        type: "refund",
+        toolName: "send_event_refund",
+        inputSchema: z.object({ amount: z.number() }),
+      },
+      { type: "deny", toolName: "send_event_deny" },
+    ],
+    attempts: [],
+  };
+  const closed: AgentDecisionRequest = {
+    ...open,
+    options: [{ event: { type: "deny" } }, { event: { type: "refund", amount: 5 } }],
+  };
+
+  test("object mode (default): an open choice sends a `{ event }` schema and reads the event", async () => {
+    const model = textModel(JSON.stringify({ event: { type: "refund", amount: 20 } }));
+    const result = await createAiSdkExecutors({ models: { m: model } }).decide(open);
+    expect(result.event).toEqual({ type: "refund", amount: 20 });
+    expect(result.usage).toMatchObject({ inputTokens: 2, outputTokens: 1 });
+    const call = model.doGenerateCalls[0]!;
+    expect(call.tools ?? []).toHaveLength(0);
+    expect(call.responseFormat?.type).toBe("json");
+    const schema = (call.responseFormat as { schema: any }).schema;
+    expect(schema.required).toEqual(["event"]);
+    expect(schema.properties.event.anyOf.map((b: any) => b.properties.type.enum)).toEqual([
+      ["refund"],
+      ["deny"],
+    ]);
+  });
+
+  test("object mode: a closed choice sends a `{ choice }` enum and maps the id back", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        const ids = (options.responseFormat as { schema: any }).schema.properties.choice.enum;
+        return {
+          content: [{ type: "text", text: JSON.stringify({ choice: ids[1] }) }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      },
+    });
+    const result = await createAiSdkExecutors({ models: { m: model } }).decide(closed);
+    expect(result.event).toEqual({ type: "refund", amount: 5 });
+  });
+
+  test("object mode: an unknown type, an unoffered id, and bad JSON are rejected", async () => {
+    const decideWith = (text: string, request: AgentDecisionRequest) =>
+      createAiSdkExecutors({ models: { m: textModel(text) } }).decide(request);
+    expect((await decideWith('{"event":{"type":"nope"}}', open)).rejected).toMatchObject({
+      failure: "unknown-event",
+      reason: expect.stringContaining("'nope' is not among the allowed events"),
+    });
+    expect((await decideWith('{"choice":"zz"}', closed)).rejected).toMatchObject({
+      failure: "unknown-event",
+    });
+    expect((await decideWith("not json", open)).rejected).toMatchObject({
+      failure: "invalid-payload",
+    });
+  });
+
+  test("tool mode: parallel calls are turned off under the host's providerOptions", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          { type: "tool-call", toolCallId: "c1", toolName: "send_event_deny", input: "{}" },
+        ],
+        finishReason: { unified: "tool-calls", raw: "tool_calls" },
+        usage,
+        warnings: [],
+      },
+    });
+    const { decide } = createAiSdkExecutors({
+      models: { m: model },
+      decideMode: () => "tool",
+      settings: { providerOptions: { openai: { parallelToolCalls: true, store: false } } },
+    });
+    expect((await decide(open)).event).toEqual({ type: "deny" });
+    expect(model.doGenerateCalls[0]!.providerOptions).toMatchObject({
+      openai: { parallelToolCalls: true, store: false },
+      anthropic: { disableParallelToolUse: true },
+    });
+
+    const bare = new MockLanguageModelV3({ doGenerate: model.doGenerate as never });
+    await createAiSdkExecutors({ models: { m: bare }, decideMode: "tool" }).decide(open);
+    expect(bare.doGenerateCalls[0]!.providerOptions).toMatchObject({
+      openai: { parallelToolCalls: false },
+    });
+  });
+
+  test("tool mode: an answer with more than one tool call is rejected", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          { type: "tool-call", toolCallId: "c1", toolName: "send_event_deny", input: "{}" },
+          {
+            type: "tool-call",
+            toolCallId: "c2",
+            toolName: "send_event_refund",
+            input: '{"amount":1}',
+          },
+        ],
+        finishReason: { unified: "tool-calls", raw: "tool_calls" },
+        usage,
+        warnings: [],
+      },
+    });
+    const result = await createAiSdkExecutors({ models: { m: model }, decideMode: "tool" }).decide(
+      open,
+    );
+    expect(result.event).toBeUndefined();
+    expect(result.rejected?.reason).toContain("2 tools were called");
   });
 });

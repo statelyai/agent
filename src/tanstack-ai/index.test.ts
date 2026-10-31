@@ -383,7 +383,10 @@ describe("createTanStackAiExecutors — decide", () => {
     const adapter = new FakeTextAdapter([
       { toolCalls: [{ name: "approve", input: { note: "LGTM", type: "REJECT" } }] },
     ]);
-    const { decide } = createTanStackAiExecutors({ models: { quick: adapter } });
+    const { decide } = createTanStackAiExecutors({
+      decideMode: "tool",
+      models: { quick: adapter },
+    });
 
     const result = await decide(decisionRequest());
 
@@ -396,16 +399,32 @@ describe("createTanStackAiExecutors — decide", () => {
 
   test("forces a tool call through the provider's modelOptions", async () => {
     const adapter = new FakeTextAdapter([{ toolCalls: [{ name: "reject" }] }], "openai");
-    const { decide } = createTanStackAiExecutors({ models: { quick: adapter } });
+    const { decide } = createTanStackAiExecutors({
+      decideMode: "tool",
+      models: { quick: adapter },
+    });
 
     await decide(decisionRequest({ temperature: 0 }));
 
-    expect(adapter.requests[0]!.modelOptions).toEqual({ tool_choice: "required", temperature: 0 });
+    expect(adapter.requests[0]!.modelOptions).toEqual({
+      parallel_tool_calls: false,
+      tool_choice: "required",
+      temperature: 0,
+    });
+
+    const anthropic = new FakeTextAdapter([{ toolCalls: [{ name: "reject" }] }], "anthropic");
+    await createTanStackAiExecutors({ models: { quick: anthropic }, decideMode: "tool" }).decide(
+      decisionRequest(),
+    );
+    expect(anthropic.requests[0]!.modelOptions).toEqual({
+      tool_choice: { type: "any", disable_parallel_tool_use: true },
+    });
   });
 
   // Resolves a decision against `responses`, one per model call.
   async function resolveWith(responses: FakeResponse[]) {
     const { decide } = createTanStackAiExecutors({
+      decideMode: "tool",
       models: { quick: new FakeTextAdapter(responses) },
     });
     const seen: AgentDecisionRequest[] = [];
@@ -418,6 +437,7 @@ describe("createTanStackAiExecutors — decide", () => {
 
   test("a text answer instead of a tool call is retried, its usage still reported", async () => {
     const { decide } = createTanStackAiExecutors({
+      decideMode: "tool",
       models: { quick: new FakeTextAdapter([{ text: "I approve." }]) },
     });
     const result = await decide(decisionRequest());
@@ -451,6 +471,7 @@ describe("createTanStackAiExecutors — decide", () => {
 
   test("answers that never name a candidate exhaust the retries", async () => {
     const { decide } = createTanStackAiExecutors({
+      decideMode: "tool",
       models: { quick: new FakeTextAdapter([{ text: "no" }, { text: "no" }, { text: "no" }]) },
     });
     const error = await resolveDecision(decisionRequest(), { decide }).catch((e: unknown) => e);
@@ -853,5 +874,60 @@ describe("createTanStackAiExecutors model sources", () => {
     expect(() => createTanStackAiExecutors(bareMachine)).toThrow(
       /got a machine whose setupAgent\(\.\.\.\) declared no models/,
     );
+  });
+});
+
+describe("createTanStackAiExecutors — decideMode", () => {
+  test("object mode (default): an open choice sends a `{ event }` schema and reads the event", async () => {
+    const adapter = new FakeTextAdapter([{ text: '{"event":{"type":"APPROVE","note":"ok"}}' }]);
+    const result = await createTanStackAiExecutors({ models: { quick: adapter } }).decide(
+      decisionRequest(),
+    );
+    expect(result.event).toEqual({ type: "APPROVE", note: "ok" });
+    const sent = adapter.requests[0]!;
+    expect(sent.tools ?? []).toHaveLength(0);
+    const schema = sent.outputSchema as any;
+    expect(schema.required).toEqual(["event"]);
+    expect(schema.properties.event.anyOf.map((b: any) => b.properties.type.enum[0])).toEqual([
+      "APPROVE",
+      "REJECT",
+    ]);
+  });
+
+  test("object mode: a closed choice sends a `{ choice }` enum and maps the id back", async () => {
+    const options = [{ event: { type: "REJECT" } }, { event: { type: "APPROVE", note: "fine" } }];
+    const probe = new FakeTextAdapter([{ text: '{"choice":"none"}' }]);
+    await createTanStackAiExecutors({ models: { quick: probe } }).decide(
+      decisionRequest({ options }),
+    );
+    const ids = (probe.requests[0]!.outputSchema as any).properties.choice.enum;
+    const adapter = new FakeTextAdapter([{ text: JSON.stringify({ choice: ids[1] }) }]);
+    const result = await createTanStackAiExecutors({ models: { quick: adapter } }).decide(
+      decisionRequest({ options }),
+    );
+    expect(result.event).toEqual({ type: "APPROVE", note: "fine" });
+  });
+
+  test("object mode: an unknown type and bad JSON are rejected", async () => {
+    const decideWith = (text: string) =>
+      createTanStackAiExecutors({ models: { quick: new FakeTextAdapter([{ text }]) } }).decide(
+        decisionRequest(),
+      );
+    expect((await decideWith('{"event":{"type":"NOPE"}}')).rejected).toMatchObject({
+      failure: "unknown-event",
+    });
+    expect((await decideWith("{not json")).rejected).toMatchObject({ failure: "invalid-payload" });
+  });
+
+  test("tool mode: an answer with more than one tool call is rejected", async () => {
+    const adapter = new FakeTextAdapter([
+      { toolCalls: [{ name: "reject" }, { name: "approve", input: { note: "x" } }] },
+    ]);
+    const result = await createTanStackAiExecutors({
+      models: { quick: adapter },
+      decideMode: "tool",
+    }).decide(decisionRequest());
+    expect(result.event).toBeUndefined();
+    expect(result.rejected?.reason).toContain("2 tools were called");
   });
 });
