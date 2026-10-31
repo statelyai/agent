@@ -552,12 +552,18 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         effect.error = toRecordedError(error);
         throw error;
       }
-      if (!(output instanceof Promise)) {
+      if (
+        output === null ||
+        (typeof output !== "object" && typeof output !== "function") ||
+        typeof (output as PromiseLike<unknown>).then !== "function"
+      ) {
         effect.sync = true;
         effect.output = toJson(output);
         return output;
       }
-      return output.then(
+      // Assimilate thenables and promises from other realms before recording
+      // their settled result. This also gives track a native Promise to follow.
+      return Promise.resolve(output).then(
         (value) => {
           effect.output = toJson(value);
           return value;
