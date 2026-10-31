@@ -243,3 +243,22 @@ test("cancelling an AI SDK stream with a pending read is not a provider failure"
   await expect(pending).resolves.toEqual({ done: true, value: undefined });
   expect(recorder.recording.effects[0]).not.toHaveProperty("streamError");
 });
+
+test.each(["chat", "responses"] as const)(
+  "a consumer throw into %s does not become a replayed provider failure",
+  async (seam) => {
+    const recorder = createRecorder();
+    const live = source(seam, [chunk, chunk]);
+    const iterator = (await live.load(recorder))[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ done: false, value: chunk });
+    const consumerError = new Error("consumer aborted");
+    await expect(iterator.throw?.(consumerError)).rejects.toBe(consumerError);
+    await live.cancellation;
+    expect(recorder.recording.effects[0]).not.toHaveProperty("streamError");
+    const replay = createRecorder({ replay: JSON.parse(JSON.stringify(recorder.recording)) });
+    expect(await consume(await source(seam, []).load(replay))).toEqual({
+      parts: [chunk],
+      error: undefined,
+    });
+  },
+);

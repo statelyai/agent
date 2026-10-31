@@ -477,18 +477,42 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     effect.stream = parts;
     if (seam === "openai") {
       const source = result as AsyncIterable<unknown>;
+      const observed: AsyncIterable<unknown> = {
+        [Symbol.asyncIterator]() {
+          const iterator = source[Symbol.asyncIterator]();
+          const next = iterator.next;
+          return {
+            async next() {
+              try {
+                return await Reflect.apply(next, iterator, []);
+              } catch (error) {
+                effect.streamError = toRecordedError(error);
+                throw error;
+              }
+            },
+            async return(...args: unknown[]) {
+              const close = iterator.return;
+              return close == null
+                ? { done: true, value: args[0] }
+                : Reflect.apply(close, iterator, args);
+            },
+          };
+        },
+      };
       return (async function* () {
-        try {
-          for await (const chunk of source) {
+        for await (const chunk of observed) {
+          try {
             parts.push(toJson(chunk));
-            yield chunk;
+          } catch (error) {
+            effect.streamError = toRecordedError(error);
+            throw error;
           }
-        } catch (error) {
-          effect.streamError = toRecordedError(error);
-          throw error;
+          // Keep consumer-injected exceptions outside the source-error boundary.
+          yield chunk;
         }
       })();
     }
+
     const { stream, ...rest } = result as { stream: ReadableStream<unknown> };
     effect.response = toJson(rest);
     const reader = stream
