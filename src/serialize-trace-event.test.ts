@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
@@ -83,6 +84,90 @@ function roundTrip(event: ReturnType<typeof serializeTraceEvent>) {
 }
 
 describe("serializeTraceEvent", () => {
+  test.each([null, 42, "literal", { answer: 42 }, ["item"]].map((value) => ({ value })))(
+    "preserves own JSON keys and ordinary output prototypes for %j",
+    ({ value }) => {
+      const data = JSON.parse(
+        `{"__proto__":${JSON.stringify(value)},"constructor":"ctor","prototype":"field","normal":1}`,
+      );
+      const event = { ...envelope, type: "emit" as const, event: { type: "DATA", payload: data } };
+      const serialized = serializeTraceEvent(event);
+      expect(roundTrip(serialized)).toEqual(event);
+      const payload = (serialized as typeof event).event.payload;
+      expect(Object.hasOwn(payload, "__proto__")).toBe(true);
+      expect(Object.getPrototypeOf(payload)).toBe(Object.prototype);
+      expect(Object.getPrototypeOf(data)).toBe(Object.prototype);
+    },
+  );
+
+  test("preserves nested data across all trace JSON payload paths", () => {
+    const data = JSON.parse('{"nested":[{"__proto__":{"answer":42},"normal":1}]}');
+    const events: AgentTraceEvent[] = [
+      { ...envelope, type: "emit", event: { type: "DATA", payload: data } },
+      {
+        ...envelope,
+        type: "request.end",
+        request: { kind: "text", id: "r", model: "test" } as never,
+        output: data,
+        raw: undefined,
+      },
+      { ...envelope, type: "run.end", status: "done", output: data, snapshot: {} as never },
+      {
+        ...envelope,
+        type: "machine.transition",
+        from: { value: "before" },
+        snapshot: { context: data } as never,
+        event: { type: "GO" },
+      },
+    ];
+    for (const event of events) {
+      expect(roundTrip(serializeTraceEvent(event))).toEqual(JSON.parse(JSON.stringify(event)));
+    }
+  });
+
+  test("keeps an own data key on an extended trace envelope", () => {
+    const event = {
+      ...envelope,
+      ...JSON.parse('{"__proto__":{"answer":42}}'),
+      type: "emit" as const,
+      event: { type: "GO" },
+    };
+    const serialized = serializeTraceEvent(event);
+    expect(roundTrip(serialized)).toEqual(event);
+    expect(Object.hasOwn(serialized, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(serialized)).toBe(Object.prototype);
+  });
+
+  test("serializes foreign Error metadata and nested causes like local Errors", () => {
+    const error = runInNewContext(
+      'Object.assign(new Error("foreign", { cause: new TypeError("inner") }), { code: "E_PROVIDER" })',
+    );
+    const event: AgentTraceEvent = {
+      ...envelope,
+      type: "request.error",
+      request: { kind: "text", id: "r", model: "test" } as never,
+      error,
+    };
+    expect(roundTrip(serializeTraceEvent(event))).toMatchObject({
+      error: {
+        name: "Error",
+        message: "foreign",
+        stack: expect.any(String),
+        code: "E_PROVIDER",
+        cause: { name: "TypeError", message: "inner", stack: expect.any(String) },
+      },
+    });
+  });
+
+  test("keeps Error-shaped plain records as ordinary JSON records", () => {
+    const event = {
+      ...envelope,
+      type: "emit" as const,
+      event: { type: "DATA", payload: { name: "Error", message: "data", extra: true } },
+    };
+    expect(roundTrip(serializeTraceEvent(event))).toEqual(event);
+  });
+
   test("serializes every trace event type and survives a JSON round-trip", () => {
     const events: AgentTraceEvent[] = [
       { ...envelope, type: "run.start", input: { topic: "rivers" } },
