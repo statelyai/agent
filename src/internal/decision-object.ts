@@ -80,7 +80,7 @@ function eventBranch(
   inputSchema: AgentDecisionRequest["events"][number]["inputSchema"],
 ): Record<string, unknown> {
   const pinned = { type: "string", enum: [type] };
-  const payload = getJsonSchemaSync(inputSchema);
+  const payload = markOptional(getJsonSchemaSync(inputSchema));
   const description =
     typeof payload?.description === "string"
       ? `Send '${type}'. ${payload.description}`
@@ -103,6 +103,35 @@ function eventBranch(
     allOf: [{ type: "object", properties: { type: pinned }, required: ["type"] }, rest],
   };
 }
+
+// Notes every optional property, at any depth, as one to leave out when the
+// input does not give it. Without this, a model answering one object tends to
+// pick a clarifying event over filling an unmentioned optional field.
+function markOptional<T>(schema: T): T {
+  if (Array.isArray(schema)) return schema.map(markOptional) as T;
+  if (!isRecord(schema)) return schema;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) out[key] = markOptional(value);
+  if (isRecord(out.properties)) {
+    const required = Array.isArray(out.required) ? out.required : [];
+    out.properties = Object.fromEntries(
+      Object.entries(out.properties).map(([key, value]) =>
+        required.includes(key) || !isRecord(value)
+          ? [key, value]
+          : [
+              key,
+              {
+                ...value,
+                description: [OPTIONAL_NOTE, value.description].filter(Boolean).join(" "),
+              },
+            ],
+      ),
+    );
+  }
+  return out as T;
+}
+
+const OPTIONAL_NOTE = "Optional: leave out unless the input gives it.";
 
 function isObjectSchema(schema: Record<string, unknown>): boolean {
   return (
