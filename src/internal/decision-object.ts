@@ -10,7 +10,7 @@ import { isRecord } from "./is-record.js";
 
 /**
  * How a decide executor asks a language model for its one event:
- * - `'object'` (default): ONE structured-output object, `{ event: { type, ...payload } }`
+ * - `'object'` (default for compatible payloads): ONE structured-output object, `{ event: { type, ...payload } }`
  *   (or `{ choice: id }` for a closed choice). Exactly one answer by construction.
  * - `'tool'`: one tool per candidate event under a forced tool choice. Parallel
  *   calls are turned off where the provider allows it, and an answer that still
@@ -23,12 +23,17 @@ export type DecisionModeOption =
   | DecisionMode
   | ((request: AgentDecisionRequest) => DecisionMode | undefined);
 
-/** Resolves a host's `decideMode` for one request; `'object'` by default. @internal */
+/** Resolves a host's `decideMode`; incompatible object payloads default to `'tool'`. @internal */
 export function resolveDecisionMode(
   option: DecisionModeOption | undefined,
   request: AgentDecisionRequest,
 ): DecisionMode {
-  return (typeof option === "function" ? option(request) : option) ?? "object";
+  const configured = typeof option === "function" ? option(request) : option;
+  if (configured) return configured;
+  if (request.options) return "object";
+  return request.events.every((event) => eventPayloadBranches(event.inputSchema) !== undefined)
+    ? "object"
+    : "tool";
 }
 
 /**
@@ -64,7 +69,7 @@ export function decisionObjectSchema(
     properties: {
       event: {
         description: "The one event to send next.",
-        anyOf: request.events.map((event) => eventBranch(event.type, event.inputSchema)),
+        anyOf: request.events.flatMap((event) => eventBranches(event.type, event.inputSchema)),
       },
     },
     required: ["event"],
@@ -75,72 +80,111 @@ export function decisionObjectSchema(
 // One candidate: `type` pinned with a one-value `enum` (more widely supported
 // than `const`), merged into an object payload schema, or alongside any other.
 // The payload's own description is kept after the `Send '<type>'.` lead.
-function eventBranch(
+function eventPayloadBranches(
+  inputSchema: AgentDecisionRequest["events"][number]["inputSchema"],
+): Record<string, unknown>[] | undefined {
+  const payload = markOptional(getJsonSchemaSync(inputSchema));
+  return payload ? objectBranches(payload) : [{}];
+}
+
+function objectBranches(schema: unknown): Record<string, unknown>[] | undefined {
+  if (!isRecord(schema)) return undefined;
+  const union = schema.anyOf ?? schema.oneOf;
+  if (Array.isArray(union) && union.length > 0) {
+    const variants = union.map(objectBranches);
+    if (variants.some((variant) => variant === undefined)) return undefined;
+    return variants.flatMap((variant) => variant ?? []);
+  }
+  if (schema.allOf !== undefined) return undefined;
+  return schema.type === "object" || isRecord(schema.properties) ? [schema] : undefined;
+}
+
+function eventBranches(
   type: string,
   inputSchema: AgentDecisionRequest["events"][number]["inputSchema"],
-): Record<string, unknown> {
+): Record<string, unknown>[] {
+  const payloads = eventPayloadBranches(inputSchema);
+  if (!payloads) {
+    throw new Error(
+      `Event '${type}' has a payload schema that cannot be represented in decision object mode; use decision tool mode instead.`,
+    );
+  }
+  return payloads.map((payload) => eventBranch(type, payload));
+}
+
+function eventBranch(type: string, payload: Record<string, unknown>): Record<string, unknown> {
   const pinned = { type: "string", enum: [type] };
-  const payload = markOptional(getJsonSchemaSync(inputSchema));
   const description =
-    typeof payload?.description === "string"
+    typeof payload.description === "string"
       ? `Send '${type}'. ${payload.description}`
       : `Send '${type}'.`;
-  if (!payload || isObjectSchema(payload)) {
-    const properties = isRecord(payload?.properties) ? payload.properties : {};
-    const required = Array.isArray(payload?.required) ? (payload.required as string[]) : [];
-    const { $schema: _, ...rest } = payload ?? {};
-    return {
-      ...rest,
-      type: "object",
-      description,
-      properties: { ...properties, type: pinned },
-      required: ["type", ...required.filter((key) => key !== "type")],
-    };
-  }
+  const properties = isRecord(payload.properties) ? payload.properties : {};
+  const required = Array.isArray(payload.required)
+    ? payload.required.filter((key): key is string => typeof key === "string")
+    : [];
   const { $schema: _, ...rest } = payload;
   return {
+    ...rest,
+    type: "object",
     description,
-    allOf: [{ type: "object", properties: { type: pinned }, required: ["type"] }, rest],
+    properties: { ...properties, type: pinned },
+    required: ["type", ...required.filter((key) => key !== "type")],
   };
 }
 
 // Notes every optional property, at any depth, as one to leave out when the
 // input does not give it. Without this, a model answering one object tends to
 // pick a clarifying event over filling an unmentioned optional field.
-function markOptional<T>(schema: T): T {
-  if (Array.isArray(schema)) return schema.map(markOptional) as T;
-  if (!isRecord(schema)) return schema;
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(schema)) out[key] = markOptional(value);
-  if (isRecord(out.properties)) {
-    const required = Array.isArray(out.required) ? out.required : [];
+function markOptional(schema: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(schema)) return undefined;
+  const out: Record<string, unknown> = { ...schema };
+  for (const key of ["anyOf", "oneOf", "allOf", "prefixItems"] as const) {
+    const children = schema[key];
+    if (Array.isArray(children)) {
+      out[key] = children.map((child) => markOptional(child) ?? child);
+    }
+  }
+  for (const key of [
+    "items",
+    "contains",
+    "not",
+    "if",
+    "then",
+    "else",
+    "propertyNames",
+    "additionalProperties",
+    "unevaluatedProperties",
+  ] as const) {
+    const child = schema[key];
+    if (isRecord(child)) out[key] = markOptional(child) ?? child;
+  }
+  for (const key of ["$defs", "definitions", "patternProperties", "dependentSchemas"] as const) {
+    const children = schema[key];
+    if (!isRecord(children)) continue;
+    out[key] = Object.fromEntries(
+      Object.entries(children).map(([name, child]) => [name, markOptional(child) ?? child]),
+    );
+  }
+  if (isRecord(schema.properties)) {
+    const required = Array.isArray(schema.required) ? schema.required : [];
     out.properties = Object.fromEntries(
-      Object.entries(out.properties).map(([key, value]) =>
+      Object.entries(schema.properties).map(([key, value]) =>
         required.includes(key) || !isRecord(value)
-          ? [key, value]
+          ? [key, markOptional(value) ?? value]
           : [
               key,
               {
-                ...value,
+                ...(markOptional(value) ?? value),
                 description: [OPTIONAL_NOTE, value.description].filter(Boolean).join(" "),
               },
             ],
       ),
     );
   }
-  return out as T;
+  return out;
 }
 
 const OPTIONAL_NOTE = "Optional: leave out unless the input gives it.";
-
-function isObjectSchema(schema: Record<string, unknown>): boolean {
-  return (
-    schema.type === "object" &&
-    schema.anyOf === undefined &&
-    schema.oneOf === undefined &&
-    schema.allOf === undefined
-  );
-}
 
 /**
  * Reads a decision answered as one object (see {@link decisionObjectSchema}):

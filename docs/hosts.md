@@ -70,14 +70,14 @@ await runToQuiescence(
 
 Passing the same `models` map to `setupAgent({ models })` types the machine's model refs, so a request naming a model the host does not have is a compile error. Executors are always passed explicitly. Core does not import or require the AI SDK at runtime.
 
-`decideMode` sets how a language model answers a decision: `'object'` (default) for one structured-output object, or `'tool'` for one tool per candidate event. In tool mode, parallel tool calls are turned off with `providerOptions` (`openai.parallelToolCalls: false`, `anthropic.disableParallelToolUse: true`), merged under the host's own settings. Decision models are unaffected. See [Coercion](decisions.md#coercion).
+`decideMode` sets how a language model answers a decision: `'object'` for one structured-output object, or `'tool'` for one tool per candidate event. The default is object mode when every payload can be represented as object variants, otherwise tool mode. In tool mode, parallel tool calls are turned off with `providerOptions` (`openai.parallelToolCalls: false`, `anthropic.disableParallelToolUse: true`), merged under the host's own settings. Decision models are unaffected. See [Coercion](decisions.md#coercion).
 
 ## OpenAI SDK adapter
 
 `@statelyai/agent/openai` maps the same three executors onto the raw `openai` package, with no AI SDK in between.
 
 - By default, calls that carry function tools use the Responses API: `generateText` with tools, and `decide` under `decideMode: 'tool'`. Reasoning models such as `gpt-6-luna` reject function tools on Chat Completions.
-- Tool-free calls use Chat Completions: `generateText` without tools, `streamText`, and `decide` in the default object mode.
+- Tool-free calls use Chat Completions: `generateText` without tools, `streamText`, and `decide` in object mode.
 - `api` pins every call to one API. See the table below.
 
 ```sh
@@ -126,7 +126,7 @@ Structured output sends the declared schema wrapped as `{ result, reasoning? }`,
 
 Decisions follow `decideMode`:
 
-- `'object'` (default): one structured-output call whose schema is the decision object, sent with `strict: false`, since the adapter validates the answer itself.
+- `'object'` (default for compatible object payloads): one structured-output call whose schema is the decision object, sent with `strict: false`, since the adapter validates the answer itself.
 - `'tool'`: one function tool per candidate event, with `tool_choice: 'required'` and `parallel_tool_calls: false`. Function tools are sent with `strict: false`, since the Responses API defaults strict mode on and arbitrary JSON Schema may fall outside it.
 - An answer the adapter cannot read as one event comes back as `rejected`, and the runtime retries it. See [Coercion](decisions.md#coercion).
 
@@ -171,7 +171,7 @@ The options mirror `createAiSdkExecutors`:
 - `models` maps model refs to text adapters, or to `{ adapter, settings }` pairs that give a ref a persona.
 - `resolveModel` resolves refs dynamically, and wins over `models` when both are set.
 - `settings` carries `chat()` options that belong to the host, such as `modelOptions`, `middleware`, or `metadata`. Pass an object for every call, or a function of the request.
-- `decideMode` sets how a decision is answered: `'object'` (default) or `'tool'`. See [Coercion](decisions.md#coercion).
+- `decideMode` sets how a decision is answered: `'object'` (the compatible-payload default) or `'tool'`. See [Coercion](decisions.md#coercion).
 
 Precedence is global `settings`, then the model entry's `settings`, then the request's own generation settings. `modelOptions` merge key by key.
 
@@ -188,7 +188,7 @@ The rest of the contract matches the other adapters:
 - Tools run in `chat()`'s own loop, in `generateText` and `streamText` alike. The request's `maxSteps` bounds the model turns; the default is one. A tool with no `execute` stops the run at its call, with `finishReason: 'tool-calls'`.
 - A forced `toolChoice` applies to the first model turn only, so the model can answer after the tool runs.
 - `generateText` and `streamText` return the run's response `messages`: each turn's assistant text and tool calls, and the tool results fed back. Append them to a conversation and they replay into the next request.
-- Decisions are one structured-output object by default. Under `decideMode: 'tool'` they offer one tool per candidate event, with no `execute`, so the run stops at the model's first call. The tool choice is forced where the provider supports it, and an answer with more than one call is rejected.
+- Decisions with compatible object payloads use one structured-output object by default; incompatible payloads default to tool mode. Under `decideMode: 'tool'` they offer one tool per candidate event, with no `execute`, so the run stops at the model's first call. The tool choice is forced where the provider supports it, and an answer with more than one call is rejected.
 - System messages and the request's `system` become `systemPrompts`, since TanStack AI messages have no `system` role. Image parts become `url` or base64 `data` sources; other part types throw.
 - Every result reports `usage` summed over the run's model turns, the normalized `finishReason`, and every chunk the run produced on `raw`. A provider error arrives as a `RUN_ERROR` chunk and is thrown with its `code`.
 

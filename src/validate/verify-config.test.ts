@@ -333,6 +333,21 @@ describe("verifyAgentConfig decide strategies", () => {
     });
   });
 
+  test("omitted allowedEvents checks the lowered state's accepted events", async () => {
+    const config = strategyConfig({ strategy: "pick-then-fill" });
+    delete config.states.triage.invoke.input.allowedEvents;
+    const result = await verifyAgentConfig(
+      config,
+      options({ allow: undefined, explore: undefined }),
+    );
+    expect(result.gates.find((gate) => gate.name === "lower")).toEqual({
+      name: "lower",
+      ok: false,
+      detail:
+        "state 'triage': agent.decide uses strategy 'pick-then-fill' but APPROVE has open payload fields and no fillModel is set",
+    });
+  });
+
   test("pick-then-fill with a fillModel, or over finite payloads, passes", async () => {
     expect(await lowerGate({ strategy: "pick-then-fill", fillModel: MODEL })).toEqual({
       name: "lower",

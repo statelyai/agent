@@ -1620,6 +1620,7 @@ function createCountingFill(
         ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
         ...(info?.requestId === undefined && id !== "" ? { requestId: id } : {}),
       });
+      runCtx.countModelCalls?.(getCallModelCalls(raw) - 1);
       const usage = getCallUsage(raw);
       const finishReason = getCallFinishReason(raw);
       if (usage) {
@@ -1649,6 +1650,7 @@ function createCountingFill(
       );
       return raw;
     } catch (error) {
+      runCtx.countModelCalls?.(getCallModelCalls(error) - 1);
       runCtx.emitTrace?.({ type: "request.error", request: agentRequest, error }, self);
       throw error;
     }

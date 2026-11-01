@@ -7,7 +7,7 @@ description: Let the model send any number of the current state's accepted event
 
 ## Overview
 
-`agent.act` is a builtin invoke that runs one model call with a host-side tool loop. Its tools are the invoking state's accepted events, plus any plain `tools`. The model calls them in any order, zero or more times, and each call is delivered to the machine.
+`agent.act` is a builtin invoke that runs one `generateText` request with a host-side tool loop. Its tools are the invoking state's accepted events, plus any plain `tools`. The loop may make multiple provider model calls. The model calls the tools in any order, zero or more times, and each call is delivered to the machine.
 
 - `agent.decide` sends exactly one event per decision. See [Decisions](decisions.md).
 - `agent.act` sends zero to many events, and sees the result of each one before it calls the next.

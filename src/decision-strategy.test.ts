@@ -189,6 +189,37 @@ describe("decide strategies", () => {
     ).toBeUndefined();
   });
 
+  test("finite root unions enumerate every object variant", () => {
+    expect(
+      enumerateFinitePayloads({
+        anyOf: [
+          {
+            type: "object",
+            properties: { method: { const: "ground" }, days: { const: 5 } },
+            required: ["method", "days"],
+          },
+          {
+            type: "object",
+            properties: { method: { const: "air" }, cabin: { enum: ["coach", "first"] } },
+            required: ["method", "cabin"],
+          },
+        ],
+      }),
+    ).toEqual([
+      { method: "ground", days: 5 },
+      { method: "air", cabin: "coach" },
+      { method: "air", cabin: "first" },
+    ]);
+    expect(
+      enumerateFinitePayloads({
+        anyOf: [
+          { type: "object", properties: { kind: { const: "known" } }, required: ["kind"] },
+          { type: "object", properties: { note: { type: "string" } }, required: ["note"] },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
   test("attempts feedback reaches every sub-call", async () => {
     const calls: Call[] = [];
     const answers = ["desk.refund", "desk.refund"];
@@ -286,6 +317,39 @@ describe("decide strategies in the runtime", () => {
       }),
     );
     expect(result.snapshot.value).toBe("failed");
+  });
+
+  test("the fill sub-call records every provider model call", async () => {
+    const result = await runToQuiescence(
+      createAgentRuntime(createDeskMachine({ fillModel: "writer" }), {
+        maxModelCalls: 4,
+        executors: {
+          decide: async () => ({ event: { type: "desk.refund" } as ChosenEvent }),
+          generateText: async () => ({
+            result: { amount: 5, note: "ok" },
+            modelCalls: 3,
+          }),
+        },
+      }),
+    );
+    expect(result.snapshot.value).toBe("done");
+    expect(result.usage.modelCalls).toBe(4);
+  });
+
+  test("a failed fill records every provider model call", async () => {
+    const result = await runToQuiescence(
+      createAgentRuntime(createDeskMachine({ fillModel: "writer" }), {
+        maxModelCalls: 4,
+        executors: {
+          decide: async () => ({ event: { type: "desk.refund" } as ChosenEvent }),
+          generateText: async () => {
+            throw Object.assign(new Error("bad fill"), { modelCalls: 3 });
+          },
+        },
+      }),
+    );
+    expect(result.snapshot.value).toBe("failed");
+    expect(result.usage.modelCalls).toBe(4);
   });
 
   test("a runtime pick-then-fill over an open payload without fillModel errors", async () => {

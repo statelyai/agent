@@ -57,6 +57,22 @@ export function enumerateFinitePayloads(
   jsonSchema: Record<string, unknown> | undefined,
 ): Record<string, unknown>[] | undefined {
   if (!jsonSchema) return undefined;
+  const union = jsonSchema.anyOf ?? jsonSchema.oneOf;
+  if (Array.isArray(union) && union.length > 0) {
+    const variants = union.map((variant) =>
+      isRecord(variant) ? enumerateFinitePayloads(variant) : undefined,
+    );
+    if (variants.some((variant) => variant === undefined)) return undefined;
+    const payloads = variants.flatMap((variant) => variant ?? []);
+    return payloads.length <= MAX_FINITE_PAYLOADS ? payloads : undefined;
+  }
+  if (
+    jsonSchema.allOf !== undefined ||
+    (jsonSchema.type !== undefined && jsonSchema.type !== "object") ||
+    (jsonSchema.type !== "object" && !isRecord(jsonSchema.properties))
+  ) {
+    return undefined;
+  }
   const properties = isRecord(jsonSchema.properties) ? jsonSchema.properties : {};
   const required = new Set(Array.isArray(jsonSchema.required) ? jsonSchema.required : []);
   let payloads: Record<string, unknown>[] = [{}];
@@ -89,8 +105,6 @@ function finiteValues(schema: unknown): unknown[] | undefined {
  */
 export function payloadNeedsFillModel(jsonSchema: Record<string, unknown> | undefined): boolean {
   if (!jsonSchema) return false;
-  const properties = isRecord(jsonSchema.properties) ? jsonSchema.properties : {};
-  if (Object.keys(properties).length === 0) return false;
   return enumerateFinitePayloads(jsonSchema) === undefined;
 }
 

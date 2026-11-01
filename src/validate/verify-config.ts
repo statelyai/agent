@@ -4,7 +4,7 @@
  * whose `detail` names the offending path, state, or name, so a repair loop
  * can feed a failed gate straight back to the model.
  */
-import type { AnyActorLogic, AnyStateMachine } from "xstate";
+import type { AnyActorLogic, AnyStateMachine, AnyStateNode } from "xstate";
 import { payloadNeedsFillModel } from "../decision-strategy.js";
 import { ACT_ACTOR, DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR } from "../text-logic.js";
 import { explorePaths, lintAgentMachine, type ExplorePathsOptions } from "../verify.js";
@@ -176,7 +176,7 @@ export async function verifyAgentConfig(
     record("lower", [errorMessage(error)]);
     return fail({ config: typed });
   }
-  if (!record("lower", checkFillModels(typed))) return fail({ config: typed });
+  if (!record("lower", checkFillModels(typed, machine))) return fail({ config: typed });
 
   const diagnostics = lintAgentMachine(machine).map((d) => ({
     failing: d.severity === "error" || options.lint?.warnings === true,
@@ -201,10 +201,10 @@ export async function verifyAgentConfig(
 /**
  * An `agent.decide` invoke whose strategy is `'pick-then-fill'` (explicit, or
  * `'auto'` with a `fillModel`) needs a `fillModel` when any literal
- * `allowedEvents` entry has open payload fields. Templated or omitted inputs
- * are checked at run time instead.
+ * candidate event has open payload fields. Omitted `allowedEvents` is resolved
+ * from the lowered state's own and ancestor event handlers.
  */
-function checkFillModels(config: AgentWorkflowConfig): string[] {
+function checkFillModels(config: AgentWorkflowConfig, machine: AnyStateMachine): string[] {
   const schemas = (config.schemas?.events ?? {}) as Record<string, Record<string, unknown>>;
   const problems: string[] = [];
   for (const { path, state } of walkStates(config.states)) {
@@ -212,8 +212,11 @@ function checkFillModels(config: AgentWorkflowConfig): string[] {
       if (invoke.src !== DECIDE_ACTOR || !isPlainObject(invoke.input)) continue;
       const input = invoke.input as ConfigNode;
       if (input.strategy !== "pick-then-fill" || input.fillModel !== undefined) continue;
-      if (input.payloads !== undefined || !Array.isArray(input.allowedEvents)) continue;
-      const open = input.allowedEvents.filter(
+      if (input.payloads !== undefined) continue;
+      const candidates = Array.isArray(input.allowedEvents)
+        ? input.allowedEvents
+        : loweredEventTypes(machine, path);
+      const open = candidates.filter(
         (type): type is string => typeof type === "string" && payloadNeedsFillModel(schemas[type]),
       );
       if (open.length) {
@@ -225,6 +228,16 @@ function checkFillModels(config: AgentWorkflowConfig): string[] {
     }
   }
   return problems;
+}
+
+function loweredEventTypes(machine: AnyStateMachine, path: string): string[] {
+  let node: AnyStateNode | undefined = machine.root;
+  for (const key of path.split(".")) node = node?.states[key];
+  const types = new Set<string>();
+  for (let current = node; current; current = current.parent) {
+    for (const type of current.ownEvents) types.add(type);
+  }
+  return [...types];
 }
 
 // ─── vocabulary ───

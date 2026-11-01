@@ -195,9 +195,7 @@ function answer(options: CallOptions) {
   const format = options.responseFormat;
   const text =
     format?.type === "json" && format.schema
-      ? JSON.stringify(
-          synthesize(format.schema as JsonSchema, "result", format.schema as JsonSchema),
-        )
+      ? JSON.stringify(synthesizeStructured(format.schema as JsonSchema))
       : `Mock reply to: ${lastUserText(options).slice(0, 60)}`;
   return {
     content: [{ type: "text" as const, text }],
@@ -205,6 +203,22 @@ function answer(options: CallOptions) {
     usage,
     warnings: [],
   };
+}
+
+function synthesizeStructured(schema: JsonSchema): unknown {
+  const eventVariants = schema.properties?.event?.anyOf ?? schema.properties?.event?.oneOf;
+  if (eventVariants?.length) {
+    const eventSchema = eventVariants[decisionTurn % eventVariants.length]!;
+    decisionTurn += 1;
+    return { event: synthesize(eventSchema, "event", schema) };
+  }
+  const choices = schema.properties?.choice?.enum;
+  if (choices?.length) {
+    const choice = choices[decisionTurn % choices.length];
+    decisionTurn += 1;
+    return { choice };
+  }
+  return synthesize(schema, "result", schema);
 }
 
 /** A language model that answers every request from its own schema. */
