@@ -20,7 +20,7 @@ import {
   type StateValue,
   type TimerKey,
 } from "xstate";
-import { canonicalJson } from "./internal/is-record.js";
+import { canonicalJson, isError } from "./internal/is-record.js";
 import { createDurable, type DurableExecution } from "xstate/durable";
 import type {
   AgentTools,
@@ -319,6 +319,16 @@ const TRACE_ENVELOPE_KEYS = [
   "chunk",
 ] as const;
 
+function setTraceDataField<T>(target: Record<string, T>, key: string, value: T): void {
+  // JSON field names are data, including names with inherited setters.
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+}
+
 /**
  * Best-effort JSON projection of an arbitrary value. Never throws: functions,
  * symbols, `undefined`, and cyclic back-references are DROPPED (array holes
@@ -352,7 +362,7 @@ function toJsonValue(value: unknown, ancestors: readonly object[]): JsonValue | 
   }
   const nextAncestors = [...ancestors, object];
 
-  if (object instanceof Error) {
+  if (isError(object)) {
     const serialized: Record<string, JsonValue> = {
       name: object.name,
       message: object.message,
@@ -384,7 +394,7 @@ function toJsonValue(value: unknown, ancestors: readonly object[]): JsonValue | 
   for (const [key, item] of Object.entries(object)) {
     const serializedItem = toJsonValue(item, nextAncestors);
     if (serializedItem !== undefined) {
-      out[key] = serializedItem;
+      setTraceDataField(out, key, serializedItem);
     }
   }
   return out;
@@ -421,13 +431,13 @@ export function serializeTraceEvent(
     }
     if ((TRACE_ENVELOPE_KEYS as readonly string[]).includes(key)) {
       if (value !== undefined) {
-        out[key] = value;
+        setTraceDataField(out, key, value);
       }
       continue;
     }
     const serialized = toJsonValue(value, []);
     if (serialized !== undefined) {
-      out[key] = serialized;
+      setTraceDataField(out, key, serialized);
     }
   }
   return out as JsonSerializableTraceEvent;
