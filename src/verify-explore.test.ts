@@ -462,6 +462,45 @@ describe("explorePaths — explored children: soundness", () => {
     expect(result).toMatchObject({ reachable: true, complete: true });
     expect(await canReach(machine, "done", options)).toMatchObject({ reachable: true });
   });
+  test("a blocked invoke pending beside an explored child is a needs-output terminal", async () => {
+    const child = createMachine({
+      initial: "working",
+      states: { working: { on: { FINISH: { target: "finished" } } }, finished: { type: "final" } },
+    });
+    const agent = setupAgent({
+      context: z.object({}),
+      actors: {
+        a: child,
+        b: createAsyncLogic({ run: async () => 1 }),
+        c: createAsyncLogic({ run: async () => 1 }),
+      },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: {
+          invoke: [
+            { id: "a", src: "a", onDone: { target: "done" } },
+            { id: "b", src: "b", onDone: { target: "blockedFirst" } },
+            { id: "c", src: "c", onDone: { target: "done" } },
+          ],
+        },
+        done: { type: "final" },
+        blockedFirst: { type: "final" },
+      },
+    });
+    const report = await explorePaths(machine, {
+      children: "explore",
+      childEvents: { a: ["FINISH"] },
+      outputs: { c: [1] },
+    });
+    expect(report.terminals).toContainEqual(
+      expect.objectContaining({ status: "needs-output", missingSrc: "b" }),
+    );
+    expect(isExplorationComplete(report)).toBe(false);
+  });
+
   test("a child restarted under the same id can send the same event again", async () => {
     const worker = createMachine({
       initial: "starting",

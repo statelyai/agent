@@ -1678,20 +1678,33 @@ function explore(
   // text requests, scripted invokes, and the children themselves, each a fork
   // of its own, so whichever settles first (and leaves the state) is a branch.
   // Undefined when there is at most one: the usual one-at-a-time advance.
-  const concurrentForks = (step: AgentStep): InvokeFork[] | undefined => {
+  // A blocked one (no `outputs` entry) is no fork, but settling first is
+  // still a branch the search cannot follow: it ends `needs-output`.
+  const concurrentForks = (
+    step: AgentStep,
+  ): { forks: InvokeFork[]; blocked: string[] } | undefined => {
+    if (options.children !== "explore") {
+      return undefined;
+    }
     const invokes = pendingInvokes(step);
     if (!invokes.some(isExploredChild)) {
       return undefined;
     }
+    const blocked: string[] = [];
     const asFork = (
       settle: ReturnType<typeof settleFor>,
       id: string,
+      src: string,
       isText: boolean,
     ): InvokeFork[] => {
       if ("fork" in settle) {
         return [settle.fork];
       }
-      return "output" in settle ? [{ id, errors: [], outputs: [settle.output], isText }] : [];
+      if ("blocked" in settle) {
+        blocked.push(src);
+        return [];
+      }
+      return [{ id, errors: [], outputs: [settle.output], isText }];
     };
     const texts = step.requests.filter(
       (request): request is AgentStepRequest & { kind: "text" } => request.kind === "text",
@@ -1699,15 +1712,15 @@ function explore(
     const textIds = new Set(texts.map((request) => request.id));
     const forks = [
       ...texts.flatMap((request) =>
-        asFork(settleFor(request.id, request.src, true), request.id, true),
+        asFork(settleFor(request.id, request.src, true), request.id, request.src, true),
       ),
       ...invokes
         .filter((invoke) => !textIds.has(invoke.id))
         .flatMap((invoke) =>
-          asFork(settleFor(invoke.id, invoke.src, false, invoke), invoke.id, false),
+          asFork(settleFor(invoke.id, invoke.src, false, invoke), invoke.id, invoke.src, false),
         ),
     ];
-    return forks.length > 1 ? forks : undefined;
+    return forks.length > 0 && forks.length + blocked.length > 1 ? { forks, blocked } : undefined;
   };
 
   const reachedStates = new Set<string>();
@@ -1781,6 +1794,8 @@ function explore(
     fork?: InvokeFork;
     /** Other pending explored children, which can settle or send first. */
     siblings?: InvokeFork[];
+    /** Srcs pending beside them with no `outputs` entry. */
+    blockedSiblings?: string[];
     pending?: { id: string; output: unknown };
   } => {
     let current = step;
@@ -1795,7 +1810,12 @@ function explore(
       const request = current.requests[0] as AgentStepRequest | undefined;
       const concurrent = request?.kind === "decision" ? undefined : concurrentForks(current);
       if (concurrent) {
-        return { step: current, fork: concurrent[0], siblings: concurrent.slice(1) };
+        return {
+          step: current,
+          fork: concurrent.forks[0],
+          siblings: concurrent.forks.slice(1),
+          blockedSiblings: concurrent.blocked,
+        };
       }
       if (request && request.kind === "text") {
         const settle = settleFor(request.id, request.src, true);
@@ -1960,7 +1980,15 @@ function explore(
     }
     nodesExpanded++;
 
-    const { step: settled, blockedSrc, hit, fork, siblings, pending } = advance(step);
+    const {
+      step: settled,
+      blockedSrc,
+      hit,
+      fork,
+      siblings,
+      blockedSiblings,
+      pending,
+    } = advance(step);
     if (hit) {
       witness = path;
       return;
@@ -2055,9 +2083,17 @@ function explore(
           pathsExplored++;
           terminals.push({ status: "idle", path, state: settled.snapshot.value });
         }
-        for (const incompleteSrc of [fork, ...(siblings ?? [])].flatMap((child) =>
-          child.incompleteSrc === undefined ? [] : [child.incompleteSrc],
-        )) {
+        for (const src of blockedSiblings ?? []) {
+          unexplored.push(
+            `needs-output: no \`outputs\` entry for src '${src}' at path [${path.map((e) => e.type).join(", ")}]`,
+          );
+        }
+        for (const incompleteSrc of [
+          ...[fork, ...(siblings ?? [])].flatMap((child) =>
+            child.incompleteSrc === undefined ? [] : [child.incompleteSrc],
+          ),
+          ...(blockedSiblings ?? []),
+        ]) {
           if (witness !== undefined || capped()) {
             break;
           }
