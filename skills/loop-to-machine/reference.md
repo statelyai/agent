@@ -89,7 +89,8 @@ const run = await runAgent(machine, {
   },
 });
 if (run.status === "done") replay.output(run.output);
-compareRecordings(recorder.recording, replay.recording).divergences; // INTENDED[scenario.id] ?? []
+const { divergences } = compareRecordings(recorder.recording, replay.recording);
+expect(divergences).toEqual(INTENDED[scenario.id] ?? []); // the replay test fails on any unreviewed difference
 ```
 
 - Each call is a `call` effect named `<name>.<method>` (`anthropic.messages.create`) with its arguments and its result or error.
