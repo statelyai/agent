@@ -206,7 +206,7 @@ A host that drives the transition loop itself uses `createAgentRuntime`. See [Wr
 
 [`index.test.ts`](../examples/port-walkthrough/index.test.ts) has four tests. None of them needs an API key or network access. Each one starts with a comment naming what the `while` loop could not test.
 
-The model is `examples/mock-model.ts`: the AI SDK's `MockLanguageModelV3` behind the real `createAiSdkExecutors` adapter. Answers are keyed by request name, `assist` for the text request and `chooseAction` for the decision.
+The model is `examples/mock-model.ts`, a file in the repository, not in the package: the AI SDK's `MockLanguageModelV3` behind the real `createAiSdkExecutors` adapter. Answers are keyed by request name, `assist` for the text request and `chooseAction` for the decision.
 
 ### The port runs with no key
 
