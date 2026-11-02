@@ -353,11 +353,11 @@ checking: {
 },
 ```
 
-The returned object takes the same fields as a transition object, including `context` for a partial context update. The function must return a target. A choice state whose function returns no target throws at run time.
+The returned object takes `target`, and optionally `description`, `reenter`, and `meta`. It cannot update `context`; a choice only routes. The function must return a target. A choice state whose function returns no target throws at run time.
 
 A choice state has no other behavior. `on`, `always`, `after`, `entry`, `exit`, `invoke`, and `states` are not allowed on it. Put the work in the target states.
 
-A choice function receives only `{ context, event }`, with no `enq` argument, so it cannot emit, spawn, raise, or send. Routing that must also do one of those uses an `always` transition on a normal state, whose function takes `enq` like any transition function:
+A choice function receives the same first argument as a transition function (`context`, `event`, `self`, `system`, `guards`, `actors`), but no `enq` argument, so it cannot emit, spawn, raise, or send. Routing that must also do one of those uses an `always` transition on a normal state, whose function takes `enq` like any transition function:
 
 ```ts no-check
 // Routes only.

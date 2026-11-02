@@ -16,8 +16,11 @@ import { createInspector } from "@statelyai/sdk/inspect";
 const inspector = createInspector({ name: "Refund agent" });
 console.log("Open", inspector.inspectorUrl);
 
-const result = await runAgent(machine, { input, executors, inspect: inspector.inspect });
-inspector.destroy();
+try {
+  const result = await runAgent(machine, { input, executors, inspect: inspector.inspect });
+} finally {
+  inspector.destroy(); // also when runAgent throws, so the connection closes
+}
 ```
 
 - `inspector.inspect` is an XState `inspect` callback, so it is passed as is. `createAgentRuntime` takes the same option.
