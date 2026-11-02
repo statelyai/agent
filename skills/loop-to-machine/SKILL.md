@@ -25,7 +25,7 @@ This is step 1 of 4. Next: `add-traces`, then `add-evals`, then `improve-machine
 ## 0. Before you write code
 
 
-- Every request needs `prompt` or `messages`, or the run throws `invalid-request`.
+- Text requests need exactly one non-empty `prompt` or `messages`. `setupAgent` throws `invalid-request` when both are omitted; a request that resolves neither or both at run time fails validation with schema issues.
 - Actors: `createAsyncLogic<Output, Input>({ run })` from `xstate` (no `fromPromise` in v6); without the generics `onDone`'s `output` is untyped.
 - `onIdle` return events need `as const` on `type`, or the union does not narrow.
 - In `onError`, the error is `event.error`; there is no `error` argument.
@@ -46,7 +46,7 @@ Read the loop and fill this table before writing anything. Each row maps to a ma
 | A read-only tool (search, lookup) | An actor the machine invokes, or a tool on a text request |
 | A rule: an `if`, a prompt line, a check after the fact | A guard on the transition it protects |
 | A model call that produces content | A text request in `setupAgent({ requests })`, invoked by one state |
-| One SDK tool call that picks the action and carries its content (`send_email({ … })`) | A text request with those tools, then guards on the returned call: exactly one, offered, schema-valid. `agent.decide` would hide your tool names and descriptions |
+| One SDK tool call that picks the action and carries its content (`send_email({ … })`) | A text request with those tools, then guards on the returned call: exactly one, offered, schema-valid. Those guards check shape only: a tool that still has `execute` runs inside the SDK before the request returns, so the unchanged-shape port keeps the old timing. A side effect that needs approval either loses its `execute` (the call comes back unexecuted; a state invokes the real work after the verdict) or moves to the decision step later. `agent.decide` would hide your tool names and descriptions |
 | N tool calls per model turn, each needing approval | First port: the request returns the calls; a state holds them in context and waits for a verdict per call. Later step: `agent.act` ([docs/act.md](../../docs/act.md)), each call an event the state queues |
 | A persisted "always allow" rule | Data loaded into input or context, read by a guard. Saving a rule is a recorded effect |
 | A tool the browser runs (no `execute`) | The request ends with the tool calls; an idle state waits for `TOOL_RESULTS` |
