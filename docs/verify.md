@@ -171,14 +171,15 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 ## Branch exploration
 
-`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, outputs?, errors?, payloads?, dedupeBy? })` enumerates decision and external-event branches without a model, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor.<id>' }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
 - At an idle wait, it forks one branch per externally accepted event.
 - `outputs` is a map of output lists, keyed by src: a text request's src or any other invoked actor's src. A one-element list is a canned output, reused every time that src is reached. A text request resolves with it as its `result`. A longer list forks one branch per output. See [Payloads and invoke outputs](#payloads-and-invoke-outputs).
 - A src with no `outputs` entry halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
-- `errors` is a map of one canned failure per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates. The failure and the candidates are sibling branches: each spends one level of `maxDepth`.
+- `errors` is a map of canned failures per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates. The failure and the candidates are sibling branches: each spends one level of `maxDepth`.
+- An `errors` array forks one failing branch per element, each recording `{ type: 'xstate.error.actor.<id>', error }`. `[]` is no entry. Any other value is one failure, recorded without `error`. Wrap a single array-valued failure: `[[...]]`.
 - A rejection that reaches no `onError` errors the machine, and that path ends in an `error` terminal carrying the failure value on `error`.
 - Every invoke a state is still waiting on counts as work, concurrent ones included. They are settled one per branch, in invoke-id order, and a src in `errors` forks per invoke.
 
@@ -240,6 +241,56 @@ const violation = await canReach(refundMachine, "illegallyIssued", {
 
 Pick boundary values for numeric payloads: each guard threshold on both sides. Values between two boundaries take the same branch as one of them.
 
+`report.vacuous` lists event types offered only as the bare `{ type }` at a snapshot where a transition for them may read the payload: no `payloads` entry, no decision option, and no schema variant beyond `{ type }`.
+
+- Covers a type with no schema, or a schema the fill cannot enumerate (a required free-form field, a product over 64, an object of only optional free-form fields).
+- Not listed: a partial fill with real variants, such as finite fields plus an optional free-form one. That type is only in `unexpandedEvents`.
+- Always a subset of `unexpandedEvents`. Data only: completeness is unchanged.
+
+### Interleaved events
+
+By default, external events fork only at idle waits. A host event that arrives while an invoke is still running is never explored. `interleave: "pending"` explores it.
+
+| `interleave`       | External events fork at                                                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"idle"` (default) | Idle waits.                                                                                                                                                                 |
+| `"pending"`        | Idle waits, plus every point an invoke is outstanding: before a text or scripted invoke resolves, at an output or error fork, at a `needs-output` block, and at a decision. |
+
+- Each event the active states (or ancestors) accept forks once per payload variant, the same variants as an idle wait. A decision races only the events it does not offer as candidates.
+- Each race branch spends one level of `maxDepth`. Resolving a single canned output does not.
+- `payloads`, `dedupeBy`, and guard pruning apply as at idle waits.
+- A state that accepts no external event resolves straight through, as before.
+
+```ts no-check
+const report = await explorePaths(lookupMachine, {
+  outputs: { lookup: [{ found: true }] },
+  interleave: "pending",
+});
+// report.terminals → 'found' (no race), and 'cancelled' via [{ type: 'CANCEL' }]
+```
+
+### Child machines
+
+By default, an invoked child machine is a src like any other: with no `outputs` entry, its branch ends `needs-output`. `children: "explore"` explores the child instead. It covers invoked child machines; spawned children are not explored.
+
+- Applies when the src has no `outputs` or `errors` entry and its logic is a state machine.
+- The child is explored on its own, from its invoke input, with the same options and caps, to at most 4 nested levels.
+- Events reach the child only as `childEvents` lists them: `{ [src]: eventTypes }`, the types the parent forwards (`sendTo`/`forwardTo`) or the host sends the child. Default none. A child wait that accepts an unlisted type makes the child search incomplete, never a reachable parent path.
+- Each distinct `output` of the child's `done` terminals forks the parent as an output. One output resolves straight through.
+- Each distinct failure of the child's `error` terminals forks a failing branch, recorded with `error`.
+- A child that can end `idle` adds an `idle` terminal to the parent: the parent can wait there forever.
+- Bounded: child idle waits are not parent fork points. The child is explored to its finals, and its distinct outputs fork the parent.
+- An incomplete child search, such as one with its own `needs-output` or `max-depth`, also ends the parent branch `needs-output` for that src, so the parent report is not complete. The child's `unexpandedEvents` and `vacuous` join the parent's.
+
+```ts no-check
+const report = await explorePaths(parentMachine, {
+  children: "explore",
+  childEvents: { approval: ["YES", "NO"] }, // the parent forwards both
+});
+// report.terminals → one branch per distinct child output, e.g.
+// [{ type: 'xstate.done.actor.approval', output: { ok: true } }]
+```
+
 ## Reachability checks
 
 <!-- canReach contract from src/verify.ts -->
@@ -251,7 +302,7 @@ path or state-node ID is reachable, with a witness path when it is.
 
 - `maxPaths` or `maxNodes` cut the search short.
 - A path reached `maxDepth`.
-- A branch stopped on a `needs-output` terminal, with no `outputs` entry for its src.
+- A branch stopped on a `needs-output` terminal, with no `outputs` entry for its src, or an explored child machine whose own search was incomplete.
 - An event type was not expanded to all its payload variants, as `explorePaths` lists in `unexpandedEvents`.
 
 Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.

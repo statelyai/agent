@@ -1,6 +1,6 @@
 ---
 title: Preset machines
-description: Factories for proven agent shapes (tool loop, sequential, router, parallel, loop, supervisor, handoff) that return ordinary, inspectable agent machines.
+description: Factories for proven agent shapes (tool loop, sequential, router, parallel, loop, supervisor, handoff, approval batch) that return ordinary, inspectable agent machines.
 ---
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
@@ -47,21 +47,22 @@ Snapshots and log entries carry `machine.version` automatically. See [Versioning
 
 ## Preset taxonomy
 
-Three questions separate the seven presets:
+Three questions separate the seven model-driven presets. `createApprovalBatchMachine` is the odd one out: it makes no model call.
 
 - Who runs the work? One request in `toolLoop`, a fixed chain in `sequential`, or named sub-units in the rest.
 - Who picks the next unit? The author in `sequential`, `parallel`, and `loop`. The model in `router`, `supervisor`, and `handoff`.
 - Does control come back? Delegation returns in `supervisor`. Routing ends the run in `router`. Handoff transfers control permanently in `handoff`.
 
-| Preset                    | Shape                                                        | Model chooses                    | Control returns        |
-| ------------------------- | ------------------------------------------------------------ | -------------------------------- | ---------------------- |
-| `createToolLoopMachine`   | One request, host-run tool loop                              | tools                            | n/a                    |
-| `createSequentialMachine` | Prompt chain, step by step                                   | nothing                          | n/a                    |
-| `createRouterMachine`     | One decision picks one destination                           | the route                        | no, the run ends there |
-| `createParallelMachine`   | Static fan-out, joined                                       | nothing                          | yes, at the join       |
-| `createLoopMachine`       | Bounded repeat                                               | nothing                          | yes, each iteration    |
-| `createSupervisorMachine` | Delegate, accumulate, repeat                                 | the worker, or `FINISH`          | yes, every turn        |
-| `createHandoffMachine`    | Peer swarm, `activeAgent` names the agent that runs the turn | n/a (host sends `transfer_to_*`) | no, transfer is final  |
+| Preset                       | Shape                                                        | Model chooses                    | Control returns        |
+| ---------------------------- | ------------------------------------------------------------ | -------------------------------- | ---------------------- |
+| `createToolLoopMachine`      | One request, host-run tool loop                              | tools                            | n/a                    |
+| `createSequentialMachine`    | Prompt chain, step by step                                   | nothing                          | n/a                    |
+| `createRouterMachine`        | One decision picks one destination                           | the route                        | no, the run ends there |
+| `createParallelMachine`      | Static fan-out, joined                                       | nothing                          | yes, at the join       |
+| `createLoopMachine`          | Bounded repeat                                               | nothing                          | yes, each iteration    |
+| `createSupervisorMachine`    | Delegate, accumulate, repeat                                 | the worker, or `FINISH`          | yes, every turn        |
+| `createHandoffMachine`       | Peer swarm, `activeAgent` names the agent that runs the turn | n/a (host sends `transfer_to_*`) | no, transfer is final  |
+| `createApprovalBatchMachine` | One child per proposed tool call: approve, then execute      | nothing (policy or person)       | n/a                    |
 
 ## Config names
 
@@ -86,7 +87,7 @@ An entry is either an inline request, written as `{ description, instructions, m
 
 One text request carries the `tools`, and the host runs the tool loop inside that request. `maxSteps` bounds the loop through the request's typed `maxSteps` field. The states are `answering` and `done`.
 
-This preset is the default for tool use. It does not add machine states, and it sets no request `metadata`. To model an approval gate as states, eject. See [Ejection](#ejection).
+This preset is the default for tool use. It does not add machine states, and it sets no request `metadata`. To gate the calls on approval, run them through [`createApprovalBatchMachine`](#createapprovalbatchmachine), or eject. See [Ejection](#ejection).
 
 ### `createSequentialMachine`
 
@@ -119,6 +120,46 @@ Each turn, one `agent.decide` picks a worker or finishes. `maxTurns` bounds the 
 ### `createHandoffMachine`
 
 A peer swarm. `context.activeAgent` names the agent that runs the current turn. After the turn, the machine settles idle in `waiting`. A `transfer_to_<name>` event, built with `transferEventType(name)`, changes `activeAgent` and re-routes. There is no final state. The conversation ends when the host stops resuming it. Persist the idle snapshot between turns.
+
+### `createApprovalBatchMachine`
+
+One model turn's tool calls, each approved or rejected on its own. Only approved calls execute. No model call: the host maps the turn's calls to `input.calls` and feeds `output.results` back as tool results. See [Tools](tools.md#approval-gate).
+
+```ts
+import { createAsyncLogic } from "xstate";
+import { createAgentRuntime, runToQuiescence } from "@statelyai/agent";
+import { createApprovalBatchMachine } from "@statelyai/agent/machines";
+
+const machine = createApprovalBatchMachine({
+  policy: createAsyncLogic({
+    run: async ({ input }: { input: { call: { name: string } } }) =>
+      input.call.name === "search" ? ("allow" as const) : ("ask" as const),
+  }),
+  execute: createAsyncLogic({
+    run: async ({ input }: { input: { call: { name: string; args: unknown } } }) =>
+      `ran ${input.call.name}`,
+  }),
+});
+
+const paused = await runToQuiescence(createAgentRuntime(machine), {
+  input: { calls: [{ id: "call_1", name: "deleteFile", args: { path: "a.txt" } }] },
+});
+const result = await runToQuiescence(createAgentRuntime(machine), {
+  snapshot: paused.persist(),
+  event: { type: "APPROVE", callId: "call_1" },
+});
+```
+
+- **Input.** `{ calls: Array<{ id, name, args }> }`. Ids must be unique.
+- **`policy`.** Actor logic over `{ call }` returning `"allow"`, `"ask"`, or `"deny"`. Default: every call is `"ask"`. A policy failure or any other value fails the call; it never executes.
+- **`execute`.** Actor logic over `{ call }`. Its output is the call's `result`; a rejection is `status: "failed"`.
+- **`executeWhen`.** `"allReady"` (default): nothing executes until every call has settled its approval. `"eachReady"`: each call executes once approved.
+- **Child states.** `checking` (policy) → `awaitingApproval` → `approved` → `executing` → `executed` | `rejected` | `failed`. One spawned child per call, id `call:<id>`.
+- **Host events.** `APPROVE`, `APPROVE_ALWAYS`, `REJECT` (optional `reason`), each with `callId`. Routed to that call's child; ignored for a call not awaiting approval. `CANCEL_ALL` ends the batch (state `cancelled`), stopping unfinished calls, including an in-flight execute, which reports `cancelled`.
+- **Interaction.** `running` declares `meta.interaction` with one payload choice per awaiting call and verb, so `getInteraction(snapshot).choices` lists them. `context.awaiting` holds the calls themselves.
+- **Output.** `{ results, approveAlways }`. `results` holds one `{ id, status, result?, error?, reason? }` per input call, in input order, with `status` `"executed"`, `"rejected"`, `"failed"`, or `"cancelled"`. `approveAlways` holds one `{ name }` per tool approved with `APPROVE_ALWAYS`; persist it and have `policy` return `"allow"` for those names next time.
+- **Safety.** The per-call child reaches `executing` only from a policy `"allow"` or a person's approval. `canReach` proves the opposite unreachable with `complete: true`; see `src/machines/approval-batch.test.ts`.
+- **Mid-run cancel.** `runtime.send({ type: "CANCEL_ALL" })` from a hand-written loop. See [Hosts](hosts.md#host-events-mid-run).
 
 ## Ejection
 

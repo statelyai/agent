@@ -1494,3 +1494,5 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
 
   return { generateText, streamText, decide };
 }
+
+export type { DecisionMode, DecisionModeOption } from "../internal/decision-object.js";

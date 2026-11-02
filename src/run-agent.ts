@@ -593,8 +593,25 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * Default 0. Not added to this run's `usage.modelCalls`.
    */
   modelCallsSpent?: number;
-  /** Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with `signal.reason` as the error. */
+  /**
+   * Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with
+   * `signal.reason` as the error. With {@link AgentRuntimeOptions.abortWith},
+   * the machine sees the abort first.
+   */
   signal?: AbortSignal;
+  /**
+   * Routes `signal`'s abort through the machine: when it fires, `event` is
+   * sent into the run (see {@link AgentRuntime.send}) and the run continues
+   * until the machine settles, so a `cancelled` final state, cleanup
+   * invokes, and its output run as usual. Until the machine applies
+   * `event`, the host's direct `transition` events (such as
+   * `runToQuiescence`'s init `event`) are dropped, so the abort goes first.
+   * The run falls back to today's `{ status: 'error', cause: 'aborted' }`
+   * when the machine has no transition for `event`, when the loop never
+   * applies it, when the machine settles still `active` after handling it,
+   * or when `timeout` milliseconds pass while it is still working.
+   */
+  abortWith?: { event: EventFromLogic<TMachine>; timeout?: number };
   /** Where root `after` timers live. Default `"in-process"`. See {@link AgentTimerScheduler}. */
   timers?: AgentTimerScheduler;
 }
@@ -2334,6 +2351,32 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
   execute(effects: AgentEffects): Promise<void>;
   /** The next event that arrived, or `undefined` once the run is quiescent. */
   nextEvent(): Promise<EventFromLogic<TMachine> | undefined>;
+  /**
+   * Delivers a host event (a cancel, a user message, a host-owned timer) into
+   * the run's mailbox, behind whatever already arrived. Asynchronous: `send`
+   * only enqueues; the machine moves when the host loop's next `nextEvent()`
+   * hands the event out (a parked `nextEvent()` resolves with it) and the loop
+   * calls `transition`. A host that needs the event applied before it returns
+   * (a synchronous cancel) calls `transition(state, event)` itself instead,
+   * on the loop's current `state`, and keeps the loop's invariants: one
+   * shared `state` variable that both paths read and write, `execute` on the
+   * returned effects, and no `transition` once the state is not `active`. It is
+   * applied by the host's own `transition` call, so it is journaled and
+   * replayed like any other event, and reported as `result.ignored` when the
+   * state has no transition for it.
+   *
+   * - Before `start`: queued; the first `nextEvent()` hands it out (after the
+   *   init event a host delivers itself). Returns `true`.
+   * - While an effect, child or timer is in flight: queued in arrival order
+   *   with their completions. Returns `true`.
+   * - After the run stopped (cancelled, aborted, journal failure) or the
+   *   machine left `active` (done, error): dropped. Returns `false`.
+   * - After `finish`: throws {@link AgentError} `runtime-finished`.
+   *
+   * A sent event the loop never reads (the host called `finish` without
+   * draining `nextEvent()`) is dropped.
+   */
+  send(event: EventFromLogic<TMachine> | AgentTimerEvent): boolean;
   /** Settles the run: stops what is still running and returns the outcome. */
   finish(): Promise<AgentRunResult<TMachine>>;
 }
@@ -3019,11 +3062,13 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   let finished = false;
   let ignoredEvent: EventObject | undefined;
 
-  const enqueue = (event: EventObject): void => {
+  const enqueue = (event: EventObject, fromHost = false): void => {
     if (finished) {
       return;
     }
-    fromMailbox.add(event);
+    if (!fromHost) {
+      fromMailbox.add(event);
+    }
     const waiting = wake;
     if (waiting) {
       wake = undefined;
@@ -3150,8 +3195,28 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     recheck();
   };
 
-  const onAbort = () =>
+  const abortNow = () =>
     stopRun({ cause: "aborted", error: options.signal?.reason ?? new Error("Aborted") });
+  // The abort event the machine has been sent but has not yet handled.
+  let pendingAbort: EventObject | undefined;
+  // True once the machine applied the abort event: it owns the wind-down.
+  let abortApplied = false;
+  // Events brought in through `send`, as opposed to a direct `transition`.
+  const sentEvents = new WeakSet<object>();
+  let abortTimer: ReturnType<typeof setTimeout> | undefined;
+  const onAbort = () => {
+    const abortWith = options.abortWith;
+    if (abortWith === undefined || runtime.send(abortWith.event) === false) {
+      abortNow();
+      return;
+    }
+    pendingAbort = abortWith.event as EventObject;
+    if (abortWith.timeout !== undefined) {
+      abortTimer = setTimeout(() => {
+        if (current?.status === "active") abortNow();
+      }, abortWith.timeout);
+    }
+  };
 
   const emitFromRoot = (event: EventObject): void => {
     onTrace({ type: "emit", event: event as EmittedFrom<TMachine> });
@@ -3596,7 +3661,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       });
 
       if (options.signal) {
-        if (options.signal.aborted) {
+        if (options.signal.aborted && options.abortWith !== undefined) {
+          onAbort();
+        } else if (options.signal.aborted) {
           stopReason = {
             cause: "aborted",
             error: options.signal.reason ?? new Error("Aborted"),
@@ -3659,6 +3726,17 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       if (stopReason !== undefined) {
         return [state, []];
       }
+      // Once aborted, the abort event goes first: a host's direct event (the
+      // init event of `runToQuiescence`) is dropped until the machine has
+      // handled the abort, so it cannot finish the run past the abort.
+      if (
+        pendingAbort !== undefined &&
+        (event as unknown) !== pendingAbort &&
+        !fromMailbox.has(event as object) &&
+        !sentEvents.has(event as object)
+      ) {
+        return [state, []];
+      }
       event = toTimerInput(event as EventObject) as typeof event;
       // Host-supplied attempts are checked before the machine moves, so a
       // non-JSON value fails loudly without leaving a half-applied event.
@@ -3677,6 +3755,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         !fromMailbox.has(event as object) &&
         (next as unknown) === (state as unknown) &&
         effects.length === 0;
+      if ((event as unknown) === pendingAbort) {
+        pendingAbort = undefined;
+        abortApplied = !ignored;
+        // The machine had no transition for the abort event: abort as usual.
+        if (ignored) {
+          abortNow();
+          return [state, []];
+        }
+      }
       if (ignored) {
         ignoredEvent = event as EventObject;
       }
@@ -3730,12 +3817,34 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       }
     },
 
+    send(event) {
+      if (finished) {
+        throw new AgentError(
+          "runtime-finished",
+          "createAgentRuntime: the run has finished; start a new runtime to send it events.",
+        );
+      }
+      if (stopReason !== undefined || (current !== undefined && current.status !== "active")) {
+        return false;
+      }
+      sentEvents.add(event);
+      enqueue(event as EventObject, true);
+      return true;
+    },
+
     async finish() {
       if (finished) {
         throw new AgentError(
           "runtime-finished",
           "createAgentRuntime: `finish` was already called.",
         );
+      }
+      clearTimeout(abortTimer);
+      // A still-active machine at settle after an abort aborts as usual: the
+      // loop never applied the abort event, or the machine handled it but
+      // came to rest short of a final state (nothing left can finish it).
+      if ((pendingAbort !== undefined || abortApplied) && current?.status === "active") {
+        abortNow();
       }
       // A decision's usage is queued after the event it chose; when that event
       // ends the machine, the usage is never handed out. Journal it out of

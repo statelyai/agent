@@ -77,6 +77,21 @@ export type {
   HandoffMachine,
 } from "./handoff.js";
 
+export { createApprovalBatchMachine } from "./approval-batch.js";
+export type {
+  ApprovalBatchContext,
+  ApprovalBatchEvent,
+  ApprovalBatchInput,
+  ApprovalBatchMachine,
+  ApprovalBatchOutput,
+  ApprovalCallInput,
+  ApprovalCallResult,
+  ApprovalDecision,
+  ApproveAlwaysRule,
+  CreateApprovalBatchMachineConfig,
+  ProposedCall,
+} from "./approval-batch.js";
+
 export type {
   PresetEntry,
   PresetMachine,

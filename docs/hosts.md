@@ -308,10 +308,85 @@ const result = await runtime.finish();
 Write the loop yourself when `runAgent` cannot express the host:
 
 - **Non-blocking durable host.** A Durable Object woken by alarms runs one leg per wake-up and cannot await a whole run.
-- **Events pushed mid-run.** A socket delivers user events while requests are in flight; pass each one to `runtime.transition` between effects.
+- **Events pushed mid-run.** A socket delivers user events while requests are in flight; hand each one to `runtime.send(event)`.
 - **Custom stop or checkpoint policy.** Persist after selected transitions, or stop before `nextEvent()` returns `undefined`.
 
 Each operation is described in [The runtime loop](steps.md).
+
+### Host events mid-run
+
+`runtime.send(event)` puts a host event in the run's mailbox, behind whatever already arrived. A `nextEvent()` parked on a pending request resolves with it; the loop applies it with `transition` like any other event.
+
+```ts no-check
+const runtime = createAgentRuntime(machine, { executors });
+socket.on("message", (event) => runtime.send(event));
+cancelButton.onclick = () => runtime.send({ type: "CANCEL" });
+
+let [state, effects] = await runtime.start({ input });
+await runtime.execute(effects);
+for (let event; (event = await runtime.nextEvent());) {
+  [state, effects] = runtime.transition(state, event);
+  await runtime.execute(effects);
+}
+const result = await runtime.finish();
+```
+
+- **Ordering.** One FIFO with request completions, child messages, and timers. A send during a pending invoke is handed out by the next `nextEvent()`; the invoke keeps running unless the transition leaves its state, which aborts its `signal`.
+- **Journal.** A sent event is a log entry, the same as `runAgent({ event })`. Replaying `result.events` lands on the same state.
+- **Unhandled.** A sent event the state has no transition for is reported as `result.ignored`.
+- **Before `start`.** Queued; the first `nextEvent()` hands it out. Returns `true`.
+- **After the run stopped or the machine left `active`.** Dropped. Returns `false`.
+- **After `finish`.** Throws `AgentError` `runtime-finished`.
+- **Not read.** A send after `nextEvent()` returned `undefined` waits for another `nextEvent()`; `finish` drops it.
+
+`send` is asynchronous: the machine moves when the loop's next `transition` applies the event. For a cancel that must take effect before the caller returns, call `transition` from outside the loop on the loop's own `state`:
+
+```ts no-check
+let state, effects;
+[state, effects] = await runtime.start({ input });
+await runtime.execute(effects);
+
+async function cancelAll() {
+  if (state.status !== "active") return;
+  [state, effects] = runtime.transition(state, { type: "CANCEL" });
+  await runtime.execute(effects);
+}
+
+for (let event; (event = await runtime.nextEvent());) {
+  [state, effects] = runtime.transition(state, event);
+  await runtime.execute(effects);
+}
+```
+
+Invariants for a direct `transition`:
+
+- **One `state`.** The loop and the out-of-band caller read and write the same variable; a stale `state` forks the run.
+- **Effects executed.** Pass every returned `effects` to `execute`.
+- **Active only.** No `transition` once `state.status` is not `active`.
+- **Loop exits on its own.** A parked `nextEvent()` returns `undefined` once the cancel stops the in-flight work.
+
+### Abort through the machine
+
+`options.signal` alone is a hard stop: the run settles `{ status: "error", cause: "aborted" }` and the machine sees nothing. Add `abortWith` to let the machine handle the abort, for a `cancelled` final state, cleanup invokes, or an `afterRun` hook:
+
+```ts no-check
+const result = await runAgent(machine, {
+  executors,
+  input,
+  signal: request.signal,
+  abortWith: { event: { type: "CANCEL" }, timeout: 5_000 },
+});
+// result.status === "done", result.snapshot.value === "cancelled"
+```
+
+- **On abort.** `event` is sent into the run (`runtime.send`); the run continues until the machine settles.
+- **Abort first.** Until the machine has applied `event`, the host's direct `transition` events are dropped, including `runAgent`'s own `event`. A signal already aborted at start therefore applies `event` before anything else.
+- **Fallback.** `cause: "aborted"` as without `abortWith` when:
+  - the state has no transition for `event`;
+  - the loop never applies it;
+  - the machine handled it but settles still `active` (an idle wait nothing will answer), immediately and without waiting for `timeout`;
+  - `timeout` ms pass while the machine is still active and working.
+- **Journal.** The abort event is a log entry; replay reaches the same final state.
 
 ## Uncontrolled XState actor
 

@@ -1,0 +1,17 @@
+{
+  "//": "Declaration-portability canary for consumers built with `composite: true` (project references). Imports @statelyai/agent BY NAME (resolving to the built dist via package.json exports), re-exports inferred machine/runtime/result types, and fails with TS2742 if any of them references a type only reachable through an internal dist chunk. Run by src/declaration-emit.test.ts; outDir is overridden there to a temp dir.",
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": ".",
+    "outDir": "dist-types",
+    "types": []
+  },
+  "include": ["index.ts"]
+}
