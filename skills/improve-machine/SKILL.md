@@ -11,7 +11,7 @@ You improve a **policy**: the machine that decides how the agent works toward it
 locate inputs → read traces → diagnose → propose one diff → gate (≤ 3 repairs) → replay train → replay held-out → recommend or discard → record → pull request
 ```
 
-This is step 4 of 4, after `loop-to-machine`, `add-traces`, and `add-evals`. To author a JSON policy from scratch, use the `generate-machine` skill. Concept page: [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md).
+This is step 4 of 4, after `loop-to-machine`, `add-traces`, and `add-evals`. To author a JSON policy from scratch, use the `generate-machine` skill. Concept page: [Environment and policy](../../docs/environment-and-policy.md).
 
 ## Hard rules
 

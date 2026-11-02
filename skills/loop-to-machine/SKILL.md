@@ -47,7 +47,7 @@ Read the loop and fill this table before writing anything. Each row maps to a ma
 | A rule: an `if`, a prompt line, a check after the fact | A guard on the transition it protects |
 | A model call that produces content | A text request in `setupAgent({ requests })`, invoked by one state |
 | One SDK tool call that picks the action and carries its content (`send_email({ … })`) | A text request with those tools, then guards on the returned call: exactly one, offered, schema-valid. `agent.decide` would hide your tool names and descriptions |
-| N tool calls per model turn, each needing approval | First port: the request returns the calls; a state holds them in context and waits for a verdict per call. Later step: `agent.act` ([docs/act.md](https://github.com/statelyai/agent/blob/next/docs/act.md)), each call an event the state queues |
+| N tool calls per model turn, each needing approval | First port: the request returns the calls; a state holds them in context and waits for a verdict per call. Later step: `agent.act` ([docs/act.md](../../docs/act.md)), each call an event the state queues |
 | A persisted "always allow" rule | Data loaded into input or context, read by a guard. Saving a rule is a recorded effect |
 | A tool the browser runs (no `execute`) | The request ends with the tool calls; an idle state waits for `TOOL_RESULTS` |
 | A point where the model picks what to do | A decision state: `agent.decide`, usually a closed choice |
@@ -159,6 +159,6 @@ Report, in this order:
 2. The rule list, each mapped to a guard, a state, or why it was dropped.
 3. The parity table per stand-in model: `same / intended / regression`, one line per `intended` row with its reason. Say whether the baseline was a run or a spec.
 4. The `canReach` results and the loosened-guard test.
-5. The machine rendered: `describeMachine(machine)` output, and how to watch it live in the Stately inspector (pass `@statelyai/sdk`'s `inspector.inspect` as `runAgent`'s `inspect`; see [docs/observability.md](https://github.com/statelyai/agent/blob/next/docs/observability.md)).
+5. The machine rendered: `describeMachine(machine)` output, and how to watch it live in the Stately inspector (pass `@statelyai/sdk`'s `inspector.inspect` as `runAgent`'s `inspect`; see [docs/observability.md](../../docs/observability.md)).
 6. Anything you had to decide that the user should confirm, including where message history lives.
 7. Next step: `add-traces`.
