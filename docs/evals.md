@@ -298,6 +298,8 @@ interface ParityResult<TScenario> {
 }
 ```
 
+[examples/retrofit-parity](https://github.com/statelyai/agent/tree/next/examples/retrofit-parity) ports a loop with recorded golden runs and asserts its one reviewed difference.
+
 ## Suite coverage
 
 `traceCoverage` (from `@statelyai/agent/testing`) reports which states and handlers no trace exercised, so a suite can say how much of the machine it covers.

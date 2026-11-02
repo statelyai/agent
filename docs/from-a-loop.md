@@ -277,6 +277,10 @@ expect(sendsUnapproved.reachable).toBe(false);
 
 `everyPath` scripts the `assist` text and the `sendEmail` output, and sets `maxDepth` and `maxPaths` high enough that all 766 paths through the eight rounds are explored. The loop's approval was an `if` inside the tool loop, and no test could list the paths around it. Here the claim holds for every path. See [Testing and verification](verify.md) for `explorePaths`, `simulateAgent`, and `lintAgentMachine`.
 
+### Recorded runs and parity
+
+To check a port against the loop's actual effects, record the loop's model and tool calls with `createRecorder`, replay the machine against the recordings with `compareRecordings`, and label outcomes with `compareRuns`. [`examples/retrofit-parity`](../examples/retrofit-parity) does all three with no API key. See [Parity with the code you replace](evals.md#parity-with-the-code-you-replace).
+
 ## Part 2: a factory loop that improves
 
 Part 2 starts from a working software factory. An author writes a patch, a self-check and an independent review run in parallel, and the task's visible tests run. Then the loop ships, retries, or asks a person.
