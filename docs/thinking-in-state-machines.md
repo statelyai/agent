@@ -312,7 +312,7 @@ A machine that breaks this rule still runs, but its replays diverge, and a diver
 
 The design work above assumes you are writing the machine. Existing machines can still be hosted without Agent-specific authoring.
 
-- The machine already exists and contains nothing agent-specific. Any machine whose invokes resolve to values and whose events you can enumerate can be driven. Use [`getAcceptedEvents(snapshot)`](human-in-the-loop.md) for the candidates and call `resolveDecision` gated by `snapshot.can(event)`. See [plain-xstate](../examples/plain-xstate/index.ts).
+- The machine already exists and contains nothing agent-specific. Any machine whose invokes resolve to values and whose events you can enumerate can be driven. Use [`getAcceptedEvents(snapshot)`](human-in-the-loop.md) for the candidates and call `resolveDecision` gated by `snapshot.can(event)`. See [plain-xstate](https://github.com/statelyai/agent/blob/next/examples/plain-xstate/index.ts).
 
 Prompts do not have to live in the machine. Leave bare `src` strings and bind a separate prompt map through the `actors` option of `runToQuiescence`, which is shorthand for `machine.provide({ actors })`. The explicit invokes remain part of the graph, which is what lets a machine round-trip through JSON with `setupAgent.fromConfig`. See [Machines as data](machines-as-data.md).
 

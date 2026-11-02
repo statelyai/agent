@@ -92,6 +92,7 @@ describe("example human waits", () => {
       "machine-as-tool#refundMachine",
       "port-walkthrough#supportLoopMachine",
       "retrofit#supportMachine",
+      "retrofit-parity#refundLoopMachine",
       "review-tool-calls#reviewToolCallsMachine",
       "review-tool-calls#toolCallingMachine",
       "self-improving-refunds#refundDeskMachine",

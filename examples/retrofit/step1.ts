@@ -15,8 +15,7 @@ import { openai } from "@ai-sdk/openai";
 import { createAiSdkExecutors } from "@statelyai/agent/ai-sdk";
 import {
   createAgentSchemas,
-  createAgentRuntime,
-  runToQuiescence,
+  runAgent,
   setupAgent,
   type AgentRequestExecutors,
 } from "@statelyai/agent";
@@ -172,14 +171,10 @@ export async function runSupportStep1(
   ticket: string,
   executors = buildExecutors(),
 ): Promise<Step1Result | Step1Pending> {
-  const result = await runToQuiescence(
-    createAgentRuntime(supportMachineStep1, {
-      executors,
-    }),
-    {
-      input: { ticket },
-    },
-  );
+  const result = await runAgent(supportMachineStep1, {
+    executors,
+    input: { ticket },
+  });
   if (result.status !== "done") throw new Error(`unexpected status ${result.status}`);
 
   if (result.output.pending !== null) {

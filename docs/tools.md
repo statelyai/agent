@@ -114,7 +114,7 @@ const result = await runToQuiescence(
 );
 ```
 
-For approval and progress around real tools, see [review-tool-calls](../examples/review-tool-calls/index.ts).
+For approval and progress around real tools, see [review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts).
 
 ## Execution flow through the host
 
@@ -167,7 +167,7 @@ Build these parts by hand only when the machine owns the loop, such as in a ReAc
 
 Eject from the preset when the tool loop needs machine states of its own:
 
-- To model approval as machine states, with approve, edit, and reject steps that persist and resume, eject to [examples/review-tool-calls](../examples/review-tool-calls/index.ts).
+- To model approval as machine states, with approve, edit, and reject steps that persist and resume, eject to [examples/review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts).
 - To model each think, act, and observe turn as its own transition, use explicit request, tool, and observation states.
 
 > **Note:** There is no built-in MCP client and no built-in tool-approval gate. MCP discovery, auth, and transport are the host's responsibility. Pass the discovered tool descriptors into `tools` like any other tool. See [Scope](scope.md).

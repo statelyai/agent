@@ -35,6 +35,7 @@ export {
   supportLoopMachine,
   runSupportAgent as runPortWalkthroughExample,
 } from "./port-walkthrough/index.js";
+export { refundLoopMachine, runRetrofitParityExample } from "./retrofit-parity/index.js";
 export {
   jsonAgentMachine,
   runJsonAgentDemo,

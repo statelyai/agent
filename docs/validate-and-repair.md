@@ -5,7 +5,7 @@ description: Check model output with your own host code, feed the rejection back
 
 > **Alpha:** `@statelyai/agent` 2.0 is in alpha. APIs can change between releases; pin an exact version. Feedback: [github.com/statelyai/agent](https://github.com/statelyai/agent/issues).
 
-This page builds a machine that asks a model for output, validates it with the app's own code, and sends the rejection back to the model as a repair prompt, up to a fixed number of rounds. The worked version is [examples/generate-and-repair](../examples/generate-and-repair/index.ts).
+This page builds a machine that asks a model for output, validates it with the app's own code, and sends the rejection back to the model as a repair prompt, up to a fixed number of rounds. The worked version is [examples/generate-and-repair](https://github.com/statelyai/agent/blob/next/examples/generate-and-repair/index.ts).
 
 ## When to use this
 
@@ -245,7 +245,7 @@ The score is the branch the seam caused, not a rubric over its text. A candidate
 
 ## Related
 
-- [examples/generate-and-repair](../examples/generate-and-repair/index.ts): the full machine, the validator, and the three scripted tests.
+- [examples/generate-and-repair](https://github.com/statelyai/agent/blob/next/examples/generate-and-repair/index.ts): the full machine, the validator, and the three scripted tests.
 - [Text requests](text-requests.md): finish reasons and `AgentTruncatedError`.
 - [Hosts and executors](hosts.md): the executor contract, and what a host owes a truncated call.
 - [Testing and verification](verify.md): linting, scripted playthroughs, and reachability.

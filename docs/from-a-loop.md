@@ -11,9 +11,9 @@ Part 1 (Steps 1–5) ports a support agent and ends on the tests the port makes 
 
 Part 1's code is in `examples/port-walkthrough`:
 
-- [`before.ts`](../examples/port-walkthrough/before.ts): the loop, runnable with `OPENAI_API_KEY=... npx tsx examples/port-walkthrough/before.ts`.
-- [`index.ts`](../examples/port-walkthrough/index.ts): the machine, and a `runSupportAgent` with the loop's signature and result type.
-- [`index.test.ts`](../examples/port-walkthrough/index.test.ts): four tests that run without an API key.
+- [`before.ts`](https://github.com/statelyai/agent/blob/next/examples/port-walkthrough/before.ts): the loop, runnable with `OPENAI_API_KEY=... npx tsx examples/port-walkthrough/before.ts`.
+- [`index.ts`](https://github.com/statelyai/agent/blob/next/examples/port-walkthrough/index.ts): the machine, and a `runSupportAgent` with the loop's signature and result type.
+- [`index.test.ts`](https://github.com/statelyai/agent/blob/next/examples/port-walkthrough/index.test.ts): four tests that run without an API key.
 
 The loop's model call is this:
 
@@ -60,7 +60,7 @@ The model work moves into executors unchanged. The control flow around it change
 
 ## Starting point: a hand-rolled loop
 
-The starting point is a support agent written as a `while` loop against the AI SDK. The model calls `search` freely, and it can call `sendEmail`, which a human must approve. The full loop is in [`before.ts`](../examples/port-walkthrough/before.ts). Its control flow is these lines:
+The starting point is a support agent written as a `while` loop against the AI SDK. The model calls `search` freely, and it can call `sendEmail`, which a human must approve. The full loop is in [`before.ts`](https://github.com/statelyai/agent/blob/next/examples/port-walkthrough/before.ts). Its control flow is these lines:
 
 ```ts no-check
 if (steps++ >= 8) return { sent, stopped: "step-limit" };
@@ -93,7 +93,7 @@ This loop has four problems:
 
 ## Step 1: implicit phases as explicit states
 
-Each line of the loop becomes a state in [`index.ts`](../examples/port-walkthrough/index.ts):
+Each line of the loop becomes a state in [`index.ts`](https://github.com/statelyai/agent/blob/next/examples/port-walkthrough/index.ts):
 
 | In the loop                                    | In the machine                                     |
 | ---------------------------------------------- | -------------------------------------------------- |
@@ -190,7 +190,7 @@ const result = await runAgent(supportLoopMachine, {
 });
 ```
 
-With `onIdle`, the call returns only `done` or `error`. `runSupportAgent` in [`index.ts`](../examples/port-walkthrough/index.ts) wraps this call with the loop's signature: it returns `result.output` and rethrows a run that settles `error`. The invokes have no `onError`, so an SDK error still rejects the call, as it did in the loop.
+With `onIdle`, the call returns only `done` or `error`. `runSupportAgent` in [`index.ts`](https://github.com/statelyai/agent/blob/next/examples/port-walkthrough/index.ts) wraps this call with the loop's signature: it returns `result.output` and rethrows a run that settles `error`. The invokes have no `onError`, so an SDK error still rejects the call, as it did in the loop.
 
 For a single leg that hands the pause back to a caller, leave out `onIdle` and resume later with a second `runAgent` call that passes `{ snapshot, event }`. This is the form an HTTP handler wants, because the pause outlives the request. The third test below runs it. [Use in any stack](any-stack.md) runs one machine in local, Express, and Cloudflare hosts. See [Choosing a run mode](choosing-a-run-mode.md) for the full set.
 
@@ -204,9 +204,9 @@ A host that drives the transition loop itself uses `createAgentRuntime`. See [Wr
 
 ## Step 5: the tests
 
-[`index.test.ts`](../examples/port-walkthrough/index.test.ts) has four tests. None of them needs an API key or network access. Each one starts with a comment naming what the `while` loop could not test.
+[`index.test.ts`](https://github.com/statelyai/agent/blob/next/examples/port-walkthrough/index.test.ts) has four tests. None of them needs an API key or network access. Each one starts with a comment naming what the `while` loop could not test.
 
-The model is `examples/mock-model.ts`: the AI SDK's `MockLanguageModelV3` behind the real `createAiSdkExecutors` adapter. Answers are keyed by request name, `assist` for the text request and `chooseAction` for the decision.
+The model is `examples/mock-model.ts`, a file in the repository, not in the package: the AI SDK's `MockLanguageModelV3` behind the real `createAiSdkExecutors` adapter. Answers are keyed by request name, `assist` for the text request and `chooseAction` for the decision.
 
 ### The port runs with no key
 
@@ -277,6 +277,10 @@ expect(sendsUnapproved.reachable).toBe(false);
 
 `everyPath` scripts the `assist` text and the `sendEmail` output, and sets `maxDepth` and `maxPaths` high enough that all 766 paths through the eight rounds are explored. The loop's approval was an `if` inside the tool loop, and no test could list the paths around it. Here the claim holds for every path. See [Testing and verification](verify.md) for `explorePaths`, `simulateAgent`, and `lintAgentMachine`.
 
+### Recorded runs and parity
+
+To check a port against the loop's actual effects, record the loop's model and tool calls with `createRecorder`, replay the machine against the recordings with `compareRecordings`, and label outcomes with `compareRuns`. [`examples/retrofit-parity`](https://github.com/statelyai/agent/blob/next/examples/retrofit-parity) does all three with no API key. See [Parity with the code you replace](evals.md#parity-with-the-code-you-replace).
+
 ## Part 2: a factory loop that improves
 
 Part 2 starts from a working software factory. An author writes a patch, a self-check and an independent review run in parallel, and the task's visible tests run. Then the loop ships, retries, or asks a person.
@@ -285,10 +289,10 @@ The loop works. Part 2 makes its triage improve from its own runs, and keeps its
 
 The code is in `examples/code-review-loop`:
 
-- [`before.ts`](../examples/code-review-loop/before.ts): the factory as a `while` loop with plain injectable dependencies. [`before.test.ts`](../examples/code-review-loop/before.test.ts) runs it with fakes.
-- [`environment.ts`](../examples/code-review-loop/environment.ts): the same factory as a machine.
-- [`policies/`](../examples/code-review-loop/policies): the triage policy versions, as JSON configs. [`policy.ts`](../examples/code-review-loop/policy.ts) runs one as the triage decider.
-- [`run.ts`](../examples/code-review-loop/run.ts): runs the tasks on Claude Code in headless mode. `--improve` runs one improvement round.
+- [`before.ts`](https://github.com/statelyai/agent/blob/next/examples/code-review-loop/before.ts): the factory as a `while` loop with plain injectable dependencies. [`before.test.ts`](https://github.com/statelyai/agent/blob/next/examples/code-review-loop/before.test.ts) runs it with fakes.
+- [`environment.ts`](https://github.com/statelyai/agent/blob/next/examples/code-review-loop/environment.ts): the same factory as a machine.
+- [`policies/`](https://github.com/statelyai/agent/blob/next/examples/code-review-loop/policies): the triage policy versions, as JSON configs. [`policy.ts`](https://github.com/statelyai/agent/blob/next/examples/code-review-loop/policy.ts) runs one as the triage decider.
+- [`run.ts`](https://github.com/statelyai/agent/blob/next/examples/code-review-loop/run.ts): runs the tasks on Claude Code in headless mode. `--improve` runs one improvement round.
 
 The loop's body is this:
 
@@ -500,16 +504,16 @@ pnpm exec tsx examples/code-review-loop/run.ts --policy v0 --no-human
 claude -p "Use the improve-machine skill on examples/code-review-loop. ..."
 ```
 
-The full prompt and its allowed tools are in the [example's README](../examples/code-review-loop/README.md#inside-claude-code-with-the-improve-machine-skill).
+The full prompt and its allowed tools are in the [example's README](https://github.com/statelyai/agent/blob/next/examples/code-review-loop/README.md#inside-claude-code-with-the-improve-machine-skill).
 
 - One change per round. People own the environment, the goal, the objective, and the task split.
 - With the mock executors in `improve.test.ts`, one round from `v0` promotes `v1`: the combined objective rises from 0.900 to 0.925, and the held-out objective from 0.900 to 0.933.
 
 ## Related
 
-- [retrofit](../examples/retrofit/index.ts): a larger loop refactored one step at a time, in the order `before.ts`, `step1.ts`, `step2.ts`, `step3.ts`, and `index.ts`.
+- [retrofit](https://github.com/statelyai/agent/blob/next/examples/retrofit/index.ts): a larger loop refactored one step at a time, in the order `before.ts`, `step1.ts`, `step2.ts`, `step3.ts`, and `index.ts`.
 - [Overview](index.md): what the machine gives you over the loop.
 - [Human in the loop](human-in-the-loop.md): idle states, `meta.interaction`, and resuming.
 - [Environment and policy](environment-and-policy.md): the fixed environment, the generated policy, the objective, and the improvement loop.
-- [code-review-loop](../examples/code-review-loop): Part 2's factory: `before.ts`, the machine, the policies, and the improvement round on Claude Code.
+- [code-review-loop](https://github.com/statelyai/agent/blob/next/examples/code-review-loop): Part 2's factory: `before.ts`, the machine, the policies, and the improvement round on Claude Code.
 - [`skills/improve-machine`](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md): one improvement round from traces, run by an agent.

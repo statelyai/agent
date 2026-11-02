@@ -71,7 +71,7 @@ Two fields are exempt from template evaluation. State, invoke, and transition `m
 
 ## Example: a support ticket config
 
-The config below drives the examples on the rest of this page. The model triages a ticket as escalate or reply, drafts a reply, then waits for a human to approve or reject. The equivalent JSON ships at [examples/json-agent/workflow.json](../examples/json-agent/workflow.json) and is run by [examples/json-agent/index.ts](../examples/json-agent/index.ts). Model IDs are illustrative. Substitute your provider's current models. The config is shown as YAML for readability.
+The config below drives the examples on the rest of this page. The model triages a ticket as escalate or reply, drafts a reply, then waits for a human to approve or reject. The equivalent JSON ships at [examples/json-agent/workflow.json](https://github.com/statelyai/agent/blob/next/examples/json-agent/workflow.json) and is run by [examples/json-agent/index.ts](https://github.com/statelyai/agent/blob/next/examples/json-agent/index.ts). Model IDs are illustrative. Substitute your provider's current models. The config is shown as YAML for readability.
 
 <!-- viz: support-ticket machine: triaging (agent.decide) -> resolved on ESCALATE, -> drafting on REPLY; drafting -> awaitingApproval on draft onDone; awaitingApproval -> resolved on APPROVE or REJECT; mark awaitingApproval as the idle state -->
 
@@ -449,4 +449,4 @@ For comparisons, or for function-valued fields that have no named-reference equi
 - [Generating machines with an LLM](generate-machines.md): the generate → validate → lint → simulate pipeline.
 - [Agent machines](machines.md): the TypeScript authoring form a config lowers to.
 - [Decisions](decisions.md): `agent.decide` from a config.
-- [examples/json-agent](../examples/json-agent/index.ts): a hand-written config, run.
+- [examples/json-agent](https://github.com/statelyai/agent/blob/next/examples/json-agent/index.ts): a hand-written config, run.

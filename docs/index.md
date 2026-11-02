@@ -10,24 +10,24 @@ Stately Agent is XState plus typed model requests, decisions, and host executors
 
 ## Start here
 
-- [Quickstart](quickstart.md)
-- [Thinking in state machines](thinking-in-state-machines.md)
-- [Migrating from a loop](from-a-loop.md)
+- Greenfield, a new agent: [Quickstart](quickstart.md), then [Thinking in state machines](thinking-in-state-machines.md) or a copied [agent pattern](patterns.md).
+- Brownfield, an existing agent loop: [Migrating from a loop](from-a-loop.md), or the shipped `loop-to-machine` skill in `node_modules/@statelyai/agent/skills/`.
 - [Choosing a run mode](choosing-a-run-mode.md)
 - [Advanced: bare XState actors and hand-written executors](advanced.md)
 
 ## Core APIs
 
-| API                                         | Purpose                                                  |
-| ------------------------------------------- | -------------------------------------------------------- |
-| `setupAgent`                                | Schema-first XState setup with Agent request actors      |
-| `createAgentRuntime`                        | Bind executors and expose one durable transition loop    |
-| `runToQuiescence`                           | Drive a runtime to done, idle, or error                  |
-| `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                   |
-| `decideNext`                                | Ask a model for one event a plain XState machine accepts |
-| `describeMachine`                           | Render a machine as plain text for a model               |
-| `isAgentIdle`                               | Distinguish a human wait from a stuck settled machine    |
-| `ContextOf` / `EventOf` / other `*Of` types | Extract setup and machine types                          |
+| API                                         | Purpose                                                                    |
+| ------------------------------------------- | -------------------------------------------------------------------------- |
+| `runAgent`                                  | Run a machine to done or idle; the default entry point                     |
+| `setupAgent`                                | Schema-first XState setup with Agent request actors                        |
+| `createAgentRuntime`                        | Advanced, own the loop: bind executors, expose one durable transition loop |
+| `runToQuiescence`                           | Advanced, own the loop: drive a runtime to done, idle, or error            |
+| `getInteraction` / `eventFromInteraction`   | Render and validate human interactions                                     |
+| `decideNext`                                | Ask a model for one event a plain XState machine accepts                   |
+| `describeMachine`                           | Render a machine as plain text for a model                                 |
+| `isAgentIdle`                               | Distinguish a human wait from a stuck settled machine                      |
+| `ContextOf` / `EventOf` / other `*Of` types | Extract setup and machine types                                            |
 
 ## Entry points
 

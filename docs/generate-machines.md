@@ -107,4 +107,4 @@ Generated machines have these constraints.
 
 - [Machines as data](machines-as-data.md): the config format, its expressions, and its limits.
 - [Testing and verification](verify.md): every check and simulation API in full.
-- [examples/json-agent](../examples/json-agent/index.ts): a hand-written config, run.
+- [examples/json-agent](https://github.com/statelyai/agent/blob/next/examples/json-agent/index.ts): a hand-written config, run.

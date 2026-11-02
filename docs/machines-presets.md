@@ -130,9 +130,9 @@ A preset is a starting point. When you need one more state, a human gate, a diff
 
 Examples to eject toward:
 
-- [review-tool-calls](../examples/review-tool-calls/index.ts): an approval gate.
-- [reflection-writer](../examples/reflection-writer/index.ts): a critique loop.
-- [hierarchical-teams](../examples/hierarchical-teams/index.ts) and [swarm-handoff](../examples/swarm-handoff/index.ts): multi-agent topologies.
+- [review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts): an approval gate.
+- [reflection-writer](https://github.com/statelyai/agent/blob/next/examples/reflection-writer/index.ts): a critique loop.
+- [hierarchical-teams](https://github.com/statelyai/agent/blob/next/examples/hierarchical-teams/index.ts) and [swarm-handoff](https://github.com/statelyai/agent/blob/next/examples/swarm-handoff/index.ts): multi-agent topologies.
 
 ## Versioning
 

@@ -1,0 +1,13 @@
+{
+  "name": "retrofit-parity",
+  "title": "Check a port with recorded runs",
+  "kind": "evaluation",
+  "origin": {
+    "type": "pattern",
+    "source": "A hand-rolled AI SDK refund loop (two tools, one approval) ported to a machine and checked against recorded golden runs, following the loop-to-machine skill"
+  },
+  "comparison": {
+    "targets": ["hand-rolled loop"],
+    "purpose": "before.ts is a generateText loop with lookupOrder and a gated issueRefund. index.ts records the loop's model and tool calls with createRecorder on a MockLanguageModelV3 stand-in, ports it to a machine whose executor is the loop's own generateText call, replays the machine against each recording with compareRecordings, and labels outcomes with compareRuns. index.test.ts needs no API key: every recording replays with no divergence, the one parity difference (small refunds skip approval) is asserted in a REVIEWED map, and canReach proves no path refunds more than the order total."
+  }
+}

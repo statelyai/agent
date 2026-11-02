@@ -75,7 +75,7 @@ answering: {
 
 In `onDone`, `output` is `{ result, messages }`. `output.result` is already validated against the request's output schema and typed from it. In this example the type is `{ answer: string }`, so you read `output.result.answer` directly. The machine needs no parsing step. `output.messages` holds the response messages the executor returned, ready to append to context; see [Messages](messages.md).
 
-> **Note:** Route on `request.name`. Every lowered request carries its `setupAgent({ requests })` key as `name`. A mock executor, or a router that picks providers per request, tells requests apart with `request.name === 'answerQuestion'`. Do not inspect the `system` or `prompt` text. See [examples/context-compaction/index.test.ts](../examples/context-compaction/index.test.ts).
+> **Note:** Route on `request.name`. Every lowered request carries its `setupAgent({ requests })` key as `name`. A mock executor, or a router that picks providers per request, tells requests apart with `request.name === 'answerQuestion'`. Do not inspect the `system` or `prompt` text. See [examples/context-compaction/index.test.ts](https://github.com/statelyai/agent/blob/next/examples/context-compaction/index.test.ts).
 
 ### Narrowing an unknown output outside the machine
 
@@ -111,7 +111,7 @@ export const triageTicket = createTextLogic({
 });
 ```
 
-The mode is derived from the schema automatically. You never set it. See [examples/triage/index.ts](../examples/triage/index.ts).
+The mode is derived from the schema automatically. You never set it. See [examples/triage/index.ts](https://github.com/statelyai/agent/blob/next/examples/triage/index.ts).
 
 ### Reasoning
 
@@ -161,7 +161,7 @@ const result = await runToQuiescence(
 - `onChunk` is observational only. It cannot change the run.
 - A `mode: 'stream'` request needs a `streamText` executor. Without one, `runToQuiescence` fails at bind time.
 
-See [parallel-streams](../examples/parallel-streams/index.ts).
+See [parallel-streams](https://github.com/statelyai/agent/blob/next/examples/parallel-streams/index.ts).
 
 ## Finish reason and truncation
 
@@ -240,7 +240,7 @@ export const draftEmail = createTextLogic({
 const agentSetup = setupAgent({ models, context, input, output, actors: { draftEmail } });
 ```
 
-Because `draftEmail` is a value, a test can import it and drive it with a fake executor without a machine. [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts) shows structured, streaming, and message-based `createTextLogic` requests across a multi-state workflow.
+Because `draftEmail` is a value, a test can import it and drive it with a fake executor without a machine. [examples/email-drafter/agent-logic.ts](https://github.com/statelyai/agent/blob/next/examples/email-drafter/agent-logic.ts) shows structured, streaming, and message-based `createTextLogic` requests across a multi-state workflow.
 
 ## Related
 

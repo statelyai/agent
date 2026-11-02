@@ -268,11 +268,11 @@ test("routes a double charge to billing", async () => {
 - `doDecide` receives `{ state, questions }`. The AI SDK wraps a plain `state` in one part, `[{ type: "json", value }]`, so read the machine's evidence from `state[0].value`. Record both to assert on the evidence and the questions the machine sent.
 - To script TypeSafe confidence, return `providerMetadata: { typesafe: { confidence: { team: 0.9 } } }` from `doDecide`.
 - The AI SDK validates answers: a `choice` must be one of the labels and the most probable one, `probabilities` must sum to 1, and a score with `probabilities` must equal their weighted mean. Omit `probabilities` from scripted answers unless a test needs them.
-- The repository's examples share one scripted judge that keys answers by question id; see [examples/mock-judge.ts](../examples/mock-judge.ts).
+- The repository's examples share one scripted judge that keys answers by question id; see [examples/mock-judge.ts](https://github.com/statelyai/agent/blob/next/examples/mock-judge.ts).
 
 ## Example
 
-[examples/corrective-rag](../examples/corrective-rag/index.ts) grades retrieved documents with one boolean question per document in a single `experimental_decide` call, keeps the ones whose probability clears `RELEVANCE_THRESHOLD`, and routes to a query rewrite when none survive. The rewrite and the answer stay text requests.
+[examples/corrective-rag](https://github.com/statelyai/agent/blob/next/examples/corrective-rag/index.ts) grades retrieved documents with one boolean question per document in a single `experimental_decide` call, keeps the ones whose probability clears `RELEVANCE_THRESHOLD`, and routes to a query rewrite when none survive. The rewrite and the answer stay text requests.
 
 ## Related
 
