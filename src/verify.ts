@@ -20,6 +20,7 @@ import {
   type AnyActorLogic,
   type AnyMachineSnapshot,
   type AnyStateMachine,
+  type EventObject,
 } from "xstate";
 import type { ChosenEvent, StandardSchemaV1 } from "./types.js";
 import { AgentError } from "./errors.js";
@@ -604,17 +605,31 @@ interface PendingInvoke {
   src: string;
   input?: unknown;
   logic?: unknown;
+  /** The live child actor (invoked or spawned), for `children: "explore"`. */
+  ref?: ChildRef;
+}
+
+// The parts of a pure-transition child actor `children: "explore"` reads.
+interface ChildRef {
+  getSnapshot?: () => unknown;
+  options?: { input?: unknown };
+  _parent?: unknown;
+  _initialEffects?: unknown;
 }
 
 function pendingInvokes(step: AgentStep): PendingInvoke[] {
   const out: PendingInvoke[] = [];
+  const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
   for (const metadata of getPendingInvokes(step.snapshot as AnyMachineSnapshot)) {
     if (typeof metadata.src === "string") {
+      const ref = children[metadata.id];
       out.push({
         id: metadata.id,
         src: metadata.src,
-        input: metadata.input,
+        // A machine child's snapshot carries no `input`; its actor options do.
+        input: metadata.input ?? ref?.options?.input,
         logic: metadata.logic,
+        ref,
       });
     }
   }
@@ -1083,20 +1098,26 @@ export interface ExplorePathsOptions {
    */
   interleave?: "idle" | "pending";
   /**
-   * How an invoked child state machine with no `outputs` entry settles.
-   * `"outputs"` (default): it is a `needs-output` block like any other src.
-   * `"explore"`: the child is explored on its own with the same options (and
-   * its own invoke input), to at most 4 nested levels. Each distinct `output`
-   * of its `done` terminals forks the parent as an output, each distinct
-   * failure of its `error` terminals forks a failing branch, and a child
-   * that can stall `idle` adds an `idle` terminal. Child idle waits are not
+   * How a child state machine (invoked, or spawned with `enq.spawn`) with no
+   * `outputs` entry settles. `"outputs"` (default): it is a `needs-output`
+   * block like any other src. `"explore"`: the child is explored on its own
+   * with the same options (and its own invoke or spawn input), to at most 4
+   * nested levels. Each distinct `output` of its `done` terminals forks the
+   * parent as an output, each distinct failure of its `error` terminals
+   * forks a failing branch, each distinct event it sends its parent
+   * (`sendTo(parent, …)`) forks the parent receiving it, and a child that
+   * can stall `idle` adds an `idle` terminal. Child idle waits are not
    * parent fork points. A child search that was incomplete also ends the
    * parent branch `needs-output` for that src, so the parent report is not
    * complete.
    *
-   * Invoked children only; spawned children are not explored. An invoked
-   * child receives only the events its parent forwards or the host sends
-   * it, so the child search offers external events only for the types
+   * Bounded: each child is explored independently. Its events and outputs
+   * are not correlated: any of its events, each at most once per path and
+   * in any order, can reach the parent before it settles. Several pending
+   * explored children settle in any order; other combinations are not
+   * enumerated beyond `interleave`. A child receives only the events its
+   * parent forwards or the host sends it, so the child search offers
+   * external events only for the types
    * {@link ExplorePathsOptions.childEvents} lists for its src (none by
    * default). A child wait that accepts an event not listed leaves the
    * child search incomplete.
@@ -1209,6 +1230,8 @@ interface InvokeFork {
   incompleteSrc?: string;
   /** Text requests resolve to `{ result, messages }`, not the bare output. */
   isText?: boolean;
+  /** An explored child's events to its parent, each delivered at most once per path. */
+  events?: EventObject[];
   /**
    * A decision invoke has no canned output of its own — its success branch is
    * the per-candidate-event fork the branch-point logic already does. So the
@@ -1261,8 +1284,26 @@ function distinctValues(values: unknown[]): unknown[] {
 interface ChildOutcome {
   outputs: unknown[];
   errors: unknown[];
+  /** Distinct events the child sends its parent on some explored path. */
+  events: EventObject[];
   stalls: boolean;
   complete: boolean;
+}
+
+// The events a child's effects send to `parent` (`sendTo(parent, …)`).
+function eventsToParent(effects: unknown, parent: unknown): EventObject[] {
+  if (parent === undefined || !Array.isArray(effects)) {
+    return [];
+  }
+  return effects.flatMap((effect) =>
+    isRecord(effect) &&
+    effect["type"] === "@xstate.sendTo" &&
+    effect["target"] === parent &&
+    isRecord(effect["event"]) &&
+    typeof effect["event"]["type"] === "string"
+      ? [effect["event"] as EventObject]
+      : [],
+  );
 }
 
 // Every value a JSON Schema admits when that set is finite and small: a
@@ -1357,6 +1398,33 @@ interface ExploreNode {
   step: AgentStep;
   path: ChosenEvent[];
   depth: number;
+  /** Child-to-parent events already delivered on this path (`<child id>\u0000<event JSON>`). */
+  delivered?: ReadonlySet<string> | undefined;
+}
+
+// An explored child starts from its pure-transition actor's snapshot, which
+// keeps the parent link `sendTo(parent, …)` needs, with the requests a fresh
+// start of the same logic and input discovers.
+function childStartStep(machine: AnyStateMachine, input: unknown, ref?: ChildRef): AgentStep {
+  const fresh = initialAgentStep(machine, input);
+  const snapshot = ref?.getSnapshot?.();
+  return isRecord(snapshot) && snapshot["status"] === "active"
+    ? { ...fresh, snapshot: snapshot as unknown as AnyMachineSnapshot }
+    : fresh;
+}
+
+// Drops delivered child events whose child is no longer running, so a child
+// started again under the same id can send them again.
+function pruneDelivered(
+  delivered: ReadonlySet<string> | undefined,
+  step: AgentStep,
+): ReadonlySet<string> | undefined {
+  if (delivered === undefined || delivered.size === 0) {
+    return delivered;
+  }
+  const running = step.snapshot.children ?? {};
+  const kept = [...delivered].filter((key) => key.slice(0, key.indexOf("\u0000")) in running);
+  return kept.length === delivered.size ? delivered : new Set(kept);
 }
 
 // Shared engine for explorePaths/canReach. Without `stopWhen` it walks depth
@@ -1371,12 +1439,16 @@ function explore(
   // For an explored child: the external event types that can reach it.
   // Undefined at the root, where every accepted event can arrive.
   deliverable?: ReadonlySet<string>,
+  // For an explored child: its pure-transition actor, whose parent link
+  // makes `sendTo(parent, …)` observable.
+  childRef?: ChildRef,
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
   doneOutputs: unknown[];
   failures: unknown[];
   undeliverable: string[];
+  parentEvents: EventObject[];
 } {
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 200;
@@ -1465,12 +1537,17 @@ function explore(
   // `children: "explore"`: a child machine explored on its own, once per
   // (logic, input). Its unexpanded and vacuous types join this report's.
   const childCache = new Map<unknown, Map<string, ChildOutcome>>();
-  const exploreChild = (src: string, logic: AnyStateMachine, input: unknown): ChildOutcome => {
+  const exploreChild = (
+    src: string,
+    logic: AnyStateMachine,
+    input: unknown,
+    ref?: ChildRef,
+  ): ChildOutcome => {
     if (nesting >= MAX_CHILD_NESTING) {
       unexplored.push(
         `child: src '${src}' is nested deeper than ${MAX_CHILD_NESTING} machines; not explored`,
       );
-      return { outputs: [], errors: [], stalls: false, complete: false };
+      return { outputs: [], errors: [], events: [], stalls: false, complete: false };
     }
     let key: string | undefined;
     try {
@@ -1491,6 +1568,7 @@ function explore(
       undefined,
       nesting + 1,
       new Set(options.childEvents?.[src] ?? []),
+      ref,
     );
     if (child.undeliverable.length > 0) {
       unexplored.push(
@@ -1502,6 +1580,7 @@ function explore(
     const outcome: ChildOutcome = {
       outputs: distinctValues(child.doneOutputs),
       errors: distinctValues(child.failures),
+      events: distinctValues(child.parentEvents) as EventObject[],
       stalls: child.report.terminals.some((terminal) => terminal.status === "idle"),
       complete: isExplorationComplete(child.report) && child.undeliverable.length === 0,
     };
@@ -1532,16 +1611,22 @@ function explore(
       !failures &&
       isMachineLogic(invoke?.logic)
     ) {
-      const child = exploreChild(src, invoke.logic, invoke.input);
+      const child = exploreChild(src, invoke.logic, invoke.input, invoke.ref);
       if (
         child.outputs.length === 1 &&
         child.errors.length === 0 &&
+        child.events.length === 0 &&
         !child.stalls &&
         child.complete
       ) {
         return { output: child.outputs[0] };
       }
-      if (child.outputs.length === 0 && child.errors.length === 0 && !child.stalls) {
+      if (
+        child.outputs.length === 0 &&
+        child.errors.length === 0 &&
+        child.events.length === 0 &&
+        !child.stalls
+      ) {
         return { blocked: true };
       }
       return {
@@ -1550,6 +1635,7 @@ function explore(
           errors: child.errors,
           recordError: true,
           outputs: child.outputs,
+          events: child.events,
           stalls: child.stalls,
           ...(child.complete ? {} : { incompleteSrc: src }),
         },
@@ -1569,6 +1655,22 @@ function explore(
     }
     return outputs.length === 1 ? { output: outputs[0] } : { blocked: true };
   };
+
+  // A pending invoke `children: "explore"` explores rather than scripts.
+  const isExploredChild = (invoke: PendingInvoke): boolean =>
+    options.children === "explore" &&
+    !(invoke.src in outputScript) &&
+    !errorsFor(invoke.src) &&
+    isMachineLogic(invoke.logic);
+  // The other pending explored children, as forks of their own.
+  const siblingForks = (invokes: PendingInvoke[]): InvokeFork[] =>
+    invokes.filter(isExploredChild).flatMap((invoke) => {
+      const settle = settleFor(invoke.id, invoke.src, false, invoke);
+      if ("fork" in settle) {
+        return [settle.fork];
+      }
+      return "output" in settle ? [{ id: invoke.id, errors: [], outputs: [settle.output] }] : [];
+    });
 
   const reachedStates = new Set<string>();
   const reachedValues: unknown[] = [];
@@ -1593,16 +1695,19 @@ function explore(
   // `dedupeBy` key → the shallowest depth it was explored at.
   const visited = new Map<string, number>();
 
-  const recordState = (snapshot: AnyMachineSnapshot): void => {
-    const key = JSON.stringify(snapshot.value);
+  const parentEvents: EventObject[] = [];
+  const parent = childRef?._parent;
+  const recordState = (step: AgentStep, effects: unknown = step.actions): void => {
+    const key = JSON.stringify(step.snapshot.value);
     if (!reachedStates.has(key)) {
       reachedStates.add(key);
-      reachedValues.push(snapshot.value);
+      reachedValues.push(step.snapshot.value);
     }
+    parentEvents.push(...eventsToParent(effects, parent));
   };
 
-  const initial = initialAgentStep(machine, options.input);
-  recordState(initial.snapshot);
+  const initial = childStartStep(machine, options.input, childRef);
+  recordState(initial, childRef?._initialEffects ?? initial.actions);
   if (stopWhen?.(initial.snapshot)) {
     witness = [];
   }
@@ -1636,6 +1741,8 @@ function explore(
     blockedSrc?: string;
     hit?: boolean;
     fork?: InvokeFork;
+    /** Other pending explored children, which can settle or send first. */
+    siblings?: InvokeFork[];
     pending?: { id: string; output: unknown };
   } => {
     let current = step;
@@ -1663,7 +1770,7 @@ function explore(
           };
         }
         current = resolveAgentStep(machine, current, request, asTextResult(settle.output));
-        recordState(current.snapshot);
+        recordState(current);
         continue;
       }
       if (request && request.kind === "decision") {
@@ -1686,11 +1793,19 @@ function explore(
           : { step: current };
       }
       // No request: maybe a pending scripted invoke, else a wait.
-      const [invoke] = pendingInvokes(current);
+      const [invoke, ...others] = pendingInvokes(current);
       if (invoke) {
         const settle = settleFor(invoke.id, invoke.src, false, invoke);
+        const siblings = isExploredChild(invoke) ? siblingForks(others) : [];
         if ("fork" in settle) {
-          return { step: current, fork: settle.fork };
+          return { step: current, fork: settle.fork, siblings };
+        }
+        if ("output" in settle && siblings.length > 0) {
+          return {
+            step: current,
+            fork: { id: invoke.id, errors: [], outputs: [settle.output] },
+            siblings,
+          };
         }
         if ("blocked" in settle) {
           return { step: current, blockedSrc: invoke.src };
@@ -1699,7 +1814,7 @@ function explore(
           return { step: current, pending: { id: invoke.id, output: settle.output } };
         }
         current = resolveAgentStep(machine, current, invoke.id, settle.output);
-        recordState(current.snapshot);
+        recordState(current);
         continue;
       }
       return { step: current };
@@ -1755,10 +1870,49 @@ function explore(
         continue;
       }
       const next = transitionAgentStep(machine, settled, event);
-      recordState(next.snapshot);
+      recordState(next);
       yield { step: next, path: [...path, event], depth: depth + 1 };
     }
   }
+
+  const failBranch = (
+    settled: AgentStep,
+    path: ChosenEvent[],
+    depth: number,
+    fork: InvokeFork,
+    error: unknown,
+  ): ExploreNode => {
+    const failed = rejectAgentStep(machine, settled, fork.id, error);
+    recordState(failed);
+    return {
+      step: failed,
+      path: [
+        ...path,
+        { type: `xstate.error.actor.${fork.id}`, ...(fork.recordError ? { error } : {}) },
+      ],
+      depth: depth + 1,
+    };
+  };
+  const doneBranch = (
+    settled: AgentStep,
+    path: ChosenEvent[],
+    depth: number,
+    fork: InvokeFork,
+    output: unknown,
+  ): ExploreNode => {
+    const resolved = resolveAgentStep(
+      machine,
+      settled,
+      fork.id,
+      fork.isText ? asTextResult(output) : output,
+    );
+    recordState(resolved);
+    return {
+      step: resolved,
+      path: [...path, { type: `xstate.done.actor.${fork.id}`, output }],
+      depth: depth + 1,
+    };
+  };
 
   const maxDepthTerminal = (settled: AgentStep, path: ChosenEvent[]): void => {
     pathsExplored++;
@@ -1766,13 +1920,13 @@ function explore(
     unexplored.push(`max-depth: stopped at path [${path.map((e) => e.type).join(", ")}]`);
   };
 
-  function* expand({ step, path, depth }: ExploreNode): Generator<ExploreNode> {
+  function* expand({ step, path, depth, delivered }: ExploreNode): Generator<ExploreNode> {
     if (witness !== undefined || capped()) {
       return;
     }
     nodesExpanded++;
 
-    const { step: settled, blockedSrc, hit, fork, pending } = advance(step);
+    const { step: settled, blockedSrc, hit, fork, siblings, pending } = advance(step);
     if (hit) {
       witness = path;
       return;
@@ -1783,7 +1937,9 @@ function explore(
     // (the depth-first walk can reach a key deep before it reaches it
     // shallow).
     if (options.dedupeBy) {
-      const key = options.dedupeBy(settled.snapshot as AnyMachineSnapshot);
+      const key =
+        options.dedupeBy(settled.snapshot as AnyMachineSnapshot) +
+        (delivered?.size ? `\u0001${[...delivered].sort().join("\u0001")}` : "");
       const seenAt = visited.get(key);
       if (seenAt !== undefined && seenAt <= depth) {
         return;
@@ -1799,7 +1955,7 @@ function explore(
         return;
       }
       const resolved = resolveAgentStep(machine, settled, pending.id, pending.output);
-      recordState(resolved.snapshot);
+      recordState(resolved);
       yield { step: resolved, path, depth };
       yield* raceBranches(settled, path, depth);
       return;
@@ -1816,34 +1972,49 @@ function explore(
         if (witness !== undefined || capped()) {
           return;
         }
-        const failed = rejectAgentStep(machine, settled, fork.id, error);
-        recordState(failed.snapshot);
-        yield {
-          step: failed,
-          path: [
-            ...path,
-            { type: `xstate.error.actor.${fork.id}`, ...(fork.recordError ? { error } : {}) },
-          ],
-          depth: depth + 1,
-        };
+        yield failBranch(settled, path, depth, fork, error);
       }
       if (!fork.isDecision) {
         for (const output of fork.outputs) {
           if (witness !== undefined || capped()) {
             return;
           }
-          const resolved = resolveAgentStep(
-            machine,
-            settled,
-            fork.id,
-            fork.isText ? asTextResult(output) : output,
-          );
-          recordState(resolved.snapshot);
-          yield {
-            step: resolved,
-            path: [...path, { type: `xstate.done.actor.${fork.id}`, output }],
-            depth: depth + 1,
-          };
+          yield doneBranch(settled, path, depth, fork, output);
+        }
+        // Explored children settle in any order, and each child event can
+        // reach the parent before any of them settles.
+        for (const other of siblings ?? []) {
+          for (const error of other.errors) {
+            if (witness !== undefined || capped()) {
+              return;
+            }
+            yield failBranch(settled, path, depth, other, error);
+          }
+          for (const output of other.outputs) {
+            if (witness !== undefined || capped()) {
+              return;
+            }
+            yield doneBranch(settled, path, depth, other, output);
+          }
+        }
+        for (const child of [fork, ...(siblings ?? [])]) {
+          for (const event of child.events ?? []) {
+            if (witness !== undefined || capped()) {
+              return;
+            }
+            const key = `${child.id}\u0000${JSON.stringify(event)}`;
+            if (delivered?.has(key) || !(settled.snapshot as AnyMachineSnapshot).can(event)) {
+              continue;
+            }
+            const next = transitionAgentStep(machine, settled, event);
+            recordState(next);
+            yield {
+              step: next,
+              path: [...path, event as ChosenEvent],
+              depth: depth + 1,
+              delivered: new Set([...(delivered ?? []), key]),
+            };
+          }
         }
         // An explored child that can stall leaves the parent waiting here.
         if (fork.stalls && witness === undefined && !capped()) {
@@ -1949,7 +2120,7 @@ function explore(
       }
       taken++;
       const next = transitionAgentStep(machine, settled, event);
-      recordState(next.snapshot);
+      recordState(next);
       yield { step: next, path: [...path, event], depth: depth + 1 };
     }
 
@@ -1984,7 +2155,7 @@ function explore(
         `Decision '${request.name ?? request.id}' has no candidate the current snapshot ` +
         "accepts (explored, no model call).";
       const failed = rejectAgentStep(machine, settled, request.id, exhausted);
-      recordState(failed.snapshot);
+      recordState(failed);
       yield {
         step: failed,
         path: [...path, { type: `xstate.error.actor.${request.id}` }],
@@ -2016,6 +2187,7 @@ function explore(
         // Drop the reference once taken, so a drained level frees its snapshots.
         level[i] = undefined;
         for (const child of expand(node)) {
+          child.delivered ??= pruneDelivered(node.delivered, child.step);
           (levels[child.path.length] ??= []).push(child);
         }
         if (witness !== undefined || hitPathCap) {
@@ -2027,6 +2199,7 @@ function explore(
   } else if (witness === undefined) {
     const visit = (node: ExploreNode): void => {
       for (const child of expand(node)) {
+        child.delivered ??= pruneDelivered(node.delivered, child.step);
         visit(child);
       }
     };
@@ -2048,6 +2221,7 @@ function explore(
     doneOutputs,
     failures,
     undeliverable: [...undeliverable],
+    parentEvents,
   };
 }
 

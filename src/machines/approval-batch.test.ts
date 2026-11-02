@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { createAsyncLogic, type AnyStateMachine } from "xstate";
 import { createAgentRuntime, getInteraction, runToQuiescence } from "../index.js";
-import { canReach, lintAgentMachine } from "../testing/index.js";
+import { canReach, explorePaths, lintAgentMachine } from "../testing/index.js";
+import { isExplorationComplete } from "../verify.js";
 import { createApprovalBatchMachine, type ApprovalDecision, type ProposedCall } from "./index.js";
 
 const calls: ProposedCall[] = [
@@ -249,5 +250,42 @@ describe("approval-batch call machine: safety", () => {
     expect(
       asked.witness?.some((event) => event.type === "APPROVE" || event.type === "APPROVE_ALWAYS"),
     ).toBe(true);
+  });
+});
+
+describe("approval-batch root: safety", () => {
+  const machine = createApprovalBatchMachine({ execute: recordingExecute().execute });
+  const options = {
+    input: { calls: calls.slice(0, 2) },
+    children: "explore" as const,
+    childEvents: { call: ["APPROVE", "APPROVE_ALWAYS", "REJECT", "RELEASE"] },
+    outputs: { policy: ["allow", "ask", "deny", "bogus"], execute: ["ok"] },
+    errors: { policy: new Error("policy down"), execute: new Error("boom") },
+    payloads: () => ({ REJECT: [{}, { reason: "no" }] }),
+    dedupeBy: (snapshot: { value: unknown; context: unknown }) =>
+      JSON.stringify([snapshot.value, snapshot.context]),
+    maxDepth: 12,
+    maxPaths: 10_000,
+  };
+  const executed = (snapshot: { context: { results: Record<string, { status: string }> } }) =>
+    Object.values(snapshot.context.results).some((result) => result.status === "executed");
+
+  test("the spawned calls are explored to completion from the root", async () => {
+    const report = await explorePaths(machine, options);
+    expect(isExplorationComplete(report)).toBe(true);
+    expect(report.terminals.every((terminal) => terminal.state === "done")).toBe(true);
+  });
+
+  test("a denying policy never executes (complete proof at the root)", async () => {
+    const result = await canReach(machine, executed as never, {
+      ...options,
+      outputs: { ...options.outputs, policy: ["deny"] },
+    });
+    expect(result).toEqual({ reachable: false, complete: true });
+  });
+
+  test("an approving policy executes", async () => {
+    const result = await canReach(machine, executed as never, options);
+    expect(result).toMatchObject({ reachable: true, complete: true });
   });
 });

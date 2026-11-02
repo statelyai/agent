@@ -322,6 +322,113 @@ describe("explorePaths — children: 'explore'", () => {
   });
 });
 
+describe("explorePaths — spawned children", () => {
+  // Each child pauses for approval, tells its parent READY, then waits for RELEASE.
+  const approver = createMachine({
+    context: ({ input }: { input: { id: string } }) => ({ id: input.id }),
+    initial: "asking",
+    states: {
+      asking: { on: { APPROVE: { target: "approved" }, REJECT: { target: "rejected" } } },
+      approved: {
+        entry: (
+          { parent }: { parent?: unknown },
+          enq: { sendTo: (to: unknown, event: unknown) => void },
+        ) => {
+          if (parent) enq.sendTo(parent, { type: "READY" });
+        },
+        on: { RELEASE: { target: "ran" } },
+      },
+      ran: {
+        type: "final",
+        output: ({ context }: { context: { id: string } }) => ({ id: context.id, ran: true }),
+      },
+      rejected: {
+        type: "final",
+        output: ({ context }: { context: { id: string } }) => ({ id: context.id, ran: false }),
+      },
+    },
+  } as never) as AnyStateMachine;
+
+  // Spawns two approvers; both READY opens the barrier.
+  function createBatch() {
+    const agent = setupAgent({
+      context: z.object({ ready: z.number(), settled: z.number() }),
+      events: { READY: z.object({}) },
+      actors: { approver },
+    });
+    return agent.createMachine({
+      context: { ready: 0, settled: 0 },
+      initial: "waiting",
+      states: {
+        waiting: {
+          entry: ({ actors }, enq) => {
+            enq.spawn(actors.approver, { id: "a1", input: { id: "a1" } });
+            enq.spawn(actors.approver, { id: "a2", input: { id: "a2" } });
+          },
+          on: {
+            READY: ({ context }) =>
+              context.ready + 1 === 2
+                ? { target: "released", context: { ready: 2 } }
+                : { context: { ready: context.ready + 1 } },
+          },
+        },
+        released: {},
+        finished: { type: "final" },
+      },
+      on: {
+        "xstate.done.actor": ({ context }) =>
+          context.settled + 1 === 2
+            ? { target: ".finished", context: { settled: 2 } }
+            : { context: { settled: context.settled + 1 } },
+      },
+    });
+  }
+  const childEvents = { approver: ["APPROVE", "REJECT", "RELEASE"] };
+
+  test("default 'outputs': a spawned child machine is a needs-output block", async () => {
+    const report = await explorePaths(createBatch());
+    expect(report.terminals).toMatchObject([{ status: "needs-output", missingSrc: "approver" }]);
+  });
+
+  test("'explore': each spawned child is explored with its spawn input", async () => {
+    const report = await explorePaths(createBatch(), {
+      children: "explore",
+      childEvents,
+      maxDepth: 10,
+      maxPaths: 10_000,
+    });
+    expect(isExplorationComplete(report)).toBe(true);
+    const outputs = report.terminals.flatMap((t) =>
+      t.path.flatMap((e) => (e.type.startsWith("xstate.done.actor.") ? [e["output"]] : [])),
+    );
+    expect(outputs).toContainEqual({ id: "a1", ran: true });
+    expect(outputs).toContainEqual({ id: "a2", ran: false });
+  });
+
+  test("'explore': a child's sendTo(parent) event forks the parent", async () => {
+    const options = { children: "explore" as const, childEvents, maxDepth: 10, maxPaths: 10_000 };
+    const report = await explorePaths(createBatch(), options);
+    expect(report.reachedStates).toContain("released");
+    const { reachable, complete, witness } = await canReach(createBatch(), "released", options);
+    expect({ reachable, complete }).toEqual({ reachable: true, complete: true });
+    expect(witness).toEqual([{ type: "READY" }, { type: "READY" }]);
+  });
+
+  test("'explore': each child's event reaches the parent at most once per path", async () => {
+    const report = await explorePaths(createBatch(), {
+      children: "explore",
+      childEvents,
+      maxDepth: 10,
+      maxPaths: 10_000,
+      dedupeBy: (snapshot) => JSON.stringify([snapshot.value, snapshot.context]),
+    });
+    expect(isExplorationComplete(report)).toBe(true);
+    for (const terminal of report.terminals) {
+      expect(terminal.path.filter((e) => e.type === "READY").length).toBeLessThanOrEqual(2);
+    }
+  });
+});
+
 describe("explorePaths — vacuous", () => {
   test("a payload-reading transition explored only as bare { type } is vacuous", async () => {
     const machine = createMachine({
