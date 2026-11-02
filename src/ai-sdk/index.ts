@@ -2,6 +2,7 @@ import {
   experimental_decide,
   generateText as aiGenerateText,
   InvalidResponseDataError,
+  jsonSchema,
   NoObjectGeneratedError,
   Output,
   streamText as aiStreamText,
@@ -35,6 +36,13 @@ import {
   type AgentDecisionRejection,
   type AgentDecisionRequest,
 } from "../decision.js";
+import {
+  decisionObjectSchema,
+  fromDecisionObject,
+  multipleCallsRejection,
+  resolveDecisionMode,
+  type DecisionModeOption,
+} from "../internal/decision-object.js";
 import { isRecord } from "../internal/is-record.js";
 import { rejectedAnswer } from "../internal/rejected-answer.js";
 import { withModelCalls } from "../internal/with-model-calls.js";
@@ -152,6 +160,14 @@ export type AiSdkCallSettings = Omit<
  * portable, and a host that cannot honor a knob simply does not set it.
  */
 export type CreateAiSdkExecutorsOptions<TModels extends AiSdkModelMap = AiSdkModelMap> = {
+  /**
+   * How a language model answers a `decide` request: `'object'` (default), one
+   * structured-output object naming the event; or `'tool'`, one tool per
+   * candidate event under a required tool choice, with parallel tool calls
+   * turned off and a multi-call answer rejected. A function picks per request.
+   * Decision models are unaffected.
+   */
+  decideMode?: DecisionModeOption;
   settings?:
     | AiSdkCallSettings
     | ((request: AgentTextRequest | AgentDecisionRequest) => AiSdkCallSettings | undefined);
@@ -513,13 +529,16 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
   const decide = async (request: AgentDecisionRequest, info?: AgentRequestExecutorInfo) => {
     const { model, settings: modelSettings } = resolveAiSdkModel(options, request.model);
     if (isDecisionModel(model)) return decideWithDecisionModel(model, request, info);
+    const settings = { ...callSettings(options, request), ...defined(modelSettings ?? {}) };
+    if (resolveDecisionMode(options.decideMode, request) === "object") {
+      return decideWithObject(model, settings, request, info);
+    }
     // A closed choice (`request.options`) is ONE tool over an enum of option
     // ids; otherwise one tool per candidate event.
     const choice = request.options ? toAiSdkOptionTool(request.options) : undefined;
     const tools = choice ? choice.tools : toAiSdkEventTools(request.events);
     const messages = toDecisionMessages(request);
 
-    const settings = { ...callSettings(options, request), ...defined(modelSettings ?? {}) };
     const toolNames = Object.keys(tools);
     // The call's usage, kept for an answer the SDK rejects by throwing.
     let callEnd: { usage: LanguageModelUsage; finishReason: FinishReason } | undefined;
@@ -538,6 +557,7 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
       model,
       abortSignal: info?.signal,
       ...settings,
+      providerOptions: withParallelToolCallsOff(settings.providerOptions),
       onLanguageModelCallEnd: (event) => {
         callEnd = event;
         return settings.onLanguageModelCallEnd?.(event);
@@ -559,6 +579,13 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
 
     const toolCall = result.toolCalls[0];
     if (!toolCall) return unnamed(result);
+    if (result.toolCalls.length > 1) {
+      return {
+        rejected: multipleCallsRejection(result.toolCalls.map((call) => call.toolName)),
+        usage: toAgentCallUsage(result.usage),
+        finishReason: result.finishReason,
+      } satisfies AiSdkDecideResult;
+    }
     // An invalid call keeps its raw text as `input` when that text is not JSON.
     if (
       toolCall.invalid &&
@@ -593,6 +620,61 @@ export function createAiSdkExecutors<TModels extends AiSdkModelMap>(
   };
 
   return { generateText, streamText, decide };
+}
+
+// Tool-mode decisions turn parallel tool calls off for the providers that
+// expose the switch. The host's own `providerOptions` are merged over these.
+function withParallelToolCallsOff(
+  providerOptions: AiSdkCallSettings["providerOptions"],
+): NonNullable<AiSdkCallSettings["providerOptions"]> {
+  const host = providerOptions ?? {};
+  return {
+    ...host,
+    openai: { parallelToolCalls: false, ...host.openai },
+    anthropic: { disableParallelToolUse: true, ...host.anthropic },
+  };
+}
+
+// An object-mode decision: one structured-output call whose answer is
+// `{ event }` (or `{ choice }`), read by `fromDecisionObject`. The schema has
+// no validator: `resolveDecision` checks the event after.
+async function decideWithObject(
+  model: LanguageModel,
+  settings: AiSdkCallSettings,
+  request: AgentDecisionRequest,
+  info: AgentRequestExecutorInfo | undefined,
+): Promise<AiSdkDecideResult> {
+  const messages = toDecisionMessages(request);
+  const result = await aiGenerateText({
+    model,
+    abortSignal: info?.signal,
+    ...settings,
+    // `@ai-sdk/openai` sends schemas strict by default, and strict mode rejects
+    // the decision schema's open payload branches. Host keys still win.
+    providerOptions: {
+      ...settings.providerOptions,
+      openai: { strictJsonSchema: false, ...settings.providerOptions?.openai },
+    },
+    system: request.system,
+    ...(messages ? { messages, allowSystemInMessages: true } : { prompt: request.prompt ?? "" }),
+    output: Output.object({
+      schema: jsonSchema(decisionObjectSchema(request)) as FlexibleSchema<unknown>,
+      name: "decision",
+    }),
+    stopWhen: stepCountIs(1),
+    ...toAiSdkGenerationSettings(request),
+  }).catch((error: unknown) => {
+    // An answer that is not JSON (a truncated one included) is rejected and
+    // retried, like a tool call cut off mid-arguments.
+    if (NoObjectGeneratedError.isInstance(error) && error.usage) return error;
+    throw error;
+  });
+  const text = result.text ?? "";
+  return {
+    ...fromDecisionObject(request, extractFirstJsonValue(text) ?? text),
+    usage: toAgentCallUsage(result.usage!),
+    finishReason: result.finishReason ?? "other",
+  } satisfies AiSdkDecideResult;
 }
 
 // ─── Decision models ───

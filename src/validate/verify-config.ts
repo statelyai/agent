@@ -4,8 +4,9 @@
  * whose `detail` names the offending path, state, or name, so a repair loop
  * can feed a failed gate straight back to the model.
  */
-import type { AnyActorLogic, AnyStateMachine } from "xstate";
-import { DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR } from "../text-logic.js";
+import type { AnyActorLogic, AnyStateMachine, AnyStateNode } from "xstate";
+import { payloadNeedsFillModel } from "../decision-strategy.js";
+import { ACT_ACTOR, DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR } from "../text-logic.js";
 import { explorePaths, lintAgentMachine, type ExplorePathsOptions } from "../verify.js";
 import {
   setupAgentFromConfig,
@@ -50,7 +51,7 @@ export interface AgentConfigVocabulary {
   guards?: string[];
   /** Named action types (`{ type: "notify" }`). */
   actions?: string[];
-  /** Event types an `agent.decide` invoke may list in `allowedEvents`. */
+  /** Event types an `agent.decide`/`agent.act` invoke may list in `allowedEvents`. */
   events?: string[];
   /** Model refs. Each must be a literal string (not a `{{ }}` template) in this set. */
   models?: string[];
@@ -99,7 +100,12 @@ export interface VerifyAgentConfigResult {
   config?: AgentWorkflowConfig;
 }
 
-const BUILTIN_SRCS: readonly string[] = [DECIDE_ACTOR, GENERATE_TEXT_ACTOR, STREAM_TEXT_ACTOR];
+const BUILTIN_SRCS: readonly string[] = [
+  DECIDE_ACTOR,
+  ACT_ACTOR,
+  GENERATE_TEXT_ACTOR,
+  STREAM_TEXT_ACTOR,
+];
 const MAX_DETAIL_LINES = 10;
 
 /**
@@ -170,7 +176,7 @@ export async function verifyAgentConfig(
     record("lower", [errorMessage(error)]);
     return fail({ config: typed });
   }
-  record("lower", []);
+  if (!record("lower", checkFillModels(typed, machine))) return fail({ config: typed });
 
   const diagnostics = lintAgentMachine(machine).map((d) => ({
     failing: d.severity === "error" || options.lint?.warnings === true,
@@ -188,6 +194,57 @@ export async function verifyAgentConfig(
   }
 
   return { ok: true, gates, config: typed, machine };
+}
+
+// ─── lower: decide strategies ───
+
+/**
+ * An `agent.decide` invoke whose strategy is `'pick-then-fill'` (explicit, or
+ * `'auto'` with a `fillModel`) needs a `fillModel` when any literal
+ * candidate event has open payload fields. Omitted `allowedEvents` is resolved
+ * from the lowered state's own and ancestor event handlers.
+ */
+function checkFillModels(config: AgentWorkflowConfig, machine: AnyStateMachine): string[] {
+  const schemas = (config.schemas?.events ?? {}) as Record<string, Record<string, unknown>>;
+  const problems: string[] = [];
+  for (const { path, state } of walkStates(config.states)) {
+    for (const invoke of nodes(state.invoke)) {
+      if (invoke.src !== DECIDE_ACTOR || !isPlainObject(invoke.input)) continue;
+      const input = invoke.input as ConfigNode;
+      if (input.strategy !== "pick-then-fill" || input.fillModel !== undefined) continue;
+      if (input.payloads !== undefined) continue;
+      const candidates = Array.isArray(input.allowedEvents)
+        ? input.allowedEvents
+        : loweredEventTypes(machine, path);
+      const open = candidates.filter(
+        (type): type is string => typeof type === "string" && payloadNeedsFillModel(schemas[type]),
+      );
+      if (open.length) {
+        problems.push(
+          `state '${path}': agent.decide uses strategy 'pick-then-fill' but ${list(open)} ` +
+            "has open payload fields and no fillModel is set",
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+function loweredEventTypes(machine: AnyStateMachine, path: string): string[] {
+  let node: AnyStateNode | undefined = machine.root;
+  for (const key of path.split(".")) node = node?.states[key];
+  const types = new Set<string>();
+  for (let current = node; current; current = current.parent) {
+    for (const [type, transitions] of current.transitions) {
+      // Human events are never offered to the model (see getHumanEventTypes).
+      if (
+        !transitions.every((t) => (t.meta as { actor?: unknown } | undefined)?.actor === "human")
+      ) {
+        types.add(type);
+      }
+    }
+  }
+  return [...types];
 }
 
 // ─── vocabulary ───
@@ -286,23 +343,30 @@ function checkVocabulary(config: AgentWorkflowConfig, allow: AgentConfigVocabula
       }
       if (!BUILTIN_SRCS.includes(src)) continue;
       const input = invoke.input;
-      if ((allow.models || (src === DECIDE_ACTOR && allow.events)) && !isPlainObject(input)) {
+      if (
+        (allow.models || ((src === DECIDE_ACTOR || src === ACT_ACTOR) && allow.events)) &&
+        !isPlainObject(input)
+      ) {
         problems.push(`state '${path}': '${src}' input must be a literal object`);
         continue;
       }
       checkModel(`state '${path}': '${src}'`, (input as ConfigNode | undefined)?.model);
-      if (src !== DECIDE_ACTOR || !allow.events) continue;
-      const allowedEvents = (input as ConfigNode).allowedEvents;
+      const fillModel = (input as ConfigNode | undefined)?.fillModel;
+      if (fillModel !== undefined) checkModel(`state '${path}': '${src}' fillModel`, fillModel);
+      if ((src !== DECIDE_ACTOR && src !== ACT_ACTOR) || !allow.events) continue;
+      const allowedEvents = (input as ConfigNode | undefined)?.allowedEvents;
+      // `agent.act` may omit the list: it then offers what the state accepts.
+      if (src === ACT_ACTOR && allowedEvents === undefined) continue;
       if (!Array.isArray(allowedEvents) || allowedEvents.length === 0) {
         problems.push(
-          `state '${path}': agent.decide needs a literal, non-empty allowedEvents list; allowed: ${list(allow.events)}`,
+          `state '${path}': ${src} needs a literal, non-empty allowedEvents list; allowed: ${list(allow.events)}`,
         );
         continue;
       }
       for (const type of allowedEvents) {
         if (typeof type !== "string" || !allow.events.includes(type)) {
           problems.push(
-            `state '${path}': agent.decide allowedEvents entry '${String(type)}' is not allowed; allowed: ${list(allow.events)}`,
+            `state '${path}': ${src} allowedEvents entry '${String(type)}' is not allowed; allowed: ${list(allow.events)}`,
           );
         }
       }

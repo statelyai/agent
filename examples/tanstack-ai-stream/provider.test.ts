@@ -175,7 +175,7 @@ test("structured output travels as a JSON schema and comes back parsed", async (
 
 test("a decision forces a function call and reads the chosen event off the stream", async () => {
   const { adapter, requests } = scriptedOpenAi([functionCallEvents("approve", { note: "LGTM" })]);
-  const { decide } = createTanStackAiExecutors({ models: { quick: adapter } });
+  const { decide } = createTanStackAiExecutors({ models: { quick: adapter }, decideMode: "tool" });
 
   const result = await decide({
     model: "quick",

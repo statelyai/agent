@@ -1,7 +1,9 @@
 import type { AnyActorLogic, AnyStateMachine } from "xstate";
 import { isTextLogic, type AgentRequestExecutors } from "./text-logic.js";
 import { isDecisionLogic } from "./decision.js";
+import { isActLogic } from "./act.js";
 import {
+  bindActForProvide,
   bindChildMachineForProvide,
   bindDecisionForProvide,
   bindTextForProvide,
@@ -57,6 +59,8 @@ export interface ProvideExecutorsOptions<TMachine extends AnyStateMachine = AnyS
  * - decision / `agent.decide` source → `executors.decide` (snapshot-driven
  *   candidate events, guard `canTake`, and auto-delivery of the chosen event,
  *   mirroring `createAgentRuntime` but without its model-call counting)
+ * - `agent.act` → `executors.generateText` (accepted events as tools, each
+ *   call sent to the invoking actor)
  *
  * Pass `options.onTrace` to observe request-level trace events (identical in
  * shape to `createAgentRuntime`'s); pair it with {@link traceTransitions} on the actor's
@@ -129,9 +133,11 @@ export function provideExecutors<TMachine extends AnyStateMachine>(
     const binding: MissingExecutorBinding = {
       ...requirement,
       bind: () =>
-        isDecisionLogic(logic)
-          ? bindDecisionForProvide(provided, logic, executors, bindOptions)
-          : bindTextForProvide(provided, logic as never, executors, bindOptions),
+        isActLogic(logic)
+          ? bindActForProvide(provided, executors, bindOptions)
+          : isDecisionLogic(logic)
+            ? bindDecisionForProvide(provided, logic, executors, bindOptions)
+            : bindTextForProvide(provided, logic as never, executors, bindOptions),
     };
     // A source that already carries its own executor (`.withExecutor(...)`) runs itself.
     if (executorBoundLogics.has(logic)) {
@@ -156,6 +162,9 @@ function executorRequirementOf(logic: AnyActorLogic):
       kind: "text" | "streaming text" | "decision";
     }
   | undefined {
+  if (isActLogic(logic)) {
+    return { executorKey: "generateText", kind: "text" };
+  }
   if (isDecisionLogic(logic)) {
     return { executorKey: "decide", kind: "decision" };
   }

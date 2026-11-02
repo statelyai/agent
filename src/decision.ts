@@ -20,6 +20,7 @@ import { isEventPattern, sanitizeEventToolName, type AgentEventDescriptor } from
 import { executorBoundLogics } from "./internal/registry.js";
 import { isRecord } from "./internal/is-record.js";
 import { canonicalEventJson } from "./event-log.js";
+import { withDecisionStrategy, type DecisionStrategy } from "./decision-strategy.js";
 
 /**
  * Inline input for the `agent.decide` builtin actor — the zero-config
@@ -48,6 +49,15 @@ export interface AgentDecisionInput<
    * `allowedEvents` with no entry here are offered as `{ type }`.
    */
   payloads?: Partial<Record<TEvent, Record<string, unknown>[]>>;
+  /** How the decision is split into model calls. Default `'auto'`; see {@link DecisionStrategy}. */
+  strategy?: DecisionStrategy;
+  /** Model ref that fills open payload fields under `'pick-then-fill'` (and selects it under `'auto'`). */
+  fillModel?: TModel;
+  /**
+   * Named groups of event types for `'grouped'`. Types in no group are
+   * grouped by their prefix before the first `.`.
+   */
+  groups?: Record<string, readonly TEvent[]>;
   maxRetries?: number;
   temperature?: number;
   maxOutputTokens?: number;
@@ -152,6 +162,9 @@ function decideRequestFromInput(input: AgentDecisionInput): AgentDecisionRequest
         toolName: sanitizeEventToolName(type),
       })),
     ...(input.payloads ? { options: optionsFromPayloads(allowedEventTypes, input.payloads) } : {}),
+    ...(input.strategy !== undefined ? { strategy: input.strategy } : {}),
+    ...(input.fillModel !== undefined ? { fillModel: input.fillModel } : {}),
+    ...(input.groups !== undefined ? { groups: input.groups } : {}),
     attempts: [],
     temperature: input.temperature,
     maxOutputTokens: input.maxOutputTokens,
@@ -251,6 +264,12 @@ export interface DecisionLogicConfig<
   /** Framework-native messages, passed through without conversion. */
   messages?: ResolveTextLogicValue<any[] | undefined, InferOutput<TInputSchema>>;
   allowedEvents?: AllowedEvents<TEvent, InferOutput<TInputSchema>>;
+  /** How the decision is split into model calls. Default `'auto'`; see {@link DecisionStrategy}. */
+  strategy?: DecisionStrategy;
+  /** Model ref that fills open payload fields under `'pick-then-fill'` (and selects it under `'auto'`). */
+  fillModel?: TModel;
+  /** Named groups of event types for `'grouped'`; the rest group by prefix before the first `.`. */
+  groups?: Record<string, readonly TEvent[]>;
   maxRetries?: number; // default 2
   temperature?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
   maxOutputTokens?: ResolveTextLogicValue<number | undefined, InferOutput<TInputSchema>>;
@@ -281,8 +300,8 @@ export interface DecisionLogic<
 }
 
 // Resolves a declared `AllowedEvents` (single entry, array, or resolver) to a concrete
-// list of types/patterns; undefined means "all legal events."
-function resolveAllowedEventTypes(
+// list of types/patterns; undefined means "all legal events." @internal
+export function resolveAllowedEventTypes(
   allowedEvents: AllowedEvents | undefined,
   input: unknown,
 ): readonly string[] | undefined {
@@ -356,6 +375,9 @@ export function createDecisionLogic<
         type,
         toolName: sanitizeEventToolName(type),
       })),
+      ...(config.strategy !== undefined ? { strategy: config.strategy } : {}),
+      ...(config.fillModel !== undefined ? { fillModel: config.fillModel } : {}),
+      ...(config.groups !== undefined ? { groups: config.groups } : {}),
       attempts: [],
       temperature: resolveTextLogicValue(config.temperature, args),
       maxOutputTokens: resolveTextLogicValue(config.maxOutputTokens, args),
@@ -473,6 +495,12 @@ export interface AgentDecisionRequest {
    * closed choices, so a `request.start` trace shows what the guards blocked.
    */
   withheld?: ChosenEvent[];
+  /** How the decision is split into model calls. Default `'auto'`; see {@link DecisionStrategy}. */
+  strategy?: DecisionStrategy;
+  /** Model ref that fills open payload fields under `'pick-then-fill'`. */
+  fillModel?: string;
+  /** Named groups of event types for `'grouped'`; the rest group by prefix before the first `.`. */
+  groups?: Record<string, readonly string[]>;
   /**
    * Prior failed attempts for THIS decision. Empty on the first attempt.
    * Adapters render these into the provider request so retries converge.
@@ -721,6 +749,12 @@ export interface ResolveDecisionOptions<TEvent extends ChosenEvent = ChosenEvent
    * {@link resolveDecision} return that union.
    */
   canTake?: (event: TEvent) => boolean;
+  /**
+   * The decision's invoke-level idempotency key. Each attempt's executor
+   * `info.callKey` is this plus the attempt ordinal (`<key>.<attempt>`), and a
+   * strategy's sub-calls add their role (`<key>.<attempt>.pick`).
+   */
+  callKey?: string;
 }
 
 /**
@@ -752,11 +786,10 @@ export interface ResolveDecisionOptions<TEvent extends ChosenEvent = ChosenEvent
  */
 export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
   request: AgentDecisionRequest,
-  executors: Pick<Partial<AgentRequestExecutors>, "decide">,
+  executors: Pick<Partial<AgentRequestExecutors>, "decide" | "generateText">,
   options: ResolveDecisionOptions<TEvent> = {},
 ): Promise<TEvent> {
-  const executor = executors?.decide;
-  if (typeof executor !== "function") {
+  if (typeof executors?.decide !== "function") {
     throw new AgentError(
       "missing-decide-executor",
       "resolveDecision(request, executors, ...) takes the EXECUTOR SET (the same object " +
@@ -764,6 +797,11 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
         "createAiSdkExecutors({ models }), or pass { decide }.",
     );
   }
+  // The strategy's sub-calls answer as one executor call, validated below.
+  const executor = withDecisionStrategy(request, {
+    decide: executors.decide,
+    ...(executors.generateText ? { generateText: executors.generateText } : {}),
+  });
   const maxRetries = options.maxRetries ?? 2;
   const attempts: DecisionAttempt[] = [];
   const eventsByType = new Map(request.events.map((event) => [event.type, event]));
@@ -790,6 +828,7 @@ export async function resolveDecision<TEvent extends ChosenEvent = ChosenEvent>(
       {
         ...(options.signal !== undefined ? { signal: options.signal } : {}),
         ...(request.id ? { requestId: request.id } : {}),
+        ...(options.callKey !== undefined ? { callKey: `${options.callKey}.${attempt}` } : {}),
       },
     );
 
