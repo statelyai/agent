@@ -2566,13 +2566,13 @@ async function nextIdleEvent<TMachine extends AnyStateMachine>(
   if (queued !== undefined) return queued as EventFromLogic<TMachine>;
   if (!onIdle) return undefined;
   if (!inbox) return onIdle(snapshot);
+  // The waiter goes in before `onIdle` runs, so an `inbox.send` from inside
+  // `onIdle` reaches it instead of a queue nobody reads.
+  const sent = new Promise<EventFromLogic<TMachine>>((resolve) => {
+    inbox.waiter = resolve as (event: EventObject) => void;
+  });
   try {
-    return await Promise.race([
-      onIdle(snapshot),
-      new Promise<EventFromLogic<TMachine>>((resolve) => {
-        inbox.waiter = resolve as (event: EventObject) => void;
-      }),
-    ]);
+    return await Promise.race([sent, onIdle(snapshot)]);
   } finally {
     inbox.waiter = undefined;
   }

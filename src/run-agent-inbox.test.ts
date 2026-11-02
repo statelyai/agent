@@ -151,6 +151,18 @@ describe("runAgent inbox", () => {
     expect(result.status).toBe("done");
   });
 
+  test("an inbox send from inside onIdle resumes the run", async () => {
+    const inbox = createAgentInbox<EventOf<typeof steps>>();
+    const result = await runAgent(steps, {
+      inbox,
+      onIdle: (snapshot) => {
+        inbox.send(snapshot.value === "a" ? { type: "FIRST" } : { type: "SECOND" });
+        return new Promise(() => {});
+      },
+    });
+    expect(result.status).toBe("done");
+  });
+
   test("an inbox serves one runAgent call", async () => {
     const inbox = createAgentInbox<EventOf<typeof steps>>();
     await runAgent(steps, { inbox });
