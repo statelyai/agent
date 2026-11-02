@@ -1048,14 +1048,45 @@ export interface ExplorePathsOptions {
   input?: unknown;
   /** Max branch points (decisions + external-event forks) along any path. Default 8. */
   maxDepth?: number;
-  /** Total path cap before exploration stops (reported via `hitPathCap`). Default 200. */
+  /**
+   * Path cap per search before it stops (reported via `hitPathCap`). Default
+   * 200. Each explored child search has its own; see `budget` for a total.
+   */
   maxPaths?: number;
   /**
-   * Total branch points expanded before exploration stops (reported via
+   * Branch points expanded per search before it stops (reported via
    * `hitPathCap`). Default 100,000. It bounds work and memory where
    * `maxPaths` cannot: a loopy machine expands many nodes per terminal.
+   * Each explored child search has its own; see `budget` for a total.
    */
   maxNodes?: number;
+  /**
+   * Limits on the whole call. When one runs out, the search stops cleanly:
+   * the report is `partial` and not `complete`, and `unexplored` notes
+   * `budget-exhausted: nodes` or `budget-exhausted: ms` with the counts so
+   * far. {@link canReach} returns what it found, with `complete: false`.
+   */
+  budget?: {
+    /**
+     * Branch points expanded in total: the top-level search and every child
+     * search it triggers (`children: "explore"`). A cached child outcome
+     * counts once, when it is computed; a cache hit costs nothing. Default
+     * 250,000; raise it explicitly for a bigger machine.
+     */
+    nodes?: number;
+    /**
+     * Wall-clock milliseconds from the start of the call, checked at each
+     * branch point, in child searches too. A slow `payloads` or guard call
+     * is not interrupted: the check runs between them.
+     */
+    ms?: number;
+    /**
+     * Explored-child outcomes kept for reuse per search, keyed by logic, src,
+     * and input; the least recently used is evicted first. An evicted child
+     * is explored again when reached, and counts again. Default 64.
+     */
+    childCache?: number;
+  };
   /**
    * Every output to try per src: a text request's src (the
    * `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`)
@@ -1196,8 +1227,18 @@ export interface AgentPathReport {
   unexplored: string[];
   /** Total paths explored. */
   pathsExplored: number;
-  /** True when a cap (`maxPaths` or `maxNodes`) cut exploration short (report is partial). */
+  /** True when `maxPaths` or `maxNodes` cut exploration short (report is partial). */
   hitPathCap: boolean;
+  /**
+   * True when a cap or the `budget` cut exploration short: `hitPathCap`, or
+   * a `budget-exhausted` note in `unexplored`.
+   */
+  partial: boolean;
+  /**
+   * True when the report covers every path: not `partial`, every payload
+   * expanded, and every branch ended `done`, `idle`, or `error`.
+   */
+  complete: boolean;
   /**
    * Event types whose payload variants were not all tried: their schema has
    * a non-finite field or a product over the fill cap, and `payloads` has no
@@ -1259,6 +1300,46 @@ const DEFAULT_MAX_NODES = 100_000;
 // Cap on nested child-machine explorations (`children: "explore"`).
 const MAX_CHILD_NESTING = 4;
 
+// Default cap on branch points expanded across one call, child searches
+// included (`budget.nodes`). Well above every search in this repo's tests
+// and examples (the largest is under 50,000).
+const DEFAULT_BUDGET_NODES = 250_000;
+
+// Default cap on explored-child outcomes kept per search (`budget.childCache`).
+const DEFAULT_CHILD_CACHE = 64;
+
+// The budget one top-level call and every child search it triggers draw on.
+interface SearchBudget {
+  /** Branch points expanded so far, child searches included. */
+  nodes: number;
+  maxNodes: number;
+  started: number;
+  deadline: number | undefined;
+  exhausted?: "nodes" | "ms";
+}
+
+function startBudget(budget: ExplorePathsOptions["budget"]): SearchBudget {
+  const started = Date.now();
+  return {
+    nodes: 0,
+    maxNodes: budget?.nodes ?? DEFAULT_BUDGET_NODES,
+    started,
+    deadline: budget?.ms === undefined ? undefined : started + budget.ms,
+  };
+}
+
+// A stable id per child logic, for the child-outcome cache key.
+const logicIds = new WeakMap<object, number>();
+let nextLogicId = 0;
+function logicId(logic: object): number {
+  let id = logicIds.get(logic);
+  if (id === undefined) {
+    id = nextLogicId++;
+    logicIds.set(logic, id);
+  }
+  return id;
+}
+
 function isMachineLogic(logic: unknown): logic is AnyStateMachine {
   return (
     isRecord(logic) &&
@@ -1268,25 +1349,24 @@ function isMachineLogic(logic: unknown): logic is AnyStateMachine {
   );
 }
 
-// Distinct values by JSON (an Error by name and message), first seen first.
-function distinctValues(values: unknown[]): unknown[] {
-  const seen = new Set<string>();
-  return values.filter((value) => {
-    let key: string;
-    try {
-      key =
-        value instanceof Error
-          ? `Error:${value.name}:${value.message}`
-          : (JSON.stringify(value) ?? String(value));
-    } catch {
-      return true;
-    }
-    if (seen.has(key)) {
-      return false;
-    }
+// Appends a value unless an equal one is already in the list: equal by JSON
+// (an Error by name and message), first seen first. A value with no JSON is
+// always appended.
+function pushDistinct<T>(values: T[], seen: Set<string>, value: T): void {
+  let key: string;
+  try {
+    key =
+      value instanceof Error
+        ? `Error:${value.name}:${value.message}`
+        : (JSON.stringify(value) ?? String(value));
+  } catch {
+    values.push(value);
+    return;
+  }
+  if (!seen.has(key)) {
     seen.add(key);
-    return true;
-  });
+    values.push(value);
+  }
 }
 
 // What an explored child machine settles to, for its parent's invoke.
@@ -1401,11 +1481,36 @@ function mayReadPayload(snapshot: AnyMachineSnapshot, type: string): boolean {
   );
 }
 
+// One event of a path, linked to the one before it. A node keeps this parent
+// pointer, not a copy of its whole path.
+interface PathLink {
+  event: ChosenEvent;
+  prev: PathLink | undefined;
+  length: number;
+}
+
+function extend(prev: PathLink | undefined, event: ChosenEvent): PathLink {
+  return { event, prev, length: (prev?.length ?? 0) + 1 };
+}
+
+function pathOf(link: PathLink | undefined): ChosenEvent[] {
+  const path = Array.from<ChosenEvent>({ length: link?.length ?? 0 });
+  for (let at = link; at; at = at.prev) path[at.length - 1] = at.event;
+  return path;
+}
+
+function pathTypes(link: PathLink | undefined): string {
+  return pathOf(link)
+    .map((event) => event.type)
+    .join(", ");
+}
+
 // A pending branch point: the step to advance, the events that led to it, and
 // how many branch points it has spent against `maxDepth`.
 interface ExploreNode {
   step: AgentStep;
-  path: ChosenEvent[];
+  /** The last event on the path here; the path itself is rebuilt only for a terminal or witness. */
+  path: PathLink | undefined;
   depth: number;
   /** Child-to-parent events already delivered on this path (`<child session>\u0000<event JSON>`). */
   delivered?: ReadonlySet<string> | undefined;
@@ -1498,6 +1603,8 @@ function explore(
   // `reachedStates` and a `canReach` state target that can be one. An
   // explored child, whose states are not reported, skips it.
   trackTransits = nesting === 0 && hasTransientStates(machine.root),
+  // Shared by the top-level search and every child search it triggers.
+  budget: SearchBudget = startBudget(options.budget),
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
@@ -1505,6 +1612,10 @@ function explore(
   failures: unknown[];
   undeliverable: string[];
   parentEvents: EventObject[];
+  /** Some path ended `idle`. */
+  stalls: boolean;
+  /** Some path ended short of `done`, `idle`, or `error`. */
+  unfinished: boolean;
 } {
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 200;
@@ -1600,7 +1711,7 @@ function explore(
     }
     if (!fill.complete && !unexpanded.has(type)) {
       unexpanded.add(type);
-      unexplored.push(
+      note(() =>
         schema
           ? `unexpanded: event '${type}' has payload fields the schema fill cannot enumerate; add a payloads entry for it`
           : `unexpanded: event '${type}' has no schema and a transition that may read its payload; add a payloads entry for it`,
@@ -1633,8 +1744,11 @@ function explore(
   };
 
   // `children: "explore"`: a child machine explored on its own, once per
-  // (logic, input). Its unexpanded and vacuous types join this report's.
-  const childCache = new Map<unknown, Map<string, ChildOutcome>>();
+  // (logic, src, input) while its outcome stays in the cache, the least
+  // recently used entry evicted first. Its unexpanded and vacuous types join
+  // this report's.
+  const childCache = new Map<string, ChildOutcome>();
+  const childCacheSize = options.budget?.childCache ?? DEFAULT_CHILD_CACHE;
   const exploreChild = (
     src: string,
     logic: AnyStateMachine,
@@ -1642,24 +1756,28 @@ function explore(
     ref?: ChildRef,
   ): ChildOutcome => {
     if (nesting >= MAX_CHILD_NESTING) {
-      unexplored.push(
-        `child: src '${src}' is nested deeper than ${MAX_CHILD_NESTING} machines; not explored`,
+      note(
+        () =>
+          `child: src '${src}' is nested deeper than ${MAX_CHILD_NESTING} machines; not explored`,
       );
       return { outputs: [], errors: [], events: [], stalls: false, complete: false };
     }
     let key: string | undefined;
     try {
       // Keyed by src too: `childEvents` is per src.
-      key = `${src}\u0000${JSON.stringify(input) ?? "undefined"}`;
+      key = `${logicId(logic)}\u0000${src}\u0000${JSON.stringify(input) ?? "undefined"}`;
     } catch {
       key = undefined;
     }
-    const byInput = childCache.get(logic) ?? new Map<string, ChildOutcome>();
-    childCache.set(logic, byInput);
-    const cached = key === undefined ? undefined : byInput.get(key);
+    const cached = key === undefined ? undefined : childCache.get(key);
     if (cached) {
+      // Most recently used last.
+      childCache.delete(key!);
+      childCache.set(key!, cached);
       return cached;
     }
+    // Only the outcome outlives this call: the child's search state is
+    // released once its outputs are collected.
     const child = explore(
       logic,
       { ...options, input },
@@ -1667,28 +1785,38 @@ function explore(
       nesting + 1,
       new Set(options.childEvents?.[src] ?? []),
       ref,
+      false,
+      budget,
     );
     if (child.undeliverable.length > 0) {
-      unexplored.push(
-        `child: src '${src}' waits for ${child.undeliverable.join(", ")}, which childEvents does not list as reaching it; list each event the parent forwards`,
+      note(
+        () =>
+          `child: src '${src}' waits for ${child.undeliverable.join(", ")}, which childEvents does not list as reaching it; list each event the parent forwards`,
       );
     }
     for (const type of child.report.unexpandedEvents) unexpanded.add(type);
     for (const type of child.report.vacuous) vacuous.add(type);
     const outcome: ChildOutcome = {
-      outputs: distinctValues(child.doneOutputs),
-      errors: distinctValues(child.failures),
-      events: distinctValues(child.parentEvents) as EventObject[],
-      stalls: child.report.terminals.some((terminal) => terminal.status === "idle"),
-      complete: isExplorationComplete(child.report) && child.undeliverable.length === 0,
+      outputs: child.doneOutputs,
+      errors: child.failures,
+      events: child.parentEvents,
+      stalls: child.stalls,
+      complete:
+        !child.unfinished &&
+        isExplorationComplete(child.report) &&
+        child.undeliverable.length === 0,
     };
     if (!outcome.complete) {
-      unexplored.push(
-        `child: exploring src '${src}' was incomplete, so its outputs may be partial; add an outputs entry for it`,
+      note(
+        () =>
+          `child: exploring src '${src}' was incomplete, so its outputs may be partial; add an outputs entry for it`,
       );
     }
-    if (key !== undefined) {
-      byInput.set(key, outcome);
+    if (key !== undefined && childCacheSize > 0) {
+      childCache.set(key, outcome);
+      if (childCache.size > childCacheSize) {
+        childCache.delete(childCache.keys().next().value!);
+      }
     }
     return outcome;
   };
@@ -1835,18 +1963,48 @@ function explore(
   const unexplored: string[] = [];
   const unexpanded = new Set<string>();
   const vacuous = new Set<string>();
+  // An explored child's reports are read only for these, so a child keeps
+  // no terminals or notes, and its outputs, failures, and events distinct.
   const doneOutputs: unknown[] = [];
   const failures: unknown[] = [];
+  const seenOutputs = new Set<string>();
+  const seenFailures = new Set<string>();
+  const seenParentEvents = new Set<string>();
+  let stalls = false;
+  let unfinished = false;
+  const note = (text: () => string): void => {
+    if (nesting === 0) {
+      unexplored.push(text());
+    }
+  };
+  const endPath = (path: PathLink | undefined, terminal: Omit<AgentPathTerminal, "path">): void => {
+    pathsExplored++;
+    if (terminal.status === "idle") {
+      stalls = true;
+    } else if (terminal.status !== "done" && terminal.status !== "error") {
+      unfinished = true;
+    }
+    if (nesting === 0) {
+      terminals.push({ ...terminal, path: pathOf(path) });
+    }
+  };
   let prunedByGuard = 0;
   let pathsExplored = 0;
   let nodesExpanded = 0;
   let hitPathCap = false;
-  // True, and recorded, once either cap leaves a node unexpanded.
+  // True, and recorded, once a cap or the shared budget leaves a node unexpanded.
   const capped = (): boolean => {
     if (pathsExplored >= maxPaths || nodesExpanded >= maxNodes) {
       hitPathCap = true;
     }
-    return hitPathCap;
+    if (budget.exhausted === undefined) {
+      if (budget.nodes >= budget.maxNodes) {
+        budget.exhausted = "nodes";
+      } else if (budget.deadline !== undefined && Date.now() >= budget.deadline) {
+        budget.exhausted = "ms";
+      }
+    }
+    return hitPathCap || budget.exhausted !== undefined;
   };
   let witness: ChosenEvent[] | undefined;
   // `dedupeBy` key → the shallowest depth it was explored at.
@@ -1860,7 +2018,9 @@ function explore(
       reachedStates.add(key);
       reachedValues.push(step.snapshot.value);
     }
-    parentEvents.push(...eventsToParent(effects, parent));
+    for (const event of eventsToParent(effects, parent)) {
+      pushDistinct(parentEvents, seenParentEvents, event);
+    }
     for (const snapshot of transits.get(step) ?? []) {
       const transitKey = JSON.stringify(snapshot.value);
       if (!reachedStates.has(transitKey)) {
@@ -2002,7 +2162,7 @@ function explore(
   // offers them. A type the explorer table lists as `[]` is skipped and noted.
   const acceptedVariants = (
     snapshot: AnyMachineSnapshot,
-    path: ChosenEvent[],
+    path: PathLink | undefined,
     table: Partial<Record<string, Record<string, unknown>[]>>,
     except?: ReadonlySet<string>,
   ): ChosenEvent[] =>
@@ -2014,10 +2174,9 @@ function explore(
       // accepts skips that type: the search no longer covers it.
       if (table[descriptor.type]?.length === 0) {
         unexpanded.add(descriptor.type);
-        unexplored.push(
-          `skipped: payloads lists no ${descriptor.type} at path [${path
-            .map((e) => e.type)
-            .join(", ")}], so its branches were not explored`,
+        note(
+          () =>
+            `skipped: payloads lists no ${descriptor.type} at path [${pathTypes(path)}], so its branches were not explored`,
         );
       }
       return variantsOf(descriptor.type, snapshot, table);
@@ -2027,7 +2186,7 @@ function explore(
   // while an invoke is outstanding, one branch each.
   function* raceBranches(
     settled: AgentStep,
-    path: ChosenEvent[],
+    path: PathLink | undefined,
     depth: number,
     except?: ReadonlySet<string>,
   ): Generator<ExploreNode> {
@@ -2043,13 +2202,13 @@ function explore(
       }
       const next = transitionStep(settled, event);
       recordState(next);
-      yield { step: next, path: [...path, event], depth: depth + 1 };
+      yield { step: next, path: extend(path, event), depth: depth + 1 };
     }
   }
 
   const failBranch = (
     settled: AgentStep,
-    path: ChosenEvent[],
+    path: PathLink | undefined,
     depth: number,
     fork: InvokeFork,
     error: unknown,
@@ -2058,16 +2217,16 @@ function explore(
     recordState(failed);
     return {
       step: failed,
-      path: [
-        ...path,
-        { type: `xstate.error.actor.${fork.id}`, ...(fork.recordError ? { error } : {}) },
-      ],
+      path: extend(path, {
+        type: `xstate.error.actor.${fork.id}`,
+        ...(fork.recordError ? { error } : {}),
+      }),
       depth: depth + 1,
     };
   };
   const doneBranch = (
     settled: AgentStep,
-    path: ChosenEvent[],
+    path: PathLink | undefined,
     depth: number,
     fork: InvokeFork,
     output: unknown,
@@ -2076,15 +2235,14 @@ function explore(
     recordState(resolved);
     return {
       step: resolved,
-      path: [...path, { type: `xstate.done.actor.${fork.id}`, output }],
+      path: extend(path, { type: `xstate.done.actor.${fork.id}`, output }),
       depth: depth + 1,
     };
   };
 
-  const maxDepthTerminal = (settled: AgentStep, path: ChosenEvent[]): void => {
-    pathsExplored++;
-    terminals.push({ status: "max-depth", path, state: settled.snapshot.value });
-    unexplored.push(`max-depth: stopped at path [${path.map((e) => e.type).join(", ")}]`);
+  const maxDepthTerminal = (settled: AgentStep, path: PathLink | undefined): void => {
+    endPath(path, { status: "max-depth", state: settled.snapshot.value });
+    note(() => `max-depth: stopped at path [${pathTypes(path)}]`);
   };
 
   function* expand({ step, path, depth, delivered }: ExploreNode): Generator<ExploreNode> {
@@ -2092,6 +2250,7 @@ function explore(
       return;
     }
     nodesExpanded++;
+    budget.nodes++;
 
     const {
       step: settled,
@@ -2104,7 +2263,7 @@ function explore(
       pending,
     } = advance(step);
     if (hit) {
-      witness = path;
+      witness = pathOf(path);
       return;
     }
 
@@ -2186,7 +2345,7 @@ function explore(
             recordState(next);
             yield {
               step: next,
-              path: [...path, event as ChosenEvent],
+              path: extend(path, event as ChosenEvent),
               depth: depth + 1,
               delivered: new Set([...(delivered ?? []), key]),
             };
@@ -2194,12 +2353,12 @@ function explore(
         }
         // An explored child that can stall leaves the parent waiting here.
         if (fork.stalls && witness === undefined && !capped()) {
-          pathsExplored++;
-          terminals.push({ status: "idle", path, state: settled.snapshot.value });
+          endPath(path, { status: "idle", state: settled.snapshot.value });
         }
         for (const src of blockedSiblings ?? []) {
-          unexplored.push(
-            `needs-output: no \`outputs\` entry for src '${src}' at path [${path.map((e) => e.type).join(", ")}]`,
+          note(
+            () =>
+              `needs-output: no \`outputs\` entry for src '${src}' at path [${pathTypes(path)}]`,
           );
         }
         for (const incompleteSrc of [
@@ -2211,10 +2370,8 @@ function explore(
           if (witness !== undefined || capped()) {
             break;
           }
-          pathsExplored++;
-          terminals.push({
+          endPath(path, {
             status: "needs-output",
-            path,
             state: settled.snapshot.value,
             missingSrc: incompleteSrc,
           });
@@ -2235,15 +2392,14 @@ function explore(
     }
 
     if (blockedSrc) {
-      pathsExplored++;
-      terminals.push({
+      endPath(path, {
         status: "needs-output",
-        path,
         state: settled.snapshot.value,
         missingSrc: blockedSrc,
       });
-      unexplored.push(
-        `needs-output: no \`outputs\` entry for src '${blockedSrc}' at path [${path.map((e) => e.type).join(", ")}]`,
+      note(
+        () =>
+          `needs-output: no \`outputs\` entry for src '${blockedSrc}' at path [${pathTypes(path)}]`,
       );
       if (interleaving && depth < maxDepth) {
         yield* raceBranches(settled, path, depth);
@@ -2252,9 +2408,8 @@ function explore(
     }
 
     if (settled.done) {
-      pathsExplored++;
-      terminals.push({ status: "done", path, state: settled.snapshot.value });
-      doneOutputs.push((settled.snapshot as AnyMachineSnapshot).output);
+      endPath(path, { status: "done", state: settled.snapshot.value });
+      pushDistinct(doneOutputs, seenOutputs, (settled.snapshot as AnyMachineSnapshot).output);
       return;
     }
 
@@ -2262,9 +2417,8 @@ function explore(
     // does in a live run. That is a terminal of its own, not an idle wait.
     if ((settled.snapshot as AnyMachineSnapshot).status === "error") {
       const error = (settled.snapshot as AnyMachineSnapshot & { error?: unknown }).error;
-      pathsExplored++;
-      terminals.push({ status: "error", path, state: settled.snapshot.value, error });
-      failures.push(error);
+      endPath(path, { status: "error", state: settled.snapshot.value, error });
+      pushDistinct(failures, seenFailures, error);
       return;
     }
 
@@ -2292,15 +2446,13 @@ function explore(
       // An idle wait with nothing to accept ends the branch. A decision with
       // nothing to choose does not: it exhausts, below.
       if (branchEvents.length === 0 && request?.kind !== "decision") {
-        pathsExplored++;
-        terminals.push({ status: "idle", path, state: settled.snapshot.value });
+        endPath(path, { status: "idle", state: settled.snapshot.value });
         return;
       }
 
       if (depth >= maxDepth) {
-        pathsExplored++;
-        terminals.push({ status: "max-depth", path, state: settled.snapshot.value });
-        unexplored.push(`max-depth: stopped at path [${path.map((e) => e.type).join(", ")}]`);
+        endPath(path, { status: "max-depth", state: settled.snapshot.value });
+        note(() => `max-depth: stopped at path [${pathTypes(path)}]`);
         return;
       }
 
@@ -2317,7 +2469,7 @@ function explore(
         taken++;
         const next = transitionStep(settled, event);
         recordState(next);
-        yield { step: next, path: [...path, event], depth: depth + 1 };
+        yield { step: next, path: extend(path, event), depth: depth + 1 };
       }
 
       // An idle wait whose every offered event the guards refuse: a live run
@@ -2325,14 +2477,12 @@ function explore(
       // machine accepts. Record the wait and list the types as unexpanded, so
       // the search is not a proof until the table covers an accepted payload.
       if (request?.kind !== "decision" && taken === 0 && witness === undefined && !capped()) {
-        pathsExplored++;
-        terminals.push({ status: "idle", path, state: settled.snapshot.value });
+        endPath(path, { status: "idle", state: settled.snapshot.value });
         const refused = [...new Set(branchEvents.map((event) => event.type))];
         for (const type of refused) unexpanded.add(type);
-        unexplored.push(
-          `stuck: every offered ${refused.join(", ")} event at path [${path
-            .map((e) => e.type)
-            .join(", ")}] was refused by the machine's guards; add a payloads entry it accepts`,
+        note(
+          () =>
+            `stuck: every offered ${refused.join(", ")} event at path [${pathTypes(path)}] was refused by the machine's guards; add a payloads entry it accepts`,
         );
         return;
       }
@@ -2354,7 +2504,7 @@ function explore(
         recordState(failed);
         yield {
           step: failed,
-          path: [...path, { type: `xstate.error.actor.${request.id}` }],
+          path: extend(path, { type: `xstate.error.actor.${request.id}` }),
           depth: depth + 1,
         };
       }
@@ -2373,7 +2523,7 @@ function explore(
     }
   }
 
-  const root: ExploreNode = { step: initial, path: [], depth: 0 };
+  const root: ExploreNode = { step: initial, path: undefined, depth: 0 };
   if (witness === undefined && stopWhen) {
     // Breadth-first by path length, so the first witness found is a shortest
     // one.
@@ -2386,9 +2536,9 @@ function explore(
         level[i] = undefined;
         for (const child of expand(node)) {
           child.delivered = pruneDelivered(child.delivered ?? node.delivered, child.step);
-          (levels[child.path.length] ??= []).push(child);
+          (levels[child.path?.length ?? 0] ??= []).push(child);
         }
-        if (witness !== undefined || hitPathCap) {
+        if (witness !== undefined || hitPathCap || budget.exhausted !== undefined) {
           break search;
         }
       }
@@ -2404,22 +2554,34 @@ function explore(
     visit(root);
   }
 
+  if (nesting === 0 && budget.exhausted !== undefined) {
+    unexplored.push(
+      `budget-exhausted: ${budget.exhausted} (${budget.nodes} nodes expanded in ${Date.now() - budget.started} ms, child searches included)`,
+    );
+  }
+  const partial = hitPathCap || budget.exhausted !== undefined;
+  const report: AgentPathReport = {
+    reachedStates: reachedValues,
+    terminals,
+    prunedByGuard,
+    unexplored,
+    pathsExplored,
+    hitPathCap,
+    partial,
+    complete: false,
+    unexpandedEvents: [...unexpanded],
+    vacuous: [...vacuous],
+  };
+  report.complete = isExplorationComplete(report);
   return {
-    report: {
-      reachedStates: reachedValues,
-      terminals,
-      prunedByGuard,
-      unexplored,
-      pathsExplored,
-      hitPathCap,
-      unexpandedEvents: [...unexpanded],
-      vacuous: [...vacuous],
-    },
+    report,
     witness,
     doneOutputs,
     failures,
     undeliverable: [...undeliverable],
     parentEvents,
+    stalls,
+    unfinished,
   };
 }
 
@@ -2449,8 +2611,9 @@ function explore(
  * payload table tractable.
  *
  * Combinatorics are bounded by `maxDepth` (default 8), `maxPaths` (default
- * 200), and `maxNodes` (default 100,000), the last two reported via
- * `hitPathCap`.
+ * 200), and `maxNodes` (default 100,000) per search, the last two reported
+ * via `hitPathCap`, and by `budget` across the whole call, child searches
+ * included. A cut-short report is `partial` and not `complete`.
  *
  * @example
  * ```ts
@@ -2475,7 +2638,7 @@ export interface CanReachResult {
   witness?: ChosenEvent[];
   /**
    * False when the search left a branch it could not rule out unexplored: a
-   * cap (`maxPaths` or `maxNodes`) cut it short, a path reached `maxDepth`, a
+   * cap (`maxPaths` or `maxNodes`) or the `budget` cut it short, a path reached `maxDepth`, a
    * branch stopped `needs-output` on a src with no `outputs` entry, or an event type
    * was not expanded to all its payload variants (`unexpandedEvents` in the
    * {@link explorePaths} report). `reachable: false` is a proof of
@@ -2579,6 +2742,7 @@ export async function canReach(
 export function isExplorationComplete(report: AgentPathReport): boolean {
   return (
     !report.hitPathCap &&
+    !report.partial &&
     report.unexpandedEvents.length === 0 &&
     report.terminals.every(
       (terminal) =>
