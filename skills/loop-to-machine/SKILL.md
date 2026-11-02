@@ -111,7 +111,7 @@ Keep the decision in the environment as one `agent.decide`, with no policy machi
 Write `runMachine` with the old function's signature and result type; callers and the parity test change one line.
 
 - **The existing SDK call becomes the executor.** `generateText` (or `streamText`) in `executors`, as the old call: same model, system prompt, tools, options, retry code; return `{ result }`. Pass the conversation as `messages: ({ input }) => input.messages`.
-- **A streaming route keeps its response, not its signature.** `createAiSdkExecutors().streamText` forwards text chunks only, so wrap the old call: pipe its stream to the old consumer, return the final messages as `{ result }`.
+- **A streaming route keeps its response, not its signature.** `createAiSdkExecutors().streamText` forwards text chunks only, so wrap the old call: pipe its stream to the old consumer, then return `{ result: finalValue, messages: responseMessages }` so later requests can rebuild the assistant and tool history from `output.messages`.
 - `runAgent(machine, { input, executors, actors, onIdle })`. `onIdle` answers each idle state with the old code's call.
 - `executors.decide` reads `request.options` (each `{ event }`) and `request.metadata?.facts`.
 - JSON-safe input and events: with a store, an unloggable value fails the run.
@@ -121,7 +121,7 @@ Write `runMachine` with the old function's signature and result type; callers an
 
 **Host events mid-run** (cancel, abort, a user message while a request runs):
 
-- Abort: `runAgent`'s `signal` alone is a hard stop: the run settles `{ status: "error", cause: "aborted" }` and the machine sees nothing. Add `abortWith: { event, timeout? }` when the machine should handle it (a `cancelled` final, cleanup invokes); it falls back to `aborted` if unhandled or on timeout.
+- Abort: `runAgent`'s `signal` alone is a hard stop: the run settles `{ status: "error", cause: "aborted" }` and the machine sees nothing. Add `abortWith: { event, timeout? }` when the machine should handle it (a `cancelled` final, cleanup invokes); it falls back to `aborted` if the event is unhandled, if the machine is still active once the event has been applied and the run settles, or on timeout: the handled path must reach a final or idle state before you can rely on its cleanup.
 - A cancel the machine handles (cleanup, a `cancelled` final): a `CANCEL` event on the parent state. With `runAgent`, pass `inbox: createAgentInbox()` and call `inbox.send(event)`; an inbox serves one run. A hand-written `createAgentRuntime` loop uses `runtime.send(event)` ([docs/hosts.md](../../docs/hosts.md)).
 
 ## 6. Proofs that need no model
