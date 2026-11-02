@@ -1769,7 +1769,7 @@ function explore(
   // still a branch the search cannot follow: it ends `needs-output`.
   const concurrentForks = (
     step: AgentStep,
-  ): { forks: InvokeFork[]; blocked: string[]; decision?: AgentStepRequest } | undefined => {
+  ): { forks: InvokeFork[]; blocked: string[]; decisions: AgentStepRequest[] } | undefined => {
     if (options.children !== "explore") {
       return undefined;
     }
@@ -1809,10 +1809,10 @@ function explore(
           asFork(settleFor(invoke.id, invoke.src, false, invoke), invoke.id, invoke.src, false),
         ),
     ];
-    // A pending decision's choices are branches of the same node; its
+    // Each pending decision's choices are branches of the same node; its
     // `errors` entry, if any, is a failing settlement like the others.
-    const decision = step.requests.find((request) => request.kind === "decision");
-    if (decision) {
+    const decisions = step.requests.filter((request) => request.kind === "decision");
+    for (const decision of decisions) {
       const src = findInvokeMetadata(step, decision.id)?.src;
       const failed = (src !== undefined ? errorsFor(src) : undefined) ?? errorsFor(decision.id);
       if (failed) {
@@ -1824,8 +1824,8 @@ function explore(
         });
       }
     }
-    return forks.length > 0 && forks.length + blocked.length + (decision ? 1 : 0) > 1
-      ? { forks, blocked, ...(decision ? { decision } : {}) }
+    return forks.length > 0 && forks.length + blocked.length + decisions.length > 1
+      ? { forks, blocked, decisions }
       : undefined;
   };
 
@@ -1911,8 +1911,8 @@ function explore(
     siblings?: InvokeFork[];
     /** Srcs pending beside them with no `outputs` entry. */
     blockedSiblings?: string[];
-    /** A decision pending beside them: its choices branch from the same node. */
-    decision?: AgentStepRequest;
+    /** Decisions pending beside them: their choices branch from the same node. */
+    decisions?: AgentStepRequest[];
     pending?: { id: string; output: unknown };
   } => {
     let current = step;
@@ -1932,7 +1932,7 @@ function explore(
           fork: concurrent.forks[0],
           siblings: concurrent.forks.slice(1),
           blockedSiblings: concurrent.blocked,
-          ...(concurrent.decision ? { decision: concurrent.decision } : {}),
+          decisions: concurrent.decisions,
         };
       }
       if (request && request.kind === "text") {
@@ -2100,7 +2100,7 @@ function explore(
       fork,
       siblings,
       blockedSiblings,
-      decision,
+      decisions,
       pending,
     } = advance(step);
     if (hit) {
@@ -2220,7 +2220,7 @@ function explore(
           });
         }
         // A pending decision's choices follow, at the branch point below.
-        if (decision === undefined) {
+        if (!decisions?.length) {
           if (interleaving) {
             yield* raceBranches(settled, path, depth);
           }
@@ -2270,99 +2270,105 @@ function explore(
 
     // Branch point: a decision request's candidates, or an idle wait's
     // externally-accepted events — each type expanded to its payload variants.
-    const request = (decision ?? settled.requests[0]) as AgentStepRequest | undefined;
     const snapshot = settled.snapshot as AnyMachineSnapshot;
     const table = options.payloads?.(snapshot) ?? {};
-    // A closed choice's options, rebuilt over the live candidates as a run
-    // does but not yet filtered: the loop below prunes them, so guard-rejected
-    // options count in `prunedByGuard`.
-    const requestOptions =
-      request?.kind === "decision" ? acceptedDecisionOptions(request, () => true) : undefined;
-    const branchEvents: ChosenEvent[] =
-      request?.kind === "decision"
-        ? request.events.flatMap((descriptor) =>
-            variantsOf(descriptor.type, snapshot, table, requestOptions),
-          )
-        : acceptedVariants(snapshot, path, table);
+    // Beside an explored child, every pending decision is a branch point.
+    const branchRequests: (AgentStepRequest | undefined)[] = decisions?.length
+      ? decisions
+      : [settled.requests[0]];
+    for (const request of branchRequests) {
+      // A closed choice's options, rebuilt over the live candidates as a run
+      // does but not yet filtered: the loop below prunes them, so guard-rejected
+      // options count in `prunedByGuard`.
+      const requestOptions =
+        request?.kind === "decision" ? acceptedDecisionOptions(request, () => true) : undefined;
+      const branchEvents: ChosenEvent[] =
+        request?.kind === "decision"
+          ? request.events.flatMap((descriptor) =>
+              variantsOf(descriptor.type, snapshot, table, requestOptions),
+            )
+          : acceptedVariants(snapshot, path, table);
 
-    // An idle wait with nothing to accept ends the branch. A decision with
-    // nothing to choose does not: it exhausts, below.
-    if (branchEvents.length === 0 && request?.kind !== "decision") {
-      pathsExplored++;
-      terminals.push({ status: "idle", path, state: settled.snapshot.value });
-      return;
-    }
-
-    if (depth >= maxDepth) {
-      pathsExplored++;
-      terminals.push({ status: "max-depth", path, state: settled.snapshot.value });
-      unexplored.push(`max-depth: stopped at path [${path.map((e) => e.type).join(", ")}]`);
-      return;
-    }
-
-    let taken = 0;
-    for (const event of branchEvents) {
-      if (witness !== undefined || capped()) {
+      // An idle wait with nothing to accept ends the branch. A decision with
+      // nothing to choose does not: it exhausts, below.
+      if (branchEvents.length === 0 && request?.kind !== "decision") {
+        pathsExplored++;
+        terminals.push({ status: "idle", path, state: settled.snapshot.value });
         return;
       }
-      // Guard legality: a type-legal-but-guard-rejected candidate is a pruned branch.
-      if (!snapshot.can(event)) {
-        prunedByGuard++;
-        continue;
-      }
-      taken++;
-      const next = transitionStep(settled, event);
-      recordState(next);
-      yield { step: next, path: [...path, event], depth: depth + 1 };
-    }
 
-    // An idle wait whose every offered event the guards refuse: a live run
-    // would sit here, but more likely the payload table offered nothing the
-    // machine accepts. Record the wait and list the types as unexpanded, so
-    // the search is not a proof until the table covers an accepted payload.
-    if (request?.kind !== "decision" && taken === 0 && witness === undefined && !capped()) {
-      pathsExplored++;
-      terminals.push({ status: "idle", path, state: settled.snapshot.value });
-      const refused = [...new Set(branchEvents.map((event) => event.type))];
-      for (const type of refused) unexpanded.add(type);
-      unexplored.push(
-        `stuck: every offered ${refused.join(", ")} event at path [${path
-          .map((e) => e.type)
-          .join(", ")}] was refused by the machine's guards; add a payloads entry it accepts`,
-      );
-      return;
-    }
-
-    // A decision none of whose candidates the snapshot takes fails at run time
-    // after its retries (or at once, for an empty closed choice) with
-    // AgentDecisionExhaustedError, and the invoke's onError runs. Explore that
-    // branch the same way; with no onError it errors the machine, an `error`
-    // terminal.
-    if (request?.kind === "decision" && taken === 0) {
-      if (witness !== undefined || capped()) {
+      if (depth >= maxDepth) {
+        pathsExplored++;
+        terminals.push({ status: "max-depth", path, state: settled.snapshot.value });
+        unexplored.push(`max-depth: stopped at path [${path.map((e) => e.type).join(", ")}]`);
         return;
       }
-      const exhausted = new AgentDecisionExhaustedError([]);
-      exhausted.message =
-        `Decision '${request.name ?? request.id}' has no candidate the current snapshot ` +
-        "accepts (explored, no model call).";
-      const failed = rejectStep(settled, request.id, exhausted);
-      recordState(failed);
-      yield {
-        step: failed,
-        path: [...path, { type: `xstate.error.actor.${request.id}` }],
-        depth: depth + 1,
-      };
+
+      let taken = 0;
+      for (const event of branchEvents) {
+        if (witness !== undefined || capped()) {
+          return;
+        }
+        // Guard legality: a type-legal-but-guard-rejected candidate is a pruned branch.
+        if (!snapshot.can(event)) {
+          prunedByGuard++;
+          continue;
+        }
+        taken++;
+        const next = transitionStep(settled, event);
+        recordState(next);
+        yield { step: next, path: [...path, event], depth: depth + 1 };
+      }
+
+      // An idle wait whose every offered event the guards refuse: a live run
+      // would sit here, but more likely the payload table offered nothing the
+      // machine accepts. Record the wait and list the types as unexpanded, so
+      // the search is not a proof until the table covers an accepted payload.
+      if (request?.kind !== "decision" && taken === 0 && witness === undefined && !capped()) {
+        pathsExplored++;
+        terminals.push({ status: "idle", path, state: settled.snapshot.value });
+        const refused = [...new Set(branchEvents.map((event) => event.type))];
+        for (const type of refused) unexpanded.add(type);
+        unexplored.push(
+          `stuck: every offered ${refused.join(", ")} event at path [${path
+            .map((e) => e.type)
+            .join(", ")}] was refused by the machine's guards; add a payloads entry it accepts`,
+        );
+        return;
+      }
+
+      // A decision none of whose candidates the snapshot takes fails at run time
+      // after its retries (or at once, for an empty closed choice) with
+      // AgentDecisionExhaustedError, and the invoke's onError runs. Explore that
+      // branch the same way; with no onError it errors the machine, an `error`
+      // terminal.
+      if (request?.kind === "decision" && taken === 0) {
+        if (witness !== undefined || capped()) {
+          return;
+        }
+        const exhausted = new AgentDecisionExhaustedError([]);
+        exhausted.message =
+          `Decision '${request.name ?? request.id}' has no candidate the current snapshot ` +
+          "accepts (explored, no model call).";
+        const failed = rejectStep(settled, request.id, exhausted);
+        recordState(failed);
+        yield {
+          step: failed,
+          path: [...path, { type: `xstate.error.actor.${request.id}` }],
+          depth: depth + 1,
+        };
+      }
     }
 
-    // An event the active states accept but the decision does not offer can
-    // arrive while the decision is outstanding.
-    if (interleaving && request?.kind === "decision") {
+    // An event the active states accept but no decision offers can arrive
+    // while the decisions are outstanding.
+    const offered = branchRequests.filter((request) => request?.kind === "decision");
+    if (interleaving && offered.length > 0) {
       yield* raceBranches(
         settled,
         path,
         depth,
-        new Set(request.events.map((descriptor) => descriptor.type)),
+        new Set(offered.flatMap((request) => request!.events.map((descriptor) => descriptor.type))),
       );
     }
   }

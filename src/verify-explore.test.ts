@@ -549,6 +549,51 @@ describe("explorePaths — explored children: soundness", () => {
     expect(isExplorationComplete(report)).toBe(true);
   });
 
+  test("every pending decision beside an explored child expands its choices", async () => {
+    const child = createMachine({
+      initial: "working",
+      states: { working: { on: { FINISH: { target: "finished" } } }, finished: { type: "final" } },
+    });
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { LEFT: z.object({}), RIGHT: z.object({}) },
+      actors: { a: child },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: {
+          invoke: [
+            { id: "a", src: "a", onDone: { target: "childDone" } },
+            {
+              id: "d1",
+              src: "agent.decide",
+              input: () => ({ model: "m", prompt: "left?", allowedEvents: ["LEFT"] as const }),
+            },
+            {
+              id: "d2",
+              src: "agent.decide",
+              input: () => ({ model: "m", prompt: "right?", allowedEvents: ["RIGHT"] as const }),
+            },
+          ],
+          on: { LEFT: { target: "left" }, RIGHT: { target: "right" } },
+        },
+        childDone: { type: "final" },
+        left: { type: "final" },
+        right: { type: "final" },
+      },
+    });
+    const options = { children: "explore" as const, childEvents: { a: ["FINISH"] } };
+    for (const target of ["left", "right", "childDone"]) {
+      expect(await canReach(machine, target, options)).toMatchObject({
+        reachable: true,
+        complete: true,
+      });
+    }
+    expect(isExplorationComplete(await explorePaths(machine, options))).toBe(true);
+  });
+
   test("a child restarted under the same id can send the same event again", async () => {
     const worker = createMachine({
       initial: "starting",
