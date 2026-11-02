@@ -856,4 +856,20 @@ describe("abortWith: abort comes first, and an unfinished wind-down aborts", () 
     expect(types).toContain("CANCEL");
     expect(types).not.toContain("FINISH");
   });
+
+  test("abort handled but the machine rests short of a final state: settles aborted", async () => {
+    const controller = new AbortController();
+    const settled = runToQuiescence(
+      createAgentRuntime(machine, {
+        signal: controller.signal,
+        abortWith: { event: { type: "CANCEL" }, timeout: 60_000 },
+        executors: hanging,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+    const result = await settled;
+    expect(result.status === "error" ? result.cause : undefined).toBe("aborted");
+    expect(result.snapshot.value).toBe("cancelled");
+  });
 });

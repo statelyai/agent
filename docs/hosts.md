@@ -384,6 +384,7 @@ const result = await runAgent(machine, {
 - **Fallback.** `cause: "aborted"` as without `abortWith` when:
   - the state has no transition for `event`;
   - the loop never applies it;
+  - the machine handled it but settles still `active` (an idle wait nothing will answer), immediately and without waiting for `timeout`;
   - `timeout` ms pass while the machine is still active and working.
 - **Journal.** The abort event is a log entry; replay reaches the same final state.
 

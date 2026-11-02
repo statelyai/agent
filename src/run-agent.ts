@@ -608,8 +608,8 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * `runToQuiescence`'s init `event`) are dropped, so the abort goes first.
    * The run falls back to today's `{ status: 'error', cause: 'aborted' }`
    * when the machine has no transition for `event`, when the loop never
-   * applies it, or when `timeout` milliseconds pass while it is still
-   * working.
+   * applies it, when the machine settles still `active` after handling it,
+   * or when `timeout` milliseconds pass while it is still working.
    */
   abortWith?: { event: EventFromLogic<TMachine>; timeout?: number };
   /** Where root `after` timers live. Default `"in-process"`. See {@link AgentTimerScheduler}. */
@@ -3199,6 +3199,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     stopRun({ cause: "aborted", error: options.signal?.reason ?? new Error("Aborted") });
   // The abort event the machine has been sent but has not yet handled.
   let pendingAbort: EventObject | undefined;
+  // True once the machine applied the abort event: it owns the wind-down.
+  let abortApplied = false;
   // Events brought in through `send`, as opposed to a direct `transition`.
   const sentEvents = new WeakSet<object>();
   let abortTimer: ReturnType<typeof setTimeout> | undefined;
@@ -3755,6 +3757,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         effects.length === 0;
       if ((event as unknown) === pendingAbort) {
         pendingAbort = undefined;
+        abortApplied = !ignored;
         // The machine had no transition for the abort event: abort as usual.
         if (ignored) {
           abortNow();
@@ -3837,8 +3840,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         );
       }
       clearTimeout(abortTimer);
-      // An abort event the loop never applied to a still-active machine: abort as usual.
-      if (pendingAbort !== undefined && current?.status === "active") {
+      // A still-active machine at settle after an abort aborts as usual: the
+      // loop never applied the abort event, or the machine handled it but
+      // came to rest short of a final state (nothing left can finish it).
+      if ((pendingAbort !== undefined || abortApplied) && current?.status === "active") {
         abortNow();
       }
       // A decision's usage is queued after the event it chose; when that event
