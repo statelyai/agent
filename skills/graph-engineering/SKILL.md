@@ -21,13 +21,14 @@ Check in this order and start at the first step that is not done:
 1. Does the code path production actually runs go through a machine (`setupAgent`, `createMachine`, an `AgentWorkflowConfig`)? Follow the route or entry point to the model call; a machine that nothing calls does not count. If the path is a loop or ad-hoc code, step 1.
 2. Do runs persist to an event log store with a declared machine `version` and a `metadata` stamp? If not, step 2.
 3. Is there an objective over ground truth, and evals that name the states they cover? If not, step 3.
-4. Otherwise, step 4.
+4. Otherwise, step 4. A machine with no decision point (a tool loop, a scheduler: the model picks tools inside one text request) still goes to step 4: `improve-machine`'s "No decision points" branch, which turns traces into approval-rule, cap, and request-wording proposals.
 
 Tell the user which step you are starting at and why, in one line, then load that skill.
 
 ## Across all steps
 
 - **The environment is people's code.** Rules, guards, invariants, and the sentinel change only by human review. No step rewrites them on its own.
+- **No decision point is not a dead end.** Steps 2–4 still apply: traces stamp the request config or approval-rules version, evals are rule checks and per-state stats, and improvement proposes changes for a person to review.
 - **Ground truth scores everything.** Outcomes and effects in the world, labeled by people. A model never grades its own runs.
 - **Ask for labels and rules; decide the mechanics.** Expected outcomes, thresholds, the objective, and the train/held-out split are the user's. File layout, test names, and helper code are yours.
 - **Hand back between steps.** Finish one step's hand-back before starting the next, unless the user asked for several in one go.
