@@ -283,6 +283,8 @@ expect(sendsUnapproved.reachable).toBe(false);
 
 To check a port against the loop's actual effects, record the loop's model and tool calls with `createRecorder`, replay the machine against the recordings with `compareRecordings`, and label outcomes with `compareRuns`. [`examples/retrofit-parity`](https://github.com/statelyai/agent/blob/next/examples/retrofit-parity) does all three with no API key. See [Parity with the code you replace](evals.md#parity-with-the-code-you-replace).
 
+A loop on a client other than the AI SDK or `openai` (Anthropic, Gemini, a framework's model client) records through `recorder.client`. See [Any model client](evals.md#any-model-client).
+
 ## Part 2: a factory loop that improves
 
 Part 2 starts from a working software factory. An author writes a patch, a self-check and an independent review run in parallel, and the task's visible tests run. Then the loop ships, retries, or asks a person.

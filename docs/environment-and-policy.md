@@ -160,6 +160,11 @@ People own everything that defines "better" and everything the policy cannot tou
 
 Self-improvement is a supported pattern with gates. The library supplies the gates; the loop, the objective, and the promotion rule stay with the host.
 
+### Machines with no decision point
+
+A pure environment still improves through its approval rules and caps. [`proposeApprovalRules` and `proposeCaps`](evals.md#proposals-from-traces) read many runs' traces and propose an `allow` or `deny` rule per tool-and-arguments pattern and a value per cap.
+They are proposals for a person to review; nothing promotes them.
+
 ## When not to split
 
 The split pays off when there is a policy worth learning. Skip it in these cases.
