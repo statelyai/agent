@@ -1682,7 +1682,7 @@ function explore(
   // still a branch the search cannot follow: it ends `needs-output`.
   const concurrentForks = (
     step: AgentStep,
-  ): { forks: InvokeFork[]; blocked: string[] } | undefined => {
+  ): { forks: InvokeFork[]; blocked: string[]; decision?: AgentStepRequest } | undefined => {
     if (options.children !== "explore") {
       return undefined;
     }
@@ -1709,18 +1709,37 @@ function explore(
     const texts = step.requests.filter(
       (request): request is AgentStepRequest & { kind: "text" } => request.kind === "text",
     );
-    const textIds = new Set(texts.map((request) => request.id));
+    // Text requests are settled below by their request; a decision's choices
+    // are the decision branch's to expand, not a settlement.
+    const requestIds = new Set(step.requests.map((request) => request.id));
     const forks = [
       ...texts.flatMap((request) =>
         asFork(settleFor(request.id, request.src, true), request.id, request.src, true),
       ),
       ...invokes
-        .filter((invoke) => !textIds.has(invoke.id))
+        .filter((invoke) => !requestIds.has(invoke.id))
         .flatMap((invoke) =>
           asFork(settleFor(invoke.id, invoke.src, false, invoke), invoke.id, invoke.src, false),
         ),
     ];
-    return forks.length > 0 && forks.length + blocked.length > 1 ? { forks, blocked } : undefined;
+    // A pending decision's choices are branches of the same node; its
+    // `errors` entry, if any, is a failing settlement like the others.
+    const decision = step.requests.find((request) => request.kind === "decision");
+    if (decision) {
+      const src = findInvokeMetadata(step, decision.id)?.src;
+      const failed = (src !== undefined ? errorsFor(src) : undefined) ?? errorsFor(decision.id);
+      if (failed) {
+        forks.push({
+          id: decision.id,
+          errors: failed.values,
+          recordError: failed.record,
+          outputs: [],
+        });
+      }
+    }
+    return forks.length > 0 && forks.length + blocked.length + (decision ? 1 : 0) > 1
+      ? { forks, blocked, ...(decision ? { decision } : {}) }
+      : undefined;
   };
 
   const reachedStates = new Set<string>();
@@ -1796,6 +1815,8 @@ function explore(
     siblings?: InvokeFork[];
     /** Srcs pending beside them with no `outputs` entry. */
     blockedSiblings?: string[];
+    /** A decision pending beside them: its choices branch from the same node. */
+    decision?: AgentStepRequest;
     pending?: { id: string; output: unknown };
   } => {
     let current = step;
@@ -1808,13 +1829,14 @@ function explore(
         return { step: current };
       }
       const request = current.requests[0] as AgentStepRequest | undefined;
-      const concurrent = request?.kind === "decision" ? undefined : concurrentForks(current);
+      const concurrent = concurrentForks(current);
       if (concurrent) {
         return {
           step: current,
           fork: concurrent.forks[0],
           siblings: concurrent.forks.slice(1),
           blockedSiblings: concurrent.blocked,
+          ...(concurrent.decision ? { decision: concurrent.decision } : {}),
         };
       }
       if (request && request.kind === "text") {
@@ -1987,6 +2009,7 @@ function explore(
       fork,
       siblings,
       blockedSiblings,
+      decision,
       pending,
     } = advance(step);
     if (hit) {
@@ -2105,10 +2128,13 @@ function explore(
             missingSrc: incompleteSrc,
           });
         }
-        if (interleaving) {
-          yield* raceBranches(settled, path, depth);
+        // A pending decision's choices follow, at the branch point below.
+        if (decision === undefined) {
+          if (interleaving) {
+            yield* raceBranches(settled, path, depth);
+          }
+          return;
         }
-        return;
       }
       // A decision's success branch is the per-candidate-event fork below, a
       // sibling of the error branch: it spends its own level, not a second one.
@@ -2153,7 +2179,7 @@ function explore(
 
     // Branch point: a decision request's candidates, or an idle wait's
     // externally-accepted events — each type expanded to its payload variants.
-    const request = settled.requests[0] as AgentStepRequest | undefined;
+    const request = (decision ?? settled.requests[0]) as AgentStepRequest | undefined;
     const snapshot = settled.snapshot as AnyMachineSnapshot;
     const table = options.payloads?.(snapshot) ?? {};
     // A closed choice's options, rebuilt over the live candidates as a run

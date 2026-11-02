@@ -501,6 +501,54 @@ describe("explorePaths — explored children: soundness", () => {
     expect(isExplorationComplete(report)).toBe(false);
   });
 
+  test("a pending decision beside an explored child expands its choices", async () => {
+    const child = createMachine({
+      initial: "working",
+      states: { working: { on: { FINISH: { target: "finished" } } }, finished: { type: "final" } },
+    });
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { PICK: z.object({}) },
+      actors: { a: child },
+      requests: {
+        summarize: {
+          schemas: { input: z.object({}), output: z.string() },
+          model: "m",
+          prompt: () => "summarize",
+        },
+      },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: {
+          invoke: [
+            { id: "a", src: "a", onDone: { target: "childDone" } },
+            { id: "b", src: "summarize", input: {}, onDone: { target: "summarized" } },
+            {
+              id: "c",
+              src: "agent.decide",
+              input: () => ({ model: "m", prompt: "pick", allowedEvents: ["PICK"] as const }),
+            },
+          ],
+          on: { PICK: { target: "picked" } },
+        },
+        childDone: { type: "final" },
+        summarized: { type: "final" },
+        picked: { type: "final" },
+      },
+    });
+    const report = await explorePaths(machine, {
+      children: "explore",
+      childEvents: { a: ["FINISH"] },
+      outputs: { summarize: ["s"] },
+    });
+    expect(report.terminals.filter((t) => t.status === "needs-output")).toEqual([]);
+    expect(report.reachedStates).toContain("picked");
+    expect(isExplorationComplete(report)).toBe(true);
+  });
+
   test("a child restarted under the same id can send the same event again", async () => {
     const worker = createMachine({
       initial: "starting",
