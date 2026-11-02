@@ -171,7 +171,7 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 ## Branch exploration
 
-`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children? })` enumerates decision and external-event branches without a model, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, budget?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor.<id>' }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
@@ -195,13 +195,13 @@ const report = await explorePaths(refundMachine, {
 // report.reachedStates → ['deciding', 'awaitingHuman', 'refunded', 'denied']
 ```
 
-Exploration is bounded by three limits:
+Exploration is bounded by three limits per search, plus a [budget](#budgets) for the whole call:
 
 - `maxDepth`: branch points along any path. Default 8.
 - `maxPaths`: terminals in the report. Default 200.
 - `maxNodes`: branch points expanded in total. Default 100,000. It bounds work and memory on a loopy machine, which expands many nodes per terminal.
 
-`report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short, so the report is partial.
+`report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short. `report.partial` is true when any cap or the budget did, and `report.complete` is true only when the report covers every path.
 
 A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor.<id>', output }`.
 
@@ -295,6 +295,31 @@ const report = await explorePaths(parentMachine, {
 // [{ type: 'xstate.done.actor.approval', output: { ok: true } }]
 ```
 
+### Budgets
+
+`maxPaths` and `maxNodes` apply to each search on its own. With `children: "explore"`, every explored child is a search of its own with the same caps, so a parent with two loopy children can expand far more than `maxNodes`. `budget` bounds the whole call.
+
+- `budget.nodes`: branch points expanded in total, by the top-level search and every child search it triggers. A cached child outcome counts once, when it is computed. No default.
+- `budget.ms`: wall-clock milliseconds from the start of the call. It is checked at each branch point, in child searches too. A slow `payloads` or guard call is not interrupted. No default.
+- `budget.childCache`: explored-child outcomes kept for reuse, keyed by logic, src, and input. The least recently used one is evicted first. An evicted child is explored again when reached, and counts against `budget.nodes` again. Default 64.
+
+When a budget runs out, the search stops and returns what it has:
+
+- `report.partial` is true and `report.complete` is false.
+- `report.unexplored` has one note, `budget-exhausted: nodes` or `budget-exhausted: ms`, with the nodes expanded and the milliseconds spent so far.
+- `canReach` returns `reachable: true` with its witness if it found one first. Otherwise it returns `{ reachable: false, complete: false }`, which proves nothing: the target may be reachable on a branch the search did not reach.
+
+```ts no-check
+const report = await explorePaths(parentMachine, {
+  children: "explore",
+  budget: { nodes: 50_000, ms: 10_000 },
+});
+// report.partial → true when the budget ran out
+// report.unexplored → [..., 'budget-exhausted: nodes (50000 nodes expanded in 812 ms, child searches included)']
+```
+
+Set `budget.ms` under the test runner's timeout, so a long search fails its assertion instead of the worker.
+
 ## Reachability checks
 
 <!-- canReach contract from src/verify.ts -->
@@ -306,7 +331,7 @@ A state the machine only passes through within one step counts as reached: one l
 
 `reachable: false` proves unreachability only when `complete` is true. `complete` is false when the search left a branch it could not rule out:
 
-- `maxPaths` or `maxNodes` cut the search short.
+- `maxPaths`, `maxNodes`, or the `budget` cut the search short.
 - A path reached `maxDepth`.
 - A branch stopped on a `needs-output` terminal, with no `outputs` entry for its src, or an explored child machine whose own search was incomplete.
 - An event type was not expanded to all its payload variants, as `explorePaths` lists in `unexpandedEvents`.

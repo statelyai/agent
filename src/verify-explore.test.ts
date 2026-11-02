@@ -732,3 +732,170 @@ describe("explorePaths — vacuous", () => {
     expect(report.unexpandedEvents.sort()).toEqual(["NAMED", "TIER"]);
   });
 });
+
+describe("explorePaths — budget", () => {
+  // Two self-loops at one wait: every path of length n is a distinct node.
+  const looping = createMachine({
+    context: { n: 0 },
+    initial: "counting",
+    states: {
+      counting: {
+        on: {
+          INC: ({ context }) => ({ context: { n: context.n + 1 } }),
+          DEC: ({ context }) => ({ context: { n: context.n - 1 } }),
+          STOP: { target: "stopped" },
+        },
+      },
+      stopped: { type: "final" },
+      unreachable: {},
+    },
+  });
+
+  test("a nodes budget stops the search with a note, partial and not complete", async () => {
+    const unbounded = await explorePaths(looping, { maxDepth: 8, maxPaths: 10_000 });
+    expect(unbounded.complete).toBe(false); // max-depth, but no cap or budget
+    expect(unbounded.partial).toBe(false);
+
+    const report = await explorePaths(looping, {
+      maxDepth: 8,
+      maxPaths: 10_000,
+      budget: { nodes: 50 },
+    });
+    expect(report.partial).toBe(true);
+    expect(report.complete).toBe(false);
+    expect(report.hitPathCap).toBe(false);
+    expect(isExplorationComplete(report)).toBe(false);
+    expect(report.terminals.length).toBeLessThan(unbounded.terminals.length);
+    expect(report.unexplored.filter((note) => note.startsWith("budget-exhausted"))).toEqual([
+      expect.stringMatching(/^budget-exhausted: nodes \(50 nodes expanded in \d+ ms/),
+    ]);
+
+    const result = await canReach(looping, "unreachable", { maxDepth: 8, budget: { nodes: 50 } });
+    expect(result).toMatchObject({ reachable: false, complete: false });
+    const found = await canReach(looping, "stopped", { maxDepth: 8, budget: { nodes: 50 } });
+    expect(found).toMatchObject({ reachable: true, witness: [{ type: "STOP" }] });
+  });
+
+  test("an ms budget stops a slow search", async () => {
+    const slow = () => {
+      const until = Date.now() + 5;
+      while (Date.now() < until) {
+        // A slow payloads table.
+      }
+      return {};
+    };
+    const report = await explorePaths(looping, {
+      maxDepth: 20,
+      maxPaths: 1_000_000,
+      payloads: slow,
+      budget: { ms: 30 },
+    });
+    expect(report).toMatchObject({ partial: true, complete: false, hitPathCap: false });
+    expect(report.unexplored).toContainEqual(expect.stringMatching(/^budget-exhausted: ms \(/));
+    const result = await canReach(looping, "unreachable", {
+      maxDepth: 20,
+      payloads: slow,
+      budget: { ms: 30 },
+    });
+    expect(result).toMatchObject({ reachable: false, complete: false });
+  });
+
+  test("child searches count against the shared nodes budget", async () => {
+    const agent = setupAgent({ context: z.object({}), actors: { counter: looping } });
+    // The parent alone is a trivial loop; the child alone exceeds the budget.
+    const parent = agent.createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: {
+          invoke: { id: "counter", src: "counter", onDone: { target: "done" } },
+          on: { PING: {} },
+        },
+        done: { type: "final" },
+      },
+    });
+    const options = {
+      children: "explore" as const,
+      childEvents: { counter: ["INC", "DEC", "STOP"] },
+      maxDepth: 3,
+    };
+    const unbounded = await explorePaths(parent, options);
+    expect(unbounded.partial).toBe(false);
+
+    const report = await explorePaths(parent, { ...options, maxDepth: 8, budget: { nodes: 100 } });
+    expect(report).toMatchObject({ partial: true, complete: false, hitPathCap: false });
+    expect(report.unexplored).toContainEqual(
+      expect.stringMatching(/^budget-exhausted: nodes \(100 nodes expanded/),
+    );
+    const result = await canReach(parent, "done", {
+      ...options,
+      maxDepth: 8,
+      budget: { nodes: 100 },
+    });
+    expect(result).toMatchObject({ reachable: false, complete: false });
+  });
+
+  test("a search that fits the budget is unaffected", async () => {
+    const options = { maxDepth: 4, maxPaths: 10_000 };
+    const report = await explorePaths(looping, options);
+    expect(
+      await explorePaths(looping, { ...options, budget: { nodes: 1_000_000, ms: 60_000 } }),
+    ).toEqual(report);
+    expect(
+      await canReach(looping, "stopped", { ...options, budget: { nodes: 1_000_000 } }),
+    ).toEqual(await canReach(looping, "stopped", options));
+  });
+
+  test("evicting cached child outcomes does not change the report", async () => {
+    // The child answers with its input; the parent reaches it again and
+    // again with alternating inputs, so a one-entry cache keeps evicting.
+    const echo = createMachine({
+      context: ({ input }: { input: { side: string } }) => ({ side: input.side }),
+      initial: "answering",
+      states: {
+        answering: { on: { OK: { target: "answered" } } },
+        answered: {
+          type: "final",
+          output: ({ context }: { context: { side: string } }) => ({ side: context.side }),
+        },
+      },
+    } as never) as AnyStateMachine;
+    const agent = setupAgent({
+      context: z.object({ side: z.string(), last: z.string() }),
+      actors: { echo },
+    });
+    const parent = agent.createMachine({
+      context: { side: "a", last: "" },
+      initial: "idle",
+      states: {
+        idle: {
+          on: {
+            LEFT: ({ context }) => ({ target: "asking", context: { ...context, side: "a" } }),
+            RIGHT: ({ context }) => ({ target: "asking", context: { ...context, side: "b" } }),
+          },
+        },
+        asking: {
+          invoke: {
+            id: "echo",
+            src: "echo",
+            input: ({ context }: { context: { side: string } }) => ({ side: context.side }),
+            onDone: ({ context, output }) => ({
+              target: "idle",
+              context: { ...context, last: (output as { side: string }).side },
+            }),
+          },
+        },
+      },
+    });
+    const options = {
+      children: "explore" as const,
+      childEvents: { echo: ["OK"] },
+      maxDepth: 6,
+      maxPaths: 10_000,
+    };
+    const cached = await explorePaths(parent, options);
+    expect(cached.terminals.length).toBeGreaterThan(0);
+    expect(await explorePaths(parent, { ...options, budget: { childCache: 1 } })).toEqual(cached);
+    expect(await explorePaths(parent, { ...options, budget: { childCache: 0 } })).toEqual(cached);
+  });
+});
