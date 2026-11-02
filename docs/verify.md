@@ -271,7 +271,7 @@ const report = await explorePaths(lookupMachine, {
 
 ### Child machines
 
-By default, an invoked or spawned child machine is a src like any other: with no `outputs` entry, its branch ends `needs-output`. `children: "explore"` explores the child instead.
+By default, an invoked child machine is a src like any other: with no `outputs` entry, its branch ends `needs-output`. `children: "explore"` explores the child instead. It covers invoked child machines; spawned children are not explored.
 
 - Applies when the src has no `outputs` or `errors` entry and its logic is a state machine.
 - The child is explored on its own, from its invoke input, with the same options and caps, to at most 4 nested levels.
