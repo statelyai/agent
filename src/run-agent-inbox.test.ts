@@ -181,6 +181,28 @@ describe("runAgent inbox", () => {
     expect(result.ignored).toBe(second);
   });
 
+  test.each([1, 2, 3, 4, 5])(
+    "a send just after the onIdle answer wins reaches the next pass (%i hops)",
+    async (hops) => {
+      const inbox = createAgentInbox<EventOf<typeof steps>>();
+      let calls = 0;
+      const result = await runAgent(steps, {
+        inbox,
+        onIdle: () => {
+          calls += 1;
+          if (calls > 1) return new Promise(() => {});
+          const answer = Promise.resolve({ type: "FIRST" } as const);
+          let hop: Promise<unknown> = answer;
+          for (let n = 0; n < hops; n++) hop = hop.then(() => undefined);
+          void hop.then(() => inbox.send({ type: "SECOND" }));
+          return answer;
+        },
+      });
+      expect(result.status).toBe("done");
+    },
+    1000,
+  );
+
   test("an inbox serves one runAgent call", async () => {
     const inbox = createAgentInbox<EventOf<typeof steps>>();
     await runAgent(steps, { inbox });

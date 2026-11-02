@@ -2574,17 +2574,33 @@ async function nextIdleEvent<TMachine extends AnyStateMachine>(
   if (!inbox) return { event: await onIdle(snapshot), fromInbox: false };
   // The waiter goes in before `onIdle` runs, so an `inbox.send` from inside
   // `onIdle` reaches it instead of a queue nobody reads.
+  let waiter: InboxState["waiter"];
   const sent = new Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean }>((resolve) => {
-    inbox.waiter = (event) =>
-      resolve({ event: event as EventFromLogic<TMachine>, fromInbox: true });
+    waiter = (event) => resolve({ event: event as EventFromLogic<TMachine>, fromInbox: true });
+    inbox.waiter = waiter;
   });
+  // Cleared the moment the answer settles, not after the race's `await`: a
+  // send in between then queues for the next pass instead of resolving the
+  // losing promise.
+  const release = () => {
+    if (inbox.waiter === waiter) inbox.waiter = undefined;
+  };
   try {
     return await Promise.race([
       sent,
-      onIdle(snapshot).then((event) => ({ event, fromInbox: false })),
+      onIdle(snapshot).then(
+        (event) => {
+          release();
+          return { event, fromInbox: false };
+        },
+        (error: unknown) => {
+          release();
+          throw error;
+        },
+      ),
     ]);
   } finally {
-    inbox.waiter = undefined;
+    release();
   }
 }
 
