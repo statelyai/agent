@@ -62,6 +62,15 @@ export type {
 export { firstDivergence } from "../first-divergence.js";
 export type { Divergence, FirstDivergenceOptions, TraceStep } from "../first-divergence.js";
 export type { FoldTracesOptions, StateStats } from "../fold-traces.js";
+export { proposeApprovalRules, proposeCaps } from "../propose-from-traces.js";
+export type {
+  ApprovalRuleProposal,
+  ApprovalVerdict,
+  CapProposal,
+  CapSpec,
+  ProposeApprovalRulesOptions,
+  ProposeCapsOptions,
+} from "../propose-from-traces.js";
 export { getDecisionRequests } from "../decision-requests.js";
 export type { GetDecisionRequestsOptions, TracedDecisionRequest } from "../decision-requests.js";
 export { repeatRuns, summarizeRepeats } from "../repeat-runs.js";

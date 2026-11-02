@@ -389,6 +389,39 @@ const stats = foldTraces(traces, {
 - Returns `undefined` when the run does not diverge.
 - In `foldTraces`, `blame` is called for failed runs only. `undefined` blames no state.
 
+## Proposals from traces
+
+`proposeApprovalRules` and `proposeCaps` (from `@statelyai/agent/testing`) read many runs' traces and propose changes for a machine with no decision point: which approvals a rule could answer, and what each cap should be. They are proposals for a person. Nothing promotes them or edits the machine.
+
+```ts no-check
+import { proposeApprovalRules, proposeCaps } from "@statelyai/agent/testing";
+
+const rules = proposeApprovalRules(traces, {
+  approvalState: "awaitingApproval",
+  approveEvents: ["APPROVE"],
+  rejectEvents: ["REJECT"],
+  key: ({ snapshot }) => {
+    const { tool, path } = snapshot.context.pending;
+    return `${tool}:${path.startsWith("src/") ? "src/**" : path}`;
+  },
+  violations: (trace) => brokenRuleKeys(trace), // optional, from ground truth
+});
+// [{ key: "write:src/**", approved: 3, rejected: 0, violations: 0, runs: [0, 1, 2], proposal: "allow", support: 3 }, ...]
+
+const caps = proposeCaps(traces, {
+  caps: [{ name: "retries", current: 3, failureState: "gaveUp", valueFromRun: countRetries }],
+});
+// [{ name: "retries", hits: 2, passing: 2, max: 3, p95: 1, proposal: 3 }]
+```
+
+- Both take what `foldTraces` takes: one trace per run, live or serialized.
+- A verdict is a `machine.transition` out of `approvalState` (or a state inside it) on an approve or reject event. Ignored events are not verdicts. `key` sees the event and the snapshot it arrived in, so it can read the pending call from `snapshot.context`. Returning `undefined` skips the verdict.
+- `proposal` is `"allow"` when a key was approved and never rejected, with no violation; `"deny"` when it was rejected and never approved; otherwise `null`. A single rejection or violation blocks `"allow"`.
+- `support` is the number of runs with a verdict for the key, and `runs` lists their indexes. Weigh a proposal by its support.
+- A run hits a cap when it enters `failureState` or its `run.end` output satisfies `failureOutput`. `valueFromRun` says how much of the cap a run used; `undefined` leaves the run out.
+- `max` is over all runs; `p95` is the nearest-rank 95th percentile over runs that did not hit the cap.
+- `proposal` is `p95 + 1`. While any run hits the cap, it is never below `current`, so a cap runs still hit is never tightened. A cap no run hit can be lowered. With no passing run, `proposal` is `null`.
+
 ## Repeated runs
 
 `repeatRuns` (from `@statelyai/agent/testing`) runs every scenario `k` times and reports how reliably each one passes. With a live model, one run per scenario says little: τ-bench found the rate at which all `k` runs of a task pass (pass^k) falls well below the single-run rate.
