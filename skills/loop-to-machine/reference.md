@@ -47,7 +47,7 @@ const proofOptions: ExplorePathsOptions = {
 };
 ```
 
-`errors` takes one error per actor src, and `"agent.decide"` is a valid key.
+`errors[src]` takes one failure or an array of them (one failing branch per element; wrap an array-valued failure as `[[...]]`), and `"agent.decide"` is a valid key.
 
 ## Recording golden runs
 
@@ -62,6 +62,40 @@ const tools = recorder.tools(appTools); // AI SDK tools; recorder.tool(name, fn)
 recorder.output(await runLoop({ ...scenario, model, tools }));
 writeFileSync(`fixtures/${scenario.id}.json`, JSON.stringify(recorder.recording));
 ```
+
+### Any other model client
+
+`recorder.client(name, sdk, { methods })` wraps the named async methods of an SDK object and keeps its type; `recorder.fn(name, asyncFn)` wraps a client that is a function. Record the hand-rolled loop with the wrapped client, then put the same wrapper inside the machine's executor for replay:
+
+```ts
+import Anthropic from "@anthropic-ai/sdk";
+import { runAgent } from "@statelyai/agent";
+import { compareRecordings, createRecorder } from "@statelyai/agent/testing";
+
+const methods = ["messages.create"];
+
+// Record: the hand-rolled loop gets the wrapped client.
+const recorder = createRecorder();
+recorder.output(await runLoop(recorder.client("anthropic", new Anthropic(), { methods }), scenario));
+
+// Replay: the same wrapper inside the machine's executor; the client is never called.
+const replay = createRecorder({ replay: recorder.recording });
+const client = replay.client("anthropic", {} as Anthropic, { methods });
+const run = await runAgent(machine, {
+  input: scenario,
+  executors: {
+    // askModel: the old loop's call, moved unchanged.
+    generateText: async (request) => ({ result: await askModel(client, request.messages as Anthropic.MessageParam[]) }),
+  },
+});
+if (run.status === "done") replay.output(run.output);
+compareRecordings(recorder.recording, replay.recording).divergences; // INTENDED[scenario.id] ?? []
+```
+
+- Each call is a `call` effect named `<name>.<method>` (`anthropic.messages.create`) with its arguments and its result or error.
+- Replay answers each call with the next unused recorded call of the same name, in order, whatever its arguments; `compareRecordings` reports differing arguments as `call-args`.
+- A result that is an async iterable (a stream) records its chunks; replay returns an async iterable of them.
+- `redact(args)` records only what must match (model, offered tool names) and keeps secrets out. `serialize` maps a non-JSON result or chunk; `revive` rebuilds the replayed value, such as a stream object with helper methods.
 
 ## The parity harness
 
