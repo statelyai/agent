@@ -308,7 +308,7 @@ const result = await runtime.finish();
 Write the loop yourself when `runAgent` cannot express the host:
 
 - **Non-blocking durable host.** A Durable Object woken by alarms runs one leg per wake-up and cannot await a whole run.
-- **Events pushed mid-run.** A socket delivers user events while requests are in flight; hand each one to `runtime.send(event)`.
+- **Events pushed mid-run with a custom loop.** A socket delivers user events while requests are in flight; hand each one to `runtime.send(event)`. Without a custom loop, `runAgent`'s [`inbox`](#runagent-inbox) does the same.
 - **Custom stop or checkpoint policy.** Persist after selected transitions, or stop before `nextEvent()` returns `undefined`.
 
 Each operation is described in [The runtime loop](steps.md).
@@ -387,6 +387,23 @@ const result = await runAgent(machine, {
   - the machine handled it but settles still `active` (an idle wait nothing will answer), immediately and without waiting for `timeout`;
   - `timeout` ms pass while the machine is still active and working.
 - **Journal.** The abort event is a log entry; replay reaches the same final state.
+
+### runAgent inbox
+
+`runAgent` returns a promise, so a host holds no runtime to `send` into. Pass an `inbox` from `createAgentInbox` instead:
+
+```ts no-check
+const inbox = createAgentInbox<EventOf<typeof machine>>();
+const run = runAgent(machine, { executors, input, inbox });
+cancelButton.onclick = () => inbox.send({ type: "CANCEL" });
+const result = await run;
+```
+
+- **Same as `runtime.send`.** Each `inbox.send` goes to the run's mailbox and returns the same boolean. See [Host events mid-run](#host-events-mid-run).
+- **Before start.** Queued; delivered after the init event and after `runAgent`'s own `event`. Returns `true`.
+- **While idle.** An inbox event resumes the run, ahead of a pending `onIdle` answer; that answer is dropped. Without `onIdle`, `runAgent` returns at the first idle.
+- **After `runAgent` returns.** Returns `false`.
+- **One call.** An inbox serves one `runAgent` call; reusing it throws `AgentError` `inbox-in-use`.
 
 ## Uncontrolled XState actor
 
