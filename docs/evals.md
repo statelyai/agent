@@ -300,6 +300,39 @@ interface ParityResult<TScenario> {
 
 [examples/retrofit-parity](https://github.com/statelyai/agent/tree/next/examples/retrofit-parity) ports a loop with recorded golden runs and asserts its one reviewed difference.
 
+### Any model client
+
+`createRecorder` (from `@statelyai/agent/testing`) records a run's effects so a port can replay them with no network. `recorder.model` wraps an AI SDK model and `recorder.openai` an `openai` client. Any other client (`@anthropic-ai/sdk`, `@google/genai`, a framework's own model client) goes through `recorder.client`, which wraps the async methods you name and keeps the client's type.
+
+```ts
+import Anthropic from "@anthropic-ai/sdk";
+import { compareRecordings, createRecorder } from "@statelyai/agent/testing";
+
+declare function originalLoop(client: Anthropic): Promise<string>;
+declare function runPort(client: Anthropic): Promise<string>;
+
+const methods = ["messages.create"];
+
+// Record the original against the real client.
+const recorder = createRecorder();
+recorder.output(await originalLoop(recorder.client("anthropic", new Anthropic(), { methods })));
+
+// Replay the port: the client is never called.
+const replay = createRecorder({ replay: recorder.recording });
+const stand = new Anthropic({ apiKey: "replay" });
+replay.output(await runPort(replay.client("anthropic", stand, { methods })));
+
+compareRecordings(recorder.recording, replay.recording); // { equivalent: true, divergences: [] }
+```
+
+- Each call is a `call` effect named `<name>.<method>`, such as `anthropic.messages.create`, with its arguments and its result or error.
+- `recorder.fn(name, asyncFn, options?)` wraps one async function the same way, for a client that is a function.
+- Replay answers each call with the next unused recorded call of the same name, in order, whatever its arguments. A call past the recorded ones throws `RecordingDivergenceError`.
+- `compareRecordings` compares arguments as recorded and reports `call-args`. A port whose prompts differ on purpose passes `redact: (args) => …` to record only what must match, such as the model and the offered tool names. `redact` also keeps secrets out of the recording.
+- A result that resolves to an async iterable (a stream) records its chunks; replay returns an async iterable of them.
+- `serialize` maps a result that is not JSON, or each chunk of a stream. `revive` builds the replayed value from the recorded result or chunks, such as a stream object with helper methods.
+- In replay the client is never called. A missing object on a method's path is stood in for, so `{} as Anthropic` also works.
+
 ## Suite coverage
 
 `traceCoverage` (from `@statelyai/agent/testing`) reports which states and handlers no trace exercised, so a suite can say how much of the machine it covers.
