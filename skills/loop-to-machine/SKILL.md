@@ -85,9 +85,9 @@ The parity test exists before the machine does.
 
 ### No model in the loop
 
-A scheduler or tool runner has no model to stand in for, and its old code may not run (a class wired to a bus, no callable entry).
+This branch is for code with no model call at all (a tool scheduler, an approval queue), and for old code that cannot run (a class wired to a bus, no callable entry). A tool runner whose text request still picks tools has a model in the loop: keep the recorders and the replay check (§7) for its model and tool calls, and use only the spec baseline below where the old code cannot run.
 
-- **Skip recorders.** Nothing to record; replay (§7) does not apply.
+- **Skip recorders only when nothing calls a model.** Then replay (§7) does not apply.
 - **Baseline as spec.** When the old code cannot run, the baseline returns a pinned expectation per scenario: `baseline: async (s) => SPEC[s.id]`, with the outcome, effects, and violations a person confirmed from the old code and its docs, before the machine exists. Skip the harness check; the hand-back says the baseline is a spec, not a run.
 - **Stand-ins become scripted worlds:** the proposed calls, the order approvals arrive in, which tool fails.
 
@@ -123,7 +123,7 @@ Write `runMachine` with the old function's signature and result type, so callers
 **Host events mid-run** (cancel, abort, a user message while a request runs):
 
 - Abort: `runAgent`'s `signal`. The run settles `{ status: "error", cause: "aborted" }`; the in-flight executor sees the signal.
-- A cancel the machine handles (cleanup, a `cancelled` final): a `CANCEL` event on the parent state, sent by the host with `AgentRuntime.send(event)` if your installed version has it. Otherwise drive `createAgentRuntime` yourself and race `runtime.nextEvent()` against a host inbox, passing the winner to `runtime.transition`.
+- A cancel the machine handles (cleanup, a `cancelled` final): a `CANCEL` event on the parent state, sent by the host with `AgentRuntime.send(event)` if your installed version has it. Otherwise drive `createAgentRuntime` yourself and race `runtime.nextEvent()` against a host inbox. `nextEvent()` consumes the event it resolves with, so never call it again while an earlier call is still pending: keep the one pending `nextEvent()` promise across loop iterations, transition the host event when it wins, and keep racing the same pending promise until it resolves, or its event is lost.
 
 ## 6. Proofs that need no model
 
