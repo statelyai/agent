@@ -52,7 +52,7 @@ The rules for what belongs in core live in [CONTRIBUTING.md](https://github.com/
 
 ## Non-goals
 
-- Visualization tooling. Stately Studio and the VS Code extension handle diagramming and inspection.
+- A bundled visualizer. Inspection and visualization are still part of what an agent machine gives you: XState's `inspect` stream feeds the Stately inspector, Stately Studio, and the VS Code extension. See [Inspect a run](observability.md#inspect-a-run).
 - Search clients, vector stores, browser automation, code sandboxes, skills, prompt registries, eval scorers, and deployment servers. These evolve independently as specialized libraries.
 
 ## Integration recipes
