@@ -46,6 +46,21 @@ For a TypeScript policy, before the first round:
 - **List the environment files** (the environment machine, its guards, the world and its tools) and record a hash of each. Any change to them fails the round. The runner is not one of them, but its diff may contain only the routing line.
 - **Keep the policy a machine.** A diff may add states, `choice` branches, guards over facts, helpers in the policy file, or change a prompt or a model ref. It may not turn the policy into a free function, call tools the environment owns, or import from the environment anything but its schemas, types, constants, and exported guard functions.
 
+## No decision points
+
+A tool loop or a scheduler has no `agent.decide`: the model picks tools inside one text request and the machine only gates. There is no policy to diff. Traces still drive change, as proposals a person reviews:
+
+| Proposal | Evidence from traces | Goes to |
+| --- | --- | --- |
+| An approval rule ("always allow `read_file` under `src/`", "always block `rm -rf`") | Approve/reject verdicts grouped by tool and argument pattern, counted from the log's approval events; `foldTraces` rows for the approval state; `traceCoverage` for approval handlers no run exercised (propose nothing for those) | Environment change request |
+| A cap or threshold (retry cap, max steps, batch size) | Runs ending in the cap's failure final, and how close passing runs came to it | Environment change request |
+| Prompt or tool-description wording of the text request | The rounds below, scored by the objective | A versioned request config the improver may edit |
+
+- **Approval rules and caps are environment.** Write each as a change request ([reference.md](reference.md)) with the counts, the pattern, and thread ids. Never write a persisted "always allow" rule yourself. Propose a rule only from a pattern with no rejection and no violation in the training runs, and say how many runs it rests on.
+- **The request config is the policy.** Move the request's system prompt and tool descriptions into one file with a `version` (`requests/agent.ts`, or JSON), and stamp that version as the decider version (`add-traces`). One round changes it once, through the same rounds, replays, and pull request as a policy.
+- **Gates for a request-config diff:** environment files hash as recorded; the diff changes wording only, never tool names, input schemas, or the offered tool set (that changes the call shape, so it is an environment change); the overfit check; the rule evals from `add-evals` still pass.
+- **Propose, never promote** applies to all three.
+
 ## 1. Locate the inputs
 
 Find all six before changing anything. If one is missing, stop and ask.
