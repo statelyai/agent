@@ -271,15 +271,19 @@ const report = await explorePaths(lookupMachine, {
 
 ### Child machines
 
-By default, an invoked child machine is a src like any other: with no `outputs` entry, its branch ends `needs-output`. `children: "explore"` explores the child instead. It covers invoked child machines; spawned children are not explored.
+By default, a child machine is a src like any other: with no `outputs` entry, its branch ends `needs-output`. `children: "explore"` explores the child instead. It covers invoked children and children spawned with `enq.spawn(actors.x, { id, input })`.
 
 - Applies when the src has no `outputs` or `errors` entry and its logic is a state machine.
-- The child is explored on its own, from its invoke input, with the same options and caps, to at most 4 nested levels.
+- The child is explored on its own, from its invoke or spawn input, with the same options and caps, to at most 4 nested levels.
 - Events reach the child only as `childEvents` lists them: `{ [src]: eventTypes }`, the types the parent forwards (`sendTo`/`forwardTo`) or the host sends the child. Default none. A child wait that accepts an unlisted type makes the child search incomplete, never a reachable parent path.
 - Each distinct `output` of the child's `done` terminals forks the parent as an output. One output resolves straight through.
 - Each distinct failure of the child's `error` terminals forks a failing branch, recorded with `error`.
+- Each distinct event the child sends its parent (`sendTo(parent, …)`) on any explored path forks the parent receiving it, recorded as the event itself.
 - A child that can end `idle` adds an `idle` terminal to the parent: the parent can wait there forever.
-- Bounded: child idle waits are not parent fork points. The child is explored to its finals, and its distinct outputs fork the parent.
+- Bounded:
+  - Child idle waits are not parent fork points. The child is explored to its finals, and its distinct outputs fork the parent.
+  - N children are explored independently, not as a product of their states. While an explored child is pending, it and every other pending invoke or text request settle in any order; one with no `outputs` entry adds a `needs-output` terminal, and a pending decision's choices branch from the same point. Other combinations are not enumerated beyond `interleave`.
+  - A child's events and outputs are not correlated: each event reaches the parent at most once per path, in any order, before or without the others, and before any of the child's outputs. This over-approximates the child, so a witness may not be a live path. A child that sends the same event twice is covered once.
 - An incomplete child search, such as one with its own `needs-output` or `max-depth`, also ends the parent branch `needs-output` for that src, so the parent report is not complete. The child's `unexpandedEvents` and `vacuous` join the parent's.
 
 ```ts no-check
@@ -297,6 +301,8 @@ const report = await explorePaths(parentMachine, {
 
 `canReach(machine, target, opts)` wraps `explorePaths` to answer whether a state
 path or state-node ID is reachable, with a witness path when it is.
+
+A state the machine only passes through within one step counts as reached: one left at once by an `always` transition, or a `choice` state. `canReach` returns the path that transits it, and `explorePaths` lists it in `reachedStates`.
 
 `reachable: false` proves unreachability only when `complete` is true. `complete` is false when the search left a branch it could not rule out:
 

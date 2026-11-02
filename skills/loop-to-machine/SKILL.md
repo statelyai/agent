@@ -134,7 +134,7 @@ From `@statelyai/agent/testing` (example options in [reference.md](reference.md#
 - `options.payloads(snapshot)` returns payload lists per event type, on both sides of every guard boundary (`0`, the threshold and one over, each producible amount and one over). Without it a closed choice explores only its own `payloads`, and `complete: true` proves nothing about boundaries. A person's free-text event needs one payload per branch.
 - `outputs`: every output each actor can return; `errors`: each actor fails.
 - **A loop** needs `options.dedupeBy`, or the search hits `maxDepth` with `complete: false`. Key on the state value plus the fields read at the loop head (counters, flags); drop fields that only change within one pass. A search over a few seconds: cut the key first. `outputs` are per src, not per call: for "fails twice, then succeeds", let the guard read a context counter.
-- `reachedStates` never lists a `choice` state.
+- A `choice` or `always` state the machine passes through is reachable and listed in `reachedStates`, so it works as a sentinel.
 - A loosened guard makes `canReach` true; test that too.
 - Each normal final is reachable (the search is not vacuous).
 

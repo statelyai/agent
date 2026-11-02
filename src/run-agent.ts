@@ -2448,6 +2448,160 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
    * {@link runAgent} again later with `{ snapshot, event }`.
    */
   onIdle?: (snapshot: SnapshotFrom<TMachine>) => Promise<EventFromLogic<TMachine>>;
+  /**
+   * A send handle for events pushed mid-run (a cancel, a user message), from
+   * {@link createAgentInbox}. Each `inbox.send` goes to the current pass's
+   * {@link AgentRuntime.send}; one sent before the run starts is delivered
+   * after the opening `event`. An inbox event that arrives while the run is
+   * idle resumes it, ahead of a pending `onIdle` answer (that answer is then
+   * dropped). One inbox serves one `runAgent` call.
+   */
+  inbox?: AgentInbox<EventFromLogic<TMachine>>;
+}
+
+/** A send handle into a {@link runAgent} call. See {@link AgentRunOptions.inbox}. */
+export interface AgentInbox<TEvent extends EventObject = EventObject> {
+  /**
+   * Delivers `event` into the run, with the same result as
+   * {@link AgentRuntime.send}: `true` when queued (including before the run
+   * starts), `false` once the run is done, errored, stopped, or the
+   * `runAgent` call returned.
+   */
+  send(event: TEvent): boolean;
+}
+
+interface InboxState {
+  queue: EventObject[];
+  /** The inbox events delivered into the current pass, so an ignored one is not taken for an ignored answer. */
+  passSent: Set<EventObject>;
+  runtime?: { send(event: EventObject): boolean };
+  waiter?: (event: EventObject) => void;
+  claimed: boolean;
+  closed: boolean;
+}
+
+const inboxStates = new WeakMap<object, InboxState>();
+
+/**
+ * Creates a send handle for {@link AgentRunOptions.inbox}, typed by the
+ * machine's events.
+ *
+ * @example
+ * ```ts
+ * const inbox = createAgentInbox<EventOf<typeof machine>>();
+ * const run = runAgent(machine, { input, executors, inbox });
+ * inbox.send({ type: "CANCEL" });
+ * const result = await run;
+ * ```
+ */
+export function createAgentInbox<TEvent extends EventObject = EventObject>(): AgentInbox<TEvent> {
+  const state: InboxState = { queue: [], passSent: new Set(), claimed: false, closed: false };
+  const inbox: AgentInbox<TEvent> = {
+    send(event) {
+      if (state.closed) return false;
+      if (state.runtime) {
+        state.passSent.add(event);
+        const accepted = state.runtime.send(event);
+        if (!accepted) state.closed = true;
+        return accepted;
+      }
+      const waiter = state.waiter;
+      if (waiter) {
+        state.waiter = undefined;
+        waiter(event);
+      } else {
+        state.queue.push(event);
+      }
+      return true;
+    },
+  };
+  inboxStates.set(inbox, state);
+  return inbox;
+}
+
+// Binds the inbox to one pass's runtime: queued events go in first (so they
+// follow the opening event), and the binding drops once the pass is quiescent,
+// so a later send queues for the next pass instead of reaching a finishing runtime.
+function bindInbox<TMachine extends AnyStateMachine>(
+  runtime: AgentRuntime<TMachine>,
+  inbox: InboxState | undefined,
+  // The pass's opening event, when an inbox send supplied it.
+  openingFromInbox?: EventObject,
+): AgentRuntime<TMachine> {
+  if (!inbox) return runtime;
+  inbox.passSent = new Set(openingFromInbox === undefined ? [] : [openingFromInbox]);
+  for (const event of inbox.queue.splice(0)) {
+    inbox.passSent.add(event);
+    runtime.send(event as EventFromLogic<TMachine>);
+  }
+  inbox.runtime = runtime as { send(event: EventObject): boolean };
+  let status: string | undefined;
+  return {
+    start: async (init) => {
+      const [state, effects] = await runtime.start(init);
+      status = (state as AnyMachineSnapshot).status;
+      return [state, effects];
+    },
+    transition: (state, event, options) => {
+      const [next, effects] = runtime.transition(state, event, options);
+      status = (next as AnyMachineSnapshot).status;
+      return [next, effects];
+    },
+    execute: (effects) => runtime.execute(effects),
+    nextEvent: async () => {
+      const event = await runtime.nextEvent();
+      if (event === undefined) {
+        inbox.runtime = undefined;
+        if (status !== "active") inbox.closed = true;
+      }
+      return event;
+    },
+    send: (event) => runtime.send(event),
+    finish: () => runtime.finish(),
+  };
+}
+
+// The next idle answer: a queued inbox event, else the first of `onIdle`'s
+// answer and an inbox send. `undefined` when neither can come.
+async function nextIdleEvent<TMachine extends AnyStateMachine>(
+  snapshot: SnapshotFrom<TMachine>,
+  onIdle: AgentRunOptions<TMachine>["onIdle"],
+  inbox: InboxState | undefined,
+): Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean } | undefined> {
+  const queued = inbox?.queue.shift();
+  if (queued !== undefined) return { event: queued as EventFromLogic<TMachine>, fromInbox: true };
+  if (!onIdle) return undefined;
+  if (!inbox) return { event: await onIdle(snapshot), fromInbox: false };
+  // The waiter goes in before `onIdle` runs, so an `inbox.send` from inside
+  // `onIdle` reaches it instead of a queue nobody reads.
+  let waiter: InboxState["waiter"];
+  const sent = new Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean }>((resolve) => {
+    waiter = (event) => resolve({ event: event as EventFromLogic<TMachine>, fromInbox: true });
+    inbox.waiter = waiter;
+  });
+  // Cleared the moment the answer settles, not after the race's `await`: a
+  // send in between then queues for the next pass instead of resolving the
+  // losing promise.
+  const release = () => {
+    if (inbox.waiter === waiter) inbox.waiter = undefined;
+  };
+  try {
+    return await Promise.race([
+      sent,
+      onIdle(snapshot).then(
+        (event) => {
+          release();
+          return { event, fromInbox: false };
+        },
+        (error: unknown) => {
+          release();
+          throw error;
+        },
+      ),
+    ]);
+  } finally {
+    release();
+  }
 }
 
 /**
@@ -2478,20 +2632,62 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: AgentRunOptions<TMachine> = {},
 ): Promise<AgentRunResult<TMachine>> {
-  const { onIdle, ...rest } = options;
-  let result = await runToQuiescence(createAgentRuntime(machine, rest), rest);
-  if (!onIdle) return result;
+  const { onIdle, inbox, ...rest } = options;
+  const inboxState = inbox === undefined ? undefined : inboxStates.get(inbox);
+  if (inbox !== undefined) {
+    if (inboxState === undefined || inboxState.claimed) {
+      throw new AgentError(
+        "inbox-in-use",
+        "runAgent: `inbox` must come from createAgentInbox() and serves one runAgent call.",
+      );
+    }
+    inboxState.claimed = true;
+  }
+  try {
+    return await runAgentPasses(machine, rest, onIdle, inboxState);
+  } finally {
+    if (inboxState) {
+      inboxState.closed = true;
+      inboxState.runtime = undefined;
+      inboxState.queue.length = 0;
+    }
+  }
+}
+
+async function runAgentPasses<TMachine extends AnyStateMachine>(
+  machine: TMachine,
+  rest: Omit<AgentRunOptions<TMachine>, "onIdle" | "inbox">,
+  onIdle: AgentRunOptions<TMachine>["onIdle"],
+  inbox: InboxState | undefined,
+): Promise<AgentRunResult<TMachine>> {
+  let result = await runToQuiescence(bindInbox(createAgentRuntime(machine, rest), inbox), rest);
+  if (!onIdle && !inbox) return result;
   // The budget is for the whole call: each pass starts from what the earlier
   // passes spent, since every runtime counts only its own calls.
   let modelCallsSpent = (rest.modelCallsSpent ?? 0) + result.usage.modelCalls;
   // `attempts` explain the opening `event` only, never an `onIdle` answer.
   const { input: _input, events: _events, attempts: _attempts, ...resumeOptions } = rest;
   // An ignored event (the opening `event`, or an answer) leaves the run where
-  // it was; it is reported, not retried from the same snapshot.
-  while (result.status === "idle" && result.ignored === undefined) {
-    const event = await onIdle(result.snapshot);
+  // it was; it is reported, not retried from the same snapshot. An ignored
+  // inbox event is reported too, but does not end the loop.
+  // Only an ignored inbox event of the current pass (not its opening answer)
+  // keeps the loop going.
+  let answer: EventObject | undefined = rest.event;
+  while (
+    result.status === "idle" &&
+    (result.ignored === undefined ||
+      (result.ignored !== answer && inbox?.passSent.has(result.ignored) === true))
+  ) {
+    const next = await nextIdleEvent(result.snapshot, onIdle, inbox);
+    if (next === undefined) break;
+    const { event, fromInbox } = next;
+    answer = fromInbox ? undefined : event;
     result = await runToQuiescence(
-      createAgentRuntime(machine, { ...resumeOptions, modelCallsSpent }),
+      bindInbox(
+        createAgentRuntime(machine, { ...resumeOptions, modelCallsSpent }),
+        inbox,
+        fromInbox ? event : undefined,
+      ),
       {
         ...resumeOptions,
         // Without a store the log travels with the result, so the final

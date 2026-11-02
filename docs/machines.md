@@ -112,6 +112,8 @@ Beyond schemas, `setupAgent` takes your models plus optional `requests`, `actors
 
 The builtins `agent.generateText`, `agent.streamText`, and `agent.decide` are registered automatically. Invoke them by name.
 
+The setup's type is `SetupAgentResult<…>`, exported from the root, so `export const agentSetup = setupAgent(...)` emits portable declarations under `declaration: true` or `composite: true` (TS 6 and 7) with no annotation.
+
 ### Models
 
 The `models` map pairs a short alias with a resolved model. Request and decision `model:` values autocomplete against its keys. Pass the same map to the host adapter. See [Models and providers](models-and-providers.md).

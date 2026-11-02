@@ -322,6 +322,363 @@ describe("explorePaths — children: 'explore'", () => {
   });
 });
 
+describe("explorePaths — spawned children", () => {
+  // Each child pauses for approval, tells its parent READY, then waits for RELEASE.
+  const approver = createMachine({
+    context: ({ input }: { input: { id: string } }) => ({ id: input.id }),
+    initial: "asking",
+    states: {
+      asking: { on: { APPROVE: { target: "approved" }, REJECT: { target: "rejected" } } },
+      approved: {
+        entry: (
+          { parent }: { parent?: unknown },
+          enq: { sendTo: (to: unknown, event: unknown) => void },
+        ) => {
+          if (parent) enq.sendTo(parent, { type: "READY" });
+        },
+        on: { RELEASE: { target: "ran" } },
+      },
+      ran: {
+        type: "final",
+        output: ({ context }: { context: { id: string } }) => ({ id: context.id, ran: true }),
+      },
+      rejected: {
+        type: "final",
+        output: ({ context }: { context: { id: string } }) => ({ id: context.id, ran: false }),
+      },
+    },
+  } as never) as AnyStateMachine;
+
+  // Spawns two approvers; both READY opens the barrier.
+  function createBatch() {
+    const agent = setupAgent({
+      context: z.object({ ready: z.number(), settled: z.number() }),
+      events: { READY: z.object({}) },
+      actors: { approver },
+    });
+    return agent.createMachine({
+      context: { ready: 0, settled: 0 },
+      initial: "waiting",
+      states: {
+        waiting: {
+          entry: ({ actors }, enq) => {
+            enq.spawn(actors.approver, { id: "a1", input: { id: "a1" } });
+            enq.spawn(actors.approver, { id: "a2", input: { id: "a2" } });
+          },
+          on: {
+            READY: ({ context }) =>
+              context.ready + 1 === 2
+                ? { target: "released", context: { ready: 2 } }
+                : { context: { ready: context.ready + 1 } },
+          },
+        },
+        released: {},
+        finished: { type: "final" },
+      },
+      on: {
+        "xstate.done.actor": ({ context }) =>
+          context.settled + 1 === 2
+            ? { target: ".finished", context: { settled: 2 } }
+            : { context: { settled: context.settled + 1 } },
+      },
+    });
+  }
+  const childEvents = { approver: ["APPROVE", "REJECT", "RELEASE"] };
+
+  test("default 'outputs': a spawned child machine is a needs-output block", async () => {
+    const report = await explorePaths(createBatch());
+    expect(report.terminals).toMatchObject([{ status: "needs-output", missingSrc: "approver" }]);
+  });
+
+  test("'explore': each spawned child is explored with its spawn input", async () => {
+    const report = await explorePaths(createBatch(), {
+      children: "explore",
+      childEvents,
+      maxDepth: 10,
+      maxPaths: 10_000,
+    });
+    expect(isExplorationComplete(report)).toBe(true);
+    const outputs = report.terminals.flatMap((t) =>
+      t.path.flatMap((e) => (e.type.startsWith("xstate.done.actor.") ? [e["output"]] : [])),
+    );
+    expect(outputs).toContainEqual({ id: "a1", ran: true });
+    expect(outputs).toContainEqual({ id: "a2", ran: false });
+  });
+
+  test("'explore': a child's sendTo(parent) event forks the parent", async () => {
+    const options = { children: "explore" as const, childEvents, maxDepth: 10, maxPaths: 10_000 };
+    const report = await explorePaths(createBatch(), options);
+    expect(report.reachedStates).toContain("released");
+    const { reachable, complete, witness } = await canReach(createBatch(), "released", options);
+    expect({ reachable, complete }).toEqual({ reachable: true, complete: true });
+    expect(witness).toEqual([{ type: "READY" }, { type: "READY" }]);
+  });
+
+  test("'explore': each child's event reaches the parent at most once per path", async () => {
+    const report = await explorePaths(createBatch(), {
+      children: "explore",
+      childEvents,
+      maxDepth: 10,
+      maxPaths: 10_000,
+      dedupeBy: (snapshot) => JSON.stringify([snapshot.value, snapshot.context]),
+    });
+    expect(isExplorationComplete(report)).toBe(true);
+    for (const terminal of report.terminals) {
+      expect(terminal.path.filter((e) => e.type === "READY").length).toBeLessThanOrEqual(2);
+    }
+  });
+});
+
+describe("explorePaths — explored children: soundness", () => {
+  test("a child can settle before a sibling scripted invoke with an earlier id", async () => {
+    const child = createMachine({
+      initial: "working",
+      states: { working: { on: { FINISH: { target: "finished" } } }, finished: { type: "final" } },
+    });
+    const agent = setupAgent({
+      context: z.object({}),
+      actors: { a: createAsyncLogic({ run: async () => 1 }), b: child },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: {
+          invoke: [
+            { id: "a", src: "a", onDone: { target: "done" } },
+            { id: "b", src: "b", onDone: { target: "recovered" } },
+          ],
+        },
+        done: { type: "final" },
+        recovered: { type: "final" },
+      },
+    });
+    const options = {
+      children: "explore" as const,
+      childEvents: { b: ["FINISH"] },
+      outputs: { a: [1] },
+    };
+    const result = await canReach(machine, "recovered", options);
+    expect(result).toMatchObject({ reachable: true, complete: true });
+    expect(await canReach(machine, "done", options)).toMatchObject({ reachable: true });
+  });
+  test("a blocked invoke pending beside an explored child is a needs-output terminal", async () => {
+    const child = createMachine({
+      initial: "working",
+      states: { working: { on: { FINISH: { target: "finished" } } }, finished: { type: "final" } },
+    });
+    const agent = setupAgent({
+      context: z.object({}),
+      actors: {
+        a: child,
+        b: createAsyncLogic({ run: async () => 1 }),
+        c: createAsyncLogic({ run: async () => 1 }),
+      },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: {
+          invoke: [
+            { id: "a", src: "a", onDone: { target: "done" } },
+            { id: "b", src: "b", onDone: { target: "blockedFirst" } },
+            { id: "c", src: "c", onDone: { target: "done" } },
+          ],
+        },
+        done: { type: "final" },
+        blockedFirst: { type: "final" },
+      },
+    });
+    const report = await explorePaths(machine, {
+      children: "explore",
+      childEvents: { a: ["FINISH"] },
+      outputs: { c: [1] },
+    });
+    expect(report.terminals).toContainEqual(
+      expect.objectContaining({ status: "needs-output", missingSrc: "b" }),
+    );
+    expect(isExplorationComplete(report)).toBe(false);
+  });
+
+  test("a pending decision beside an explored child expands its choices", async () => {
+    const child = createMachine({
+      initial: "working",
+      states: { working: { on: { FINISH: { target: "finished" } } }, finished: { type: "final" } },
+    });
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { PICK: z.object({}) },
+      actors: { a: child },
+      requests: {
+        summarize: {
+          schemas: { input: z.object({}), output: z.string() },
+          model: "m",
+          prompt: () => "summarize",
+        },
+      },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: {
+          invoke: [
+            { id: "a", src: "a", onDone: { target: "childDone" } },
+            { id: "b", src: "summarize", input: {}, onDone: { target: "summarized" } },
+            {
+              id: "c",
+              src: "agent.decide",
+              input: () => ({ model: "m", prompt: "pick", allowedEvents: ["PICK"] as const }),
+            },
+          ],
+          on: { PICK: { target: "picked" } },
+        },
+        childDone: { type: "final" },
+        summarized: { type: "final" },
+        picked: { type: "final" },
+      },
+    });
+    const report = await explorePaths(machine, {
+      children: "explore",
+      childEvents: { a: ["FINISH"] },
+      outputs: { summarize: ["s"] },
+    });
+    expect(report.terminals.filter((t) => t.status === "needs-output")).toEqual([]);
+    expect(report.reachedStates).toContain("picked");
+    expect(isExplorationComplete(report)).toBe(true);
+  });
+
+  test("every pending decision beside an explored child expands its choices", async () => {
+    const child = createMachine({
+      initial: "working",
+      states: { working: { on: { FINISH: { target: "finished" } } }, finished: { type: "final" } },
+    });
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { LEFT: z.object({}), RIGHT: z.object({}) },
+      actors: { a: child },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: {
+          invoke: [
+            { id: "a", src: "a", onDone: { target: "childDone" } },
+            {
+              id: "d1",
+              src: "agent.decide",
+              input: () => ({ model: "m", prompt: "left?", allowedEvents: ["LEFT"] as const }),
+            },
+            {
+              id: "d2",
+              src: "agent.decide",
+              input: () => ({ model: "m", prompt: "right?", allowedEvents: ["RIGHT"] as const }),
+            },
+          ],
+          on: { LEFT: { target: "left" }, RIGHT: { target: "right" } },
+        },
+        childDone: { type: "final" },
+        left: { type: "final" },
+        right: { type: "final" },
+      },
+    });
+    const options = { children: "explore" as const, childEvents: { a: ["FINISH"] } };
+    for (const target of ["left", "right", "childDone"]) {
+      expect(await canReach(machine, target, options)).toMatchObject({
+        reachable: true,
+        complete: true,
+      });
+    }
+    expect(isExplorationComplete(await explorePaths(machine, options))).toBe(true);
+  });
+
+  test("a child restarted under the same id can send the same event again", async () => {
+    const worker = createMachine({
+      initial: "starting",
+      states: {
+        starting: {
+          on: { GO: { target: "ready" } },
+        },
+        ready: {
+          entry: (
+            { parent }: { parent?: unknown },
+            enq: { sendTo: (to: unknown, event: unknown) => void },
+          ) => {
+            if (parent) enq.sendTo(parent, { type: "READY" });
+          },
+        },
+      },
+    } as never) as AnyStateMachine;
+    const agent = setupAgent({
+      context: z.object({ readies: z.number() }),
+      events: { READY: z.object({}) },
+      actors: { worker },
+    });
+    const machine = agent.createMachine({
+      context: { readies: 0 },
+      initial: "first",
+      states: {
+        first: {
+          invoke: { id: "worker", src: "worker" },
+          on: { READY: { target: "second", context: { readies: 1 } } },
+        },
+        second: {
+          invoke: { id: "worker", src: "worker" },
+          on: { READY: { target: "done", context: { readies: 2 } } },
+        },
+        done: { type: "final" },
+      },
+    });
+    const result = await canReach(machine, "done", {
+      children: "explore",
+      childEvents: { worker: ["GO"] },
+    });
+    expect(result).toMatchObject({ reachable: true });
+    expect(result.witness).toEqual([{ type: "READY" }, { type: "READY" }]);
+  });
+});
+
+describe("canReach — states passed through", () => {
+  function createRouting() {
+    return createMachine({
+      initial: "booting",
+      states: {
+        booting: { always: { target: "idle" } },
+        idle: { on: { GO: { target: "check" }, PICK: { target: "pick" } } },
+        check: { always: { target: "end" } },
+        pick: { type: "choice", choice: () => ({ target: "end" }) },
+        orphan: { always: { target: "end" } },
+        end: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+  }
+
+  test("an `always` state passed through is reachable", async () => {
+    const result = await canReach(createRouting(), "check");
+    expect(result).toMatchObject({ reachable: true, complete: true, witness: [{ type: "GO" }] });
+    expect(await canReach(createRouting(), "booting")).toMatchObject({
+      reachable: true,
+      witness: [],
+    });
+    const report = await explorePaths(createRouting());
+    expect(report.reachedStates).toEqual(expect.arrayContaining(["booting", "check", "pick"]));
+  });
+
+  test("a choice state passed through is reachable", async () => {
+    const result = await canReach(createRouting(), "pick");
+    expect(result).toMatchObject({ reachable: true, complete: true, witness: [{ type: "PICK" }] });
+  });
+
+  test("a transient state nothing transits stays unreachable", async () => {
+    expect(await canReach(createRouting(), "orphan")).toMatchObject({
+      reachable: false,
+      complete: true,
+    });
+  });
+});
+
 describe("explorePaths — vacuous", () => {
   test("a payload-reading transition explored only as bare { type } is vacuous", async () => {
     const machine = createMachine({

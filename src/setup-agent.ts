@@ -627,7 +627,7 @@ type SetupAgentXStateResult<
  * `createAgentRuntime` can resolve their schemas/actors
  * without re-passing them each call.
  */
-type SetupAgentResult<
+export type SetupAgentResult<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends AgentEventSchemaInputMap,
   TActors extends { [K in keyof TActors]: AnyActorLogic },

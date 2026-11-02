@@ -260,7 +260,7 @@ export function getAgentRequests(
  *
  * @internal
  */
-function doneEvent(
+export function doneEvent(
   snapshot: AnyMachineSnapshot,
   request: Pick<AgentRequest, "id"> | string,
   output: unknown,
@@ -282,7 +282,7 @@ function doneEvent(
  *
  * @internal
  */
-function errorEvent(
+export function errorEvent(
   snapshot: AnyMachineSnapshot,
   request: Pick<AgentRequest, "id"> | string,
   error: unknown,
