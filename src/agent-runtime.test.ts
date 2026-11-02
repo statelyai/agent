@@ -553,3 +553,176 @@ describe("createAgentRuntime", () => {
     });
   });
 });
+
+describe("AgentRuntime.send", () => {
+  // `work` stays pending until its gate opens; NOTE records arrivals without
+  // leaving the state, CANCEL leaves it (stopping the request).
+  const worker = setupAgent({
+    context: z.object({ log: z.array(z.string()) }),
+    output: z.object({ log: z.array(z.string()) }),
+    events: { NOTE: z.object({ text: z.string() }), CANCEL: z.object({}) },
+    requests: { work: text("work") },
+  }).createMachine({
+    context: { log: [] },
+    initial: "working",
+    states: {
+      working: {
+        invoke: {
+          src: "work",
+          input: {},
+          onDone: {
+            target: "done",
+            context: ({ context, event }) => ({ log: [...context.log, event.output.result] }),
+          },
+        },
+        on: {
+          NOTE: { context: ({ context, event }) => ({ log: [...context.log, event.text] }) },
+          CANCEL: { target: "cancelled" },
+        },
+      },
+      cancelled: { type: "final", output: ({ context }) => context },
+      done: { type: "final", output: ({ context }) => context },
+    },
+  });
+
+  async function drive(runtime: ReturnType<typeof createAgentRuntime<typeof worker>>) {
+    let [state, effects] = await runtime.start();
+    await runtime.execute(effects);
+    for (let event; (event = await runtime.nextEvent());) {
+      [state, effects] = runtime.transition(state, event);
+      await runtime.execute(effects);
+    }
+    return runtime.finish();
+  }
+
+  test("a sent event interleaves with a pending invoke, in arrival order", async () => {
+    const gate = deferred();
+    const runtime = createAgentRuntime(worker, {
+      executors: gatedExecutors({ work: gate.promise }).executors,
+    });
+    const settled = drive(runtime);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(runtime.send({ type: "NOTE", text: "first" })).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(runtime.send({ type: "NOTE", text: "second" })).toBe(true);
+    gate.resolve();
+    const result = await settled;
+    expect(result.status === "done" ? result.output.log : undefined).toEqual([
+      "first",
+      "second",
+      "work done",
+    ]);
+    expect(result.ignored).toBeUndefined();
+    // Journaled like any delivered event.
+    expect(result.events.map((entry) => entry.event.type)).toEqual([
+      "@agent.init",
+      "NOTE",
+      "NOTE",
+      expect.stringMatching(/^xstate\.done\.actor/),
+    ]);
+  });
+
+  test("abort mid-invoke: a sent CANCEL leaves the state and aborts the request", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const runtime = createAgentRuntime(worker, {
+      executors: {
+        generateText: (_request, info) => {
+          requestSignal = info?.signal;
+          return new Promise(() => {});
+        },
+      },
+    });
+    const settled = drive(runtime);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(requestSignal?.aborted).toBe(false);
+    runtime.send({ type: "CANCEL" });
+    const result = await settled;
+    expect(result.status).toBe("done");
+    expect(result.snapshot.value).toBe("cancelled");
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  test("replaying the log of a run with sent events lands on the same state", async () => {
+    const gate = deferred();
+    const runtime = createAgentRuntime(worker, {
+      executors: gatedExecutors({ work: gate.promise }).executors,
+    });
+    const settled = drive(runtime);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    runtime.send({ type: "NOTE", text: "hi" });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    runtime.send({ type: "CANCEL" });
+    const result = await settled;
+    const replayed = replay(worker, result.events);
+    expect(replayed.snapshot.value).toBe("cancelled");
+    expect(replayed.snapshot.context).toEqual(result.snapshot.context);
+    expect(result.snapshot.context).toEqual({ log: ["hi"] });
+  });
+
+  test("before start: queued and handed out by the first nextEvent", async () => {
+    const runtime = createAgentRuntime(worker, {
+      executors: { generateText: () => new Promise(() => {}) },
+    });
+    expect(runtime.send({ type: "CANCEL" })).toBe(true);
+    const result = await drive(runtime);
+    expect(result.snapshot.value).toBe("cancelled");
+  });
+
+  test("after the machine is done: dropped (false); after finish: throws", async () => {
+    const runtime = createAgentRuntime(worker, { executors: gatedExecutors().executors });
+    let [state, effects] = await runtime.start();
+    await runtime.execute(effects);
+    for (let event; (event = await runtime.nextEvent());) {
+      [state, effects] = runtime.transition(state, event);
+      await runtime.execute(effects);
+    }
+    expect(state.status).toBe("done");
+    expect(runtime.send({ type: "NOTE", text: "late" })).toBe(false);
+    await runtime.finish();
+    expect(() => runtime.send({ type: "CANCEL" })).toThrow(/finished/);
+  });
+
+  test("synchronous cancel: a direct transition on the loop's state, then the loop exits", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const runtime = createAgentRuntime(worker, {
+      executors: {
+        generateText: (_request, info) => {
+          requestSignal = info?.signal;
+          return new Promise(() => {});
+        },
+      },
+    });
+    let [state, effects] = await runtime.start();
+    await runtime.execute(effects);
+    const loop = (async () => {
+      for (let event; (event = await runtime.nextEvent());) {
+        [state, effects] = runtime.transition(state, event);
+        await runtime.execute(effects);
+      }
+    })();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    [state, effects] = runtime.transition(state, { type: "CANCEL" });
+    await runtime.execute(effects);
+    // Applied before the caller continues.
+    expect(state.value).toBe("cancelled");
+    expect(requestSignal?.aborted).toBe(true);
+    await loop;
+    const result = await runtime.finish();
+    expect(result.snapshot.value).toBe("cancelled");
+  });
+
+  test("an unhandled sent event is reported as ignored", async () => {
+    const gate = deferred();
+    const runtime = createAgentRuntime(worker, {
+      executors: gatedExecutors({ work: gate.promise }).executors,
+    });
+    const settled = drive(runtime);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    runtime.send({ type: "BOGUS" } as never);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    gate.resolve();
+    const result = await settled;
+    expect(result.status).toBe("done");
+    expect(result.ignored?.type).toBe("BOGUS");
+  });
+});

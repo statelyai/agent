@@ -2334,6 +2334,32 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
   execute(effects: AgentEffects): Promise<void>;
   /** The next event that arrived, or `undefined` once the run is quiescent. */
   nextEvent(): Promise<EventFromLogic<TMachine> | undefined>;
+  /**
+   * Delivers a host event (a cancel, a user message, a host-owned timer) into
+   * the run's mailbox, behind whatever already arrived. Asynchronous: `send`
+   * only enqueues; the machine moves when the host loop's next `nextEvent()`
+   * hands the event out (a parked `nextEvent()` resolves with it) and the loop
+   * calls `transition`. A host that needs the event applied before it returns
+   * (a synchronous cancel) calls `transition(state, event)` itself instead,
+   * on the loop's current `state`, and keeps the loop's invariants: one
+   * shared `state` variable that both paths read and write, `execute` on the
+   * returned effects, and no `transition` once the state is not `active`. It is
+   * applied by the host's own `transition` call, so it is journaled and
+   * replayed like any other event, and reported as `result.ignored` when the
+   * state has no transition for it.
+   *
+   * - Before `start`: queued; the first `nextEvent()` hands it out (after the
+   *   init event a host delivers itself). Returns `true`.
+   * - While an effect, child or timer is in flight: queued in arrival order
+   *   with their completions. Returns `true`.
+   * - After the run stopped (cancelled, aborted, journal failure) or the
+   *   machine left `active` (done, error): dropped. Returns `false`.
+   * - After `finish`: throws {@link AgentError} `runtime-finished`.
+   *
+   * A sent event the loop never reads (the host called `finish` without
+   * draining `nextEvent()`) is dropped.
+   */
+  send(event: EventFromLogic<TMachine> | AgentTimerEvent): boolean;
   /** Settles the run: stops what is still running and returns the outcome. */
   finish(): Promise<AgentRunResult<TMachine>>;
 }
@@ -3019,11 +3045,13 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   let finished = false;
   let ignoredEvent: EventObject | undefined;
 
-  const enqueue = (event: EventObject): void => {
+  const enqueue = (event: EventObject, fromHost = false): void => {
     if (finished) {
       return;
     }
-    fromMailbox.add(event);
+    if (!fromHost) {
+      fromMailbox.add(event);
+    }
     const waiting = wake;
     if (waiting) {
       wake = undefined;
@@ -3728,6 +3756,20 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         }
         return event as EventFromLogic<TMachine>;
       }
+    },
+
+    send(event) {
+      if (finished) {
+        throw new AgentError(
+          "runtime-finished",
+          "createAgentRuntime: the run has finished; start a new runtime to send it events.",
+        );
+      }
+      if (stopReason !== undefined || (current !== undefined && current.status !== "active")) {
+        return false;
+      }
+      enqueue(event as EventObject, true);
+      return true;
     },
 
     async finish() {
