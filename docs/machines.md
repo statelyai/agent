@@ -357,6 +357,27 @@ The returned object takes the same fields as a transition object, including `con
 
 A choice state has no other behavior. `on`, `always`, `after`, `entry`, `exit`, `invoke`, and `states` are not allowed on it. Put the work in the target states.
 
+A choice function receives only `{ context, event }`, with no `enq` argument, so it cannot emit, spawn, raise, or send. Routing that must also do one of those uses an `always` transition on a normal state, whose function takes `enq` like any transition function:
+
+```ts no-check
+// Routes only.
+checking: {
+  type: 'choice',
+  choice: ({ context }) =>
+    context.score >= 0.8 ? { target: 'accepted' } : { target: 'rejected' },
+},
+```
+
+```ts no-check
+// Routes and emits.
+routing: {
+  always: ({ context }, enq) => {
+    enq.emit({ type: 'SCORED', score: context.score });
+    return { target: context.score >= 0.8 ? 'accepted' : 'rejected' };
+  },
+},
+```
+
 Use a choice state when the branch is a pure routing decision the machine makes on its own, such as a loop bound or a score threshold. Use a [decision](decisions.md) when the model picks the branch.
 
 In a JSON [machine config](machines-as-data.md), `choice` is an array of branches instead of a function. Each branch carries an optional `guard` and a `target`, and the first branch whose guard passes wins. A branch with no guard is the fallback.
