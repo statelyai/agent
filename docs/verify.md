@@ -299,7 +299,7 @@ const report = await explorePaths(parentMachine, {
 
 `maxPaths` and `maxNodes` apply to each search on its own. With `children: "explore"`, every explored child is a search of its own with the same caps, so a parent with two loopy children can expand far more than `maxNodes`. `budget` bounds the whole call.
 
-- `budget.nodes`: branch points expanded in total, by the top-level search and every child search it triggers. A cached child outcome counts once, when it is computed. No default.
+- `budget.nodes`: branch points expanded in total, by the top-level search and every child search it triggers. A cached child outcome counts once, when it is computed. Default 250,000, so a search with loopy children stops instead of growing without bound. Raise it explicitly for a bigger machine.
 - `budget.ms`: wall-clock milliseconds from the start of the call. It is checked at each branch point, in child searches too. A slow `payloads` or guard call is not interrupted. No default.
 - `budget.childCache`: explored-child outcomes kept for reuse, keyed by logic, src, and input. The least recently used one is evicted first. An evicted child is explored again when reached, and counts against `budget.nodes` again. Default 64.
 

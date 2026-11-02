@@ -1070,7 +1070,8 @@ export interface ExplorePathsOptions {
     /**
      * Branch points expanded in total: the top-level search and every child
      * search it triggers (`children: "explore"`). A cached child outcome
-     * counts once, when it is computed; a cache hit costs nothing.
+     * counts once, when it is computed; a cache hit costs nothing. Default
+     * 250,000; raise it explicitly for a bigger machine.
      */
     nodes?: number;
     /**
@@ -1299,6 +1300,11 @@ const DEFAULT_MAX_NODES = 100_000;
 // Cap on nested child-machine explorations (`children: "explore"`).
 const MAX_CHILD_NESTING = 4;
 
+// Default cap on branch points expanded across one call, child searches
+// included (`budget.nodes`). Well above every search in this repo's tests
+// and examples (the largest is under 50,000).
+const DEFAULT_BUDGET_NODES = 250_000;
+
 // Default cap on explored-child outcomes kept per search (`budget.childCache`).
 const DEFAULT_CHILD_CACHE = 64;
 
@@ -1316,7 +1322,7 @@ function startBudget(budget: ExplorePathsOptions["budget"]): SearchBudget {
   const started = Date.now();
   return {
     nodes: 0,
-    maxNodes: budget?.nodes ?? Number.POSITIVE_INFINITY,
+    maxNodes: budget?.nodes ?? DEFAULT_BUDGET_NODES,
     started,
     deadline: budget?.ms === undefined ? undefined : started + budget.ms,
   };
