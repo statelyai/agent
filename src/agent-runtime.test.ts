@@ -823,9 +823,11 @@ describe("abortWith", () => {
 
 describe("abortWith: abort comes first, and an unfinished wind-down aborts", () => {
   const machine = setupAgent({
+    context: z.object({}),
     events: { CANCEL: z.object({}), FINISH: z.object({}), CONFIRM: z.object({}) },
     requests: { work: text("work") },
   }).createMachine({
+    context: {},
     initial: "working",
     states: {
       working: {
