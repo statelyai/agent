@@ -1093,8 +1093,22 @@ export interface ExplorePathsOptions {
    * parent fork points. A child search that was incomplete also ends the
    * parent branch `needs-output` for that src, so the parent report is not
    * complete.
+   *
+   * Invoked children only; spawned children are not explored. An invoked
+   * child receives only the events its parent forwards or the host sends
+   * it, so the child search offers external events only for the types
+   * {@link ExplorePathsOptions.childEvents} lists for its src (none by
+   * default). A child wait that accepts an event not listed leaves the
+   * child search incomplete.
    */
   children?: "outputs" | "explore";
+  /**
+   * With `children: "explore"`: per child src, the event types that can
+   * reach the child at its waits (the ones the parent forwards with
+   * `sendTo`/`forwardTo`, or the host sends it directly). Unlisted types are
+   * never offered to the child.
+   */
+  childEvents?: Record<string, string[]>;
   /**
    * Payloads to try per event type at each branch point, given the settled
    * snapshot there. At a decision or an idle wait, an event type with an
@@ -1354,11 +1368,15 @@ function explore(
   options: ExplorePathsOptions,
   stopWhen?: (snapshot: AnyMachineSnapshot) => boolean,
   nesting = 0,
+  // For an explored child: the external event types that can reach it.
+  // Undefined at the root, where every accepted event can arrive.
+  deliverable?: ReadonlySet<string>,
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
   doneOutputs: unknown[];
   failures: unknown[];
+  undeliverable: string[];
 } {
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 200;
@@ -1456,7 +1474,8 @@ function explore(
     }
     let key: string | undefined;
     try {
-      key = JSON.stringify(input) ?? "undefined";
+      // Keyed by src too: `childEvents` is per src.
+      key = `${src}\u0000${JSON.stringify(input) ?? "undefined"}`;
     } catch {
       key = undefined;
     }
@@ -1466,14 +1485,25 @@ function explore(
     if (cached) {
       return cached;
     }
-    const child = explore(logic, { ...options, input }, undefined, nesting + 1);
+    const child = explore(
+      logic,
+      { ...options, input },
+      undefined,
+      nesting + 1,
+      new Set(options.childEvents?.[src] ?? []),
+    );
+    if (child.undeliverable.length > 0) {
+      unexplored.push(
+        `child: src '${src}' waits for ${child.undeliverable.join(", ")}, which childEvents does not list as reaching it; list each event the parent forwards`,
+      );
+    }
     for (const type of child.report.unexpandedEvents) unexpanded.add(type);
     for (const type of child.report.vacuous) vacuous.add(type);
     const outcome: ChildOutcome = {
       outputs: distinctValues(child.doneOutputs),
       errors: distinctValues(child.failures),
       stalls: child.report.terminals.some((terminal) => terminal.status === "idle"),
-      complete: isExplorationComplete(child.report),
+      complete: isExplorationComplete(child.report) && child.undeliverable.length === 0,
     };
     if (!outcome.complete) {
       unexplored.push(
@@ -1586,8 +1616,19 @@ function explore(
   // With `interleave: "pending"`, an invoke that would resolve straight
   // through stops the advance (`pending`) when the active states accept an
   // external event, so the event can race it.
+  // Accepted events that can actually arrive: all of them at the root, only
+  // the deliverable ones in an explored child (the rest are noted).
+  const undeliverable = new Set<string>();
+  const arriving = (snapshot: AnyMachineSnapshot) =>
+    getAcceptedEvents(snapshot).filter((descriptor) => {
+      if (deliverable === undefined || deliverable.has(descriptor.type)) {
+        return true;
+      }
+      undeliverable.add(descriptor.type);
+      return false;
+    });
   const races = (step: AgentStep): boolean =>
-    interleaving && getAcceptedEvents(step.snapshot as AnyMachineSnapshot).length > 0;
+    interleaving && arriving(step.snapshot as AnyMachineSnapshot).length > 0;
   const advance = (
     step: AgentStep,
   ): {
@@ -1678,7 +1719,7 @@ function explore(
     table: Partial<Record<string, Record<string, unknown>[]>>,
     except?: ReadonlySet<string>,
   ): ChosenEvent[] =>
-    getAcceptedEvents(snapshot).flatMap((descriptor) => {
+    arriving(snapshot).flatMap((descriptor) => {
       if (except?.has(descriptor.type)) {
         return [];
       }
@@ -2006,6 +2047,7 @@ function explore(
     witness,
     doneOutputs,
     failures,
+    undeliverable: [...undeliverable],
   };
 }
 

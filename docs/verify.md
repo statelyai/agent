@@ -275,6 +275,7 @@ By default, an invoked or spawned child machine is a src like any other: with no
 
 - Applies when the src has no `outputs` or `errors` entry and its logic is a state machine.
 - The child is explored on its own, from its invoke input, with the same options and caps, to at most 4 nested levels.
+- Events reach the child only as `childEvents` lists them: `{ [src]: eventTypes }`, the types the parent forwards (`sendTo`/`forwardTo`) or the host sends the child. Default none. A child wait that accepts an unlisted type makes the child search incomplete, never a reachable parent path.
 - Each distinct `output` of the child's `done` terminals forks the parent as an output. One output resolves straight through.
 - Each distinct failure of the child's `error` terminals forks a failing branch, recorded with `error`.
 - A child that can end `idle` adds an `idle` terminal to the parent: the parent can wait there forever.
@@ -282,7 +283,10 @@ By default, an invoked or spawned child machine is a src like any other: with no
 - An incomplete child search, such as one with its own `needs-output` or `max-depth`, also ends the parent branch `needs-output` for that src, so the parent report is not complete. The child's `unexpandedEvents` and `vacuous` join the parent's.
 
 ```ts no-check
-const report = await explorePaths(parentMachine, { children: "explore" });
+const report = await explorePaths(parentMachine, {
+  children: "explore",
+  childEvents: { approval: ["YES", "NO"] }, // the parent forwards both
+});
 // report.terminals → one branch per distinct child output, e.g.
 // [{ type: 'xstate.done.actor.approval', output: { ok: true } }]
 ```

@@ -227,8 +227,23 @@ describe("explorePaths — children: 'explore'", () => {
     expect(report.terminals).toMatchObject([{ status: "needs-output", missingSrc: "approval" }]);
   });
 
-  test("'explore': the child's distinct outputs fork the parent", async () => {
+  test("'explore': a child wait for an event nobody forwards is incomplete, not reachable", async () => {
+    // The parent forwards neither YES nor NO, so the child can never finish.
     const report = await explorePaths(createParent(approval), { children: "explore" });
+    expect(report.terminals.some((t) => t.status === "done")).toBe(false);
+    expect(report.terminals).toMatchObject([
+      { status: "idle", state: "waiting" },
+      { status: "needs-output", missingSrc: "approval" },
+    ]);
+    expect(report.unexplored.some((note) => note.includes("childEvents"))).toBe(true);
+    expect(isExplorationComplete(report)).toBe(false);
+    const result = await canReach(createParent(approval), "rejected", { children: "explore" });
+    expect(result).toMatchObject({ reachable: false, complete: false });
+  });
+
+  test("'explore': the child's distinct outputs fork the parent", async () => {
+    const childEvents = { approval: ["YES", "NO"] };
+    const report = await explorePaths(createParent(approval), { children: "explore", childEvents });
     expect(report.terminals).toEqual([
       {
         status: "done",
@@ -242,7 +257,10 @@ describe("explorePaths — children: 'explore'", () => {
       },
     ]);
     expect(isExplorationComplete(report)).toBe(true);
-    const { witness } = await canReach(createParent(approval), "rejected", { children: "explore" });
+    const { witness } = await canReach(createParent(approval), "rejected", {
+      children: "explore",
+      childEvents,
+    });
     expect(witness).toEqual([{ type: "xstate.done.actor.approval", output: { ok: false } }]);
   });
 
@@ -293,7 +311,10 @@ describe("explorePaths — children: 'explore'", () => {
         yes: { type: "final", output: { ok: true } },
       },
     });
-    const report = await explorePaths(createParent(stalling), { children: "explore" });
+    const report = await explorePaths(createParent(stalling), {
+      children: "explore",
+      childEvents: { approval: ["YES", "WAIT"] },
+    });
     expect(report.terminals.map((t) => [t.status, t.state])).toEqual([
       ["done", "approved"],
       ["idle", "waiting"],
