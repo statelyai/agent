@@ -615,6 +615,8 @@ interface ChildRef {
   options?: { input?: unknown };
   _parent?: unknown;
   _initialEffects?: unknown;
+  /** Unique per started actor, so a child restarted under the same id is a new one. */
+  sessionId?: string;
 }
 
 function pendingInvokes(step: AgentStep): PendingInvoke[] {
@@ -1233,6 +1235,8 @@ interface InvokeFork {
   isText?: boolean;
   /** An explored child's events to its parent, each delivered at most once per path. */
   events?: EventObject[];
+  /** The child actor's session, keying its delivered events. */
+  session?: string;
   /**
    * A decision invoke has no canned output of its own — its success branch is
    * the per-candidate-event fork the branch-point logic already does. So the
@@ -1399,7 +1403,7 @@ interface ExploreNode {
   step: AgentStep;
   path: ChosenEvent[];
   depth: number;
-  /** Child-to-parent events already delivered on this path (`<child id>\u0000<event JSON>`). */
+  /** Child-to-parent events already delivered on this path (`<child session>\u0000<event JSON>`). */
   delivered?: ReadonlySet<string> | undefined;
 }
 
@@ -1414,8 +1418,13 @@ function childStartStep(machine: AnyStateMachine, input: unknown, ref?: ChildRef
     : fresh;
 }
 
-// Drops delivered child events whose child is no longer running, so a child
-// started again under the same id can send them again.
+// The key a child's delivered events are recorded under: its actor session,
+// so a child restarted under the same id is a new sender.
+function childSession(id: string, ref: ChildRef | undefined): string {
+  return typeof ref?.sessionId === "string" ? ref.sessionId : id;
+}
+
+// Drops delivered child events whose child actor is no longer running.
 function pruneDelivered(
   delivered: ReadonlySet<string> | undefined,
   step: AgentStep,
@@ -1423,8 +1432,9 @@ function pruneDelivered(
   if (delivered === undefined || delivered.size === 0) {
     return delivered;
   }
-  const running = step.snapshot.children ?? {};
-  const kept = [...delivered].filter((key) => key.slice(0, key.indexOf("\u0000")) in running);
+  const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+  const running = new Set(Object.entries(children).map(([id, ref]) => childSession(id, ref)));
+  const kept = [...delivered].filter((key) => running.has(key.slice(0, key.indexOf("\u0000"))));
   return kept.length === delivered.size ? delivered : new Set(kept);
 }
 
@@ -1637,6 +1647,7 @@ function explore(
           recordError: true,
           outputs: child.outputs,
           events: child.events,
+          session: childSession(id, invoke.ref),
           stalls: child.stalls,
           ...(child.complete ? {} : { incompleteSrc: src }),
         },
@@ -2025,7 +2036,7 @@ function explore(
             if (witness !== undefined || capped()) {
               return;
             }
-            const key = `${child.id}\u0000${JSON.stringify(event)}`;
+            const key = `${child.session ?? child.id}\u0000${JSON.stringify(event)}`;
             if (delivered?.has(key) || !(settled.snapshot as AnyMachineSnapshot).can(event)) {
               continue;
             }
@@ -2215,7 +2226,7 @@ function explore(
         // Drop the reference once taken, so a drained level frees its snapshots.
         level[i] = undefined;
         for (const child of expand(node)) {
-          child.delivered ??= pruneDelivered(node.delivered, child.step);
+          child.delivered = pruneDelivered(child.delivered ?? node.delivered, child.step);
           (levels[child.path.length] ??= []).push(child);
         }
         if (witness !== undefined || hitPathCap) {
@@ -2227,7 +2238,7 @@ function explore(
   } else if (witness === undefined) {
     const visit = (node: ExploreNode): void => {
       for (const child of expand(node)) {
-        child.delivered ??= pruneDelivered(node.delivered, child.step);
+        child.delivered = pruneDelivered(child.delivered ?? node.delivered, child.step);
         visit(child);
       }
     };

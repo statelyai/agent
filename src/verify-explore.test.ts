@@ -462,6 +462,50 @@ describe("explorePaths — explored children: soundness", () => {
     expect(result).toMatchObject({ reachable: true, complete: true });
     expect(await canReach(machine, "done", options)).toMatchObject({ reachable: true });
   });
+  test("a child restarted under the same id can send the same event again", async () => {
+    const worker = createMachine({
+      initial: "starting",
+      states: {
+        starting: {
+          on: { GO: { target: "ready" } },
+        },
+        ready: {
+          entry: (
+            { parent }: { parent?: unknown },
+            enq: { sendTo: (to: unknown, event: unknown) => void },
+          ) => {
+            if (parent) enq.sendTo(parent, { type: "READY" });
+          },
+        },
+      },
+    } as never) as AnyStateMachine;
+    const agent = setupAgent({
+      context: z.object({ readies: z.number() }),
+      events: { READY: z.object({}) },
+      actors: { worker },
+    });
+    const machine = agent.createMachine({
+      context: { readies: 0 },
+      initial: "first",
+      states: {
+        first: {
+          invoke: { id: "worker", src: "worker" },
+          on: { READY: { target: "second", context: { readies: 1 } } },
+        },
+        second: {
+          invoke: { id: "worker", src: "worker" },
+          on: { READY: { target: "done", context: { readies: 2 } } },
+        },
+        done: { type: "final" },
+      },
+    });
+    const result = await canReach(machine, "done", {
+      children: "explore",
+      childEvents: { worker: ["GO"] },
+    });
+    expect(result).toMatchObject({ reachable: true });
+    expect(result.witness).toEqual([{ type: "READY" }, { type: "READY" }]);
+  });
 });
 
 describe("explorePaths — vacuous", () => {
