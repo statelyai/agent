@@ -15,6 +15,8 @@
  * @module
  */
 import {
+  getInitialMicrosteps,
+  getMicrosteps,
   getNextTransitions,
   machineToJSON,
   type AnyActorLogic,
@@ -37,6 +39,8 @@ import { getJsonSchemaSync } from "./utils.js";
 import { isTextLogic, type AgentTextResult } from "./text-logic.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import {
+  doneEvent,
+  errorEvent,
   getPendingInvokes,
   initialAgentStep,
   rejectAgentStep,
@@ -1438,6 +1442,43 @@ function pruneDelivered(
   return kept.length === delivered.size ? delivered : new Set(kept);
 }
 
+// Whether `node` or a state under it is only ever passed through: one with
+// an `always` transition, or a choice state.
+function hasTransientStates(node: unknown): boolean {
+  const visit = (node: unknown): boolean => {
+    if (!isRecord(node)) {
+      return false;
+    }
+    if (node["type"] === "choice" || (Array.isArray(node["always"]) && node["always"].length > 0)) {
+      return true;
+    }
+    return Object.values(isRecord(node["states"]) ? node["states"] : {}).some(visit);
+  };
+  return visit(node);
+}
+
+// The ids of the states under `node` (itself included) only ever passed through.
+function transientStateIds(node: unknown, ids: string[] = []): string[] {
+  if (!isRecord(node)) {
+    return ids;
+  }
+  if (node["type"] === "choice" || (Array.isArray(node["always"]) && node["always"].length > 0)) {
+    ids.push(String(node["id"]));
+  }
+  for (const child of Object.values(isRecord(node["states"]) ? node["states"] : {})) {
+    transientStateIds(child, ids);
+  }
+  return ids;
+}
+
+function hasParallelStates(node: unknown): boolean {
+  return (
+    isRecord(node) &&
+    (node["type"] === "parallel" ||
+      Object.values(isRecord(node["states"]) ? node["states"] : {}).some(hasParallelStates))
+  );
+}
+
 // Shared engine for explorePaths/canReach. Without `stopWhen` it walks depth
 // first (explorePaths' terminal order). With `stopWhen` (canReach) it walks
 // breadth first by path length and halts on the first snapshot the predicate
@@ -1453,6 +1494,10 @@ function explore(
   // For an explored child: its pure-transition actor, whose parent link
   // makes `sendTo(parent, …)` observable.
   childRef?: ChildRef,
+  // Read states passed through within a step: for `explorePaths`'
+  // `reachedStates` and a `canReach` state target that can be one. An
+  // explored child, whose states are not reported, skips it.
+  trackTransits = nesting === 0 && hasTransientStates(machine.root),
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
@@ -1484,6 +1529,48 @@ function explore(
     (getRegisteredAgentExecutionOptions(machine).schemas as AgentSchemas | undefined)?.events ??
     (machine.schemas as AgentSchemas | undefined)?.events ??
     {};
+
+  // States the machine passes through within one step (an `always` hop, a
+  // choice state) never settle, so they are read off the step's microsteps.
+  // Only machines that have such a state pay for it.
+  // Once every such state has been passed through, a further pass adds
+  // nothing, so the microsteps stop (unless parallel regions make each
+  // combination a distinct value).
+  const unseenTransient = new Set(trackTransits ? transientStateIds(machine.root) : []);
+  const keepTracking = trackTransits && hasParallelStates(machine.root);
+  const transits = new WeakMap<AgentStep, AnyMachineSnapshot[]>();
+  const withTransits = (
+    next: AgentStep,
+    microsteps: () => Array<[AnyMachineSnapshot, ...unknown[]]>,
+  ): AgentStep => {
+    if (unseenTransient.size > 0 || keepTracking) {
+      const passed = microsteps()
+        .slice(0, -1)
+        .map(([snapshot]) => snapshot);
+      for (const snapshot of passed) {
+        for (const node of snapshot.nodes) unseenTransient.delete(node.id);
+      }
+      transits.set(next, passed);
+    }
+    return next;
+  };
+  const resolveStep = (prev: AgentStep, id: string | { id: string }, output: unknown) =>
+    withTransits(resolveAgentStep(machine, prev, id, output), () =>
+      getMicrosteps(machine, prev.snapshot, doneEvent(prev.snapshot, id, output) as never),
+    );
+  const rejectStep = (prev: AgentStep, id: string | { id: string }, error: unknown) =>
+    withTransits(rejectAgentStep(machine, prev, id, error), () =>
+      getMicrosteps(machine, prev.snapshot, errorEvent(prev.snapshot, id, error) as never),
+    );
+  const transitionStep = (prev: AgentStep, event: EventObject) =>
+    withTransits(transitionAgentStep(machine, prev, event as never), () =>
+      getMicrosteps(machine, prev.snapshot, event as never),
+    );
+  // `stopWhen` on the settled snapshot or any state passed through to reach it.
+  const stops = (step: AgentStep): boolean =>
+    stopWhen !== undefined &&
+    (stopWhen(step.snapshot as AnyMachineSnapshot) ||
+      (transits.get(step)?.some((snapshot) => stopWhen(snapshot)) ?? false));
 
   // Schema-derived payloads per event type, computed once per type. A type
   // with no schema is applied bare. That covers it only when no transition
@@ -1774,11 +1861,20 @@ function explore(
       reachedValues.push(step.snapshot.value);
     }
     parentEvents.push(...eventsToParent(effects, parent));
+    for (const snapshot of transits.get(step) ?? []) {
+      const transitKey = JSON.stringify(snapshot.value);
+      if (!reachedStates.has(transitKey)) {
+        reachedStates.add(transitKey);
+        reachedValues.push(snapshot.value);
+      }
+    }
   };
 
-  const initial = childStartStep(machine, options.input, childRef);
+  const initial = withTransits(childStartStep(machine, options.input, childRef), () =>
+    getInitialMicrosteps(machine, options.input as never),
+  );
   recordState(initial, childRef?._initialEffects ?? initial.actions);
-  if (stopWhen?.(initial.snapshot)) {
+  if (stops(initial)) {
     witness = [];
   }
 
@@ -1822,7 +1918,7 @@ function explore(
     let current = step;
     // Bounded loop: each iteration resolves one text or scripted invoke.
     for (let i = 0; i < MAX_ADVANCE_STEPS; i++) {
-      if (stopWhen?.(current.snapshot)) {
+      if (stops(current)) {
         return { step: current, hit: true };
       }
       if (current.done) {
@@ -1853,7 +1949,7 @@ function explore(
             pending: { id: request.id, output: asTextResult(settle.output) },
           };
         }
-        current = resolveAgentStep(machine, current, request, asTextResult(settle.output));
+        current = resolveStep(current, request, asTextResult(settle.output));
         recordState(current);
         continue;
       }
@@ -1889,7 +1985,7 @@ function explore(
         if (races(current)) {
           return { step: current, pending: { id: invoke.id, output: settle.output } };
         }
-        current = resolveAgentStep(machine, current, invoke.id, settle.output);
+        current = resolveStep(current, invoke.id, settle.output);
         recordState(current);
         continue;
       }
@@ -1945,7 +2041,7 @@ function explore(
         prunedByGuard++;
         continue;
       }
-      const next = transitionAgentStep(machine, settled, event);
+      const next = transitionStep(settled, event);
       recordState(next);
       yield { step: next, path: [...path, event], depth: depth + 1 };
     }
@@ -1958,7 +2054,7 @@ function explore(
     fork: InvokeFork,
     error: unknown,
   ): ExploreNode => {
-    const failed = rejectAgentStep(machine, settled, fork.id, error);
+    const failed = rejectStep(settled, fork.id, error);
     recordState(failed);
     return {
       step: failed,
@@ -1976,12 +2072,7 @@ function explore(
     fork: InvokeFork,
     output: unknown,
   ): ExploreNode => {
-    const resolved = resolveAgentStep(
-      machine,
-      settled,
-      fork.id,
-      fork.isText ? asTextResult(output) : output,
-    );
+    const resolved = resolveStep(settled, fork.id, fork.isText ? asTextResult(output) : output);
     recordState(resolved);
     return {
       step: resolved,
@@ -2039,7 +2130,7 @@ function explore(
         maxDepthTerminal(settled, path);
         return;
       }
-      const resolved = resolveAgentStep(machine, settled, pending.id, pending.output);
+      const resolved = resolveStep(settled, pending.id, pending.output);
       recordState(resolved);
       yield { step: resolved, path, depth };
       yield* raceBranches(settled, path, depth);
@@ -2091,7 +2182,7 @@ function explore(
             if (delivered?.has(key) || !(settled.snapshot as AnyMachineSnapshot).can(event)) {
               continue;
             }
-            const next = transitionAgentStep(machine, settled, event);
+            const next = transitionStep(settled, event);
             recordState(next);
             yield {
               step: next,
@@ -2220,7 +2311,7 @@ function explore(
         continue;
       }
       taken++;
-      const next = transitionAgentStep(machine, settled, event);
+      const next = transitionStep(settled, event);
       recordState(next);
       yield { step: next, path: [...path, event], depth: depth + 1 };
     }
@@ -2255,7 +2346,7 @@ function explore(
       exhausted.message =
         `Decision '${request.name ?? request.id}' has no candidate the current snapshot ` +
         "accepts (explored, no model call).";
-      const failed = rejectAgentStep(machine, settled, request.id, exhausted);
+      const failed = rejectStep(settled, request.id, exhausted);
       recordState(failed);
       yield {
         step: failed,
@@ -2450,7 +2541,16 @@ export async function canReach(
       ? target
       : (snapshot: AnyMachineSnapshot): boolean =>
           snapshot.nodes.some((node) => node.id === resolvedTarget);
-  const { witness, report } = explore(machine, options, stopWhen);
+  // Only a state target can be passed through; a predicate sees settled snapshots.
+  const { witness, report } = explore(
+    machine,
+    options,
+    stopWhen,
+    0,
+    undefined,
+    undefined,
+    resolvedTarget !== undefined && hasTransientStates(machine.getStateNodeById(resolvedTarget)),
+  );
   if (witness !== undefined) {
     return {
       reachable: true,

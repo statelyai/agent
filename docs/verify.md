@@ -302,6 +302,8 @@ const report = await explorePaths(parentMachine, {
 `canReach(machine, target, opts)` wraps `explorePaths` to answer whether a state
 path or state-node ID is reachable, with a witness path when it is.
 
+A state the machine only passes through within one step counts as reached: one left at once by an `always` transition, or a `choice` state. `canReach` returns the path that transits it, and `explorePaths` lists it in `reachedStates`.
+
 `reachable: false` proves unreachability only when `complete` is true. `complete` is false when the search left a branch it could not rule out:
 
 - `maxPaths` or `maxNodes` cut the search short.

@@ -595,6 +595,45 @@ describe("explorePaths — explored children: soundness", () => {
   });
 });
 
+describe("canReach — states passed through", () => {
+  function createRouting() {
+    return createMachine({
+      initial: "booting",
+      states: {
+        booting: { always: { target: "idle" } },
+        idle: { on: { GO: { target: "check" }, PICK: { target: "pick" } } },
+        check: { always: { target: "end" } },
+        pick: { type: "choice", choice: () => ({ target: "end" }) },
+        orphan: { always: { target: "end" } },
+        end: { type: "final" },
+      },
+    } as never) as AnyStateMachine;
+  }
+
+  test("an `always` state passed through is reachable", async () => {
+    const result = await canReach(createRouting(), "check");
+    expect(result).toMatchObject({ reachable: true, complete: true, witness: [{ type: "GO" }] });
+    expect(await canReach(createRouting(), "booting")).toMatchObject({
+      reachable: true,
+      witness: [],
+    });
+    const report = await explorePaths(createRouting());
+    expect(report.reachedStates).toEqual(expect.arrayContaining(["booting", "check", "pick"]));
+  });
+
+  test("a choice state passed through is reachable", async () => {
+    const result = await canReach(createRouting(), "pick");
+    expect(result).toMatchObject({ reachable: true, complete: true, witness: [{ type: "PICK" }] });
+  });
+
+  test("a transient state nothing transits stays unreachable", async () => {
+    expect(await canReach(createRouting(), "orphan")).toMatchObject({
+      reachable: false,
+      complete: true,
+    });
+  });
+});
+
 describe("explorePaths — vacuous", () => {
   test("a payload-reading transition explored only as bare { type } is vacuous", async () => {
     const machine = createMachine({
