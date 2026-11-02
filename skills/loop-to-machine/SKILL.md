@@ -121,7 +121,7 @@ Write `runMachine` with the old function's signature and result type; callers an
 
 **Host events mid-run** (cancel, abort, a user message while a request runs):
 
-- Abort: `runAgent`'s `signal`. The run settles `{ status: "error", cause: "aborted" }`; the in-flight executor sees the signal.
+- Abort: `runAgent`'s `signal` alone is a hard stop: the run settles `{ status: "error", cause: "aborted" }` and the machine sees nothing. Add `abortWith: { event, timeout? }` when the machine should handle it (a `cancelled` final, cleanup invokes); it falls back to `aborted` if unhandled or on timeout.
 - A cancel the machine handles (cleanup, a `cancelled` final): a `CANCEL` event on the parent state. With `runAgent`, pass `inbox: createAgentInbox()` and call `inbox.send(event)`; an inbox serves one run. A hand-written `createAgentRuntime` loop uses `runtime.send(event)` ([docs/hosts.md](../../docs/hosts.md)).
 
 ## 6. Proofs that need no model
