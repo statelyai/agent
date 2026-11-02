@@ -276,6 +276,27 @@ expect(report.ok).toBe(true); // no regressions
 - Put every write the world records in `effects`, not only the main one. A refund issued without its approval looks the same as a correct one if `effects` holds only the refunds.
 - A run that throws is recorded with outcome `'threw'` and its message as `detail`.
 - Parity holds for these scenarios and these runs. With a live model, run it more than once, or drive both sides with the same deterministic stand-in model.
+- A scenario object reserves two fields: `id: string`, which names its row, and an optional `expected: string`, the outcome people know is right. Keep your own fields under other names. A field called `expected` that holds something else (an expected amount, an expected reply) changes how rows are labeled.
+
+The run each side returns, and each row of `report.scenarios`:
+
+```ts no-check
+interface ParityRun {
+  outcome: string; // a final state name or the loop's return label; 'threw' when the run threw
+  effects?: unknown; // what the run changed in the world, compared structurally
+  violations?: readonly unknown[]; // rules broken, from ground truth
+  detail?: unknown; // kept in the report, not compared
+}
+
+interface ParityResult<TScenario> {
+  id: string;
+  scenario: TScenario;
+  label: "same" | "intended" | "regression";
+  reason: string; // empty for 'same'
+  baseline: ParityRun;
+  candidate: ParityRun;
+}
+```
 
 ## Suite coverage
 
