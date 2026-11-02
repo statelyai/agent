@@ -9,7 +9,7 @@ description: Let the model choose one currently-legal machine event, validated a
 
 A **decision** lets the model choose one event to send to the running machine. The machine declares the candidate events, guards determine which of them are legal in the current state, and the model picks one of the remaining candidates. The model does not produce free text or an arbitrary tool call. The machine rejects any event that is not legal in the current state.
 
-The snippets below come from [Twenty Questions](../examples/twenty-questions/index.ts), where the model chooses `ASK` or `GUESS` each turn.
+The snippets below come from [Twenty Questions](https://github.com/statelyai/agent/blob/next/examples/twenty-questions/index.ts), where the model chooses `ASK` or `GUESS` each turn.
 
 <!-- viz: sequence diagram for one decision: machine invokes agent.decide -> host coerces the model to one candidate event -> validation (unknown-event / invalid-payload / rejected-by-guard) -> retry or send the event to the machine -->
 
@@ -223,7 +223,7 @@ planning: {
 applying: { always: { target: 'planning' } },
 ```
 
-Every step runs the validation and retry loop described above. For the full example, see [examples/todo-nl/index.ts](../examples/todo-nl/index.ts).
+Every step runs the validation and retry loop described above. For the full example, see [examples/todo-nl/index.ts](https://github.com/statelyai/agent/blob/next/examples/todo-nl/index.ts).
 
 To let the model send several events in one tool loop instead, invoke `agent.act`. See [Acting on events](act.md).
 

@@ -192,7 +192,7 @@ The rest of the contract matches the other adapters:
 - System messages and the request's `system` become `systemPrompts`, since TanStack AI messages have no `system` role. Image parts become `url` or base64 `data` sources; other part types throw.
 - Every result reports `usage` summed over the run's model turns, the normalized `finishReason`, and every chunk the run produced on `raw`. A provider error arrives as a `RUN_ERROR` chunk and is thrown with its `code`.
 
-`@tanstack/ai` is an optional peer dependency. To stream a run to a `useChat` client over TanStack AI's wire protocol, see [tanstack-ai-stream](../examples/tanstack-ai-stream).
+`@tanstack/ai` is an optional peer dependency. To stream a run to a `useChat` client over TanStack AI's wire protocol, see [tanstack-ai-stream](https://github.com/statelyai/agent/blob/next/examples/tanstack-ai-stream).
 
 ## Finish reasons and truncation
 

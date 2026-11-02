@@ -64,4 +64,4 @@ context: z.object({
 
 This is deliberately transparent: the AI SDK executor returns AI SDK messages, another framework returns its own messages, and the machine stores those values unchanged. Tool calls and tool results remain part of that framework-native chat log.
 
-See the runnable [`review-tool-calls`](../examples/review-tool-calls) example, where each proposed tool call becomes an explicit, persistable machine decision, and [Tools](tools.md#tool-results-in-messages) for a host-run tool loop whose native response messages are retained this way.
+See the runnable [`review-tool-calls`](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls) example, where each proposed tool call becomes an explicit, persistable machine decision, and [Tools](tools.md#tool-results-in-messages) for a host-run tool loop whose native response messages are retained this way.
