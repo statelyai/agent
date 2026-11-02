@@ -9,7 +9,8 @@ import { createActor, createAsyncLogic } from "xstate";
 import { createAgentRuntime, createAgentSchemas, runAgent, setupAgent } from "@statelyai/agent";
 import { createApprovalBatchMachine, createToolLoopMachine } from "@statelyai/agent/machines";
 
-const batchSetup = setupAgent({
+/** A bare setupAgent result. */
+export const batchSetup = setupAgent({
   models: { quick: "openai/gpt-6-luna" },
   context: z.object({ items: z.array(z.string()), done: z.number() }),
   input: z.object({ items: z.array(z.string()) }),
@@ -105,7 +106,7 @@ const schemas = createAgentSchemas({
   emitted: { changed: z.object({ count: z.number() }) },
   meta: z.object({ label: z.string() }),
 });
-const counterSetup = setupAgent({
+export const counterSetup = setupAgent({
   schemas,
   actors: { load: createAsyncLogic({ run: async () => 1 }) },
   guards: { isSmall: ({ context }) => context.count < 10 },

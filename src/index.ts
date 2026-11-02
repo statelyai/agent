@@ -15,6 +15,7 @@ export { createAgentSchemas, getAgentSchemas, setupAgent } from "./setup-agent.j
 export type {
   AgentDefaultMeta,
   AgentSchemaPack,
+  SetupAgentResult,
   // Both appear in `setupAgent`'s inferred result type (its event schemas
   // always carry the reserved `'@agent.usage'` entry), so consumers' declaration
   // emit needs them nameable.
