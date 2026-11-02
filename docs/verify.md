@@ -282,7 +282,7 @@ By default, a child machine is a src like any other: with no `outputs` entry, it
 - A child that can end `idle` adds an `idle` terminal to the parent: the parent can wait there forever.
 - Bounded:
   - Child idle waits are not parent fork points. The child is explored to its finals, and its distinct outputs fork the parent.
-  - N children are explored independently, not as a product of their states. Pending explored children settle in any order. Other combinations are not enumerated beyond `interleave`.
+  - N children are explored independently, not as a product of their states. While an explored child is pending, it and every other pending invoke or text request settle in any order. Other combinations are not enumerated beyond `interleave`.
   - A child's events and outputs are not correlated: each event reaches the parent at most once per path, in any order, before or without the others, and before any of the child's outputs. This over-approximates the child, so a witness may not be a live path. A child that sends the same event twice is covered once.
 - An incomplete child search, such as one with its own `needs-output` or `max-depth`, also ends the parent branch `needs-output` for that src, so the parent report is not complete. The child's `unexpandedEvents` and `vacuous` join the parent's.
 

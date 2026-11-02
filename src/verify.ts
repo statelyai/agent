@@ -1113,8 +1113,9 @@ export interface ExplorePathsOptions {
    *
    * Bounded: each child is explored independently. Its events and outputs
    * are not correlated: any of its events, each at most once per path and
-   * in any order, can reach the parent before it settles. Several pending
-   * explored children settle in any order; other combinations are not
+   * in any order, can reach the parent before it settles. While an
+   * explored child is pending, it and every other pending invoke or text
+   * request settle in any order; other combinations are not
    * enumerated beyond `interleave`. A child receives only the events its
    * parent forwards or the host sends it, so the child search offers
    * external events only for the types
@@ -1662,15 +1663,41 @@ function explore(
     !(invoke.src in outputScript) &&
     !errorsFor(invoke.src) &&
     isMachineLogic(invoke.logic);
-  // The other pending explored children, as forks of their own.
-  const siblingForks = (invokes: PendingInvoke[]): InvokeFork[] =>
-    invokes.filter(isExploredChild).flatMap((invoke) => {
-      const settle = settleFor(invoke.id, invoke.src, false, invoke);
+  // Every settlement that can come next while an explored child is pending:
+  // text requests, scripted invokes, and the children themselves, each a fork
+  // of its own, so whichever settles first (and leaves the state) is a branch.
+  // Undefined when there is at most one: the usual one-at-a-time advance.
+  const concurrentForks = (step: AgentStep): InvokeFork[] | undefined => {
+    const invokes = pendingInvokes(step);
+    if (!invokes.some(isExploredChild)) {
+      return undefined;
+    }
+    const asFork = (
+      settle: ReturnType<typeof settleFor>,
+      id: string,
+      isText: boolean,
+    ): InvokeFork[] => {
       if ("fork" in settle) {
         return [settle.fork];
       }
-      return "output" in settle ? [{ id: invoke.id, errors: [], outputs: [settle.output] }] : [];
-    });
+      return "output" in settle ? [{ id, errors: [], outputs: [settle.output], isText }] : [];
+    };
+    const texts = step.requests.filter(
+      (request): request is AgentStepRequest & { kind: "text" } => request.kind === "text",
+    );
+    const textIds = new Set(texts.map((request) => request.id));
+    const forks = [
+      ...texts.flatMap((request) =>
+        asFork(settleFor(request.id, request.src, true), request.id, true),
+      ),
+      ...invokes
+        .filter((invoke) => !textIds.has(invoke.id))
+        .flatMap((invoke) =>
+          asFork(settleFor(invoke.id, invoke.src, false, invoke), invoke.id, false),
+        ),
+    ];
+    return forks.length > 1 ? forks : undefined;
+  };
 
   const reachedStates = new Set<string>();
   const reachedValues: unknown[] = [];
@@ -1755,6 +1782,10 @@ function explore(
         return { step: current };
       }
       const request = current.requests[0] as AgentStepRequest | undefined;
+      const concurrent = request?.kind === "decision" ? undefined : concurrentForks(current);
+      if (concurrent) {
+        return { step: current, fork: concurrent[0], siblings: concurrent.slice(1) };
+      }
       if (request && request.kind === "text") {
         const settle = settleFor(request.id, request.src, true);
         if ("fork" in settle) {
@@ -1793,19 +1824,11 @@ function explore(
           : { step: current };
       }
       // No request: maybe a pending scripted invoke, else a wait.
-      const [invoke, ...others] = pendingInvokes(current);
+      const [invoke] = pendingInvokes(current);
       if (invoke) {
         const settle = settleFor(invoke.id, invoke.src, false, invoke);
-        const siblings = isExploredChild(invoke) ? siblingForks(others) : [];
         if ("fork" in settle) {
-          return { step: current, fork: settle.fork, siblings };
-        }
-        if ("output" in settle && siblings.length > 0) {
-          return {
-            step: current,
-            fork: { id: invoke.id, errors: [], outputs: [settle.output] },
-            siblings,
-          };
+          return { step: current, fork: settle.fork };
         }
         if ("blocked" in settle) {
           return { step: current, blockedSrc: invoke.src };
@@ -2021,13 +2044,18 @@ function explore(
           pathsExplored++;
           terminals.push({ status: "idle", path, state: settled.snapshot.value });
         }
-        if (fork.incompleteSrc !== undefined && witness === undefined && !capped()) {
+        for (const incompleteSrc of [fork, ...(siblings ?? [])].flatMap((child) =>
+          child.incompleteSrc === undefined ? [] : [child.incompleteSrc],
+        )) {
+          if (witness !== undefined || capped()) {
+            break;
+          }
           pathsExplored++;
           terminals.push({
             status: "needs-output",
             path,
             state: settled.snapshot.value,
-            missingSrc: fork.incompleteSrc,
+            missingSrc: incompleteSrc,
           });
         }
         if (interleaving) {

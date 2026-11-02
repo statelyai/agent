@@ -429,6 +429,41 @@ describe("explorePaths — spawned children", () => {
   });
 });
 
+describe("explorePaths — explored children: soundness", () => {
+  test("a child can settle before a sibling scripted invoke with an earlier id", async () => {
+    const child = createMachine({
+      initial: "working",
+      states: { working: { on: { FINISH: { target: "finished" } } }, finished: { type: "final" } },
+    });
+    const agent = setupAgent({
+      context: z.object({}),
+      actors: { a: createAsyncLogic({ run: async () => 1 }), b: child },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: {
+          invoke: [
+            { id: "a", src: "a", onDone: { target: "done" } },
+            { id: "b", src: "b", onDone: { target: "recovered" } },
+          ],
+        },
+        done: { type: "final" },
+        recovered: { type: "final" },
+      },
+    });
+    const options = {
+      children: "explore" as const,
+      childEvents: { b: ["FINISH"] },
+      outputs: { a: [1] },
+    };
+    const result = await canReach(machine, "recovered", options);
+    expect(result).toMatchObject({ reachable: true, complete: true });
+    expect(await canReach(machine, "done", options)).toMatchObject({ reachable: true });
+  });
+});
+
 describe("explorePaths — vacuous", () => {
   test("a payload-reading transition explored only as bare { type } is vacuous", async () => {
     const machine = createMachine({
