@@ -77,6 +77,21 @@ describe("decisionObjectSchema", () => {
     } as never;
     expect(resolveDecisionMode(undefined, request)).toBe("tool");
   });
+
+  it("routes a schema with no synchronous JSON Schema to tool mode", () => {
+    const asyncSchema = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: (value: unknown) => ({ value }),
+        jsonSchema: { input: async () => ({ type: "object" }) },
+      },
+    };
+    const request = {
+      events: [{ type: "SHIP", toolName: "SHIP", inputSchema: asyncSchema }],
+    } as never;
+    expect(resolveDecisionMode(undefined, request)).toBe("tool");
+  });
 });
 
 const OPTIONAL_NOTE = "Optional: leave out unless the input gives it.";

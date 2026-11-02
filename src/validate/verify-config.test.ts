@@ -348,6 +348,17 @@ describe("verifyAgentConfig decide strategies", () => {
     });
   });
 
+  test("omitted allowedEvents skips human events", async () => {
+    const config = strategyConfig({ strategy: "pick-then-fill" });
+    delete config.states.triage.invoke.input.allowedEvents;
+    config.states.triage.on.APPROVE = { target: "approved", meta: { actor: "human" } };
+    const result = await verifyAgentConfig(
+      config,
+      options({ allow: undefined, explore: undefined }),
+    );
+    expect(result.gates.find((gate) => gate.name === "lower")).toEqual({ name: "lower", ok: true });
+  });
+
   test("pick-then-fill with a fillModel, or over finite payloads, passes", async () => {
     expect(await lowerGate({ strategy: "pick-then-fill", fillModel: MODEL })).toEqual({
       name: "lower",

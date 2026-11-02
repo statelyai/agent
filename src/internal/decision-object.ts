@@ -83,8 +83,10 @@ export function decisionObjectSchema(
 function eventPayloadBranches(
   inputSchema: AgentDecisionRequest["events"][number]["inputSchema"],
 ): Record<string, unknown>[] | undefined {
+  if (!inputSchema) return [{}];
+  // A schema with no synchronous JSON Schema cannot be described in one object.
   const payload = markOptional(getJsonSchemaSync(inputSchema));
-  return payload ? objectBranches(payload) : [{}];
+  return payload ? objectBranches(payload) : undefined;
 }
 
 function objectBranches(schema: unknown): Record<string, unknown>[] | undefined {
