@@ -726,3 +726,97 @@ describe("AgentRuntime.send", () => {
     expect(result.ignored?.type).toBe("BOGUS");
   });
 });
+
+describe("abortWith", () => {
+  const worker = setupAgent({
+    context: z.object({ cleaned: z.boolean() }),
+    output: z.object({ cleaned: z.boolean() }),
+    events: { CANCEL: z.object({}) },
+    requests: { work: text("work"), cleanup: text("cleanup") },
+  }).createMachine({
+    context: { cleaned: false },
+    initial: "working",
+    states: {
+      working: {
+        invoke: { src: "work", input: {}, onDone: { target: "done" } },
+        on: { CANCEL: { target: "cleaning" } },
+      },
+      cleaning: {
+        invoke: {
+          src: "cleanup",
+          input: {},
+          onDone: { target: "aborted", context: { cleaned: true } },
+        },
+      },
+      aborted: { type: "final", output: ({ context }) => context },
+      done: { type: "final", output: ({ context }) => context },
+    },
+  });
+  const hangingWork = (): AgentRequestExecutors => ({
+    generateText: async (request) =>
+      request.name === "work" ? new Promise(() => {}) : { result: "ok" },
+  });
+
+  test("the machine handles the abort event and settles on its own final state", async () => {
+    const controller = new AbortController();
+    const settled = runToQuiescence(
+      createAgentRuntime(worker, {
+        signal: controller.signal,
+        abortWith: { event: { type: "CANCEL" } },
+        executors: hangingWork(),
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+    const result = await settled;
+    expect(result.status).toBe("done");
+    expect(result.snapshot.value).toBe("aborted");
+    expect(result.status === "done" ? result.output : undefined).toEqual({ cleaned: true });
+    expect(result.events.map((entry) => entry.event.type)).toContain("CANCEL");
+  });
+
+  test("an already-aborted signal delivers the event first", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const result = await runToQuiescence(
+      createAgentRuntime(worker, {
+        signal: controller.signal,
+        abortWith: { event: { type: "CANCEL" } },
+        executors: hangingWork(),
+      }),
+    );
+    expect(result.snapshot.value).toBe("aborted");
+  });
+
+  test("an unhandled abort event falls back to the aborted settle", async () => {
+    const controller = new AbortController();
+    const settled = runToQuiescence(
+      createAgentRuntime(worker, {
+        signal: controller.signal,
+        abortWith: { event: { type: "NOPE" } as never },
+        executors: hangingWork(),
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+    const result = await settled;
+    expect(result.status === "error" ? result.cause : undefined).toBe("aborted");
+    expect(result.ignored).toBeUndefined();
+  });
+
+  test("timeout: a machine that does not settle in time is aborted", async () => {
+    const controller = new AbortController();
+    const settled = runToQuiescence(
+      createAgentRuntime(worker, {
+        signal: controller.signal,
+        abortWith: { event: { type: "CANCEL" }, timeout: 10 },
+        executors: { generateText: () => new Promise(() => {}) },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+    const result = await settled;
+    expect(result.status === "error" ? result.cause : undefined).toBe("aborted");
+    expect(result.snapshot.value).toBe("cleaning");
+  });
+});

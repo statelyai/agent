@@ -365,7 +365,24 @@ Invariants for a direct `transition`:
 - **Active only.** No `transition` once `state.status` is not `active`.
 - **Loop exits on its own.** A parked `nextEvent()` returns `undefined` once the cancel stops the in-flight work.
 
-`options.signal` stays a hard stop: it ends the run with `cause: "aborted"`. Send a `CANCEL` instead when the machine should handle cancellation itself.
+### Abort through the machine
+
+`options.signal` alone is a hard stop: the run settles `{ status: "error", cause: "aborted" }` and the machine sees nothing. Add `abortWith` to let the machine handle the abort, for a `cancelled` final state, cleanup invokes, or an `afterRun` hook:
+
+```ts no-check
+const result = await runAgent(machine, {
+  executors,
+  input,
+  signal: request.signal,
+  abortWith: { event: { type: "CANCEL" }, timeout: 5_000 },
+});
+// result.status === "done", result.snapshot.value === "cancelled"
+```
+
+- **On abort.** `event` is sent into the run (`runtime.send`); the run continues until the machine settles.
+- **Already aborted.** `event` is the first event the loop hands out.
+- **Fallback.** `cause: "aborted"` as without `abortWith` when the state has no transition for `event`, the loop never applies it, or `timeout` ms pass while the machine is still active.
+- **Journal.** The abort event is a log entry; replay reaches the same final state.
 
 ## Uncontrolled XState actor
 

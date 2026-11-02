@@ -593,8 +593,22 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * Default 0. Not added to this run's `usage.modelCalls`.
    */
   modelCallsSpent?: number;
-  /** Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with `signal.reason` as the error. */
+  /**
+   * Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with
+   * `signal.reason` as the error. With {@link AgentRuntimeOptions.abortWith},
+   * the machine sees the abort first.
+   */
   signal?: AbortSignal;
+  /**
+   * Routes `signal`'s abort through the machine: when it fires, `event` is
+   * sent into the run (see {@link AgentRuntime.send}) and the run continues
+   * until the machine settles, so a `cancelled` final state, cleanup
+   * invokes, and its output run as usual. The run falls back to today's
+   * `{ status: 'error', cause: 'aborted' }` when the machine has no
+   * transition for `event`, when the loop never applies it, or when
+   * `timeout` milliseconds pass before the run finishes.
+   */
+  abortWith?: { event: EventFromLogic<TMachine>; timeout?: number };
   /** Where root `after` timers live. Default `"in-process"`. See {@link AgentTimerScheduler}. */
   timers?: AgentTimerScheduler;
 }
@@ -3178,8 +3192,24 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     recheck();
   };
 
-  const onAbort = () =>
+  const abortNow = () =>
     stopRun({ cause: "aborted", error: options.signal?.reason ?? new Error("Aborted") });
+  // The abort event the machine has been sent but has not yet handled.
+  let pendingAbort: EventObject | undefined;
+  let abortTimer: ReturnType<typeof setTimeout> | undefined;
+  const onAbort = () => {
+    const abortWith = options.abortWith;
+    if (abortWith === undefined || runtime.send(abortWith.event) === false) {
+      abortNow();
+      return;
+    }
+    pendingAbort = abortWith.event as EventObject;
+    if (abortWith.timeout !== undefined) {
+      abortTimer = setTimeout(() => {
+        if (current?.status === "active") abortNow();
+      }, abortWith.timeout);
+    }
+  };
 
   const emitFromRoot = (event: EventObject): void => {
     onTrace({ type: "emit", event: event as EmittedFrom<TMachine> });
@@ -3624,7 +3654,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       });
 
       if (options.signal) {
-        if (options.signal.aborted) {
+        if (options.signal.aborted && options.abortWith !== undefined) {
+          onAbort();
+        } else if (options.signal.aborted) {
           stopReason = {
             cause: "aborted",
             error: options.signal.reason ?? new Error("Aborted"),
@@ -3705,6 +3737,14 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         !fromMailbox.has(event as object) &&
         (next as unknown) === (state as unknown) &&
         effects.length === 0;
+      if ((event as unknown) === pendingAbort) {
+        pendingAbort = undefined;
+        // The machine had no transition for the abort event: abort as usual.
+        if (ignored) {
+          abortNow();
+          return [state, []];
+        }
+      }
       if (ignored) {
         ignoredEvent = event as EventObject;
       }
@@ -3778,6 +3818,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           "runtime-finished",
           "createAgentRuntime: `finish` was already called.",
         );
+      }
+      clearTimeout(abortTimer);
+      // An abort event the loop never applied to a still-active machine: abort as usual.
+      if (pendingAbort !== undefined && current?.status === "active") {
+        abortNow();
       }
       // A decision's usage is queued after the event it chose; when that event
       // ends the machine, the usage is never handed out. Journal it out of
