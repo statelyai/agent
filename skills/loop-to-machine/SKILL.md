@@ -24,8 +24,7 @@ This is step 1 of 4. Next: `add-traces`, then `add-evals`, then `improve-machine
 
 ## 0. Before you write code
 
-
-- Text requests need exactly one non-empty `prompt` or `messages`. `setupAgent` throws `invalid-request` when both are omitted; a request that resolves neither or both at run time fails validation with schema issues.
+- Text requests need exactly one non-empty `prompt` or `messages`. `setupAgent` throws `invalid-request` when both are omitted; resolving neither or both at run time fails validation.
 - Actors: `createAsyncLogic<Output, Input>({ run })` from `xstate` (no `fromPromise` in v6); without the generics `onDone`'s `output` is untyped.
 - `onIdle` return events need `as const` on `type`, or the union does not narrow.
 - In `onError`, the error is `event.error`; there is no `error` argument.
@@ -34,7 +33,7 @@ This is step 1 of 4. Next: `add-traces`, then `add-evals`, then `improve-machine
 - `request.metadata.facts` is `unknown`; parse it with the exported facts schema.
 - A `type: "choice"` state has no `enq` or actions; when routing must emit, use `always` on a normal state.
 - `compareRuns` scenarios reserve `expected: string` for the outcome; name other expectations differently.
-- `explorePaths` `errors`: one error per src, unless your installed type accepts an array per src; otherwise drive repeated failures from a context counter.
+- `explorePaths` `errors[src]`: an array forks one failing branch per element (`[[...]]` for an array-valued failure). `outputs` and `errors` branches are alternatives, not a sequence: drive "fails twice, then succeeds" from a context counter.
 
 ## 1. Inventory the code
 
@@ -46,7 +45,7 @@ Read the loop and fill this table before writing anything. Each row maps to a ma
 | A read-only tool (search, lookup) | An actor the machine invokes, or a tool on a text request |
 | A rule: an `if`, a prompt line, a check after the fact | A guard on the transition it protects |
 | A model call that produces content | A text request in `setupAgent({ requests })`, invoked by one state |
-| One SDK tool call that picks the action and carries its content (`send_email({ … })`) | A text request with those tools, then guards on the returned call: exactly one, offered, schema-valid. Those guards check shape only: a tool that still has `execute` runs inside the SDK before the request returns, so the unchanged-shape port keeps the old timing. A side effect that needs approval either loses its `execute` (the call comes back unexecuted; a state invokes the real work after the verdict) or moves to the decision step later. `agent.decide` would hide your tool names and descriptions |
+| One SDK tool call that picks the action and carries its content (`send_email({ … })`) | A text request with those tools, then shape guards on the returned call: exactly one, offered, schema-valid. A tool that keeps `execute` runs inside the SDK (old timing); to gate it, drop `execute` and invoke the real work after the verdict. Not `agent.decide` yet: it hides your tool names and descriptions |
 | N tool calls per model turn, each needing approval | First port: the request returns the calls; a state holds them in context and waits for a verdict per call. Later step: `agent.act` ([docs/act.md](../../docs/act.md)), each call an event the state queues |
 | A persisted "always allow" rule | Data loaded into input or context, read by a guard. Saving a rule is a recorded effect |
 | A tool the browser runs (no `execute`) | The request ends with the tool calls; an idle state waits for `TOOL_RESULTS` |
@@ -64,11 +63,11 @@ Read the loop and fill this table before writing anything. Each row maps to a ma
 | A streaming iterator | The `streamText` executor keeps it and pipes to the old consumer |
 | Mutable state on the class instance | JSON context fields, or host state passed as input |
 | A cap on a loop the machine keeps / removed | A `choice` state against an exported constant / nothing, with the reason recorded |
-| A class-shaped runtime (`run`/`continue`/`abort`/`restore`/`snapshot`) | A subclass overriding the loop methods to call `runAgent`, inheriting the rest. The conversation may stay host-owned in the first port; a persisted snapshot then cannot resume alone, and moving it into context is a later labeled step |
+| A class-shaped runtime (`run`/`continue`/`abort`/`restore`/`snapshot`) | A subclass overriding the loop methods to call `runAgent`, inheriting the rest. The conversation may stay host-owned at first (a snapshot then cannot resume alone); moving it into context is a later labeled step |
 | Each distinct return | A final state |
 | A terminal tool with a side effect (`escalate`) | A state that invokes it, then the final; `onError` to a `failed` final |
 
-List the rules as a numbered list in your notes. Every one must end as a guard, a state ordering, or a written reason it was dropped.
+Number the rules in your notes. Each ends as a guard, a state ordering, or a written reason it was dropped.
 
 A loop with no decision point (generate-validate-repair, a tool loop, a scheduler) is still worth converting: caps, rules, and failure paths become explicit and provable. Skip step 4 and the decision parts of step 5.
 
@@ -78,30 +77,30 @@ The parity test exists before the machine does.
 
 1. **Scenarios.** Reuse the code's tests, fixtures, or benchmarks: an `id` each and, where known, the `expected` outcome. If none exist, draft 6–10 covering every terminal and rule; ask the user to confirm them.
 2. **Deterministic stand-in models.** The code's mocks, or a function from the request (prompt or `name`) to a fixed answer ([`examples/mock-model.ts`](https://github.com/statelyai/agent/blob/next/examples/mock-model.ts), repo only). Two: one follows the rules, one breaks them. A seeded model seeds from the scenario id, fresh per run.
-3. **Ground truth.** Outcomes and effects from the world, not the agent's report. `effects` holds **every write the world records**: refunds, and also approvals, verifications, questions asked, escalations. Model-written text: compare count or presence. Violations come from the world, or a plain function over the effects.
+3. **Ground truth.** Outcomes and effects from the world, not the agent's report. `effects` holds **every write the world records**: refunds, approvals, verifications, questions asked, escalations. Model-written text: compare count or presence. Violations come from the world, or a plain function over the effects.
 4. **A baseline with no function to call.** Loop inline in a framework handler: call the handler with stand-in model and storage. Do not extract the loop first.
-5. **Record golden runs.** AI SDK or `openai` client: wrap model and tools with `createRecorder` (`@statelyai/agent/testing`), run the old code per scenario and stand-in, save JSON fixtures. [reference.md](reference.md#recording-golden-runs). A custom model client has no recorder seam: skip recording; parity rests on the old suite (§7) or `compareRuns` with stand-ins.
+5. **Record golden runs.** `createRecorder` (`@statelyai/agent/testing`) wraps model and tools; run the old code per scenario and stand-in, save JSON fixtures. AI SDK model → `recorder.model`; `openai` client → `recorder.openai`; anything else → `recorder.client` on the SDK object (`methods: ["messages.create"]`), or `recorder.fn` on a function. Code, streams, and `redact`/`serialize`/`revive`: [reference.md](reference.md#any-other-model-client).
 6. **The harness check.** The old code on both sides of `compareRuns`, per stand-in: baseline equals candidate in every row; all `same` with the rule-following model, `regression` by design with the rule-breaker. [reference.md](reference.md#the-parity-harness).
 
 ### No model in the loop
 
-This branch is for code with no model call at all (a tool scheduler, an approval queue), and for old code that cannot run (a class wired to a bus, no callable entry). A tool runner whose text request still picks tools has a model in the loop: keep the recorders and the replay check (§7) for its model and tool calls, and use only the spec baseline below where the old code cannot run.
+For code with no model call (a tool scheduler, an approval queue), and old code that cannot run (a class wired to a bus, no callable entry). A tool runner whose text request picks tools has a model in the loop: keep recorders and replay (§7); use the spec baseline only where the old code cannot run.
 
 - **Skip recorders only when nothing calls a model.** Then replay (§7) does not apply.
-- **Baseline as spec.** When the old code cannot run, the baseline returns a pinned expectation per scenario: `baseline: async (s) => SPEC[s.id]`, with the outcome, effects, and violations a person confirmed from the old code and its docs, before the machine exists. Skip the harness check; the hand-back says the baseline is a spec, not a run.
+- **Baseline as spec.** When the old code cannot run, `baseline: async (s) => SPEC[s.id]`: outcome, effects, and violations a person confirmed from the old code and its docs, before the machine exists. Skip the harness check; the hand-back says the baseline is a spec, not a run.
 - **Stand-ins become scripted worlds:** the proposed calls, the order approvals arrive in, which tool fails.
 
 ## 3. Author the environment
 
 The environment is the machine: states, guards that encode the rules, side-effecting actors, an invariant sentinel. Use `setupAgent` (from `@statelyai/agent`) with zod schemas for `input`, `context`, `output`, and every event. Export the event schemas as one object for a later policy. A gated action (closed-choice `agent.decide`, guard in the transition) is in [reference.md](reference.md#a-gated-action).
 
-- **Do the deterministic steps yourself.** Identity, lookup, ownership: states run in order. A model only answers what needs judgment.
+- **Do the deterministic steps yourself.** Identity, lookup, ownership: states in order. A model answers only what needs judgment.
 - **Export the guards** as plain functions, and build the machine in a factory (`createDeskMachine({ refundIsLegal })`) so a test can pass a loosened guard.
-- **Add an invariant sentinel** for the rule that must never break: a final state described `SENTINEL: …`, entered from an `always` on the side-effect state (`paying`); `always` runs before the invoke starts, so the effect never runs. The check is its own function, not the guard, so a loosened guard does not loosen it.
+- **Add an invariant sentinel** for the rule that must never break: a final state described `SENTINEL: …`, entered from an `always` on the side-effect state (`paying`), which runs before the invoke starts. The check is its own function, not the guard, so a loosened guard does not loosen it.
 - **A person's step** is an idle state whose `meta.interaction` tells a host what to render: `{ label, events: { APPROVE: { label: "Approve" }, REJECT: { label: "Reject" } } }`, or `textEvent: { type: "CUSTOMER_REPLIED", field: "reply" }` for free text.
 - **Actors are placeholders** in `setupAgent({ actors })`; pass the real ones with `runAgent(machine, { actors })`.
 - **Final outputs carry the result** (`{ outcome, orderId, amount }`); the runner rebuilds the old return type from it and the world.
-- **Declare `version`** (`version: "1"`). The structural hash cannot see transition functions; traces stamp this string.
+- **Declare `version`** in `createMachine({ id, version: "1", ... })` on every machine whose runs are recorded (environment, any policy). Bump it on every behavior change. The structural hash cannot see transition functions; traces stamp this string (`add-traces` §1).
 
 ## 4. A policy, only if the code already has one
 
@@ -109,32 +108,33 @@ Keep the decision in the environment as one `agent.decide`, with no policy machi
 
 ## 5. The runner
 
-Write `runMachine` with the old function's signature and result type, so callers and the parity test change one line.
+Write `runMachine` with the old function's signature and result type; callers and the parity test change one line.
 
 - **The existing SDK call becomes the executor.** `generateText` (or `streamText`) in `executors`, as the old call: same model, system prompt, tools, options, retry code; return `{ result }`. Pass the conversation as `messages: ({ input }) => input.messages`.
-- **A streaming route keeps its response, not its signature.** `createAiSdkExecutors().streamText` forwards text chunks only. Write the executor around the old call, pipe its stream to the old consumer, return the final messages as `{ result }`.
+- **A streaming route keeps its response, not its signature.** `createAiSdkExecutors().streamText` forwards text chunks only, so wrap the old call: pipe its stream to the old consumer, then return `{ result: finalValue, messages: responseMessages }` so later requests can rebuild the assistant and tool history from `output.messages`.
 - `runAgent(machine, { input, executors, actors, onIdle })`. `onIdle` answers each idle state with the old code's call.
 - `executors.decide` reads `request.options` (each `{ event }`) and `request.metadata?.facts`.
-- JSON-safe input and events at the boundary: with a store, an unloggable value fails the run.
+- JSON-safe input and events: with a store, an unloggable value fails the run.
 - Rebuild the old result from `result.output` and the world. A field with no meaning now keeps its type and a comment.
 
-**Approvals off a message bus.** The rule: nothing else runs while the answer is awaited → idle state + `onIdle`. Other calls in flight, or answers arriving in any order → the run is never idle, so invoke a wait actor in the waiting state: `createCallbackLogic` that subscribes to the bus, sends `APPROVED`/`REJECTED` with the call id to its parent, and unsubscribes on exit. For N calls per batch (per-call approve/reject/always, a barrier before execute, cancel-all), use `createApprovalBatchMachine` from `@statelyai/agent/machines` if your installed version has it; otherwise a child machine per batch that sends status events to the parent, which releases it with an event once every call has a verdict.
+**Approvals off a message bus.** The rule: nothing else runs while the answer is awaited → idle state + `onIdle`. Other calls in flight, or answers in any order → never idle, so invoke a wait actor: `createCallbackLogic` that subscribes to the bus, sends `APPROVED`/`REJECTED` with the call id to its parent, and unsubscribes on exit. For N calls per batch (per-call approve/reject/always, a barrier before execute, cancel-all), use `createApprovalBatchMachine` from `@statelyai/agent/machines` ([docs/machines-presets.md](../../docs/machines-presets.md)). Only when it does not fit, hand-write a child machine per batch.
 
 **Host events mid-run** (cancel, abort, a user message while a request runs):
 
-- Abort: `runAgent`'s `signal`. The run settles `{ status: "error", cause: "aborted" }`; the in-flight executor sees the signal.
-- A cancel the machine handles (cleanup, a `cancelled` final): a `CANCEL` event on the parent state, sent by the host with `AgentRuntime.send(event)` if your installed version has it. Otherwise drive `createAgentRuntime` yourself and race `runtime.nextEvent()` against a host inbox. `nextEvent()` consumes the event it resolves with, so never call it again while an earlier call is still pending: keep the one pending `nextEvent()` promise across loop iterations, transition the host event when it wins, and keep racing the same pending promise until it resolves, or its event is lost.
+- Abort: `runAgent`'s `signal` alone is a hard stop: the run settles `{ status: "error", cause: "aborted" }` and the machine sees nothing. Add `abortWith: { event, timeout? }` when the machine should handle it (a `cancelled` final, cleanup invokes); it falls back to `aborted` if the event is unhandled, if the machine is still active once the event has been applied and the run settles, or on timeout: the handled path must reach a final or idle state before you can rely on its cleanup.
+- A cancel the machine handles (cleanup, a `cancelled` final): a `CANCEL` event on the parent state. With `runAgent`, pass `inbox: createAgentInbox()` and call `inbox.send(event)`; an inbox serves one run. A hand-written `createAgentRuntime` loop uses `runtime.send(event)` ([docs/hosts.md](../../docs/hosts.md)).
 
 ## 6. Proofs that need no model
 
 From `@statelyai/agent/testing` (example options in [reference.md](reference.md#proof-options)):
 
 - `lintAgentMachine`: no errors.
-- `canReach(machine, "<sentinel>", options)` returns `reachable: false` **and** `complete: true`, for each distinct input shape (with and without an order id lead to different paths; loop over them).
-- `options.payloads(snapshot)` returns payload lists per event type, on both sides of every guard boundary (`0`, the threshold and one over, each producible amount and one over). Without it a closed choice explores only its own `payloads`, and `complete: true` proves nothing about boundaries. A person's free-text event needs one payload per branch.
+- `canReach(machine, "<sentinel>", options)` returns `reachable: false` **and** `complete: true`, for each distinct input shape (with and without an order id; loop over them).
+- `options.payloads(snapshot)` returns payload lists per event type, on both sides of every guard boundary (`0`, the threshold and one over, each producible amount and one over); without it `complete: true` proves nothing about boundaries. A person's free-text event needs one payload per branch.
 - `outputs`: every output each actor can return; `errors`: each actor fails.
-- **A loop** needs `options.dedupeBy`, or the search hits `maxDepth` with `complete: false`. Key on the state value plus the fields read at the loop head (counters, flags); drop fields that only change within one pass. A search over a few seconds: cut the key first. `outputs` are per src, not per call: for "fails twice, then succeeds", let the guard read a context counter.
-- A `choice` or `always` state the machine passes through is reachable and listed in `reachedStates`, so it works as a sentinel.
+- **A loop** needs `options.dedupeBy`, or the search hits `maxDepth` with `complete: false`. Key on the state value plus the fields read at the loop head (counters, flags); drop fields that only change within one pass. A search over a few seconds: cut the key first.
+- A state passed through within one step (left at once by `always`, or a `choice` state) counts as reached: `canReach` returns the path through it and `explorePaths` lists it in `reachedStates`, so it works as a sentinel.
+- **A machine that spawns or invokes children**: pass `children: "explore"` and `childEvents` (the types the parent forwards), and read `vacuous`. Expect long searches; use `interleave: "pending"` only for the invariant that needs host events raced against in-flight invokes.
 - A loosened guard makes `canReach` true; test that too.
 - Each normal final is reachable (the search is not vacuous).
 
@@ -144,12 +144,12 @@ Type options with `ExplorePathsOptions` and callback snapshots with `ExploreSnap
 
 Switch the candidate to `runMachine`; run per stand-in (or against the spec). Code in [reference.md](reference.md#the-parity-harness).
 
-- Every `regression` row: fix the machine, or, when the old behavior was wrong but broke no rule, ask the user. Differing outcomes: the answer may become `expected`. Differing effects only: list the row in a reviewed-differences map, exact difference asserted, with who accepted it. Never edit a scenario to make a row pass.
-- **Run the old suite against the port**, the strongest evidence when the old code has tests: mock the old module (`vi.mock`) with a subclass whose loop methods call `runAgent`, and assert a canary counter the machine increments, so a passing suite proves the machine ran.
-- Every `intended` row: check that its reason is a real rule. A candidate that fixed a rule break with the same outcome is `intended` too.
+- Every `regression` row: fix the machine, or ask the user when the old behavior was wrong but broke no rule. Differing outcomes: the answer may become `expected`. Differing effects only: list the row in a reviewed-differences map, exact difference asserted, with who accepted it. Never edit a scenario to make a row pass.
+- **Run the old suite against the port**, the strongest evidence when the old code has tests: mock the old module (`vi.mock('../old-module', ...)`) with a subclass whose loop methods call `runAgent`, plus a canary counter the machine increments. Assert the exact count (the N runs the suite drives), not `> 0`. A test that spies on internals the port no longer calls is a structural failure: mark it `it.fails` with a comment naming why; never delete it.
+- Every `intended` row: its reason is a real rule. A fixed rule break with the same outcome is `intended` too.
 - With recordings, replay each against the machine (`createRecorder({ replay })`, `compareRecordings`): no key, no side effects, every divergence in `INTENDED` with who accepted it, including a guard that blocks a rule break. Semantics in [reference.md](reference.md#replay-equivalence).
 - With no model in the loop, parity is the whole proof: the spec baseline plus §6. Say so.
-- A live-model run, if a key exists, is one sample, not a guarantee.
+- A live-model run is one sample, not a guarantee.
 
 ## 8. Hand back
 
