@@ -26,4 +26,4 @@ Spawned children are named at runtime, so the machine's event union cannot name 
 }
 ```
 
-See [hierarchical teams](../examples/hierarchical-teams), [swarm handoff](../examples/swarm-handoff), [deep research](../examples/deep-research), and [game loop agent](../examples/game-loop-agent).
+See [hierarchical teams](https://github.com/statelyai/agent/blob/next/examples/hierarchical-teams), [swarm handoff](https://github.com/statelyai/agent/blob/next/examples/swarm-handoff), [deep research](https://github.com/statelyai/agent/blob/next/examples/deep-research), and [game loop agent](https://github.com/statelyai/agent/blob/next/examples/game-loop-agent).

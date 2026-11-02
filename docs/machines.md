@@ -280,7 +280,7 @@ const agentSetup = setupAgent({
 
 > **Note:** Narrow only where every path into the state has assigned the field. A state that is also reachable on an error or refusal route, where the field is still `null`, must keep its nullable handling. Narrowing changes the type only. Runtime behavior is unchanged.
 
-See [examples/sql-agent/index.ts](../examples/sql-agent/index.ts).
+See [examples/sql-agent/index.ts](https://github.com/statelyai/agent/blob/next/examples/sql-agent/index.ts).
 
 ## Transitions
 
@@ -470,7 +470,7 @@ prompting: {
 }
 ```
 
-A choice or `textEvent` naming an event the machine never declared is a compile error. `textEvent: { type, field }` names another field, and `choices` (an array, or a context path) offers one button per payload. See [Human in the loop](human-in-the-loop.md#payload-choices). A machine with other metadata declares its own `meta` schema on `setupAgent`, which replaces the default. See [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts).
+A choice or `textEvent` naming an event the machine never declared is a compile error. `textEvent: { type, field }` names another field, and `choices` (an array, or a context path) offers one button per payload. See [Human in the loop](human-in-the-loop.md#payload-choices). A machine with other metadata declares its own `meta` schema on `setupAgent`, which replaces the default. See [examples/email-drafter/agent-logic.ts](https://github.com/statelyai/agent/blob/next/examples/email-drafter/agent-logic.ts).
 
 ## Delayed transitions
 

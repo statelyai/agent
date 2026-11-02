@@ -47,7 +47,7 @@ Any host can drive `AgentRuntime` one transition at a time. Effects only start
 when the host calls `execute`; completions and child messages arrive through
 `nextEvent`. See [The runtime loop](steps.md).
 
-[`portable-xstate-loop`](../examples/portable-xstate-loop) expands this sketch
+[`portable-xstate-loop`](https://github.com/statelyai/agent/blob/next/examples/portable-xstate-loop) expands this sketch
 into a runnable `createDurable` host. Its extra mailbox and wake-up plumbing is
 host implementation, while the Agent machine artifact stays unchanged.
 

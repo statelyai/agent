@@ -4,24 +4,24 @@ The examples are non-trivial state machines, not special runner APIs.
 
 ## Control-flow patterns
 
-- [Evaluator/optimizer](../examples/ai-sdk-evaluator-optimizer)
-- [Validate and repair](validate-and-repair.md) ([example](../examples/generate-and-repair))
-- [Reflection writer](../examples/reflection-writer)
-- [Plan and execute](../examples/plan-and-execute)
-- [Corrective RAG](../examples/corrective-rag)
-- [Deep research](../examples/deep-research)
-- [Guardrails](../examples/guardrails)
-- [Hierarchical teams](../examples/hierarchical-teams)
-- [Swarm handoff](../examples/swarm-handoff)
-- [Parallel streams](../examples/parallel-streams)
+- [Evaluator/optimizer](https://github.com/statelyai/agent/blob/next/examples/ai-sdk-evaluator-optimizer)
+- [Validate and repair](validate-and-repair.md) ([example](https://github.com/statelyai/agent/blob/next/examples/generate-and-repair))
+- [Reflection writer](https://github.com/statelyai/agent/blob/next/examples/reflection-writer)
+- [Plan and execute](https://github.com/statelyai/agent/blob/next/examples/plan-and-execute)
+- [Corrective RAG](https://github.com/statelyai/agent/blob/next/examples/corrective-rag)
+- [Deep research](https://github.com/statelyai/agent/blob/next/examples/deep-research)
+- [Guardrails](https://github.com/statelyai/agent/blob/next/examples/guardrails)
+- [Hierarchical teams](https://github.com/statelyai/agent/blob/next/examples/hierarchical-teams)
+- [Swarm handoff](https://github.com/statelyai/agent/blob/next/examples/swarm-handoff)
+- [Parallel streams](https://github.com/statelyai/agent/blob/next/examples/parallel-streams)
 
 ## Human and long-running patterns
 
-- [Long-running onboarding](../examples/long-running-onboarding)
-- [Snapshot migration](../examples/snapshot-migration)
-- [Review tool calls](../examples/review-tool-calls)
-- [SQL approval](../examples/sql-agent)
-- [Context compaction](../examples/context-compaction)
+- [Long-running onboarding](https://github.com/statelyai/agent/blob/next/examples/long-running-onboarding)
+- [Snapshot migration](https://github.com/statelyai/agent/blob/next/examples/snapshot-migration)
+- [Review tool calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls)
+- [SQL approval](https://github.com/statelyai/agent/blob/next/examples/sql-agent)
+- [Context compaction](https://github.com/statelyai/agent/blob/next/examples/context-compaction)
 - [Statechart policy examples](statechart-policy-examples.md): reviewer quorum, booking compensation, and scheduler-driven approval deadlines
 
 ## Host portability
