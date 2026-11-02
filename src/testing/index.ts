@@ -35,6 +35,7 @@ export { matchesTrajectory } from "../trajectory.js";
 export type {
   MatchTrajectoryOptions,
   TrajectoryEvent,
+  TrajectoryEventEnvelope,
   TrajectoryItem,
   TrajectoryMatch,
   TrajectoryMiss,

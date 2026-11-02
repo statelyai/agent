@@ -789,3 +789,6 @@ function toDecisionState(value: unknown): string | JSONObject {
     return String(value);
   }
 }
+
+export type { DecisionMode, DecisionModeOption } from "../internal/decision-object.js";
+export type { AiSdkCallUsage } from "./mappers.js";
