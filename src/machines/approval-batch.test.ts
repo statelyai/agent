@@ -74,6 +74,27 @@ describe("createApprovalBatchMachine", () => {
     });
   });
 
+  test("call ids that name Object.prototype members are not read as settled", async () => {
+    const { execute, executed } = recordingExecute();
+    const machine = createApprovalBatchMachine({ policy: policyByName, execute });
+    const odd: ProposedCall[] = [
+      { id: "toString", name: "write", args: {} },
+      { id: "constructor", name: "read", args: {} },
+    ];
+    const paused = await runToQuiescence(createAgentRuntime(machine), { input: { calls: odd } });
+    expect(paused.status).toBe("idle");
+    expect(paused.snapshot.context.awaiting.map((call) => call.id)).toEqual(["toString"]);
+    const result = await runToQuiescence(createAgentRuntime(machine), {
+      snapshot: paused.persist(),
+      event: { type: "APPROVE", callId: "toString" },
+    });
+    expect(executed.sort()).toEqual(["constructor", "toString"]);
+    expect(result.status === "done" && result.output.results).toEqual([
+      { id: "toString", status: "executed", result: "ran write" },
+      { id: "constructor", status: "executed", result: "ran read" },
+    ]);
+  });
+
   test("eachReady: an allowed call executes while another waits", async () => {
     const { execute, executed } = recordingExecute();
     const machine = createApprovalBatchMachine({

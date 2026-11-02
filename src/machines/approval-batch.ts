@@ -104,6 +104,15 @@ const askEveryCall = createAsyncLogic<ApprovalDecision, ApprovalCallInput>({
 const callSchema = { type: "object", properties: { id: jsonString, name: jsonString } };
 const callIdPayload = objectSchema<{ callId: string }>({ callId: jsonString }, ["callId"]);
 
+// Call ids are model-chosen strings: read only own keys, so an id like
+// `toString` never finds an inherited property.
+function settledResult(
+  results: Record<string, ApprovalCallResult>,
+  id: string,
+): ApprovalCallResult | undefined {
+  return Object.hasOwn(results, id) ? results[id] : undefined;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -388,7 +397,7 @@ export function createApprovalBatchMachine(
 
   const output = ({ context }: { context: ApprovalBatchContext }): ApprovalBatchOutput => ({
     results: context.calls.map(
-      (call) => context.results[call.id] ?? { id: call.id, status: "cancelled" },
+      (call) => settledResult(context.results, call.id) ?? { id: call.id, status: "cancelled" },
     ),
     approveAlways: context.approveAlways,
   });
@@ -436,7 +445,7 @@ export function createApprovalBatchMachine(
             const call = context.calls.find((candidate) => candidate.id === event.callId);
             if (
               !call ||
-              context.results[call.id] ||
+              settledResult(context.results, call.id) ||
               context.awaiting.some((candidate) => candidate.id === call.id)
             ) {
               return undefined;
@@ -448,7 +457,7 @@ export function createApprovalBatchMachine(
             const { context, event, children } = args;
             const id = event.callId;
             if (!id || !context.calls.some((call) => call.id === id)) return undefined;
-            if (context.ready.includes(id) || context.results[id]) return undefined;
+            if (context.ready.includes(id) || settledResult(context.results, id)) return undefined;
             if (executeWhen === "eachReady") {
               enq.sendTo(child(children, id), { type: "RELEASE" });
               // A taken (targetless) transition, so the enqueued send runs.
