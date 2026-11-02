@@ -139,6 +139,8 @@ A converted loop splits its tools in two, and the split is the whole refactor:
 | A tool with no side effect you gate   | Stays a tool on a [text request](text-requests.md). The host runs the tool loop inside one state.    |
 | A tool a human or a rule must approve | Becomes an event the model proposes through `agent.decide`, plus a state that invokes the real work. |
 
+> **Note:** This walkthrough changes `sendEmail`'s call shape in the first port, so one page shows the finished split. On your own code, port the call unchanged first: keep `sendEmail` a tool on the text request, guard the returned call, and prove the port matches the loop. Then turn it into a decision in a separate step, and list the differences that step causes as intended. Changing both at once leaves a behavior difference with two possible causes. The `loop-to-machine` skill follows that order.
+
 `search` is the first kind. `index.ts` imports it from `before.ts` and passes it to the `assist` request as `tools: { search }`. The machine stays in `assisting` for every search turn and sees one `onDone`.
 
 `sendEmail` is the second kind. The model no longer calls it. In `deciding`, the model chooses one of three events: `REPLY` ends the run, `CONTINUE` starts another round, and `SEND_EMAIL` proposes a draft:
