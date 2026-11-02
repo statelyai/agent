@@ -35,6 +35,8 @@ List:
 - the guards. `describeMachine` shows where a transition function can go and marks it `(conditional)`, but not the guard's name or logic. Read the source for those;
 - the sentinel states and the final states.
 
+**No model decisions.** When the machine has no decision states and its model only picks tools inside one text request (a scheduler, a tool runner), eval two levels: **rule** evals for every guard, cap, and approval rule (an "always allow" rule on both sides of its pattern; the barrier before execute; cancel), and **stats** from traces (`foldTraces` per state, approve/reject counts per tool). Skip decision evals. Add request evals only if a person can label which tool calls were right. The objective is rule violations (0) plus the per-state failure and cost numbers `improve-machine` reads.
+
 ## 2. Map the request to states
 
 Turn the user's words into states. "Evals for the approval logic" means every state and guard that touches approval: the guard that routes a refund over the threshold, the approval step and each answer to it, the sentinel check before the payment, and the final states they lead to. Write the mapping down:
