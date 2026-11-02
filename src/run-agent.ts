@@ -2472,6 +2472,8 @@ export interface AgentInbox<TEvent extends EventObject = EventObject> {
 
 interface InboxState {
   queue: EventObject[];
+  /** Every event sent through the inbox, so an ignored one is not taken for an ignored answer. */
+  sent: WeakSet<EventObject>;
   runtime?: { send(event: EventObject): boolean };
   waiter?: (event: EventObject) => void;
   claimed: boolean;
@@ -2493,10 +2495,11 @@ const inboxStates = new WeakMap<object, InboxState>();
  * ```
  */
 export function createAgentInbox<TEvent extends EventObject = EventObject>(): AgentInbox<TEvent> {
-  const state: InboxState = { queue: [], claimed: false, closed: false };
+  const state: InboxState = { queue: [], sent: new WeakSet(), claimed: false, closed: false };
   const inbox: AgentInbox<TEvent> = {
     send(event) {
       if (state.closed) return false;
+      state.sent.add(event);
       if (state.runtime) {
         const accepted = state.runtime.send(event);
         if (!accepted) state.closed = true;
@@ -2639,8 +2642,12 @@ async function runAgentPasses<TMachine extends AnyStateMachine>(
   // `attempts` explain the opening `event` only, never an `onIdle` answer.
   const { input: _input, events: _events, attempts: _attempts, ...resumeOptions } = rest;
   // An ignored event (the opening `event`, or an answer) leaves the run where
-  // it was; it is reported, not retried from the same snapshot.
-  while (result.status === "idle" && result.ignored === undefined) {
+  // it was; it is reported, not retried from the same snapshot. An ignored
+  // inbox event is reported too, but does not end the loop.
+  while (
+    result.status === "idle" &&
+    (result.ignored === undefined || inbox?.sent.has(result.ignored) === true)
+  ) {
     const event = await nextIdleEvent(result.snapshot, onIdle, inbox);
     if (event === undefined) break;
     result = await runToQuiescence(

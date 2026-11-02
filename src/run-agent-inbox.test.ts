@@ -135,6 +135,22 @@ describe("runAgent inbox", () => {
     ]);
   });
 
+  test("an ignored inbox event does not stop onIdle", async () => {
+    const inbox = createAgentInbox<EventOf<typeof steps>>();
+    inbox.send({ type: "SECOND" });
+    inbox.send({ type: "FIRST" });
+    const idles: unknown[] = [];
+    const result = await runAgent(steps, {
+      inbox,
+      onIdle: async (snapshot) => {
+        idles.push(snapshot.value);
+        return { type: "SECOND" } as const;
+      },
+    });
+    expect(idles).toEqual(["b"]);
+    expect(result.status).toBe("done");
+  });
+
   test("an inbox serves one runAgent call", async () => {
     const inbox = createAgentInbox<EventOf<typeof steps>>();
     await runAgent(steps, { inbox });

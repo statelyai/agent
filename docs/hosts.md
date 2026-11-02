@@ -402,6 +402,7 @@ const result = await run;
 - **Same as `runtime.send`.** Each `inbox.send` goes to the run's mailbox and returns the same boolean. See [Host events mid-run](#host-events-mid-run).
 - **Before start.** Queued; delivered after the init event and after `runAgent`'s own `event`. Returns `true`.
 - **While idle.** An inbox event resumes the run, ahead of a pending `onIdle` answer; that answer is dropped. Without `onIdle`, `runAgent` returns at the first idle.
+- **Ignored.** An inbox event the state does not handle is reported as `result.ignored`. Unlike an ignored `onIdle` answer, it does not end the `onIdle` loop.
 - **After `runAgent` returns.** Returns `false`.
 - **One call.** An inbox serves one `runAgent` call; reusing it throws `AgentError` `inbox-in-use`.
 
