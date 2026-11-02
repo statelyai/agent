@@ -25,23 +25,23 @@ This is step 1 of 4. Next: `add-traces`, then `add-evals`, then `improve-machine
 
 Read the loop and fill this table before writing anything. Each row maps to a machine element.
 
-| In the code                                                                  | Becomes                                                                  |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| A tool with a side effect someone must gate (refund, send)                   | An actor invoked by one state, entered only through a guarded transition |
-| A read-only tool (search, lookup)                                            | An actor the machine invokes itself, or a tool on a text request         |
-| A rule: an `if`, a prompt line, a check after the fact                       | A guard on the transition it protects                                    |
-| A model call that produces content (a draft, generated code, a summary)      | A text request in `setupAgent({ requests })`, invoked by one state       |
-| One SDK tool call that both picks the action and carries its content (`edit_graph({ … })`, `send_email({ … })`) | A text request with those tools, then guards on the returned call: exactly one, a tool that was offered, input that passes the tool's schema. Keep it a text request: `agent.decide` answers with one structured object naming a machine event (or, under `decideMode: 'tool'`, renames the tools to `send_event_<TYPE>` with the description "Choose the '<TYPE>' move."), so the model would no longer see your tool names and descriptions |
-| A tool the browser runs (no `execute`; the client sends results back)        | The request ends with the tool calls; an idle state waits for a `TOOL_RESULTS` event the route sends when the client posts results |
-| A point where the model picks what to do                                     | A decision state: `agent.decide`, usually a closed choice                |
-| A check on the model's output, then a retry or a repair call                 | An actor or guard that checks it, and a `choice` state that routes to the repair request, the next candidate, or a failure final |
-| A value the model pulled out of the input (an order id, an amount)           | Code when the format is fixed (a regex); a text request when it is not   |
-| A step every correct run takes in the same order (verify, then look up)      | A state the machine enters itself; the model no longer chooses it        |
-| A person in the loop: `await approve()`, a returned `pending`, or a tool that asks a person (`askCustomer`, `requestApproval`), even a synchronous one | An idle state with `meta.interaction`, answered by `onIdle` in the runner |
-| A cap (`turns < 8`, a retry counter) on a loop the machine keeps             | A `choice` state against an exported constant                            |
-| A cap on a loop the machine removed                                          | Nothing. Record that it is gone and why                                  |
-| Each distinct return                                                         | A final state                                                            |
-| A terminal tool with a side effect (`escalate`, `close`)                     | A state that invokes it, then the final state; its `onError` goes to a `failed` final |
+| In the code                                                                                                                                            | Becomes                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A tool with a side effect someone must gate (refund, send)                                                                                             | An actor invoked by one state, entered only through a guarded transition                                                                                                                                                                                                                                                                                                                                                                      |
+| A read-only tool (search, lookup)                                                                                                                      | An actor the machine invokes itself, or a tool on a text request                                                                                                                                                                                                                                                                                                                                                                              |
+| A rule: an `if`, a prompt line, a check after the fact                                                                                                 | A guard on the transition it protects                                                                                                                                                                                                                                                                                                                                                                                                         |
+| A model call that produces content (a draft, generated code, a summary)                                                                                | A text request in `setupAgent({ requests })`, invoked by one state                                                                                                                                                                                                                                                                                                                                                                            |
+| One SDK tool call that both picks the action and carries its content (`edit_graph({ … })`, `send_email({ … })`)                                        | A text request with those tools, then guards on the returned call: exactly one, a tool that was offered, input that passes the tool's schema. Keep it a text request: `agent.decide` answers with one structured object naming a machine event (or, under `decideMode: 'tool'`, renames the tools to `send_event_<TYPE>` with the description "Choose the '<TYPE>' move."), so the model would no longer see your tool names and descriptions |
+| A tool the browser runs (no `execute`; the client sends results back)                                                                                  | The request ends with the tool calls; an idle state waits for a `TOOL_RESULTS` event the route sends when the client posts results                                                                                                                                                                                                                                                                                                            |
+| A point where the model picks what to do                                                                                                               | A decision state: `agent.decide`, usually a closed choice                                                                                                                                                                                                                                                                                                                                                                                     |
+| A check on the model's output, then a retry or a repair call                                                                                           | An actor or guard that checks it, and a `choice` state that routes to the repair request, the next candidate, or a failure final                                                                                                                                                                                                                                                                                                              |
+| A value the model pulled out of the input (an order id, an amount)                                                                                     | Code when the format is fixed (a regex); a text request when it is not                                                                                                                                                                                                                                                                                                                                                                        |
+| A step every correct run takes in the same order (verify, then look up)                                                                                | A state the machine enters itself; the model no longer chooses it                                                                                                                                                                                                                                                                                                                                                                             |
+| A person in the loop: `await approve()`, a returned `pending`, or a tool that asks a person (`askCustomer`, `requestApproval`), even a synchronous one | An idle state with `meta.interaction`, answered by `onIdle` in the runner                                                                                                                                                                                                                                                                                                                                                                     |
+| A cap (`turns < 8`, a retry counter) on a loop the machine keeps                                                                                       | A `choice` state against an exported constant                                                                                                                                                                                                                                                                                                                                                                                                 |
+| A cap on a loop the machine removed                                                                                                                    | Nothing. Record that it is gone and why                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Each distinct return                                                                                                                                   | A final state                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| A terminal tool with a side effect (`escalate`, `close`)                                                                                               | A state that invokes it, then the final state; its `onError` goes to a `failed` final                                                                                                                                                                                                                                                                                                                                                         |
 
 List the rules as a numbered list in your notes. Every one must end as a guard, a state ordering, or a written reason it was dropped.
 
@@ -67,8 +67,7 @@ recorder.output(await runLoop({ ...scenario, model, tools }));
 writeFileSync(`fixtures/${scenario.id}.json`, JSON.stringify(recorder.recording));
 ```
 
-   Record with the live model to capture real answers, or with a stand-in model. Either way the recording is the script for replay. One recording per scenario and per stand-in.
-6. **The harness check.** Run the old code on both sides with each stand-in model. Each row's baseline must equal its candidate (the runs are deterministic), and with the rule-following model every row must be `same`. With a rule-breaking model, rows are `regression` by design: the candidate breaks rules.
+Record with the live model to capture real answers, or with a stand-in model. Either way the recording is the script for replay. One recording per scenario and per stand-in. 6. **The harness check.** Run the old code on both sides with each stand-in model. Each row's baseline must equal its candidate (the runs are deterministic), and with the rule-following model every row must be `same`. With a rule-breaking model, rows are `regression` by design: the candidate breaks rules.
 
 ```ts
 import { compareRuns, type ParityResult, type ParityRun } from "@statelyai/agent/testing";
@@ -77,7 +76,12 @@ function toParityRun(run: { outcome: string; world: World }): ParityRun {
   return {
     outcome: run.outcome,
     // Every write the world records; model-written text as a count.
-    effects: { refunds: run.world.refunds, approvals: run.world.approvals, verified: [...run.world.verified], escalations: run.world.escalations.length },
+    effects: {
+      refunds: run.world.refunds,
+      approvals: run.world.approvals,
+      verified: [...run.world.verified],
+      escalations: run.world.escalations.length,
+    },
     violations: run.world.violations, // rules broken, from ground truth
   };
 }
@@ -93,7 +97,11 @@ const MODELS: Array<[string, (s: Scenario) => Model]> = [
 ];
 
 test.each(MODELS)("harness: the loop matches itself (%s)", async (_, model) => {
-  const report = await compareRuns({ scenarios: SCENARIOS, baseline: runWith(runLoop, model), candidate: runWith(runLoop, model) });
+  const report = await compareRuns({
+    scenarios: SCENARIOS,
+    baseline: runWith(runLoop, model),
+    candidate: runWith(runLoop, model),
+  });
   for (const row of report.scenarios) expect(row.candidate, row.id).toEqual(row.baseline);
 });
 ```
@@ -180,6 +188,7 @@ const proofOptions: ExplorePathsOptions = {
   errors: { lookupOrder: new Error("down"), "agent.decide": new Error("exhausted") },
 };
 ```
+
 - `options.outputs` lists every output each actor can return (found and not found, owned and not, refunded and not); `options.errors` makes each actor fail once.
 - **A machine with a loop** (a repair cycle, a resubmit) needs `options.dedupeBy`, or the search runs to `maxDepth` and reports `complete: false`. Return every context field a guard or choice reads: `dedupeBy: (s) => JSON.stringify([s.value, s.context.attempts, s.context.lastError])`. `outputs` are canned per actor src, not per call: to explore "fails twice, then succeeds", let the guard read a counter from context instead of the output.
 - `explorePaths(...).reachedStates` lists only states a run settles in; a `choice` state it passes through is not listed.
@@ -194,8 +203,14 @@ Switch the parity test's candidate to `runMachine`, and run it with each stand-i
 
 ```ts
 test.each(MODELS)("parity with the loop: %s", async (_, model) => {
-  const report = await compareRuns({ scenarios: SCENARIOS, baseline: runWith(runLoop, model), candidate: runWith(runMachine, model) });
-  const unreviewed = report.scenarios.filter((row) => row.label === "regression" && !REVIEWED[row.id]);
+  const report = await compareRuns({
+    scenarios: SCENARIOS,
+    baseline: runWith(runLoop, model),
+    candidate: runWith(runMachine, model),
+  });
+  const unreviewed = report.scenarios.filter(
+    (row) => row.label === "regression" && !REVIEWED[row.id],
+  );
   expect(unreviewed).toEqual([]);
   // A reviewed difference still has to be exactly the difference a person accepted.
   for (const row of report.scenarios.filter((row) => REVIEWED[row.id])) REVIEWED[row.id]!(row);
@@ -210,7 +225,12 @@ const REVIEWED: Record<string, (row: ParityResult<Scenario>) => void> = {
 Then prove effect equivalence on every recording from step 2. Replay answers each model and tool call from the recording, so the machine needs no key and causes no side effects:
 
 ```ts
-import { compareRecordings, createRecorder, type EffectDivergence, type Recording } from "@statelyai/agent/testing";
+import {
+  compareRecordings,
+  createRecorder,
+  type EffectDivergence,
+  type Recording,
+} from "@statelyai/agent/testing";
 
 test.each(SCENARIOS)("equivalent to the recorded loop: $id", async (scenario) => {
   const recording: Recording = JSON.parse(readFileSync(`fixtures/${scenario.id}.json`, "utf8"));
@@ -218,7 +238,9 @@ test.each(SCENARIOS)("equivalent to the recorded loop: $id", async (scenario) =>
   const model = replay.model(openai("gpt-5")); // never called in replay
   replay.output(await runMachine({ ...scenario, model, tools: replay.tools(appTools) }));
   const report = compareRecordings(recording, replay.recording);
-  expect(report.divergences.map(({ reason, message }) => ({ reason, message }))).toEqual(INTENDED[scenario.id] ?? []);
+  expect(report.divergences.map(({ reason, message }) => ({ reason, message }))).toEqual(
+    INTENDED[scenario.id] ?? [],
+  );
 });
 
 // Differences a person accepted: who, and the exact divergences.
