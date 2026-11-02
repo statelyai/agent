@@ -399,6 +399,7 @@ describe("createOpenAiExecutors: decide", () => {
       }),
     );
     const { decide } = createOpenAiExecutors({
+      decideMode: "tool",
       client: stubResponsesClient(create),
       resolveModel: () => "gpt-6-luna",
     });
@@ -434,6 +435,7 @@ describe("createOpenAiExecutors: decide", () => {
       responseWith([functionCallOutput("send_event_ASK", {})]),
     );
     const { decide } = createOpenAiExecutors({
+      decideMode: "tool",
       client: stubResponsesClient(create),
       settings: {
         quick: {
@@ -474,6 +476,7 @@ describe("createOpenAiExecutors: decide", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     onTestFinished(() => warn.mockRestore());
     const { decide } = createOpenAiExecutors({
+      decideMode: "tool",
       client: stubResponsesClient(async () =>
         responseWith([functionCallOutput("send_event_ASK", {})]),
       ),
@@ -499,7 +502,10 @@ describe("createOpenAiExecutors: decide", () => {
       }
       return responseWith([functionCallOutput("send_event_ASK", {})]);
     });
-    const { decide } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+    const { decide } = createOpenAiExecutors({
+      decideMode: "tool",
+      client: stubResponsesClient(create),
+    });
     const warm = { ...decisionRequest, temperature: 0.3 };
 
     expect((await decide(warm)).event).toEqual({ type: "ASK" });
@@ -520,7 +526,10 @@ describe("createOpenAiExecutors: decide", () => {
         param: "input",
       });
     });
-    const { decide } = createOpenAiExecutors({ client: stubResponsesClient(create) });
+    const { decide } = createOpenAiExecutors({
+      decideMode: "tool",
+      client: stubResponsesClient(create),
+    });
     await expect(decide({ ...decisionRequest, temperature: 0.3 } as never)).rejects.toThrow(
       "Unsupported parameter: 'input'",
     );
@@ -529,6 +538,7 @@ describe("createOpenAiExecutors: decide", () => {
 
   test("an incomplete response's call is not accepted as a choice", async () => {
     const { decide } = createOpenAiExecutors({
+      decideMode: "tool",
       client: stubResponsesClient(async () =>
         responseWith([functionCallOutput("send_event_ASK", {})], {
           status: "incomplete",
@@ -541,6 +551,7 @@ describe("createOpenAiExecutors: decide", () => {
 
   test("a failed response is an error", async () => {
     const { decide } = createOpenAiExecutors({
+      decideMode: "tool",
       client: stubResponsesClient(async () =>
         responseWith([], {
           status: "failed",
@@ -566,7 +577,7 @@ describe("createOpenAiExecutors: decide", () => {
         { usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 } },
       );
     });
-    return createOpenAiExecutors({ client: stubResponsesClient(create) });
+    return createOpenAiExecutors({ decideMode: "tool", client: stubResponsesClient(create) });
   };
   const ask = { name: "send_event_ASK", arguments: "{}" };
   const reasons = (request: AgentDecisionRequest) =>
@@ -1199,7 +1210,11 @@ describe("createOpenAiExecutors: api 'responses'", () => {
       status: "completed",
       output: [functionCall("approve", { note: "ok", type: "nope" })],
     }));
-    const { decide } = createOpenAiExecutors({ client: responsesClient(create), api: "responses" });
+    const { decide } = createOpenAiExecutors({
+      decideMode: "tool",
+      client: responsesClient(create),
+      api: "responses",
+    });
     const result = await decide(decisionRequest);
     expect(create.mock.calls[0]![0]).toMatchObject({
       tool_choice: "required",
@@ -1211,6 +1226,7 @@ describe("createOpenAiExecutors: api 'responses'", () => {
 
   test("decide: an unknown tool or non-JSON arguments come back rejected, to be retried", async () => {
     const unknown = createOpenAiExecutors({
+      decideMode: "tool",
       client: responsesClient(async () => ({ output: [functionCall("other", {})] })),
       api: "responses",
     });
@@ -1218,11 +1234,205 @@ describe("createOpenAiExecutors: api 'responses'", () => {
       failure: "unknown-event",
     });
     const invalid = createOpenAiExecutors({
+      decideMode: "tool",
       client: responsesClient(async () => ({ output: [functionCall("approve", "{not json")] })),
       api: "responses",
     });
     expect((await invalid.decide(decisionRequest)).rejected).toMatchObject({
       failure: "invalid-payload",
     });
+  });
+});
+
+describe("createOpenAiExecutors: decideMode and api routing", () => {
+  const open = {
+    name: "pick",
+    model: "quick",
+    prompt: "Pick a move.",
+    events: [
+      { type: "ASK", toolName: "send_event_ASK" },
+      { type: "GUESS", toolName: "send_event_GUESS", inputSchema: z.object({ guess: z.string() }) },
+    ],
+    attempts: [],
+  } as unknown as AgentDecisionRequest;
+  const closed = {
+    ...open,
+    options: [{ event: { type: "ASK" } }, { event: { type: "GUESS", guess: "cat" } }],
+  } as AgentDecisionRequest;
+
+  // A client whose two APIs are separate spies, so a test sees where each call went.
+  function bothClient(chat: (params: any) => unknown, responses: (params: any) => unknown = chat) {
+    const chatCreate = vi.fn(async (params: any) => chat(params));
+    const responsesCreate = vi.fn(async (params: any) => responses(params));
+    const client = {
+      chat: { completions: { create: chatCreate } },
+      responses: { create: responsesCreate },
+    } as never;
+    return { client, chatCreate, responsesCreate };
+  }
+  const chatText = (text: string, finish = "stop") => ({ choices: [choice(text, finish)] });
+  const chatToolCalls = (...calls: Array<[string, unknown]>) => ({
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: calls.map(([name, args], index) => ({
+            id: `call_${index + 1}`,
+            type: "function",
+            function: { name, arguments: JSON.stringify(args) },
+          })),
+        },
+        finish_reason: "tool_calls",
+      },
+    ],
+  });
+
+  test("object mode (default), unset api: an open choice goes to chat with a `{ event }` schema", async () => {
+    const { client, chatCreate, responsesCreate } = bothClient(() =>
+      chatText(JSON.stringify({ event: { type: "GUESS", guess: "a cat" } })),
+    );
+    const result = await createOpenAiExecutors({ client }).decide(open);
+    expect(result.event).toEqual({ type: "GUESS", guess: "a cat" });
+    expect(responsesCreate).not.toHaveBeenCalled();
+    const params = chatCreate.mock.calls[0]![0];
+    expect(params).not.toHaveProperty("tools");
+    expect(params.response_format).toMatchObject({
+      type: "json_schema",
+      json_schema: { name: "decision", strict: false },
+    });
+    const branches = params.response_format.json_schema.schema.properties.event.anyOf;
+    expect(branches.map((branch: any) => branch.properties.type.enum[0])).toEqual(["ASK", "GUESS"]);
+  });
+
+  test("object mode: a closed choice sends a `{ choice }` enum and maps the id back", async () => {
+    const { client } = bothClient((params) => {
+      const ids = params.response_format.json_schema.schema.properties.choice.enum;
+      return chatText(JSON.stringify({ choice: ids[1] }));
+    });
+    const result = await createOpenAiExecutors({ client }).decide(closed);
+    expect(result.event).toEqual({ type: "GUESS", guess: "cat" });
+  });
+
+  test("object mode: an unknown type and bad JSON are rejected; a truncated answer throws", async () => {
+    const decideWith = (text: string, finish = "stop") =>
+      createOpenAiExecutors({ client: bothClient(() => chatText(text, finish)).client }).decide(
+        open,
+      );
+    expect((await decideWith('{"event":{"type":"NOPE"}}')).rejected).toMatchObject({
+      failure: "unknown-event",
+    });
+    expect((await decideWith("{not json")).rejected).toMatchObject({ failure: "invalid-payload" });
+    await expect(decideWith('{"event":', "length")).rejects.toThrow(/incomplete/);
+  });
+
+  test("object mode, api 'responses': the schema goes under `text.format`", async () => {
+    const { client, chatCreate, responsesCreate } = bothClient(
+      () => {
+        throw new Error("chat must not be called");
+      },
+      () => responseWith([textOutput(JSON.stringify({ event: { type: "ASK" } }))]),
+    );
+    const result = await createOpenAiExecutors({ client, api: "responses" }).decide(open);
+    expect(result.event).toEqual({ type: "ASK" });
+    expect(chatCreate).not.toHaveBeenCalled();
+    expect(responsesCreate.mock.calls[0]![0].text.format).toMatchObject({
+      type: "json_schema",
+      name: "decision",
+      strict: false,
+    });
+  });
+
+  test("tool mode: parallel calls are off, and more than one call is rejected", async () => {
+    const { client, responsesCreate } = bothClient(
+      () => {
+        throw new Error("chat must not be called");
+      },
+      () =>
+        responseWith([
+          functionCallOutput("send_event_ASK", {}, "c1"),
+          functionCallOutput("send_event_GUESS", { guess: "x" }, "c2"),
+        ]),
+    );
+    const result = await createOpenAiExecutors({ client, decideMode: "tool" }).decide(open);
+    expect(responsesCreate.mock.calls[0]![0]).toMatchObject({
+      tool_choice: "required",
+      parallel_tool_calls: false,
+    });
+    expect(result.event).toBeUndefined();
+    expect(result.rejected?.reason).toContain("2 tools were called");
+  });
+
+  test("api 'chat': a tool-mode decide uses chat tools, required, parallel off", async () => {
+    const { client, chatCreate, responsesCreate } = bothClient(() =>
+      chatToolCalls(["send_event_GUESS", { guess: "dog" }]),
+    );
+    const result = await createOpenAiExecutors({ client, api: "chat", decideMode: "tool" }).decide(
+      open,
+    );
+    expect(result.event).toEqual({ type: "GUESS", guess: "dog" });
+    expect(responsesCreate).not.toHaveBeenCalled();
+    const params = chatCreate.mock.calls[0]![0];
+    expect(params).toMatchObject({ tool_choice: "required", parallel_tool_calls: false });
+    expect(params.tools[1]).toMatchObject({
+      type: "function",
+      function: { name: "send_event_GUESS", strict: false },
+    });
+
+    const twice = bothClient(() => chatToolCalls(["send_event_ASK", {}], ["send_event_ASK", {}]));
+    const rejected = await createOpenAiExecutors({
+      client: twice.client,
+      api: "chat",
+      decideMode: "tool",
+    }).decide(open);
+    expect(rejected.rejected?.reason).toContain("2 tools were called");
+  });
+
+  test("api 'chat': text with tools runs the tool loop on chat.completions", async () => {
+    const tools = {
+      lookup: {
+        inputSchema: z.object({ q: z.string() }),
+        execute: ({ q }: { q: string }) => `${q}: 9 lives`,
+      },
+    } as unknown as AgentTools;
+    let step = 0;
+    const { client, chatCreate, responsesCreate } = bothClient(() =>
+      step++ === 0 ? chatToolCalls(["lookup", { q: "cats" }]) : chatText("Cats have 9 lives."),
+    );
+    const result = await createOpenAiExecutors({ client, api: "chat" }).generateText(
+      textRequest({ tools, maxSteps: 3, toolChoice: "required" } as never),
+    );
+    expect(result.result).toBe("Cats have 9 lives.");
+    expect(result.modelCalls).toBe(2);
+    expect(responsesCreate).not.toHaveBeenCalled();
+    const [first, second] = chatCreate.mock.calls.map(([params]) => params);
+    expect(first.tools).toEqual([
+      expect.objectContaining({
+        type: "function",
+        function: expect.objectContaining({ name: "lookup" }),
+      }),
+    ]);
+    expect(first.tool_choice).toBe("required");
+    expect(second).not.toHaveProperty("tool_choice");
+    expect(second.messages.slice(1)).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        tool_calls: [expect.objectContaining({ id: "call_1" })],
+      }),
+      { role: "tool", tool_call_id: "call_1", content: "cats: 9 lives" },
+    ]);
+  });
+
+  test("unset api: text with tools still goes to responses", async () => {
+    const tools = { lookup: { inputSchema: z.object({ q: z.string() }) } } as unknown as AgentTools;
+    const { client, chatCreate, responsesCreate } = bothClient(
+      () => chatText("no"),
+      () => responseWith([textOutput("yes")]),
+    );
+    const result = await createOpenAiExecutors({ client }).generateText(textRequest({ tools }));
+    expect(result.result).toBe("yes");
+    expect(chatCreate).not.toHaveBeenCalled();
+    expect(responsesCreate).toHaveBeenCalledTimes(1);
   });
 });

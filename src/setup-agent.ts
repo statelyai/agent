@@ -23,6 +23,7 @@ import type {
 import {
   builtinTextActors,
   createTextLogic,
+  ACT_ACTOR,
   DECIDE_ACTOR,
   type AgentModelMap,
   type AgentModelRef,
@@ -31,6 +32,7 @@ import {
   type TextLogicConfig,
 } from "./text-logic.js";
 import { createDecideActor } from "./decision.js";
+import { createActActor } from "./act.js";
 import { AgentError } from "./errors.js";
 import { isPlainObject } from "./internal/is-record.js";
 import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
@@ -1100,6 +1102,7 @@ function assertStateSchemaKeysExist(
 const RESERVED_AGENT_ACTOR_KEYS = [
   ...(Object.keys(builtinTextActors) as (keyof typeof builtinTextActors)[]),
   DECIDE_ACTOR,
+  ACT_ACTOR,
 ] satisfies readonly (keyof BuiltinAgentActors)[];
 
 /**
@@ -1183,6 +1186,7 @@ export function createAgentActors<
   return {
     ...builtinTextActors,
     [DECIDE_ACTOR]: createDecideActor(),
+    [ACT_ACTOR]: createActActor(),
     ...actors,
     ...requestActors,
   } as SetupActors<AgentSetupActors<AgentAllActors<TActors, TRequestSchemas>, string, TModel>>;

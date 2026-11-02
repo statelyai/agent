@@ -168,6 +168,23 @@ describe('transition meta `actor: "human"`', () => {
     expect(lintAgentMachine(single).map((d) => d.code)).toContain("decide-allows-human-event");
   });
 
+  test("lint: an agent.act that lists a human-tagged event is an error", () => {
+    const acting = setupAgent({ schemas }).createMachine({
+      context: {},
+      initial: "reviewing",
+      states: {
+        reviewing: {
+          invoke: { src: "agent.act", input: { model: "quick", allowedEvents: ["approve"] } },
+          on: { approve: { target: "approved", meta: { actor: "human" } } },
+        },
+        approved: { type: "final" },
+      },
+    });
+    expect(lintAgentMachine(acting)).toContainEqual(
+      expect.objectContaining({ code: "decide-allows-human-event", path: "reviewing" }),
+    );
+  });
+
   test("explorePaths branches a decision only on events a model may choose", async () => {
     const report = await explorePaths(review, { input: {} });
     expect(report.terminals.map((terminal) => terminal.state)).toEqual(["revised"]);

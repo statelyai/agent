@@ -168,13 +168,26 @@ Retry behavior:
 
 ## Coercion
 
-Core validates and retries. It never calls a model. Coercing the model into choosing exactly one option is the host's responsibility. Hosts do this with one tool per event and a forced tool choice, or with structured output over an event union. The shipped `createAiSdkExecutors` provides a `decide` executor for the Vercel AI SDK. The raw-SDK examples force the choice with `tool_choice`. See [Hosts](hosts.md).
+Core validates and retries. It never calls a model. Coercing the model into choosing exactly one option is the host's responsibility. The shipped AI SDK, OpenAI, and TanStack AI executors offer two modes, set by the `decideMode` option on each adapter:
 
-An executor returns an answer it cannot read as an event as `rejected: { failure, reason }` instead of `event`. Core records it as a failed attempt, feeds `reason` back to the model as written, and asks again. The shipped AI SDK, OpenAI, and TanStack AI executors do this instead of throwing:
+- `'object'` (default for object payloads): one structured-output call. An open choice answers `{ event }`, where `event` is one candidate event, `type` included. Root unions of object payloads become separate event variants. A closed choice answers `{ choice }`, an enum of option ids. The answer holds one event by construction.
+- `'tool'`: one tool per candidate event under a forced tool choice. Parallel tool calls are turned off where the provider allows it, and an answer that still calls more than one tool is rejected.
+- A function of the request picks the mode per request. Returning `undefined` uses the default: `'object'` when every payload can be represented as object variants, otherwise `'tool'`. This avoids unsupported `allOf` schemas in strict structured-output providers.
 
-- No tool call: an `unknown-event` attempt whose reason lists the tools to call.
-- A call to a tool that was not offered: an `unknown-event` attempt whose reason lists the valid tools.
-- Tool arguments that are not valid JSON: an `invalid-payload` attempt whose reason names the tool.
+```ts no-check
+createAiSdkExecutors({ models, decideMode: "tool" });
+createOpenAiExecutors({ client, decideMode: (request) => (request.options ? "object" : "tool") });
+```
+
+An executor returns an answer it cannot read as an event as `rejected: { failure, reason }` instead of `event`. Core records it as a failed attempt, feeds `reason` back to the model as written, and asks again. The shipped executors reject:
+
+- An object answer that is not valid JSON: an `invalid-payload` attempt.
+- An object answer that names no event, or an event that is not a candidate: an `unknown-event` attempt whose reason lists the valid events.
+- A closed-choice id that was not offered: an `unknown-event` attempt whose reason lists the valid ids.
+- In tool mode, no tool call, a call to a tool that was not offered, or more than one call: an `unknown-event` attempt whose reason lists the tools to call.
+- In tool mode, tool arguments that are not valid JSON: an `invalid-payload` attempt whose reason names the tool.
+
+Decision models such as Jev are not affected by `decideMode`. See [Decision models](#decision-models).
 
 > **Note:** Decisions are state-local, so prefer authoring one-off decisions inline on the invoke.
 
@@ -211,6 +224,8 @@ applying: { always: { target: 'planning' } },
 ```
 
 Every step runs the validation and retry loop described above. For the full example, see [examples/todo-nl/index.ts](../examples/todo-nl/index.ts).
+
+To let the model send several events in one tool loop instead, invoke `agent.act`. See [Acting on events](act.md).
 
 ## Closed choices
 
@@ -260,10 +275,10 @@ agent.createMachine({
 });
 ```
 
-### Closed choices with the AI SDK
+### Closed choices in the shipped adapters
 
-- `createAiSdkExecutors` presents a closed choice as ONE tool, `choose_option`, instead of one tool per event.
-- Its input is `{ option }`, an enum of option ids such as `refund:20` and `escalate`. The tool description lists each id with its description.
+- In object mode, the answer is `{ choice }`, an enum of option ids such as `refund:20` and `escalate`. The schema description lists each id with its description.
+- In tool mode, `createAiSdkExecutors` presents a closed choice as ONE tool, `choose_option`, whose input is `{ option }` over the same ids.
 - The chosen id maps back to that option's event.
 - An id that is not offered, or a call to another tool, is retried as an `unknown-event` attempt. Its reason names the answer and lists the valid ids.
 
@@ -271,7 +286,7 @@ agent.createMachine({
 
 An AI SDK decision model, such as TypeSafe's Jev, goes in the same `createAiSdkExecutors` models map as the language models. A decide request whose model ref names it is answered through `experimental_decide`.
 
-- The request must be a closed choice: `payloads` on `agent.decide`, or `decideNext`. A request without options throws.
+- The request must be a closed choice: `payloads` on `agent.decide`, `decideNext`, or the pick step of a [decision strategy](#decision-strategies). A request without options throws.
 - It asks one `choice` question. Each option id is a label, and its criterion is the option's description, or the event as JSON when it has none.
 - A label that is not an option is retried as an `unknown-event` attempt, like any failed choice.
 - The result carries `confidence` when the model reports it. Branch on it in your own code.
@@ -287,6 +302,73 @@ const { decide } = createAiSdkExecutors({
 ```
 
 See [Decision models](models-and-providers.md#decision-models).
+
+## Decision strategies
+
+A **decision strategy** splits one decision into several model calls. Set `strategy` on the `agent.decide` input (or on `createDecisionLogic`). Core runs the strategy around the `decide` executor, so validation and retries apply to the combined answer, and any adapter works.
+
+| Strategy           | Model calls                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `'direct'`         | One decide call over every candidate event.                                                                              |
+| `'pick-then-fill'` | Pick the event type as a closed choice over bare `{ type }` options, then fill its payload.                              |
+| `'grouped'`        | Pick a group of event types as a closed choice, then one decide call within that group.                                  |
+| `'auto'` (default) | `'pick-then-fill'` when `fillModel` is set; `'grouped'` over more than 24 events in two or more groups; else `'direct'`. |
+
+Filling a payload under `'pick-then-fill'`:
+
+- An event with no payload fields: no fill call.
+- Every payload field finite (an `enum`, a `const`, a boolean, or a union of those), with at most 32 combinations (`MAX_FINITE_PAYLOADS`): a closed choice over the enumerated payloads, on the same model.
+- Any open field: a structured `generateText` call on `fillModel`, with the event's payload schema as its output schema and `type` fixed. This needs a `generateText` executor.
+- Open fields with no `fillModel` throw `missing-fill-model` at runtime. `verifyAgentConfig` reports it at setup when `strategy: 'pick-then-fill'` is literal.
+
+Groups under `'grouped'`:
+
+- `groups` maps a group name to its event types: `groups: { cart: ["cart.add", "cart.clear"] }`.
+- An event type in no group is grouped by its prefix before the first `.`. `cart.add` and `cart.clear` group as `cart`.
+- Each group option's description lists its member types. A request with fewer than two groups makes one direct call.
+
+Every sub-call counts against the model-call budget, emits its own trace events, and receives the decision's prior `attempts`. Its `info.callKey` adds the role to the attempt key: `<key>.<attempt>.pick`, `.group`, or `.fill`. See [Idempotency keys](hosts.md#idempotency-keys).
+
+```ts
+import { createAgentSchemas, setupAgent } from "@statelyai/agent";
+import { z } from "zod";
+
+const agent = setupAgent({
+  schemas: createAgentSchemas({
+    context: z.object({}),
+    events: {
+      refund: z.object({ amount: z.number(), reason: z.string() }),
+      escalate: z.object({ queue: z.enum(["billing", "tech"]) }),
+    },
+  }),
+});
+
+agent.createMachine({
+  context: {},
+  initial: "triaging",
+  states: {
+    triaging: {
+      invoke: {
+        src: "agent.decide",
+        input: {
+          model: "judge",
+          fillModel: "writer",
+          allowedEvents: ["refund", "escalate"],
+        },
+      },
+      on: { refund: { target: "refunded" }, escalate: { target: "escalated" } },
+    },
+    refunded: {},
+    escalated: {},
+  },
+});
+```
+
+`fillModel` is set, so `'auto'` resolves to `'pick-then-fill'`. `judge` picks `refund` or `escalate`. `escalate` has one finite field, so `judge` also picks its `queue`. `refund` has open fields, so `writer` writes `amount` and `reason`.
+
+### Decision models with `fillModel`
+
+A decision model such as Jev answers only closed choices. `'pick-then-fill'` turns an open choice into closed ones, so a decision model can pick the event type while `fillModel` names a language model that writes the open payload. In the example above, `judge` can be `typeSafeAi.decisionModel("jev-latest")` and `writer` a language model in the same models map.
 
 ## A policy as the decider
 
@@ -386,5 +468,6 @@ The result also carries `attempts`, the failed choices before the one that lande
 ## Related
 
 - Read more about [Agent machines](machines.md), including transitions, guards, and event schemas.
+- Read more about [Acting on events](act.md), for several events in one tool loop.
 - Read more about [Hosts](hosts.md), including the decide executor and how the model is coerced into one event.
 - Read more about [Machines as data](machines-as-data.md), including authoring decisions from JSON.

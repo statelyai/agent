@@ -13,9 +13,11 @@
  * Entries for a name are consumed in order; the last one repeats. `"*"` is the
  * fallback name. A text entry is the request's output value (a string, or the
  * object a structured request declares); a decision entry is the chosen event.
- * For a closed choice (`request.options`) the mock answers `choose_option`
- * with the id of the option equal to that event, or with an id that is not
- * offered when none is, which the run retries.
+ * A decision is answered in whichever mode the adapter asked: as one
+ * `{ event }` object (or `{ choice }` with an option id) under the default
+ * object mode, or as a tool call under `decideMode: 'tool'`. For a closed
+ * choice (`request.options`) the mock picks the id of the option equal to that
+ * event, or an id that is not offered when none is, which the run retries.
  * Either may be a function of the agent request (and the AI SDK call options)
  * for answers that depend on the prompt or on a decision's prior attempts.
  */
@@ -81,6 +83,13 @@ function optionIdsOf(tool: NonNullable<CallOptions["tools"]>[number] | undefined
   const schema = tool && "inputSchema" in tool ? tool.inputSchema : undefined;
   const option = schema?.properties?.["option"];
   return typeof option === "object" && Array.isArray(option.enum) ? (option.enum as string[]) : [];
+}
+
+/** The option ids an object-mode closed choice offers: its `choice` enum. */
+function choiceIdsOf(schema: unknown): string[] {
+  const choice = (schema as { properties?: Record<string, { enum?: unknown }> } | undefined)
+    ?.properties?.["choice"];
+  return Array.isArray(choice?.enum) ? (choice.enum as string[]) : [];
 }
 
 /** Mirrors the adapter's event → tool-name mapping for the common case. */
@@ -154,6 +163,23 @@ export function createMockModelExecutors(script: MockModelScript): MockModelExec
       );
       const { type, ...payload } = event;
       const offered = (request as AgentDecisionRequest).options;
+      if (options.responseFormat?.type === "json") {
+        // Object mode (the adapter's default): one JSON object, `{ event }`,
+        // or `{ choice }` naming an option id from the schema's enum.
+        const ids = choiceIdsOf(options.responseFormat.schema);
+        const index = offered
+          ? offered.findIndex((option) => isDeepStrictEqual(option.event, event))
+          : -1;
+        const answer = offered
+          ? { choice: ids[index] ?? `${JSON.stringify(event)} (not offered)` }
+          : { event };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(answer) }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage,
+          warnings: [],
+        };
+      }
       let toolName: string;
       let input: unknown;
       if (offered) {

@@ -1,11 +1,13 @@
 /**
  * The raw `openai` package adapter: builds the `{ generateText, streamText,
  * decide }` executor set consumed by `createAgentRuntime`/`executeAgentRequest`,
- * with no Vercel AI SDK in between. Calls that carry function tools — every
- * `decide`, and a `generateText` with tools — go through the Responses API,
- * because reasoning models such as `gpt-6-luna` reject function tools on Chat
- * Completions. Tool-free calls stay on Chat Completions unless `api: 'responses'`
- * sends them to the Responses API too.
+ * with no Vercel AI SDK in between. By default, calls that carry function
+ * tools — a `generateText` with tools, and a `decide` under `decideMode: 'tool'`
+ * — go through the Responses API, because reasoning models such as
+ * `gpt-6-luna` reject function tools on Chat Completions; tool-free calls,
+ * including an object-mode `decide`, stay on Chat Completions. `api: 'chat'`
+ * sends everything to Chat Completions, tools included, and `api: 'responses'`
+ * sends everything to the Responses API.
  *
  * `openai` is an OPTIONAL peer dependency and is imported for TYPES ONLY: the
  * client is injected, so nothing here pulls the package into a bundle at
@@ -20,6 +22,9 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionCreateParamsStreaming,
   ChatCompletionMessageParam,
+  // `ChatCompletionTool` spans the whole supported `openai` peer range; the
+  // narrower `ChatCompletionFunctionTool` name only exists in later releases.
+  ChatCompletionTool,
 } from "openai/resources/chat/completions/completions.js";
 import type {
   FunctionTool,
@@ -47,6 +52,13 @@ import {
   type AgentDecisionRejection,
   type AgentDecisionRequest,
 } from "../decision.js";
+import {
+  decisionObjectSchema,
+  fromDecisionObject,
+  multipleCallsRejection,
+  resolveDecisionMode,
+  type DecisionModeOption,
+} from "../internal/decision-object.js";
 import { rejectedAnswer } from "../internal/rejected-answer.js";
 import { withModelCalls } from "../internal/with-model-calls.js";
 import type { AgentEventDescriptor } from "../events.js";
@@ -287,6 +299,29 @@ export function toOpenAiEventTools(events: AgentEventDescriptor[]): FunctionTool
     parameters: getJsonSchemaSync(event.inputSchema) ?? {},
     strict: false,
   }));
+}
+
+/** Responses API function tools as Chat Completions tools, for `api: 'chat'`. */
+function toChatTools(tools: FunctionTool[]): ChatCompletionTool[] {
+  return tools.map(({ name, description, parameters, strict }) => ({
+    type: "function" as const,
+    function: {
+      name,
+      ...(description != null ? { description } : {}),
+      parameters: parameters ?? {},
+      ...(strict != null ? { strict } : {}),
+    },
+  }));
+}
+
+/** {@link toOpenAiToolChoice} in Chat Completions' shape, for `api: 'chat'`. */
+function toChatToolChoice(toolChoice: AgentToolChoice | undefined) {
+  if (toolChoice === undefined) {
+    return undefined;
+  }
+  return typeof toolChoice === "object"
+    ? { type: "function" as const, function: { name: toolChoice.name } }
+    : toolChoice;
 }
 
 /** A Chat Completions content part as a Responses input part. `toOpenAiMessages`
@@ -636,10 +671,24 @@ export type OpenAiCallSettings = Omit<
  */
 export type CreateOpenAiExecutorsOptions = {
   client: OpenAI;
-  /** Where tool-free text calls go: `'chat'` (default, `chat.completions.create`)
-   * or `'responses'` (`responses.create`), for a host whose recorded traffic uses
-   * it. Decisions and tool calls always use the Responses API. */
+  /**
+   * Which OpenAI API the calls use. Unset (the default): calls with function
+   * tools — a `generateText` with tools, a tool-mode `decide` — use the
+   * Responses API, which reasoning models require for tools, and every other
+   * call uses Chat Completions. `'chat'`: every call uses
+   * `chat.completions.create`, tools included, for a model or gateway without
+   * the Responses API. `'responses'`: every call uses `responses.create`, for a
+   * host whose recorded traffic uses it.
+   */
   api?: "chat" | "responses";
+  /**
+   * How a `decide` request is answered: `'object'` (default), one
+   * structured-output object naming the event; or `'tool'`, one function tool
+   * per candidate event under `tool_choice: 'required'`, with
+   * `parallel_tool_calls: false` and a multi-call answer rejected. A function
+   * picks per request.
+   */
+  decideMode?: DecisionModeOption;
   resolveModel?: (modelRef: string) => string;
   settings?:
     | Record<string, OpenAiCallSettings>
@@ -805,10 +854,12 @@ function toToolContent(output: unknown): string {
  * `openai` package. Compare `createAiSdkExecutors` — same shape, different SDK
  * underneath.
  *
- * Calls with function tools use the Responses API, which reasoning models
- * require for tools: decisions force a call with `tool_choice: 'required'`, one
- * function tool per candidate event, and `generateText` runs its tool loop
- * there. Tool-free calls use Chat Completions. Structured output wraps the
+ * By default, calls with function tools use the Responses API, which reasoning
+ * models require for tools: a tool-mode decision forces a call with
+ * `tool_choice: 'required'`, one function tool per candidate event, and
+ * `generateText` runs its tool loop there. Tool-free calls, an object-mode
+ * decision among them, use Chat Completions. `api` pins every call to one API
+ * (see {@link CreateOpenAiExecutorsOptions.api}). Structured output wraps the
  * `{ result, reasoning? }` provider output schema in a `json_schema` format on
  * either API.
  *
@@ -822,7 +873,7 @@ function toToolContent(output: unknown): string {
  * ```
  */
 export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): OpenAiExecutors {
-  const { client, api = "chat", resolveModel = (modelRef: string) => modelRef } = options;
+  const { client, api, resolveModel = (modelRef: string) => modelRef } = options;
   const warnedSettings = new Set<string>();
   // Resolved model id → the settings it rejected. A model learns each rejected
   // setting once; later calls to it leave the setting out.
@@ -908,43 +959,134 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     raw: unknown;
   };
 
-  // A tool-free text call: one Chat Completions request.
-  const chatCompletion = async (
-    request: AgentTextRequest,
+  // The JSON Schema `response_format` of a Chat Completions call.
+  const chatResponseFormat = (name: string, schema: Record<string, unknown>) => ({
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name,
+        schema,
+        // Arbitrary JSON Schema (e.g. from Zod) may use features outside
+        // OpenAI's strict-mode subset (defaults, unions, …) — leaving strict
+        // mode off keeps this general rather than requiring schema authors to
+        // hand-tune for OpenAI.
+        strict: false,
+      },
+    },
+  });
+
+  // Params every Chat Completions call shares, layered like `responsesParams`.
+  const chatParams = (
+    request: AgentTextRequest | AgentDecisionRequest,
+    messages: ChatCompletionMessageParam[],
+    extra: Record<string, unknown>,
+  ): ChatCompletionCreateParamsNonStreaming =>
+    ({
+      model: resolveModel(request.model),
+      messages,
+      ...callSettings(options, request),
+      ...toOpenAiCallSettings(request),
+      ...extra,
+    }) as ChatCompletionCreateParamsNonStreaming;
+
+  // The host-side tool loop over Chat Completions; a tool-free call is its
+  // single step. Same contract as `responsesToolLoop` below: each step that
+  // comes back with tool calls runs them, appends the assistant `tool_calls`
+  // message and one tool message per result, and asks again, until a step
+  // with no calls, the `maxSteps` budget, or a client-side tool.
+  const chatToolLoop = async (
+    request: AgentTextRequest & { tools: AgentTools },
+    tools: FunctionTool[],
     jsonSchema: Record<string, unknown> | undefined,
     info?: AgentRequestExecutorInfo,
   ): Promise<TextCallOutcome> => {
-    const response = (await client.chat.completions.create(
-      {
-        model: resolveModel(request.model),
-        messages: toOpenAiMessages(request),
-        ...callSettings(options, request),
-        ...toOpenAiCallSettings(request),
-        ...(jsonSchema
-          ? {
-              response_format: {
-                type: "json_schema",
-                json_schema: {
-                  name: "output",
-                  schema: jsonSchema,
-                  // Arbitrary JSON Schema (e.g. from Zod) may use features
-                  // outside OpenAI's strict-mode subset (defaults, unions, …) —
-                  // leaving strict mode off keeps this general rather than
-                  // requiring schema authors to hand-tune for OpenAI.
-                  strict: false,
-                },
-              },
+    const maxSteps =
+      typeof request.maxSteps === "number" && Number.isFinite(request.maxSteps)
+        ? Math.max(1, Math.floor(request.maxSteps))
+        : 1;
+    const messages = toOpenAiMessages(request);
+    const toolChoice = tools.length > 0 ? toChatToolChoice(request.toolChoice) : undefined;
+    let response: ChatCompletion;
+    let usage: AgentCallUsage | undefined;
+    let step = 0;
+
+    try {
+      for (;;) {
+        step++;
+        response = (await client.chat.completions.create(
+          chatParams(request, [...messages], {
+            ...(tools.length > 0 ? { tools: toChatTools(tools) } : {}),
+            ...(jsonSchema ? chatResponseFormat("output", jsonSchema) : {}),
+            // A forced choice applies to the FIRST step only, as on Responses.
+            ...(step === 1 && toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+          }),
+          { signal: info?.signal },
+        )) as ChatCompletion;
+        usage = addAgentCallUsage(usage, toAgentCallUsage(response.usage));
+
+        const message = response.choices[0]?.message;
+        const toolCalls = message?.tool_calls ?? [];
+        // A truncated turn never runs its calls, as on Responses.
+        if (
+          toolCalls.length === 0 ||
+          step >= maxSteps ||
+          response.choices[0]?.finish_reason === "length"
+        ) {
+          break;
+        }
+        // An offered tool with no `execute` hands the call back: the loop ends.
+        // A tool that was not offered is answered with an error result below.
+        const offered = (name: string) =>
+          Object.hasOwn(request.tools, name) && request.tools[name] !== undefined;
+        if (
+          toolCalls.some(
+            (call) =>
+              call.type !== "function" ||
+              (offered(call.function.name) && !toolExecutor(request.tools, call.function.name)),
+          )
+        ) {
+          break;
+        }
+
+        messages.push(message as ChatCompletionMessageParam);
+        for (const call of toolCalls) {
+          if (call.type !== "function") continue;
+          const { name, arguments: args } = call.function;
+          let content: string;
+          try {
+            if (!offered(name)) {
+              throw new Error(
+                `tool '${name}' was not offered; valid tools: ${Object.keys(request.tools)
+                  .filter(offered)
+                  .join(", ")}`,
+              );
             }
-          : {}),
-      } as ChatCompletionCreateParamsNonStreaming,
-      { signal: info?.signal },
-    )) as ChatCompletion;
+            let toolInput: unknown = {};
+            if (args) {
+              try {
+                toolInput = JSON.parse(args);
+              } catch {
+                throw new Error(`the arguments for tool '${name}' were not valid JSON`);
+              }
+            }
+            content = toToolContent(await toolExecutor(request.tools, name)!(toolInput));
+          } catch (error) {
+            // Reported to the model as an error result, as on Responses.
+            content = `Error: ${error instanceof Error ? error.message : String(error)}`;
+          }
+          messages.push({ role: "tool", tool_call_id: call.id, content });
+        }
+      }
+    } catch (error) {
+      throw withModelCalls(error, step);
+    }
+
     const choice = response.choices[0];
     return {
       content: choice?.message.content,
       finishReason: toAgentFinishReason(choice?.finish_reason),
-      usage: toAgentCallUsage(response.usage),
-      modelCalls: 1,
+      usage,
+      modelCalls: step,
       raw: response,
     };
   };
@@ -1077,9 +1219,9 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     const jsonSchema = await structuredSchema(request);
     const tools = toOpenAiTools(request.tools);
     const { content, finishReason, usage, modelCalls, raw } =
-      tools.length > 0 || api === "responses"
+      api === "responses" || (api === undefined && tools.length > 0)
         ? await responsesToolLoop(request, tools, jsonSchema, info)
-        : await chatCompletion(request, jsonSchema, info);
+        : await chatToolLoop(request, tools, jsonSchema, info);
 
     try {
       if (jsonSchema) {
@@ -1207,38 +1349,28 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
     return { result: text, ...usageField(toAgentCallUsage(usage)), finishReason, raw: last };
   };
 
-  const decide = async (
+  // A decision's answer, read from the one tool call (or the object) a
+  // response carries, with the call's metadata alongside.
+  type DecideMeta = Pick<OpenAiDecideResult, "usage" | "finishReason" | "raw">;
+  const fromToolCalls = (
     request: AgentDecisionRequest,
-    info?: AgentRequestExecutorInfo,
-  ): Promise<OpenAiDecideResult> => {
-    const response = await createResponse(
-      responsesParams(request, toResponsesInput(toDecisionMessages(request)), {
-        tools: toOpenAiEventTools(request.events),
-        tool_choice: "required",
-      }),
-      info?.signal,
-    );
-    assertNotFailed(response, "decide");
-
-    // An incomplete turn did not finish choosing, so its call is not a choice.
-    if (response.status === "incomplete") {
-      throw new Error(
-        "createOpenAiExecutors: decide — the response was incomplete " +
-          `(${response.incomplete_details?.reason ?? "unknown reason"}), so no event was chosen.`,
-      );
-    }
-    const toolCall = functionCalls(response)[0];
+    calls: Array<{ name: string; arguments: string }>,
+    meta: DecideMeta,
+  ): OpenAiDecideResult => {
     // An answer that names no candidate is retried, not thrown.
     const unnamed = (call?: { toolName: string; invalidJson?: boolean }): OpenAiDecideResult => ({
       rejected: rejectedAnswer(
         call,
         request.events.map((event) => event.toolName),
       ),
-      ...usageField(toAgentResponseUsage(response.usage)),
-      finishReason: toAgentResponseFinishReason(response),
-      raw: response,
+      ...meta,
     });
+    const toolCall = calls[0];
     if (!toolCall) return unnamed();
+    // A decision sends exactly one event, so a second call is retried too.
+    if (calls.length > 1) {
+      return { rejected: multipleCallsRejection(calls.map((call) => call.name)), ...meta };
+    }
     const toolName = toolCall.name;
     const chosenEvent = request.events.find((event) => event.toolName === toolName);
     if (!chosenEvent) return unnamed({ toolName });
@@ -1258,10 +1390,106 @@ export function createOpenAiExecutors(options: CreateOpenAiExecutorsOptions): Op
         ...(args && typeof args === "object" ? args : {}),
         type: chosenEvent.type,
       } as ChosenEvent,
+      ...meta,
+    };
+  };
+
+  // An incomplete turn did not finish choosing, so its answer is not a choice.
+  const incomplete = (reason: string | null | undefined): Error =>
+    new Error(
+      "createOpenAiExecutors: decide — the response was incomplete " +
+        `(${reason ?? "unknown reason"}), so no event was chosen.`,
+    );
+
+  // A decision over Chat Completions: one `{ event }` object under a
+  // `json_schema` response format, or one tool call under `tool_choice: 'required'`.
+  const decideWithChat = async (
+    request: AgentDecisionRequest,
+    mode: "object" | "tool",
+    info?: AgentRequestExecutorInfo,
+  ): Promise<OpenAiDecideResult> => {
+    const response = (await client.chat.completions.create(
+      chatParams(
+        request,
+        toDecisionMessages(request),
+        mode === "object"
+          ? chatResponseFormat("decision", decisionObjectSchema(request))
+          : {
+              tools: toChatTools(toOpenAiEventTools(request.events)),
+              tool_choice: "required",
+              parallel_tool_calls: false,
+            },
+      ),
+      { signal: info?.signal },
+    )) as ChatCompletion;
+    const choice = response.choices[0];
+    if (choice?.finish_reason === "length") throw incomplete("max_output_tokens");
+    const meta: DecideMeta = {
+      ...usageField(toAgentCallUsage(response.usage)),
+      finishReason: toAgentFinishReason(choice?.finish_reason),
+      raw: response,
+    };
+    if (mode === "object") {
+      return { ...fromDecisionObject(request, choice?.message.content ?? ""), ...meta };
+    }
+    const calls = (choice?.message.tool_calls ?? []).flatMap((call) =>
+      call.type === "function" ? [call.function] : [],
+    );
+    return fromToolCalls(request, calls, meta);
+  };
+
+  // A decision over the Responses API: the same two modes, with the object
+  // under `text.format`.
+  const decideWithResponses = async (
+    request: AgentDecisionRequest,
+    mode: "object" | "tool",
+    info?: AgentRequestExecutorInfo,
+  ): Promise<OpenAiDecideResult> => {
+    const response = await createResponse(
+      responsesParams(
+        request,
+        toResponsesInput(toDecisionMessages(request)),
+        mode === "object"
+          ? {
+              text: {
+                format: {
+                  type: "json_schema",
+                  name: "decision",
+                  schema: decisionObjectSchema(request),
+                  strict: false,
+                },
+              },
+            }
+          : {
+              tools: toOpenAiEventTools(request.events),
+              tool_choice: "required",
+              parallel_tool_calls: false,
+            },
+      ),
+      info?.signal,
+    );
+    assertNotFailed(response, "decide");
+    if (response.status === "incomplete") throw incomplete(response.incomplete_details?.reason);
+    const meta: DecideMeta = {
       ...usageField(toAgentResponseUsage(response.usage)),
       finishReason: toAgentResponseFinishReason(response),
       raw: response,
     };
+    if (mode === "object") {
+      return { ...fromDecisionObject(request, outputText(response)), ...meta };
+    }
+    return fromToolCalls(request, functionCalls(response), meta);
+  };
+
+  const decide = async (
+    request: AgentDecisionRequest,
+    info?: AgentRequestExecutorInfo,
+  ): Promise<OpenAiDecideResult> => {
+    const mode = resolveDecisionMode(options.decideMode, request);
+    // Unset `api`: only a tool-mode decision needs the Responses API.
+    return api === "chat" || (api === undefined && mode === "object")
+      ? decideWithChat(request, mode, info)
+      : decideWithResponses(request, mode, info);
   };
 
   return { generateText, streamText, decide };

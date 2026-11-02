@@ -32,6 +32,7 @@ Execution is at-least-once. A host runs the request and then journals its comple
 - `requestId` is the invoke site, and `n` is the invocation's ordinal there: how many times a fold of the log has started that invoke, a cancelled invocation included. Each iteration of a looped state gets its own key, and so does a call re-entered after a cancel. A run whose log cannot be folded counts the site's completions instead, a decision counting once its chosen event is journaled.
 - A call inside an invoked child machine names the child's path: `<executionId>:<childId>/<requestId>#<n>`, one `/` segment per nesting level. A `%` or `/` inside an id is escaped as `%25` or `%2F`. The child's own entries (its `actorPath`) are folded too, so `n` keeps counting across turns and across invocations of the child.
 - A decision retry appends its attempt ordinal: `<executionId>:<requestId>#<n>.<attempt>`, where `attempt` is the number of prior failed attempts. Each retry is a different request, so it gets a different key.
+- A [decision strategy](decisions.md#decision-strategies)'s sub-calls append their role: `<executionId>:<requestId>#<n>.<attempt>.pick`, `.group`, or `.fill`.
 - A resumed run re-executing an in-flight request passes the same `callKey` as the original attempt.
 - A fork mints its own lineage id (see [Fork](event-log.md#fork)), so none of its calls shares a key with its parent's.
 - It is `undefined` off the `runToQuiescence` path (a bare `provideExecutors` bind) and on a run with no event log.
@@ -69,12 +70,15 @@ await runToQuiescence(
 
 Passing the same `models` map to `setupAgent({ models })` types the machine's model refs, so a request naming a model the host does not have is a compile error. Executors are always passed explicitly. Core does not import or require the AI SDK at runtime.
 
+`decideMode` sets how a language model answers a decision: `'object'` for one structured-output object, or `'tool'` for one tool per candidate event. The default is object mode when every payload can be represented as object variants, otherwise tool mode. In tool mode, parallel tool calls are turned off with `providerOptions` (`openai.parallelToolCalls: false`, `anthropic.disableParallelToolUse: true`), merged under the host's own settings. Decision models are unaffected. See [Coercion](decisions.md#coercion).
+
 ## OpenAI SDK adapter
 
 `@statelyai/agent/openai` maps the same three executors onto the raw `openai` package, with no AI SDK in between.
 
-- Calls that carry function tools use the Responses API: every `decide`, and `generateText` with tools. Reasoning models such as `gpt-6-luna` reject function tools on Chat Completions.
-- Tool-free calls use Chat Completions: `generateText` without tools, and `streamText`.
+- By default, calls that carry function tools use the Responses API: `generateText` with tools, and `decide` under `decideMode: 'tool'`. Reasoning models such as `gpt-6-luna` reject function tools on Chat Completions.
+- Tool-free calls use Chat Completions: `generateText` without tools, `streamText`, and `decide` in object mode.
+- `api` pins every call to one API. See the table below.
 
 ```sh
 pnpm add openai
@@ -95,7 +99,16 @@ const executors = createOpenAiExecutors({
 await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 ```
 
-`client` is injected, so the API key, base URL, and transport stay with the host. `openai` 5 or newer is required. It is an optional peer dependency with no version range, so an app on `openai` 4 still installs the core, and it is imported for types only. A client wrapper must forward both `responses.create` and `chat.completions.create`, and an OpenAI-compatible server needs `/v1/responses` for tool calls. Decisions and tool calls use `client.responses.create`, and other calls use Chat Completions. Pass `api: "responses"` to send every call to `client.responses.create`.
+`client` is injected, so the API key, base URL, and transport stay with the host. `openai` 5 or newer is required. It is an optional peer dependency with no version range, so an app on `openai` 4 still installs the core, and it is imported for types only. A client wrapper must forward both `responses.create` and `chat.completions.create` unless `api` pins one of them.
+
+| `api`         | Calls with function tools | Tool-free calls and object-mode `decide` |
+| ------------- | ------------------------- | ---------------------------------------- |
+| unset         | `responses.create`        | `chat.completions.create`                |
+| `"chat"`      | `chat.completions.create` | `chat.completions.create`                |
+| `"responses"` | `responses.create`        | `responses.create`                       |
+
+- `"chat"` is for a model or OpenAI-compatible server without `/v1/responses`. `generateText` runs its tool loop on Chat Completions, and a tool-mode decision sends `tools` with `tool_choice: 'required'`.
+- `"responses"` is for a host whose recorded traffic uses the Responses API.
 
 `resolveModel` maps a machine's model ref to a real OpenAI model id. It defaults to identity, for machines whose refs are already ids.
 
@@ -109,7 +122,13 @@ await runToQuiescence(createAgentRuntime(machine, { executors }), { input });
 - `store` defaults to `false`, matching Chat Completions.
 - A sampling setting the model rejects, such as `temperature` or `top_p` on a reasoning model like `gpt-6-luna`, is dropped for that model after its first 400. The call is retried without it, and one warning is logged. The rejected request still counts against an HTTP-level budget.
 
-Structured output sends the declared schema wrapped as `{ result, reasoning? }`, as `response_format: { type: 'json_schema' }` on Chat Completions or `text.format` on the Responses API. The parsed `result` is what the machine validates. Decisions force a tool call with `tool_choice: 'required'`, one function tool per candidate event. An answer that calls no tool, calls a tool that was not offered, or passes arguments that are not JSON comes back as `rejected`, and the runtime retries it. Function tools are sent with `strict: false`, since the Responses API defaults strict mode on and arbitrary JSON Schema may fall outside it.
+Structured output sends the declared schema wrapped as `{ result, reasoning? }`, as `response_format: { type: 'json_schema' }` on Chat Completions or `text.format` on the Responses API. The parsed `result` is what the machine validates.
+
+Decisions follow `decideMode`:
+
+- `'object'` (default for compatible object payloads): one structured-output call whose schema is the decision object, sent with `strict: false`, since the adapter validates the answer itself.
+- `'tool'`: one function tool per candidate event, with `tool_choice: 'required'` and `parallel_tool_calls: false`. Function tools are sent with `strict: false`, since the Responses API defaults strict mode on and arbitrary JSON Schema may fall outside it.
+- An answer the adapter cannot read as one event comes back as `rejected`, and the runtime retries it. See [Coercion](decisions.md#coercion).
 
 `generateText` runs the tool loop host-side. Each step that comes back with function calls runs the request's tools, appends the calls and one `function_call_output` item per result, and asks again. The replay is stateless: calls go back without their item ids, and reasoning items are left out. An incomplete turn, such as one cut off at `max_output_tokens`, never runs its calls, and an incomplete decision throws instead of choosing. A `failed` response throws on both paths, with its error code and message. The request's `maxSteps` bounds the number of OpenAI calls; the default is one, so a single-step request behaves as before. A tool that throws, a call to a tool the request did not offer, and arguments that are not JSON go back to the model as error results. The loop also ends early on a tool with no `execute` — a client-side tool, whose call is handed back with `finishReason: 'tool-calls'` and the raw response. Every step's `usage` is summed onto the one result the run aggregates. `modelCalls` reports the steps, and a loop that throws after a step records them on the error, so the run's budget counts them.
 
@@ -152,6 +171,7 @@ The options mirror `createAiSdkExecutors`:
 - `models` maps model refs to text adapters, or to `{ adapter, settings }` pairs that give a ref a persona.
 - `resolveModel` resolves refs dynamically, and wins over `models` when both are set.
 - `settings` carries `chat()` options that belong to the host, such as `modelOptions`, `middleware`, or `metadata`. Pass an object for every call, or a function of the request.
+- `decideMode` sets how a decision is answered: `'object'` (the compatible-payload default) or `'tool'`. See [Coercion](decisions.md#coercion).
 
 Precedence is global `settings`, then the model entry's `settings`, then the request's own generation settings. `modelOptions` merge key by key.
 
@@ -168,7 +188,7 @@ The rest of the contract matches the other adapters:
 - Tools run in `chat()`'s own loop, in `generateText` and `streamText` alike. The request's `maxSteps` bounds the model turns; the default is one. A tool with no `execute` stops the run at its call, with `finishReason: 'tool-calls'`.
 - A forced `toolChoice` applies to the first model turn only, so the model can answer after the tool runs.
 - `generateText` and `streamText` return the run's response `messages`: each turn's assistant text and tool calls, and the tool results fed back. Append them to a conversation and they replay into the next request.
-- Decisions offer one tool per candidate event, with no `execute`, so the run stops at the model's first call. The tool choice is forced where the provider supports it.
+- Decisions with compatible object payloads use one structured-output object by default; incompatible payloads default to tool mode. Under `decideMode: 'tool'` they offer one tool per candidate event, with no `execute`, so the run stops at the model's first call. The tool choice is forced where the provider supports it, and an answer with more than one call is rejected.
 - System messages and the request's `system` become `systemPrompts`, since TanStack AI messages have no `system` role. Image parts become `url` or base64 `data` sources; other part types throw.
 - Every result reports `usage` summed over the run's model turns, the normalized `finishReason`, and every chunk the run produced on `raw`. A provider error arrives as a `RUN_ERROR` chunk and is thrown with its `code`.
 
