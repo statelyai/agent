@@ -820,3 +820,40 @@ describe("abortWith", () => {
     expect(result.snapshot.value).toBe("cleaning");
   });
 });
+
+describe("abortWith: abort comes first, and an unfinished wind-down aborts", () => {
+  const machine = setupAgent({
+    events: { CANCEL: z.object({}), FINISH: z.object({}), CONFIRM: z.object({}) },
+    requests: { work: text("work") },
+  }).createMachine({
+    initial: "working",
+    states: {
+      working: {
+        invoke: { src: "work", input: {}, onDone: { target: "done" } },
+        on: { CANCEL: { target: "cancelled" }, FINISH: { target: "done" } },
+      },
+      // Handles the abort, then waits on a host event that never comes.
+      cancelled: { on: { CONFIRM: { target: "done" } } },
+      done: { type: "final" },
+    },
+  });
+  const hanging: AgentRequestExecutors = { generateText: () => new Promise(() => {}) };
+
+  test("pre-aborted signal: the abort event goes before an init event that would finish the run", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const result = await runToQuiescence(
+      createAgentRuntime(machine, {
+        signal: controller.signal,
+        abortWith: { event: { type: "CANCEL" } },
+        executors: hanging,
+      }),
+      { event: { type: "FINISH" } },
+    );
+    expect(result.status).toBe("error");
+    expect(result.status === "error" ? result.cause : undefined).toBe("aborted");
+    const types = result.events.map((entry) => entry.event.type);
+    expect(types).toContain("CANCEL");
+    expect(types).not.toContain("FINISH");
+  });
+});

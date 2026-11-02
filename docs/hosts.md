@@ -380,8 +380,11 @@ const result = await runAgent(machine, {
 ```
 
 - **On abort.** `event` is sent into the run (`runtime.send`); the run continues until the machine settles.
-- **Already aborted.** `event` is the first event the loop hands out.
-- **Fallback.** `cause: "aborted"` as without `abortWith` when the state has no transition for `event`, the loop never applies it, or `timeout` ms pass while the machine is still active.
+- **Abort first.** Until the machine has applied `event`, the host's direct `transition` events are dropped, including `runAgent`'s own `event`. A signal already aborted at start therefore applies `event` before anything else.
+- **Fallback.** `cause: "aborted"` as without `abortWith` when:
+  - the state has no transition for `event`;
+  - the loop never applies it;
+  - `timeout` ms pass while the machine is still active and working.
 - **Journal.** The abort event is a log entry; replay reaches the same final state.
 
 ## Uncontrolled XState actor

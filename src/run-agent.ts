@@ -603,10 +603,13 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * Routes `signal`'s abort through the machine: when it fires, `event` is
    * sent into the run (see {@link AgentRuntime.send}) and the run continues
    * until the machine settles, so a `cancelled` final state, cleanup
-   * invokes, and its output run as usual. The run falls back to today's
-   * `{ status: 'error', cause: 'aborted' }` when the machine has no
-   * transition for `event`, when the loop never applies it, or when
-   * `timeout` milliseconds pass before the run finishes.
+   * invokes, and its output run as usual. Until the machine applies
+   * `event`, the host's direct `transition` events (such as
+   * `runToQuiescence`'s init `event`) are dropped, so the abort goes first.
+   * The run falls back to today's `{ status: 'error', cause: 'aborted' }`
+   * when the machine has no transition for `event`, when the loop never
+   * applies it, or when `timeout` milliseconds pass while it is still
+   * working.
    */
   abortWith?: { event: EventFromLogic<TMachine>; timeout?: number };
   /** Where root `after` timers live. Default `"in-process"`. See {@link AgentTimerScheduler}. */
@@ -3196,6 +3199,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     stopRun({ cause: "aborted", error: options.signal?.reason ?? new Error("Aborted") });
   // The abort event the machine has been sent but has not yet handled.
   let pendingAbort: EventObject | undefined;
+  // Events brought in through `send`, as opposed to a direct `transition`.
+  const sentEvents = new WeakSet<object>();
   let abortTimer: ReturnType<typeof setTimeout> | undefined;
   const onAbort = () => {
     const abortWith = options.abortWith;
@@ -3719,6 +3724,17 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       if (stopReason !== undefined) {
         return [state, []];
       }
+      // Once aborted, the abort event goes first: a host's direct event (the
+      // init event of `runToQuiescence`) is dropped until the machine has
+      // handled the abort, so it cannot finish the run past the abort.
+      if (
+        pendingAbort !== undefined &&
+        (event as unknown) !== pendingAbort &&
+        !fromMailbox.has(event as object) &&
+        !sentEvents.has(event as object)
+      ) {
+        return [state, []];
+      }
       event = toTimerInput(event as EventObject) as typeof event;
       // Host-supplied attempts are checked before the machine moves, so a
       // non-JSON value fails loudly without leaving a half-applied event.
@@ -3808,6 +3824,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       if (stopReason !== undefined || (current !== undefined && current.status !== "active")) {
         return false;
       }
+      sentEvents.add(event);
       enqueue(event as EventObject, true);
       return true;
     },
