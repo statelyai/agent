@@ -163,6 +163,24 @@ describe("runAgent inbox", () => {
     expect(result.status).toBe("done");
   });
 
+  test("an ignored onIdle answer stops the loop even if it was once an inbox event", async () => {
+    const inbox = createAgentInbox<EventOf<typeof steps>>();
+    const second = { type: "SECOND" } as const;
+    inbox.send(second); // ignored in `a`
+    let idles = 0;
+    const result = await runAgent(steps, {
+      inbox,
+      onIdle: async () => {
+        idles += 1;
+        if (idles > 3) throw new Error("retried an ignored answer");
+        return second; // ignored in `a` again, now as an answer
+      },
+    });
+    expect(idles).toBe(1);
+    expect(result.status).toBe("idle");
+    expect(result.ignored).toBe(second);
+  });
+
   test("an inbox serves one runAgent call", async () => {
     const inbox = createAgentInbox<EventOf<typeof steps>>();
     await runAgent(steps, { inbox });
