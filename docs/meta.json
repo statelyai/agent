@@ -6,6 +6,7 @@
     "quickstart",
     "thinking-in-state-machines",
     "from-a-loop",
+    "strangler-fig",
     "scope",
     "---Core concepts---",
     "machines",

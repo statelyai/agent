@@ -149,6 +149,20 @@ export type {
   AgentRunResult,
   AgentRunErrorCause,
 } from "./run-agent.js";
+export { wrapWorkflow } from "./wrap-workflow.js";
+export type {
+  EffectCallEvent,
+  EffectDoneEvent,
+  EffectErrorEvent,
+  WorkflowEffects,
+  WorkflowRunContext,
+  WrappedWorkflow,
+  WrappedWorkflowContext,
+  WrappedWorkflowEvent,
+  WrappedWorkflowMachine,
+  WrappedWorkflowRunOptions,
+  WrapWorkflowConfig,
+} from "./wrap-workflow.js";
 export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";
 export {

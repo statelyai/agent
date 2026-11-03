@@ -63,6 +63,22 @@ recorder.output(await runLoop({ ...scenario, model, tools }));
 writeFileSync(`fixtures/${scenario.id}.json`, JSON.stringify(recorder.recording));
 ```
 
+### Effects-object workflows: `checkParity`
+
+When every side effect goes through one `effects` object of async functions, `checkParity` (`@statelyai/agent/testing`) does the record, replay, and compare above in one call: it wraps each effect with `recorder.fn`, records `before`, replays `after` with no effect running, and returns one row per scenario (`equivalent`, `divergences`, `before`/`after` as `{ output }` or `{ error }`, `recording`).
+
+```ts
+const report = await checkParity({
+  scenarios, // { id, input }[]
+  effects: (scenario) => createFakeEffects(scenario),
+  before: (input, effects) => oldWorkflow(input, effects),
+  after: (input, effects) => step1.run(input, { effects }), // or a runAgent runner
+});
+expect(report.scenarios.filter((row) => !row.equivalent)).toEqual([]);
+```
+
+`wrapWorkflow(...).run(input, { recorder })` records a golden run from a normal run.
+
 ### Any other model client
 
 `recorder.client(name, sdk, { methods })` wraps the named async methods of an SDK object and keeps its type; `recorder.fn(name, asyncFn)` wraps a client that is a function. Record the hand-rolled loop with the wrapped client, then put the same wrapper inside the machine's executor for replay:

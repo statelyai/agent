@@ -125,3 +125,11 @@ export type {
   Recorder,
   Recording,
 } from "../equivalence.js";
+export { checkParity } from "../check-parity.js";
+export type {
+  CheckParityOptions,
+  CheckParityOutcome,
+  CheckParityReport,
+  CheckParityRow,
+  CheckParityScenario,
+} from "../check-parity.js";

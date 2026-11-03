@@ -336,9 +336,12 @@ const TRACE_ENVELOPE_KEYS = [
  * become `null`), non-finite numbers become `null`, `bigint`s become strings,
  * `Error`s become `{ name, message, stack?, code? }`, and anything with a
  * `toJSON()` (e.g. `Date`) is projected through it — the same losses a
- * `JSON.parse(JSON.stringify(...))` round-trip incurs, minus the throws.
+ * `JSON.parse(JSON.stringify(...))` round-trip incurs, minus the throws. @internal
  */
-function toJsonValue(value: unknown, ancestors: readonly object[]): JsonValue | undefined {
+export function toJsonValue(
+  value: unknown,
+  ancestors: readonly object[] = [],
+): JsonValue | undefined {
   if (value === null) {
     return null;
   }

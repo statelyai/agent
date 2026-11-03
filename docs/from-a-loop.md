@@ -37,6 +37,8 @@ const result = await runAgent(supportLoopMachine, {
 
 The `generateText` call still exists. It moves into the executors, and the loop around it becomes the machine. The result carries `result.output`, the live `result.snapshot`, native `result.persist()`, and aggregated `result.usage`.
 
+To move a workflow over one phase at a time instead, with the original running unchanged until each phase is carved, read [Strangler-fig retrofit](strangler-fig.md).
+
 For the design work behind this refactor, read [Thinking in state machines](thinking-in-state-machines.md). It covers how to find the states in a loop before you write any of them down.
 
 ## What stays the same, what changes
@@ -516,6 +518,7 @@ The full prompt and its allowed tools are in the [example's README](https://gith
 ## Related
 
 - [retrofit](https://github.com/statelyai/agent/blob/next/examples/retrofit/index.ts): a larger loop refactored one step at a time, in the order `before.ts`, `step1.ts`, `step2.ts`, `step3.ts`, and `index.ts`.
+- [Strangler-fig retrofit](strangler-fig.md): wrap the workflow unchanged with `wrapWorkflow`, then carve one phase at a time, checked with `checkParity`.
 - [Overview](index.md): what the machine gives you over the loop.
 - [Human in the loop](human-in-the-loop.md): idle states, `meta.interaction`, and resuming.
 - [Environment and policy](environment-and-policy.md): the fixed environment, the generated policy, the objective, and the improvement loop.

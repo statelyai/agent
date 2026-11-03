@@ -11,12 +11,21 @@ You replace the control flow of working agent code with a machine, and show wher
 inventory → pin the baseline → environment → (policy) → runner → proofs → parity → hand back
 ```
 
+## Default track: wrap first, carve per commit
+
+For an async workflow (not a hand-rolled loop you are asked to replace wholesale), start here, and use the sections below for each carved phase.
+
+1. **Step 0: wrap and record.** Move every side effect behind one `effects` object of async functions (the only edit to the old code). Then `wrapWorkflow({ id, effects, run: (input, effects) => old(input, effects) })` from `@statelyai/agent`. Pin the baseline with `checkParity` (`@statelyai/agent/testing`): `{ scenarios, effects: (s) => fakes, before: old, after: (input, fx) => step0.run(input, { effects: fx }) }`; every row `equivalent`. Ship it: inspection, traces, the event log, `signal`, a recorded baseline.
+2. **Carve one phase per commit.** One phase becomes states (§3); the rest stays the old helper, invoked as a `createAsyncLogic` actor built per run from `effects`. Keep the `(input, effects)` runner signature, and run `checkParity` against the old code after each carve. Add the §6 proofs for the carved phase only.
+
+A wrapped workflow is a black box: one state, no mid-function resume, no `canReach` about its inside. Do not report proofs before the phase is carved. Worked example: `examples/strangler-fig`. A class whose loop calls its own private model/tool methods: replace those methods on the instance inside `run` so they call `effects` (no edit to the class). Pin timestamps and generated ids with `checkParity`'s `normalizeOutput`. An actor resolving `null` reaches `onDone` as `undefined`: compare with `== null`.
+
 This is step 1 of 4. Next: `add-traces`, then `add-evals`, then `improve-machine`. To author a machine with no existing code, use `generate-machine`. Recording, replay, and the full parity test code are in [reference.md](reference.md).
 
 ## Hard rules
 
 - **Pin the baseline before you change anything.** The parity test runs against the old code, which stays in the repo, untouched, until a person deletes it. When the old code cannot run, the baseline is a written behavioral spec (see "No model in the loop").
-- **Never promise "behaves exactly like".** Promise what the parity evidence shows: equivalent effects on these scenarios, every difference labeled.
+- **Never promise "behaves exactly like".** Promise what the parity evidence shows, every difference labeled.
 - **Never copy a rule break.** Where the old code broke a rule, the machine blocks it. That difference is `intended`, not a regression.
 - **Rules are code, not prompt text.** A prompt-only rule becomes a guard; the prompt line stays only as context.
 - **Business rules belong to people.** Ambiguous rule (which threshold, which order)? Ask; never pick silently.
@@ -69,7 +78,7 @@ Read the loop and fill this table before writing anything. Each row maps to a ma
 
 Number the rules in your notes. Each ends as a guard, a state ordering, or a written reason it was dropped.
 
-A loop with no decision point (generate-validate-repair, a tool loop, a scheduler) is still worth converting: caps, rules, and failure paths become explicit and provable. Skip step 4 and the decision parts of step 5.
+A loop with no decision point is still worth converting: caps, rules, and failure paths become provable. Skip step 4 and the decision parts of step 5.
 
 ## 2. Pin the baseline
 
@@ -100,7 +109,7 @@ The environment is the machine: states, guards that encode the rules, side-effec
 - **A person's step** is an idle state whose `meta.interaction` tells a host what to render: `{ label, events: { APPROVE: { label: "Approve" }, REJECT: { label: "Reject" } } }`, or `textEvent: { type: "CUSTOMER_REPLIED", field: "reply" }` for free text.
 - **Actors are placeholders** in `setupAgent({ actors })`; pass the real ones with `runAgent(machine, { actors })`.
 - **Final outputs carry the result** (`{ outcome, orderId, amount }`); the runner rebuilds the old return type from it and the world.
-- **Declare `version`** in `createMachine({ id, version: "1", ... })` on every machine whose runs are recorded (environment, any policy). Bump it on every behavior change. The structural hash cannot see transition functions; traces stamp this string (`add-traces` §1).
+- **Declare `version`** in `createMachine({ id, version: "1", ... })` on every recorded machine; bump it on every behavior change. Traces stamp it (`add-traces` §1).
 
 ## 4. A policy, only if the code already has one
 
@@ -108,7 +117,7 @@ Keep the decision in the environment as one `agent.decide`, with no policy machi
 
 ## 5. The runner
 
-Write `runMachine` with the old function's signature and result type; callers and the parity test change one line.
+Write `runMachine` with the old function's signature and result type.
 
 - **The existing SDK call becomes the executor.** `generateText` (or `streamText`) in `executors`, as the old call: same model, system prompt, tools, options, retry code; return `{ result }`. Pass the conversation as `messages: ({ input }) => input.messages`.
 - **A streaming route keeps its response, not its signature.** `createAiSdkExecutors().streamText` forwards text chunks only, so wrap the old call: pipe its stream to the old consumer, then return `{ result: finalValue, messages: responseMessages }` so later requests can rebuild the assistant and tool history from `output.messages`.
@@ -149,7 +158,6 @@ Switch the candidate to `runMachine`; run per stand-in (or against the spec). Co
 - Every `intended` row: its reason is a real rule. A fixed rule break with the same outcome is `intended` too.
 - With recordings, replay each against the machine (`createRecorder({ replay })`, `compareRecordings`): no key, no side effects, every divergence in `INTENDED` with who accepted it, including a guard that blocks a rule break. Semantics in [reference.md](reference.md#replay-equivalence).
 - With no model in the loop, parity is the whole proof: the spec baseline plus §6. Say so.
-- A live-model run is one sample, not a guarantee.
 
 ## 8. Hand back
 
