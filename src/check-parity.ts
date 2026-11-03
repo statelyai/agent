@@ -11,6 +11,7 @@ import {
   type Recorder,
   type Recording,
 } from "./equivalence.js";
+import { mapEffects } from "./internal/effects.js";
 
 /** One scenario: an id and the workflow's input. Extra fields are yours. */
 export interface CheckParityScenario<TInput = unknown> {
@@ -30,7 +31,10 @@ export interface CheckParityOptions<
   scenarios: readonly TScenario[];
   /**
    * Fresh effects for one scenario: fakes, stubs, or real clients. `before`
-   * runs on them, recorded. `after` gets replay stand-ins and never runs them.
+   * runs on them for real, recorded, so a write effect writes once per
+   * scenario: point it at an isolated fixture, not production. `after` gets
+   * replay stand-ins and never runs them. A class instance's prototype
+   * methods count, bound to the instance.
    */
   effects: (scenario: TScenario) => TEffects;
   /** The original workflow. */
@@ -65,14 +69,7 @@ export interface CheckParityReport<TScenario extends CheckParityScenario, TOutpu
 
 /** Each function effect wrapped with `recorder.fn`, by its key. */
 function recordEffects<TEffects extends object>(recorder: Recorder, effects: TEffects): TEffects {
-  return Object.fromEntries(
-    Object.entries(effects).map(([name, effect]) => [
-      name,
-      typeof effect === "function"
-        ? recorder.fn(name, effect as (...args: unknown[]) => PromiseLike<unknown>)
-        : effect,
-    ]),
-  ) as TEffects;
+  return mapEffects(effects, (name, effect) => recorder.fn(name, effect));
 }
 
 async function settle<T>(run: () => PromiseLike<T>, recorder: Recorder) {

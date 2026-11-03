@@ -210,3 +210,86 @@ describe("wrapWorkflow", () => {
     expect(result).toMatchObject({ status: "error", cause: "machine", error: boom });
   });
 });
+
+describe("wrapWorkflow: effects objects and safety", () => {
+  class Store {
+    constructor(private readonly prefix: string) {}
+    async lookup(id: string) {
+      return `${this.prefix}${id}`;
+    }
+  }
+
+  test("a class instance's prototype methods are effects, bound to the instance", async () => {
+    const wrapped = wrapWorkflow({
+      id: "store",
+      effects: new Store("order-"),
+      run: async (id: string, effects) => effects.lookup(id),
+    });
+    const types: string[] = [];
+    const out = await wrapped.run("7", {
+      onTransition: (_s, event) => void types.push(event.type),
+    });
+    expect(out).toBe("order-7");
+    expect(types).toContain("effect.call");
+    const recorder = createRecorder();
+    await wrapped.run("8", { recorder });
+    expect(recorder.recording.effects.some((e) => e.kind === "call" && e.name === "lookup")).toBe(
+      true,
+    );
+  });
+
+  test("after an abort, effects throw instead of running", async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const wrapped = wrapWorkflow({
+      id: "retry",
+      effects: {
+        generate: async () => {
+          calls++;
+          if (calls === 1) controller.abort(new Error("stop"));
+          throw new Error("overloaded");
+        },
+      },
+      // Ignores its signal: retries until an effect stops it.
+      run: async (_input: null, effects) => {
+        for (let i = 0; i < 10; i++) {
+          try {
+            return await effects.generate();
+          } catch (error) {
+            if ((error as Error).message === "stop") throw error;
+          }
+        }
+        return "gave up";
+      },
+    });
+    await expect(wrapped.run(null, { signal: controller.signal })).rejects.toThrow("stop");
+    expect(calls).toBe(1);
+  });
+
+  test("redact maps what the journal sees, not what the workflow gets", async () => {
+    const seen: unknown[] = [];
+    const wrapped = wrapWorkflow({
+      id: "secret",
+      effects: { login: async (token: string) => ({ token, user: "ada" }) },
+      redact: (_name, part, value) =>
+        part === "args"
+          ? ["[redacted]"]
+          : part === "result"
+            ? { user: (value as { user: string }).user }
+            : value,
+      run: async (token: string, effects) => (await effects.login(token)).token,
+    });
+    const out = await wrapped.run("s3cret", {
+      onTransition: (_s, event) => void seen.push(event),
+    });
+    expect(out).toBe("s3cret");
+    const effectEvents = seen.filter((event) =>
+      String((event as { type: string }).type).startsWith("effect."),
+    );
+    expect(effectEvents).toHaveLength(2);
+    expect(JSON.stringify(effectEvents)).not.toContain("s3cret");
+    expect(seen).toContainEqual(
+      expect.objectContaining({ type: "effect.call", args: ["[redacted]"] }),
+    );
+  });
+});

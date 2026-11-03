@@ -75,7 +75,9 @@ Each effect call is two events, `effect.call` then `effect.done` or `effect.erro
 | `effect.error` | `name`, `call`, `error`  | `failures` goes up     |
 
 - `call` is the 0-based call number across the run; it pairs a call with its result.
-- Payloads are JSON-safe, so they land in the event log and traces as they are.
+- Payloads are JSON-safe, so they land in the event log and traces as they are. Pass `redact: (name, part, value) => …` to strip secrets and private records first; the workflow still gets the real values.
+- Once the run's `signal` aborts, an effect throws the abort reason instead of running, even in a workflow that ignores its signal.
+- `effects` can be a class instance: its prototype methods count, bound to it.
 - `onTransition`, `onTrace`, `onEvent`, and `inspect` see every effect call.
 
 ### Run options
@@ -218,6 +220,7 @@ Step 0 cannot give this proof: its one `running` state holds the whole function.
 - No resume in the middle of the function. A resumed run starts the workflow again.
 - `canReach` and `explorePaths` prove nothing about the wrapped function's inside.
 - Effect arguments and results are journaled JSON-safe. A value that is not JSON (a class instance, a stream) loses what JSON cannot hold.
+- `checkParity` runs `before` on the effects you give it for real. Give it fakes or an isolated fixture, never production writes.
 - `effects` are async functions only. A sync function or a client object goes behind an async function first.
 - Parity covers what goes through `effects` and the output. A change in a call made around `effects` is not seen.
 

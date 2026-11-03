@@ -11,6 +11,7 @@ import type { JsonValue } from "./event-log.js";
 import { runAgent, toJsonValue, type AgentRunOptions } from "./run-agent.js";
 import { setupAgent } from "./setup-agent.js";
 import type { StandardSchemaV1 } from "./types.js";
+import { mapEffects } from "./internal/effects.js";
 
 /** The effects a wrapped workflow calls: async functions, by name. */
 export type WorkflowEffects<TEffects> = {
@@ -37,6 +38,13 @@ export interface WrapWorkflowConfig<TInput, TOutput, TEffects extends WorkflowEf
    * traces, and to {@link Recorder} recordings.
    */
   run: (input: TInput, effects: TEffects, context: WorkflowRunContext) => PromiseLike<TOutput>;
+  /**
+   * Maps an effect's arguments, result, or error before it is journaled as an
+   * event. Return a redacted value for secrets and private records: every
+   * `effect.*` event reaches traces, the event log, and the inspector.
+   * Default: journal each value as is (JSON-safe).
+   */
+  redact?: (name: string, part: "args" | "result" | "error", value: unknown) => unknown;
 }
 
 /** An effect call, as the machine sees it. `call` pairs it with its result. */
@@ -123,48 +131,67 @@ function typeOnly<T>(): StandardSchemaV1<T> {
   };
 }
 
-type AnyEffect = (...args: unknown[]) => PromiseLike<unknown>;
+type Redact = NonNullable<WrapWorkflowConfig<unknown, unknown, never>["redact"]>;
 
-/** Wraps each effect so its call and settlement reach the machine as events. */
-function observeEffects<TEffects>(effects: TEffects, send: (event: object) => void): TEffects {
+/**
+ * Wraps each effect so its call and settlement reach the machine as events.
+ * Once `signal` aborts, an effect throws its reason instead of running, so a
+ * workflow that ignores its signal stops spending calls.
+ */
+function observeEffects<TEffects>(
+  effects: TEffects,
+  send: (event: object) => void,
+  signal: AbortSignal,
+  redact: Redact = (_name, _part, value) => value,
+): TEffects {
   let calls = 0;
-  return Object.fromEntries(
-    Object.entries(effects as Record<string, unknown>).map(([name, effect]) => {
-      if (typeof effect !== "function") return [name, effect];
-      const observed = async (...args: unknown[]) => {
-        const call = calls++;
-        send({ type: "effect.call", name, call, args: (toJsonValue(args) ?? []) as JsonValue[] });
-        try {
-          const result = await (effect as AnyEffect)(...args);
-          send({ type: "effect.done", name, call, result: toJsonValue(result) ?? null });
-          return result;
-        } catch (error) {
-          send({ type: "effect.error", name, call, error: toJsonValue(error) ?? null });
-          throw error;
-        }
-      };
-      return [name, observed];
-    }),
-  ) as TEffects;
+  return mapEffects(effects, (name, effect) => async (...args: unknown[]) => {
+    signal.throwIfAborted();
+    const call = calls++;
+    send({
+      type: "effect.call",
+      name,
+      call,
+      args: (toJsonValue(redact(name, "args", args)) ?? []) as JsonValue[],
+    });
+    try {
+      const result = await effect(...args);
+      send({
+        type: "effect.done",
+        name,
+        call,
+        result: toJsonValue(redact(name, "result", result)) ?? null,
+      });
+      return result;
+    } catch (error) {
+      send({
+        type: "effect.error",
+        name,
+        call,
+        error: toJsonValue(redact(name, "error", error)) ?? null,
+      });
+      throw error;
+    }
+  });
 }
 
 function workflowLogic<TInput, TOutput, TEffects>(
   run: (input: TInput, effects: TEffects, context: WorkflowRunContext) => PromiseLike<TOutput>,
   effects: TEffects,
   runSignal?: AbortSignal,
+  redact?: Redact,
 ) {
   return createAsyncLogic<TOutput, TInput>({
     run: async ({ input, self, signal }) => {
       // Sent to the invoking machine: under `runAgent` that lands in the
       // run's mailbox, so each one is a transition, a trace and a log entry.
       const parent = (self as unknown as { _parent?: { send(event: object): void } })._parent;
+      // The run's own signal first, so the workflow sees its reason.
+      const combined = runSignal ? AbortSignal.any([runSignal, signal]) : signal;
       return run(
         input,
-        observeEffects(effects, (event) => parent?.send(event)),
-        {
-          // The run's own signal first, so the workflow sees its reason.
-          signal: runSignal ? AbortSignal.any([runSignal, signal]) : signal,
-        },
+        observeEffects(effects, (event) => parent?.send(event), combined, redact),
+        { signal: combined },
       );
     },
   });
@@ -266,25 +293,24 @@ export function wrapWorkflow<TInput, TOutput, TEffects extends WorkflowEffects<T
   const machine = createWrappedMachine<TInput, TOutput>(
     config.id,
     config.version ?? "1",
-    workflowLogic(config.run, config.effects),
+    workflowLogic(config.run, config.effects, undefined, config.redact),
   );
   return {
     machine,
     async run(input, options = {}) {
       const { effects: overrides, recorder, ...runOptions } = options;
-      let effects = { ...config.effects, ...overrides } as TEffects;
+      // A class instance's prototype methods count, bound to the instance.
+      let effects = {
+        ...mapEffects(config.effects, (_name, effect) => effect),
+        ...(overrides ? mapEffects(overrides, (_name, effect) => effect) : {}),
+      } as TEffects;
       if (recorder) {
-        effects = Object.fromEntries(
-          Object.entries(effects as Record<string, unknown>).map(([name, effect]) => [
-            name,
-            typeof effect === "function" ? recorder.fn(name, effect as AnyEffect) : effect,
-          ]),
-        ) as TEffects;
+        effects = mapEffects(effects, (name, effect) => recorder.fn(name, effect));
       }
       const result = await runAgent(machine, {
         ...runOptions,
         input: input as never,
-        actors: { workflow: workflowLogic(config.run, effects, options.signal) },
+        actors: { workflow: workflowLogic(config.run, effects, options.signal, config.redact) },
       });
       if (result.status === "done") {
         const output = result.output as TOutput;
