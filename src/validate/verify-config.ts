@@ -118,8 +118,8 @@ const MAX_DETAIL_LINES = 10;
  * - `lower`: `setupAgent.fromConfig` (unresolved guards/actions, bad targets).
  * - `lint`: `lintAgentMachine` (errors fail; warnings fail with `lint.warnings`).
  * - `explore`: `explorePaths` from each `explore.inputs` entry; every terminal
- *   must be one of `explore.terminals`, no cap (`maxPaths`, `maxNodes`) may cut
- *   it short, every event's payloads must be tried (`unexpandedEvents`), and
+ *   must be one of `explore.terminals`, no cap (`maxPaths`, `maxNodes`) or
+ *   `budget` may cut it short, every event's payloads must be tried (`unexpandedEvents`), and
  *   every reached text request or invoke needs an `explore.outputs` entry.
  *
  * @example
@@ -459,6 +459,13 @@ async function checkExplore(
       problems.add(
         `${at}a cap (maxPaths ${options.maxPaths ?? 200} or maxNodes ${options.maxNodes ?? 100_000}) cut exploration short; the workflow branches too much to verify`,
       );
+    }
+    for (const note of report.unexplored) {
+      if (note.startsWith("budget-exhausted")) {
+        problems.add(
+          `${at}the explore budget ran out (${note}); exploration is incomplete, so raise explore.budget or narrow the workflow`,
+        );
+      }
     }
     if (report.unexpandedEvents.length > 0) {
       problems.add(

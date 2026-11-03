@@ -114,7 +114,7 @@ const result = await runToQuiescence(
 );
 ```
 
-For approval and progress around real tools, see [review-tool-calls](../examples/review-tool-calls/index.ts).
+For approval and progress around real tools, see [review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts).
 
 ## Execution flow through the host
 
@@ -167,10 +167,79 @@ Build these parts by hand only when the machine owns the loop, such as in a ReAc
 
 Eject from the preset when the tool loop needs machine states of its own:
 
-- To model approval as machine states, with approve, edit, and reject steps that persist and resume, eject to [examples/review-tool-calls](../examples/review-tool-calls/index.ts).
+- To approve or reject each of a turn's tool calls before it runs, use `createApprovalBatchMachine`. See [Approval gate](#approval-gate).
+- To model approval as machine states, with approve, edit, and reject steps that persist and resume, eject to [examples/review-tool-calls](https://github.com/statelyai/agent/blob/next/examples/review-tool-calls/index.ts).
 - To model each think, act, and observe turn as its own transition, use explicit request, tool, and observation states.
 
-> **Note:** There is no built-in MCP client and no built-in tool-approval gate. MCP discovery, auth, and transport are the host's responsibility. Pass the discovered tool descriptors into `tools` like any other tool. See [Scope](scope.md).
+> **Note:** There is no built-in MCP client. MCP discovery, auth, and transport are the host's responsibility. Pass the discovered tool descriptors into `tools` like any other tool. See [Scope](scope.md).
+
+## Approval gate
+
+`createApprovalBatchMachine` from `@statelyai/agent/machines` gates one model turn's tool calls: a policy allows, asks about, or denies each call, a person approves or rejects the asked ones, and only approved calls execute. See [Preset machines](machines-presets.md#createapprovalbatchmachine).
+
+### AI SDK `needsApproval`
+
+A tool with `needsApproval: true` comes back from `generateText` unexecuted, as a `tool-approval-request` content part. Run those calls through the batch, then answer each request in a `tool` message:
+
+- **Executed.** `tool-approval-response` with `approved: true`, plus the batch's `tool-result`. The SDK skips an approved call that already has a result, so it does not run twice.
+- **Rejected or cancelled.** `tool-approval-response` with `approved: false`. The SDK reports it to the model as denied.
+- **Failed.** `approved: true` plus an `error-text` tool result.
+
+```ts no-check
+import { generateText, type ModelMessage } from "ai";
+
+const first = await generateText({ model, tools, messages });
+const requests = first.content.filter((part) => part.type === "tool-approval-request");
+
+// 1. Map the unexecuted calls to the batch input.
+const calls = requests.map(({ toolCall }) => ({
+  id: toolCall.toolCallId,
+  name: toolCall.toolName,
+  args: toolCall.input,
+}));
+
+// 2. Run the batch; resume it with APPROVE / REJECT events until it is done.
+const batch = createApprovalBatchMachine({
+  policy,
+  execute: createAsyncLogic({
+    run: ({ input }) =>
+      tools[input.call.name].execute(input.call.args, { toolCallId: input.call.id, messages }),
+  }),
+});
+const done = await runBatchToDone(batch, { calls }); // host-specific: approval UI, persistence
+
+// 3. Feed the results back as one tool message, and continue.
+const toolMessage: ModelMessage = {
+  role: "tool",
+  content: done.output.results.flatMap((result, index) => {
+    const { approvalId, toolCall } = requests[index]!;
+    const approved = result.status === "executed" || result.status === "failed";
+    return [
+      { type: "tool-approval-response", approvalId, approved, reason: result.reason },
+      ...(approved
+        ? [
+            {
+              type: "tool-result",
+              toolCallId: toolCall.toolCallId,
+              toolName: toolCall.toolName,
+              output:
+                result.status === "executed"
+                  ? { type: "json", value: result.result }
+                  : { type: "error-text", value: result.error },
+            },
+          ]
+        : []),
+    ];
+  }),
+};
+await generateText({
+  model,
+  tools,
+  messages: [...messages, ...first.response.messages, toolMessage],
+});
+```
+
+`results` is in input order, so `results[index]` answers `requests[index]`. Persist `done.output.approveAlways` and have `policy` allow those tool names on later turns.
 
 ## Related
 

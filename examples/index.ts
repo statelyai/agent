@@ -35,6 +35,12 @@ export {
   supportLoopMachine,
   runSupportAgent as runPortWalkthroughExample,
 } from "./port-walkthrough/index.js";
+export { refundLoopMachine, runRetrofitParityExample } from "./retrofit-parity/index.js";
+// `supportMachine` is taken by retrofit above.
+export {
+  runStranglerFigExample,
+  supportMachine as stranglerFigMachine,
+} from "./strangler-fig/index.js";
 export {
   jsonAgentMachine,
   runJsonAgentDemo,

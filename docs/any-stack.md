@@ -50,10 +50,10 @@ A host that cannot block on a run, such as a Durable Object woken by alarms, dri
 
 ## Examples
 
-- Next.js: [next-host](../examples/next-host)
-- Cloudflare: [cloudflare-agent-host](../examples/cloudflare-agent-host), [cloudflare-workers-ai-host](../examples/cloudflare-workers-ai-host)
-- Mastra, LangChain: [mastra-host](../examples/mastra-host), [langchain-host](../examples/langchain-host)
-- AI SDK and AG-UI streaming: [ai-sdk-ui-stream](../examples/ai-sdk-ui-stream), [tanstack-ai-stream](../examples/tanstack-ai-stream)
+- Next.js: [next-host](https://github.com/statelyai/agent/blob/next/examples/next-host)
+- Cloudflare: [cloudflare-agent-host](https://github.com/statelyai/agent/blob/next/examples/cloudflare-agent-host), [cloudflare-workers-ai-host](https://github.com/statelyai/agent/blob/next/examples/cloudflare-workers-ai-host)
+- Mastra, LangChain: [mastra-host](https://github.com/statelyai/agent/blob/next/examples/mastra-host), [langchain-host](https://github.com/statelyai/agent/blob/next/examples/langchain-host)
+- AI SDK and AG-UI streaming: [ai-sdk-ui-stream](https://github.com/statelyai/agent/blob/next/examples/ai-sdk-ui-stream), [tanstack-ai-stream](https://github.com/statelyai/agent/blob/next/examples/tanstack-ai-stream)
 
 Use each framework's own storage, retry, queue, and interruption semantics.
 

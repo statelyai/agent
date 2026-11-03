@@ -91,7 +91,7 @@ const machine = emailDrafter.provide({
 });
 ```
 
-[examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts) drives a full run this way, with fixed values and no model call.
+[examples/email-drafter/agent-logic.ts](https://github.com/statelyai/agent/blob/next/examples/email-drafter/agent-logic.ts) drives a full run this way, with fixed values and no model call.
 
 Use deterministic executors when the test should exercise the real `runToQuiescence` path with canned model output. Use [`simulateAgent`](#scripted-playthroughs) when a model-free transition playthrough is enough.
 
@@ -171,14 +171,15 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 
 ## Branch exploration
 
-`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, outputs?, errors?, payloads?, dedupeBy? })` enumerates decision and external-event branches without a model, and reports coverage.
+`explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, budget?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
 - A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor.<id>' }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
 - At an idle wait, it forks one branch per externally accepted event.
 - `outputs` is a map of output lists, keyed by src: a text request's src or any other invoked actor's src. A one-element list is a canned output, reused every time that src is reached. A text request resolves with it as its `result`. A longer list forks one branch per output. See [Payloads and invoke outputs](#payloads-and-invoke-outputs).
 - A src with no `outputs` entry halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
-- `errors` is a map of one canned failure per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates. The failure and the candidates are sibling branches: each spends one level of `maxDepth`.
+- `errors` is a map of canned failures per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates. The failure and the candidates are sibling branches: each spends one level of `maxDepth`.
+- An `errors` array forks one failing branch per element, each recording `{ type: 'xstate.error.actor.<id>', error }`. `[]` is no entry. Any other value is one failure, recorded without `error`. Wrap a single array-valued failure: `[[...]]`.
 - A rejection that reaches no `onError` errors the machine, and that path ends in an `error` terminal carrying the failure value on `error`.
 - Every invoke a state is still waiting on counts as work, concurrent ones included. They are settled one per branch, in invoke-id order, and a src in `errors` forks per invoke.
 
@@ -194,13 +195,13 @@ const report = await explorePaths(refundMachine, {
 // report.reachedStates → ['deciding', 'awaitingHuman', 'refunded', 'denied']
 ```
 
-Exploration is bounded by three limits:
+Exploration is bounded by three limits per search, plus a [budget](#budgets) for the whole call:
 
 - `maxDepth`: branch points along any path. Default 8.
 - `maxPaths`: terminals in the report. Default 200.
 - `maxNodes`: branch points expanded in total. Default 100,000. It bounds work and memory on a loopy machine, which expands many nodes per terminal.
 
-`report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short, so the report is partial.
+`report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short. `report.partial` is true when any cap or the budget did, and `report.complete` is true only when the report covers every path.
 
 A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor.<id>', output }`.
 
@@ -240,6 +241,116 @@ const violation = await canReach(refundMachine, "illegallyIssued", {
 
 Pick boundary values for numeric payloads: each guard threshold on both sides. Values between two boundaries take the same branch as one of them.
 
+`report.vacuous` lists event types offered only as the bare `{ type }` at a snapshot where a transition for them may read the payload: no `payloads` entry, no decision option, and no schema variant beyond `{ type }`.
+
+- Covers a type with no schema, or a schema the fill cannot enumerate (a required free-form field, a product over 64, an object of only optional free-form fields).
+- Not listed: a partial fill with real variants, such as finite fields plus an optional free-form one. That type is only in `unexpandedEvents`.
+- Always a subset of `unexpandedEvents`. Data only: completeness is unchanged.
+
+### Interleaved events
+
+By default, external events fork only at idle waits. A host event that arrives while an invoke is still running is never explored. `interleave: "pending"` explores it.
+
+| `interleave`       | External events fork at                                                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"idle"` (default) | Idle waits.                                                                                                                                                                 |
+| `"pending"`        | Idle waits, plus every point an invoke is outstanding: before a text or scripted invoke resolves, at an output or error fork, at a `needs-output` block, and at a decision. |
+
+- Each event the active states (or ancestors) accept forks once per payload variant, the same variants as an idle wait. A decision races only the events it does not offer as candidates.
+- Each race branch spends one level of `maxDepth`. Resolving a single canned output does not.
+- `payloads`, `dedupeBy`, and guard pruning apply as at idle waits.
+- A state that accepts no external event resolves straight through, as before.
+
+```ts no-check
+const report = await explorePaths(lookupMachine, {
+  outputs: { lookup: [{ found: true }] },
+  interleave: "pending",
+});
+// report.terminals → 'found' (no race), and 'cancelled' via [{ type: 'CANCEL' }]
+```
+
+### Child machines
+
+By default, a child machine is a src like any other: with no `outputs` entry, its branch ends `needs-output`. `children: "explore"` explores the child instead. It covers invoked children and children spawned with `enq.spawn(actors.x, { id, input })`.
+
+- Applies when the src has no `outputs` or `errors` entry and its logic is a state machine.
+- The child is explored on its own, from its invoke or spawn input, with the same options and caps, to at most 4 nested levels.
+- Events reach the child only as `childEvents` lists them: `{ [src]: eventTypes }`, the types the parent forwards (`sendTo`/`forwardTo`) or the host sends the child. Default none. A child wait that accepts an unlisted type makes the child search incomplete, never a reachable parent path.
+- Each distinct `output` of the child's `done` terminals forks the parent as an output. One output resolves straight through.
+- Each distinct failure of the child's `error` terminals forks a failing branch, recorded with `error`.
+- Each distinct event the child sends its parent (`sendTo(parent, …)`) on any explored path forks the parent receiving it, recorded as the event itself.
+- A child that can end `idle` adds an `idle` terminal to the parent: the parent can wait there forever.
+- Bounded:
+  - Child idle waits are not parent fork points. The child is explored to its finals, and its distinct outputs fork the parent.
+  - N children are explored independently, not as a product of their states. While an explored child is pending, it and every other pending invoke or text request settle in any order; one with no `outputs` entry adds a `needs-output` terminal, and a pending decision's choices branch from the same point. Other combinations are not enumerated beyond `interleave`.
+  - A child's events and outputs are not correlated: each event reaches the parent at most once per path, in any order, before or without the others, and before any of the child's outputs. This over-approximates the child, so a witness may not be a live path. A child that sends the same event twice is covered once. For witnesses that are live runs, use `children: "coupled"`.
+- An incomplete child search, such as one with its own `needs-output` or `max-depth`, also ends the parent branch `needs-output` for that src, so the parent report is not complete. The child's `unexpandedEvents` and `vacuous` join the parent's.
+
+```ts no-check
+const report = await explorePaths(parentMachine, {
+  children: "explore",
+  childEvents: { approval: ["YES", "NO"] }, // the parent forwards both
+});
+// report.terminals → one branch per distinct child output, e.g.
+// [{ type: 'xstate.done.actor.approval', output: { ok: true } }]
+```
+
+### Coupled child machines
+
+`children: "coupled"` steps each child machine inside the parent's search, one move at a time. A witness is then a run the parent and its children can make together. Use it for child machines you wrote, such as one machine per tool call in a batch.
+
+- The same children qualify as for `"explore"`: invoked or spawned state machines with no `outputs` or `errors` entry.
+- A child's events reach the parent in the order the child sends them on its own path. Its output follows them.
+- An event the parent sends a child with `sendTo`/`forwardTo` is applied to that child's state at once, in order. It does not need a `childEvents` entry.
+- `childEvents` lists only the types the host sends the child directly. Default none.
+- A child's pending work races the events that can reach it, as with `interleave: "pending"`.
+- The parent's host events arrive at its idle waits, including while every child waits on the host. While a child or the parent has work pending, they race it only with `interleave: "pending"`.
+- What a child's move sends its own children, and their replies, happen in the same move. A child's send to a sibling is delivered to that sibling, entry sends included. A child's sends reach their targets in the order it made them, each run to quiescence before the next, as a live run does. A send to an actor the search does not model lists the event type in `unexpandedEvents`, so the report is not complete.
+- Child moves count against `maxDepth` like the parent's own branches. On a path they carry `actor` with the child's id (a grandchild's as `child.grandchild`): the host events it received, its choices, its settled work. The events it sends the parent appear as the parent receives them.
+- With `dedupeBy`, each child's state joins the key. Without it, every interleaving is explored in full.
+- A child that stops on `needs-output` or `max-depth` ends the parent branch the same way, so the parent report is not complete.
+
+Pass `hostEvents` when some types the parent accepts come only from its children, such as a child's status events. The search then offers only the listed types at the parent's waits.
+
+```ts no-check
+const result = await canReach(batchMachine, executedWhileAwaiting, {
+  input: { calls: [read, write] },
+  children: "coupled",
+  childEvents: { call: [] }, // every event a call receives comes through the batch
+  hostEvents: ["APPROVE", "REJECT", "CANCEL_ALL"], // CALL_READY comes only from calls
+  outputs: { policy: ["allow", "ask"], execute: ["ok"] },
+  dedupeBy: (snapshot) => JSON.stringify([snapshot.value, snapshot.context]),
+});
+// → { reachable: false, complete: true }: no call runs while another awaits a person
+```
+
+`"explore"` stays the over-approximation: it sends a child's events in any order and does not correlate them with its outputs. A witness there may not be a live run. Prefer it only when you do not want the proof to depend on the child's own logic.
+
+### Budgets
+
+`maxPaths` and `maxNodes` apply to each search on its own. With `children: "explore"`, every explored child is a search of its own with the same caps, so a parent with two loopy children can expand far more than `maxNodes`. `budget` bounds the whole call.
+
+- `budget.nodes`: branch points expanded in total, by the top-level search and every child search it triggers. A cached child outcome counts once, when it is computed. Default 250,000, so a search with loopy children stops instead of growing without bound. Raise it explicitly for a bigger machine.
+- `budget.ms`: wall-clock milliseconds from the start of the call. It is checked at each branch point, in child searches too. A slow `payloads` or guard call is not interrupted. No default.
+- `budget.childCache`: explored-child outcomes kept for reuse, keyed by logic, src, and input. The least recently used one is evicted first. An evicted child is explored again when reached, and counts against `budget.nodes` again. Default 64.
+
+When a budget runs out, the search stops and returns what it has:
+
+- `report.partial` is true and `report.complete` is false.
+- `report.unexplored` has one note, `budget-exhausted: nodes` or `budget-exhausted: ms`, with the nodes expanded and the milliseconds spent so far.
+- `canReach` returns `reachable: true` with its witness if it found one first. Otherwise it returns `{ reachable: false, complete: false }`, which proves nothing: the target may be reachable on a branch the search did not reach.
+
+```ts no-check
+const report = await explorePaths(parentMachine, {
+  children: "explore",
+  budget: { nodes: 50_000, ms: 10_000 },
+});
+// report.partial → true when the budget ran out
+// report.unexplored → [..., 'budget-exhausted: nodes (50000 nodes expanded in 812 ms, child searches included)']
+```
+
+Set `budget.ms` under the test runner's timeout, so a long search fails its assertion instead of the worker.
+
 ## Reachability checks
 
 <!-- canReach contract from src/verify.ts -->
@@ -247,11 +358,13 @@ Pick boundary values for numeric payloads: each guard threshold on both sides. V
 `canReach(machine, target, opts)` wraps `explorePaths` to answer whether a state
 path or state-node ID is reachable, with a witness path when it is.
 
+A state the machine only passes through within one step counts as reached: one left at once by an `always` transition, or a `choice` state. `canReach` returns the path that transits it, and `explorePaths` lists it in `reachedStates`.
+
 `reachable: false` proves unreachability only when `complete` is true. `complete` is false when the search left a branch it could not rule out:
 
-- `maxPaths` or `maxNodes` cut the search short.
+- `maxPaths`, `maxNodes`, or the `budget` cut the search short.
 - A path reached `maxDepth`.
-- A branch stopped on a `needs-output` terminal, with no `outputs` entry for its src.
+- A branch stopped on a `needs-output` terminal, with no `outputs` entry for its src, or an explored child machine whose own search was incomplete.
 - An event type was not expanded to all its payload variants, as `explorePaths` lists in `unexpandedEvents`.
 
 Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.
@@ -299,4 +412,4 @@ For machines authored as data, validate the config with `validateAgentConfig(con
 - [Quickstart](quickstart.md#define-and-run-one-artifact): a plain-function executor for `runToQuiescence`.
 - [Machines as data](machines-as-data.md): verifying a machine lowered from a config.
 - [Migrating from a hand-rolled loop](from-a-loop.md): pinning behavior across a refactor.
-- [examples/verification](../examples/verification/index.ts): every API on this page run over one refund-approval machine, with no API key, including `canReach` proving that an over-limit payout without human approval is unreachable.
+- [examples/verification](https://github.com/statelyai/agent/blob/next/examples/verification/index.ts): every API on this page run over one refund-approval machine, with no API key, including `canReach` proving that an over-limit payout without human approval is unreachable.

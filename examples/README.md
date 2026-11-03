@@ -13,6 +13,8 @@ they happen to call.
 - [plain-xstate](plain-xstate): an ordinary XState machine that knows nothing about the agent library
 - [port-walkthrough](port-walkthrough): the `generateText` loop from [Migrating from a hand-rolled loop](../docs/from-a-loop.md), ported with the same result type and ending on its tests
 - [retrofit](retrofit): the same agent as a `while(true)` loop and as a machine, refactored step by step, ending with Jev triage
+- [retrofit-parity](retrofit-parity): a `generateText` loop with two tools and one approval, recorded with `createRecorder`, replayed against its machine port with `compareRecordings`, and compared with `compareRuns` and one reviewed difference
+- [strangler-fig](strangler-fig): an async workflow wrapped unchanged with `wrapWorkflow`, then its classify retry carved into states, with `checkParity` against the original at each step and a `canReach` proof the wrap could not give
 - [json-agent](json-agent): the whole workflow authored as a `.json` file and lowered to the same machine
 - [triage](triage): Jev classifies category and sentiment and escalates when unsure, with one retry when the draft fails
 

@@ -7,6 +7,7 @@ import {
   gameMachine,
   runRpsExample,
   jokeMachine,
+  stranglerFigMachine,
   tellJoke as tellJokeLogic,
 } from "../examples/index.js";
 import { createEvaluatePrompt, writeFollowUps } from "../examples/email-drafter/agent-logic.js";
@@ -14,7 +15,7 @@ import { createRateJoke } from "../examples/joke/index.js";
 // The examples' repo-internal judge double: an AI SDK evaluation model with
 // scripted answers keyed by question id.
 import { createMockJudge } from "../examples/mock-judge.js";
-import { createAgentRuntime, runToQuiescence, type AgentTextRequest } from "./index.js";
+import { createAgentRuntime, runAgent, runToQuiescence, type AgentTextRequest } from "./index.js";
 // The step envelope (getAgentRequests/resolveAgentStep/transitionAgentStep) is
 // internal now — imported straight from ./steps.js (it backs verify.ts and these
 // example checks); resolveDecision remains on the public /steps subpath.
@@ -283,5 +284,12 @@ describe("curated XState setup examples", () => {
     expect(decisions).toBe(1);
     expect(result.status).toBe("done");
     expect(result.status === "done" && result.output.joke).toBe("joke 3 about state machines");
+  });
+
+  test("strangler-fig machine runs on its default fake effects", async () => {
+    const result = await runAgent(stranglerFigMachine, {
+      input: { id: "T-1", message: "Mug A-100 arrived chipped, refund $20." },
+    });
+    expect(result.status === "done" && result.output).toMatchObject({ outcome: "refunded" });
   });
 });

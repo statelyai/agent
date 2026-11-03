@@ -15,6 +15,7 @@ export { createAgentSchemas, getAgentSchemas, setupAgent } from "./setup-agent.j
 export type {
   AgentDefaultMeta,
   AgentSchemaPack,
+  SetupAgentResult,
   // Both appear in `setupAgent`'s inferred result type (its event schemas
   // always carry the reserved `'@agent.usage'` entry), so consumers' declaration
   // emit needs them nameable.
@@ -60,6 +61,7 @@ export type {
 } from "./interaction.js";
 export type {
   AgentRequestOptions,
+  EventFromSnapshot,
   // Named return type of `getAgentSchemas`, so declaration emit can name it.
   AgentSchemas,
   AgentEventDescriptor,
@@ -77,7 +79,10 @@ export {
 } from "./text-logic.js";
 export type {
   AgentFinishReason,
+  AgentModelMap,
   AgentModelRef,
+  AgentRequestMode,
+  BuiltinAgentActors,
   AgentOutputMode,
   ProviderStructuredOutput,
   AgentExecutorTextRequest,
@@ -97,7 +102,9 @@ export type {
 export type { AgentRequest, AgentStepRequest } from "./steps.js";
 export { AGENT_USAGE_EVENT_TYPE } from "./usage.js";
 export { describeMachine } from "./describe-machine.js";
+export type { DescribeMachineOptions } from "./describe-machine.js";
 export { decideNext } from "./decide-next.js";
+export type { DecideNextOptions, DecideNextResult } from "./decide-next.js";
 export { createPolicyDecider } from "./policy-decider.js";
 export type { PolicyDeciderOptions } from "./policy-decider.js";
 export type { AgentUsageEvent } from "./usage.js";
@@ -112,6 +119,7 @@ export {
   AGENT_TRACE_SCHEMA_VERSION,
   AgentMaxModelCallsExceededError,
   AgentSnapshotDivergedError,
+  createAgentInbox,
   createAgentRuntime,
   inspectTransitions,
   isAgentIdle,
@@ -122,6 +130,7 @@ export {
 } from "./run-agent.js";
 export type {
   AgentEffects,
+  AgentInbox,
   AgentRunInit,
   AgentRunOptions,
   AgentRunStart,
@@ -140,6 +149,20 @@ export type {
   AgentRunResult,
   AgentRunErrorCause,
 } from "./run-agent.js";
+export { wrapWorkflow } from "./wrap-workflow.js";
+export type {
+  EffectCallEvent,
+  EffectDoneEvent,
+  EffectErrorEvent,
+  WorkflowEffects,
+  WorkflowRunContext,
+  WrappedWorkflow,
+  WrappedWorkflowContext,
+  WrappedWorkflowEvent,
+  WrappedWorkflowMachine,
+  WrappedWorkflowRunOptions,
+  WrapWorkflowConfig,
+} from "./wrap-workflow.js";
 export { provideExecutors } from "./provide-executors.js";
 export type { ProvideExecutorsOptions } from "./provide-executors.js";
 export {
@@ -155,6 +178,7 @@ export {
   toolMessage,
   userMessage,
 } from "./utils.js";
+export type { MetaOfSnapshot } from "./utils.js";
 export type {
   AgentWorkflowActionConfig,
   AgentWorkflowActorConfig,
@@ -167,26 +191,39 @@ export type {
   FromConfigResult,
   SchemaCompiler,
 } from "./workflow-config.js";
+// Every type below can appear in the inferred type of a machine, runtime, or
+// run result, so consumers' declaration emit (`declaration`/`composite`) must
+// be able to name it through this entry instead of an internal dist chunk.
 export type {
+  AgentEventSchemaInput,
+  AgentEventSchemaInputMap,
   AgentMessage,
   AgentTool,
   AgentToolChoice,
   AgentToolDescriptor,
   AgentToolExecute,
   AgentTools,
+  AgentToolSchema,
+  AllowedEventPattern,
   AllowedEvents,
   AssistantMessage,
   ChosenEvent,
+  DataContent,
+  EventPayload,
+  EventUnion,
   FilePart,
   ImagePart,
   InferInput,
   InferOutput,
   NormalizedEventSchemas,
+  ProviderOptions,
   StandardSchemaV1,
   SystemMessage,
   TextPart,
   ToolCallPart,
   ToolMessage,
+  ToolResultOutput,
   ToolResultPart,
   UserMessage,
+  WithAgentInputSchema,
 } from "./types.js";

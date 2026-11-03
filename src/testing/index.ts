@@ -35,6 +35,7 @@ export { matchesTrajectory } from "../trajectory.js";
 export type {
   MatchTrajectoryOptions,
   TrajectoryEvent,
+  TrajectoryEventEnvelope,
   TrajectoryItem,
   TrajectoryMatch,
   TrajectoryMiss,
@@ -61,6 +62,15 @@ export type {
 export { firstDivergence } from "../first-divergence.js";
 export type { Divergence, FirstDivergenceOptions, TraceStep } from "../first-divergence.js";
 export type { FoldTracesOptions, StateStats } from "../fold-traces.js";
+export { proposeApprovalRules, proposeCaps } from "../propose-from-traces.js";
+export type {
+  ApprovalRuleProposal,
+  ApprovalVerdict,
+  CapProposal,
+  CapSpec,
+  ProposeApprovalRulesOptions,
+  ProposeCapsOptions,
+} from "../propose-from-traces.js";
 export { getDecisionRequests } from "../decision-requests.js";
 export type { GetDecisionRequestsOptions, TracedDecisionRequest } from "../decision-requests.js";
 export { repeatRuns, summarizeRepeats } from "../repeat-runs.js";
@@ -105,6 +115,9 @@ export type {
   RecordableLanguageModel,
   RecordableModel,
   RecordedEffect,
+  RecordCallOptions,
+  RecordClientOptions,
+  RecordedCall,
   RecordedError,
   RecordedModelCall,
   RecordedOutput,
@@ -112,3 +125,11 @@ export type {
   Recorder,
   Recording,
 } from "../equivalence.js";
+export { checkParity } from "../check-parity.js";
+export type {
+  CheckParityOptions,
+  CheckParityOutcome,
+  CheckParityReport,
+  CheckParityRow,
+  CheckParityScenario,
+} from "../check-parity.js";

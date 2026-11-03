@@ -2,6 +2,32 @@
 
 Use XState inspection for actor/runtime behavior and Agent traces for model-request behavior.
 
+## Inspect a run
+
+The package does not ship a visualizer. A run streams XState's inspection events through the `inspect` option, and the Stately inspector renders them live: the machine diagram, the active state, and every event.
+
+```sh
+pnpm add -D @statelyai/sdk
+```
+
+```ts no-check
+import { createInspector } from "@statelyai/sdk/inspect";
+
+const inspector = createInspector({ name: "Refund agent" });
+console.log("Open", inspector.inspectorUrl);
+
+try {
+  const result = await runAgent(machine, { input, executors, inspect: inspector.inspect });
+} finally {
+  inspector.destroy(); // also when runAgent throws, so the connection closes
+}
+```
+
+- `inspector.inspect` is an XState `inspect` callback, so it is passed as is. `createAgentRuntime` takes the same option.
+- `createInspector` connects to the hosted relay (`wss://sky.stately.ai`) unless `url` or `STATELY_INSPECT_URL` names another one.
+- Create one inspector per run. Session ids are unique only within one actor system, so a reused inspector collides actor ids across runs.
+- [examples/tanstack-ai-stream/inspect.ts](https://github.com/statelyai/agent/blob/next/examples/tanstack-ai-stream/inspect.ts) and [examples/next-host/agent-runtime.ts](https://github.com/statelyai/agent/blob/next/examples/next-host/agent-runtime.ts) wire it behind `STATELY_INSPECT=1`.
+
 ## Trace one run
 
 ```ts no-check

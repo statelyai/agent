@@ -276,6 +276,62 @@ expect(report.ok).toBe(true); // no regressions
 - Put every write the world records in `effects`, not only the main one. A refund issued without its approval looks the same as a correct one if `effects` holds only the refunds.
 - A run that throws is recorded with outcome `'threw'` and its message as `detail`.
 - Parity holds for these scenarios and these runs. With a live model, run it more than once, or drive both sides with the same deterministic stand-in model.
+- A scenario object reserves two fields: `id: string`, which names its row, and an optional `expected: string`, the outcome people know is right. Keep your own fields under other names. A field called `expected` that holds something else (an expected amount, an expected reply) changes how rows are labeled.
+
+The run each side returns, and each row of `report.scenarios`:
+
+```ts no-check
+interface ParityRun {
+  outcome: string; // a final state name or the loop's return label; 'threw' when the run threw
+  effects?: unknown; // what the run changed in the world, compared structurally
+  violations?: readonly unknown[]; // rules broken, from ground truth
+  detail?: unknown; // kept in the report, not compared
+}
+
+interface ParityResult<TScenario> {
+  id: string;
+  scenario: TScenario;
+  label: "same" | "intended" | "regression";
+  reason: string; // empty for 'same'
+  baseline: ParityRun;
+  candidate: ParityRun;
+}
+```
+
+[examples/retrofit-parity](https://github.com/statelyai/agent/tree/next/examples/retrofit-parity) ports a loop with recorded golden runs and asserts its one reviewed difference.
+
+### Any model client
+
+`createRecorder` (from `@statelyai/agent/testing`) records a run's effects so a port can replay them with no network. `recorder.model` wraps an AI SDK model and `recorder.openai` an `openai` client. Any other client (`@anthropic-ai/sdk`, `@google/genai`, a framework's own model client) goes through `recorder.client`, which wraps the async methods you name and keeps the client's type.
+
+```ts
+import Anthropic from "@anthropic-ai/sdk";
+import { compareRecordings, createRecorder } from "@statelyai/agent/testing";
+
+declare function originalLoop(client: Anthropic): Promise<string>;
+declare function runPort(client: Anthropic): Promise<string>;
+
+const methods = ["messages.create"];
+
+// Record the original against the real client.
+const recorder = createRecorder();
+recorder.output(await originalLoop(recorder.client("anthropic", new Anthropic(), { methods })));
+
+// Replay the port: the client is never called.
+const replay = createRecorder({ replay: recorder.recording });
+const stand = new Anthropic({ apiKey: "replay" });
+replay.output(await runPort(replay.client("anthropic", stand, { methods })));
+
+compareRecordings(recorder.recording, replay.recording); // { equivalent: true, divergences: [] }
+```
+
+- Each call is a `call` effect named `<name>.<method>`, such as `anthropic.messages.create`, with its arguments and its result or error.
+- `recorder.fn(name, asyncFn, options?)` wraps one async function the same way, for a client that is a function.
+- Replay answers each call with the next unused recorded call of the same name, in order, whatever its arguments. A call past the recorded ones throws `RecordingDivergenceError`.
+- `compareRecordings` compares arguments as recorded and reports `call-args`. A port whose prompts differ on purpose passes `redact: (args) => …` to record only what must match, such as the model and the offered tool names. `redact` also keeps secrets out of the recording.
+- A result that resolves to an async iterable (a stream) records its chunks; replay returns an async iterable of them.
+- `serialize` maps a result that is not JSON, or each chunk of a stream. `revive` builds the replayed value from the recorded result or chunks, such as a stream object with helper methods.
+- In replay the client is never called. A missing object on a method's path is stood in for, so `{} as Anthropic` also works.
 
 ## Suite coverage
 
@@ -332,6 +388,39 @@ const stats = foldTraces(traces, {
 - An empty reference is a trace with no steps, so the run's first step diverges from it.
 - Returns `undefined` when the run does not diverge.
 - In `foldTraces`, `blame` is called for failed runs only. `undefined` blames no state.
+
+## Proposals from traces
+
+`proposeApprovalRules` and `proposeCaps` (from `@statelyai/agent/testing`) read many runs' traces and propose changes for a machine with no decision point: which approvals a rule could answer, and what each cap should be. They are proposals for a person. Nothing promotes them or edits the machine.
+
+```ts no-check
+import { proposeApprovalRules, proposeCaps } from "@statelyai/agent/testing";
+
+const rules = proposeApprovalRules(traces, {
+  approvalState: "awaitingApproval",
+  approveEvents: ["APPROVE"],
+  rejectEvents: ["REJECT"],
+  key: ({ snapshot }) => {
+    const { tool, path } = snapshot.context.pending;
+    return `${tool}:${path.startsWith("src/") ? "src/**" : path}`;
+  },
+  violations: (trace) => brokenRuleKeys(trace), // optional, from ground truth
+});
+// [{ key: "write:src/**", approved: 3, rejected: 0, violations: 0, runs: [0, 1, 2], proposal: "allow", support: 3 }, ...]
+
+const caps = proposeCaps(traces, {
+  caps: [{ name: "retries", current: 3, failureState: "gaveUp", valueFromRun: countRetries }],
+});
+// [{ name: "retries", hits: 2, passing: 2, max: 3, p95: 1, proposal: 3 }]
+```
+
+- Both take what `foldTraces` takes: one trace per run, live or serialized.
+- A verdict is a `machine.transition` out of `approvalState` (or a state inside it) on an approve or reject event. Ignored events are not verdicts. `key` sees the event and the snapshot it arrived in, so it can read the pending call from `snapshot.context`. Returning `undefined` skips the verdict.
+- `proposal` is `"allow"` when a key was approved and never rejected, with no violation; `"deny"` when it was rejected and never approved; otherwise `null`. A single rejection or violation blocks `"allow"`.
+- `support` is the number of runs with a verdict for the key, and `runs` lists their indexes. Weigh a proposal by its support.
+- A run hits a cap when it enters `failureState` or its `run.end` output satisfies `failureOutput`. `valueFromRun` says how much of the cap a run used; `undefined` leaves the run out.
+- `max` is over all runs; `p95` is the nearest-rank 95th percentile over runs that did not hit the cap.
+- `proposal` is `p95 + 1`. While any run hits the cap, it is never below `current`, so a cap runs still hit is never tightened. A cap no run hit can be lowered. With no passing run, `proposal` is `null`.
 
 ## Repeated runs
 

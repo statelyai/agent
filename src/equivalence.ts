@@ -21,7 +21,11 @@
  * the calls the original never made, and `compareRecordings(…, { kinds })`
  * compares only tool calls and output.
  *
- * Provider-free: both seams are wrapped structurally, so this module imports
+ * Any other client (`@anthropic-ai/sdk`, `@google/genai`, a framework's own
+ * model client) records through `recorder.client` or `recorder.fn`: each call
+ * is a `call` effect, answered in replay by name and order.
+ *
+ * Provider-free: every seam is wrapped structurally, so this module imports
  * neither `ai` nor `openai`.
  * @module
  */
@@ -80,13 +84,57 @@ export interface RecordedToolCall {
   unrecorded?: true;
 }
 
+/**
+ * One call to a function wrapped with `recorder.fn` or `recorder.client`.
+ * `call` is its 0-based position among calls with the same `name`.
+ */
+export interface RecordedCall {
+  kind: "call";
+  /** The `fn` name, or the client name and method path: `anthropic.messages.create`. */
+  name: string;
+  call: number;
+  /** The arguments, JSON-safe (trailing `undefined` dropped), or what `redact` returned. */
+  args: unknown;
+  /** The resolved value, JSON-safe, or what `serialize` returned. */
+  result?: unknown;
+  /** The chunks of a resolved async iterable, in order. */
+  stream?: unknown[];
+  error?: RecordedError;
+}
+
+/** Options for `recorder.fn` and `recorder.client`. */
+export interface RecordCallOptions {
+  /**
+   * What to record of the arguments, instead of all of them: drop a secret,
+   * or keep only the fields that must match in {@link compareRecordings}.
+   */
+  redact?: (args: unknown[]) => unknown;
+  /**
+   * What to record of a result that is not JSON (a class instance, a
+   * `Response`). For an async iterable it maps each chunk.
+   */
+  serialize?: (value: unknown) => unknown;
+  /**
+   * In replay, builds the returned value from the recorded result, or from
+   * the recorded chunks of a stream. Default: the result as recorded, or an
+   * async iterable of the chunks.
+   */
+  revive?: (recorded: unknown) => unknown;
+}
+
+/** Options for `recorder.client`. */
+export interface RecordClientOptions extends RecordCallOptions {
+  /** Dot paths of the async methods to record: `["messages.create"]`. */
+  methods: readonly string[];
+}
+
 /** The run's final result. */
 export interface RecordedOutput {
   kind: "output";
   value: unknown;
 }
 
-export type RecordedEffect = RecordedModelCall | RecordedToolCall | RecordedOutput;
+export type RecordedEffect = RecordedModelCall | RecordedToolCall | RecordedCall | RecordedOutput;
 
 /** A run's effects, in order. JSON-serializable: save it as a golden file. */
 export interface Recording {
@@ -218,6 +266,28 @@ export interface Recorder {
   tool<TFn extends AnyFunction>(name: string, fn: TFn): TFn;
   /** Wraps every `execute` in an AI SDK tool set, named by key. */
   tools<TTools extends Record<string, { execute?: AnyFunction }>>(tools: TTools): TTools;
+  /**
+   * Wraps any async function, keeping its type. Each call is a
+   * {@link RecordedCall}. In replay the function is never called: each call
+   * gets the next unused recorded result for `name`, in order, whatever its
+   * arguments; {@link compareRecordings} reports arguments that differ.
+   */
+  fn<TFn extends (...args: never[]) => PromiseLike<unknown>>(
+    name: string,
+    fn: TFn,
+    options?: RecordCallOptions,
+  ): TFn;
+  /**
+   * Wraps the async methods at `options.methods` of a client object, keeping
+   * its type, as `fn` named `<name>.<path>`. Other members pass through. In
+   * replay the client is never called, and missing objects on a method's path
+   * are stood in for, so `{} as Anthropic` works.
+   */
+  client<TClient extends object>(
+    name: string,
+    client: TClient,
+    options: RecordClientOptions,
+  ): TClient;
   /** Records the run's final result. */
   output(value: unknown): void;
   /** What this run did so far. */
@@ -336,6 +406,14 @@ function streamFrom(parts: unknown[]): ReadableStream<unknown> {
   });
 }
 
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as Record<symbol, unknown>)[Symbol.asyncIterator] === "function"
+  );
+}
+
 async function* iterate(chunks: unknown[]): AsyncGenerator<unknown> {
   for (const chunk of chunks) yield structuredClone(chunk);
 }
@@ -352,6 +430,8 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
   );
   const usedModels = new Set<RecordedModelCall>();
   const usedTools = new Set<RecordedToolCall>();
+  const usedCalls = new Set<RecordedCall>();
+  const callCounts = new Map<string, number>();
   const normalizeEffect = (effect: RecordedEffect, list: readonly RecordedEffect[]) =>
     options.normalize?.(effect, list.indexOf(effect), list) ?? effect;
   let modelCalls = 0;
@@ -570,6 +650,78 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     }
   }
 
+  function fn<TFn extends (...args: never[]) => PromiseLike<unknown>>(
+    name: string,
+    run: TFn,
+    callOptions: RecordCallOptions = {},
+  ): TFn {
+    const { redact, serialize = toJson, revive } = callOptions;
+    return (async (...args: unknown[]) => {
+      const passed = [...args];
+      while (passed.length && passed.at(-1) === undefined) passed.pop();
+      const call = callCounts.get(name) ?? 0;
+      callCounts.set(name, call + 1);
+      const effect: RecordedCall = {
+        kind: "call",
+        name,
+        call,
+        args: toJson(redact ? redact(passed) : passed),
+      };
+      effects.push(effect);
+      if (replay) {
+        const recorded = replay.find(
+          (candidate): candidate is RecordedCall =>
+            candidate.kind === "call" && candidate.name === name && !usedCalls.has(candidate),
+        );
+        if (!recorded) {
+          const error = new RecordingDivergenceError(
+            `Call #${call} to '${name}' was never made by the recorded run.`,
+          );
+          effect.error = toRecordedError(error);
+          throw error;
+        }
+        usedCalls.add(recorded);
+        if (recorded.error) {
+          effect.error = recorded.error;
+          throw fromRecordedError(recorded.error);
+        }
+        if (recorded.stream) {
+          effect.stream = recorded.stream;
+          const chunks = structuredClone(recorded.stream);
+          return revive ? revive(chunks) : iterate(chunks);
+        }
+        effect.result = recorded.result;
+        const result = structuredClone(recorded.result);
+        return revive ? revive(result) : result;
+      }
+      let result: unknown;
+      try {
+        result = await (run as unknown as (...args: unknown[]) => PromiseLike<unknown>)(...args);
+      } catch (error) {
+        effect.error = toRecordedError(error);
+        throw error;
+      }
+      if (!isAsyncIterable(result)) {
+        effect.result = toJson(serialize(result));
+        return result;
+      }
+      const chunks: unknown[] = [];
+      effect.stream = chunks;
+      const source = result;
+      return (async function* () {
+        try {
+          for await (const chunk of source) {
+            chunks.push(toJson(serialize(chunk)));
+            yield chunk;
+          }
+        } catch (error) {
+          effect.error = toRecordedError(error);
+          throw error;
+        }
+      })();
+    }) as unknown as TFn;
+  }
+
   /** Counts an async tool call as running until it settles. */
   function track(result: unknown): unknown {
     if (result instanceof Promise) {
@@ -685,6 +837,41 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
       });
     },
     tool: (name, fn) => tool(name, fn),
+    fn,
+    client(name, client, { methods, ...callOptions }) {
+      const paths = methods.map((method) => method.split("."));
+      const startsWith = (path: string[], prefix: string[]) =>
+        prefix.every((key, index) => path[index] === key);
+      const wrapAt = (target: object, prefix: string[]): object => {
+        const wrapped = new Map<string, unknown>();
+        return new Proxy(target, {
+          get(object, key, receiver) {
+            if (typeof key !== "string") return Reflect.get(object, key, receiver);
+            const path = [...prefix, key];
+            const method = paths.some((p) => p.length === path.length && startsWith(p, path));
+            if (!method && !paths.some((p) => startsWith(p, path))) {
+              return Reflect.get(object, key, receiver);
+            }
+            if (!wrapped.has(key)) {
+              const value = Reflect.get(object, key, receiver) as unknown;
+              wrapped.set(
+                key,
+                method
+                  ? fn(
+                      `${name}.${path.join(".")}`,
+                      (...args: unknown[]) =>
+                        (value as (...args: unknown[]) => PromiseLike<unknown>).apply(object, args),
+                      callOptions,
+                    )
+                  : wrapAt(value && typeof value === "object" ? value : {}, path),
+              );
+            }
+            return wrapped.get(key);
+          },
+        });
+      };
+      return wrapAt(client, []) as never;
+    },
     tools(tools) {
       return Object.fromEntries(
         Object.entries(tools).map(([name, definition]) => [
@@ -715,6 +902,9 @@ export type EffectDivergenceReason =
   | "tool-name"
   | "tool-input"
   | "tool-result"
+  | "call-name"
+  | "call-args"
+  | "call-result"
   | "output";
 
 /** The first effect where two recordings differ. */
@@ -856,6 +1046,8 @@ function describe(effect: RecordedEffect): string {
       return `model call #${effect.call} (${effect.method})`;
     case "tool":
       return `tool '${effect.name}' with ${JSON.stringify(effect.input)}`;
+    case "call":
+      return `call #${effect.call} to '${effect.name}' with ${JSON.stringify(effect.args)}`;
     case "output":
       return `output ${JSON.stringify(effect.value)}`;
   }
@@ -913,6 +1105,31 @@ function differ(
       !jsonEqual(errorIdentity(left.error), errorIdentity(right.error))
     ) {
       return { reason: "tool-result", message: `Tool '${left.name}' returned a different result.` };
+    }
+    return undefined;
+  }
+  if (left.kind === "call" && right.kind === "call") {
+    if (left.name !== right.name) {
+      return {
+        reason: "call-name",
+        message: `Expected ${describe(left)}; the port made ${describe(right)}.`,
+      };
+    }
+    if (!jsonEqual(left.args, right.args)) {
+      return {
+        reason: "call-args",
+        message: `Expected ${describe(left)}; the port passed ${JSON.stringify(right.args)}.`,
+      };
+    }
+    if (
+      !jsonEqual(left.result, right.result) ||
+      !jsonEqual(left.stream, right.stream) ||
+      !jsonEqual(errorIdentity(left.error), errorIdentity(right.error))
+    ) {
+      return {
+        reason: "call-result",
+        message: `Call #${left.call} to '${left.name}' returned a different result.`,
+      };
     }
     return undefined;
   }

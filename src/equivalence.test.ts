@@ -812,3 +812,214 @@ describe("verified equivalence (ports that change on purpose)", () => {
     expect(compareRecordings(recorder.recording, port).equivalent).toBe(true);
   });
 });
+
+describe("verified equivalence (any client)", () => {
+  // An Anthropic-shaped client: `messages.create` returns a message, or with
+  // `stream: true` an async iterable of events.
+  interface Message {
+    id: string;
+    stop_reason: "tool_use" | "end_turn";
+    content: (
+      | { type: "text"; text: string }
+      | { type: "tool_use"; id: string; name: string; input: { city: string } }
+    )[];
+  }
+  type StreamEvent = { type: "content_block_delta"; delta: { type: "text_delta"; text: string } };
+  interface MessagesParams {
+    model: string;
+    messages: { role: string; content: unknown }[];
+    stream?: boolean;
+  }
+  interface FakeAnthropic {
+    apiKey: string;
+    messages: {
+      create(params: MessagesParams & { stream: true }): Promise<AsyncIterable<StreamEvent>>;
+      create(params: MessagesParams): Promise<Message>;
+    };
+  }
+  function fakeAnthropic(): FakeAnthropic {
+    let turn = 0;
+    return {
+      apiKey: "sk-live",
+      messages: {
+        create: (async (params: MessagesParams) => {
+          if (params.stream) {
+            return (async function* () {
+              for (const text of ["Sunny ", "in Paris."]) {
+                yield { type: "content_block_delta", delta: { type: "text_delta", text } };
+              }
+            })();
+          }
+          return turn++ === 0
+            ? {
+                id: "m1",
+                stop_reason: "tool_use",
+                content: [
+                  { type: "tool_use", id: "t1", name: "getWeather", input: { city: "Paris" } },
+                ],
+              }
+            : { id: "m2", stop_reason: "end_turn", content: [{ type: "text", text: "Sunny." }] };
+        }) as FakeAnthropic["messages"]["create"],
+      },
+    };
+  }
+  const methods = ["messages.create"];
+
+  // One tool loop over the client, as the original and the port's executor both run it.
+  async function weatherLoop(
+    client: FakeAnthropic,
+    recorder: Recorder,
+    model = "claude-x",
+  ): Promise<string> {
+    const getWeather = recorder.tool("getWeather", async ({ city }: { city: string }) => ({
+      city,
+      forecast: "sunny",
+    }));
+    const messages: MessagesParams["messages"] = [{ role: "user", content: "Weather in Paris?" }];
+    for (;;) {
+      const message = await client.messages.create({ model, messages });
+      const use = message.content.find((block) => block.type === "tool_use");
+      if (message.stop_reason !== "tool_use" || !use) {
+        return message.content.map((block) => (block.type === "text" ? block.text : "")).join("");
+      }
+      messages.push(
+        { role: "assistant", content: message.content },
+        { role: "user", content: [{ type: "tool_result", content: await getWeather(use.input) }] },
+      );
+    }
+  }
+
+  function clientMachine() {
+    const agent = setupAgent({ context: z.object({ text: z.string() }), output: z.string() });
+    return agent.createMachine({
+      context: { text: "" },
+      initial: "asking",
+      states: {
+        asking: {
+          invoke: {
+            src: "agent.generateText",
+            input: { model: "claude-x", prompt: "Weather in Paris?" },
+            onDone: ({ event }) => ({
+              target: "done",
+              context: { text: String(event.output.result) },
+            }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => context.text },
+      },
+    });
+  }
+
+  async function runPort(recorder: Recorder, client: FakeAnthropic): Promise<void> {
+    const result = await runToQuiescence(
+      createAgentRuntime(clientMachine(), {
+        executors: { generateText: async () => ({ result: await weatherLoop(client, recorder) }) },
+      }),
+    );
+    if (result.status !== "done")
+      throw result.status === "error" ? result.error : new Error("idle");
+    recorder.output(result.output);
+  }
+
+  async function recordLoop(): Promise<Recording> {
+    const recorder = createRecorder();
+    recorder.output(
+      await weatherLoop(recorder.client("anthropic", fakeAnthropic(), { methods }), recorder),
+    );
+    return JSON.parse(JSON.stringify(recorder.recording));
+  }
+
+  test("a hand-rolled loop's client calls replay on a machine with no network", async () => {
+    const recording = await recordLoop();
+    expect(recording.effects.map((effect) => effect.kind)).toEqual([
+      "call",
+      "tool",
+      "call",
+      "output",
+    ]);
+    expect(recording.effects[0]).toMatchObject({
+      kind: "call",
+      name: "anthropic.messages.create",
+      call: 0,
+      result: { id: "m1", stop_reason: "tool_use" },
+    });
+
+    const replay = createRecorder({ replay: recording });
+    // Never called: the stand-in has no `messages` at all.
+    await runPort(replay, replay.client("anthropic", {} as FakeAnthropic, { methods }));
+    expect(compareRecordings(recording, replay.recording)).toEqual({
+      equivalent: true,
+      divergences: [],
+    });
+  });
+
+  test("a streamed result records its chunks and replays as an async iterable", async () => {
+    const streamText = async (client: FakeAnthropic) => {
+      let text = "";
+      const events = await client.messages.create({
+        model: "claude-x",
+        messages: [{ role: "user", content: "Weather?" }],
+        stream: true,
+      });
+      for await (const event of events) text += event.delta.text;
+      return text;
+    };
+    const recorder = createRecorder();
+    recorder.output(await streamText(recorder.client("anthropic", fakeAnthropic(), { methods })));
+    const recording: Recording = JSON.parse(JSON.stringify(recorder.recording));
+    expect(recording.effects[0]).toMatchObject({ kind: "call", stream: expect.any(Array) });
+
+    const replay = createRecorder({ replay: recording });
+    const text = await streamText(replay.client("anthropic", {} as FakeAnthropic, { methods }));
+    replay.output(text);
+    expect(text).toBe("Sunny in Paris.");
+    expect(compareRecordings(recording, replay.recording).equivalent).toBe(true);
+  });
+
+  test("a port that changes the arguments diverges at the first changed call", async () => {
+    const recording = await recordLoop();
+    const replay = createRecorder({ replay: recording });
+    const client = replay.client("anthropic", {} as FakeAnthropic, { methods });
+    replay.output(await weatherLoop(client, replay, "claude-y"));
+    const report = compareRecordings(recording, replay.recording);
+    expect(report.divergence).toMatchObject({ index: 0, reason: "call-args" });
+    expect(report.divergences.map((d) => [d.index, d.reason])).toEqual([
+      [0, "call-args"],
+      [2, "call-args"],
+    ]);
+    // A call past the recorded ones has no answer.
+    await expect(client.messages.create({ model: "claude-x", messages: [] })).rejects.toThrow(
+      RecordingDivergenceError,
+    );
+  });
+
+  test("redact keeps secrets and run-specific fields out of the recording", async () => {
+    const recorder = createRecorder();
+    const stamped = recorder.fn(
+      "audit.write",
+      async (entry: { user: string; token: string; at: number }) => ({ ok: true, at: entry.at }),
+      {
+        redact: ([entry]) => ({ user: (entry as { user: string }).user }),
+        serialize: (result) => ({ ok: (result as { ok: boolean }).ok }),
+      },
+    );
+    await stamped({ user: "ada", token: "secret", at: 1 });
+    expect(JSON.stringify(recorder.recording)).not.toContain("secret");
+    expect(recorder.recording.effects[0]).toMatchObject({
+      args: { user: "ada" },
+      result: { ok: true },
+    });
+
+    const replay = createRecorder({ replay: recorder.recording });
+    const write = replay.fn(
+      "audit.write",
+      async (_entry: { user: string; token: string; at: number }) => ({ ok: false, at: 0 }),
+      {
+        redact: ([entry]) => ({ user: (entry as { user: string }).user }),
+        revive: (recorded) => ({ ...(recorded as object), at: 2 }),
+      },
+    );
+    expect(await write({ user: "ada", token: "other", at: 2 })).toEqual({ ok: true, at: 2 });
+    expect(compareRecordings(recorder.recording, replay.recording).equivalent).toBe(true);
+  });
+});

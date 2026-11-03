@@ -112,6 +112,8 @@ Beyond schemas, `setupAgent` takes your models plus optional `requests`, `actors
 
 The builtins `agent.generateText`, `agent.streamText`, and `agent.decide` are registered automatically. Invoke them by name.
 
+The setup's type is `SetupAgentResult<…>`, exported from the root, so `export const agentSetup = setupAgent(...)` emits portable declarations under `declaration: true` or `composite: true` (TS 6 and 7) with no annotation.
+
 ### Models
 
 The `models` map pairs a short alias with a resolved model. Request and decision `model:` values autocomplete against its keys. Pass the same map to the host adapter. See [Models and providers](models-and-providers.md).
@@ -280,7 +282,7 @@ const agentSetup = setupAgent({
 
 > **Note:** Narrow only where every path into the state has assigned the field. A state that is also reachable on an error or refusal route, where the field is still `null`, must keep its nullable handling. Narrowing changes the type only. Runtime behavior is unchanged.
 
-See [examples/sql-agent/index.ts](../examples/sql-agent/index.ts).
+See [examples/sql-agent/index.ts](https://github.com/statelyai/agent/blob/next/examples/sql-agent/index.ts).
 
 ## Transitions
 
@@ -353,9 +355,30 @@ checking: {
 },
 ```
 
-The returned object takes the same fields as a transition object, including `context` for a partial context update. The function must return a target. A choice state whose function returns no target throws at run time.
+The returned object takes `target`, and optionally `description`, `reenter`, and `meta`. It cannot update `context`; a choice only routes. The function must return a target. A choice state whose function returns no target throws at run time.
 
 A choice state has no other behavior. `on`, `always`, `after`, `entry`, `exit`, `invoke`, and `states` are not allowed on it. Put the work in the target states.
+
+A choice function receives the same first argument as a transition function (`context`, `event`, `self`, `system`, `guards`, `actors`), but no `enq` argument, so it cannot emit, spawn, raise, or send. Routing that must also do one of those uses an `always` transition on a normal state, whose function takes `enq` like any transition function:
+
+```ts no-check
+// Routes only.
+checking: {
+  type: 'choice',
+  choice: ({ context }) =>
+    context.score >= 0.8 ? { target: 'accepted' } : { target: 'rejected' },
+},
+```
+
+```ts no-check
+// Routes and emits.
+routing: {
+  always: ({ context }, enq) => {
+    enq.emit({ type: 'SCORED', score: context.score });
+    return { target: context.score >= 0.8 ? 'accepted' : 'rejected' };
+  },
+},
+```
 
 Use a choice state when the branch is a pure routing decision the machine makes on its own, such as a loop bound or a score threshold. Use a [decision](decisions.md) when the model picks the branch.
 
@@ -449,7 +472,7 @@ prompting: {
 }
 ```
 
-A choice or `textEvent` naming an event the machine never declared is a compile error. `textEvent: { type, field }` names another field, and `choices` (an array, or a context path) offers one button per payload. See [Human in the loop](human-in-the-loop.md#payload-choices). A machine with other metadata declares its own `meta` schema on `setupAgent`, which replaces the default. See [examples/email-drafter/agent-logic.ts](../examples/email-drafter/agent-logic.ts).
+A choice or `textEvent` naming an event the machine never declared is a compile error. `textEvent: { type, field }` names another field, and `choices` (an array, or a context path) offers one button per payload. See [Human in the loop](human-in-the-loop.md#payload-choices). A machine with other metadata declares its own `meta` schema on `setupAgent`, which replaces the default. See [examples/email-drafter/agent-logic.ts](https://github.com/statelyai/agent/blob/next/examples/email-drafter/agent-logic.ts).
 
 ## Delayed transitions
 

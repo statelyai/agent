@@ -160,6 +160,11 @@ People own everything that defines "better" and everything the policy cannot tou
 
 Self-improvement is a supported pattern with gates. The library supplies the gates; the loop, the objective, and the promotion rule stay with the host.
 
+### Machines with no decision point
+
+A pure environment still improves through its approval rules and caps. [`proposeApprovalRules` and `proposeCaps`](evals.md#proposals-from-traces) read many runs' traces and propose an `allow` or `deny` rule per tool-and-arguments pattern and a value per cap.
+They are proposals for a person to review; nothing promotes them.
+
 ## When not to split
 
 The split pays off when there is a policy worth learning. Skip it in these cases.
@@ -176,6 +181,6 @@ The split pays off when there is a policy worth learning. Skip it in these cases
 - [Testing and verification](verify.md): `canReach`, `explorePaths`, and payload variants.
 - [Event log](event-log.md) and [Persistence](persistence.md): stores, threads, and replay.
 - The [`graph-engineering`](https://github.com/statelyai/agent/blob/next/skills/graph-engineering/SKILL.md) skill routes existing code to [`loop-to-machine`](https://github.com/statelyai/agent/blob/next/skills/loop-to-machine/SKILL.md), which converts the loop and checks parity with `compareRuns`. It routes new policies to [`generate-machine`](https://github.com/statelyai/agent/blob/next/skills/generate-machine/SKILL.md). Then [`add-traces`](https://github.com/statelyai/agent/blob/next/skills/add-traces/SKILL.md) persists runs, [`add-evals`](https://github.com/statelyai/agent/blob/next/skills/add-evals/SKILL.md) writes evaluations for each state, and [`improve-machine`](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md) proposes a pull request from traces, or reports that no candidate beat the current policy.
-- [examples/self-improving-refunds](../examples/self-improving-refunds): a refund desk as the environment, JSON playbooks as the policy, an improvement loop, and a benchmark against a raw tool loop.
-- [examples/code-review-loop](../examples/code-review-loop): review gates as the environment, a triage policy improved from traces against hidden tests, run with Claude Code in headless mode.
-- [examples/tic-tac-toe](../examples/tic-tac-toe): a game as the environment, a policy over board features, and a `canReach` proof that it never loses as the bar for promotion.
+- [examples/self-improving-refunds](https://github.com/statelyai/agent/blob/next/examples/self-improving-refunds): a refund desk as the environment, JSON playbooks as the policy, an improvement loop, and a benchmark against a raw tool loop.
+- [examples/code-review-loop](https://github.com/statelyai/agent/blob/next/examples/code-review-loop): review gates as the environment, a triage policy improved from traces against hidden tests, run with Claude Code in headless mode.
+- [examples/tic-tac-toe](https://github.com/statelyai/agent/blob/next/examples/tic-tac-toe): a game as the environment, a policy over board features, and a `canReach` proof that it never loses as the bar for promotion.

@@ -256,8 +256,8 @@ The `decide` executor asks for one structured-output object naming the event, or
 
 Each example is a runnable host for one provider stack.
 
-| Example                                                                       | Backing                                                                                                              |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Example                                                                       | Backing                                                                                                           |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | [ai-sdk-host](../examples/ai-sdk-host/index.ts)                               | Vercel AI SDK, through the optional adapter                                                                          |
 | [openai-sdk-host](../examples/openai-sdk-host/index.ts)                       | `createOpenAiExecutors` from `@statelyai/agent/openai`, over the raw `openai` package (Responses + Chat Completions) |
 | [tanstack-ai-stream](../examples/tanstack-ai-stream/index.ts)                 | `createTanStackAiExecutors` from `@statelyai/agent/tanstack-ai`, streamed to a `useChat` client over AG-UI           |

@@ -336,9 +336,12 @@ const TRACE_ENVELOPE_KEYS = [
  * become `null`), non-finite numbers become `null`, `bigint`s become strings,
  * `Error`s become `{ name, message, stack?, code? }`, and anything with a
  * `toJSON()` (e.g. `Date`) is projected through it — the same losses a
- * `JSON.parse(JSON.stringify(...))` round-trip incurs, minus the throws.
+ * `JSON.parse(JSON.stringify(...))` round-trip incurs, minus the throws. @internal
  */
-function toJsonValue(value: unknown, ancestors: readonly object[]): JsonValue | undefined {
+export function toJsonValue(
+  value: unknown,
+  ancestors: readonly object[] = [],
+): JsonValue | undefined {
   if (value === null) {
     return null;
   }
@@ -593,8 +596,25 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
    * Default 0. Not added to this run's `usage.modelCalls`.
    */
   modelCallsSpent?: number;
-  /** Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with `signal.reason` as the error. */
+  /**
+   * Aborts the run; settles `{ status: 'error', cause: 'aborted' }` with
+   * `signal.reason` as the error. With {@link AgentRuntimeOptions.abortWith},
+   * the machine sees the abort first.
+   */
   signal?: AbortSignal;
+  /**
+   * Routes `signal`'s abort through the machine: when it fires, `event` is
+   * sent into the run (see {@link AgentRuntime.send}) and the run continues
+   * until the machine settles, so a `cancelled` final state, cleanup
+   * invokes, and its output run as usual. Until the machine applies
+   * `event`, the host's direct `transition` events (such as
+   * `runToQuiescence`'s init `event`) are dropped, so the abort goes first.
+   * The run falls back to today's `{ status: 'error', cause: 'aborted' }`
+   * when the machine has no transition for `event`, when the loop never
+   * applies it, when the machine settles still `active` after handling it,
+   * or when `timeout` milliseconds pass while it is still working.
+   */
+  abortWith?: { event: EventFromLogic<TMachine>; timeout?: number };
   /** Where root `after` timers live. Default `"in-process"`. See {@link AgentTimerScheduler}. */
   timers?: AgentTimerScheduler;
 }
@@ -2334,6 +2354,32 @@ export interface AgentRuntime<TMachine extends AnyStateMachine> {
   execute(effects: AgentEffects): Promise<void>;
   /** The next event that arrived, or `undefined` once the run is quiescent. */
   nextEvent(): Promise<EventFromLogic<TMachine> | undefined>;
+  /**
+   * Delivers a host event (a cancel, a user message, a host-owned timer) into
+   * the run's mailbox, behind whatever already arrived. Asynchronous: `send`
+   * only enqueues; the machine moves when the host loop's next `nextEvent()`
+   * hands the event out (a parked `nextEvent()` resolves with it) and the loop
+   * calls `transition`. A host that needs the event applied before it returns
+   * (a synchronous cancel) calls `transition(state, event)` itself instead,
+   * on the loop's current `state`, and keeps the loop's invariants: one
+   * shared `state` variable that both paths read and write, `execute` on the
+   * returned effects, and no `transition` once the state is not `active`. It is
+   * applied by the host's own `transition` call, so it is journaled and
+   * replayed like any other event, and reported as `result.ignored` when the
+   * state has no transition for it.
+   *
+   * - Before `start`: queued; the first `nextEvent()` hands it out (after the
+   *   init event a host delivers itself). Returns `true`.
+   * - While an effect, child or timer is in flight: queued in arrival order
+   *   with their completions. Returns `true`.
+   * - After the run stopped (cancelled, aborted, journal failure) or the
+   *   machine left `active` (done, error): dropped. Returns `false`.
+   * - After `finish`: throws {@link AgentError} `runtime-finished`.
+   *
+   * A sent event the loop never reads (the host called `finish` without
+   * draining `nextEvent()`) is dropped.
+   */
+  send(event: EventFromLogic<TMachine> | AgentTimerEvent): boolean;
   /** Settles the run: stops what is still running and returns the outcome. */
   finish(): Promise<AgentRunResult<TMachine>>;
 }
@@ -2405,6 +2451,160 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
    * {@link runAgent} again later with `{ snapshot, event }`.
    */
   onIdle?: (snapshot: SnapshotFrom<TMachine>) => Promise<EventFromLogic<TMachine>>;
+  /**
+   * A send handle for events pushed mid-run (a cancel, a user message), from
+   * {@link createAgentInbox}. Each `inbox.send` goes to the current pass's
+   * {@link AgentRuntime.send}; one sent before the run starts is delivered
+   * after the opening `event`. An inbox event that arrives while the run is
+   * idle resumes it, ahead of a pending `onIdle` answer (that answer is then
+   * dropped). One inbox serves one `runAgent` call.
+   */
+  inbox?: AgentInbox<EventFromLogic<TMachine>>;
+}
+
+/** A send handle into a {@link runAgent} call. See {@link AgentRunOptions.inbox}. */
+export interface AgentInbox<TEvent extends EventObject = EventObject> {
+  /**
+   * Delivers `event` into the run, with the same result as
+   * {@link AgentRuntime.send}: `true` when queued (including before the run
+   * starts), `false` once the run is done, errored, stopped, or the
+   * `runAgent` call returned.
+   */
+  send(event: TEvent): boolean;
+}
+
+interface InboxState {
+  queue: EventObject[];
+  /** The inbox events delivered into the current pass, so an ignored one is not taken for an ignored answer. */
+  passSent: Set<EventObject>;
+  runtime?: { send(event: EventObject): boolean };
+  waiter?: (event: EventObject) => void;
+  claimed: boolean;
+  closed: boolean;
+}
+
+const inboxStates = new WeakMap<object, InboxState>();
+
+/**
+ * Creates a send handle for {@link AgentRunOptions.inbox}, typed by the
+ * machine's events.
+ *
+ * @example
+ * ```ts
+ * const inbox = createAgentInbox<EventOf<typeof machine>>();
+ * const run = runAgent(machine, { input, executors, inbox });
+ * inbox.send({ type: "CANCEL" });
+ * const result = await run;
+ * ```
+ */
+export function createAgentInbox<TEvent extends EventObject = EventObject>(): AgentInbox<TEvent> {
+  const state: InboxState = { queue: [], passSent: new Set(), claimed: false, closed: false };
+  const inbox: AgentInbox<TEvent> = {
+    send(event) {
+      if (state.closed) return false;
+      if (state.runtime) {
+        state.passSent.add(event);
+        const accepted = state.runtime.send(event);
+        if (!accepted) state.closed = true;
+        return accepted;
+      }
+      const waiter = state.waiter;
+      if (waiter) {
+        state.waiter = undefined;
+        waiter(event);
+      } else {
+        state.queue.push(event);
+      }
+      return true;
+    },
+  };
+  inboxStates.set(inbox, state);
+  return inbox;
+}
+
+// Binds the inbox to one pass's runtime: queued events go in first (so they
+// follow the opening event), and the binding drops once the pass is quiescent,
+// so a later send queues for the next pass instead of reaching a finishing runtime.
+function bindInbox<TMachine extends AnyStateMachine>(
+  runtime: AgentRuntime<TMachine>,
+  inbox: InboxState | undefined,
+  // The pass's opening event, when an inbox send supplied it.
+  openingFromInbox?: EventObject,
+): AgentRuntime<TMachine> {
+  if (!inbox) return runtime;
+  inbox.passSent = new Set(openingFromInbox === undefined ? [] : [openingFromInbox]);
+  for (const event of inbox.queue.splice(0)) {
+    inbox.passSent.add(event);
+    runtime.send(event as EventFromLogic<TMachine>);
+  }
+  inbox.runtime = runtime as { send(event: EventObject): boolean };
+  let status: string | undefined;
+  return {
+    start: async (init) => {
+      const [state, effects] = await runtime.start(init);
+      status = (state as AnyMachineSnapshot).status;
+      return [state, effects];
+    },
+    transition: (state, event, options) => {
+      const [next, effects] = runtime.transition(state, event, options);
+      status = (next as AnyMachineSnapshot).status;
+      return [next, effects];
+    },
+    execute: (effects) => runtime.execute(effects),
+    nextEvent: async () => {
+      const event = await runtime.nextEvent();
+      if (event === undefined) {
+        inbox.runtime = undefined;
+        if (status !== "active") inbox.closed = true;
+      }
+      return event;
+    },
+    send: (event) => runtime.send(event),
+    finish: () => runtime.finish(),
+  };
+}
+
+// The next idle answer: a queued inbox event, else the first of `onIdle`'s
+// answer and an inbox send. `undefined` when neither can come.
+async function nextIdleEvent<TMachine extends AnyStateMachine>(
+  snapshot: SnapshotFrom<TMachine>,
+  onIdle: AgentRunOptions<TMachine>["onIdle"],
+  inbox: InboxState | undefined,
+): Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean } | undefined> {
+  const queued = inbox?.queue.shift();
+  if (queued !== undefined) return { event: queued as EventFromLogic<TMachine>, fromInbox: true };
+  if (!onIdle) return undefined;
+  if (!inbox) return { event: await onIdle(snapshot), fromInbox: false };
+  // The waiter goes in before `onIdle` runs, so an `inbox.send` from inside
+  // `onIdle` reaches it instead of a queue nobody reads.
+  let waiter: InboxState["waiter"];
+  const sent = new Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean }>((resolve) => {
+    waiter = (event) => resolve({ event: event as EventFromLogic<TMachine>, fromInbox: true });
+    inbox.waiter = waiter;
+  });
+  // Cleared the moment the answer settles, not after the race's `await`: a
+  // send in between then queues for the next pass instead of resolving the
+  // losing promise.
+  const release = () => {
+    if (inbox.waiter === waiter) inbox.waiter = undefined;
+  };
+  try {
+    return await Promise.race([
+      sent,
+      onIdle(snapshot).then(
+        (event) => {
+          release();
+          return { event, fromInbox: false };
+        },
+        (error: unknown) => {
+          release();
+          throw error;
+        },
+      ),
+    ]);
+  } finally {
+    release();
+  }
 }
 
 /**
@@ -2435,20 +2635,62 @@ export async function runAgent<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: AgentRunOptions<TMachine> = {},
 ): Promise<AgentRunResult<TMachine>> {
-  const { onIdle, ...rest } = options;
-  let result = await runToQuiescence(createAgentRuntime(machine, rest), rest);
-  if (!onIdle) return result;
+  const { onIdle, inbox, ...rest } = options;
+  const inboxState = inbox === undefined ? undefined : inboxStates.get(inbox);
+  if (inbox !== undefined) {
+    if (inboxState === undefined || inboxState.claimed) {
+      throw new AgentError(
+        "inbox-in-use",
+        "runAgent: `inbox` must come from createAgentInbox() and serves one runAgent call.",
+      );
+    }
+    inboxState.claimed = true;
+  }
+  try {
+    return await runAgentPasses(machine, rest, onIdle, inboxState);
+  } finally {
+    if (inboxState) {
+      inboxState.closed = true;
+      inboxState.runtime = undefined;
+      inboxState.queue.length = 0;
+    }
+  }
+}
+
+async function runAgentPasses<TMachine extends AnyStateMachine>(
+  machine: TMachine,
+  rest: Omit<AgentRunOptions<TMachine>, "onIdle" | "inbox">,
+  onIdle: AgentRunOptions<TMachine>["onIdle"],
+  inbox: InboxState | undefined,
+): Promise<AgentRunResult<TMachine>> {
+  let result = await runToQuiescence(bindInbox(createAgentRuntime(machine, rest), inbox), rest);
+  if (!onIdle && !inbox) return result;
   // The budget is for the whole call: each pass starts from what the earlier
   // passes spent, since every runtime counts only its own calls.
   let modelCallsSpent = (rest.modelCallsSpent ?? 0) + result.usage.modelCalls;
   // `attempts` explain the opening `event` only, never an `onIdle` answer.
   const { input: _input, events: _events, attempts: _attempts, ...resumeOptions } = rest;
   // An ignored event (the opening `event`, or an answer) leaves the run where
-  // it was; it is reported, not retried from the same snapshot.
-  while (result.status === "idle" && result.ignored === undefined) {
-    const event = await onIdle(result.snapshot);
+  // it was; it is reported, not retried from the same snapshot. An ignored
+  // inbox event is reported too, but does not end the loop.
+  // Only an ignored inbox event of the current pass (not its opening answer)
+  // keeps the loop going.
+  let answer: EventObject | undefined = rest.event;
+  while (
+    result.status === "idle" &&
+    (result.ignored === undefined ||
+      (result.ignored !== answer && inbox?.passSent.has(result.ignored) === true))
+  ) {
+    const next = await nextIdleEvent(result.snapshot, onIdle, inbox);
+    if (next === undefined) break;
+    const { event, fromInbox } = next;
+    answer = fromInbox ? undefined : event;
     result = await runToQuiescence(
-      createAgentRuntime(machine, { ...resumeOptions, modelCallsSpent }),
+      bindInbox(
+        createAgentRuntime(machine, { ...resumeOptions, modelCallsSpent }),
+        inbox,
+        fromInbox ? event : undefined,
+      ),
       {
         ...resumeOptions,
         // Without a store the log travels with the result, so the final
@@ -3019,11 +3261,13 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   let finished = false;
   let ignoredEvent: EventObject | undefined;
 
-  const enqueue = (event: EventObject): void => {
+  const enqueue = (event: EventObject, fromHost = false): void => {
     if (finished) {
       return;
     }
-    fromMailbox.add(event);
+    if (!fromHost) {
+      fromMailbox.add(event);
+    }
     const waiting = wake;
     if (waiting) {
       wake = undefined;
@@ -3150,8 +3394,28 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     recheck();
   };
 
-  const onAbort = () =>
+  const abortNow = () =>
     stopRun({ cause: "aborted", error: options.signal?.reason ?? new Error("Aborted") });
+  // The abort event the machine has been sent but has not yet handled.
+  let pendingAbort: EventObject | undefined;
+  // True once the machine applied the abort event: it owns the wind-down.
+  let abortApplied = false;
+  // Events brought in through `send`, as opposed to a direct `transition`.
+  const sentEvents = new WeakSet<object>();
+  let abortTimer: ReturnType<typeof setTimeout> | undefined;
+  const onAbort = () => {
+    const abortWith = options.abortWith;
+    if (abortWith === undefined || runtime.send(abortWith.event) === false) {
+      abortNow();
+      return;
+    }
+    pendingAbort = abortWith.event as EventObject;
+    if (abortWith.timeout !== undefined) {
+      abortTimer = setTimeout(() => {
+        if (current?.status === "active") abortNow();
+      }, abortWith.timeout);
+    }
+  };
 
   const emitFromRoot = (event: EventObject): void => {
     onTrace({ type: "emit", event: event as EmittedFrom<TMachine> });
@@ -3596,7 +3860,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       });
 
       if (options.signal) {
-        if (options.signal.aborted) {
+        if (options.signal.aborted && options.abortWith !== undefined) {
+          onAbort();
+        } else if (options.signal.aborted) {
           stopReason = {
             cause: "aborted",
             error: options.signal.reason ?? new Error("Aborted"),
@@ -3659,6 +3925,17 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       if (stopReason !== undefined) {
         return [state, []];
       }
+      // Once aborted, the abort event goes first: a host's direct event (the
+      // init event of `runToQuiescence`) is dropped until the machine has
+      // handled the abort, so it cannot finish the run past the abort.
+      if (
+        pendingAbort !== undefined &&
+        (event as unknown) !== pendingAbort &&
+        !fromMailbox.has(event as object) &&
+        !sentEvents.has(event as object)
+      ) {
+        return [state, []];
+      }
       event = toTimerInput(event as EventObject) as typeof event;
       // Host-supplied attempts are checked before the machine moves, so a
       // non-JSON value fails loudly without leaving a half-applied event.
@@ -3677,6 +3954,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         !fromMailbox.has(event as object) &&
         (next as unknown) === (state as unknown) &&
         effects.length === 0;
+      if ((event as unknown) === pendingAbort) {
+        pendingAbort = undefined;
+        abortApplied = !ignored;
+        // The machine had no transition for the abort event: abort as usual.
+        if (ignored) {
+          abortNow();
+          return [state, []];
+        }
+      }
       if (ignored) {
         ignoredEvent = event as EventObject;
       }
@@ -3730,12 +4016,34 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       }
     },
 
+    send(event) {
+      if (finished) {
+        throw new AgentError(
+          "runtime-finished",
+          "createAgentRuntime: the run has finished; start a new runtime to send it events.",
+        );
+      }
+      if (stopReason !== undefined || (current !== undefined && current.status !== "active")) {
+        return false;
+      }
+      sentEvents.add(event);
+      enqueue(event as EventObject, true);
+      return true;
+    },
+
     async finish() {
       if (finished) {
         throw new AgentError(
           "runtime-finished",
           "createAgentRuntime: `finish` was already called.",
         );
+      }
+      clearTimeout(abortTimer);
+      // A still-active machine at settle after an abort aborts as usual: the
+      // loop never applied the abort event, or the machine handled it but
+      // came to rest short of a final state (nothing left can finish it).
+      if ((pendingAbort !== undefined || abortApplied) && current?.status === "active") {
+        abortNow();
       }
       // A decision's usage is queued after the event it chose; when that event
       // ends the machine, the usage is never handed out. Journal it out of

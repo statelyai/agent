@@ -1,0 +1,38 @@
+{
+  "Small refund on A-100": [
+    {
+      "sent": "start {\"id\":\"T-1\",\"message\":\"Mug A-100 arrived chipped, refund $20.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition xstate.done.actor -> \"resolving\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Thanks for writing in. Refunded $20 on A-100 (rf_A-100_1).\n\n- Outcome: refunded\n- Refund id: rf_A-100_1"
+    }
+  ],
+  "Refund over the limit on A-200": [
+    {
+      "sent": "start {\"id\":\"T-2\",\"message\":\"Desk A-200 is cracked, refund $240.\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition xstate.done.actor -> \"resolving\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "A teammate from tier-2 will follow up (refund needs approval).\n\n- Outcome: escalated"
+    }
+  ],
+  "Order status": [
+    {
+      "sent": "start {\"id\":\"T-3\",\"message\":\"Where is A-200?\"}",
+      "status": "done",
+      "trace": [
+        "transition @xstate.init -> \"classifying\"",
+        "transition xstate.done.actor -> \"resolving\"",
+        "transition xstate.done.actor -> \"done\""
+      ],
+      "response": "Thanks for writing in. Order A-200 is processing.\n\n- Outcome: answered"
+    }
+  ]
+}

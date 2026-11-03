@@ -22,6 +22,9 @@
     "dist",
     "schemas",
     "skills",
+    "docs",
+    "!docs/snippet-globals.ts",
+    "llms.txt",
     "CHANGELOG.md"
   ],
   "type": "module",

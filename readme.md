@@ -2,7 +2,15 @@
 
 **Make invalid agent actions impossible.**
 
-Agent logic as state machines: deterministic, inspectable, resumable, runs anywhere. The machine owns control flow; the model only ever picks a legal event. Testing, inspection, and visualization fall out for free.
+Agent logic as state machines: deterministic, inspectable, resumable, runs anywhere. The machine owns control flow; the model only ever picks a legal event.
+
+What you get:
+
+- **Proofs with no model.** Put the rule that must never break behind a sentinel state, then `canReach(machine, "refundedOverLimit", options)` returns `reachable: false` and `complete: true` with no API key. See [Testing and verification](https://github.com/statelyai/agent/blob/next/docs/verify.md).
+- **Resume and replay from the event log.** A paused run resumes with `runAgent(machine, { snapshot, event })`, and `replay(machine, result.events)` rebuilds any point of a run with no model calls. See [The event log](https://github.com/statelyai/agent/blob/next/docs/event-log.md).
+- **Checked ports.** `createRecorder` records the old loop's model and tool calls, `compareRecordings` replays them against the machine, and `compareRuns` labels every scenario `same`, `intended`, or `regression`. See [Parity with the code you replace](https://github.com/statelyai/agent/blob/next/docs/evals.md#parity-with-the-code-you-replace).
+
+The machine is also a diagram: stream any run to the Stately inspector with `runAgent`'s `inspect` option. See [Inspect a run](https://github.com/statelyai/agent/blob/next/docs/observability.md#inspect-a-run).
 
 Stately Agent adds model requests and decisions to XState:
 
@@ -10,22 +18,28 @@ Stately Agent adds model requests and decisions to XState:
 - Your application chooses the model, runs the requests, and stores the state.
 - The model proposes an event; the machine decides whether it is allowed and what happens next.
 
-Environment and policy:
-
-- The environment is code you own and can verify; the policy is something a model can write inside it.
-- The environment holds the rules and invariants as TypeScript states and guards, fixed and checked with `canReach`.
-- The policy is a JSON machine a model can author and improve from traces, gated before it runs and promoted only on a measured gain. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md).
-
 Stately Agent 2 is in alpha. APIs may change before the stable release.
 
 [Documentation](https://stately.ai/docs/packages/agent) · [Examples](https://github.com/statelyai/agent/blob/next/examples/README.md) · [XState](https://github.com/statelyai/xstate)
 
-## Four starting points
+## Starting points
+
+### Greenfield: a new agent
 
 - **Author a new agent.** Build a machine from states, decisions, and typed requests; run it locally with `runAgent`, test it with no API key, then use it in any framework or runtime with zero machine changes. See the [Quickstart](https://github.com/statelyai/agent/blob/next/docs/quickstart.md) and [Use in any stack](https://github.com/statelyai/agent/blob/next/docs/any-stack.md).
-- **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](https://github.com/statelyai/agent/blob/next/docs/from-a-loop.md).
 - **Copy a known pattern.** ReAct, reflection, plan-and-execute, RAG, supervisor, and more, each a single runnable file you lift in 60 seconds. See [Agent patterns](https://github.com/statelyai/agent/blob/next/docs/patterns.md).
+
+### Brownfield: an existing agent
+
+- **Wrap an existing workflow, then carve it.** `wrapWorkflow` runs an async workflow unchanged inside a machine. In minutes and with no rewrite, you get inspection, traces, the event log, and a recorded baseline. Reliability proofs such as `canReach` arrive per phase, as each phase moves into states, with `checkParity` against the original after each. See [Strangler-fig retrofit](https://github.com/statelyai/agent/blob/next/docs/strangler-fig.md).
+- **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](https://github.com/statelyai/agent/blob/next/docs/from-a-loop.md). A coding agent does it with the shipped `loop-to-machine` skill (see [Agent skills](#agent-skills)): "Use the loop-to-machine skill to convert `src/support-agent.ts` to a machine."
 - **Let an agent improve its own logic.** Keep the rules in a fixed TypeScript environment and let a model rewrite the JSON policy inside it, gated by `verifyAgentConfig` and promoted only when held-out scenarios improve. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md) and the [`improve-machine` skill](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md).
+
+## Environment and policy
+
+- The environment is code you own and can verify; the policy is something a model can write inside it.
+- The environment holds the rules and invariants as TypeScript states and guards, fixed and checked with `canReach`.
+- The policy is a JSON machine a model can author and improve from traces, gated before it runs and promoted only on a measured gain. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md).
 
 ## Install
 
@@ -78,7 +92,7 @@ An app that already uses XState 4 or 5 keeps it: put the agent in its own worksp
 
 ## Agent skills
 
-The package ships agent skills in `node_modules/@statelyai/agent/skills/`. Copy them into your coding agent's skills directory (for Claude Code, `.claude/skills/`):
+The package ships agent skills in `node_modules/@statelyai/agent/skills/`, and its docs in `node_modules/@statelyai/agent/docs/` with an index in `llms.txt`. Copy the skills into your coding agent's skills directory (for Claude Code, `.claude/skills/`):
 
 ```sh
 mkdir -p .claude/skills

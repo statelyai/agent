@@ -255,6 +255,18 @@ describe("verifyAgentConfig", () => {
     );
   });
 
+  test("explore: an exhausted budget fails and surfaces its note", async () => {
+    const result = await verifyAgentConfig(
+      refundConfig(),
+      options({ explore: { inputs: [{ amount: 5 }], budget: { nodes: 1 } } }),
+    );
+    expect(result.gates.at(-1)).toMatchObject({ name: "explore", ok: false });
+    expect(result.gates.at(-1)!.detail).toMatch(
+      /the explore budget ran out \(budget-exhausted: nodes \(1 nodes expanded in \d+ ms, child searches included\)\); exploration is incomplete/,
+    );
+    expect(result.gates.at(-1)!.detail).not.toContain("a cap (maxPaths");
+  });
+
   test("explore: an event whose payloads were not all tried fails and names it", async () => {
     const config = refundConfig();
     config.schemas = {

@@ -1164,3 +1164,5 @@ export function createTanStackAiExecutors<TModels extends TanStackAiModelMap>(
 
   return { generateText, streamText, decide };
 }
+
+export type { DecisionMode, DecisionModeOption } from "../internal/decision-object.js";
