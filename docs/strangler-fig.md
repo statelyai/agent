@@ -26,6 +26,14 @@ export async function runTicket(ticket: Ticket, effects: SupportEffects): Promis
 
 - Each effect is an async function.
 - A call made around `effects` (a module-level client, `fetch`) is invisible to the machine, to traces, and to recordings. Move it into `effects` first.
+- Keep effect arguments and results JSON-shaped where you can: they are journaled and recorded. Pass live objects (a chat session, an `AbortSignal`) by closure, not as arguments.
+
+### Class-shaped code
+
+When the loop is a class method that calls its own private methods for the model and the tools, there is no `(input, effects)` function to pass. Wrap it with no edit to the class:
+
+- `run: (input, effects) => { const executor = createExecutor(input); executor.callModel = (...args) => effects.callModel(...args); return executor.run(); }`, with each effect calling the original method.
+- Route the old test suite through the wrap with a factory or a static `create` stand-in, not a subclass, when the constructor is private.
 
 ## Step 0: wrap
 
@@ -62,7 +70,7 @@ const result = await support.run({ id: "A-100", message: "Refund my mug." });
 - `support.run(input, options)` resolves with what the workflow returned and rethrows what it threw, the same error object.
 - `support.machine` is an ordinary agent machine: `running` invokes the workflow, `done` is final with its result as output. It works with `runAgent`, `describeMachine`, `canReach`, and the inspector.
 - A thrown error settles `runAgent(support.machine, …)` as `{ status: "error", cause: "machine" }`.
-- The `run` callback's third argument carries `signal`, aborted when the run is.
+- `options.signal` reaches the workflow as the `run` callback's third argument, `{ signal }`. The workflow decides what an abort returns, as it did before: one that returns an `aborted` result still returns it.
 
 ### Effect calls as events
 
@@ -146,6 +154,8 @@ resolving: {
 
 - Build the actors per run from `effects`, and pass them as `runAgent`'s `actors`.
 - Carve one phase per commit.
+- A phase in the middle of a `try`/`finally`: the setup before it moves into the runner, and the `finally` becomes a state every exit passes through, so a proof can say cleanup runs first.
+- An invoke whose actor resolves `null` reaches `onDone` with `output` `undefined` (XState v6 alpha). Test for `output == null`, not `=== null`.
 
 ## Check parity
 

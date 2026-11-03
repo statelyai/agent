@@ -111,8 +111,10 @@ export interface WrappedWorkflow<TInput, TOutput, TEffects> {
   machine: WrappedWorkflowMachine<TInput, TOutput>;
   /**
    * Runs the machine with `runAgent` and returns what the workflow returned,
-   * or rethrows what it threw (the same error object). An aborted run throws
-   * `signal.reason`.
+   * or rethrows what it threw (the same error object). `signal` reaches the
+   * workflow, which decides what an abort means, as it did before: a
+   * workflow that returns an `aborted` result still returns it. Once it
+   * aborts, an effect call throws `signal.reason` instead of running.
    */
   run(
     input: TInput,
@@ -307,8 +309,11 @@ export function wrapWorkflow<TInput, TOutput, TEffects extends WorkflowEffects<T
       if (recorder) {
         effects = mapEffects(effects, (name, effect) => recorder.fn(name, effect));
       }
+      // The signal goes to the workflow, not the run: a drop-in keeps the
+      // workflow's own abort behavior.
+      const { signal: _signal, ...agentOptions } = runOptions;
       const result = await runAgent(machine, {
-        ...runOptions,
+        ...agentOptions,
         input: input as never,
         actors: { workflow: workflowLogic(config.run, effects, options.signal, config.redact) },
       });

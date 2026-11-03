@@ -132,4 +132,28 @@ describe("checkParity", () => {
       expect.objectContaining({ reason: "output", message: expect.stringContaining("other") }),
     ]);
   });
+
+  test("normalizeOutput pins what differs run to run", async () => {
+    let clock = 0;
+    const timed = async (ticket: Ticket, effects: Effects) => ({
+      ...(await legacy(ticket, effects)),
+      durationMs: ++clock,
+    });
+    const options = {
+      scenarios,
+      effects: (scenario: (typeof scenarios)[number]) => createEffects(scenario.total),
+      before: timed,
+      after: timed,
+    };
+    expect((await checkParity(options)).equivalent).toBe(false);
+    const report = await checkParity({
+      ...options,
+      normalizeOutput: (output) => ({ ...(output as object), durationMs: 0 }),
+    });
+    expect(report.equivalent).toBe(true);
+    // Rows keep the raw outputs.
+    expect(report.scenarios[0]!.before).toMatchObject({
+      output: { durationMs: expect.any(Number) },
+    });
+  });
 });

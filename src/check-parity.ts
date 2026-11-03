@@ -43,6 +43,11 @@ export interface CheckParityOptions<
   after: (input: TScenario["input"], effects: TEffects) => PromiseLike<unknown>;
   /** Passed to `compareRecordings`. */
   compare?: CompareRecordingsOptions;
+  /**
+   * Maps each side's output before it is compared: drop or pin what differs
+   * run to run (a duration, a generated id). Rows keep the raw outputs.
+   */
+  normalizeOutput?: (output: unknown, scenario: TScenario) => unknown;
 }
 
 /** One scenario's row in a {@link CheckParityReport}. */
@@ -72,10 +77,14 @@ function recordEffects<TEffects extends object>(recorder: Recorder, effects: TEf
   return mapEffects(effects, (name, effect) => recorder.fn(name, effect));
 }
 
-async function settle<T>(run: () => PromiseLike<T>, recorder: Recorder) {
+async function settle<T>(
+  run: () => PromiseLike<T>,
+  recorder: Recorder,
+  normalize: (output: unknown) => unknown,
+) {
   try {
     const output = await run();
-    recorder.output(output);
+    recorder.output(normalize(output));
     return { output };
   } catch (error) {
     return { error };
@@ -122,12 +131,14 @@ export async function checkParity<
   for (const scenario of options.scenarios) {
     const recorder = createRecorder();
     const effects = recordEffects(recorder, options.effects(scenario));
-    const before = await settle(() => options.before(scenario.input, effects), recorder);
+    const normalize = (output: unknown) =>
+      options.normalizeOutput ? options.normalizeOutput(output, scenario) : output;
+    const before = await settle(() => options.before(scenario.input, effects), recorder, normalize);
     const recording = recorder.recording;
 
     const replayer = createRecorder({ replay: recording });
     const stand = recordEffects(replayer, options.effects(scenario));
-    const after = await settle(() => options.after(scenario.input, stand), replayer);
+    const after = await settle(() => options.after(scenario.input, stand), replayer, normalize);
     const replay = replayer.recording;
 
     const { divergences } = compareRecordings(recording, replay, options.compare);

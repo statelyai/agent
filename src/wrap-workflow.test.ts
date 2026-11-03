@@ -163,7 +163,7 @@ describe("wrapWorkflow", () => {
     ).rejects.toBeInstanceOf(RecordingDivergenceError);
   });
 
-  test("signal aborts the run and the workflow", async () => {
+  test("signal reaches the workflow, which decides what an abort returns", async () => {
     let workflowSignal: AbortSignal | undefined;
     const support = wrapWorkflow({
       id: "slow",
@@ -177,7 +177,8 @@ describe("wrapWorkflow", () => {
     const controller = new AbortController();
     const reason = new Error("user cancelled");
     setTimeout(() => controller.abort(reason), 5);
-    await expect(support.run(null, { signal: controller.signal })).rejects.toBe(reason);
+    // The legacy behavior stands: this workflow resolves on abort.
+    await expect(support.run(null, { signal: controller.signal })).resolves.toBe("too late");
     expect(workflowSignal?.aborted).toBe(true);
     expect(workflowSignal?.reason).toBe(reason);
   });
