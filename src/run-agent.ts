@@ -21,6 +21,7 @@ import {
   type TimerKey,
 } from "xstate";
 import { canonicalJson, isPlainObject } from "./internal/is-record.js";
+import { stableInspection } from "./internal/stable-inspection.js";
 import { createDurable, type DurableExecution } from "xstate/durable";
 import type {
   AgentTools,
@@ -3426,16 +3427,18 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     }
   };
 
+  // One stable handle per actor session: the durable runtime re-creates the
+  // actor object each step, which an inspector would see as a new actor.
   const inspect =
     options.inspect === undefined
       ? undefined
-      : (event: InspectionEvent) => {
+      : stableInspection((event: InspectionEvent) => {
           if (typeof options.inspect === "function") {
             options.inspect(event);
           } else {
             options.inspect?.next?.(event);
           }
-        };
+        });
 
   let execution!: DurableExecution<TMachine>;
   const durableAdapter = {

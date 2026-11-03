@@ -14,6 +14,7 @@ pnpm add -D @statelyai/sdk
 import { createInspector } from "@statelyai/sdk/inspect";
 
 const inspector = createInspector({ name: "Refund agent" });
+await inspector.ready; // the URL is null until the relay registers the session
 console.log("Open", inspector.inspectorUrl);
 
 try {
@@ -26,6 +27,8 @@ try {
 - `inspector.inspect` is an XState `inspect` callback, so it is passed as is. `createAgentRuntime` takes the same option.
 - `createInspector` connects to the hosted relay (`wss://sky.stately.ai`) unless `url` or `STATELY_INSPECT_URL` names another one.
 - Create one inspector per run. Session ids are unique only within one actor system, so a reused inspector collides actor ids across runs.
+- With the hosted relay, `inspectorUrl` is a one-time claim link for that session. Open it while the process runs; a new run prints a new one.
+- Each actor in the run reaches the inspector once, under one handle, though the durable runtime re-creates actor objects between steps. Compare actors by `sessionId`, not by object.
 - [examples/tanstack-ai-stream/inspect.ts](https://github.com/statelyai/agent/blob/next/examples/tanstack-ai-stream/inspect.ts) and [examples/next-host/agent-runtime.ts](https://github.com/statelyai/agent/blob/next/examples/next-host/agent-runtime.ts) wire it behind `STATELY_INSPECT=1`.
 
 ## Trace one run
