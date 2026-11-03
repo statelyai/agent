@@ -1421,6 +1421,35 @@ function eventsToParent(effects: unknown, parent: unknown): EventObject[] {
   );
 }
 
+// What a coupled child's effects send beyond it, in effect order: events to
+// `parent`, and events to any other actor that is not one of `own` (its own
+// children) for its parent to route.
+function outboundOf(effects: unknown, parent: unknown, own: unknown): Outbound[] {
+  if (parent === undefined || !Array.isArray(effects)) {
+    return [];
+  }
+  const children = Object.entries(isRecord(own) ? own : {});
+  const out: Outbound[] = [];
+  for (const effect of effects) {
+    if (
+      !isRecord(effect) ||
+      effect["type"] !== "@xstate.sendTo" ||
+      !isRecord(effect["event"]) ||
+      typeof effect["event"]["type"] !== "string"
+    ) {
+      continue;
+    }
+    const target = effect["target"];
+    const event = effect["event"] as EventObject;
+    if (target === parent) {
+      out.push({ event });
+    } else if (!children.some(([id, ref]) => ref === target || id === target)) {
+      out.push({ route: { target, event } });
+    }
+  }
+  return out;
+}
+
 // Every value a JSON Schema admits when that set is finite and small: a
 // `const`, an `enum`, `boolean`, `null`, or a union of those. Else undefined.
 function finiteDomain(schema: unknown): unknown[] | undefined {
@@ -1542,8 +1571,8 @@ interface ExploreNode {
   delivered?: ReadonlySet<string> | undefined;
   /** `children: "coupled"`: each live child machine's state, by actor session. */
   kids?: KidsMap | undefined;
-  /** In a coupled child's search: the events this move sent the parent, in order. */
-  sends?: EventObject[] | undefined;
+  /** In a coupled child's search: what this move sent beyond the child, in order. */
+  outbound?: Outbound[] | undefined;
 }
 
 // `children: "coupled"`: the live child machines a node carries, by actor session.
@@ -1570,10 +1599,11 @@ interface ChildMove {
   path: ChosenEvent[];
   depth: number;
   kids: KidsMap | undefined;
-  /** The events the move sent the parent, in order. */
-  sends: EventObject[];
-  /** Events it sent actors other than its parent and its own children (a sibling). */
-  routed: Routed[];
+  /**
+   * What the move sent beyond the child, in effect order: events to its
+   * parent, and events to other actors (a sibling) for the parent to route.
+   */
+  outbound: Outbound[];
 }
 
 // An event a coupled child sent an actor it does not hold: its parent routes it.
@@ -1595,24 +1625,30 @@ interface ChildStepper {
     idle: boolean;
   };
   /** Applies an event the parent sends the child. */
-  deliver(
-    kid: KidState,
-    event: EventObject,
-  ): {
-    step: AgentStep;
-    kids: KidsMap | undefined;
-    sends: EventObject[];
-    routed: Routed[];
-    overflow?: boolean;
-  };
+  deliver(kid: KidState, event: EventObject): Settled;
+  /** Delivers what a just-started child's entry sent its own children. */
+  prime(kid: KidState): Settled;
+  /** No work pending in the child or in any of its own children. */
+  quiet(kid: KidState): boolean;
   /** A key for the child's state, for `dedupeBy`. */
   stateKey(kid: KidState): string;
   unexpanded: ReadonlySet<string>;
   vacuous: ReadonlySet<string>;
 }
 
-// What a coupled pump delivers next: an event to the parent, or a child that settled.
-type Delivery = { event: EventObject } | { settle: string } | { route: Routed };
+// What a child sent beyond itself: an event to its parent, or one to route.
+type Outbound = { event: EventObject } | { route: Routed };
+
+// What a coupled pump delivers next: an event to the machine, one to route, or a child that settled.
+type Delivery = Outbound | { settle: string };
+
+// A coupled child after a delivery, and what it sent on the way.
+interface Settled {
+  step: AgentStep;
+  kids: KidsMap | undefined;
+  outbound: Outbound[];
+  overflow?: boolean;
+}
 
 // Cap on deliveries in one coupled pump (a parent and children sending to each other).
 const MAX_PUMP = 1_000;
@@ -2426,7 +2462,8 @@ function explore(
 
   // Starts every coupled child live at `step` that `kids` does not hold yet
   // (its entry sends queued for the parent), and drops the ones that stopped.
-  const register = (step: AgentStep, kids: Map<string, KidState>, queue: Delivery[]): void => {
+  // False when priming a child ran past the delivery cap.
+  const register = (step: AgentStep, kids: Map<string, KidState>, queue: Delivery[]): boolean => {
     const live = pendingInvokes(step).filter(isExploredChild);
     const sessions = new Set(live.map((invoke) => childSession(invoke.id, invoke.ref)));
     for (const session of kids.keys()) {
@@ -2442,23 +2479,37 @@ function explore(
       if (!engine) {
         continue;
       }
-      const start = childStartStep(logic, invoke.input, invoke.ref);
+      // The entry effects the child actor actually ran, so their targets
+      // are its own children's refs.
+      const fresh = childStartStep(logic, invoke.input, invoke.ref);
+      const start: AgentStep =
+        invoke.ref?._initialEffects === undefined
+          ? fresh
+          : { ...fresh, actions: invoke.ref._initialEffects as AgentStep["actions"] };
       const parentRef = invoke.ref?._parent;
-      kids.set(session, {
+      const kid: KidState = {
         id: invoke.id,
         src: invoke.src,
         engine,
         step: start,
         parent: parentRef,
         kids: undefined,
-      });
-      for (const event of eventsToParent(invoke.ref?._initialEffects ?? start.actions, parentRef)) {
-        queue.push({ event });
+      };
+      // Its entry's sends, in order, then what its own children's replies set off.
+      const primed = engine.prime(kid);
+      if (primed.overflow) {
+        return false;
       }
-      if (start.snapshot.status !== "active") {
+      kids.set(session, { ...kid, step: primed.step, kids: primed.kids });
+      queue.push(
+        ...outboundOf(start.actions, parentRef, start.snapshot.children),
+        ...primed.outbound,
+      );
+      if (primed.step.snapshot.status !== "active") {
         queue.push({ settle: session });
       }
     }
+    return true;
   };
 
   // The session of the coupled child an effect's `target` names, if any.
@@ -2491,16 +2542,14 @@ function explore(
     step: AgentStep;
     link: PathLink | undefined;
     kids: Map<string, KidState>;
-    sends: EventObject[];
-    /** Events for actors this machine does not hold, for its own parent to route. */
-    routed: Routed[];
+    /** What this machine sent its own parent, or other actors to route, in order. */
+    outbound: Outbound[];
     /** The deliveries ran past the cap: the branch ended `max-depth`, follow it no further. */
     overflow?: boolean;
   } => {
     let step = start;
     let overflow = false;
-    const sends: EventObject[] = [];
-    const routed: Routed[] = [];
+    const outbound: Outbound[] = [];
     // Delivers one event to a coupled child, queueing what follows from it.
     // False when no live coupled child at `at` is the target.
     const deliverTo = (at: AgentStep, target: unknown, event: EventObject): boolean => {
@@ -2519,8 +2568,7 @@ function explore(
         return true;
       }
       kids.set(session!, { ...kid, step: delivered.step, kids: delivered.kids });
-      for (const sent of delivered.sends) queue.push({ event: sent });
-      for (const route of delivered.routed) queue.push({ route });
+      queue.push(...delivered.outbound);
       if (delivered.step.snapshot.status !== "active") {
         queue.push({ settle: session! });
       }
@@ -2530,7 +2578,7 @@ function explore(
     // to this machine's parent, or, at the root, a gap in the search.
     const unrouted = (route: Routed): void => {
       if (stepping) {
-        routed.push(route);
+        outbound.push({ route });
         return;
       }
       unexpanded.add(route.event.type);
@@ -2544,7 +2592,11 @@ function explore(
         return;
       }
       pumped.add(at);
-      register(at, kids, queue);
+      if (!register(at, kids, queue)) {
+        overflow = true;
+        endPath(link, { status: "max-depth", state: at.snapshot.value });
+        return;
+      }
       for (const effect of Array.isArray(at.actions) ? at.actions : []) {
         if (
           !isRecord(effect) ||
@@ -2554,17 +2606,9 @@ function explore(
         ) {
           continue;
         }
-        const target = effect["target"];
-        const event = effect["event"] as EventObject;
-        if (deliverTo(at, target, event)) {
-          if (overflow) return;
-          continue;
-        }
-        // A coupled child's send to anyone but its parent and its own
-        // children goes up for its parent to route (a sibling).
-        if (stepping && outParent !== undefined && target !== outParent) {
-          routed.push({ target, event });
-        }
+        // Sends to anyone else are this step's outbound, in order.
+        deliverTo(at, effect["target"], effect["event"] as EventObject);
+        if (overflow) return;
       }
     };
     flush(step);
@@ -2609,14 +2653,14 @@ function explore(
         }
       }
       recordState(step);
-      sends.push(...eventsToParent(step.actions, outParent));
+      outbound.push(...outboundOf(step.actions, outParent, step.snapshot.children));
       if (stops(step)) {
         witness = pathOf(link);
         break;
       }
       flush(step);
     }
-    return { step, link, kids, sends, routed, overflow };
+    return { step, link, kids, outbound, overflow };
   };
 
   // A key for each coupled child's state, for `dedupeBy`.
@@ -2699,7 +2743,7 @@ function explore(
             path: synced.link,
             depth,
             kids: synced.kids,
-            sends: synced.sends,
+            outbound: synced.outbound,
           };
         }
         return;
@@ -2790,16 +2834,26 @@ function explore(
           moved = true;
           const kids = new Map(nodeKids!);
           kids.set(session, { ...kid, step: move.step, kids: move.kids });
-          const queue: Delivery[] = [
-            ...move.sends.map((event) => ({ event })),
-            ...move.routed.map((route) => ({ route })),
-          ];
+          const queue: Delivery[] = [...move.outbound];
           if (move.step.snapshot.status !== "active") {
             queue.push({ settle: session });
           }
           let link = path;
           for (const event of move.path) link = extend(link, { ...event, actor: kid.id });
-          const next = pump(settled, link, kids, queue);
+          // The machine is not mid-transition when the child's sends reach it,
+          // so each one runs to quiescence (its replies included) before the next.
+          let next: ReturnType<typeof pump> = { step: settled, link, kids, outbound: [] };
+          for (const item of queue) {
+            const after = pump(next.step, next.link, next.kids, [item]);
+            next = { ...after, outbound: [...next.outbound, ...after.outbound] };
+            if (
+              after.overflow ||
+              witness !== undefined ||
+              after.step.snapshot.status !== "active"
+            ) {
+              break;
+            }
+          }
           if (witness !== undefined) {
             return;
           }
@@ -2811,7 +2865,7 @@ function explore(
             path: next.link,
             depth: move.depth,
             kids: next.kids,
-            sends: next.sends,
+            outbound: next.outbound,
           };
         }
       }
@@ -3101,7 +3155,7 @@ function explore(
         captured = [];
         outParent = kid.parent;
         try {
-          const idle = pendingInvokes(kid.step).length === 0 && kid.step.requests.length === 0;
+          const idle = stepper.quiet(kid);
           const moves: ChildMove[] = [];
           for (const node of expand({ step: kid.step, path: undefined, depth, kids: kid.kids })) {
             // What the move's own step sent its children happens in the same
@@ -3120,11 +3174,11 @@ function explore(
               path: pathOf(settledMove.link),
               depth: node.depth,
               kids: settledMove.kids,
-              sends: [
-                ...(node.sends ?? eventsToParent(node.step.actions, kid.parent)),
-                ...settledMove.sends,
+              outbound: [
+                ...(node.outbound ??
+                  outboundOf(node.step.actions, kid.parent, node.step.snapshot.children)),
+                ...settledMove.outbound,
               ],
-              routed: settledMove.routed,
             });
           }
           return { moves, blocked: captured, idle };
@@ -3137,25 +3191,47 @@ function explore(
         const outer = outParent;
         outParent = kid.parent;
         try {
-          // A child not yet settled (just started): its start's effects come first.
+          // A child not yet settled: its own pending effects come first.
           const primed = pump(kid.step, undefined, new Map(kid.kids ?? []), []);
           if (primed.overflow) {
-            return { ...primed, routed: primed.routed, overflow: true };
+            return { ...primed, overflow: true };
           }
           const next = transitionStep(primed.step, event);
           recordState(next);
-          const sends = eventsToParent(next.actions, kid.parent);
           const pumpedKids = pump(next, undefined, primed.kids, []);
           return {
             step: pumpedKids.step,
             kids: pumpedKids.kids,
-            sends: [...primed.sends, ...sends, ...pumpedKids.sends],
-            routed: [...primed.routed, ...pumpedKids.routed],
-            overflow: pumpedKids.overflow,
+            outbound: [
+              ...primed.outbound,
+              ...outboundOf(next.actions, kid.parent, next.snapshot.children),
+              ...pumpedKids.outbound,
+            ],
+            ...(pumpedKids.overflow ? { overflow: true } : {}),
           };
         } finally {
           outParent = outer;
         }
+      },
+      prime(kid) {
+        const outer = outParent;
+        outParent = kid.parent;
+        try {
+          return pump(kid.step, undefined, new Map(kid.kids ?? []), []);
+        } finally {
+          outParent = outer;
+        }
+      },
+      quiet(kid) {
+        if (kid.step.requests.length > 0) {
+          return false;
+        }
+        // Its only pending work may be coupled children that are quiet too.
+        const held = [...(kid.kids ?? new Map<string, KidState>()).values()];
+        return pendingInvokes(kid.step).every((invoke) => {
+          const child = held.find((candidate) => candidate.id === invoke.id);
+          return child !== undefined && child.engine.quiet(child);
+        });
       },
       stateKey,
       unexpanded,

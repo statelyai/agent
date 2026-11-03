@@ -305,7 +305,7 @@ const report = await explorePaths(parentMachine, {
 - `childEvents` lists only the types the host sends the child directly. Default none.
 - A child's pending work races the events that can reach it, as with `interleave: "pending"`.
 - The parent's host events arrive at its idle waits, including while every child waits on the host. While a child or the parent has work pending, they race it only with `interleave: "pending"`.
-- What a child's move sends its own children, and their replies, happen in the same move. A child's send to a sibling is delivered to that sibling. A send to an actor the search does not model lists the event type in `unexpandedEvents`, so the report is not complete.
+- What a child's move sends its own children, and their replies, happen in the same move. A child's send to a sibling is delivered to that sibling, entry sends included. A child's sends reach their targets in the order it made them, each run to quiescence before the next, as a live run does. A send to an actor the search does not model lists the event type in `unexpandedEvents`, so the report is not complete.
 - Child moves count against `maxDepth` like the parent's own branches. On a path they carry `actor` with the child's id: the host events it received, its choices, its settled work. The events it sends the parent appear as the parent receives them.
 - With `dedupeBy`, each child's state joins the key. Without it, every interleaving is explored in full.
 - A child that stops on `needs-output` or `max-depth` ends the parent branch the same way, so the parent report is not complete.
