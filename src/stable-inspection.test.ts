@@ -58,4 +58,24 @@ describe("runAgent inspection", () => {
     )!.actorRef;
     expect((child as unknown as { _parent?: unknown })._parent).toBe(root);
   });
+
+  test("an earlier child's parent link never rewinds the root's handle", async () => {
+    const events: InspectionEvent[] = [];
+    await runAgent(createTwoStepMachine(), { inspect: (event) => events.push(event) });
+    const root = events.find(
+      (event) =>
+        event.type === "@xstate.actor" &&
+        (event.actorRef as unknown as { _parent?: unknown })._parent === undefined,
+    )!.actorRef;
+    // The first child, announced while the root was in `a`.
+    const firstChild = events.find(
+      (event) => event.type === "@xstate.actor" && event.actorRef !== root,
+    )!.actorRef as unknown as {
+      _parent: { getSnapshot(): { value: unknown } };
+      options: { parent: unknown };
+    };
+    expect(firstChild._parent.getSnapshot().value).toBe("c");
+    void firstChild.options.parent;
+    expect((root.getSnapshot() as { value: unknown }).value).toBe("c");
+  });
 });

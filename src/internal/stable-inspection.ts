@@ -37,14 +37,17 @@ export function stableInspection(
     return copy;
   };
 
-  const stable = (ref: unknown): unknown => {
+  // Only the actor an event comes from (`adopt`) moves its handle to a newer
+  // object. A reference reached any other way (a child's `_parent`, a
+  // snapshot's children) may be an older step's object and only looks up.
+  const stable = (ref: unknown, adopt = false): unknown => {
     if (!isRecord(ref) || typeof ref["sessionId"] !== "string") {
       return ref;
     }
     const sessionId = ref["sessionId"];
     const known = handles.get(sessionId);
     if (known) {
-      known.latest = ref;
+      if (adopt) known.latest = ref;
       return known.handle;
     }
     const entry = { latest: ref as object, handle: ref as object };
@@ -84,12 +87,12 @@ export function stableInspection(
     const sessionId = isRecord(actorRef) ? actorRef["sessionId"] : undefined;
     if (raw["type"] === "@xstate.actor" && typeof sessionId === "string") {
       if (announced.has(sessionId)) {
-        stable(actorRef);
+        stable(actorRef, true);
         return;
       }
       announced.add(sessionId);
     }
-    const next: Record<string, unknown> = { ...raw, actorRef: stable(actorRef) };
+    const next: Record<string, unknown> = { ...raw, actorRef: stable(actorRef, true) };
     if (raw["snapshot"] !== undefined) next["snapshot"] = stableSnapshot(raw["snapshot"]);
     // A transition's sent events name their targets by actor too.
     if (Array.isArray(raw["sent"])) {
