@@ -65,6 +65,9 @@ A thread id is how runs are found later. Use a prefix scheme and keep it in one 
 | ------------------------ | -------------------------------------------- |
 | Scenario runs for evals  | `<split>:<deciderVersion>:<scenarioId>:r<k>`, `k` = the repeat index |
 | Production               | `prod:<domain id>` (ticket id, session id)   |
+| Production, no decider   | `prod:<domain id>:<rulesVersion>:<requestVersion>` |
+
+With no decider, `<deciderVersion>` in a scenario thread id is `<rulesVersion>.<requestVersion>`.
 
 `store.listThreads?.({ prefix: "train:careful:" })` then pages through one split of one decider. `listThreads` is optional on a custom store.
 
