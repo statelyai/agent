@@ -2429,7 +2429,7 @@ function explore(
   const register = (step: AgentStep, kids: Map<string, KidState>, queue: Delivery[]): void => {
     const live = pendingInvokes(step).filter(isExploredChild);
     const sessions = new Set(live.map((invoke) => childSession(invoke.id, invoke.ref)));
-    for (const session of [...kids.keys()]) {
+    for (const session of kids.keys()) {
       if (!sessions.has(session)) kids.delete(session);
     }
     for (const invoke of live) {
