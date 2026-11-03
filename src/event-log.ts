@@ -636,7 +636,7 @@ export interface CreateReplayEntryOptions {
 }
 
 function machineIdOf(machine: AnyStateMachine): string {
-  return (machine.config as { id?: string }).id ?? machine.id ?? "(machine)";
+  return (machine.config as { id?: string }).id || machine.id || "(machine)";
 }
 
 function toPersisted(

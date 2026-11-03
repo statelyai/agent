@@ -3205,6 +3205,7 @@ describe("machine version prop (createMachine({ version }))", () => {
       events: { GO: {} },
     });
     return agentSetup.createMachine({
+      id: "versioned",
       version,
       ...(migrate ? { migrate } : {}),
       context: () => ({}),
@@ -5812,12 +5813,12 @@ describe("runAgent (sugar over createAgentRuntime + runToQuiescence)", () => {
 
 describe("invoked async actor completing without a value", () => {
   // XState's `createAsyncLogic` completes with `output: undefined` for a void
-  // `run`, and (via its `data ?? output` coalesce) for one resolving `null`.
-  // The journal must accept both rather than reject the explicit `undefined`.
+  // `run` and `output: null` for one resolving `null`. The journal must accept
+  // both: it drops the explicit `undefined` and keeps `null`.
   test.each([
-    ["undefined", async () => {}],
-    ["null", async () => null],
-  ])("journals the done event when run resolves %s", async (_label, run) => {
+    ["undefined", async () => {}, false],
+    ["null", async () => null, true],
+  ])("journals the done event when run resolves %s", async (_label, run, hasOutput) => {
     const machine = setupAgent({
       context: z.object({}),
       output: z.object({ ok: z.boolean() }),
@@ -5846,7 +5847,7 @@ describe("invoked async actor completing without a value", () => {
     expect(result.status).toBe("done");
     const done = entries.find((entry) => entry.event.type === "xstate.done.actor");
     expect(done).toBeDefined();
-    expect(Object.hasOwn(done!.event, "output")).toBe(false);
+    expect(Object.hasOwn(done!.event, "output")).toBe(hasOutput);
     expect(() => JSON.parse(JSON.stringify(done))).not.toThrow();
   });
 

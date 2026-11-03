@@ -160,7 +160,6 @@ resolving: {
 - Move prompt or warning text the carved phase sends into a versioned request config as you carve. That file is the lever `improve-machine` may edit later.
 - Carve one phase per commit.
 - A phase in the middle of a `try`/`finally`: the setup before it moves into the runner, and the `finally` becomes a state every exit passes through, so a proof can say cleanup runs first.
-- An invoke whose actor resolves `null` reaches `onDone` with `output` `undefined` (XState v6 alpha). Test for `output == null`, not `=== null`.
 
 ## Check parity
 

@@ -65,6 +65,7 @@ const refundMachine = refundAgent.createMachine({
       invoke: {
         src: "agent.generateText",
         id: "payout",
+        input: { model: "quick", prompt: "Pay out the refund" },
         onDone: { target: "done" },
         onError: ({ context }) =>
           context.attempts < 3
