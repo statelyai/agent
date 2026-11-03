@@ -49,12 +49,15 @@ interface Ticket {
 
 const effects = {
   lookupOrder: async (orderId: string) => ({ orderId, total: 20 }),
-  issueRefund: async (orderId: string, amount: number) => ({ refundId: `rf_${orderId}` }),
+  // Keyed, so a retried or resumed run cannot refund twice.
+  issueRefund: async (orderId: string, amount: number, idempotencyKey: string) => ({
+    refundId: `rf_${orderId}`,
+  }),
 };
 
 async function runTicket(ticket: Ticket, fx: typeof effects) {
   const order = await fx.lookupOrder(ticket.id);
-  return fx.issueRefund(order.orderId, order.total);
+  return fx.issueRefund(order.orderId, order.total, `refund:${ticket.id}`);
 }
 
 const support = wrapWorkflow({
@@ -153,6 +156,8 @@ resolving: {
 ```
 
 - Build the actors per run from `effects`, and pass them as `runAgent`'s `actors`.
+- Give the runner a third `options` argument passed through to `runAgent` (`threadId`, `store`, `metadata`, `onTrace`, `inspect`). Traces and inspection then need no copy of it.
+- Move prompt or warning text the carved phase sends into a versioned request config as you carve. That file is the lever `improve-machine` may edit later.
 - Carve one phase per commit.
 - A phase in the middle of a `try`/`finally`: the setup before it moves into the runner, and the `finally` becomes a state every exit passes through, so a proof can say cleanup runs first.
 - An invoke whose actor resolves `null` reaches `onDone` with `output` `undefined` (XState v6 alpha). Test for `output == null`, not `=== null`.

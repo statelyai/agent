@@ -10,7 +10,7 @@
  */
 import { createAsyncLogic } from "xstate";
 import { z } from "zod";
-import { runAgent, setupAgent } from "@statelyai/agent";
+import { runAgent, setupAgent, type AgentRunOptions } from "@statelyai/agent";
 import {
   MAX_ATTEMPTS,
   resolveTicket,
@@ -100,12 +100,18 @@ export const supportMachine = agentSetup.createMachine({
   },
 });
 
-/** `runTicket`'s signature, on the machine. */
+/**
+ * `runTicket`'s signature, on the machine. `options` passes through to
+ * `runAgent` (`threadId`, `store`, `metadata`, `onTrace`, `inspect`), so
+ * traces and inspection need no copy of this runner.
+ */
 export async function runTicketStep1(
   ticket: Ticket,
   effects: SupportEffects,
+  options: Omit<AgentRunOptions<typeof supportMachine>, "input" | "actors"> = {},
 ): Promise<SupportResult> {
   const result = await runAgent(supportMachine, {
+    ...options,
     input: ticket,
     actors: createActors(effects),
   });

@@ -38,7 +38,12 @@ export interface SupportEffects {
     request: GenerateRequest<TTask>,
   ): Promise<GenerateTasks[TTask]["result"]>;
   lookupOrder(orderId: string): Promise<Order | null>;
-  issueRefund(orderId: string, amount: number): Promise<{ refundId: string }>;
+  /** `idempotencyKey` makes a retried or resumed run's second call a no-op. */
+  issueRefund(
+    orderId: string,
+    amount: number,
+    idempotencyKey: string,
+  ): Promise<{ refundId: string }>;
   escalate(ticketId: string, reason: string): Promise<{ queue: string }>;
 }
 
@@ -102,7 +107,7 @@ export async function resolveTicket(
   const amount = classification.amount ?? order.total;
   if (amount > order.total) return escalate(ticket, "refund over order total", effects);
   if (amount > REFUND_LIMIT) return escalate(ticket, "refund needs approval", effects);
-  const { refundId } = await effects.issueRefund(order.orderId, amount);
+  const { refundId } = await effects.issueRefund(order.orderId, amount, `refund:${ticket.id}`);
   const { text } = await effects.generate({
     task: "reply",
     ticket: ticket.message,
