@@ -321,6 +321,7 @@ describe("explorePaths — children: 'coupled'", () => {
     });
     const result = await canReach(machine, "heard", { children: "coupled" });
     expect(result).toMatchObject({ reachable: true, complete: true });
+
     expect(result.witness?.at(-1)).toEqual({ type: "PONG" });
   });
 
@@ -735,6 +736,12 @@ describe("explorePaths — children: 'coupled'", () => {
         childEvents: { leaf: ["PING"] },
       });
       expect(result).toMatchObject({ reachable: true, complete: true });
+      // The grandchild's host event is labeled with its path of actors.
+      const finished = await canReach(machine, "finished", {
+        children: "coupled",
+        childEvents: { leaf: ["PING"] },
+      });
+      expect(finished.witness).toContainEqual({ type: "PING", actor: "middle.leaf" });
     });
   });
 });

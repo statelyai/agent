@@ -2839,7 +2839,12 @@ function explore(
             queue.push({ settle: session });
           }
           let link = path;
-          for (const event of move.path) link = extend(link, { ...event, actor: kid.id });
+          // A grandchild's move keeps its own actor, qualified by this child's id.
+          for (const event of move.path) {
+            const actor =
+              typeof event["actor"] === "string" ? `${kid.id}.${event["actor"]}` : kid.id;
+            link = extend(link, { ...event, actor });
+          }
           // The machine is not mid-transition when the child's sends reach it,
           // so each one runs to quiescence (its replies included) before the next.
           let next: ReturnType<typeof pump> = { step: settled, link, kids, outbound: [] };
