@@ -289,3 +289,75 @@ describe("approval-batch root: safety", () => {
     expect(result).toMatchObject({ reachable: true, complete: true });
   });
 });
+
+describe("approval-batch root: coupled children", () => {
+  const machine = createApprovalBatchMachine({ execute: recordingExecute().execute });
+  const two = calls.slice(0, 2);
+  // The person answers the parent, which forwards to the awaiting call.
+  const verdicts = () => ({
+    APPROVE: two.map((call) => ({ callId: call.id })),
+    APPROVE_ALWAYS: two.map((call) => ({ callId: call.id })),
+    REJECT: two.map((call) => ({ callId: call.id })),
+  });
+  const options = {
+    input: { calls: two },
+    children: "coupled" as const,
+    // Every event a call receives comes through the batch.
+    childEvents: { call: [] },
+    // CALL_ASKING and CALL_READY come only from the calls.
+    hostEvents: ["APPROVE", "APPROVE_ALWAYS", "REJECT", "CANCEL_ALL"],
+    outputs: { policy: ["allow", "ask"], execute: ["ok"] },
+    errors: { execute: new Error("boom") },
+    payloads: verdicts,
+    dedupeBy: (snapshot: { value: unknown; context: unknown }) =>
+      JSON.stringify([snapshot.value, snapshot.context]),
+    maxDepth: 16,
+    maxPaths: 10_000,
+  };
+  type Batch = {
+    context: { results: Record<string, { status: string }>; awaiting: unknown[] };
+  };
+  const executed = (snapshot: Batch) =>
+    Object.values(snapshot.context.results).some((result) => result.status === "executed");
+
+  test("explored to completion from the root", async () => {
+    const report = await explorePaths(machine, options);
+    expect(isExplorationComplete(report)).toBe(true);
+    // Every path settles: all calls land, or the person cancels the batch.
+    expect(new Set(report.terminals.map((terminal) => terminal.state))).toEqual(
+      new Set(["done", "cancelled"]),
+    );
+    expect(report.terminals.every((terminal) => terminal.status === "done")).toBe(true);
+  });
+
+  test("allReady: no call executes while another still awaits a person (complete proof)", async () => {
+    const result = await canReach(
+      machine,
+      ((snapshot: Batch) => executed(snapshot) && snapshot.context.awaiting.length > 0) as never,
+      options,
+    );
+    expect(result).toEqual({ reachable: false, complete: true });
+  });
+
+  test("the barrier is not vacuous: a call that asked still executes", async () => {
+    const result = await canReach(machine, executed as never, {
+      ...options,
+      outputs: { ...options.outputs, policy: ["ask"] },
+    });
+    expect(result).toMatchObject({ reachable: true, complete: true });
+    expect(result.witness?.some((event) => event.type === "APPROVE")).toBe(true);
+  });
+
+  test("'explore' cannot prove the barrier: its children run in any order", async () => {
+    const result = await canReach(
+      machine,
+      ((snapshot: Batch) => executed(snapshot) && snapshot.context.awaiting.length > 0) as never,
+      {
+        ...options,
+        children: "explore" as const,
+        childEvents: { call: ["APPROVE", "APPROVE_ALWAYS", "REJECT", "RELEASE"] },
+      },
+    );
+    expect(result.reachable).toBe(true);
+  });
+});

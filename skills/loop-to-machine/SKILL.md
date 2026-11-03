@@ -134,7 +134,7 @@ From `@statelyai/agent/testing` (example options in [reference.md](reference.md#
 - `outputs`: every output each actor can return; `errors`: each actor fails.
 - **A loop** needs `options.dedupeBy`, or the search hits `maxDepth` with `complete: false`. Key on the state value plus the fields read at the loop head (counters, flags); drop fields that only change within one pass. A search over a few seconds: cut the key first.
 - A state passed through within one step (left at once by `always`, or a `choice` state) counts as reached: `canReach` returns the path through it and `explorePaths` lists it in `reachedStates`, so it works as a sentinel.
-- **A machine that spawns or invokes children**: pass `children: "explore"` and `childEvents` (the types the parent forwards), and read `vacuous`. Expect long searches; use `interleave: "pending"` only for the invariant that needs host events raced against in-flight invokes.
+- **A machine that spawns or invokes children**: pass `children: "coupled"`, `childEvents` (only the types the host sends a child directly; the parent's sends need no entry), and `hostEvents` when child status events must not be forged by the host. A witness is then a run the machines can make together. Read `vacuous`. Use `interleave: "pending"` only for the invariant that needs host events raced against in-flight work.
 - A loosened guard makes `canReach` true; test that too.
 - Each normal final is reachable (the search is not vacuous).
 

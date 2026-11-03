@@ -283,7 +283,7 @@ By default, a child machine is a src like any other: with no `outputs` entry, it
 - Bounded:
   - Child idle waits are not parent fork points. The child is explored to its finals, and its distinct outputs fork the parent.
   - N children are explored independently, not as a product of their states. While an explored child is pending, it and every other pending invoke or text request settle in any order; one with no `outputs` entry adds a `needs-output` terminal, and a pending decision's choices branch from the same point. Other combinations are not enumerated beyond `interleave`.
-  - A child's events and outputs are not correlated: each event reaches the parent at most once per path, in any order, before or without the others, and before any of the child's outputs. This over-approximates the child, so a witness may not be a live path. A child that sends the same event twice is covered once.
+  - A child's events and outputs are not correlated: each event reaches the parent at most once per path, in any order, before or without the others, and before any of the child's outputs. This over-approximates the child, so a witness may not be a live path. A child that sends the same event twice is covered once. For witnesses that are live runs, use `children: "coupled"`.
 - An incomplete child search, such as one with its own `needs-output` or `max-depth`, also ends the parent branch `needs-output` for that src, so the parent report is not complete. The child's `unexpandedEvents` and `vacuous` join the parent's.
 
 ```ts no-check
@@ -294,6 +294,37 @@ const report = await explorePaths(parentMachine, {
 // report.terminals → one branch per distinct child output, e.g.
 // [{ type: 'xstate.done.actor.approval', output: { ok: true } }]
 ```
+
+### Coupled child machines
+
+`children: "coupled"` steps each child machine inside the parent's search, one move at a time. A witness is then a run the parent and its children can make together. Use it for child machines you wrote, such as one machine per tool call in a batch.
+
+- The same children qualify as for `"explore"`: invoked or spawned state machines with no `outputs` or `errors` entry.
+- A child's events reach the parent in the order the child sends them on its own path. Its output follows them.
+- An event the parent sends a child with `sendTo`/`forwardTo` is applied to that child's state at once, in order. It does not need a `childEvents` entry.
+- `childEvents` lists only the types the host sends the child directly. Default none.
+- A child's pending work races the events that can reach it, as with `interleave: "pending"`.
+- The parent's host events arrive at its idle waits, including while every child waits on the host. While a child or the parent has work pending, they race it only with `interleave: "pending"`.
+- What a child's move sends its own children, and their replies, happen in the same move. A child's send to a sibling is delivered to that sibling, entry sends included. A child's sends reach their targets in the order it made them, each run to quiescence before the next, as a live run does. A send to an actor the search does not model lists the event type in `unexpandedEvents`, so the report is not complete.
+- Child moves count against `maxDepth` like the parent's own branches. On a path they carry `actor` with the child's id (a grandchild's as `child.grandchild`): the host events it received, its choices, its settled work. The events it sends the parent appear as the parent receives them.
+- With `dedupeBy`, each child's state joins the key. Without it, every interleaving is explored in full.
+- A child that stops on `needs-output` or `max-depth` ends the parent branch the same way, so the parent report is not complete.
+
+Pass `hostEvents` when some types the parent accepts come only from its children, such as a child's status events. The search then offers only the listed types at the parent's waits.
+
+```ts no-check
+const result = await canReach(batchMachine, executedWhileAwaiting, {
+  input: { calls: [read, write] },
+  children: "coupled",
+  childEvents: { call: [] }, // every event a call receives comes through the batch
+  hostEvents: ["APPROVE", "REJECT", "CANCEL_ALL"], // CALL_READY comes only from calls
+  outputs: { policy: ["allow", "ask"], execute: ["ok"] },
+  dedupeBy: (snapshot) => JSON.stringify([snapshot.value, snapshot.context]),
+});
+// → { reachable: false, complete: true }: no call runs while another awaits a person
+```
+
+`"explore"` stays the over-approximation: it sends a child's events in any order and does not correlate them with its outputs. A witness there may not be a live run. Prefer it only when you do not want the proof to depend on the child's own logic.
 
 ### Budgets
 

@@ -1159,15 +1159,41 @@ export interface ExplorePathsOptions {
    * {@link ExplorePathsOptions.childEvents} lists for its src (none by
    * default). A child wait that accepts an event not listed leaves the
    * child search incomplete.
+   *
+   * `"coupled"`: each child machine is stepped inside the parent's search,
+   * one move at a time, so a witness is a run the machines can make
+   * together. A child's events reach the parent in the order the child sends
+   * them on its own path, its output follows them, and an event the parent
+   * sends it (`sendTo`/`forwardTo`) is applied to the child's current state,
+   * in order, instead of arriving at any time. `childEvents` then lists only
+   * the types the host sends the child directly; the parent's own sends need
+   * no entry. A child's pending work and the events that can reach it race
+   * as with `interleave: "pending"`. Child moves count against `maxDepth`
+   * like the parent's, and appear on a path with `actor` set to the child's
+   * id (the child's own events, its choices, its settled work); the events
+   * it sends the parent appear as the parent receives them. With `dedupeBy`,
+   * each child's state is part of the key. More precise and often cheaper
+   * than `"explore"` for authored child machines; `"explore"` remains the
+   * over-approximation for a child whose behavior you do not want to trust.
    */
-  children?: "outputs" | "explore";
+  children?: "outputs" | "explore" | "coupled";
   /**
    * With `children: "explore"`: per child src, the event types that can
    * reach the child at its waits (the ones the parent forwards with
    * `sendTo`/`forwardTo`, or the host sends it directly). Unlisted types are
-   * never offered to the child.
+   * never offered to the child. With `children: "coupled"`: only the types
+   * the host sends the child directly; the parent's sends are delivered as
+   * the parent makes them.
    */
   childEvents?: Record<string, string[]>;
+  /**
+   * The event types the host can send the machine at its waits (and, with
+   * `interleave: "pending"`, while work is pending). Default: every type the
+   * active states accept. List them when some accepted types only ever come
+   * from the machine's own children (a child's status events), so the search
+   * does not offer them as if the host sent them.
+   */
+  hostEvents?: string[];
   /**
    * Payloads to try per event type at each branch point, given the settled
    * snapshot there. At a decision or an idle wait, an event type with an
@@ -1395,6 +1421,35 @@ function eventsToParent(effects: unknown, parent: unknown): EventObject[] {
   );
 }
 
+// What a coupled child's effects send beyond it, in effect order: events to
+// `parent`, and events to any other actor that is not one of `own` (its own
+// children) for its parent to route.
+function outboundOf(effects: unknown, parent: unknown, own: unknown): Outbound[] {
+  if (parent === undefined || !Array.isArray(effects)) {
+    return [];
+  }
+  const children = Object.entries(isRecord(own) ? own : {});
+  const out: Outbound[] = [];
+  for (const effect of effects) {
+    if (
+      !isRecord(effect) ||
+      effect["type"] !== "@xstate.sendTo" ||
+      !isRecord(effect["event"]) ||
+      typeof effect["event"]["type"] !== "string"
+    ) {
+      continue;
+    }
+    const target = effect["target"];
+    const event = effect["event"] as EventObject;
+    if (target === parent) {
+      out.push({ event });
+    } else if (!children.some(([id, ref]) => ref === target || id === target)) {
+      out.push({ route: { target, event } });
+    }
+  }
+  return out;
+}
+
 // Every value a JSON Schema admits when that set is finite and small: a
 // `const`, an `enum`, `boolean`, `null`, or a union of those. Else undefined.
 function finiteDomain(schema: unknown): unknown[] | undefined {
@@ -1514,7 +1569,89 @@ interface ExploreNode {
   depth: number;
   /** Child-to-parent events already delivered on this path (`<child session>\u0000<event JSON>`). */
   delivered?: ReadonlySet<string> | undefined;
+  /** `children: "coupled"`: each live child machine's state, by actor session. */
+  kids?: KidsMap | undefined;
+  /** In a coupled child's search: what this move sent beyond the child, in order. */
+  outbound?: Outbound[] | undefined;
 }
+
+// `children: "coupled"`: the live child machines a node carries, by actor session.
+type KidsMap = ReadonlyMap<string, KidState>;
+
+// One coupled child machine, stepped inside its parent's search.
+interface KidState {
+  /** The invoke or spawn id its parent knows it by. */
+  id: string;
+  src: string;
+  /** Steps this child (shared by every child of the same logic and src). */
+  engine: ChildStepper;
+  step: AgentStep;
+  /** The parent actor its `sendTo(parent, …)` effects target. */
+  parent: unknown;
+  /** Its own coupled children. */
+  kids: KidsMap | undefined;
+}
+
+// One move a coupled child can make from its current state.
+interface ChildMove {
+  step: AgentStep;
+  /** What the child did, in order (its events, choices, settled work). */
+  path: ChosenEvent[];
+  depth: number;
+  kids: KidsMap | undefined;
+  /**
+   * What the move sent beyond the child, in effect order: events to its
+   * parent, and events to other actors (a sibling) for the parent to route.
+   */
+  outbound: Outbound[];
+}
+
+// An event a coupled child sent an actor it does not hold: its parent routes it.
+interface Routed {
+  target: unknown;
+  event: EventObject;
+}
+
+// A child machine's search, run one move at a time by its parent.
+interface ChildStepper {
+  /** The moves a child can make, and the reasons a branch could not be followed. */
+  moves(
+    kid: KidState,
+    depth: number,
+  ): {
+    moves: ChildMove[];
+    blocked: Array<{ status: AgentPathTerminal["status"]; missingSrc?: string }>;
+    /** The child had no work pending: every move is an event the host sent it. */
+    idle: boolean;
+  };
+  /** Applies an event the parent sends the child. */
+  deliver(kid: KidState, event: EventObject): Settled;
+  /** Delivers what a just-started child's entry sent its own children. */
+  prime(kid: KidState): Settled;
+  /** No work pending in the child or in any of its own children. */
+  quiet(kid: KidState): boolean;
+  /** A key for the child's state, for `dedupeBy`. */
+  stateKey(kid: KidState): string;
+  unexpanded: ReadonlySet<string>;
+  vacuous: ReadonlySet<string>;
+}
+
+// What a child sent beyond itself: an event to its parent, or one to route.
+type Outbound = { event: EventObject } | { route: Routed };
+
+// What a coupled pump delivers next: an event to the machine, one to route, or a child that settled.
+type Delivery = Outbound | { settle: string };
+
+// A coupled child after a delivery, and what it sent on the way.
+interface Settled {
+  step: AgentStep;
+  kids: KidsMap | undefined;
+  outbound: Outbound[];
+  overflow?: boolean;
+}
+
+// Cap on deliveries in one coupled pump (a parent and children sending to each other).
+const MAX_PUMP = 1_000;
 
 // An explored child starts from its pure-transition actor's snapshot, which
 // keeps the parent link `sendTo(parent, …)` needs, with the requests a fresh
@@ -1605,6 +1742,8 @@ function explore(
   trackTransits = nesting === 0 && hasTransientStates(machine.root),
   // Shared by the top-level search and every child search it triggers.
   budget: SearchBudget = startBudget(options.budget),
+  // `children: "coupled"`: build a child's stepper instead of searching.
+  stepping = false,
 ): {
   report: AgentPathReport;
   witness?: ChosenEvent[];
@@ -1616,13 +1755,17 @@ function explore(
   stalls: boolean;
   /** Some path ended short of `done`, `idle`, or `error`. */
   unfinished: boolean;
+  /** With `stepping`: the child's stepper. */
+  stepper?: ChildStepper;
 } {
   const maxDepth = options.maxDepth ?? 8;
   const maxPaths = options.maxPaths ?? 200;
   const maxNodes = options.maxNodes ?? DEFAULT_MAX_NODES;
   const errorScript = options.errors ?? {};
   const outputScript = options.outputs ?? {};
-  const interleaving = options.interleave === "pending";
+  const coupled = options.children === "coupled";
+  // A coupled child's pending work always races what can reach it.
+  const interleaving = options.interleave === "pending" || stepping;
   // An `errors` entry's failure values: an array is one per element (`[]` is
   // no entry), anything else is one failure.
   const errorsFor = (key: string): { values: unknown[]; record: boolean } | undefined => {
@@ -1885,7 +2028,7 @@ function explore(
 
   // A pending invoke `children: "explore"` explores rather than scripts.
   const isExploredChild = (invoke: PendingInvoke): boolean =>
-    options.children === "explore" &&
+    (options.children === "explore" || coupled) &&
     !(invoke.src in outputScript) &&
     !errorsFor(invoke.src) &&
     isMachineLogic(invoke.logic);
@@ -1897,14 +2040,23 @@ function explore(
   // still a branch the search cannot follow: it ends `needs-output`.
   const concurrentForks = (
     step: AgentStep,
-  ): { forks: InvokeFork[]; blocked: string[]; decisions: AgentStepRequest[] } | undefined => {
-    if (options.children !== "explore") {
+  ):
+    | {
+        forks: InvokeFork[];
+        blocked: string[];
+        decisions: AgentStepRequest[];
+        /** `children: "coupled"`: the child machines stepped beside them. */
+        kids?: PendingInvoke[];
+      }
+    | undefined => {
+    if (options.children !== "explore" && !coupled) {
       return undefined;
     }
     const invokes = pendingInvokes(step);
     if (!invokes.some(isExploredChild)) {
       return undefined;
     }
+    const kids = coupled ? invokes.filter(isExploredChild) : [];
     const blocked: string[] = [];
     const asFork = (
       settle: ReturnType<typeof settleFor>,
@@ -1932,7 +2084,7 @@ function explore(
         asFork(settleFor(request.id, request.src, true), request.id, request.src, true),
       ),
       ...invokes
-        .filter((invoke) => !requestIds.has(invoke.id))
+        .filter((invoke) => !requestIds.has(invoke.id) && !kids.includes(invoke))
         .flatMap((invoke) =>
           asFork(settleFor(invoke.id, invoke.src, false, invoke), invoke.id, invoke.src, false),
         ),
@@ -1951,6 +2103,9 @@ function explore(
           outputs: [],
         });
       }
+    }
+    if (coupled) {
+      return { forks, blocked, decisions, kids };
     }
     return forks.length > 0 && forks.length + blocked.length + decisions.length > 1
       ? { forks, blocked, decisions }
@@ -1977,7 +2132,16 @@ function explore(
       unexplored.push(text());
     }
   };
+  // A coupled child's moves() collects its terminals here instead.
+  let captured: Array<{ status: AgentPathTerminal["status"]; missingSrc?: string }> | undefined;
   const endPath = (path: PathLink | undefined, terminal: Omit<AgentPathTerminal, "path">): void => {
+    if (captured) {
+      captured.push({
+        status: terminal.status,
+        ...(terminal.missingSrc === undefined ? {} : { missingSrc: terminal.missingSrc }),
+      });
+      return;
+    }
     pathsExplored++;
     if (terminal.status === "idle") {
       stalls = true;
@@ -1994,7 +2158,8 @@ function explore(
   let hitPathCap = false;
   // True, and recorded, once a cap or the shared budget leaves a node unexpanded.
   const capped = (): boolean => {
-    if (pathsExplored >= maxPaths || nodesExpanded >= maxNodes) {
+    // A coupled child's moves are bounded by its parent's search, not its own caps.
+    if (!stepping && (pathsExplored >= maxPaths || nodesExpanded >= maxNodes)) {
       hitPathCap = true;
     }
     if (budget.exhausted === undefined) {
@@ -2030,12 +2195,17 @@ function explore(
     }
   };
 
-  const initial = withTransits(childStartStep(machine, options.input, childRef), () =>
-    getInitialMicrosteps(machine, options.input as never),
-  );
-  recordState(initial, childRef?._initialEffects ?? initial.actions);
-  if (stops(initial)) {
-    witness = [];
+  // A coupled child's stepper starts from each child's own state, not here.
+  const initial = stepping
+    ? undefined
+    : withTransits(childStartStep(machine, options.input, childRef), () =>
+        getInitialMicrosteps(machine, options.input as never),
+      );
+  if (initial) {
+    recordState(initial, childRef?._initialEffects ?? initial.actions);
+    if (stops(initial)) {
+      witness = [];
+    }
   }
 
   // Advance a step deterministically through any non-branching text or scripted
@@ -2050,16 +2220,23 @@ function explore(
   // Accepted events that can actually arrive: all of them at the root, only
   // the deliverable ones in an explored child (the rest are noted).
   const undeliverable = new Set<string>();
+  const external =
+    deliverable ?? (options.hostEvents === undefined ? undefined : new Set(options.hostEvents));
   const arriving = (snapshot: AnyMachineSnapshot) =>
     getAcceptedEvents(snapshot).filter((descriptor) => {
-      if (deliverable === undefined || deliverable.has(descriptor.type)) {
+      if (external === undefined || external.has(descriptor.type)) {
         return true;
       }
-      undeliverable.add(descriptor.type);
+      if (deliverable !== undefined) {
+        undeliverable.add(descriptor.type);
+      }
       return false;
     });
+  // A coupled child never resolves work straight through: each settlement is
+  // a move of its own, so the parent's sends and the child's sends to the
+  // parent can fall between them.
   const races = (step: AgentStep): boolean =>
-    interleaving && arriving(step.snapshot as AnyMachineSnapshot).length > 0;
+    stepping || (interleaving && arriving(step.snapshot as AnyMachineSnapshot).length > 0);
   const advance = (
     step: AgentStep,
   ): {
@@ -2073,6 +2250,8 @@ function explore(
     blockedSiblings?: string[];
     /** Decisions pending beside them: their choices branch from the same node. */
     decisions?: AgentStepRequest[];
+    /** `children: "coupled"`: child machines pending, stepped by the parent. */
+    kids?: PendingInvoke[];
     pending?: { id: string; output: unknown };
   } => {
     let current = step;
@@ -2093,6 +2272,7 @@ function explore(
           siblings: concurrent.forks.slice(1),
           blockedSiblings: concurrent.blocked,
           decisions: concurrent.decisions,
+          ...(concurrent.kids?.length ? { kids: concurrent.kids } : {}),
         };
       }
       if (request && request.kind === "text") {
@@ -2245,7 +2425,281 @@ function explore(
     note(() => `max-depth: stopped at path [${pathTypes(path)}]`);
   };
 
-  function* expand({ step, path, depth, delivered }: ExploreNode): Generator<ExploreNode> {
+  // `children: "coupled"`: a stepper per child (logic, src), shared by every
+  // child of that kind; each child's own state travels with the node.
+  const steppers = new Map<string, ChildStepper>();
+  const stepperFor = (src: string, logic: AnyStateMachine): ChildStepper | undefined => {
+    if (nesting >= MAX_CHILD_NESTING) {
+      note(
+        () =>
+          `child: src '${src}' is nested deeper than ${MAX_CHILD_NESTING} machines; not explored`,
+      );
+      return undefined;
+    }
+    const key = `${logicId(logic)}\u0000${src}`;
+    let stepper = steppers.get(key);
+    if (!stepper) {
+      stepper = explore(
+        logic,
+        { ...options, input: undefined, dedupeBy: undefined },
+        undefined,
+        nesting + 1,
+        new Set(options.childEvents?.[src] ?? []),
+        undefined,
+        false,
+        budget,
+        true,
+      ).stepper!;
+      steppers.set(key, stepper);
+    }
+    return stepper;
+  };
+
+  // Steps whose effects a pump already delivered to their children.
+  const pumped = new WeakSet<AgentStep>();
+  // The parent the current coupled child sends to, while stepping it.
+  let outParent: unknown;
+
+  // Starts every coupled child live at `step` that `kids` does not hold yet
+  // (its entry sends queued for the parent), and drops the ones that stopped.
+  // False when priming a child ran past the delivery cap.
+  const register = (step: AgentStep, kids: Map<string, KidState>, queue: Delivery[]): boolean => {
+    const live = pendingInvokes(step).filter(isExploredChild);
+    const sessions = new Set(live.map((invoke) => childSession(invoke.id, invoke.ref)));
+    for (const session of kids.keys()) {
+      if (!sessions.has(session)) kids.delete(session);
+    }
+    for (const invoke of live) {
+      const session = childSession(invoke.id, invoke.ref);
+      if (kids.has(session)) {
+        continue;
+      }
+      const logic = invoke.logic as AnyStateMachine;
+      const engine = stepperFor(invoke.src, logic);
+      if (!engine) {
+        continue;
+      }
+      // The entry effects the child actor actually ran, so their targets
+      // are its own children's refs.
+      const fresh = childStartStep(logic, invoke.input, invoke.ref);
+      const start: AgentStep =
+        invoke.ref?._initialEffects === undefined
+          ? fresh
+          : { ...fresh, actions: invoke.ref._initialEffects as AgentStep["actions"] };
+      const parentRef = invoke.ref?._parent;
+      const kid: KidState = {
+        id: invoke.id,
+        src: invoke.src,
+        engine,
+        step: start,
+        parent: parentRef,
+        kids: undefined,
+      };
+      // Its entry's sends, in order, then what its own children's replies set off.
+      const primed = engine.prime(kid);
+      if (primed.overflow) {
+        return false;
+      }
+      kids.set(session, { ...kid, step: primed.step, kids: primed.kids });
+      queue.push(
+        ...outboundOf(start.actions, parentRef, start.snapshot.children),
+        ...primed.outbound,
+      );
+      if (primed.step.snapshot.status !== "active") {
+        queue.push({ settle: session });
+      }
+    }
+    return true;
+  };
+
+  // The session of the coupled child an effect's `target` names, if any.
+  const kidSessionFor = (
+    step: AgentStep,
+    target: unknown,
+    kids: ReadonlyMap<string, KidState>,
+  ): string | undefined => {
+    const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+    for (const [id, ref] of Object.entries(children)) {
+      if (ref === target || id === target) {
+        const session = childSession(id, ref);
+        return kids.has(session) ? session : undefined;
+      }
+    }
+    return undefined;
+  };
+
+  // Delivers, in order, everything that follows from `start` with no choice:
+  // the events its transition sent its coupled children, their replies to it,
+  // the children that settled, and so on. Returns where that leaves the
+  // machine, the path with each event it received, and the events it sent
+  // its own parent on the way.
+  const pump = (
+    start: AgentStep,
+    link: PathLink | undefined,
+    kids: Map<string, KidState>,
+    queue: Delivery[],
+  ): {
+    step: AgentStep;
+    link: PathLink | undefined;
+    kids: Map<string, KidState>;
+    /** What this machine sent its own parent, or other actors to route, in order. */
+    outbound: Outbound[];
+    /** The deliveries ran past the cap: the branch ended `max-depth`, follow it no further. */
+    overflow?: boolean;
+  } => {
+    let step = start;
+    let overflow = false;
+    const outbound: Outbound[] = [];
+    // Delivers one event to a coupled child, queueing what follows from it.
+    // False when no live coupled child at `at` is the target.
+    const deliverTo = (at: AgentStep, target: unknown, event: EventObject): boolean => {
+      const session = kidSessionFor(at, target, kids);
+      const kid = session === undefined ? undefined : kids.get(session);
+      if (!kid) {
+        return false;
+      }
+      if (kid.step.snapshot.status !== "active") {
+        return true;
+      }
+      const delivered = kid.engine.deliver(kid, event);
+      if (delivered.overflow) {
+        overflow = true;
+        endPath(link, { status: "max-depth", state: at.snapshot.value });
+        return true;
+      }
+      kids.set(session!, { ...kid, step: delivered.step, kids: delivered.kids });
+      queue.push(...delivered.outbound);
+      if (delivered.step.snapshot.status !== "active") {
+        queue.push({ settle: session! });
+      }
+      return true;
+    };
+    // An event a child sent an actor neither it nor this machine holds: up
+    // to this machine's parent, or, at the root, a gap in the search.
+    const unrouted = (route: Routed): void => {
+      if (stepping) {
+        outbound.push({ route });
+        return;
+      }
+      unexpanded.add(route.event.type);
+      note(
+        () =>
+          `coupled: a child sent '${route.event.type}' to an actor the search does not model, at path [${pathTypes(link)}]`,
+      );
+    };
+    const flush = (at: AgentStep): void => {
+      if (pumped.has(at)) {
+        return;
+      }
+      pumped.add(at);
+      if (!register(at, kids, queue)) {
+        overflow = true;
+        endPath(link, { status: "max-depth", state: at.snapshot.value });
+        return;
+      }
+      for (const effect of Array.isArray(at.actions) ? at.actions : []) {
+        if (
+          !isRecord(effect) ||
+          effect["type"] !== "@xstate.sendTo" ||
+          !isRecord(effect["event"]) ||
+          typeof effect["event"]["type"] !== "string"
+        ) {
+          continue;
+        }
+        // Sends to anyone else are this step's outbound, in order.
+        deliverTo(at, effect["target"], effect["event"] as EventObject);
+        if (overflow) return;
+      }
+    };
+    flush(step);
+    for (let i = 0; queue.length > 0 && !overflow; i++) {
+      if (step.done || step.snapshot.status !== "active" || witness !== undefined) {
+        break;
+      }
+      if (i >= MAX_PUMP) {
+        // A parent and children that keep sending each other: the branch is
+        // cut short, so the search is not complete.
+        endPath(link, { status: "max-depth", state: step.snapshot.value });
+        note(() => `coupled: more than ${MAX_PUMP} deliveries at path [${pathTypes(link)}]`);
+        overflow = true;
+        break;
+      }
+      const item = queue.shift()!;
+      if ("route" in item) {
+        if (!deliverTo(step, item.route.target, item.route.event)) {
+          unrouted(item.route);
+        }
+        continue;
+      }
+      if ("event" in item) {
+        const accepted = (step.snapshot as AnyMachineSnapshot).can(item.event);
+        step = transitionStep(step, item.event);
+        if (accepted) {
+          link = extend(link, item.event as ChosenEvent);
+        }
+      } else {
+        const kid = kids.get(item.settle);
+        if (!kid) {
+          continue;
+        }
+        kids.delete(item.settle);
+        const settledKid = kid.step.snapshot as AnyMachineSnapshot & { error?: unknown };
+        if (settledKid.status === "done") {
+          step = resolveStep(step, kid.id, settledKid.output);
+          link = extend(link, { type: `xstate.done.actor.${kid.id}`, output: settledKid.output });
+        } else {
+          step = rejectStep(step, kid.id, settledKid.error);
+          link = extend(link, { type: `xstate.error.actor.${kid.id}`, error: settledKid.error });
+        }
+      }
+      recordState(step);
+      outbound.push(...outboundOf(step.actions, outParent, step.snapshot.children));
+      if (stops(step)) {
+        witness = pathOf(link);
+        break;
+      }
+      flush(step);
+    }
+    return { step, link, kids, outbound, overflow };
+  };
+
+  // A key for each coupled child's state, for `dedupeBy`.
+  let unkeyable = 0;
+  const kidsKey = (kids: KidsMap | undefined): string => {
+    if (!kids || kids.size === 0) {
+      return "";
+    }
+    const parts = [...kids.values()].map(
+      (kid) => `${kid.id}\u0000${kid.src}\u0000${kid.engine.stateKey(kid)}`,
+    );
+    return `\u0003${parts.sort().join("\u0003")}`;
+  };
+  const stateKey = (kid: KidState): string => {
+    const snapshot = kid.step.snapshot as AnyMachineSnapshot;
+    try {
+      return (
+        JSON.stringify([
+          snapshot.value,
+          snapshot.context,
+          snapshot.status,
+          (snapshot as { historyValue?: unknown }).historyValue ?? null,
+          kid.step.requests.map((request) => request.id),
+          Object.keys(snapshot.children ?? {}),
+          pumped.has(kid.step),
+        ]) + kidsKey(kid.kids)
+      );
+    } catch {
+      return `\u0002${unkeyable++}`;
+    }
+  };
+
+  function* expand({
+    step,
+    path,
+    depth,
+    delivered,
+    kids: nodeKids,
+  }: ExploreNode): Generator<ExploreNode> {
     if (witness !== undefined || capped()) {
       return;
     }
@@ -2261,10 +2715,39 @@ function explore(
       blockedSiblings,
       decisions,
       pending,
+      kids: pendingKids,
     } = advance(step);
     if (hit) {
       witness = pathOf(path);
       return;
+    }
+
+    // `children: "coupled"`: first deliver what the step sent its children
+    // and start the ones it spawned. Doing so is no choice, so it keeps the depth.
+    if (pendingKids) {
+      const kids = new Map(nodeKids ?? []);
+      const sizeBefore = kids.size;
+      const synced = pump(settled, path, kids, []);
+      if (synced.overflow) {
+        return;
+      }
+      if (
+        witness !== undefined ||
+        synced.step !== settled ||
+        synced.kids.size !== sizeBefore ||
+        [...synced.kids].some(([session, kid]) => nodeKids?.get(session) !== kid)
+      ) {
+        if (witness === undefined) {
+          yield {
+            step: synced.step,
+            path: synced.link,
+            depth,
+            kids: synced.kids,
+            outbound: synced.outbound,
+          };
+        }
+        return;
+      }
     }
 
     // A key already explored at this depth or shallower has nothing new
@@ -2274,7 +2757,8 @@ function explore(
     if (options.dedupeBy) {
       const key =
         options.dedupeBy(settled.snapshot as AnyMachineSnapshot) +
-        (delivered?.size ? `\u0001${[...delivered].sort().join("\u0001")}` : "");
+        (delivered?.size ? `\u0001${[...delivered].sort().join("\u0001")}` : "") +
+        kidsKey(nodeKids);
       const seenAt = visited.get(key);
       if (seenAt !== undefined && seenAt <= depth) {
         return;
@@ -2291,12 +2775,158 @@ function explore(
       }
       const resolved = resolveStep(settled, pending.id, pending.output);
       recordState(resolved);
-      yield { step: resolved, path, depth };
+      yield {
+        step: resolved,
+        // A coupled child's settled work is a move of its own, shown on the path.
+        path: stepping
+          ? extend(path, { type: `xstate.done.actor.${pending.id}`, output: pending.output })
+          : path,
+        depth,
+      };
       yield* raceBranches(settled, path, depth);
       return;
     }
 
-    if (fork) {
+    // `children: "coupled"`: each child's next move, then the parent's own
+    // settlements beside them. With no move left but a decision or an idle
+    // wait, the branch point below takes over.
+    if (pendingKids) {
+      if (depth >= maxDepth) {
+        maxDepthTerminal(settled, path);
+        return;
+      }
+      let moved = false;
+      // Every child is waiting on the host (or stalled): the machines as a
+      // whole sit at an idle wait, where the parent's host events can arrive.
+      let quiet = true;
+      for (const [session, kid] of nodeKids ?? []) {
+        const { moves, blocked, idle } = kid.engine.moves(kid, depth);
+        if (!idle && moves.length > 0) quiet = false;
+        for (const type of kid.engine.unexpanded) unexpanded.add(type);
+        for (const type of kid.engine.vacuous) vacuous.add(type);
+        for (const terminal of blocked) {
+          if (witness !== undefined || capped()) {
+            return;
+          }
+          if (
+            terminal.status === "idle" ||
+            terminal.status === "done" ||
+            terminal.status === "error"
+          ) {
+            continue;
+          }
+          endPath(path, {
+            status: terminal.status,
+            state: settled.snapshot.value,
+            ...(terminal.status === "needs-output"
+              ? { missingSrc: terminal.missingSrc ?? kid.src }
+              : {}),
+          });
+          note(
+            () =>
+              `child: src '${kid.src}' (actor '${kid.id}') stopped ${terminal.status} at path [${pathTypes(path)}]`,
+          );
+        }
+        for (const move of moves) {
+          if (witness !== undefined || capped()) {
+            return;
+          }
+          moved = true;
+          const kids = new Map(nodeKids!);
+          kids.set(session, { ...kid, step: move.step, kids: move.kids });
+          const queue: Delivery[] = [...move.outbound];
+          if (move.step.snapshot.status !== "active") {
+            queue.push({ settle: session });
+          }
+          let link = path;
+          // A grandchild's move keeps its own actor, qualified by this child's id.
+          for (const event of move.path) {
+            const actor =
+              typeof event["actor"] === "string" ? `${kid.id}.${event["actor"]}` : kid.id;
+            link = extend(link, { ...event, actor });
+          }
+          // The machine is not mid-transition when the child's sends reach it,
+          // so each one runs to quiescence (its replies included) before the next.
+          let next: ReturnType<typeof pump> = { step: settled, link, kids, outbound: [] };
+          for (const item of queue) {
+            const after = pump(next.step, next.link, next.kids, [item]);
+            next = { ...after, outbound: [...next.outbound, ...after.outbound] };
+            if (
+              after.overflow ||
+              witness !== undefined ||
+              after.step.snapshot.status !== "active"
+            ) {
+              break;
+            }
+          }
+          if (witness !== undefined) {
+            return;
+          }
+          if (next.overflow) {
+            continue;
+          }
+          yield {
+            step: next.step,
+            path: next.link,
+            depth: move.depth,
+            kids: next.kids,
+            outbound: next.outbound,
+          };
+        }
+      }
+      // A coupled child the nesting cap kept out never moves.
+      const registered = new Set(
+        [...(nodeKids ?? new Map<string, KidState>()).values()].map((kid) => kid.id),
+      );
+      for (const kid of pendingKids.filter((invoke) => !registered.has(invoke.id))) {
+        if (witness !== undefined || capped()) {
+          return;
+        }
+        endPath(path, {
+          status: "needs-output",
+          state: settled.snapshot.value,
+          missingSrc: kid.src,
+        });
+      }
+      const others = [...(fork ? [fork] : []), ...(siblings ?? [])];
+      for (const other of others) {
+        for (const error of other.errors) {
+          if (witness !== undefined || capped()) {
+            return;
+          }
+          yield failBranch(settled, path, depth, other, error);
+        }
+        for (const output of other.outputs) {
+          if (witness !== undefined || capped()) {
+            return;
+          }
+          yield doneBranch(settled, path, depth, other, output);
+        }
+      }
+      for (const src of blockedSiblings ?? []) {
+        if (witness !== undefined || capped()) {
+          return;
+        }
+        endPath(path, { status: "needs-output", state: settled.snapshot.value, missingSrc: src });
+        note(
+          () => `needs-output: no \`outputs\` entry for src '${src}' at path [${pathTypes(path)}]`,
+        );
+      }
+      if (
+        !decisions?.length &&
+        (moved || others.length > 0 || (blockedSiblings ?? []).length > 0)
+      ) {
+        if (interleaving || (quiet && others.length === 0 && !blockedSiblings?.length)) {
+          yield* raceBranches(settled, path, depth);
+        }
+        return;
+      }
+      if (witness !== undefined) {
+        return;
+      }
+    }
+
+    if (fork && !pendingKids) {
       if (depth >= maxDepth) {
         maxDepthTerminal(settled, path);
         return;
@@ -2523,7 +3153,108 @@ function explore(
     }
   }
 
-  const root: ExploreNode = { step: initial, path: undefined, depth: 0 };
+  if (stepping) {
+    const stepper: ChildStepper = {
+      moves(kid, depth) {
+        const outer = { captured, outParent };
+        captured = [];
+        outParent = kid.parent;
+        try {
+          const idle = stepper.quiet(kid);
+          const moves: ChildMove[] = [];
+          for (const node of expand({ step: kid.step, path: undefined, depth, kids: kid.kids })) {
+            // What the move's own step sent its children happens in the same
+            // move: nothing else can run between them.
+            const settledMove = pump(
+              node.step,
+              node.path,
+              new Map(node.kids ?? kid.kids ?? []),
+              [],
+            );
+            if (settledMove.overflow) {
+              continue;
+            }
+            moves.push({
+              step: settledMove.step,
+              path: pathOf(settledMove.link),
+              depth: node.depth,
+              kids: settledMove.kids,
+              outbound: [
+                ...(node.outbound ??
+                  outboundOf(node.step.actions, kid.parent, node.step.snapshot.children)),
+                ...settledMove.outbound,
+              ],
+            });
+          }
+          return { moves, blocked: captured, idle };
+        } finally {
+          captured = outer.captured;
+          outParent = outer.outParent;
+        }
+      },
+      deliver(kid, event) {
+        const outer = outParent;
+        outParent = kid.parent;
+        try {
+          // A child not yet settled: its own pending effects come first.
+          const primed = pump(kid.step, undefined, new Map(kid.kids ?? []), []);
+          if (primed.overflow) {
+            return { ...primed, overflow: true };
+          }
+          const next = transitionStep(primed.step, event);
+          recordState(next);
+          const pumpedKids = pump(next, undefined, primed.kids, []);
+          return {
+            step: pumpedKids.step,
+            kids: pumpedKids.kids,
+            outbound: [
+              ...primed.outbound,
+              ...outboundOf(next.actions, kid.parent, next.snapshot.children),
+              ...pumpedKids.outbound,
+            ],
+            ...(pumpedKids.overflow ? { overflow: true } : {}),
+          };
+        } finally {
+          outParent = outer;
+        }
+      },
+      prime(kid) {
+        const outer = outParent;
+        outParent = kid.parent;
+        try {
+          return pump(kid.step, undefined, new Map(kid.kids ?? []), []);
+        } finally {
+          outParent = outer;
+        }
+      },
+      quiet(kid) {
+        if (kid.step.requests.length > 0) {
+          return false;
+        }
+        // Its only pending work may be coupled children that are quiet too.
+        const held = [...(kid.kids ?? new Map<string, KidState>()).values()];
+        return pendingInvokes(kid.step).every((invoke) => {
+          const child = held.find((candidate) => candidate.id === invoke.id);
+          return child !== undefined && child.engine.quiet(child);
+        });
+      },
+      stateKey,
+      unexpanded,
+      vacuous,
+    };
+    return {
+      report: undefined as never,
+      doneOutputs,
+      failures,
+      undeliverable: [],
+      parentEvents,
+      stalls,
+      unfinished,
+      stepper,
+    };
+  }
+
+  const root: ExploreNode = { step: initial!, path: undefined, depth: 0 };
   if (witness === undefined && stopWhen) {
     // Breadth-first by path length, so the first witness found is a shortest
     // one.
@@ -2536,6 +3267,7 @@ function explore(
         level[i] = undefined;
         for (const child of expand(node)) {
           child.delivered = pruneDelivered(child.delivered ?? node.delivered, child.step);
+          child.kids ??= node.kids;
           (levels[child.path?.length ?? 0] ??= []).push(child);
         }
         if (witness !== undefined || hitPathCap || budget.exhausted !== undefined) {
@@ -2548,6 +3280,7 @@ function explore(
     const visit = (node: ExploreNode): void => {
       for (const child of expand(node)) {
         child.delivered = pruneDelivered(child.delivered ?? node.delivered, child.step);
+        child.kids ??= node.kids;
         visit(child);
       }
     };
