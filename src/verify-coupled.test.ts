@@ -219,6 +219,8 @@ describe("explorePaths — children: 'coupled'", () => {
     const coupled = await canReach(createPickWatcher(), "mismatch", {
       children: "coupled",
       childEvents: { picker: ["X", "Y"] },
+      // SAW_X and SAW_Y come only from the picker.
+      hostEvents: [],
     });
     expect({ reachable: coupled.reachable, complete: coupled.complete }).toEqual({
       reachable: false,
@@ -394,5 +396,194 @@ describe("explorePaths — children: 'coupled'", () => {
     expect(report.complete).toBe(false);
     expect(report.terminals.map((terminal) => terminal.status)).toEqual(["max-depth"]);
     expect(report.unexplored.some((note) => note.startsWith("coupled: more than"))).toBe(true);
+  });
+
+  describe("review regressions", () => {
+    // G answers PING with PONG to its parent K.
+    const g = createMachine({
+      initial: "on",
+      states: {
+        on: {
+          on: {
+            PING: ({ parent }: { parent?: unknown }, enq: Enq) =>
+              void tell("PONG")({ parent }, enq),
+          },
+        },
+      },
+    } as never) as AnyStateMachine;
+    // K pings G on the host's X; with `alsoTell` it also reports A to its parent.
+    const createK = (alsoTell: boolean) =>
+      setupAgent({
+        context: z.object({}),
+        events: { X: z.object({}), PONG: z.object({}), ABORT: z.object({}) },
+        actors: { g },
+      }).createMachine({
+        context: {},
+        invoke: { id: "g", src: "g" },
+        initial: "a",
+        states: {
+          a: {
+            on: {
+              X: ({ children, parent }, enq) => {
+                enq.sendTo(children["g"] as never, { type: "PING" });
+                if (alsoTell && parent) enq.sendTo(parent as never, { type: "A" } as never);
+                return { target: "b" };
+              },
+            },
+          },
+          b: {
+            on: {
+              PONG: { target: "c" },
+              ABORT: ({ parent }, enq) => {
+                if (parent) enq.sendTo(parent as never, { type: "BAD" } as never);
+              },
+            },
+          },
+          c: { type: "final" },
+        },
+      }) as AnyStateMachine;
+
+    test("a grandchild's reply lands in the same move, before the parent's next send", async () => {
+      const k = createK(true);
+      const machine = setupAgent({
+        context: z.object({}),
+        events: { A: z.object({}) },
+        actors: { k },
+      }).createMachine({
+        context: {},
+        initial: "running",
+        states: {
+          running: {
+            invoke: { id: "k", src: "k", onDone: { target: "goal" } },
+            on: {
+              A: ({ children }, enq) => {
+                enq.sendTo(children["k"] as never, { type: "Z" });
+                return {};
+              },
+            },
+          },
+          goal: { type: "final" },
+        },
+      });
+      const result = await canReach(machine, "goal", {
+        children: "coupled",
+        childEvents: { k: ["X"] },
+        hostEvents: [],
+      });
+      expect(result).toMatchObject({ reachable: true, complete: true });
+    });
+
+    test("no host event fits between a child's move and its grandchild's reply", async () => {
+      const k = createK(false);
+      const machine = setupAgent({
+        context: z.object({}),
+        events: { GO: z.object({}), BAD: z.object({}) },
+        actors: { k },
+      }).createMachine({
+        context: {},
+        initial: "running",
+        states: {
+          running: {
+            invoke: { id: "k", src: "k", onDone: { target: "finished" } },
+            on: {
+              GO: ({ children }, enq) => {
+                enq.sendTo(children["k"] as never, { type: "ABORT" });
+                return {};
+              },
+              BAD: { target: "bad" },
+            },
+          },
+          bad: { type: "final" },
+          finished: { type: "final" },
+        },
+      });
+      const result = await canReach(machine, "bad", {
+        children: "coupled",
+        childEvents: { k: ["X"] },
+        hostEvents: ["GO"],
+        interleave: "pending",
+        // GO can repeat forever; equal states are explored once.
+        dedupeBy: (snapshot) => JSON.stringify(snapshot.value),
+      });
+      expect(result).toMatchObject({ reachable: false, complete: true });
+    });
+
+    test("a child's send to a sibling is delivered", async () => {
+      const b = createMachine({
+        initial: "on",
+        states: {
+          on: {
+            on: {
+              HI: ({ parent }: { parent?: unknown }, enq: Enq) => void tell("GOT")({ parent }, enq),
+            },
+          },
+        },
+      } as never) as AnyStateMachine;
+      const a = createMachine({
+        context: ({ input }: { input: { peer: unknown } }) => ({ peer: input.peer }),
+        initial: "on",
+        states: {
+          on: {
+            on: {
+              X: ({ context }: { context: { peer: unknown } }, enq: Enq) => {
+                enq.sendTo(context.peer, { type: "HI" });
+              },
+            },
+          },
+        },
+      } as never) as AnyStateMachine;
+      const machine = setupAgent({
+        context: z.object({}),
+        events: { GOT: z.object({}) },
+        actors: { a, b },
+      }).createMachine({
+        context: {},
+        initial: "running",
+        states: {
+          running: {
+            entry: ({ actors }, enq) => {
+              const peer = enq.spawn(actors.b, { id: "b" });
+              enq.spawn(actors.a, { id: "a", input: { peer } as never });
+            },
+            on: { GOT: { target: "goal" } },
+          },
+          goal: { type: "final" },
+        },
+      });
+      const result = await canReach(machine, "goal", {
+        children: "coupled",
+        childEvents: { a: ["X"] },
+        hostEvents: [],
+      });
+      expect(result).toMatchObject({ reachable: true, complete: true });
+    });
+
+    test("while every child waits on the host, the parent's host events can arrive", async () => {
+      const kid = createMachine({
+        initial: "idle",
+        states: { idle: { on: { PING: { target: "done" } } }, done: { type: "final" } },
+      } as never) as AnyStateMachine;
+      const machine = setupAgent({
+        context: z.object({}),
+        events: { GO: z.object({}) },
+        actors: { kid },
+      }).createMachine({
+        context: {},
+        initial: "running",
+        states: {
+          running: {
+            invoke: { id: "kid", src: "kid", onDone: { target: "finished" } },
+            on: { GO: { target: "goal" } },
+          },
+          goal: { type: "final" },
+          finished: { type: "final" },
+        },
+      });
+      const result = await canReach(machine, "goal", {
+        children: "coupled",
+        childEvents: { kid: ["PING"] },
+      });
+      expect(result).toMatchObject({ reachable: true, complete: true });
+    });
   });
 });
