@@ -112,3 +112,11 @@ test("the step 1 runner passes run options through: a store journals the thread"
   const entries = await store.read(`test:step1:${scenario.id}`);
   expect(entries.length).toBeGreaterThan(0);
 });
+
+test("a retried refund with the same ticket is issued once", async () => {
+  const world = createFakeWorld();
+  const first = await world.effects.issueRefund("A-100", 20, "refund:T-1");
+  const again = await world.effects.issueRefund("A-100", 20, "refund:T-1");
+  expect(again).toEqual(first);
+  expect(world.refunds).toHaveLength(1);
+});

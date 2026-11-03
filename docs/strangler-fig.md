@@ -49,12 +49,15 @@ interface Ticket {
 
 const effects = {
   lookupOrder: async (orderId: string) => ({ orderId, total: 20 }),
-  issueRefund: async (orderId: string, amount: number) => ({ refundId: `rf_${orderId}` }),
+  // Keyed, so a retried or resumed run cannot refund twice.
+  issueRefund: async (orderId: string, amount: number, idempotencyKey: string) => ({
+    refundId: `rf_${orderId}`,
+  }),
 };
 
 async function runTicket(ticket: Ticket, fx: typeof effects) {
   const order = await fx.lookupOrder(ticket.id);
-  return fx.issueRefund(order.orderId, order.total);
+  return fx.issueRefund(order.orderId, order.total, `refund:${ticket.id}`);
 }
 
 const support = wrapWorkflow({
