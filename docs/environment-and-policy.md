@@ -129,6 +129,8 @@ The expected outcome per scenario is a label people write. The score never comes
 
 ## The improvement loop
 
+> **Experimental:** self-improvement is experimental. The gates are stable, but the round itself may change, and on a loop with no decision point it mostly proposes wording, cap, and approval-rule changes. Code-level causes come back as change requests for a person.
+
 ```text
 traces → objective → diagnose → propose a policy diff → verifyAgentConfig → replay train → replay held-out → promote or discard
 ```
@@ -158,7 +160,7 @@ People own everything that defines "better" and everything the policy cannot tou
 - The scenario set, the held-out split, and the regression tolerance.
 - Environment changes. When the goal is unreachable without one, the improver writes a change request for a person instead of editing the environment.
 
-Self-improvement is a supported pattern with gates. The library supplies the gates; the loop, the objective, and the promotion rule stay with the host.
+Self-improvement is an experimental pattern with stable gates. The library supplies the gates; the loop, the objective, and the promotion rule stay with the host.
 
 ### Machines with no decision point
 

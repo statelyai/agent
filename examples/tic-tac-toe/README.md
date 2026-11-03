@@ -38,6 +38,8 @@ OPENAI_API_KEY=... TYPESAFE_AI_API_KEY=... pnpm exec tsx examples/tic-tac-toe/be
 
 ## Running the climb with Claude Code
 
+> **Experimental:** self-improvement is experimental. The gates are stable, but the round itself may change, and on a loop with no decision point it mostly proposes wording, cap, and approval-rule changes. Code-level causes come back as change requests for a person.
+
 The [`improve-machine`](../../skills/improve-machine/SKILL.md) skill runs the same rounds with Claude Code as the reflection model and `evaluate.ts` as the measurement:
 
 ```bash
