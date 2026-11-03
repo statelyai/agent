@@ -100,3 +100,15 @@ test("the example entry point runs both checks", async () => {
   const { step0: wrapped, step1: carved } = await runStranglerFigExample();
   expect([wrapped.equivalent, carved.equivalent]).toEqual([true, true]);
 });
+
+test("the step 1 runner passes run options through: a store journals the thread", async () => {
+  const { createInMemoryEventLogStore } = await import("@statelyai/agent/log");
+  const store = createInMemoryEventLogStore();
+  const scenario = SCENARIOS[0]!;
+  await runTicketStep1(scenario.input, effects(scenario), {
+    store,
+    threadId: `test:step1:${scenario.id}`,
+  });
+  const entries = await store.read(`test:step1:${scenario.id}`);
+  expect(entries.length).toBeGreaterThan(0);
+});
