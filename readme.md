@@ -31,6 +31,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 
 ### Brownfield: an existing agent
 
+- **Wrap an existing workflow, then carve it.** `wrapWorkflow` runs an async workflow unchanged inside a machine. In minutes and with no rewrite, you get inspection, traces, the event log, and a recorded baseline. Reliability proofs such as `canReach` arrive per phase, as each phase moves into states, with `checkParity` against the original after each. See [Strangler-fig retrofit](https://github.com/statelyai/agent/blob/next/docs/strangler-fig.md).
 - **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](https://github.com/statelyai/agent/blob/next/docs/from-a-loop.md). A coding agent does it with the shipped `loop-to-machine` skill (see [Agent skills](#agent-skills)): "Use the loop-to-machine skill to convert `src/support-agent.ts` to a machine."
 - **Let an agent improve its own logic.** Keep the rules in a fixed TypeScript environment and let a model rewrite the JSON policy inside it, gated by `verifyAgentConfig` and promoted only when held-out scenarios improve. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md) and the [`improve-machine` skill](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md).
 

@@ -1,0 +1,25 @@
+{
+  "name": "strangler-fig",
+  "title": "Wrap a workflow, then carve it",
+  "kind": "pattern",
+  "origin": {
+    "type": "pattern",
+    "source": "A strangler-fig retrofit of an existing async support workflow (docs/strangler-fig.md)"
+  },
+  "comparison": {
+    "targets": ["hand-rolled workflow"],
+    "purpose": "before.ts is an async support workflow that reaches the world only through an effects object: a model-like generate, lookupOrder, issueRefund, escalate, with a classifier retry and a refund limit inline. step0.ts wraps it unchanged with wrapWorkflow, so every effect call is a transition. step1.ts carves the classify retry into states and invokes the rest of before.ts as one actor. index.test.ts runs checkParity for both steps against before.ts on five scenarios with fake effects, and canReach proves the classifier runs at most MAX_ATTEMPTS times, which the wrapped step could not show."
+  },
+  "starters": [
+    {
+      "label": "Small refund on A-100",
+      "input": { "id": "T-1", "message": "Mug A-100 arrived chipped, refund $20." }
+    },
+    {
+      "label": "Refund over the limit on A-200",
+      "input": { "id": "T-2", "message": "Desk A-200 is cracked, refund $240." }
+    },
+    { "label": "Order status", "input": { "id": "T-3", "message": "Where is A-200?" } }
+  ],
+  "machine": "supportMachine"
+}
