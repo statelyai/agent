@@ -456,7 +456,7 @@ export function lintAgentMachine(
       ? diagnostics
       : diagnostics.filter((d) => d.severity === "error");
     if (failing.length > 0) {
-      throw new AgentLintError(machine.id || "(machine)", failing);
+      throw new AgentLintError(machine.id, failing);
     }
   }
 

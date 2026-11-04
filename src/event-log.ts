@@ -297,8 +297,14 @@ export function assertAgentLogEntry(entry: unknown): asserts entry is AgentLogEn
       `Agent event entry.index must be a non-negative integer; got ${String(candidate.index)}.`,
     );
   }
-  for (const field of ["id", "machineId", "machineVersion"] as const) {
+  for (const field of ["id", "machineVersion"] as const) {
     requireNonEmptyString(candidate[field], `entry.${field}`);
+  }
+  // XState gives a machine without an `id` the empty string.
+  if (typeof candidate.machineId !== "string") {
+    throw new AgentEventLogError(
+      `Agent event entry.machineId must be a string; got ${String(candidate.machineId)}.`,
+    );
   }
   if (
     typeof candidate.recordedAt !== "string" ||
@@ -636,7 +642,7 @@ export interface CreateReplayEntryOptions {
 }
 
 function machineIdOf(machine: AnyStateMachine): string {
-  return (machine.config as { id?: string }).id || machine.id || "(machine)";
+  return (machine.config as { id?: string }).id ?? machine.id;
 }
 
 function toPersisted(

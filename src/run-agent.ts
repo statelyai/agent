@@ -1906,7 +1906,7 @@ function rootTraceState(root: AnyActorRef): RootTraceState {
   if (!state) {
     const logic = (root as { logic?: AnyStateMachine }).logic;
     const machineId =
-      (logic?.config as { id?: string } | undefined)?.id || logic?.id || "(machine)";
+      (logic?.config as { id?: string } | undefined)?.id ?? logic?.id ?? "";
     const machineVersion = logic ? resolveMachineVersion(logic) : "";
     state = { runId: `run_${nextProvideRunId++}`, seq: 0, machineId, machineVersion };
     rootTraceRegistry.set(root as object, state);
@@ -2798,7 +2798,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   const runId = `run_${nextRunAgentTraceId++}`;
   let traceSeq = 0;
 
-  const machineId = (machine.config as { id?: string }).id || machine.id || "(machine)";
+  const machineId = (machine.config as { id?: string }).id ?? machine.id;
   // The machine's own `version` (XState's standard `createMachine({ version })`
   // prop, `.provide`-surviving) is the single source of truth; an unversioned
   // machine falls back to the structural hash.
