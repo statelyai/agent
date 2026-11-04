@@ -46,7 +46,7 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 <!-- install command matching the package prerelease channel and package.json peers -->
 
 ```sh
-pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.69 zod
+pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.73 zod
 ```
 
 XState is pinned while its experimental durable restoration API evolves.
@@ -75,7 +75,7 @@ Upgrading from an earlier alpha: see [Upgrading between alphas](https://github.c
 
 Requirements:
 
-- Node 22 or newer, and XState exactly `6.0.0-alpha.69`.
+- Node 22 or newer, and XState exactly `6.0.0-alpha.73`.
 - TypeScript 5.4 or newer. Older versions accept the code, but callback parameters in `createMachine` silently become `any`.
 - A [Standard Schema](https://standardschema.dev) library: zod 4, zod 3.24 or newer, Valibot, or ArkType. `setupAgent` throws `invalid-schema` for zod 3.23 and earlier.
 - The package is ESM-first. CommonJS builds are published too, so `require()` works. Subpath imports (`@statelyai/agent/testing`) resolve under every `moduleResolution`, including `node`.
@@ -88,7 +88,7 @@ An app that already uses XState 4 or 5 keeps it: put the agent in its own worksp
 | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | `createAsyncLogic is not a function`                                                                                            | `xstate` resolved to 4 or 5 from CommonJS   |
 | `Cannot find module '…/node_modules/xstate/durable'`                                                                            | `xstate` resolved to 4 or 5 from ESM        |
-| `unmet peer dependency "xstate@6.0.0-alpha.69"` (pnpm, npm) or `has incorrect peer dependency "xstate@6.0.0-alpha.69"` (yarn 1) | The install's only warning of the two above |
+| `unmet peer dependency "xstate@6.0.0-alpha.73"` (pnpm, npm) or `has incorrect peer dependency "xstate@6.0.0-alpha.73"` (yarn 1) | The install's only warning of the two above |
 
 ## Agent skills
 

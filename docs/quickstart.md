@@ -3,7 +3,7 @@
 Install core:
 
 ```sh
-pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.69 zod
+pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.73 zod
 ```
 
 XState is pinned to the exact version the package's peer dependency names, because its experimental durable restoration API (`xstate/durable`) still changes between alphas. `xstate@alpha` can resolve to a newer alpha that the package does not support.
