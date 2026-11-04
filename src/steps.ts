@@ -177,7 +177,16 @@ export function getAgentRequests(
   }
 
   const fromActions = actions.flatMap((action): AgentStepRequest[] => {
-    const params = getInvokeEffectMetadata(action);
+    const metadata = getInvokeEffectMetadata(action);
+    // XState leaves `src` undefined for inline (direct-object) logic; such an
+    // invoke is keyed by its id instead.
+    const params =
+      metadata &&
+      typeof metadata.src !== "string" &&
+      typeof metadata.id === "string" &&
+      (isTextLogic(metadata.logic) || isDecisionLogic(metadata.logic))
+        ? { ...metadata, src: metadata.id }
+        : metadata;
     if (!params || typeof params.src !== "string") {
       return [];
     }

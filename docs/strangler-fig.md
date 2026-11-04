@@ -176,7 +176,6 @@ resolving: {
 - Move prompt or warning text the carved phase sends into a versioned request config as you carve. That file is the lever `improve-machine` may edit later.
 - Carve one phase per commit.
 - A phase in the middle of a `try`/`finally`: the setup before it moves into the runner, and the `finally` becomes a state every exit passes through, so a proof can say cleanup runs first.
-- An invoke whose actor resolves `null` reaches `onDone` with `output` `undefined` (XState v6 alpha). Test for `output == null`, not `=== null`.
 - A legacy body that owns abort (it returns its own `stopped` result): pass the `signal` to the legacy body only, not to `runAgent`. Its result then reaches the machine as a normal final; `runAgent`'s `signal` would settle the run as `aborted` instead.
 - An invoke whose error must reach the caller unchanged: omit `onError`. The run settles `{ status: "error", error }` with the original error, and the runner rethrows it. Pass `disable: ["invoke-without-on-error"]` to `lintAgentMachine` for that machine.
 

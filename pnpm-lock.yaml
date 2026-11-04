@@ -102,8 +102,8 @@ importers:
         specifier: ^5.0.3
         version: 5.0.3(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(vite@8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       xstate:
-        specifier: 6.0.0-alpha.69
-        version: 6.0.0-alpha.69
+        specifier: 6.0.0-alpha.73
+        version: 6.0.0-alpha.73
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -139,7 +139,7 @@ importers:
         version: link:..
       '@statelyai/sdk':
         specifier: ^0.37.4
-        version: 0.37.4(cytoscape@3.34.0)(d3-force@3.0.0)(ws@8.22.0)(xstate@6.0.0-alpha.69)(zod@4.6.5)
+        version: 0.37.4(cytoscape@3.34.0)(d3-force@3.0.0)(ws@8.22.0)(xstate@6.0.0-alpha.73)(zod@4.6.5)
       '@tanstack/react-router':
         specifier: ^1.170.41
         version: 1.170.41(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -186,8 +186,8 @@ importers:
         specifier: ^8.22.0
         version: 8.22.0
       xstate:
-        specifier: 6.0.0-alpha.69
-        version: 6.0.0-alpha.69
+        specifier: 6.0.0-alpha.73
+        version: 6.0.0-alpha.73
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -247,8 +247,8 @@ importers:
         specifier: ^7.0.133
         version: 7.0.133(zod@4.6.5)
       xstate:
-        specifier: 6.0.0-alpha.69
-        version: 6.0.0-alpha.69
+        specifier: 6.0.0-alpha.73
+        version: 6.0.0-alpha.73
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -275,8 +275,8 @@ importers:
         specifier: ^7.0.133
         version: 7.0.133(zod@4.6.5)
       xstate:
-        specifier: 6.0.0-alpha.69
-        version: 6.0.0-alpha.69
+        specifier: 6.0.0-alpha.73
+        version: 6.0.0-alpha.73
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -304,7 +304,7 @@ importers:
         version: link:../..
       '@statelyai/sdk':
         specifier: ^0.37.4
-        version: 0.37.4(cytoscape@3.34.0)(d3-force@3.0.0)(ws@8.22.0)(xstate@6.0.0-alpha.69)(zod@4.6.5)
+        version: 0.37.4(cytoscape@3.34.0)(d3-force@3.0.0)(ws@8.22.0)(xstate@6.0.0-alpha.73)(zod@4.6.5)
       '@tanstack/react-query':
         specifier: ^5.104.1
         version: 5.104.1(react@19.3.0)
@@ -327,8 +327,8 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(react@19.3.0)
       xstate:
-        specifier: 6.0.0-alpha.69
-        version: 6.0.0-alpha.69
+        specifier: 6.0.0-alpha.73
+        version: 6.0.0-alpha.73
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -340,7 +340,7 @@ importers:
         version: link:../..
       '@statelyai/sdk':
         specifier: ^0.37.4
-        version: 0.37.4(cytoscape@3.34.0)(d3-force@3.0.0)(ws@8.22.0)(xstate@6.0.0-alpha.69)(zod@4.6.5)
+        version: 0.37.4(cytoscape@3.34.0)(d3-force@3.0.0)(ws@8.22.0)(xstate@6.0.0-alpha.73)(zod@4.6.5)
       '@tanstack/ai':
         specifier: ^0.66.0
         version: 0.66.0(@opentelemetry/api@1.9.1)(zod@4.6.5)
@@ -357,8 +357,8 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(react@19.3.0)
       xstate:
-        specifier: 6.0.0-alpha.69
-        version: 6.0.0-alpha.69
+        specifier: 6.0.0-alpha.73
+        version: 6.0.0-alpha.73
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -6755,8 +6755,8 @@ packages:
   xstate@5.33.3:
     resolution: {integrity: sha512-AnDRjS/GyKHmbA1PyhVCYBqYsA7EGe3KGgeD0ht3NFsXzoz7leX/HQDFX9QlHFJ/ltLHPsgChJYwPzRvB/0b4g==}
 
-  xstate@6.0.0-alpha.69:
-    resolution: {integrity: sha512-q/UTBdSgCXNsbCUwCRH/kD265yUEoUNjnPMD4UQ5F8NwX9Sr/QPZSWVcNY9E+qf32Ky5x7qMsZBLAddN6O/F9w==}
+  xstate@6.0.0-alpha.73:
+    resolution: {integrity: sha512-Ru3g082hzyn2h1TspciGFgHplK35jZl6Sl808cspInc0xx/RsALM8sc3AoQpg2KusApD2HPlX7liaVnSxlMyHw==}
     hasBin: true
 
   xxhash-wasm@1.1.0:
@@ -9571,16 +9571,16 @@ snapshots:
       xstate: 5.33.3
       zod: 4.6.5
 
-  '@statelyai/graph@2.5.1(cytoscape@3.34.0)(d3-force@3.0.0)(xstate@6.0.0-alpha.69)(zod@4.6.5)':
+  '@statelyai/graph@2.5.1(cytoscape@3.34.0)(d3-force@3.0.0)(xstate@6.0.0-alpha.73)(zod@4.6.5)':
     optionalDependencies:
       cytoscape: 3.34.0
       d3-force: 3.0.0
-      xstate: 6.0.0-alpha.69
+      xstate: 6.0.0-alpha.73
       zod: 4.6.5
 
-  '@statelyai/sdk@0.37.4(cytoscape@3.34.0)(d3-force@3.0.0)(ws@8.22.0)(xstate@6.0.0-alpha.69)(zod@4.6.5)':
+  '@statelyai/sdk@0.37.4(cytoscape@3.34.0)(d3-force@3.0.0)(ws@8.22.0)(xstate@6.0.0-alpha.73)(zod@4.6.5)':
     dependencies:
-      '@statelyai/graph': 2.5.1(cytoscape@3.34.0)(d3-force@3.0.0)(xstate@6.0.0-alpha.69)(zod@4.6.5)
+      '@statelyai/graph': 2.5.1(cytoscape@3.34.0)(d3-force@3.0.0)(xstate@6.0.0-alpha.73)(zod@4.6.5)
     optionalDependencies:
       ws: 8.22.0
     transitivePeerDependencies:
@@ -13016,7 +13016,7 @@ snapshots:
 
   xstate@5.33.3: {}
 
-  xstate@6.0.0-alpha.69: {}
+  xstate@6.0.0-alpha.73: {}
 
   xxhash-wasm@1.1.0: {}
 

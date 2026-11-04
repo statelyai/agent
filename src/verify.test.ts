@@ -677,6 +677,25 @@ describe("canReach — reachability with a witness path", () => {
     expect(proven.unexplored).toBeUndefined();
   });
 
+  test("an inline invoke is keyed by its invoke id", async () => {
+    const machine = setupAgent({ context: z.object({}) }).createMachine({
+      context: () => ({}),
+      initial: "waiting",
+      states: {
+        waiting: {
+          invoke: {
+            id: "resume",
+            src: createAsyncLogic({ run: async () => "ok" }),
+            onDone: { target: "done" },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    const result = await canReach(machine, "done", { outputs: { resume: ["ok"] } });
+    expect(result.reachable).toBe(true);
+  });
+
   test("an incomplete search says why: a path that hit maxDepth", async () => {
     const machine = setupAgent({
       context: z.object({}),

@@ -346,6 +346,7 @@ describe("provideExecutors onTrace / traceTransitions", () => {
       input: z.object({ topic: z.string() }),
     });
     const machine = setupAgent({ schemas, actors: { draftText } }).createMachine({
+      id: "drafter",
       version: "7",
       context: ({ input }: { input: { topic: string } }) => ({ topic: input.topic }),
       initial: "drafting",

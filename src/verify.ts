@@ -456,7 +456,7 @@ export function lintAgentMachine(
       ? diagnostics
       : diagnostics.filter((d) => d.severity === "error");
     if (failing.length > 0) {
-      throw new AgentLintError(machine.id ?? "(machine)", failing);
+      throw new AgentLintError(machine.id, failing);
     }
   }
 
@@ -627,11 +627,13 @@ function pendingInvokes(step: AgentStep): PendingInvoke[] {
   const out: PendingInvoke[] = [];
   const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
   for (const metadata of getPendingInvokes(step.snapshot as AnyMachineSnapshot)) {
-    if (typeof metadata.src === "string") {
+    // XState leaves `src` undefined for inline logic; key it by the invoke id.
+    const src = typeof metadata.src === "string" ? metadata.src : metadata.id;
+    if (typeof src === "string") {
       const ref = children[metadata.id];
       out.push({
         id: metadata.id,
-        src: metadata.src,
+        src,
         // A machine child's snapshot carries no `input`; its actor options do.
         input: metadata.input ?? ref?.options?.input,
         logic: metadata.logic,
