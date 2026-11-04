@@ -177,6 +177,7 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 - A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor.<id>' }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
 - At an idle wait, it forks one branch per externally accepted event.
 - `outputs` is a map of output lists, keyed by src: a text request's src or any other invoked actor's src. A one-element list is a canned output, reused every time that src is reached. A text request resolves with it as its `result`. A longer list forks one branch per output. See [Payloads and invoke outputs](#payloads-and-invoke-outputs).
+- Each `done` terminal carries the machine's `output`, so one report lists every output the search reached.
 - A src with no `outputs` entry halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
 - `errors` is a map of canned failures per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates. The failure and the candidates are sibling branches: each spends one level of `maxDepth`.
 - An `errors` array forks one failing branch per element, each recording `{ type: 'xstate.error.actor.<id>', error }`. `[]` is no entry. Any other value is one failure, recorded without `error`. Wrap a single array-valued failure: `[[...]]`.
@@ -338,7 +339,7 @@ When a budget runs out, the search stops and returns what it has:
 
 - `report.partial` is true and `report.complete` is false.
 - `report.unexplored` has one note, `budget-exhausted: nodes` or `budget-exhausted: ms`, with the nodes expanded and the milliseconds spent so far.
-- `canReach` returns `reachable: true` with its witness if it found one first. Otherwise it returns `{ reachable: false, complete: false }`, which proves nothing: the target may be reachable on a branch the search did not reach.
+- `canReach` returns `reachable: true` with its witness if it found one first. Otherwise it returns `{ reachable: false, complete: false }` with the budget note in `unexplored`, which proves nothing: the target may be reachable on a branch the search did not reach.
 
 ```ts no-check
 const report = await explorePaths(parentMachine, {
@@ -366,6 +367,8 @@ A state the machine only passes through within one step counts as reached: one l
 - A path reached `maxDepth`.
 - A branch stopped on a `needs-output` terminal, with no `outputs` entry for its src, or an explored child machine whose own search was incomplete.
 - An event type was not expanded to all its payload variants, as `explorePaths` lists in `unexpandedEvents`.
+
+When `complete` is false, `unexplored` lists why, in the wording of the `explorePaths` report's `unexplored` notes, such as `needs-output: no \`outputs\` entry for src 'resume' at path []`. A cap adds a `path-cap` note.
 
 Raise the caps, add `dedupeBy`, supply the missing outputs, or add `payloads` entries until it is true.
 

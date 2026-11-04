@@ -63,6 +63,8 @@ This is not a sandbox. On Node 22 and 24 the permission model does not restrict 
 
 ## Improve the policy
 
+> **Experimental:** self-improvement is experimental. The gates are stable, but the round itself may change, and on a loop with no decision point it mostly proposes wording, cap, and approval-rule changes. Code-level causes come back as change requests for a person.
+
 Each improvement round runs every task twice (current policy, then candidate), so expect about 100 Claude Code calls.
 
 ### With the built-in loop

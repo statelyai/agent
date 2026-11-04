@@ -12,7 +12,7 @@ Four steps, in order. Each one needs the one before it.
 | 1. Make it a state machine | `loop-to-machine` (existing code) or `generate-machine` (from scratch) | Rules are guards and the sentinel is unreachable (`canReach`). From existing code: the parity report has no unreviewed regressions. From scratch: every `verifyAgentConfig` gate passes |
 | 2. Add traces | `add-traces` | Every run leaves a stamped log thread that replays to its final state |
 | 3. Add evals | `add-evals` | Evals per state at the cheapest level, an objective, baseline numbers per split |
-| 4. Self-improve | `improve-machine` | A pull request with one policy change and its held-out scorecard, or a report that none helped |
+| 4. Self-improve (experimental) | `improve-machine` | A pull request with one policy change and its held-out scorecard, or a report that none helped |
 
 ## Find where the project is
 
@@ -21,7 +21,7 @@ Check in this order and start at the first step that is not done:
 1. Does the code path production actually runs go through a machine (`setupAgent`, `createMachine`, an `AgentWorkflowConfig`)? Follow the route or entry point to the model call; a machine that nothing calls does not count. If the path is a loop or ad-hoc code, step 1.
 2. Do runs persist to an event log store with a declared machine `version` and a `metadata` stamp? If not, step 2.
 3. Is there an objective over ground truth, and evals that name the states they cover? If not, step 3.
-4. Otherwise, step 4. A machine with no decision point (a tool loop, a scheduler: the model picks tools inside one text request) still goes to step 4: `improve-machine`'s "No decision points" branch, which turns traces into approval-rule, cap, and request-wording proposals.
+4. Otherwise, step 4, which is experimental: say so when you route there. A machine with no decision point (a tool loop, a scheduler: the model picks tools inside one text request) still goes to step 4: `improve-machine`'s "No decision points" branch, which turns traces into approval-rule, cap, and request-wording proposals.
 
 Tell the user which step you are starting at and why, in one line, then load that skill.
 

@@ -1239,6 +1239,8 @@ export interface AgentPathTerminal {
   missingSrc?: string;
   /** For `error`: the failure value that errored the machine. */
   error?: unknown;
+  /** For `done`: the machine's output (absent when it has none). */
+  output?: unknown;
 }
 
 /** The report returned by {@link explorePaths}. */
@@ -3038,8 +3040,13 @@ function explore(
     }
 
     if (settled.done) {
-      endPath(path, { status: "done", state: settled.snapshot.value });
-      pushDistinct(doneOutputs, seenOutputs, (settled.snapshot as AnyMachineSnapshot).output);
+      const output: unknown = (settled.snapshot as AnyMachineSnapshot).output;
+      endPath(path, {
+        status: "done",
+        state: settled.snapshot.value,
+        ...(output === undefined ? {} : { output }),
+      });
+      pushDistinct(doneOutputs, seenOutputs, output);
       return;
     }
 
@@ -3378,6 +3385,14 @@ export interface CanReachResult {
    * unreachability only when `complete` is true.
    */
   complete: boolean;
+  /**
+   * Why the search is not complete, present only when `complete` is false:
+   * the {@link explorePaths} report's `unexplored` notes (such as
+   * `needs-output: no \`outputs\` entry for src 'resume' at path []`), plus a
+   * `path-cap`, `unexpanded-events`, or `max-depth` note for the causes the
+   * report records elsewhere.
+   */
+  unexplored?: string[];
 }
 
 /** Thrown when a string reachability target is not a state in the machine. */
@@ -3462,7 +3477,31 @@ export async function canReach(
     };
   }
   const complete = isExplorationComplete(report);
-  return { reachable: false, complete, ...(resolvedTarget ? { target: resolvedTarget } : {}) };
+  return {
+    reachable: false,
+    complete,
+    ...(resolvedTarget ? { target: resolvedTarget } : {}),
+    ...(complete
+      ? {}
+      : {
+          unexplored: [
+            ...report.unexplored,
+            ...(report.hitPathCap
+              ? [
+                  `path-cap: maxPaths or maxNodes cut the search short after ${report.pathsExplored} paths`,
+                ]
+              : []),
+            ...(report.unexpandedEvents.length
+              ? [
+                  `unexpanded-events: not every payload variant was explored for ${report.unexpandedEvents.join(", ")}`,
+                ]
+              : []),
+            ...(report.terminals.some((terminal) => terminal.status === "max-depth")
+              ? ["max-depth: a path reached maxDepth before settling"]
+              : []),
+          ],
+        }),
+  };
 }
 
 /**

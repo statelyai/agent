@@ -44,6 +44,9 @@ importers:
       '@opentelemetry/sdk-trace-base':
         specifier: ^2.12.0
         version: 2.12.0(@opentelemetry/api@1.9.1)
+      '@statelyai/sdk':
+        specifier: 0.45.0
+        version: 0.45.0(cytoscape@3.34.0)(d3-force@3.0.0)(ws@8.22.0)(zod@4.6.5)
       '@tanstack/ai':
         specifier: ^0.66.0
         version: 0.66.0(@opentelemetry/api@1.9.1)(zod@4.6.5)
@@ -3604,6 +3607,16 @@ packages:
       ws:
         optional: true
 
+  '@statelyai/sdk@0.45.0':
+    resolution: {integrity: sha512-qQ2iqxTctzsnNrjloBhukRYQS4q9foW0uLYb9wJDHU312EScR/30G2S3DW8lH8PBaJyGqRxhTBgYrGt+Vs5ABA==}
+    engines: {node: '>=22.4'}
+    hasBin: true
+    peerDependencies:
+      ws: ^8.19.0
+    peerDependenciesMeta:
+      ws:
+        optional: true
+
   '@swc/helpers@0.5.23':
     resolution: {integrity: sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==}
 
@@ -6739,6 +6752,9 @@ packages:
     resolution: {integrity: sha512-bx8Q1STctnNaaDymWnkfQLKofs0mGNN7rLLapJlGuV3VlvegD7Ls4ggMjE3aUSWItCCzU0PEv45lI87iSigiCA==}
     engines: {node: '>=20.0'}
 
+  xstate@5.33.3:
+    resolution: {integrity: sha512-AnDRjS/GyKHmbA1PyhVCYBqYsA7EGe3KGgeD0ht3NFsXzoz7leX/HQDFX9QlHFJ/ltLHPsgChJYwPzRvB/0b4g==}
+
   xstate@6.0.0-alpha.73:
     resolution: {integrity: sha512-Ru3g082hzyn2h1TspciGFgHplK35jZl6Sl808cspInc0xx/RsALM8sc3AoQpg2KusApD2HPlX7liaVnSxlMyHw==}
     hasBin: true
@@ -9548,6 +9564,13 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
+  '@statelyai/graph@2.5.1(cytoscape@3.34.0)(d3-force@3.0.0)(xstate@5.33.3)(zod@4.6.5)':
+    optionalDependencies:
+      cytoscape: 3.34.0
+      d3-force: 3.0.0
+      xstate: 5.33.3
+      zod: 4.6.5
+
   '@statelyai/graph@2.5.1(cytoscape@3.34.0)(d3-force@3.0.0)(xstate@6.0.0-alpha.73)(zod@4.6.5)':
     optionalDependencies:
       cytoscape: 3.34.0
@@ -9573,6 +9596,26 @@ snapshots:
       - graphology-layout-forceatlas2
       - webcola
       - xstate
+      - zod
+
+  '@statelyai/sdk@0.45.0(cytoscape@3.34.0)(d3-force@3.0.0)(ws@8.22.0)(zod@4.6.5)':
+    dependencies:
+      '@statelyai/graph': 2.5.1(cytoscape@3.34.0)(d3-force@3.0.0)(xstate@5.33.3)(zod@4.6.5)
+      xstate: 5.33.3
+    optionalDependencies:
+      ws: 8.22.0
+    transitivePeerDependencies:
+      - '@dagrejs/dagre'
+      - '@hpcc-js/wasm-graphviz'
+      - cytoscape
+      - d3-force
+      - d3-hierarchy
+      - dotparser
+      - elkjs
+      - fast-xml-parser
+      - graphology
+      - graphology-layout-forceatlas2
+      - webcola
       - zod
 
   '@swc/helpers@0.5.23':
@@ -12970,6 +13013,8 @@ snapshots:
       '@oozcitak/infra': 2.0.2
       '@oozcitak/util': 10.0.0
       js-yaml: 4.3.2
+
+  xstate@5.33.3: {}
 
   xstate@6.0.0-alpha.73: {}
 

@@ -29,6 +29,7 @@
  * neither `ai` nor `openai`.
  * @module
  */
+import { isAsyncIterable } from "./internal/effects.js";
 
 /** An error as recorded: JSON-safe. */
 export interface RecordedError {
@@ -378,8 +379,11 @@ function omit(value: unknown, keys: string[]): unknown {
   return Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
 }
 
-/** Key-order-independent JSON, for equality. */
-function stableStringify(value: unknown): string {
+/**
+ * Key-order-independent JSON, for equality.
+ * @internal
+ */
+export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
   if (value && typeof value === "object") {
     return `{${Object.keys(value)
@@ -404,14 +408,6 @@ function streamFrom(parts: unknown[]): ReadableStream<unknown> {
       controller.close();
     },
   });
-}
-
-function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    typeof (value as Record<symbol, unknown>)[Symbol.asyncIterator] === "function"
-  );
 }
 
 async function* iterate(chunks: unknown[]): AsyncGenerator<unknown> {
@@ -1188,9 +1184,13 @@ export function compareRecordings(
       if (k === -1) {
         changed.push({
           index,
-          reason: "missing-effect",
+          // A missing output is a run that did not return: the outputs differ.
+          reason: left.kind === "output" ? "output" : "missing-effect",
           expected: left,
-          message: `The port never made ${describe(left)}.`,
+          message:
+            left.kind === "output"
+              ? `The port never returned; the original returned ${JSON.stringify(left.value)}.`
+              : `The port never made ${describe(left)}.`,
         });
         continue;
       }
@@ -1200,11 +1200,15 @@ export function compareRecordings(
     }
     // An extra effect comes first: it is usually the cause of what follows.
     for (const j of unpairedRights) {
+      const extra = b[j]!;
       divergences.push({
         index: lefts[0] ?? at,
-        reason: "extra-effect",
-        actual: b[j],
-        message: `The port made ${describe(b[j]!)}, which the original never made.`,
+        reason: extra.kind === "output" ? "output" : "extra-effect",
+        actual: extra,
+        message:
+          extra.kind === "output"
+            ? `The original never returned; the port returned ${JSON.stringify(extra.value)}.`
+            : `The port made ${describe(extra)}, which the original never made.`,
       });
     }
     divergences.push(...changed);
