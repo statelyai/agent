@@ -226,10 +226,19 @@ function observeStream(
     };
     return {
       next: (...args: [] | [unknown]) => step(() => source.next(...args)),
-      // Stopped early: done with what was read, not the value passed back.
+      // Stopped early: done with what was read, not the value passed back,
+      // once cleanup has run; a cleanup that throws is the effect's error.
       return: async (value?: unknown) => {
-        settle({});
-        return source.return ? source.return(value) : { done: true, value };
+        let result: IteratorResult<unknown>;
+        try {
+          result = source.return ? await source.return(value) : { done: true, value };
+        } catch (error) {
+          settle({ error });
+          throw error;
+        }
+        if (result.done) settle({});
+        else chunks.push(result.value);
+        return result;
       },
       ...(source.throw && {
         throw: (error?: unknown) => step(() => source.throw!(error)),
@@ -241,7 +250,15 @@ function observeStream(
     typeof (stream as Partial<AsyncIterator<unknown>>).next === "function"
       ? observe(stream as unknown as AsyncIterator<unknown>)
       : undefined;
-  const iterate = () => self ?? observe(stream[Symbol.asyncIterator]());
+  const iterate = () => {
+    if (self) return self;
+    try {
+      return observe(stream[Symbol.asyncIterator]());
+    } catch (error) {
+      settle({ error });
+      throw error;
+    }
+  };
   return new Proxy(stream, {
     get(target, property) {
       if (property === Symbol.asyncIterator) return iterate;

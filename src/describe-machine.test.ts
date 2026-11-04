@@ -208,6 +208,24 @@ describe("describeMachine", () => {
     expect(text).toContain("on SHORT → ?");
   });
 
+  test("a shorthand target inside a context patch stays", () => {
+    const machine = setup({}).createMachine({
+      context: { target: "" },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            SAVE: ({ event }) => {
+              const target = (event as unknown as { target: string }).target;
+              return { context: { target } };
+            },
+          },
+        },
+      },
+    });
+    expect(describeMachine(machine)).toContain("on SAVE → (stays); sets target");
+  });
+
   test("a spread of the current context sets nothing", () => {
     const machine = setup({}).createMachine({
       context: { outcome: "", toExecute: [] as string[], extra: {} as object },

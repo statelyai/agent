@@ -353,6 +353,71 @@ describe("wrapWorkflow: effects objects and safety", () => {
     expect(done).toEqual([[1]]);
   });
 
+  test("a stream whose cleanup throws when stopped early is an effect.error", async () => {
+    const closeFailed = new Error("close failed");
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: {
+        tokens: async () =>
+          (async function* () {
+            try {
+              yield 1;
+              yield 2;
+            } finally {
+              // oxlint-disable-next-line no-unsafe-finally
+              throw closeFailed;
+            }
+          })(),
+      },
+      run: async (_input: null, fx) => {
+        try {
+          for await (const chunk of await fx.tokens()) return chunk;
+        } catch (error) {
+          return (error as Error).message;
+        }
+        return 0;
+      },
+    });
+    const events: { type: string; result?: unknown; error?: unknown }[] = [];
+    const out = await wrapped.run(null, {
+      onTransition: (_s, event) => {
+        if (event.type === "effect.done" || event.type === "effect.error") events.push(event);
+      },
+    });
+    expect(out).toBe("close failed");
+    expect(events.map((event) => event.type)).toEqual(["effect.error"]);
+  });
+
+  test("a stream that throws creating its iterator is an effect.error", async () => {
+    const unavailable = new Error("unavailable");
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: {
+        tokens: async () => ({
+          [Symbol.asyncIterator](): AsyncIterator<unknown> {
+            throw unavailable;
+          },
+        }),
+      },
+      run: async (_input: null, fx) => {
+        try {
+          for await (const _chunk of await fx.tokens());
+        } catch (error) {
+          return (error as Error).message;
+        }
+        return "no error";
+      },
+    });
+    const types: string[] = [];
+    const out = await wrapped.run(null, {
+      onTransition: (_s, event) => {
+        if (event.type === "effect.done" || event.type === "effect.error") types.push(event.type);
+      },
+    });
+    expect(out).toBe("unavailable");
+    expect(types).toEqual(["effect.error"]);
+  });
+
   test("a stream that throws mid-way is an effect.error, and the workflow sees the same error", async () => {
     const boom = new Error("stream broke");
     let caught: unknown;

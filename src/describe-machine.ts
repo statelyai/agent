@@ -279,9 +279,23 @@ function targetsInSource(source: AnyStateNode, code: string, choice: boolean): s
   }
   // A target the source does not spell out (`target: next`, shorthand
   // `{ target }`), or one a helper call returns, is unknown.
-  return /\btarget\s*:|[{,]\s*target\s*[,}]/.test(blankStrings(code)) || returnsCall(code)
+  return /\btarget\s*:/.test(code) || returnsShorthandTarget(code) || returnsCall(code)
     ? "?"
     : "(stays)";
+}
+
+/**
+ * True when an object the function returns (`=> ({ … })`, `return { … }`)
+ * has shorthand `target` at its top level. A `target` nested in its context
+ * patch is a context key, not a destination.
+ */
+function returnsShorthandTarget(code: string): boolean {
+  const text = blankStrings(code);
+  for (const match of text.matchAll(/(?:=>\s*\(\s*|\breturn\s+)\{/g)) {
+    const open = match.index + match[0].length - 1;
+    if (objectKeys(text, open, new Set()).includes("target")) return true;
+  }
+  return false;
 }
 
 /** One transition, as a line: `on GO (human) if context.ready → review; sets draft — description`. */
