@@ -189,6 +189,24 @@ describe("checkParity", () => {
     expect("error" in row.after && (row.after.error as Error).message).toContain("worker.ts:4");
   });
 
+  test("a normalizeError result that cannot be plain JSON still compares", async () => {
+    const failing = async (): Promise<never> => {
+      throw new Error("nope");
+    };
+    const report = await checkParity({
+      scenarios: [{ id: "x", input: null }],
+      effects: () => ({}),
+      before: failing,
+      after: failing,
+      normalizeError: (error) => {
+        const value: Record<string, unknown> = { message: (error as Error).message };
+        value.self = value;
+        return value;
+      },
+    });
+    expect(report.equivalent).toBe(true);
+  });
+
   test("normalizeOutput pins what differs run to run", async () => {
     let clock = 0;
     const timed = async (ticket: Ticket, effects: Effects) => ({

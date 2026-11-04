@@ -388,6 +388,35 @@ describe("wrapWorkflow: effects objects and safety", () => {
     expect(events.map((event) => event.type)).toEqual(["effect.error"]);
   });
 
+  test("a Buffer input reaches the workflow as a Buffer", async () => {
+    const wrapped = wrapWorkflow({
+      id: "buffer",
+      effects: {},
+      run: async (input: { data: Buffer }) => input.data.toString("hex"),
+    });
+    expect(await wrapped.run({ data: Buffer.from("hi") })).toBe("6869");
+  });
+
+  test("for await reads the iterator a stream supplies, not its own next()", async () => {
+    const supplied = (async function* () {
+      yield "from iterator";
+    })();
+    const stream = {
+      next: async () => ({ done: false, value: "from next" }),
+      [Symbol.asyncIterator]: () => supplied,
+    };
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: { tokens: async () => stream },
+      run: async (_input: null, fx) => {
+        const seen: unknown[] = [];
+        for await (const chunk of await fx.tokens()) seen.push(chunk);
+        return seen;
+      },
+    });
+    expect(await wrapped.run(null)).toEqual(["from iterator"]);
+  });
+
   test("a stream that throws creating its iterator is an effect.error", async () => {
     const unavailable = new Error("unavailable");
     const wrapped = wrapWorkflow({

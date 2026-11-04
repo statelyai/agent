@@ -130,7 +130,11 @@ function objectKeys(text: string, open: number, kept: ReadonlySet<string>): stri
 function keysInSource(code: string, at: RegExp, keys: Set<string>): void {
   // The names the current context goes by: `context`, or `ctx` in `{ context: ctx }`.
   const kept = new Set(["context"]);
-  for (const [, name] of code.matchAll(/\bcontext\s*:\s*([A-Za-z_$][\w$]*)\s*[,}]/g)) {
+  // Aliases come from the parameters only: `{ context: patch }` in a returned
+  // object is a new context, not the current one.
+  const body = bodyStart(blankStrings(code));
+  const params = body > 0 ? code.slice(0, body) : "";
+  for (const [, name] of params.matchAll(/\bcontext\s*:\s*([A-Za-z_$][\w$]*)\s*[,}]/g)) {
     kept.add(name!);
   }
   for (const match of code.matchAll(at)) {
@@ -212,6 +216,29 @@ function bodyStart(text: string): number {
 }
 
 /**
+ * True when a returned object's `target` is an expression that can pick
+ * another state (`target: ready ? "done" : pick(context)`), not a literal.
+ */
+function targetMayVary(code: string): boolean {
+  const text = blankStrings(code);
+  for (const match of text.matchAll(/\btarget\s*:\s*/g)) {
+    const rest = text.slice(match.index + match[0].length);
+    let depth = 0;
+    let end = 0;
+    for (; end < rest.length; end++) {
+      const char = rest[end];
+      if (char === "(" || char === "[" || char === "{") depth++;
+      else if (char === ")" || char === "]" || char === "}") {
+        if (depth === 0) break;
+        depth--;
+      } else if (char === "," && depth === 0) break;
+    }
+    if (/\?|&&|\|\||\(/.test(rest.slice(0, end))) return true;
+  }
+  return false;
+}
+
+/**
  * True when an arrow function's whole body is an object literal, `=> ({ … })`:
  * it always returns a transition, whatever its context patch computes.
  */
@@ -274,7 +301,8 @@ function targetsInSource(source: AnyStateNode, code: string, choice: boolean): s
   const names = [...found].map((node) => nameOf(source, node));
   if (names.length) {
     const conditional =
-      names.length > 1 || (!choice && !returnsObjectLiteral(code) && mayDecline(code));
+      names.length > 1 ||
+      (!choice && (returnsObjectLiteral(code) ? targetMayVary(code) : mayDecline(code)));
     return `${names.join(", ")}${conditional ? " (conditional)" : ""}`;
   }
   // A target the source does not spell out (`target: next`, shorthand

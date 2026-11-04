@@ -29,7 +29,7 @@ export function mapEffects<T>(effects: T, wrap: (name: string, effect: AnyEffect
 export function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
   return (
     value !== null &&
-    typeof value === "object" &&
+    (typeof value === "object" || typeof value === "function") &&
     typeof (value as Record<symbol, unknown>)[Symbol.asyncIterator] === "function"
   );
 }

@@ -226,6 +226,28 @@ describe("describeMachine", () => {
     expect(describeMachine(machine)).toContain("on SAVE → (stays); sets target");
   });
 
+  test("a conditional target expression stays conditional, and a returned context is not an alias", () => {
+    const machine = setup({}).createMachine({
+      context: { ready: false, n: 0 },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            GO: ({ context }) => ({ target: context.ready ? "done" : "working" }),
+            SET: ({ event }) => {
+              const patch = (event as unknown as { patch: { n: number } }).patch;
+              return { context: { ...patch } };
+            },
+          },
+        },
+        done: {},
+      },
+    });
+    const text = describeMachine(machine);
+    expect(text).toMatch(/on GO → .*\(conditional\)/);
+    expect(text).toContain("…patch");
+  });
+
   test("a spread of the current context sets nothing", () => {
     const machine = setup({}).createMachine({
       context: { outcome: "", toExecute: [] as string[], extra: {} as object },

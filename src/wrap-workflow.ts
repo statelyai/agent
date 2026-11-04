@@ -251,9 +251,10 @@ function observeStream(
       ? observe(stream as unknown as AsyncIterator<unknown>)
       : undefined;
   const iterate = () => {
-    if (self) return self;
     try {
-      return observe(stream[Symbol.asyncIterator]());
+      // The iterator the stream supplies; the shared observer only when it is the stream itself.
+      const iterator = stream[Symbol.asyncIterator]();
+      return self && iterator === (stream as unknown) ? self : observe(iterator);
     } catch (error) {
       settle({ error });
       throw error;
@@ -286,12 +287,22 @@ function ownCopy<T>(value: T): T {
   }
 }
 
+function isBuiltinView(value: ArrayBufferView): boolean {
+  const proto: unknown = Object.getPrototypeOf(value);
+  if (proto === DataView.prototype) return true;
+  const tag = (value as unknown as { [Symbol.toStringTag]?: string })[Symbol.toStringTag];
+  const ctor = tag ? (globalThis as Record<string, unknown>)[tag] : undefined;
+  return typeof ctor === "function" && proto === (ctor as { prototype: unknown }).prototype;
+}
+
 function isPlainData(value: unknown, seen: WeakSet<object>): boolean {
   if (typeof value === "function") return false;
   if (value === null || typeof value !== "object") return true;
   if (seen.has(value)) return true;
   seen.add(value);
-  if (value instanceof Date || value instanceof RegExp || ArrayBuffer.isView(value)) return true;
+  if (value instanceof Date || value instanceof RegExp) return true;
+  // A built-in typed array or DataView clones exactly; a subclass (Buffer) loses its prototype.
+  if (ArrayBuffer.isView(value)) return isBuiltinView(value);
   if (value instanceof Map || value instanceof Set) {
     return [...value.entries()].every((entry) => entry.every((v) => isPlainData(v, seen)));
   }

@@ -13,6 +13,7 @@ import {
   stableStringify,
 } from "./equivalence.js";
 import { mapEffects } from "./internal/effects.js";
+import { toJsonValue } from "./run-agent.js";
 
 /** One scenario: an id and the workflow's input. Extra fields are yours. */
 export interface CheckParityScenario<TInput = unknown> {
@@ -106,7 +107,12 @@ function errorIdentity(
   if (!("error" in outcome)) return undefined;
   const error = normalize ? normalize(outcome.error) : outcome.error;
   if (error instanceof Error) return `${error.name}: ${error.message}`;
-  return normalize ? stableStringify(error) : String(error);
+  if (!normalize) return String(error);
+  try {
+    return stableStringify(toJsonValue(error) ?? null);
+  } catch {
+    return String(error);
+  }
 }
 
 /**
