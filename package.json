@@ -192,6 +192,7 @@
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/context-async-hooks": "^2.12.0",
     "@opentelemetry/sdk-trace-base": "^2.12.0",
+    "@statelyai/sdk": "0.45.0",
     "@tanstack/ai": "^0.66.0",
     "@types/node": "^22.20.5",
     "@types/react": "^19.3.0",
