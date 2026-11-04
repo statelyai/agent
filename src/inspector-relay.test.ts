@@ -45,6 +45,12 @@ async function joinAsViewer(url: string, roomId: string) {
     messages.push(JSON.parse(String(message.data)) as RelayMessage);
   };
   socket.send(JSON.stringify({ type: "@statelyai.register", protocolVersion: 2, role: "viewer" }));
+  // The run starts only after the relay acknowledges this viewer.
+  await until(() => messages.some((m) => m.type === "@statelyai.registered"));
+  if (!messages.some((m) => m.type === "@statelyai.registered")) {
+    socket.close();
+    throw new Error("relay never acknowledged the viewer");
+  }
   socket.send(JSON.stringify({ type: "@statelyai.ready", version: "test", protocolVersion: 2 }));
   socket.send(JSON.stringify({ type: "@statelyai.system.loaded" }));
   return { messages, close: () => socket.close() };
