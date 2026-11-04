@@ -78,9 +78,11 @@ const nameOf = (source: AnyStateNode, target: AnyStateNode) =>
 /**
  * The keys of the object literal whose `{` is at `open` in `text`, at its top
  * level: `a`, `b` for `{ a: 1, b, ...c }`, and `…c` for a spread, whose keys
- * cannot be read. Strings, templates and nested brackets are skipped over.
+ * cannot be read. A spread of a name in `kept` (the current context) sets
+ * nothing new, so it is left out. Strings, templates and nested brackets are
+ * skipped over.
  */
-function objectKeys(text: string, open: number): string[] {
+function objectKeys(text: string, open: number, kept: ReadonlySet<string>): string[] {
   const keys: string[] = [];
   let depth = 0;
   let expectKey = false;
@@ -110,6 +112,7 @@ function objectKeys(text: string, open: number): string[] {
       expectKey = false;
       if (text.startsWith("...", i)) {
         const spread = /^\.\.\.\s*([\w$.]+)(\()?/.exec(text.slice(i));
+        if (!spread?.[2] && kept.has(spread?.[1] ?? "")) continue;
         keys.push(`…${spread?.[1] ?? ""}${spread?.[2] ? "()" : ""}`);
         continue;
       }
@@ -125,12 +128,23 @@ function objectKeys(text: string, open: number): string[] {
 
 /** Every key of each object literal that follows a match of `at` in `code`; `…name` when what follows is not a literal. */
 function keysInSource(code: string, at: RegExp, keys: Set<string>): void {
+  // The names the current context goes by: `context`, or `ctx` in `{ context: ctx }`.
+  const kept = new Set(["context"]);
+  // Aliases come from the parameters only: `{ context: patch }` in a returned
+  // object is a new context, not the current one.
+  const body = bodyStart(blankStrings(code));
+  const params = body > 0 ? code.slice(0, body) : "";
+  for (const [, name] of params.matchAll(/\bcontext\s*:\s*([A-Za-z_$][\w$]*)\s*[,}]/g)) {
+    kept.add(name!);
+  }
   for (const match of code.matchAll(at)) {
     const open = match.index + match[0].length - 1;
     if (code[open] === "{") {
-      for (const key of objectKeys(code, open)) keys.add(key);
+      for (const key of objectKeys(code, open, kept)) keys.add(key);
     } else {
       const from = /^[\w$.]+(\()?/.exec(code.slice(open));
+      // `{ context: ctx }` binds (or passes back) the current context: nothing new.
+      if (from && !from[1] && kept.has(from[0])) continue;
       keys.add(from ? `…${from[0]}${from[1] ? ")" : ""}` : "…");
     }
   }
@@ -180,16 +194,13 @@ const mayDecline = (code: string) =>
     code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""'),
   );
 
+const blankStrings = (code: string) => code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
+
 /**
- * True when the function returns a call's result (`=> next(ctx)`, `return
- * pick(x)`), so its target is not in its own source. Reads only the
- * function's own returned expressions, not those of callbacks nested in it.
+ * Where a function's body starts (its first non-space character): after its
+ * arrow, or its first brace, outside the parameters. -1 when there is none.
  */
-function returnsCall(code: string): boolean {
-  const text = code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
-  // Grouping parentheses first: `=> (next(x))` returns a call; `=> ({ … })` does not.
-  const startsWithCall = (at: number) => /^[\s(]*[A-Za-z_$][\w$.]*\s*\(/.test(text.slice(at));
-  // The outer function's body: after its arrow, or its first brace, outside the parameters.
+function bodyStart(text: string): number {
   let parens = 0;
   let body = -1;
   for (let i = 0; i < text.length && body < 0; i++) {
@@ -199,8 +210,61 @@ function returnsCall(code: string): boolean {
     else if (parens === 0 && char === "=" && text[i + 1] === ">") body = i + 2;
     else if (parens === 0 && char === "{") body = i;
   }
-  if (body < 0) return false;
+  if (body < 0) return -1;
   while (/\s/.test(text[body] ?? "")) body++;
+  return body;
+}
+
+/**
+ * True when a returned object's `target` is an expression that can pick
+ * another state (`target: ready ? "done" : pick(context)`), not a literal.
+ */
+function targetMayVary(code: string): boolean {
+  const text = blankStrings(code);
+  for (const match of text.matchAll(/\btarget\s*:\s*/g)) {
+    const rest = text.slice(match.index + match[0].length);
+    let depth = 0;
+    let end = 0;
+    for (; end < rest.length; end++) {
+      const char = rest[end];
+      if (char === "(" || char === "[" || char === "{") depth++;
+      else if (char === ")" || char === "]" || char === "}") {
+        if (depth === 0) break;
+        depth--;
+      } else if (char === "," && depth === 0) break;
+    }
+    if (/\?|&&|\|\||\(/.test(rest.slice(0, end))) return true;
+  }
+  return false;
+}
+
+/**
+ * True when an arrow function's whole body is an object literal, `=> ({ … })`:
+ * it always returns a transition, whatever its context patch computes.
+ */
+function returnsObjectLiteral(code: string): boolean {
+  const text = blankStrings(code);
+  const body = bodyStart(text);
+  if (body < 0 || text[body] !== "(" || !/^\(\s*\{/.test(text.slice(body))) return false;
+  let depth = 0;
+  for (let i = body; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth === 0) return /^[\s;]*$/.test(text.slice(i + 1));
+  }
+  return false;
+}
+
+/**
+ * True when the function returns a call's result (`=> next(ctx)`, `return
+ * pick(x)`), so its target is not in its own source. Reads only the
+ * function's own returned expressions, not those of callbacks nested in it.
+ */
+function returnsCall(code: string): boolean {
+  const text = blankStrings(code);
+  // Grouping parentheses first: `=> (next(x))` returns a call; `=> ({ … })` does not.
+  const startsWithCall = (at: number) => /^[\s(]*[A-Za-z_$][\w$.]*\s*\(/.test(text.slice(at));
+  const body = bodyStart(text);
+  if (body < 0) return false;
   if (text[body] !== "{") return startsWithCall(body);
   // A block body: its own `return` statements, at depth 1.
   let depth = 0;
@@ -236,11 +300,30 @@ function targetsInSource(source: AnyStateNode, code: string, choice: boolean): s
   }
   const names = [...found].map((node) => nameOf(source, node));
   if (names.length) {
-    const conditional = names.length > 1 || (!choice && mayDecline(code));
+    const conditional =
+      names.length > 1 ||
+      (!choice && (returnsObjectLiteral(code) ? targetMayVary(code) : mayDecline(code)));
     return `${names.join(", ")}${conditional ? " (conditional)" : ""}`;
   }
-  // A target the source does not spell out, or one a helper call returns, is unknown.
-  return /\btarget\s*:/.test(code) || returnsCall(code) ? "?" : "(stays)";
+  // A target the source does not spell out (`target: next`, shorthand
+  // `{ target }`), or one a helper call returns, is unknown.
+  return /\btarget\s*:/.test(code) || returnsShorthandTarget(code) || returnsCall(code)
+    ? "?"
+    : "(stays)";
+}
+
+/**
+ * True when an object the function returns (`=> ({ … })`, `return { … }`)
+ * has shorthand `target` at its top level. A `target` nested in its context
+ * patch is a context key, not a destination.
+ */
+function returnsShorthandTarget(code: string): boolean {
+  const text = blankStrings(code);
+  for (const match of text.matchAll(/(?:=>\s*\(\s*|\breturn\s+)\{/g)) {
+    const open = match.index + match[0].length - 1;
+    if (objectKeys(text, open, new Set()).includes("target")) return true;
+  }
+  return false;
 }
 
 /** One transition, as a line: `on GO (human) if context.ready → review; sets draft — description`. */

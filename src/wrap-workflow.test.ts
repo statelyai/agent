@@ -293,4 +293,299 @@ describe("wrapWorkflow: effects objects and safety", () => {
       expect.objectContaining({ type: "effect.call", args: ["[redacted]"] }),
     );
   });
+
+  test("a streaming effect is done after its chunks are consumed, with the chunks as result", async () => {
+    const order: string[] = [];
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: {
+        tokens: async () =>
+          (async function* () {
+            yield "a";
+            yield "b";
+            yield "c";
+          })(),
+      },
+      run: async (_input: null, fx) => {
+        const stream = await fx.tokens();
+        order.push("returned");
+        let text = "";
+        for await (const chunk of stream) text += chunk;
+        order.push("consumed");
+        return text;
+      },
+    });
+    const events: Array<{ type: string; result?: unknown }> = [];
+    const out = await wrapped.run(null, {
+      onTransition: (_s, event) => {
+        if (event.type === "effect.done") order.push("done");
+        if (event.type.startsWith("effect.")) events.push(event as never);
+      },
+    });
+    expect(out).toBe("abc");
+    expect(events.find((e) => e.type === "effect.done")?.result).toEqual(["a", "b", "c"]);
+    expect(order.indexOf("done")).toBeGreaterThan(order.indexOf("returned"));
+  });
+
+  test("a streaming effect that stops early is done with the chunks read so far", async () => {
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: {
+        tokens: async () =>
+          (async function* () {
+            yield 1;
+            yield 2;
+            yield 3;
+          })(),
+      },
+      run: async (_input: null, fx) => {
+        for await (const chunk of await fx.tokens()) return chunk;
+        return 0;
+      },
+    });
+    const done: unknown[] = [];
+    const out = await wrapped.run(null, {
+      onTransition: (_s, event) => {
+        if (event.type === "effect.done") done.push(event.result);
+      },
+    });
+    expect(out).toBe(1);
+    expect(done).toEqual([[1]]);
+  });
+
+  test("a stream whose cleanup throws when stopped early is an effect.error", async () => {
+    const closeFailed = new Error("close failed");
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: {
+        tokens: async () =>
+          (async function* () {
+            try {
+              yield 1;
+              yield 2;
+            } finally {
+              // oxlint-disable-next-line no-unsafe-finally
+              throw closeFailed;
+            }
+          })(),
+      },
+      run: async (_input: null, fx) => {
+        try {
+          for await (const chunk of await fx.tokens()) return chunk;
+        } catch (error) {
+          return (error as Error).message;
+        }
+        return 0;
+      },
+    });
+    const events: { type: string; result?: unknown; error?: unknown }[] = [];
+    const out = await wrapped.run(null, {
+      onTransition: (_s, event) => {
+        if (event.type === "effect.done" || event.type === "effect.error") events.push(event);
+      },
+    });
+    expect(out).toBe("close failed");
+    expect(events.map((event) => event.type)).toEqual(["effect.error"]);
+  });
+
+  test("a Buffer input reaches the workflow as a Buffer", async () => {
+    const wrapped = wrapWorkflow({
+      id: "buffer",
+      effects: {},
+      run: async (input: { data: Buffer }) => input.data.toString("hex"),
+    });
+    expect(await wrapped.run({ data: Buffer.from("hi") })).toBe("6869");
+  });
+
+  test("for await reads the iterator a stream supplies, not its own next()", async () => {
+    const supplied = (async function* () {
+      yield "from iterator";
+    })();
+    const stream = {
+      next: async () => ({ done: false, value: "from next" }),
+      [Symbol.asyncIterator]: () => supplied,
+    };
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: { tokens: async () => stream },
+      run: async (_input: null, fx) => {
+        const seen: unknown[] = [];
+        for await (const chunk of await fx.tokens()) seen.push(chunk);
+        return seen;
+      },
+    });
+    expect(await wrapped.run(null)).toEqual(["from iterator"]);
+  });
+
+  test("a stream that throws creating its iterator is an effect.error", async () => {
+    const unavailable = new Error("unavailable");
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: {
+        tokens: async () => ({
+          [Symbol.asyncIterator](): AsyncIterator<unknown> {
+            throw unavailable;
+          },
+        }),
+      },
+      run: async (_input: null, fx) => {
+        try {
+          for await (const _chunk of await fx.tokens());
+        } catch (error) {
+          return (error as Error).message;
+        }
+        return "no error";
+      },
+    });
+    const types: string[] = [];
+    const out = await wrapped.run(null, {
+      onTransition: (_s, event) => {
+        if (event.type === "effect.done" || event.type === "effect.error") types.push(event.type);
+      },
+    });
+    expect(out).toBe("unavailable");
+    expect(types).toEqual(["effect.error"]);
+  });
+
+  test("a stream that throws mid-way is an effect.error, and the workflow sees the same error", async () => {
+    const boom = new Error("stream broke");
+    let caught: unknown;
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: {
+        tokens: async () =>
+          (async function* () {
+            yield "a";
+            throw boom;
+          })(),
+      },
+      run: async (_input: null, fx) => {
+        try {
+          for await (const _chunk of await fx.tokens());
+        } catch (error) {
+          caught = error;
+        }
+        return "handled";
+      },
+    });
+    const seen: string[] = [];
+    let error: unknown;
+    await wrapped.run(null, {
+      onTransition: (_s, event) => {
+        if (event.type.startsWith("effect.")) seen.push(event.type);
+        if (event.type === "effect.error") error = event.error;
+      },
+    });
+    expect(caught).toBe(boom);
+    expect(seen).toEqual(["effect.call", "effect.error"]);
+    expect(error).toEqual(expect.objectContaining({ message: "stream broke" }));
+  });
+
+  test("a generator's return value reaches a manual next() loop and is recorded", async () => {
+    const log = { prompt: "hi", tokens: 2 };
+    const tokens = async () =>
+      (async function* () {
+        yield "a";
+        yield "b";
+        return log;
+      })();
+    const read = async (next: () => Promise<IteratorResult<string, typeof log>>) => {
+      const chunks: string[] = [];
+      for (let step = await next(); ; step = await next()) {
+        if (step.done) return { chunks, returned: step.value };
+        chunks.push(step.value);
+      }
+    };
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: { tokens },
+      run: async (via: "iterator" | "generator", fx) => {
+        const stream = await fx.tokens();
+        // Through `[Symbol.asyncIterator]()`, or `next()` on the generator itself.
+        const iterator = via === "iterator" ? stream[Symbol.asyncIterator]() : stream;
+        return read(() => iterator.next());
+      },
+    });
+    for (const via of ["iterator", "generator"] as const) {
+      const done: unknown[] = [];
+      const out = await wrapped.run(via, {
+        onTransition: (_s, event) => {
+          if (event.type === "effect.done") done.push(event.result);
+        },
+      });
+      expect(out.returned).toBe(log);
+      expect(out.chunks).toEqual(["a", "b"]);
+      expect(done).toEqual([{ chunks: ["a", "b"], returned: log }]);
+    }
+  });
+
+  test("a streaming effect's other properties reach the original, bound to it", async () => {
+    class Stream {
+      total = 2;
+      async *[Symbol.asyncIterator]() {
+        yield this.total;
+      }
+      describe() {
+        return `total ${this.total}`;
+      }
+    }
+    const wrapped = wrapWorkflow({
+      id: "stream",
+      effects: { open: async () => new Stream() },
+      run: async (_input: null, fx) => {
+        const stream = await fx.open();
+        const chunks: number[] = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        return [stream.total, stream.describe(), chunks] as const;
+      },
+    });
+    expect(await wrapped.run(null)).toEqual([2, "total 2", [2]]);
+  });
+
+  test("the workflow owns its input: mutating a frozen input does not throw or touch context", async () => {
+    const deepFreeze = <T>(value: T): T => {
+      for (const child of Object.values(value as object))
+        if (child && typeof child === "object") deepFreeze(child);
+      return Object.freeze(value);
+    };
+    const input = deepFreeze({ messages: [{ role: "user", content: "hi" }] });
+    const wrapped = wrapWorkflow({
+      id: "mutates",
+      effects: {},
+      run: async (value: typeof input) => {
+        (value.messages[0] as { content: string }).content = "mutated";
+        return value.messages[0]!.content;
+      },
+    });
+    let context: unknown;
+    const out = await wrapped.run(input, {
+      onTransition: (snapshot) => void (context = snapshot.context.input),
+    });
+    expect(out).toBe("mutated");
+    expect(context).toEqual({ messages: [{ role: "user", content: "hi" }] });
+    expect(input.messages[0]!.content).toBe("hi");
+  });
+
+  test("an input structuredClone cannot copy reaches the workflow as is", async () => {
+    const input = { callback: () => "called" };
+    const wrapped = wrapWorkflow({
+      id: "uncloneable",
+      effects: {},
+      run: async (value: typeof input) => [value === input, value.callback()] as const,
+    });
+    expect(await wrapped.run(input)).toEqual([true, "called"]);
+  });
+
+  test("an input holding a class instance reaches the workflow as is", async () => {
+    class Message {
+      constructor(public content: string) {}
+    }
+    const input = { messages: [new Message("hi")] };
+    const wrapped = wrapWorkflow({
+      id: "instances",
+      effects: {},
+      run: async (value: typeof input) => [value === input, value.messages[0] instanceof Message],
+    });
+    expect(await wrapped.run(input)).toEqual([true, true]);
+  });
 });

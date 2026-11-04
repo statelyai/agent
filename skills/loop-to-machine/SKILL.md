@@ -18,7 +18,9 @@ For an async workflow (not a hand-rolled loop you are asked to replace wholesale
 1. **Step 0: wrap and record.** Move every side effect behind one `effects` object of async functions (the only edit to the old code). Then `wrapWorkflow({ id, effects, run: (input, effects) => old(input, effects) })` from `@statelyai/agent`. Pin the baseline with `checkParity` (`@statelyai/agent/testing`): `{ scenarios, effects: (s) => fakes, before: old, after: (input, fx) => step0.run(input, { effects: fx }) }`; every row `equivalent`. Ship it: inspection, traces, the event log, `signal`, a recorded baseline.
 2. **Carve one phase per commit.** One phase becomes states (§3); the rest stays the old helper, invoked as a `createAsyncLogic` actor built per run from `effects`. Keep the `(input, effects)` runner signature with a third `options` argument passed through to `runAgent` (`threadId`, `store`, `metadata`, `onTrace`, `inspect`), so traces and inspection never need a copy of the runner. Move any prompt or warning text the carved phase sends into a versioned request config as you carve it: that file is what `improve-machine` may later edit. Run `checkParity` against the old code after each carve. Add the §6 proofs for the carved phase only.
 
-A wrapped workflow is a black box: one state, no mid-function resume, no `canReach` about its inside. Do not report proofs before the phase is carved. Worked example: `examples/strangler-fig`. A class whose loop calls its own private model/tool methods: replace those methods on the instance inside `run` so they call `effects` (no edit to the class). Pin timestamps and generated ids with `checkParity`'s `normalizeOutput`. An actor resolving `null` reaches `onDone` as `undefined`: compare with `== null`.
+A wrapped workflow is a black box: one state, no mid-function resume, no `canReach` about its inside. Do not report proofs before the phase is carved. Worked example: `examples/strangler-fig`. A class whose loop calls its own private model/tool methods: replace those methods on the instance inside `run` so they call `effects` (no edit to the class). Effect-TS generators, Redux thunks, LangGraph graphs, closures in DI factories, and step loops inside the model SDK have their own seams: [docs/strangler-fig.md](../../docs/strangler-fig.md#seams-for-other-shapes). Effects bound to one call's live objects: create the workflow once, pass `run(input, { effects })` per call. Scrub generated ids and timestamps: `compare.normalize` for effect arguments, `normalizeOutput` for the output, `normalizeError` for thrown errors. An actor resolving `null` reaches `onDone` as `undefined`: compare with `== null`.
+
+**A phase in the middle of a private method:** copy only that phase's lines into the carved actor, list the copied line ranges in a comment, and let `checkParity` call-args catch drift. When a public per-turn hook exists, replace that method on the instance instead and let the machine decide at that boundary ([reference.md](reference.md#a-phase-in-the-middle-of-a-method)).
 
 This is step 1 of 4. Next: `add-traces`, then `add-evals`, then `improve-machine`. To author a machine with no existing code, use `generate-machine`. Recording, replay, and the full parity test code are in [reference.md](reference.md).
 
@@ -69,7 +71,10 @@ Read the loop and fill this table before writing anything. Each row maps to a ma
 | `AbortSignal` or a cancel method | `runAgent`'s `signal`, or a `CANCEL` event (§5) |
 | Hooks or bus emissions the UI depends on | `enq.emit(...)` (declared under `emitted`) or `onTransition`, same payloads |
 | Message history in a class field | Context when a guard or prompt reads it; else host-owned, passed as `messages`. Write down which |
-| A streaming iterator | The `streamText` executor keeps it and pipes to the old consumer |
+| A streaming iterator | The `streamText` executor keeps it and pipes to the old consumer. In a wrapped workflow, an effect returning it is observed: `effect.done` carries the chunks once read, a mid-stream throw is `effect.error` |
+| A step loop inside the model SDK (`stopWhen`, `maxSteps`) | One executor or effect, unchanged. Carve the control flow around it: handoff, approval, caps |
+| A synchronous host callback, a diagnostic logger | Not an effect: the machine factory closes over it |
+| An effect result that is a live object, a write to host state by reference | A name, id, or change in the result, with a host-side registry. Parity cannot see the live object or the write |
 | Mutable state on the class instance | JSON context fields, or host state passed as input |
 | A cap on a loop the machine keeps / removed | A `choice` state against an exported constant / nothing, with the reason recorded |
 | A class-shaped runtime (`run`/`continue`/`abort`/`restore`/`snapshot`) | A subclass overriding the loop methods to call `runAgent`, inheriting the rest. The conversation may stay host-owned at first (a snapshot then cannot resume alone); moving it into context is a later labeled step |
@@ -101,7 +106,7 @@ For code with no model call (a tool scheduler, an approval queue), and old code 
 
 ## 3. Author the environment
 
-The environment is the machine: states, guards that encode the rules, side-effecting actors, an invariant sentinel. Use `setupAgent` (from `@statelyai/agent`) with zod schemas for `input`, `context`, `output`, and every event. Export the event schemas as one object for a later policy. A gated action (closed-choice `agent.decide`, guard in the transition) is in [reference.md](reference.md#a-gated-action).
+The environment is the machine: states, guards that encode the rules, side-effecting actors, an invariant sentinel. Use `setupAgent` (from `@statelyai/agent`) with schemas for `input`, `context`, `output`, and every event. It takes any Standard Schema library (zod, valibot, arktype); the package ships none, so install one. Pass the schemas as top-level fields, `setupAgent({ context, input, output, events })` (`context` is required), or as one `schemas: createAgentSchemas({ ... })`; a partial object under `schemas` does not typecheck. Export the event schemas as one object for a later policy. A gated action (closed-choice `agent.decide`, guard in the transition) is in [reference.md](reference.md#a-gated-action).
 
 - **Do the deterministic steps yourself.** Identity, lookup, ownership: states in order. A model answers only what needs judgment.
 - **Export the guards** as plain functions, and build the machine in a factory (`createDeskMachine({ refundIsLegal })`) so a test can pass a loosened guard.
@@ -130,6 +135,7 @@ Write `runMachine` with the old function's signature and result type.
 
 **Host events mid-run** (cancel, abort, a user message while a request runs):
 
+- A legacy body that owns abort (it returns its own `stopped` result) during a partial carve: pass the signal to the legacy body only, not to `runAgent`, so its result stands and reaches the machine as a normal final.
 - Abort: `runAgent`'s `signal` alone is a hard stop: the run settles `{ status: "error", cause: "aborted" }` and the machine sees nothing. Add `abortWith: { event, timeout? }` when the machine should handle it (a `cancelled` final, cleanup invokes); it falls back to `aborted` if the event is unhandled, if the machine is still active once the event has been applied and the run settles, or on timeout: the handled path must reach a final or idle state before you can rely on its cleanup.
 - A cancel the machine handles (cleanup, a `cancelled` final): a `CANCEL` event on the parent state. With `runAgent`, pass `inbox: createAgentInbox()` and call `inbox.send(event)`; an inbox serves one run. A hand-written `createAgentRuntime` loop uses `runtime.send(event)` ([docs/hosts.md](../../docs/hosts.md)).
 
@@ -137,7 +143,7 @@ Write `runMachine` with the old function's signature and result type.
 
 From `@statelyai/agent/testing` (example options in [reference.md](reference.md#proof-options)):
 
-- `lintAgentMachine`: no errors.
+- `lintAgentMachine`: no errors. An invoke whose error must reach the caller unchanged has no `onError` (the runner rethrows `result.error`); pass `disable: ["invoke-without-on-error"]` for that machine.
 - `canReach(machine, "<sentinel>", options)` returns `reachable: false` **and** `complete: true`, for each distinct input shape (with and without an order id; loop over them).
 - `options.payloads(snapshot)` returns payload lists per event type, on both sides of every guard boundary (`0`, the threshold and one over, each producible amount and one over); without it `complete: true` proves nothing about boundaries. A person's free-text event needs one payload per branch.
 - `outputs`: every output each actor can return; `errors`: each actor fails.
@@ -155,6 +161,8 @@ Switch the candidate to `runMachine`; run per stand-in (or against the spec). Co
 
 - Every `regression` row: fix the machine, or ask the user when the old behavior was wrong but broke no rule. Differing outcomes: the answer may become `expected`. Differing effects only: list the row in a reviewed-differences map, exact difference asserted, with who accepted it. Never edit a scenario to make a row pass.
 - **Run the old suite against the port**, the strongest evidence when the old code has tests: mock the old module (`vi.mock('../old-module', ...)`) with a subclass whose loop methods call `runAgent`, plus a canary counter the machine increments. Assert the exact count (the N runs the suite drives), not `> 0`. A test that spies on internals the port no longer calls is a structural failure: mark it `it.fails` with a comment naming why; never delete it.
+- **Swap pitfalls.** A mock factory that imports the port deadlocks when the port imports the mocked module: load the port with a dynamic import in `beforeAll` and call it from inside the factory's functions. A mock that misses the code's own import of the module: patch the class prototype from a setup file that imports the module dynamically. Code in [reference.md](reference.md#old-suite-swap).
+- **Timing.** `runAgent` starts asynchronously, so fire-and-forget work the old code starts at the same time may settle in another order. An old test asserting exact action order across concurrent tasks is structural only after you confirm the actions commute and their order is not part of the contract; an order users or storage see is behavioral.
 - Every `intended` row: its reason is a real rule. A fixed rule break with the same outcome is `intended` too.
 - With recordings, replay each against the machine (`createRecorder({ replay })`, `compareRecordings`): no key, no side effects, every divergence in `INTENDED` with who accepted it, including a guard that blocks a rule break. Semantics in [reference.md](reference.md#replay-equivalence).
 - With no model in the loop, parity is the whole proof: the spec baseline plus §6. Say so.

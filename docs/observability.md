@@ -30,6 +30,37 @@ try {
 - With the hosted relay, `inspectorUrl` is a one-time claim link for that session. Open it while the process runs; a new run prints a new one.
 - Each actor in the run reaches the inspector once, under one handle, though the durable runtime re-creates actor objects between steps. Compare actors by `sessionId`, not by object.
 - [examples/tanstack-ai-stream/inspect.ts](https://github.com/statelyai/agent/blob/next/examples/tanstack-ai-stream/inspect.ts) and [examples/next-host/agent-runtime.ts](https://github.com/statelyai/agent/blob/next/examples/next-host/agent-runtime.ts) wire it behind `STATELY_INSPECT=1`.
+- `type: "choice"` states and other transient states (left at once by `always`) never appear in the viewer's snapshot sequence: they resolve within the same macrostep. `canReach` still counts them as reached.
+- A `runAgent` started inside a wrapped workflow (a nested run per tool call, for example) appears in the inspector only when it gets its own `inspect` option: the workflow does not receive one, so pass the same inspector explicitly. It is a separate root actor with its own thread, and it does not resume with the outer run.
+
+### Local relay
+
+For a test or an offline run, start a relay in the process instead of the hosted one:
+
+```sh
+pnpm add -D @statelyai/sdk ws
+```
+
+```ts no-check
+import { createInspector } from "@statelyai/sdk/inspect";
+import { createNodeInspectionRelay } from "@statelyai/sdk/node-relay";
+
+const relay = createNodeInspectionRelay({ port: 0 }); // any free port
+await relay.start();
+let inspector: ReturnType<typeof createInspector> | undefined;
+try {
+  inspector = createInspector({ url: relay.url, roomId: "local", session: "direct" });
+  await inspector.ready;
+  await runAgent(machine, { input, executors, inspect: inspector.inspect });
+} finally {
+  inspector?.destroy();
+  await relay.stop();
+}
+```
+
+- `@statelyai/sdk/node-relay` imports `ws`, an optional peer of `@statelyai/sdk`. Without it, the import fails with `Cannot find package 'ws'`.
+- `session: "direct"` connects with the room id only, which is what a local relay expects.
+- A test's viewer connects a WebSocket to `${relay.url}?r=<roomId>` and registers as a viewer. That is the relay endpoint, not an inspector page.
 
 ## Trace one run
 

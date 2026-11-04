@@ -620,6 +620,22 @@ describe("explorePaths — enumerates decision + human branches", () => {
     );
   });
 
+  test("done terminals carry the machine's output", async () => {
+    const report = await explorePaths(createRefundMachine(), {
+      input: { request: "x", amount: 5000 },
+    });
+    const done = report.terminals.filter((terminal) => terminal.status === "done");
+    expect(done.map((terminal) => [terminal.state, terminal.output])).toEqual(
+      expect.arrayContaining([
+        ["refunded", { refunded: true }],
+        ["denied", { refunded: false }],
+      ]),
+    );
+    expect(report.terminals.filter((t) => t.status !== "done").every((t) => !("output" in t))).toBe(
+      true,
+    );
+  });
+
   test("refund (amount <= 100) can auto-approve without the human gate", async () => {
     const report = await explorePaths(createRefundMachine(), {
       input: { request: "small refund", amount: 50 },
@@ -636,6 +652,47 @@ describe("canReach — reachability with a witness path", () => {
     });
     expect(result.reachable).toBe(true);
     expect(result.witness?.map((event) => event.type)).toEqual(["NEEDS_REVIEW", "DENY"]);
+  });
+
+  test("an incomplete search says why: a src with no outputs entry", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      actors: { resume: createAsyncLogic({ run: async () => "ok" }) },
+    });
+    const machine = agent.createMachine({
+      context: () => ({}),
+      initial: "waiting",
+      states: {
+        waiting: { invoke: { src: "resume", onDone: { target: "done" } } },
+        done: { type: "final" },
+        never: {},
+      },
+    });
+    const result = await canReach(machine, "never");
+    expect(result).toMatchObject({ reachable: false, complete: false });
+    expect(result.unexplored).toEqual([expect.stringContaining("src 'resume'")]);
+    const proven = await canReach(createRefundMachine(), "denied", {
+      input: { request: "x", amount: 5 },
+    });
+    expect(proven.unexplored).toBeUndefined();
+  });
+
+  test("an incomplete search says why: a path that hit maxDepth", async () => {
+    const machine = setupAgent({
+      context: z.object({}),
+      events: { TICK: z.object({}) },
+    }).createMachine({
+      context: () => ({}),
+      initial: "a",
+      states: {
+        a: { on: { TICK: { target: "b" } } },
+        b: { on: { TICK: { target: "a" } } },
+        never: {},
+      },
+    });
+    const result = await canReach(machine, "never", { maxDepth: 2 });
+    expect(result).toMatchObject({ reachable: false, complete: false });
+    expect(result.unexplored).toContainEqual(expect.stringContaining("max-depth"));
   });
 
   test("throws for an unknown state target", async () => {

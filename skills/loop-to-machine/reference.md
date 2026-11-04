@@ -49,6 +49,58 @@ const proofOptions: ExplorePathsOptions = {
 
 `errors[src]` takes one failure or an array of them (one failing branch per element; wrap an array-valued failure as `[[...]]`), and `"agent.decide"` is a valid key.
 
+## A phase in the middle of a method
+
+When the phase has no seam at its edges, copy only its lines into the carved actor and mark the copy:
+
+```ts
+// Copied verbatim from src/runtime.ts:412-470 (prepareToolCall) and :88-97 (normalizeArgs).
+// checkParity call-args fail if this copy drifts from the original.
+const prepare = createAsyncLogic<Prepared, ToolCall>({
+  run: async ({ input }) => {
+    /* copied lines */
+  },
+});
+```
+
+When a public per-turn hook exists (an `onTurnEnd` or `beforeToolCall` method), replace it on the instance instead. Each call hands that boundary's facts to the machine and awaits its answer, which an actor resolves; the rest of the method stays legacy. Race the legacy `run()` against the machine so exits that never reach the hook (stop, provider errors) still settle it.
+
+## Old-suite swap
+
+The port imports the module the old suite mocks, so the factory must not import the port. Hold it in `vi.hoisted` and load it in `beforeAll`:
+
+```ts
+import { beforeAll, vi } from "vitest";
+
+const ported = vi.hoisted(() => ({
+  module: undefined as undefined | typeof import("../src/port"),
+}));
+vi.mock("../../src/runner", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/runner")>()),
+  createRunner: (...args: Parameters<typeof import("../src/port").createRunner>) =>
+    ported.module!.createRunner(...args),
+}));
+beforeAll(async () => {
+  ported.module = await import("../src/port");
+});
+await import("../../src/runner.test"); // the old suite, unchanged
+```
+
+When the mock misses the code's own import of the module, patch the prototype from a setup file. Both imports are dynamic, so the module loads after the test file's mocks:
+
+```ts
+// old-suite.setup.ts, listed in the config's setupFiles
+import { beforeAll } from "vitest";
+
+beforeAll(async () => {
+  const { Executor } = await import("../../src/executor");
+  const { carvedRun } = await import("../src/port");
+  Executor.prototype.run = function (this: InstanceType<typeof Executor>, ...args) {
+    return carvedRun(this, ...args);
+  };
+});
+```
+
 ## Recording golden runs
 
 Wrap the model and tools, run the old code, save the recording. One recording per scenario and per stand-in. Record with the live model to capture real answers, or with a stand-in; either way the recording is the script for replay.
