@@ -73,7 +73,7 @@ describe("meta.interaction.component (custom composer renderer)", () => {
     createMachine({
       initial: "waiting",
       states: {
-        waiting: { meta: { interaction }, on: { RATE: "done" } },
+        waiting: { meta: { interaction }, on: { RATE: { target: "done" } } },
         done: { type: "final" },
       },
     } as never) as AnyStateMachine;
@@ -148,7 +148,7 @@ describe("idle prompt fallbacks", () => {
       states: {
         // No meta.interaction — the description carries the prompt, and
         // `{key}` placeholders still resolve against context.
-        waiting: { description: "Your move, {who}.", on: { GO: "done" } },
+        waiting: { description: "Your move, {who}.", on: { GO: { target: "done" } } },
         done: { type: "final" },
       },
     } as never) as AnyStateMachine;
@@ -161,7 +161,7 @@ describe("idle prompt fallbacks", () => {
       initial: "waiting",
       context: { employee: { name: "Jordan" } },
       states: {
-        waiting: { description: "Waiting on {employee.name}'s documents.", on: { GO: "done" } },
+        waiting: { description: "Waiting on {employee.name}'s documents.", on: { GO: { target: "done" } } },
         done: { type: "final" },
       },
     } as never) as AnyStateMachine;
@@ -517,7 +517,7 @@ describe("meta.interaction payload choices", () => {
   test("states without choices carry none", () => {
     const plain = createMachine({
       initial: "waiting",
-      states: { waiting: { meta: { interaction: { label: "?" } }, on: { GO: "waiting" } } },
+      states: { waiting: { meta: { interaction: { label: "?" } }, on: { GO: { target: "waiting" } } } },
     } as never) as AnyStateMachine;
     expect(describeIdle(plain, createActor(plain).start().getSnapshot() as never).choices).toBe(
       undefined,
