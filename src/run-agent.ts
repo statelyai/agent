@@ -1905,8 +1905,7 @@ function rootTraceState(root: AnyActorRef): RootTraceState {
   let state = rootTraceRegistry.get(root as object);
   if (!state) {
     const logic = (root as { logic?: AnyStateMachine }).logic;
-    const machineId =
-      (logic?.config as { id?: string } | undefined)?.id ?? logic?.id ?? "";
+    const machineId = (logic?.config as { id?: string } | undefined)?.id ?? logic?.id ?? "";
     const machineVersion = logic ? resolveMachineVersion(logic) : "";
     state = { runId: `run_${nextProvideRunId++}`, seq: 0, machineId, machineVersion };
     rootTraceRegistry.set(root as object, state);
