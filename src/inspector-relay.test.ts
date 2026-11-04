@@ -75,18 +75,20 @@ describe("runAgent through the Stately inspector", () => {
     const inspector = createInspector({ url: relay.url, roomId, session: "direct", name: "e2e" });
     const errors: unknown[] = [];
     inspector.on("error", (error) => errors.push(error));
-    await inspector.ready;
-    const viewer = await joinAsViewer(relay.url, roomId);
+    let viewer: Awaited<ReturnType<typeof joinAsViewer>> | undefined;
 
     try {
+      await inspector.ready;
+      viewer = await joinAsViewer(relay.url, roomId);
+      const { messages } = viewer;
       await runAgent(createTwoStepMachine(), { inspect: inspector.inspect });
 
       const snapshotsOf = (sessionId: string) =>
-        viewer.messages.filter(
+        messages.filter(
           (m) => m.type === "@statelyai.system.actorSnapshot" && m.sessionId === sessionId,
         );
       const registered = () =>
-        viewer.messages.filter((m) => m.type === "@statelyai.system.actorRegistered");
+        messages.filter((m) => m.type === "@statelyai.system.actorRegistered");
       const rootId = () =>
         registered().find((m) => JSON.stringify(m).includes("two-step"))?.sessionId;
       await until(() => {
@@ -108,7 +110,7 @@ describe("runAgent through the Stately inspector", () => {
 
       expect(errors).toEqual([]);
     } finally {
-      viewer.close();
+      viewer?.close();
       inspector.destroy();
     }
   });
