@@ -1,9 +1,11 @@
 ---
 name: improve-machine
-description: Improve a @statelyai/agent policy machine (a TypeScript setupAgent machine or a JSON AgentWorkflowConfig) from its run traces toward its goal, inside a fixed environment machine, with gates and a held-out promotion rule, and hand the result to a person as a pull request. Use when asked to "improve this agent", "self-improve", "optimize the playbook from traces", "tune the policy", "make the agent cheaper or more accurate", or "why is my agent failing" for a machine whose runs are persisted to an event log store.
+description: Experimental. Improve a @statelyai/agent policy machine (a TypeScript setupAgent machine or a JSON AgentWorkflowConfig) from its run traces toward its goal, inside a fixed environment machine, with gates and a held-out promotion rule, and hand the result to a person as a pull request. Use when asked to "improve this agent", "self-improve", "optimize the playbook from traces", "tune the policy", "make the agent cheaper or more accurate", or "why is my agent failing" for a machine whose runs are persisted to an event log store.
 ---
 
 # Improve an agent machine
+
+> **Experimental:** self-improvement is experimental. The gates are stable, but the round itself may change, and on a loop with no decision point it mostly proposes wording, cap, and approval-rule changes. Code-level causes come back as change requests for a person. Tell the user this skill is experimental before the first round.
 
 You improve a **policy**: the machine that decides how the agent works toward its goal, written in TypeScript or as a JSON `AgentWorkflowConfig`. It runs inside an **environment**: a TypeScript machine whose states and guards encode the rules of the world and the business invariants. One round changes the policy once and measures it:
 
