@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { setup } from "xstate";
+import { createAsyncLogic, setup } from "xstate";
 import { z } from "zod";
 import { describeMachine } from "./describe-machine.js";
 import { setupAgent } from "./setup-agent.js";
@@ -170,6 +170,98 @@ describe("describeMachine", () => {
     expect(text).toContain("on NOTE → (stays)");
     // A call inside a nested callback is not the transition's own result.
     expect(text).toContain("on MAP → (stays)");
+  });
+
+  test("a target held in a variable is unknown, not (stays)", () => {
+    const machine = setup({}).createMachine({
+      context: { step: 0 },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            NEXT: ({ context }) => {
+              const next = ["working", "done"][context.step]!;
+              return { target: next };
+            },
+            SHORT: ({ context }) => {
+              const target = context.step > 0 ? "#done" : "#working";
+              return { target };
+            },
+          },
+        },
+        done: { id: "done" },
+      },
+    });
+    // As the dev build prints them: minified, no spaces.
+    const { on } = (
+      machine.config as unknown as { states: { working: { on: Record<string, unknown> } } }
+    ).states.working;
+    Object.defineProperty(on.NEXT, "toString", {
+      value: () => '({context:e})=>{const t=["working","done"][e.step];return{target:t}}',
+    });
+    Object.defineProperty(on.SHORT, "toString", {
+      value: () => "({ context }) => { const target = pick(context); return { target }; }",
+    });
+
+    const text = describeMachine(machine);
+    expect(text).toContain("on NEXT → ?");
+    expect(text).toContain("on SHORT → ?");
+  });
+
+  test("a spread of the current context sets nothing", () => {
+    const machine = setup({}).createMachine({
+      context: { outcome: "", toExecute: [] as string[], extra: {} as object },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            DECIDE: ({ context: ctx }) => ({
+              context: { ...ctx, outcome: "ok", toExecute: [] },
+            }),
+            MERGE: ({ context, event }) => ({
+              context: { ...context, ...(event as unknown as { patch: object }).patch },
+            }),
+          },
+        },
+      },
+    });
+    const { on } = (
+      machine.config as unknown as { states: { working: { on: Record<string, unknown> } } }
+    ).states.working;
+    // Minified: the context binding is renamed.
+    Object.defineProperty(on.DECIDE, "toString", {
+      value: () => '({context:e})=>({context:{...e,outcome:"ok",toExecute:[]}})',
+    });
+    const text = describeMachine(machine);
+    expect(text).toContain("on DECIDE → (stays); sets outcome, toExecute");
+    // A spread of anything else may set keys the source cannot name.
+    expect(text).toContain("on MERGE → (stays); sets …event.patch");
+  });
+
+  test("an unconditional onError is not (conditional)", () => {
+    const machine = setup({
+      actors: { work: createAsyncLogic({ run: async () => 1 }) },
+    }).createMachine({
+      context: { error: null as string | null },
+      initial: "working",
+      states: {
+        working: {
+          invoke: {
+            src: "work",
+            onDone: { target: "done" },
+            onError: ({ event }) => ({
+              target: "failed",
+              context: {
+                error: event.error instanceof Error ? event.error.message : null,
+              },
+            }),
+          },
+        },
+        done: {},
+        failed: {},
+      },
+    });
+    expect(describeMachine(machine)).toContain("error → failed; sets error");
   });
 
   test("describes a TS-authored machine", () => {
@@ -390,7 +482,7 @@ describe("describeMachine", () => {
             on COMPUTED → ?
             on COUNT → (stays); sets count
             on ALWAYS_B → b
-            on SPREAD → (stays); sets …context, count
+            on SPREAD → (stays); sets count
         b (parallel)
           x
           y"
