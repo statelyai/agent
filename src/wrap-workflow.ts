@@ -279,7 +279,11 @@ function observeStream(
  * value holding one (or anything it cannot copy) passes as is.
  */
 function ownCopy<T>(value: T): T {
-  if (!isPlainData(value, new WeakSet())) return value;
+  const hidden = { found: false };
+  if (!isPlainData(value, new WeakSet(), hidden)) return value;
+  // `structuredClone` drops symbol and non-enumerable keys; this copy keeps
+  // them (a Map, Set, Date or typed array inside is shared).
+  if (hidden.found) return contextCopy(value);
   try {
     return structuredClone(value);
   } catch {
@@ -311,6 +315,8 @@ function contextCopy<T>(value: T, seen = new Map<object, unknown>()): T {
     if ("value" in descriptor) descriptor.value = contextCopy(descriptor.value, seen);
     Object.defineProperty(copy, key, descriptor);
   }
+  // Trailing holes: a sparse array's length is not implied by its entries.
+  if (isArray) (copy as unknown[]).length = (value as unknown[]).length;
   return copy as T;
 }
 
@@ -329,7 +335,7 @@ function isBuiltinView(value: ArrayBufferView): boolean {
   return typeof ctor === "function" && proto === (ctor as { prototype: unknown }).prototype;
 }
 
-function isPlainData(value: unknown, seen: WeakSet<object>): boolean {
+function isPlainData(value: unknown, seen: WeakSet<object>, hidden: { found: boolean }): boolean {
   if (typeof value === "function") return false;
   if (value === null || typeof value !== "object") return true;
   if (seen.has(value)) return true;
@@ -338,14 +344,18 @@ function isPlainData(value: unknown, seen: WeakSet<object>): boolean {
   // A built-in typed array or DataView clones exactly; a subclass (Buffer) loses its prototype.
   if (ArrayBuffer.isView(value)) return isBuiltinView(value);
   if (value instanceof Map || value instanceof Set) {
-    return [...value.entries()].every((entry) => entry.every((v) => isPlainData(v, seen)));
+    return [...value.entries()].every((entry) => entry.every((v) => isPlainData(v, seen, hidden)));
   }
   const proto: unknown = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== Array.prototype && proto !== null) return false;
-  // `structuredClone` drops symbol and non-enumerable keys (an array's `length` aside).
-  const hidden = Reflect.ownKeys(value).length - Object.keys(value).length;
-  if (hidden !== (Array.isArray(value) ? 1 : 0)) return false;
-  return Object.values(value).every((child) => isPlainData(child, seen));
+  // Symbol and non-enumerable keys (an array's `length` aside), which `structuredClone` drops.
+  const extra = Reflect.ownKeys(value).length - Object.keys(value).length;
+  if (extra !== (Array.isArray(value) ? 1 : 0)) hidden.found = true;
+  return Reflect.ownKeys(value).every((key) => {
+    if (Array.isArray(value) && key === "length") return true;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    return !("value" in descriptor) || isPlainData(descriptor.value, seen, hidden);
+  });
 }
 
 function workflowLogic<TInput, TOutput, TEffects>(

@@ -664,4 +664,32 @@ describe("wrapWorkflow: effects objects and safety", () => {
     expect(Object.keys(context as object)).toEqual(["__proto__"]);
     expect(Object.getPrototypeOf(context)).toBe(Object.prototype);
   });
+
+  test("a plain input with hidden keys is still the workflow's own copy", async () => {
+    const tag = Symbol("tag");
+    const input = Object.defineProperty({ id: "a", [tag]: 1 }, "token", { value: "secret" }) as {
+      id: string;
+      [tag]: number;
+      token?: string;
+    };
+    const wrapped = wrapWorkflow({
+      id: "hidden-copy",
+      effects: {},
+      run: async (value: typeof input) => {
+        value.id = "mutated";
+        return [value === input, value[tag], value.token];
+      },
+    });
+    expect(await wrapped.run(input)).toEqual([false, 1, "secret"]);
+    expect(input.id).toBe("a");
+  });
+
+  test("a sparse input array keeps its length in context", async () => {
+    const wrapped = wrapWorkflow({ id: "sparse", effects: {}, run: async () => "ok" });
+    let context: unknown;
+    await wrapped.run({ slots: new Array(3) } as never, {
+      onTransition: (snapshot) => void (context = snapshot.context.input),
+    });
+    expect((context as { slots: unknown[] }).slots.length).toBe(3);
+  });
 });
