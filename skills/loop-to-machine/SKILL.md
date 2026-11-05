@@ -46,6 +46,29 @@ This is step 1 of 4. Next: `add-traces`, then `add-evals`, then `improve-machine
 - `compareRuns` scenarios reserve `expected: string` for the outcome; name other expectations differently.
 - `explorePaths` `errors[src]`: an array forks one failing branch per element (`[[...]]` for an array-valued failure). `outputs` and `errors` branches are alternatives, not a sequence: drive "fails twice, then succeeds" from a context counter.
 
+### Inspect one event
+
+`transition(machine, snapshot, event)` from `xstate` is pure: it returns the next snapshot and the effects it would run, and runs none of them. Use it to answer "what happens if this event arrives here?" before writing a test or running the loop.
+
+```ts
+import { initialTransition, transition } from "xstate";
+
+const [s0] = initialTransition(machine, { maxTurns: 2 });
+const actorId = Object.keys(s0.children)[0]; // the running invoke
+const [s1, effects] = transition(machine, s0, {
+  type: "xstate.done.actor",
+  actorId,
+  output: { done: false },
+});
+s1.value; // next state
+s1.context; // next context
+effects; // what would run (spawn, start, stop, ...); nothing ran
+```
+
+- Same snapshot object back and no effects: the event is unhandled there.
+- Fail an invoke with `{ type: "xstate.error.actor", actorId, error }`.
+- Start from any journaled or persisted snapshot to replay one event from the middle of a run.
+
 ## 1. Inventory the code
 
 Read the loop and fill this table before writing anything. Each row maps to a machine element.
