@@ -82,6 +82,12 @@ export interface LintAgentMachineOptions {
   /** Skip these check codes entirely. */
   disable?: AgentLintDiagnostic["code"][];
   /**
+   * Skip one check at one state: `{ code: "invoke-without-on-error", path:
+   * "listening" }` for a callback bridge that cannot fail. `path` is the
+   * diagnostic's `path`.
+   */
+  ignore?: Array<{ code: AgentLintDiagnostic["code"]; path: string }>;
+  /**
    * Throw {@link AgentLintError} on failing diagnostics instead of returning
    * them. Fails on error-severity findings; add `warnings: true` to fail on
    * warnings too.
@@ -447,8 +453,11 @@ export function lintAgentMachine(
   };
 
   const disabled = new Set(options.disable ?? []);
+  const ignored = options.ignore ?? [];
   const diagnostics = LINT_CHECKS.flatMap((check) => check(ctx)).filter(
-    (d) => !disabled.has(d.code),
+    (d) =>
+      !disabled.has(d.code) &&
+      !ignored.some((entry) => entry.code === d.code && entry.path === d.path),
   );
 
   if (options.throw) {
@@ -1098,9 +1107,11 @@ export interface ExplorePathsOptions {
    * forks one branch per output (plus the `errors` branch when the src is
    * listed there too), so a machine whose `onDone` branches on the output is
    * explored down every arm. Each fork counts against `maxDepth`, and each
-   * forked branch records `{ type: 'xstate.done.actor.<id>', output }` in the
+   * forked branch records `{ type: 'xstate.done.actor', actorId, output }` in the
    * path. A src with no entry (and no `errors` entry) halts that branch with a
-   * `needs-output` terminal.
+   * `needs-output` terminal. An empty list, `[]`, is a src that never settles
+   * (a callback bridge, a long-lived listener): its invoke stays pending and
+   * only events move the machine on.
    */
   outputs?: Record<string, unknown[]>;
   /**
@@ -1110,7 +1121,7 @@ export interface ExplorePathsOptions {
    * are explored. When the src also has an output, both branches are explored;
    * when it has only an error, only the failing one is. Each fork counts
    * against `maxDepth`, and the failing branch records
-   * `{ type: 'xstate.error.actor.<id>' }` in the path.
+   * `{ type: 'xstate.error.actor', actorId }` in the path.
    *
    * A decision invoke can be keyed here too — by its src (usually
    * `agent.decide`) or by its invoke id — standing in for retry exhaustion.
@@ -1560,7 +1571,9 @@ function pathOf(link: PathLink | undefined): ChosenEvent[] {
 
 function pathTypes(link: PathLink | undefined): string {
   return pathOf(link)
-    .map((event) => event.type)
+    .map((event) =>
+      typeof event.actorId === "string" ? `${event.type}(${event.actorId})` : event.type,
+    )
     .join(", ");
 }
 
@@ -1971,13 +1984,19 @@ function explore(
   // How a text request or scripted invoke settles: resolved straight through
   // with its single output, forked (an `errors` entry, several `outputs`, or
   // an explored child's outcomes), or blocked on a missing output.
+  // `outputs: { src: [] }`: the src never settles (a callback bridge or a
+  // long-lived listener), so its invoke stays pending and only events move on.
+  const neverSettles = (src: string): boolean => outputScript[src]?.length === 0 && !errorsFor(src);
   const settleFor = (
     id: string,
     src: string,
     isText: boolean,
     invoke?: PendingInvoke,
-  ): { fork: InvokeFork } | { output: unknown } | { blocked: true } => {
+  ): { fork: InvokeFork } | { output: unknown } | { blocked: true } | { never: true } => {
     const failures = errorsFor(src);
+    if (neverSettles(src)) {
+      return { never: true };
+    }
     if (
       options.children === "explore" &&
       !(src in outputScript) &&
@@ -2073,6 +2092,9 @@ function explore(
       }
       if ("blocked" in settle) {
         blocked.push(src);
+        return [];
+      }
+      if ("never" in settle) {
         return [];
       }
       return [{ id, errors: [], outputs: [settle.output], isText }];
@@ -2267,7 +2289,9 @@ function explore(
       if (current.done) {
         return { step: current };
       }
-      const request = current.requests[0] as AgentStepRequest | undefined;
+      const request = current.requests.find(
+        (pending) => pending.kind !== "text" || !neverSettles(pending.src),
+      );
       const concurrent = concurrentForks(current);
       if (concurrent) {
         return {
@@ -2286,6 +2310,9 @@ function explore(
         }
         if ("blocked" in settle) {
           return { step: current, blockedSrc: request.src };
+        }
+        if ("never" in settle) {
+          return { step: current };
         }
         if (races(current)) {
           return {
@@ -2317,7 +2344,7 @@ function explore(
           : { step: current };
       }
       // No request: maybe a pending scripted invoke, else a wait.
-      const [invoke] = pendingInvokes(current);
+      const [invoke] = pendingInvokes(current).filter((pending) => !neverSettles(pending.src));
       if (invoke) {
         const settle = settleFor(invoke.id, invoke.src, false, invoke);
         if ("fork" in settle) {
@@ -2325,6 +2352,9 @@ function explore(
         }
         if ("blocked" in settle) {
           return { step: current, blockedSrc: invoke.src };
+        }
+        if ("never" in settle) {
+          return { step: current };
         }
         if (races(current)) {
           return { step: current, pending: { id: invoke.id, output: settle.output } };
@@ -2402,7 +2432,8 @@ function explore(
     return {
       step: failed,
       path: extend(path, {
-        type: `xstate.error.actor.${fork.id}`,
+        type: "xstate.error.actor",
+        actorId: fork.id,
         ...(fork.recordError ? { error } : {}),
       }),
       depth: depth + 1,
@@ -2419,7 +2450,7 @@ function explore(
     recordState(resolved);
     return {
       step: resolved,
-      path: extend(path, { type: `xstate.done.actor.${fork.id}`, output }),
+      path: extend(path, { type: "xstate.done.actor", actorId: fork.id, output }),
       depth: depth + 1,
     };
   };
@@ -2650,10 +2681,18 @@ function explore(
         const settledKid = kid.step.snapshot as AnyMachineSnapshot & { error?: unknown };
         if (settledKid.status === "done") {
           step = resolveStep(step, kid.id, settledKid.output);
-          link = extend(link, { type: `xstate.done.actor.${kid.id}`, output: settledKid.output });
+          link = extend(link, {
+            type: "xstate.done.actor",
+            actorId: kid.id,
+            output: settledKid.output,
+          });
         } else {
           step = rejectStep(step, kid.id, settledKid.error);
-          link = extend(link, { type: `xstate.error.actor.${kid.id}`, error: settledKid.error });
+          link = extend(link, {
+            type: "xstate.error.actor",
+            actorId: kid.id,
+            error: settledKid.error,
+          });
         }
       }
       recordState(step);
@@ -2783,7 +2822,7 @@ function explore(
         step: resolved,
         // A coupled child's settled work is a move of its own, shown on the path.
         path: stepping
-          ? extend(path, { type: `xstate.done.actor.${pending.id}`, output: pending.output })
+          ? extend(path, { type: "xstate.done.actor", actorId: pending.id, output: pending.output })
           : path,
         depth,
       };
@@ -3143,7 +3182,7 @@ function explore(
         recordState(failed);
         yield {
           step: failed,
-          path: extend(path, { type: `xstate.error.actor.${request.id}` }),
+          path: extend(path, { type: "xstate.error.actor", actorId: request.id }),
           depth: depth + 1,
         };
       }

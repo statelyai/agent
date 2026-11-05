@@ -651,6 +651,68 @@ describe("describeMachine", () => {
     expect(describeMachine(machine)).not.toContain("|");
   });
 
+  test("source: true prints entry and exit actions; helpers print in their own section", () => {
+    const fn = (code: string) => new Function(`return ${code}`)() as never;
+    const withinLimit = fn(`(turn, limit) => turn < limit`);
+    const machine = setup({}).createMachine({
+      context: { turn: 0, limit: 3 },
+      initial: "working",
+      states: {
+        working: {
+          entry: fn(`(_, enq) => enq.emit({ type: "started" })`),
+          exit: fn(`() => {}`),
+          on: {
+            NEXT: fn(
+              `({ context }) => withinLimit(context.turn, context.limit) ? { target: "working" } : { target: "done" }`,
+            ),
+          },
+        },
+        done: {},
+      },
+    });
+    expect(describeMachine(machine, { source: true, helpers: { withinLimit } }))
+      .toMatchInlineSnapshot(`
+        "Machine 
+        States (initial: working):
+          working
+              entry
+                | (_, enq) => enq.emit({ type: "started" })
+              exit
+                | () => {}
+              on NEXT → working, done (conditional)
+                | ({ context }) => withinLimit(context.turn, context.limit) ? { target: "working" } : { target: "done" }
+          done
+        Helpers:
+          withinLimit
+            | (turn, limit) => turn < limit"
+      `);
+    expect(describeMachine(machine)).not.toContain("entry");
+  });
+
+  test("vite SSR import rewrites are read and printed as written", () => {
+    const fn = (code: string) =>
+      new Function("__vite_ssr_import_3__", `return ${code}`)({
+        next: () => "done",
+        Target: { done: "done" },
+      }) as never;
+    const machine = setup({}).createMachine({
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            GO: fn(
+              `({ context }) => ({ target: __vite_ssr_import_3__.Target.done, context: (0, __vite_ssr_import_3__.next)(context) })`,
+            ),
+          },
+        },
+        done: {},
+      },
+    });
+    const text = describeMachine(machine, { source: true });
+    expect(text).not.toContain("__vite_ssr_import");
+    expect(text).toContain("| ({ context }) => ({ target: Target.done, context: next(context) })");
+  });
+
   test("an exhaustive switch or if/else does not decline; spreads and mutations count", () => {
     const fn = (code: string) => new Function(`return ${code}`)() as never;
     const machine = setup({}).createMachine({

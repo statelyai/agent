@@ -293,7 +293,9 @@ describe("explorePaths — invoke outcome branching", () => {
     const { witness } = await canReach(createLookupMachine(), "missing", {
       outputs: { lookup: [{ found: true }, { found: false }] },
     });
-    expect(witness).toEqual([{ type: "xstate.done.actor.lookup", output: { found: false } }]);
+    expect(witness).toEqual([
+      { type: "xstate.done.actor", actorId: "lookup", output: { found: false } },
+    ]);
   });
 
   test("an errors entry for the same src adds the failing branch", async () => {
@@ -517,7 +519,9 @@ describe("canReach — shortest witness", () => {
     const { witness } = await canReach(machine, "found", {
       outputs: { lookup: [{ found: false }, { found: true }] },
     });
-    expect(witness).toEqual([{ type: "xstate.done.actor.lookup", output: { found: true } }]);
+    expect(witness).toEqual([
+      { type: "xstate.done.actor", actorId: "lookup", output: { found: true } },
+    ]);
   });
 
   test("over payloads, the witness takes the one payload that gets there", async () => {
@@ -804,7 +808,7 @@ describe("explorePaths — a decision with nothing it can take", () => {
     const machine = createExhaustedDesk();
     expect(await canReach(machine, "failed")).toMatchObject({
       reachable: true,
-      witness: [{ type: "xstate.error.actor.decide" }],
+      witness: [{ type: "xstate.error.actor", actorId: "decide" }],
     });
     const report = await explorePaths(machine);
     expect(report.prunedByGuard).toBe(1);
@@ -817,13 +821,19 @@ describe("explorePaths — a decision with nothing it can take", () => {
     const machine = createExhaustedDesk({ open: true });
     expect(
       await canReach(machine, "failed", { payloads: () => ({ refund: [{ amount: 80 }] }) }),
-    ).toMatchObject({ reachable: true, witness: [{ type: "xstate.error.actor.decide" }] });
+    ).toMatchObject({
+      reachable: true,
+      witness: [{ type: "xstate.error.actor", actorId: "decide" }],
+    });
   });
 
   test("with no onError, the exhausted decision is an error terminal", async () => {
     const report = await explorePaths(createExhaustedDesk({ onError: false }));
     expect(report.terminals).toEqual([
-      expect.objectContaining({ status: "error", path: [{ type: "xstate.error.actor.decide" }] }),
+      expect.objectContaining({
+        status: "error",
+        path: [{ type: "xstate.error.actor", actorId: "decide" }],
+      }),
     ]);
   });
 

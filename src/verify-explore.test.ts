@@ -137,12 +137,12 @@ describe("explorePaths — errors arrays", () => {
     expect(report.terminals).toEqual([
       {
         status: "done",
-        path: [{ type: "xstate.error.actor.parse", error: { code: "truncated" } }],
+        path: [{ type: "xstate.error.actor", actorId: "parse", error: { code: "truncated" } }],
         state: "retrying",
       },
       {
         status: "done",
-        path: [{ type: "xstate.error.actor.parse", error: { code: "other" } }],
+        path: [{ type: "xstate.error.actor", actorId: "parse", error: { code: "other" } }],
         state: "failed",
       },
     ]);
@@ -153,7 +153,7 @@ describe("explorePaths — errors arrays", () => {
     expect(wrapped.terminals).toEqual([
       {
         status: "done",
-        path: [{ type: "xstate.error.actor.parse", error: [1, 2] }],
+        path: [{ type: "xstate.error.actor", actorId: "parse", error: [1, 2] }],
         state: "failed",
       },
     ]);
@@ -182,8 +182,8 @@ describe("explorePaths — errors arrays", () => {
     });
     const report = await explorePaths(machine, { errors: { "agent.decide": ["a", "b"] } });
     expect(report.terminals.map((t) => t.path)).toEqual([
-      [{ type: "xstate.error.actor.decide", error: "a" }],
-      [{ type: "xstate.error.actor.decide", error: "b" }],
+      [{ type: "xstate.error.actor", actorId: "decide", error: "a" }],
+      [{ type: "xstate.error.actor", actorId: "decide", error: "b" }],
       [{ type: "PICK" }],
     ]);
   });
@@ -247,12 +247,12 @@ describe("explorePaths — children: 'explore'", () => {
     expect(report.terminals).toEqual([
       {
         status: "done",
-        path: [{ type: "xstate.done.actor.approval", output: { ok: true } }],
+        path: [{ type: "xstate.done.actor", actorId: "approval", output: { ok: true } }],
         state: "approved",
       },
       {
         status: "done",
-        path: [{ type: "xstate.done.actor.approval", output: { ok: false } }],
+        path: [{ type: "xstate.done.actor", actorId: "approval", output: { ok: false } }],
         state: "rejected",
       },
     ]);
@@ -261,7 +261,9 @@ describe("explorePaths — children: 'explore'", () => {
       children: "explore",
       childEvents,
     });
-    expect(witness).toEqual([{ type: "xstate.done.actor.approval", output: { ok: false } }]);
+    expect(witness).toEqual([
+      { type: "xstate.done.actor", actorId: "approval", output: { ok: false } },
+    ]);
   });
 
   test("an outputs entry still wins over exploring the child", async () => {
@@ -284,7 +286,11 @@ describe("explorePaths — children: 'explore'", () => {
       errors: { call: error },
     });
     expect(report.terminals).toEqual([
-      { status: "done", path: [{ type: "xstate.error.actor.approval", error }], state: "failed" },
+      {
+        status: "done",
+        path: [{ type: "xstate.error.actor", actorId: "approval", error }],
+        state: "failed",
+      },
     ]);
   });
 
@@ -399,7 +405,7 @@ describe("explorePaths — spawned children", () => {
     });
     expect(isExplorationComplete(report)).toBe(true);
     const outputs = report.terminals.flatMap((t) =>
-      t.path.flatMap((e) => (e.type.startsWith("xstate.done.actor.") ? [e["output"]] : [])),
+      t.path.flatMap((e) => (e.type === "xstate.done.actor" ? [e["output"]] : [])),
     );
     expect(outputs).toContainEqual({ id: "a1", ran: true });
     expect(outputs).toContainEqual({ id: "a2", ran: false });
@@ -910,5 +916,45 @@ describe("explorePaths — budget", () => {
     expect(cached.terminals.length).toBeGreaterThan(0);
     expect(await explorePaths(parent, { ...options, budget: { childCache: 1 } })).toEqual(cached);
     expect(await explorePaths(parent, { ...options, budget: { childCache: 0 } })).toEqual(cached);
+  });
+});
+
+describe("a src that never settles", () => {
+  // A callback bridge: it forwards events and never completes.
+  const machine = setupAgent({
+    context: z.object({ turns: z.number() }),
+    events: { TURN: z.object({}), STOP: z.object({}) },
+    actors: { bridge: createAsyncLogic<void>({ run: () => new Promise<void>(() => {}) }) },
+  }).createMachine({
+    id: "bridge",
+    context: { turns: 0 },
+    initial: "listening",
+    states: {
+      listening: {
+        invoke: { src: "bridge" },
+        on: {
+          TURN: ({ context }) =>
+            context.turns + 1 >= 3
+              ? { target: "capped" }
+              : { context: { turns: context.turns + 1 } },
+          STOP: { target: "stopped" },
+        },
+      },
+      capped: { type: "final" },
+      stopped: { type: "final" },
+    },
+  });
+
+  test("outputs: { src: [] } leaves the invoke pending and explores the events", async () => {
+    const report = await explorePaths(machine, { outputs: { bridge: [] }, maxDepth: 6 });
+    expect(report.terminals.some((t) => t.status === "needs-output")).toBe(false);
+    expect(isExplorationComplete(report)).toBe(true);
+    const capped = await canReach(machine, "capped", { outputs: { bridge: [] } });
+    expect(capped.witness?.map((event) => event.type)).toEqual(["TURN", "TURN", "TURN"]);
+  });
+
+  test("with no entry, the branch still ends needs-output", async () => {
+    const report = await explorePaths(machine, { maxDepth: 6 });
+    expect(report.terminals.some((t) => t.status === "needs-output")).toBe(true);
   });
 });

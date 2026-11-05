@@ -287,6 +287,29 @@ function ownCopy<T>(value: T): T {
   }
 }
 
+/**
+ * The input as machine context holds it: plain objects and arrays copied, so
+ * XState's dev build, which deep-freezes them in context, never freezes the
+ * caller's own. Everything else (class instances, functions, Maps) is shared,
+ * and XState leaves those unfrozen.
+ */
+function contextCopy<T>(value: T, seen = new Map<object, unknown>()): T {
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return seen.get(value) as T;
+  if (Array.isArray(value)) {
+    const copy: unknown[] = [];
+    seen.set(value, copy);
+    for (const item of value) copy.push(contextCopy(item, seen));
+    return copy as T;
+  }
+  const proto: unknown = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return value;
+  const copy: Record<string, unknown> = Object.create(proto as object | null);
+  seen.set(value, copy);
+  for (const [key, child] of Object.entries(value)) copy[key] = contextCopy(child, seen);
+  return copy as T;
+}
+
 function isBuiltinView(value: ArrayBufferView): boolean {
   const proto: unknown = Object.getPrototypeOf(value);
   if (proto === DataView.prototype) return true;
@@ -316,9 +339,12 @@ function workflowLogic<TInput, TOutput, TEffects>(
   effects: TEffects,
   runSignal?: AbortSignal,
   redact?: Redact,
+  /** The caller's own input, when known: the workflow gets it rather than context's copy. */
+  callerInput?: { value: TInput },
 ) {
   return createAsyncLogic<TOutput, TInput>({
-    run: async ({ input, self, signal }) => {
+    run: async ({ input: contextInput, self, signal }) => {
+      const input = callerInput ? callerInput.value : contextInput;
       // Sent to the invoking machine: under `runAgent` that lands in the
       // run's mailbox, so each one is a transition, a trace and a log entry.
       const parent = (self as unknown as { _parent?: { send(event: object): void } })._parent;
@@ -353,7 +379,11 @@ function createWrappedMachine<TInput, TOutput>(
   return agent.createMachine({
     id,
     version,
-    context: ({ input }: { input: unknown }) => ({ input, calls: 0, failures: 0 }),
+    context: ({ input }: { input: unknown }) => ({
+      input: contextCopy(input),
+      calls: 0,
+      failures: 0,
+    }),
     initial: "running",
     states: {
       running: {
@@ -449,7 +479,11 @@ export function wrapWorkflow<TInput, TOutput, TEffects extends WorkflowEffects<T
       const result = await runAgent(machine, {
         ...agentOptions,
         input: input as never,
-        actors: { workflow: workflowLogic(config.run, effects, options.signal, config.redact) },
+        actors: {
+          workflow: workflowLogic(config.run, effects, options.signal, config.redact, {
+            value: input,
+          }),
+        },
       });
       if (result.status === "done") {
         const output = result.output as TOutput;

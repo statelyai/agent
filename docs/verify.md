@@ -174,13 +174,13 @@ settled?.resolvedRequest; // { kind: 'text', src: 'parse', id: 'parse', outcome:
 `explorePaths(machine, { input, maxDepth?, maxPaths?, maxNodes?, budget?, outputs?, errors?, payloads?, dedupeBy?, interleave?, children? })` enumerates decision and external-event branches without a model, and reports coverage.
 
 - At each decision, it forks one branch per candidate event. Guard-rejected candidates count in `prunedByGuard` and are not explored.
-- A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor.<id>' }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
+- A decision with no candidate the snapshot takes, because its guards refuse every one or the closed choice offers nothing, exhausts as it does in a live run. That branch records `{ type: 'xstate.error.actor', actorId }` and takes the invoke's `onError`. With no `onError`, it ends in an `error` terminal.
 - At an idle wait, it forks one branch per externally accepted event.
 - `outputs` is a map of output lists, keyed by src: a text request's src or any other invoked actor's src. A one-element list is a canned output, reused every time that src is reached. A text request resolves with it as its `result`. A longer list forks one branch per output. See [Payloads and invoke outputs](#payloads-and-invoke-outputs).
 - Each `done` terminal carries the machine's `output`, so one report lists every output the search reached.
 - A src with no `outputs` entry halts that branch with a `needs-output` terminal instead of throwing. The terminal's `missingSrc` names it.
 - `errors` is a map of canned failures per src. A src listed there forks an extra branch where that invoke is rejected, so states behind an `onError` are explored. A decision keys on its src, usually `agent.decide`, or on its invoke id; its success branch stays the per-candidate-event fork, so the failure is explored in addition to the candidates. The failure and the candidates are sibling branches: each spends one level of `maxDepth`.
-- An `errors` array forks one failing branch per element, each recording `{ type: 'xstate.error.actor.<id>', error }`. `[]` is no entry. Any other value is one failure, recorded without `error`. Wrap a single array-valued failure: `[[...]]`.
+- An `errors` array forks one failing branch per element, each recording `{ type: 'xstate.error.actor', actorId, error }`. `[]` is no entry. Any other value is one failure, recorded without `error`. Wrap a single array-valued failure: `[[...]]`.
 - A rejection that reaches no `onError` errors the machine, and that path ends in an `error` terminal carrying the failure value on `error`.
 - Every invoke a state is still waiting on counts as work, concurrent ones included. They are settled one per branch, in invoke-id order, and a src in `errors` forks per invoke.
 
@@ -204,7 +204,7 @@ Exploration is bounded by three limits per search, plus a [budget](#budgets) for
 
 `report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short. `report.partial` is true when any cap or the budget did, and `report.complete` is true only when the report covers every path.
 
-A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor.<id>', output }`. These are path labels that name the invoke. The event the machine receives is v6's `{ type: 'xstate.done.actor', actorId, output }`.
+A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor', actorId }` in the path, where `actorId` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor', actorId, output }`: the same shape as the event the machine receives.
 
 ```ts
 const report = await explorePaths(machine, {
@@ -225,7 +225,7 @@ By default, events are applied as `{ type }`. A guard that reads the payload, su
 - A type the fill cannot enumerate is listed in `report.unexpandedEvents`: a required field with no finite domain, a product over 64, or a schema with no JSON Schema is applied as `{ type }`, and an optional field with no finite domain is left out. Add a `payloads` entry for each listed type. A type with no schema at all stays `{ type }`. It is listed too when a transition for it in the active states could read the payload: a function transition, a guard, a `matches` pattern, or a `context` mapper. An object transition with none of these cannot, so the type is not listed.
 - A wait where the machine refuses every offered event is recorded as an `idle` terminal, and its event types are listed in `unexpandedEvents`. The payload table offered nothing the machine accepts there, so the search is not a proof until it does.
 - An explorer `payloads` entry of `[]` for a type the wait accepts skips that type, which also lists it in `unexpandedEvents`. A decide input's `[]` is different: it withholds the type at run time too, so exploration matches the run.
-- `outputs` lists every output to try per src. Two or more outputs fork one branch each, and an `errors` entry for the same src adds the failing branch. Each forked branch records `{ type: 'xstate.done.actor.<id>', output }` in the path.
+- `outputs` lists every output to try per src. An empty list is a src that never settles, such as a callback bridge: its invoke stays pending and only events move the machine on. Two or more outputs fork one branch each, and an `errors` entry for the same src adds the failing branch. Each forked branch records `{ type: 'xstate.done.actor', actorId, output }` in the path.
 - `dedupeBy` projects a settled snapshot to a key. Each key is explored once, or again when reached at a shallower depth. The key must include every field a guard, choice, or `onDone` reads, or the search misses paths.
 
 ```ts
@@ -293,7 +293,7 @@ const report = await explorePaths(parentMachine, {
   childEvents: { approval: ["YES", "NO"] }, // the parent forwards both
 });
 // report.terminals → one branch per distinct child output, e.g.
-// [{ type: 'xstate.done.actor.approval', output: { ok: true } }]
+// [{ type: 'xstate.done.actor', actorId: 'approval', output: { ok: true } }]
 ```
 
 ### Coupled child machines
@@ -382,7 +382,7 @@ const { reachable, witness } = await canReach(refundMachine, "denied", {
 
 `witness` is the sequence of chosen and applied events that reaches the state, which is the proof that it is reachable. It is absent when `reachable` is `false`.
 
-- The witness is a shortest one: no path within `maxDepth` reaches the target in fewer events. A recorded `xstate.error.actor.*` or `xstate.done.actor.*` entry counts as one event.
+- The witness is a shortest one: no path within `maxDepth` reaches the target in fewer events. A recorded `xstate.error.actor` or `xstate.done.actor` entry counts as one event.
 - `canReach` searches breadth first to find it, so a retry loop never pads the witness. `explorePaths` stays depth first, and its terminal order is unchanged.
 
 `canReach` forwards `errors`, so a state that only a failure reaches is checkable the same way.
@@ -391,7 +391,7 @@ const { reachable, witness } = await canReach(refundMachine, "denied", {
 const failure = await canReach(machine, "failed", {
   errors: { parse: new Error("truncated response") },
 });
-// failure.reachable → true; failure.witness → [{ type: 'xstate.error.actor.parse' }]
+// failure.reachable → true; failure.witness → [{ type: 'xstate.error.actor', actorId: 'parse' }]
 ```
 
 ## CI checks

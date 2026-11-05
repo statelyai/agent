@@ -331,8 +331,12 @@ function toRecordedError(error: unknown): RecordedError {
   return recorded;
 }
 
-function fromRecordedError({ data, markers, ...fields }: RecordedError): Error {
+function fromRecordedError({ data, markers, name, ...fields }: RecordedError): Error {
   const error = Object.assign(new Error(fields.message), fields, data);
+  // Not enumerable, as on a thrown error, so the revived one serializes alike.
+  if (name !== "Error") {
+    Object.defineProperty(error, "name", { value: name, writable: true, configurable: true });
+  }
   for (const marker of markers ?? []) {
     (error as unknown as Record<symbol, boolean>)[Symbol.for(marker)] = true;
   }

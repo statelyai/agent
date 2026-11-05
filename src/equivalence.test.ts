@@ -805,6 +805,8 @@ describe("verified equivalence (ports that change on purpose)", () => {
       .catch((e: unknown) => e);
     expect(APICallError.isInstance(error)).toBe(true);
     expect((error as APICallError).isRetryable).toBe(true);
+    expect((error as Error).name).toBe("AI_APICallError");
+    expect(Object.keys(error as object)).not.toContain("name");
     const port: Recording = {
       version: 1,
       effects: [{ ...recorded, error: { name: "AI_APICallError", message: "overloaded" } }],

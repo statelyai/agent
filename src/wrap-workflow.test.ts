@@ -588,4 +588,32 @@ describe("wrapWorkflow: effects objects and safety", () => {
     });
     expect(await wrapped.run(input)).toEqual([true, true]);
   });
+
+  test("run leaves the caller's input unfrozen", async () => {
+    class Message {
+      constructor(public content: string) {}
+    }
+    const plain = { messages: [{ role: "user", content: "hi" }], meta: { n: 1 } };
+    const mixed = { messages: [new Message("hi")], callback: () => "called" };
+    const wrapped = wrapWorkflow({ id: "unfrozen", effects: {}, run: async () => "ok" });
+    await wrapped.run(plain);
+    await wrapped.run(mixed as never);
+    for (const value of [
+      plain,
+      plain.messages,
+      plain.messages[0],
+      plain.meta,
+      mixed,
+      mixed.messages,
+    ])
+      expect(Object.isFrozen(value)).toBe(false);
+  });
+
+  test("runAgent on the machine leaves the caller's input unfrozen", async () => {
+    const input = { messages: [{ role: "user", content: "hi" }] };
+    const wrapped = wrapWorkflow({ id: "unfrozen-machine", effects: {}, run: async () => "ok" });
+    await runAgent(wrapped.machine, { input });
+    expect(Object.isFrozen(input)).toBe(false);
+    expect(Object.isFrozen(input.messages[0])).toBe(false);
+  });
 });
