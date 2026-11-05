@@ -204,7 +204,7 @@ Exploration is bounded by three limits per search, plus a [budget](#budgets) for
 
 `report.hitPathCap` is true when `maxPaths` or `maxNodes` cut exploration short. `report.partial` is true when any cap or the budget did, and `report.complete` is true only when the report covers every path.
 
-A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor.<id>', output }`.
+A src in `errors` is a branch point, and counts against `maxDepth` like a decision does. When the src has an output too, both branches are explored. When it has only an error, only the failing branch is. The failing branch records `{ type: 'xstate.error.actor.<id>' }` in the path, where `<id>` is the invoke's id, and the output branch records `{ type: 'xstate.done.actor.<id>', output }`. These are path labels that name the invoke. The event the machine receives is v6's `{ type: 'xstate.done.actor', actorId, output }`.
 
 ```ts
 const report = await explorePaths(machine, {
