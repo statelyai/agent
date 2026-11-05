@@ -67,7 +67,7 @@ effects; // what would run (spawn, start, stop, ...); nothing ran
 
 - Same snapshot object back and no effects: the event is unhandled there.
 - Fail an invoke with `{ type: "xstate.error.actor", actorId, error }`.
-- Start from any journaled or persisted snapshot to replay one event from the middle of a run.
+- To start mid-run, pass a live snapshot: `machine.restoreSnapshot(persisted)` for a persisted one, or the snapshot `replay` (`@statelyai/agent/log`) folds from a journal. A raw persisted snapshot throws.
 
 ## 1. Inventory the code
 
