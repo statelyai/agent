@@ -27,6 +27,12 @@ Tell the user which step you are starting at and why, in one line, then load tha
 
 ## Across all steps
 
+- **XState v6, not v5.** Most training data is v5; v6 differs:
+  - A transition is a plain function: `({ context, event }) => ({ target, context })`. There is no `assign`; return the new context.
+  - Guards are inline JS in that function. Named guards are optional, not required.
+  - Targets are objects (`{ target: "b" }`), never bare strings.
+  - Actors: `createAsyncLogic`, not `fromPromise`. Done/error events are `{ type: "xstate.done.actor", actorId, output }` and `{ type: "xstate.error.actor", actorId, error }`.
+- **To see what one event does, call `transition`.** It is pure and runs nothing; see [loop-to-machine](../loop-to-machine/SKILL.md#inspect-one-event).
 - **The environment is people's code.** Rules, guards, invariants, and the sentinel change only by human review. No step rewrites them on its own.
 - **No decision point is not a dead end.** Steps 2–4 still apply: traces stamp the request config or approval-rules version, evals are rule checks and per-state stats, and improvement proposes changes for a person to review.
 - **Ground truth scores everything.** Outcomes and effects in the world, labeled by people. A model never grades its own runs.

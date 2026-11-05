@@ -4,6 +4,10 @@
 
 `@statelyai/agent` 2.0 is in alpha. Pin an exact version.
 
+## XState v6
+
+Not v5: transitions are plain functions returning `{ target, context }` (no `assign`), guards are inline JS, targets are objects, actors use `createAsyncLogic`. `transition(machine, snapshot, event)` from `xstate` shows what one event does without running anything.
+
 ## Docs
 
 - [Agents](docs/index.md): Author AI agents as typed XState state machines, where the machine decides and the host executes.
