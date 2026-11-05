@@ -616,4 +616,21 @@ describe("wrapWorkflow: effects objects and safety", () => {
     expect(Object.isFrozen(input)).toBe(false);
     expect(Object.isFrozen(input.messages[0])).toBe(false);
   });
+
+  test("runAgent on the machine keeps symbol and non-enumerable input fields", async () => {
+    const tag = Symbol("tag");
+    const input = Object.defineProperty({ id: "a", [tag]: 1 }, "token", { value: "secret" }) as {
+      id: string;
+      [tag]: number;
+      token?: string;
+    };
+    const wrapped = wrapWorkflow({
+      id: "hidden-fields",
+      effects: {},
+      run: async (value: typeof input) => [value.id, value[tag], value.token],
+    });
+    const result = await runAgent(wrapped.machine, { input });
+    expect(result.status === "done" && result.output).toEqual(["a", 1, "secret"]);
+    expect(Object.isFrozen(input)).toBe(false);
+  });
 });

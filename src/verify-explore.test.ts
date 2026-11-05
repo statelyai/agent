@@ -958,3 +958,34 @@ describe("a src that never settles", () => {
     expect(report.terminals.some((t) => t.status === "needs-output")).toBe(true);
   });
 });
+
+test("a never-settling text request beside a decision still branches on the decision", async () => {
+  const machine = setupAgent({
+    context: z.object({}),
+    events: { GO: z.object({}) },
+  }).createMachine({
+    id: "text-and-decide",
+    context: {},
+    initial: "working",
+    states: {
+      working: {
+        invoke: [
+          { id: "a", src: "agent.generateText", input: () => ({ model: "quick", prompt: "x" }) },
+          {
+            id: "b",
+            src: "agent.decide",
+            input: () => ({ model: "quick", prompt: "go?", allowedEvents: ["GO"] as const }),
+          },
+        ],
+        on: { GO: { target: "done" } },
+      },
+      done: { type: "final" },
+    },
+  });
+  const result = await canReach(machine, "done", {
+    outputs: { "agent.generateText": [] },
+    hostEvents: [],
+  });
+  expect(result.reachable).toBe(true);
+  expect(result.witness?.map((event) => event.type)).toEqual(["GO"]);
+});

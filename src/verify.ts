@@ -3107,7 +3107,7 @@ function explore(
     // Beside an explored child, every pending decision is a branch point.
     const branchRequests: (AgentStepRequest | undefined)[] = decisions?.length
       ? decisions
-      : [settled.requests[0]];
+      : [settled.requests.find((request) => request.kind !== "text" || !neverSettles(request.src))];
     for (const request of branchRequests) {
       // A closed choice's options, rebuilt over the live candidates as a run
       // does but not yet filtered: the loop below prunes them, so guard-rejected

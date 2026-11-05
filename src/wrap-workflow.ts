@@ -296,17 +296,18 @@ function ownCopy<T>(value: T): T {
 function contextCopy<T>(value: T, seen = new Map<object, unknown>()): T {
   if (value === null || typeof value !== "object") return value;
   if (seen.has(value)) return seen.get(value) as T;
-  if (Array.isArray(value)) {
-    const copy: unknown[] = [];
-    seen.set(value, copy);
-    for (const item of value) copy.push(contextCopy(item, seen));
-    return copy as T;
-  }
   const proto: unknown = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) return value;
-  const copy: Record<string, unknown> = Object.create(proto as object | null);
+  const isArray = Array.isArray(value);
+  if (!isArray && proto !== Object.prototype && proto !== null) return value;
+  const copy: object = isArray ? [] : Object.create(proto as object | null);
   seen.set(value, copy);
-  for (const [key, child] of Object.entries(value)) copy[key] = contextCopy(child, seen);
+  // Every own key, symbols and non-enumerable ones too, as defined.
+  for (const key of Reflect.ownKeys(value)) {
+    if (isArray && key === "length") continue;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if ("value" in descriptor) descriptor.value = contextCopy(descriptor.value, seen);
+    Object.defineProperty(copy, key, descriptor);
+  }
   return copy as T;
 }
 
@@ -331,6 +332,9 @@ function isPlainData(value: unknown, seen: WeakSet<object>): boolean {
   }
   const proto: unknown = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== Array.prototype && proto !== null) return false;
+  // `structuredClone` drops symbol and non-enumerable keys (an array's `length` aside).
+  const hidden = Reflect.ownKeys(value).length - Object.keys(value).length;
+  if (hidden !== (Array.isArray(value) ? 1 : 0)) return false;
   return Object.values(value).every((child) => isPlainData(child, seen));
 }
 
@@ -339,7 +343,7 @@ function workflowLogic<TInput, TOutput, TEffects>(
   effects: TEffects,
   runSignal?: AbortSignal,
   redact?: Redact,
-  /** The caller's own input, when known: the workflow gets it rather than context's copy. */
+  /** The caller's own input, when known: the workflow's copy is made from it, not from context's. */
   callerInput?: { value: TInput },
 ) {
   return createAsyncLogic<TOutput, TInput>({
