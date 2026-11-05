@@ -6,7 +6,7 @@
 
 ## XState v6
 
-Not v5: transitions are plain functions returning `{ target, context }` (no `assign`), guards are inline JS, targets are objects, actors use `createAsyncLogic`. `transition(machine, snapshot, event)` from `xstate` shows what one event does without running anything.
+Not v5: transitions are plain functions returning `{ target, context }` (no `assign`), guards are inline JS, targets are objects, actors use `createAsyncLogic`. `transition(machine, snapshot, event)` from `xstate` shows what one event does without running anything. `describeMachine(machine, { source: true })` lists every state, each target a transition can return, and its code.
 
 ## Docs
 
