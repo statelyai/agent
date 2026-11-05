@@ -633,4 +633,35 @@ describe("wrapWorkflow: effects objects and safety", () => {
     expect(result.status === "done" && result.output).toEqual(["a", 1, "secret"]);
     expect(Object.isFrozen(input)).toBe(false);
   });
+
+  test("runAgent on the machine hands a mixed input to the workflow as is", async () => {
+    class Message {
+      constructor(public content: string) {}
+    }
+    const input = { messages: [new Message("hi")], callback: () => "called" };
+    const wrapped = wrapWorkflow({
+      id: "mixed-machine",
+      effects: {},
+      run: async (value: typeof input) => [value === input, value.callback()] as const,
+    });
+    const result = await runAgent(wrapped.machine, { input });
+    expect(result.status === "done" && result.output).toEqual([true, "called"]);
+    expect(Object.isFrozen(input)).toBe(false);
+  });
+
+  test("an own __proto__ input key stays an own key", async () => {
+    const input = JSON.parse('{"__proto__":{"flag":true}}') as Record<string, unknown>;
+    const wrapped = wrapWorkflow({
+      id: "proto-key",
+      effects: {},
+      run: async (value: Record<string, unknown>) => Object.keys(value),
+    });
+    let context: unknown;
+    await runAgent(wrapped.machine, {
+      input,
+      onTransition: (snapshot) => void (context = snapshot.context.input),
+    });
+    expect(Object.keys(context as object)).toEqual(["__proto__"]);
+    expect(Object.getPrototypeOf(context)).toBe(Object.prototype);
+  });
 });

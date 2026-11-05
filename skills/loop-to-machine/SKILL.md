@@ -101,7 +101,7 @@ Read the loop and fill this table before writing anything. Each row maps to a ma
 | Mutable state on the class instance | JSON context fields, or host state passed as input |
 | A cap on a loop the machine keeps / removed | A `choice` state against an exported constant / nothing, with the reason recorded |
 | A class-shaped runtime (`run`/`continue`/`abort`/`restore`/`snapshot`) | A subclass overriding the loop methods to call `runAgent`, inheriting the rest. The conversation may stay host-owned at first (a snapshot then cannot resume alone); moving it into context is a later labeled step |
-| A function that returns a live stream at once (`streamText`-shaped) | Return at once from a `TransformStream` the run writes into: an `emit` effect writes each chunk, the run's settlement closes the writer, and the result's promise fields resolve from the run. The machine owns the loop; the caller reads the stream as before |
+| A function that returns a live stream at once (`streamText`-shaped) | Return at once from a `TransformStream` the run writes into: an `emit` effect writes each chunk, the run closes the writer when it succeeds and aborts it with the error when it fails, and the result's promise fields resolve from the run. The machine owns the loop; the caller reads the stream as before |
 | A live receiver the effects need (a class instance, an open stream, a cancellation token) | A host registry keyed by id: context and events carry the id, each effect looks the object up |
 | Each distinct return | A final state |
 | A terminal tool with a side effect (`escalate`) | A state that invokes it, then the final; `onError` to a `failed` final |

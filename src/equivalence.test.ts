@@ -806,13 +806,34 @@ describe("verified equivalence (ports that change on purpose)", () => {
     expect(APICallError.isInstance(error)).toBe(true);
     expect((error as APICallError).isRetryable).toBe(true);
     expect((error as Error).name).toBe("AI_APICallError");
-    expect(Object.keys(error as object)).not.toContain("name");
+    // As enumerable as the original's: own on an APICallError, so here too.
+    expect(recorded.error?.ownName).toBe(true);
+    expect(Object.keys(error as object)).toContain("name");
     const port: Recording = {
       version: 1,
       effects: [{ ...recorded, error: { name: "AI_APICallError", message: "overloaded" } }],
     };
     expect(compareRecordings(recorder.recording, port).equivalent).toBe(true);
   });
+});
+
+test("a replayed error's name is enumerable only when the original's was", () => {
+  class LegacyError extends Error {}
+  LegacyError.prototype.name = "LegacyError";
+  const recorder = createRecorder();
+  const fail = recorder.fn("fail", async () => {
+    throw new LegacyError("boom");
+  });
+  return fail()
+    .catch(() => {})
+    .then(async () => {
+      const replay = createRecorder({ replay: recorder.recording });
+      const error = await replay
+        .fn("fail", async () => {})()
+        .catch((e: unknown) => e as Error);
+      expect(error?.name).toBe("LegacyError");
+      expect(Object.keys(error as object)).not.toContain("name");
+    });
 });
 
 describe("verified equivalence (any client)", () => {

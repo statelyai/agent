@@ -711,6 +711,20 @@ describe("describeMachine", () => {
     const text = describeMachine(machine, { source: true });
     expect(text).not.toContain("__vite_ssr_import");
     expect(text).toContain("| ({ context }) => ({ target: Target.done, context: next(context) })");
+    const withDefault = setup({}).createMachine({
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            GO: fn(
+              `({ context }) => (__vite_ssr_import_3__.default(context) ? { target: "done" } : undefined)`,
+            ),
+          },
+        },
+        done: {},
+      },
+    });
+    expect(describeMachine(withDefault)).toContain("on GO → done (conditional)");
   });
 
   test("an exhaustive switch or if/else does not decline; spreads and mutations count", () => {

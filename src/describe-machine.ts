@@ -58,11 +58,11 @@ function codeOf(value: unknown): string | undefined {
   return code === undefined ? undefined : unbundle(code);
 }
 
-/** Source as written: vite SSR's import rewrites (`(0, __vite_ssr_import_3__.f)`) undone. */
+/** Source as written: vite SSR's named-import rewrites (`(0, __vite_ssr_import_3__.f)`) undone; a default import's `.default` stays, as bare `default` would not parse. */
 function unbundle(code: string): string {
   return code
-    .replace(/\(0,\s*__vite_ssr_import_\d+__\.([\w$]+)\)/g, "$1")
-    .replace(/__vite_ssr_import_\d+__\./g, "");
+    .replace(/\(0,\s*__vite_ssr_import_\d+__\.(?!default\b)([\w$]+)\)/g, "$1")
+    .replace(/__vite_ssr_import_\d+__\.(?!default\b)/g, "");
 }
 
 /** The decoded value of a fromConfig `{ "@expr": "<json>" }` slot, or the value itself. */

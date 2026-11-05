@@ -293,6 +293,9 @@ function ownCopy<T>(value: T): T {
  * caller's own. Everything else (class instances, functions, Maps) is shared,
  * and XState leaves those unfrozen.
  */
+/** Each context copy of an input, to the input it was copied from. */
+const copiedFrom = new WeakMap<object, unknown>();
+
 function contextCopy<T>(value: T, seen = new Map<object, unknown>()): T {
   if (value === null || typeof value !== "object") return value;
   if (seen.has(value)) return seen.get(value) as T;
@@ -309,6 +312,13 @@ function contextCopy<T>(value: T, seen = new Map<object, unknown>()): T {
     Object.defineProperty(copy, key, descriptor);
   }
   return copy as T;
+}
+
+/** The input's context copy, remembered so the workflow gets the input itself back. */
+function inputCopy<T>(input: T): T {
+  const copy = contextCopy(input);
+  if (copy !== input && typeof copy === "object" && copy !== null) copiedFrom.set(copy, input);
+  return copy;
 }
 
 function isBuiltinView(value: ArrayBufferView): boolean {
@@ -343,12 +353,15 @@ function workflowLogic<TInput, TOutput, TEffects>(
   effects: TEffects,
   runSignal?: AbortSignal,
   redact?: Redact,
-  /** The caller's own input, when known: the workflow's copy is made from it, not from context's. */
-  callerInput?: { value: TInput },
 ) {
   return createAsyncLogic<TOutput, TInput>({
     run: async ({ input: contextInput, self, signal }) => {
-      const input = callerInput ? callerInput.value : contextInput;
+      // The input context was copied from, when this run copied it.
+      const input = (
+        typeof contextInput === "object" && contextInput !== null && copiedFrom.has(contextInput)
+          ? copiedFrom.get(contextInput)
+          : contextInput
+      ) as TInput;
       // Sent to the invoking machine: under `runAgent` that lands in the
       // run's mailbox, so each one is a transition, a trace and a log entry.
       const parent = (self as unknown as { _parent?: { send(event: object): void } })._parent;
@@ -384,7 +397,7 @@ function createWrappedMachine<TInput, TOutput>(
     id,
     version,
     context: ({ input }: { input: unknown }) => ({
-      input: contextCopy(input),
+      input: inputCopy(input),
       calls: 0,
       failures: 0,
     }),
@@ -484,9 +497,7 @@ export function wrapWorkflow<TInput, TOutput, TEffects extends WorkflowEffects<T
         ...agentOptions,
         input: input as never,
         actors: {
-          workflow: workflowLogic(config.run, effects, options.signal, config.redact, {
-            value: input,
-          }),
+          workflow: workflowLogic(config.run, effects, options.signal, config.redact),
         },
       });
       if (result.status === "done") {

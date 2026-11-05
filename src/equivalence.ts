@@ -43,6 +43,8 @@ export interface RecordedError {
    * `vercel.ai.error.AI_APICallError`; replay restores them, so checks like
    * `APICallError.isInstance` still pass. */
   markers?: string[];
+  /** `name` was an own enumerable field, as the AI SDK's errors set it; replay keeps it so. */
+  ownName?: true;
 }
 
 /** One model call. `call` is its 0-based position among model calls. */
@@ -308,6 +310,7 @@ export class RecordingDivergenceError extends Error {
 function toRecordedError(error: unknown): RecordedError {
   if (!(error instanceof Error)) return { name: "Error", message: String(error) };
   const recorded: RecordedError = { name: error.name, message: error.message };
+  if (Object.prototype.propertyIsEnumerable.call(error, "name")) recorded.ownName = true;
   const code = (error as { code?: unknown }).code;
   if (code !== undefined) recorded.code = toJson(code);
   // Only number and boolean fields: string and object fields (a URL with a
@@ -331,11 +334,16 @@ function toRecordedError(error: unknown): RecordedError {
   return recorded;
 }
 
-function fromRecordedError({ data, markers, name, ...fields }: RecordedError): Error {
+function fromRecordedError({ data, markers, name, ownName, ...fields }: RecordedError): Error {
   const error = Object.assign(new Error(fields.message), fields, data);
-  // Not enumerable, as on a thrown error, so the revived one serializes alike.
-  if (name !== "Error") {
-    Object.defineProperty(error, "name", { value: name, writable: true, configurable: true });
+  // Enumerable only when the original's was, so the revived one serializes alike.
+  if (ownName || name !== "Error") {
+    Object.defineProperty(error, "name", {
+      value: name,
+      writable: true,
+      configurable: true,
+      enumerable: ownName ?? false,
+    });
   }
   for (const marker of markers ?? []) {
     (error as unknown as Record<symbol, boolean>)[Symbol.for(marker)] = true;
