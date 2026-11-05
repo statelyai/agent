@@ -78,10 +78,24 @@ function scopeOf(fn: AnyNode, text: string): Scope {
   walk(fn.body, (node) => {
     if (node.type === "VariableDeclarator" && node.id.type === "Identifier") {
       declared.set(node.id.name, declared.has(node.id.name) ? null : (node.init ?? null));
-    } else if (node.type === "AssignmentExpression" && node.left.type === "Identifier") {
-      assigned.add(node.left.name);
-    } else if (node.type === "UpdateExpression" && node.argument.type === "Identifier") {
-      assigned.add(node.argument.name);
+    } else if (node.type === "AssignmentExpression") {
+      // `x = …` and `x.target = …` both change what `x` holds.
+      const name = rootName(node.left);
+      if (name) assigned.add(name);
+    } else if (node.type === "UpdateExpression") {
+      const name = rootName(node.argument);
+      if (name) assigned.add(name);
+    } else if (node.type === "UnaryExpression" && node.operator === "delete") {
+      const name = rootName(node.argument);
+      if (name) assigned.add(name);
+    } else if (node.type === "CallExpression") {
+      // A local passed to a call (`Object.assign(t, …)`) or whose method is called may be changed.
+      for (const argument of node.arguments) {
+        if (argument.type === "Identifier") assigned.add(argument.name);
+      }
+      const name =
+        node.callee.type === "MemberExpression" ? rootName(node.callee.object) : undefined;
+      if (name) assigned.add(name);
     }
   });
   const constants = new Map<string, AnyNode>();
@@ -102,6 +116,13 @@ function scopeOf(fn: AnyNode, text: string): Scope {
     }
   }
   return { text, constants, kept };
+}
+
+/** The variable a reference starts from: `t` in `t`, `t.target`, `t[k].x`. */
+function rootName(node: AnyNode): string | undefined {
+  let current = node;
+  while (current.type === "MemberExpression") current = current.object;
+  return current.type === "Identifier" ? current.name : undefined;
 }
 
 const keyName = (property: AnyNode): string | undefined =>
@@ -157,9 +178,53 @@ function returnedValues(fn: AnyNode, scope: Scope): Value[] {
     if (node.argument) returned.push(...values(node.argument, scope));
     else returned.push(DECLINE);
   });
-  const last: AnyNode | undefined = fn.body.body.at(-1);
-  if (last?.type !== "ReturnStatement" && last?.type !== "ThrowStatement") returned.push(DECLINE);
+  if (completes(fn.body)) returned.push(DECLINE);
   return returned;
+}
+
+/** True when control can run past the end of `node` (so the function may return nothing). */
+function completes(node: AnyNode | null | undefined): boolean {
+  if (!node) return true;
+  switch (node.type) {
+    case "ReturnStatement":
+    case "ThrowStatement":
+      return false;
+    case "BlockStatement":
+      return node.body.every(completes);
+    case "IfStatement":
+      return !node.alternate || completes(node.consequent) || completes(node.alternate);
+    case "TryStatement":
+      if (node.finalizer && !completes(node.finalizer)) return false;
+      return completes(node.block) || (node.handler ? completes(node.handler.body) : false);
+    case "SwitchStatement": {
+      if (!node.cases.some((c: AnyNode) => c.test === null)) return true;
+      if (breaksOut(node)) return true;
+      // Cases fall through, so the last case decides.
+      const last: AnyNode[] = node.cases.at(-1)?.consequent ?? [];
+      return last.every(completes);
+    }
+    default:
+      return true;
+  }
+}
+
+/** True when a `break` inside this switch (not in a nested loop or switch) leaves it. */
+function breaksOut(node: AnyNode): boolean {
+  let found = false;
+  const visit = (child: AnyNode) => {
+    if (found || FUNCTION_TYPES.has(child.type)) return;
+    if (child.type === "BreakStatement" && !child.label) {
+      found = true;
+      return;
+    }
+    if (/^(For|ForIn|ForOf|While|DoWhile|Switch)Statement$/.test(child.type)) return;
+    for (const [key, value] of Object.entries(child)) {
+      if (key === "start" || key === "end") continue;
+      for (const item of Array.isArray(value) ? value : [value]) if (isNode(item)) visit(item);
+    }
+  };
+  for (const c of node.cases) for (const statement of c.consequent) visit(statement);
+  return found;
 }
 
 /** The literal string a node holds, if it is one: `"done"`, `` `done` ``. */
@@ -192,6 +257,31 @@ function objectKeys(node: AnyNode, scope: Scope, keys: Set<string>, depth = 0): 
 }
 
 /**
+ * The expression an object literal's `target` ends up as, with later
+ * properties and spreads overriding earlier ones: `undefined` when it sets
+ * none, `UNKNOWN` when a spread that cannot be read may set it.
+ */
+function targetOf(object: AnyNode, scope: Scope, depth = 0): AnyNode | typeof UNKNOWN | undefined {
+  let target: AnyNode | typeof UNKNOWN | undefined;
+  for (const property of object.properties) {
+    if (property.type === "Property") {
+      if (keyName(property) === "target") target = property.value;
+      continue;
+    }
+    const spread = depth < 20 ? values(property.argument, scope, depth + 1) : [UNKNOWN];
+    if (spread.length !== 1) {
+      target = UNKNOWN;
+      continue;
+    }
+    const only = spread[0] as Value;
+    if (only === DECLINE) continue;
+    if (only === UNKNOWN || only.type !== "ObjectExpression") target = UNKNOWN;
+    else target = targetOf(only, scope, depth + 1) ?? target;
+  }
+  return target;
+}
+
+/**
  * Reads a transition function: where each of its return paths goes and what
  * context it sets. `undefined` when the source does not parse.
  */
@@ -217,12 +307,11 @@ export function readTransitionSource(code: string): TransitionSource | undefined
       result.unknown = true;
       continue;
     }
-    const target = value.properties.find(
-      (property: AnyNode) => property.type === "Property" && keyName(property) === "target",
-    );
-    if (!target) result.stays = true;
+    const target = targetOf(value, scope);
+    if (target === undefined) result.stays = true;
+    else if (target === UNKNOWN) result.unknown = true;
     else {
-      for (const option of values(target.value, scope)) {
+      for (const option of values(target, scope)) {
         const literal =
           option === DECLINE || option === UNKNOWN ? undefined : literalString(option);
         if (literal !== undefined) targets.add(literal);

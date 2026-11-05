@@ -650,4 +650,51 @@ describe("describeMachine", () => {
     `);
     expect(describeMachine(machine)).not.toContain("|");
   });
+
+  test("an exhaustive switch or if/else does not decline; spreads and mutations count", () => {
+    const fn = (code: string) => new Function(`return ${code}`)() as never;
+    const machine = setup({}).createMachine({
+      context: { failed: false },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            SWITCH: fn(`({ event }) => {
+              switch (event.kind) {
+                case "a": return { target: "done" };
+                default: return { target: "done" };
+              }
+            }`),
+            SWITCH_BREAK: fn(`({ event }) => {
+              switch (event.kind) {
+                case "a": break;
+                default: return { target: "done" };
+              }
+            }`),
+            IF_ELSE: fn(`({ context }) => {
+              if (context.failed) { return { target: "failed" }; } else { throw new Error("x"); }
+            }`),
+            SPREAD_OVERRIDE: fn(`() => ({ target: "done", ...{ target: "failed" } })`),
+            SPREAD_UNKNOWN: fn(`({ event }) => ({ target: "done", ...event.patch })`),
+            SPREAD_BEFORE: fn(`({ event }) => ({ ...event.patch, target: "done" })`),
+            MUTATED: fn(`({ context }) => {
+              const transition = { target: "done" };
+              if (context.failed) transition.target = "failed";
+              return transition;
+            }`),
+          },
+        },
+        done: {},
+        failed: {},
+      },
+    });
+    const text = describeMachine(machine);
+    expect(text).toContain("on SWITCH → done\n");
+    expect(text).toContain("on SWITCH_BREAK → done (conditional)");
+    expect(text).toContain("on IF_ELSE → failed\n");
+    expect(text).toContain("on SPREAD_OVERRIDE → failed\n");
+    expect(text).toContain("on SPREAD_UNKNOWN → ?");
+    expect(text).toContain("on SPREAD_BEFORE → done\n");
+    expect(text).toContain("on MUTATED → ?");
+  });
 });
