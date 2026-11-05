@@ -677,6 +677,11 @@ describe("describeMachine", () => {
             SPREAD_OVERRIDE: fn(`() => ({ target: "done", ...{ target: "failed" } })`),
             SPREAD_UNKNOWN: fn(`({ event }) => ({ target: "done", ...event.patch })`),
             SPREAD_BEFORE: fn(`({ event }) => ({ ...event.patch, target: "done" })`),
+            NESTED_WRITE: fn(`({ event }) => {
+              let next = "done";
+              event.items.forEach((item) => { if (item.failed) next = "failed"; });
+              return { target: next };
+            }`),
             MUTATED: fn(`({ context }) => {
               const transition = { target: "done" };
               if (context.failed) transition.target = "failed";
@@ -696,5 +701,6 @@ describe("describeMachine", () => {
     expect(text).toContain("on SPREAD_UNKNOWN → ?");
     expect(text).toContain("on SPREAD_BEFORE → done\n");
     expect(text).toContain("on MUTATED → ?");
+    expect(text).toContain("on NESTED_WRITE → ?");
   });
 });

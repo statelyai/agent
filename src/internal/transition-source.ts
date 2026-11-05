@@ -48,14 +48,14 @@ function parseFunction(code: string): { fn: AnyNode; text: string } | undefined 
   return undefined;
 }
 
-/** Calls `visit` on every node under `node`, without entering nested functions. */
-function walk(node: AnyNode, visit: (node: AnyNode) => void): void {
+/** Calls `visit` on every node under `node`, without entering nested functions unless `deep`. */
+function walk(node: AnyNode, visit: (node: AnyNode) => void, deep = false): void {
   for (const [key, value] of Object.entries(node)) {
     if (key === "start" || key === "end") continue;
     for (const child of Array.isArray(value) ? value : [value]) {
       if (!isNode(child)) continue;
       visit(child);
-      if (!FUNCTION_TYPES.has(child.type)) walk(child, visit);
+      if (deep || !FUNCTION_TYPES.has(child.type)) walk(child, visit, deep);
     }
   }
 }
@@ -78,26 +78,34 @@ function scopeOf(fn: AnyNode, text: string): Scope {
   walk(fn.body, (node) => {
     if (node.type === "VariableDeclarator" && node.id.type === "Identifier") {
       declared.set(node.id.name, declared.has(node.id.name) ? null : (node.init ?? null));
-    } else if (node.type === "AssignmentExpression") {
-      // `x = …` and `x.target = …` both change what `x` holds.
-      const name = rootName(node.left);
-      if (name) assigned.add(name);
-    } else if (node.type === "UpdateExpression") {
-      const name = rootName(node.argument);
-      if (name) assigned.add(name);
-    } else if (node.type === "UnaryExpression" && node.operator === "delete") {
-      const name = rootName(node.argument);
-      if (name) assigned.add(name);
-    } else if (node.type === "CallExpression") {
-      // A local passed to a call (`Object.assign(t, …)`) or whose method is called may be changed.
-      for (const argument of node.arguments) {
-        if (argument.type === "Identifier") assigned.add(argument.name);
-      }
-      const name =
-        node.callee.type === "MemberExpression" ? rootName(node.callee.object) : undefined;
-      if (name) assigned.add(name);
     }
   });
+  // Writes count from nested callbacks too: `items.forEach(() => { next = "done" })`.
+  walk(
+    fn.body,
+    (node) => {
+      if (node.type === "AssignmentExpression") {
+        // `x = …` and `x.target = …` both change what `x` holds.
+        const name = rootName(node.left);
+        if (name) assigned.add(name);
+      } else if (node.type === "UpdateExpression") {
+        const name = rootName(node.argument);
+        if (name) assigned.add(name);
+      } else if (node.type === "UnaryExpression" && node.operator === "delete") {
+        const name = rootName(node.argument);
+        if (name) assigned.add(name);
+      } else if (node.type === "CallExpression") {
+        // A local passed to a call (`Object.assign(t, …)`) or whose method is called may be changed.
+        for (const argument of node.arguments) {
+          if (argument.type === "Identifier") assigned.add(argument.name);
+        }
+        const name =
+          node.callee.type === "MemberExpression" ? rootName(node.callee.object) : undefined;
+        if (name) assigned.add(name);
+      }
+    },
+    true,
+  );
   const constants = new Map<string, AnyNode>();
   for (const [name, init] of declared) {
     if (init && !assigned.has(name)) constants.set(name, init);
