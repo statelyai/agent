@@ -130,7 +130,7 @@ Each resumed run is checked against the uninterrupted one. Each failure names it
 - An effect in flight at the crash may run twice. That is the at-least-once contract (see [Idempotency keys](hosts.md#idempotency-keys)), and it is not reported.
 - Model calls are keyed by `callKey` without the execution id, and plain actors by invoke site. Only actors bound through string-keyed sources are seen.
 - Model calls run live only in the uninterrupted run. After a crash, a call it made gets its recorded answer, after the same delay, so a fake may answer by call order.
-- Plain actors run live every time, so they must give the same result however often they run. A fake that keeps state passes `reset`, which runs before every run.
+- Plain actors run live every time, so they must give the same result however often they run. A fake that keeps state passes `reset`, which runs before the baseline and each crashed run. It does not run before the resume, so the fake keeps what the crashed run did, as a real dependency would.
 - The outcome check compares final states, so a machine whose result depends on which concurrent call finishes first can fail it after a crash. Make the result order-independent, or test that part without concurrency.
 - `events` are host events, delivered one per idle settle. A resume skips the ones its log already holds.
 - `store` takes a factory for your own store adapter, one fresh store per run. A store that acknowledges a write it then loses shows up as `reran`.

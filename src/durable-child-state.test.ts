@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createAsyncLogic } from "xstate";
+import { createAsyncLogic, createStepLogic } from "xstate";
 import { z } from "zod";
 import {
   createAgentRuntime,
@@ -608,5 +608,116 @@ describe("a child that finished just before a crash", () => {
       full.status === "done" && full.output,
     );
     expect(calls).toEqual([]);
+  });
+});
+
+describe("a plain actor that finishes in the step it starts an effect", () => {
+  test("still runs that effect when the journal holds it back", async () => {
+    const ran: string[] = [];
+    const step = createStepLogic({
+      context: {},
+      run: ({ event }, enq) => {
+        if (event.type !== "GO") return;
+        enq.effect(() => void ran.push("effect"));
+        return { status: "done", output: "ok" };
+      },
+    });
+    const child = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: { PING: z.object({}) } }),
+      actors: { step },
+    }).createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: {
+          invoke: { id: "step", src: "step", onDone: { target: "done" } },
+          on: {
+            PING: ({ children }, enq) => {
+              enq.sendTo(children.step as never, { type: "GO" });
+            },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    const root = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: { WORK: z.object({}) } }),
+      actors: { child },
+    }).createMachine({
+      context: {},
+      initial: "run",
+      states: {
+        run: {
+          invoke: { id: "child", src: "child", onDone: { target: "done" } },
+          on: {
+            WORK: ({ children }, enq) => {
+              enq.sendTo(children.child as never, { type: "PING" });
+            },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    const store = createInMemoryEventLogStore();
+    const result = await runToQuiescence(createAgentRuntime(root, { store, threadId: "t" }), {
+      input: undefined,
+      event: { type: "WORK" },
+    } as AgentRunInit<typeof root>);
+    expect(result.status).toBe("done");
+    expect(ran).toEqual(["effect"]);
+  });
+});
+
+describe("a restored child completion inside an active parent", () => {
+  test("reaches its parent once", async () => {
+    const inner = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: { summarize: createTextLogic({ model: "test-model", prompt: "Sum." }) },
+    }).createMachine({
+      context: {},
+      initial: "work",
+      states: {
+        work: { invoke: { id: "summarize", src: "summarize", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    // `middle` stays put on its child's completion, so a second delivery would count twice.
+    const middle = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({ done: z.number() }), events: {} }),
+      actors: { inner },
+    }).createMachine({
+      context: { done: 0 },
+      invoke: {
+        id: "inner",
+        src: "inner",
+        onDone: ({ context }) => ({ context: { done: context.done + 1 } }),
+      },
+    });
+    const root = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: { middle },
+    }).createMachine({ context: {}, invoke: { id: "middle", src: "middle" } });
+    const generateText = async () => ({ result: "sum" });
+    const full = await runToQuiescence(
+      createAgentRuntime(root, { executors: { generateText } }),
+      {},
+    );
+    const cut = full.events.findIndex(
+      (entry) =>
+        entry.event.type === "xstate.done.actor" &&
+        (entry.event as { actorId?: string }).actorId === "inner",
+    );
+    expect(cut).toBeGreaterThan(0);
+    const resumed = await runToQuiescence(
+      createAgentRuntime(root, { executors: { generateText } }),
+      {
+        events: full.events.slice(0, cut),
+      },
+    );
+    const middleDone = (persisted: unknown) =>
+      (persisted as { children: { middle: { snapshot: { context: { done: number } } } } }).children
+        .middle.snapshot.context.done;
+    expect(middleDone(full.persist())).toBe(1);
+    expect(middleDone(resumed.persist())).toBe(1);
   });
 });

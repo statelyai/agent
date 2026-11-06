@@ -2266,6 +2266,9 @@ function journalGatedLogic(
     if (!Array.isArray(effects) || !effects.some((e) => (e as Effect)?.type === "@xstate.effect")) {
       return result;
     }
+    // The step that finishes the actor still runs its effects; only a stop
+    // before the journal catches up cancels them.
+    const finishing = (snapshot as { status?: string } | undefined)?.status === "done";
     return [
       snapshot,
       effects.map((effect) => {
@@ -2275,7 +2278,7 @@ function journalGatedLogic(
           const waiting = pending();
           if (waiting === undefined) return exec(...args);
           void waiting.then(() => {
-            if (self.getSnapshot().status === "active") exec(...args);
+            if (finishing || self.getSnapshot().status === "active") exec(...args);
           });
         };
         return { ...(effect as object), exec: gated, action: gated };

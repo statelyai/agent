@@ -50,7 +50,7 @@ export interface CheckCrashRecoveryOptions<TMachine extends AnyStateMachine> {
    * an entry it acknowledged is read back after the crash.
    */
   store?: () => AgentEventLogStore;
-  /** Called before every run (the baseline and each crash), to reset fakes the executors or actors keep. */
+  /** Called before the baseline and before each crashed run, to reset fakes the executors or actors keep. Not called before the resume: like a real dependency, a fake keeps what the crashed run did to it. */
   reset?: () => void;
   /** Other runtime options (`maxModelCalls`, `verification`, …), shared by every run. */
   runtime?: Omit<
@@ -359,6 +359,9 @@ async function crashAt<TMachine extends AnyStateMachine>(
       timeout,
     );
   } catch (error) {
+    // Stop it, so nothing it still runs touches the next point's fakes.
+    resumed.crashed = true;
+    resumeController.abort(new CrashError());
     return [fail("threw", `the resume threw: ${String(error)}`)];
   }
   if (result === TIMED_OUT) {
