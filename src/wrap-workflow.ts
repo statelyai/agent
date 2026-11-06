@@ -279,12 +279,52 @@ function observeStream(
  * value holding one (or anything it cannot copy) passes as is.
  */
 function ownCopy<T>(value: T): T {
-  if (!isPlainData(value, new WeakSet())) return value;
+  const hidden = { found: false };
+  if (!isPlainData(value, new WeakSet(), hidden)) return value;
+  // `structuredClone` drops symbol and non-enumerable keys; this copy keeps
+  // them (a Map, Set, Date or typed array inside is shared).
+  if (hidden.found) return contextCopy(value);
   try {
     return structuredClone(value);
   } catch {
     return value;
   }
+}
+
+/**
+ * The input as machine context holds it: plain objects and arrays copied, so
+ * XState's dev build, which deep-freezes them in context, never freezes the
+ * caller's own. Everything else (class instances, functions, Maps) is shared,
+ * and XState leaves those unfrozen.
+ */
+/** Each context copy of an input, to the input it was copied from. */
+const copiedFrom = new WeakMap<object, unknown>();
+
+function contextCopy<T>(value: T, seen = new Map<object, unknown>()): T {
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return seen.get(value) as T;
+  const proto: unknown = Object.getPrototypeOf(value);
+  const isArray = Array.isArray(value);
+  if (!isArray && proto !== Object.prototype && proto !== null) return value;
+  const copy: object = isArray ? [] : Object.create(proto as object | null);
+  seen.set(value, copy);
+  // Every own key, symbols and non-enumerable ones too, as defined.
+  for (const key of Reflect.ownKeys(value)) {
+    if (isArray && key === "length") continue;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if ("value" in descriptor) descriptor.value = contextCopy(descriptor.value, seen);
+    Object.defineProperty(copy, key, descriptor);
+  }
+  // Trailing holes: a sparse array's length is not implied by its entries.
+  if (isArray) (copy as unknown[]).length = (value as unknown[]).length;
+  return copy as T;
+}
+
+/** The input's context copy, remembered so the workflow gets the input itself back. */
+function inputCopy<T>(input: T): T {
+  const copy = contextCopy(input);
+  if (copy !== input && typeof copy === "object" && copy !== null) copiedFrom.set(copy, input);
+  return copy;
 }
 
 function isBuiltinView(value: ArrayBufferView): boolean {
@@ -295,7 +335,7 @@ function isBuiltinView(value: ArrayBufferView): boolean {
   return typeof ctor === "function" && proto === (ctor as { prototype: unknown }).prototype;
 }
 
-function isPlainData(value: unknown, seen: WeakSet<object>): boolean {
+function isPlainData(value: unknown, seen: WeakSet<object>, hidden: { found: boolean }): boolean {
   if (typeof value === "function") return false;
   if (value === null || typeof value !== "object") return true;
   if (seen.has(value)) return true;
@@ -304,11 +344,18 @@ function isPlainData(value: unknown, seen: WeakSet<object>): boolean {
   // A built-in typed array or DataView clones exactly; a subclass (Buffer) loses its prototype.
   if (ArrayBuffer.isView(value)) return isBuiltinView(value);
   if (value instanceof Map || value instanceof Set) {
-    return [...value.entries()].every((entry) => entry.every((v) => isPlainData(v, seen)));
+    return [...value.entries()].every((entry) => entry.every((v) => isPlainData(v, seen, hidden)));
   }
   const proto: unknown = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== Array.prototype && proto !== null) return false;
-  return Object.values(value).every((child) => isPlainData(child, seen));
+  // Symbol and non-enumerable keys (an array's `length` aside), which `structuredClone` drops.
+  const extra = Reflect.ownKeys(value).length - Object.keys(value).length;
+  if (extra !== (Array.isArray(value) ? 1 : 0)) hidden.found = true;
+  return Reflect.ownKeys(value).every((key) => {
+    if (Array.isArray(value) && key === "length") return true;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    return !("value" in descriptor) || isPlainData(descriptor.value, seen, hidden);
+  });
 }
 
 function workflowLogic<TInput, TOutput, TEffects>(
@@ -318,7 +365,13 @@ function workflowLogic<TInput, TOutput, TEffects>(
   redact?: Redact,
 ) {
   return createAsyncLogic<TOutput, TInput>({
-    run: async ({ input, self, signal }) => {
+    run: async ({ input: contextInput, self, signal }) => {
+      // The input context was copied from, when this run copied it.
+      const input = (
+        typeof contextInput === "object" && contextInput !== null && copiedFrom.has(contextInput)
+          ? copiedFrom.get(contextInput)
+          : contextInput
+      ) as TInput;
       // Sent to the invoking machine: under `runAgent` that lands in the
       // run's mailbox, so each one is a transition, a trace and a log entry.
       const parent = (self as unknown as { _parent?: { send(event: object): void } })._parent;
@@ -353,7 +406,11 @@ function createWrappedMachine<TInput, TOutput>(
   return agent.createMachine({
     id,
     version,
-    context: ({ input }: { input: unknown }) => ({ input, calls: 0, failures: 0 }),
+    context: ({ input }: { input: unknown }) => ({
+      input: inputCopy(input),
+      calls: 0,
+      failures: 0,
+    }),
     initial: "running",
     states: {
       running: {
@@ -449,7 +506,9 @@ export function wrapWorkflow<TInput, TOutput, TEffects extends WorkflowEffects<T
       const result = await runAgent(machine, {
         ...agentOptions,
         input: input as never,
-        actors: { workflow: workflowLogic(config.run, effects, options.signal, config.redact) },
+        actors: {
+          workflow: workflowLogic(config.run, effects, options.signal, config.redact),
+        },
       });
       if (result.status === "done") {
         const output = result.output as TOutput;

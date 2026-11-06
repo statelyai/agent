@@ -59,6 +59,7 @@ try {
 ```
 
 - `@statelyai/sdk/node-relay` imports `ws`, an optional peer of `@statelyai/sdk`. Without it, the import fails with `Cannot find package 'ws'`.
+- A `choice` state, or one left at once by `always`, is passed through within one step, so no snapshot shows it. Read it from `describeMachine` or `explorePaths`'s `reachedStates`.
 - `session: "direct"` connects with the room id only, which is what a local relay expects.
 - A test's viewer connects a WebSocket to `${relay.url}?r=<roomId>` and registers as a viewer. That is the relay endpoint, not an inspector page.
 

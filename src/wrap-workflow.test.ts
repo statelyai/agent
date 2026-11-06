@@ -588,4 +588,108 @@ describe("wrapWorkflow: effects objects and safety", () => {
     });
     expect(await wrapped.run(input)).toEqual([true, true]);
   });
+
+  test("run leaves the caller's input unfrozen", async () => {
+    class Message {
+      constructor(public content: string) {}
+    }
+    const plain = { messages: [{ role: "user", content: "hi" }], meta: { n: 1 } };
+    const mixed = { messages: [new Message("hi")], callback: () => "called" };
+    const wrapped = wrapWorkflow({ id: "unfrozen", effects: {}, run: async () => "ok" });
+    await wrapped.run(plain);
+    await wrapped.run(mixed as never);
+    for (const value of [
+      plain,
+      plain.messages,
+      plain.messages[0],
+      plain.meta,
+      mixed,
+      mixed.messages,
+    ])
+      expect(Object.isFrozen(value)).toBe(false);
+  });
+
+  test("runAgent on the machine leaves the caller's input unfrozen", async () => {
+    const input = { messages: [{ role: "user", content: "hi" }] };
+    const wrapped = wrapWorkflow({ id: "unfrozen-machine", effects: {}, run: async () => "ok" });
+    await runAgent(wrapped.machine, { input });
+    expect(Object.isFrozen(input)).toBe(false);
+    expect(Object.isFrozen(input.messages[0])).toBe(false);
+  });
+
+  test("runAgent on the machine keeps symbol and non-enumerable input fields", async () => {
+    const tag = Symbol("tag");
+    const input = Object.defineProperty({ id: "a", [tag]: 1 }, "token", { value: "secret" }) as {
+      id: string;
+      [tag]: number;
+      token?: string;
+    };
+    const wrapped = wrapWorkflow({
+      id: "hidden-fields",
+      effects: {},
+      run: async (value: typeof input) => [value.id, value[tag], value.token],
+    });
+    const result = await runAgent(wrapped.machine, { input });
+    expect(result.status === "done" && result.output).toEqual(["a", 1, "secret"]);
+    expect(Object.isFrozen(input)).toBe(false);
+  });
+
+  test("runAgent on the machine hands a mixed input to the workflow as is", async () => {
+    class Message {
+      constructor(public content: string) {}
+    }
+    const input = { messages: [new Message("hi")], callback: () => "called" };
+    const wrapped = wrapWorkflow({
+      id: "mixed-machine",
+      effects: {},
+      run: async (value: typeof input) => [value === input, value.callback()] as const,
+    });
+    const result = await runAgent(wrapped.machine, { input });
+    expect(result.status === "done" && result.output).toEqual([true, "called"]);
+    expect(Object.isFrozen(input)).toBe(false);
+  });
+
+  test("an own __proto__ input key stays an own key", async () => {
+    const input = JSON.parse('{"__proto__":{"flag":true}}') as Record<string, unknown>;
+    const wrapped = wrapWorkflow({
+      id: "proto-key",
+      effects: {},
+      run: async (value: Record<string, unknown>) => Object.keys(value),
+    });
+    let context: unknown;
+    await runAgent(wrapped.machine, {
+      input,
+      onTransition: (snapshot) => void (context = snapshot.context.input),
+    });
+    expect(Object.keys(context as object)).toEqual(["__proto__"]);
+    expect(Object.getPrototypeOf(context)).toBe(Object.prototype);
+  });
+
+  test("a plain input with hidden keys is still the workflow's own copy", async () => {
+    const tag = Symbol("tag");
+    const input = Object.defineProperty({ id: "a", [tag]: 1 }, "token", { value: "secret" }) as {
+      id: string;
+      [tag]: number;
+      token?: string;
+    };
+    const wrapped = wrapWorkflow({
+      id: "hidden-copy",
+      effects: {},
+      run: async (value: typeof input) => {
+        value.id = "mutated";
+        return [value === input, value[tag], value.token];
+      },
+    });
+    expect(await wrapped.run(input)).toEqual([false, 1, "secret"]);
+    expect(input.id).toBe("a");
+  });
+
+  test("a sparse input array keeps its length in context", async () => {
+    const wrapped = wrapWorkflow({ id: "sparse", effects: {}, run: async () => "ok" });
+    let context: unknown;
+    await wrapped.run({ slots: new Array(3) } as never, {
+      onTransition: (snapshot) => void (context = snapshot.context.input),
+    });
+    expect((context as { slots: unknown[] }).slots.length).toBe(3);
+  });
 });

@@ -155,8 +155,8 @@ describe("explorePaths — children: 'coupled'", () => {
       { type: "READY" },
       { type: "APPROVE", actor: "a2" },
       { type: "READY" },
-      { type: "xstate.done.actor.a1", output: { id: "a1", ran: true } },
-      { type: "xstate.done.actor.a2", output: { id: "a2", ran: true } },
+      { type: "xstate.done.actor", actorId: "a1", output: { id: "a1", ran: true } },
+      { type: "xstate.done.actor", actorId: "a2", output: { id: "a2", ran: true } },
     ]);
   });
 

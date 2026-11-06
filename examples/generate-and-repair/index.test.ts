@@ -185,7 +185,7 @@ test("the machine is structurally sound", async () => {
   });
   expect(failure.reachable).toBe(true);
   expect(failure.witness).toEqual(
-    expect.arrayContaining([{ type: "xstate.error.actor.parseConfig" }]),
+    expect.arrayContaining([{ type: "xstate.error.actor", actorId: "parseConfig" }]),
   );
 
   // And the parser accepting a candidate reaches `done`.

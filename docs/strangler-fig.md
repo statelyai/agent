@@ -177,7 +177,7 @@ resolving: {
 - Carve one phase per commit.
 - A phase in the middle of a `try`/`finally`: the setup before it moves into the runner, and the `finally` becomes a state every exit passes through, so a proof can say cleanup runs first.
 - A legacy body that owns abort (it returns its own `stopped` result): pass the `signal` to the legacy body only, not to `runAgent`. Its result then reaches the machine as a normal final; `runAgent`'s `signal` would settle the run as `aborted` instead.
-- An invoke whose error must reach the caller unchanged: omit `onError`. The run settles `{ status: "error", error }` with the original error, and the runner rethrows it. Pass `disable: ["invoke-without-on-error"]` to `lintAgentMachine` for that machine.
+- An invoke whose error must reach the caller unchanged: omit `onError`. The run settles `{ status: "error", error }` with the original error, and the runner rethrows it. Pass `disable: ["invoke-without-on-error"]` to `lintAgentMachine` for that machine, or `ignore: [{ code: "invoke-without-on-error", path }]` for one state.
 
 ### A phase in the middle of a method
 
@@ -276,6 +276,7 @@ report.equivalent; // true
 
 Run the module's own tests against the port by swapping the module.
 
+- Snapshot files are named after the test file that runs them. A swap file that imports the old suite writes fresh snapshots on its first run, and `toMatchSnapshot` passes without comparing. Copy the old `__snapshots__/<old>.snap` to the swap file's name, and run with `CI=true` so a missing snapshot fails.
 - A module mock whose factory imports the port deadlocks or recurses when the port imports the mocked module. Load the port with a dynamic import in `beforeAll`, and call it from inside the mocked functions.
 - When a module mock does not reach the code's own import of the module (one runner did not apply it to a relative import inside the package), patch the class prototype from a setup file instead. Import both modules dynamically in its `beforeAll`: a static import loads the module before the test file's mocks apply.
 - `runAgent` starts asynchronously. Fire-and-forget work the old code starts at the same time may settle in a different order. An old test that asserts the exact order of actions across concurrent tasks is a structural failure only when those actions commute and their order is not part of the contract; an order that reaches users or storage is behavioral.

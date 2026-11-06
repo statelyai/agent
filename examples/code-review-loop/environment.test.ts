@@ -172,8 +172,10 @@ describe("the review loop (the environment)", () => {
       const leak = await canReach(brokenLoop(), "illegallyShipped", proofOptions);
       expect(leak.reachable).toBe(true);
       console.log(`broken-guard witness: ${formatPath(leak.witness!)}`);
-      const types = leak.witness!.map((event) => event.type);
-      expect(types.at(-1)).toBe("xstate.done.actor.runChecks");
+      expect(leak.witness!.at(-1)).toMatchObject({
+        type: "xstate.done.actor",
+        actorId: "runChecks",
+      });
     },
     SEARCH_TIMEOUT_MS,
   );

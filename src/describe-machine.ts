@@ -29,6 +29,12 @@ export interface DescribeMachineOptions {
    * shows both where it goes and what it computes.
    */
   source?: boolean;
+  /**
+   * Functions the machine's transitions call by name (guards, reducers), each
+   * printed with its source in a `Helpers` section, so a call such as
+   * `withinLimit(context.turn, context.limit)` can be read through.
+   */
+  helpers?: Record<string, (...args: never[]) => unknown>;
 }
 
 type Json = Record<string, unknown>;
@@ -43,9 +49,20 @@ const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
 /** The source of a function as serialized (`{ "@code" }`) or as a live function. */
 function codeOf(value: unknown): string | undefined {
-  if (typeof value === "function") return String(value);
-  if (isObject(value) && typeof value["@code"] === "string") return value["@code"];
-  return undefined;
+  const code =
+    typeof value === "function"
+      ? String(value)
+      : isObject(value) && typeof value["@code"] === "string"
+        ? value["@code"]
+        : undefined;
+  return code === undefined ? undefined : unbundle(code);
+}
+
+/** Source as written: vite SSR's named-import rewrites (`(0, __vite_ssr_import_3__.f)`) undone; a default import's `.default` stays, as bare `default` would not parse. */
+function unbundle(code: string): string {
+  return code
+    .replace(/\(0,\s*__vite_ssr_import_\d+__\.(?!default\b)([\w$]+)\)/g, "$1")
+    .replace(/__vite_ssr_import_\d+__\.(?!default\b)/g, "");
 }
 
 /** The decoded value of a fromConfig `{ "@expr": "<json>" }` slot, or the value itself. */
@@ -226,6 +243,14 @@ function transitionLines(
   const push = (head: string, value: unknown) => {
     for (const transition of toList(value)) line(head, transition);
   };
+  if (source) {
+    for (const key of ["entry", "exit"] as const) {
+      for (const action of toList(json[key])) {
+        const code = sourceLines(action, pad);
+        if (code.length) lines.push(`${pad}${key}`, ...code);
+      }
+    }
+  }
   for (const [event, value] of Object.entries(isObject(json.on) ? json.on : {})) {
     // fromConfig lowers a state-level `onDone` to its own done event.
     push(event === "xstate.done.state" ? "onDone" : `on ${event}`, value);
@@ -339,7 +364,8 @@ function eventLines(machine: AnyStateMachine): string[] {
  * read (a variable's value, a helper call's result). Function sources are
  * parsed, so every return path counts: ternaries, `&&`/`||`, early returns and
  * local constants. With `source: true`, each function is printed under its
- * line. A `setupAgent.fromConfig(...)` machine is read from its config, so
+ * line, along with entry and exit actions; pass `helpers` to print the
+ * functions they call by name. A `setupAgent.fromConfig(...)` machine is read from its config, so
  * its targets, guards and context patches are always known.
  *
  * @example
@@ -382,5 +408,10 @@ export function describeMachine(
 
   const events = eventLines(machine);
   if (events.length) lines.push("Events:", ...events);
+  const helpers = Object.entries(options.helpers ?? {});
+  if (helpers.length) {
+    lines.push("Helpers:");
+    for (const [name, helper] of helpers) lines.push(`  ${name}`, ...sourceLines(helper, "  "));
+  }
   return lines.join("\n");
 }

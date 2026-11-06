@@ -394,7 +394,7 @@ hand-authored machines that use `enq.emit(...)`.
 
 <!-- describeMachine from src/describe-machine.ts -->
 
-`describeMachine(machine, { snapshot?, source? })` renders any machine, from a config or from TypeScript, as plain text a model can read. Use it as the prompt for a model that proposes an improved machine, or as extra context for a decider.
+`describeMachine(machine, { snapshot?, source?, helpers? })` renders any machine, from a config or from TypeScript, as plain text a model can read. Use it as the prompt for a model that proposes an improved machine, or as extra context for a decider.
 
 ```ts
 import { describeMachine } from "@statelyai/agent";
@@ -429,7 +429,8 @@ Events:
 - **Events:** each event schema's description and fields. Event descriptions come from the schema's JSON Schema, so a `compileSchema` must implement the Standard Schema JSON Schema extension for a config's event descriptions to appear.
 - **Config machines:** read from the lowered config, so every target, guard, and context patch is known.
 - **Transition functions:** parsed from their source, following every return path: ternaries, `&&` and `||`, early returns, and local constants. A function shows each target it can return, marked `(conditional)` when it can also stay, return no transition, or pick among several. It shows `(stays)` when no path names a target, and `?` for a target its own source does not spell out: a variable's value, or a transition a helper returns.
-- **Source:** pass `source: true` to print each transition function under its line, so one read shows both where it goes and what it computes.
+- **Source:** pass `source: true` to print each transition function under its line, so one read shows both where it goes and what it computes. Entry and exit actions print too.
+- **Helpers:** pass the functions transitions call by name, such as `helpers: { withinLimit }`, to print each one's source in a `Helpers` section. A guard passed into a machine factory is then readable from the same text.
 
 The output is deterministic. The same machine always produces the same text.
 

@@ -215,8 +215,10 @@ function section(title: string): void {
 }
 
 /** `[ISSUE → ESCALATE]`, or `(none)` for an empty witness. */
-function formatPath(events: readonly { type: string }[]): string {
-  return events.length === 0 ? "(none)" : `[${events.map((event) => event.type).join(" → ")}]`;
+function formatPath(events: readonly { type: string; actorId?: unknown }[]): string {
+  const label = (event: { type: string; actorId?: unknown }) =>
+    typeof event.actorId === "string" ? `${event.type}(${event.actorId})` : event.type;
+  return events.length === 0 ? "(none)" : `[${events.map(label).join(" → ")}]`;
 }
 
 /** `done issued ×2` per distinct terminal, sorted for a stable report. */
