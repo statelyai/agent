@@ -67,7 +67,7 @@ effects; // what would run (spawn, start, stop, ...); nothing ran
 
 - Same snapshot object back and no effects: the event is unhandled there.
 - Fail an invoke with `{ type: "xstate.error.actor", actorId, error }`.
-- To start mid-run, pass a live snapshot: `machine.restoreSnapshot(persisted)` for a persisted one, or the snapshot `replay` (`@statelyai/agent/log`) folds from a journal. A raw persisted snapshot throws.
+- To start mid-run, pass a live snapshot: `restoreActor(machine, persisted).getSnapshot()` (`xstate/persist`) for a persisted one, or the snapshot `replay` (`@statelyai/agent/log`) folds from a journal. A raw persisted snapshot throws.
 
 ## 1. Inventory the code
 

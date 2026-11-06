@@ -1,3 +1,4 @@
+import { restoreActor } from "xstate/persist";
 import { describe, expect, test } from "vitest";
 import { createActor, createAsyncLogic, createMachine, toPromise } from "xstate";
 import { z } from "zod";
@@ -61,7 +62,7 @@ describe("recordLog", () => {
     const persisted = first.getPersistedSnapshot();
     first.stop();
 
-    const actor = createActor(machine, { snapshot: persisted });
+    const actor = restoreActor(machine, persisted);
     const log = recordLog(actor);
     actor.start();
     actor.send({ type: "LOOKUP" });

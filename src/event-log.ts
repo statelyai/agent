@@ -16,6 +16,7 @@
  * @module
  */
 import { isError, isPlainObject } from "./internal/is-record.js";
+import { restoreMachineSnapshot } from "./internal/restore-snapshot.js";
 import {
   initialTransition,
   isMachineSnapshot,
@@ -1276,7 +1277,7 @@ function verifyEntry(
  *
  * The first entry is the reserved {@link initEntry}: `input` folds from
  * `initialTransition`, `snapshot` restores the persisted snapshot purely
- * (`machine.restoreSnapshot`) and folds the rest of the log onto it.
+ * (`restoreActor` from `xstate/persist`) and folds the rest of the log onto it.
  */
 export function replay<TMachine extends AnyStateMachine>(
   machine: TMachine,
@@ -1329,11 +1330,7 @@ export function foldLog(
   const initEvent = entries[0]!.event as AgentInitEvent;
   let snapshot = (
     initEvent.snapshot !== undefined
-      ? (
-          machine as unknown as {
-            restoreSnapshot(persisted: AgentPersistedSnapshot): AnyMachineSnapshot;
-          }
-        ).restoreSnapshot(initEvent.snapshot)
+      ? restoreMachineSnapshot(machine, initEvent.snapshot)
       : initialTransition(machine, initEvent.input as never)[0]
   ) as AnyMachineSnapshot;
   let persisted = machine.getPersistedSnapshot(snapshot) as AgentPersistedSnapshot;
@@ -1405,11 +1402,7 @@ export function foldLog(
       next,
     ) as PersistedWithChildren;
     const before = snapshot;
-    snapshot = (
-      machine as unknown as {
-        restoreSnapshot(persisted: AgentPersistedSnapshot): AnyMachineSnapshot;
-      }
-    ).restoreSnapshot(root);
+    snapshot = restoreMachineSnapshot(machine, root);
     const reminted = new Map<string, string>();
     collectSessionRemints(before, snapshot, reminted);
     for (const map of sessions.values()) {
@@ -1474,6 +1467,11 @@ export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
   const entries: AgentLogEntry[] = [];
   let fold: LogFold | undefined;
   let failure: unknown;
+  // XState has no public flag for an actor made by `restoreActor`; until it
+  // starts, its persisted snapshot is the one it was restored from.
+  const restored = (actor as unknown as { _restored?: boolean })._restored
+    ? (actor.getPersistedSnapshot() as AgentPersistedSnapshot)
+    : undefined;
 
   const record = (event: EventObject): void => {
     if (fold === undefined) {
@@ -1482,7 +1480,6 @@ export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
           "recordLog must be attached before actor.start(): it missed the init event.",
         );
       }
-      const restored = actor.options.snapshot as AgentPersistedSnapshot | undefined;
       const init: AgentLogInit = restored
         ? { snapshot: restored }
         : { input: (event as { input?: unknown }).input };

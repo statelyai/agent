@@ -1,3 +1,4 @@
+import { restoreActor } from "xstate/persist";
 import { describe, expect, test } from "vitest";
 import { createActor } from "xstate";
 import { z } from "zod";
@@ -84,7 +85,7 @@ describe("getPendingInvokes — xstate child-actor compatibility", () => {
     const persisted = JSON.parse(JSON.stringify(actor.getPersistedSnapshot()));
     actor.stop();
 
-    const restored = createActor(machine, { snapshot: persisted }).start();
+    const restored = restoreActor(machine, persisted).start();
     const pending = getPendingInvokes(restored.getSnapshot());
     restored.stop();
 

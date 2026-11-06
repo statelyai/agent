@@ -40,7 +40,7 @@ export function getMessageText(message: AgentMessage): string {
 /**
  * Walks a context value and returns the dot-paths of the first few values that
  * would NOT survive a JSON persist/resume round-trip (persist with XState's
- * `actor.getPersistedSnapshot()`, resume with `createActor(machine, { snapshot })`):
+ * `actor.getPersistedSnapshot()`, resume with `restoreActor(machine, snapshot)` from `xstate/persist`):
  * `Date`, `Map`, `Set`, `RegExp`, functions, `undefined`, `bigint`, class
  * instances (non-plain objects), and circular references. Plain objects,
  * arrays, and JSON primitives are walked/allowed. Returns `[]` for a

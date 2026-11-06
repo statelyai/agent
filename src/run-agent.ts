@@ -21,6 +21,7 @@ import {
   type TimerKey,
 } from "xstate";
 import { canonicalJson, isPlainObject } from "./internal/is-record.js";
+import { restoreMachineSnapshot } from "./internal/restore-snapshot.js";
 import { stableInspection } from "./internal/stable-inspection.js";
 import { createDurable, type DurableExecution } from "xstate/durable";
 import type {
@@ -3606,11 +3607,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // records the snapshot the machine will actually resume from.
       const restoredPersistedSnapshot = (): AgentPersistedSnapshot | undefined => {
         try {
-          const restored = (
-            logMachine as unknown as {
-              restoreSnapshot(persisted: AgentPersistedSnapshot): AnyMachineSnapshot;
-            }
-          ).restoreSnapshot(init.snapshot as AgentPersistedSnapshot);
+          const restored = restoreMachineSnapshot(
+            logMachine,
+            init.snapshot as AgentPersistedSnapshot,
+          );
           return logMachine.getPersistedSnapshot(restored) as AgentPersistedSnapshot;
         } catch {
           return undefined;
