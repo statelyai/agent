@@ -53,7 +53,8 @@ expect(result).toMatchObject({ reachable: false, complete: true });
 - **Fork everything.** List at least two outputs per src, plus `errors`. A src with one output resolves without a fork and never appears in a path.
 - **Any-time rules need `interleave: "pending"`**, so events arrive while work is in flight.
 - **Rules across children** need `children: "coupled"`.
-- **Timers fire** as events. **Usage** is offered only for srcs listed in `usage`.
+- **Timers fire** as events, in any order (`timers: "ignore"` turns that off and marks the result incomplete). **Usage** is offered only for root text requests listed in `usage: { src: [{ totalTokens: 500 }] }`; usage inside child machines is test-only.
+- **A machine that reads `output.messages`** needs `textOutput(result, { messages })` from `@statelyai/agent/testing` as the canned output.
 - **`complete: true` or it is not a proof.** Read `unexplored` and `unexpandedEvents` when it is false. Add `payloads` for events with fields, and `dedupeBy` over the context fields guards read when the search explodes.
 - **Long-lived machines never complete.** Every path ends at `maxDepth`. Report a bounded proof: `reachable: false` with only max-depth notes, at a stated depth.
 - **Mutation check.** Weaken each guard in a throwaway copy and confirm the proof finds a witness. A proof that cannot fail proves nothing.

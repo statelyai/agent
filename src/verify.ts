@@ -36,7 +36,9 @@ import {
 } from "./decision.js";
 import { isRecord } from "./internal/is-record.js";
 import { getJsonSchemaSync } from "./utils.js";
-import { isTextLogic, type AgentTextResult } from "./text-logic.js";
+import { isTextLogic, type AgentCallUsage, type AgentTextResult } from "./text-logic.js";
+import type { AgentMessage } from "./types.js";
+import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import {
   doneEvent,
@@ -1010,10 +1012,39 @@ function resolveRegisteredDecisionLogic(
   return isDecisionLogic(candidate) ? candidate : undefined;
 }
 
+// Envelopes made by `textOutput`.
+const textOutputs = new WeakSet<object>();
+
+/**
+ * Marks a canned text-request output for {@link explorePaths},
+ * {@link canReach}, or {@link simulateAgent} as the whole
+ * `{ result, messages }` envelope the invoke resolves with, so a machine that
+ * reads `output.messages` sees them. A plain canned value is the `result`,
+ * with `messages: []`.
+ *
+ * @example
+ * ```ts
+ * await explorePaths(machine, {
+ *   outputs: { reply: [textOutput('hi', { messages: [{ role: 'assistant', content: 'hi' }] })] },
+ * });
+ * ```
+ */
+export function textOutput<TResult>(
+  result: TResult,
+  options: { messages?: AgentMessage[] } = {},
+): AgentTextResult<TResult> {
+  const envelope = { result, messages: options.messages ?? [] };
+  textOutputs.add(envelope);
+  return envelope;
+}
+
 // A scripted text value is the bare `result`; the invoke resolves to the same
-// `{ result, messages }` a live executor produces, with no messages.
+// `{ result, messages }` a live executor produces, with no messages, unless
+// `textOutput` made it the whole envelope.
 function asTextResult(value: unknown): AgentTextResult {
-  return { result: value, messages: [] };
+  return isRecord(value) && textOutputs.has(value)
+    ? (value as unknown as AgentTextResult)
+    : { result: value, messages: [] };
 }
 
 function mapValues<T, U>(obj: Record<string, T>, fn: (value: T) => U): Record<string, U> {
@@ -1103,7 +1134,8 @@ export interface ExplorePathsOptions {
    * `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`)
    * or any other invoked actor's src. A one-element list is a canned output,
    * reused every time that src is reached; a text request resolves with it as
-   * its `result` (`{ result, messages: [] }`). A src with two or more outputs
+   * its `result` (`{ result, messages: [] }`), or with the whole envelope a
+   * {@link textOutput} value carries. A src with two or more outputs
    * forks one branch per output (plus the `errors` branch when the src is
    * listed there too), so a machine whose `onDone` branches on the output is
    * explored down every arm. Each fork counts against `maxDepth`, and each
@@ -1235,6 +1267,32 @@ export interface ExplorePathsOptions {
    * Without it, every path is explored in full.
    */
   dedupeBy?: (snapshot: ExploreSnapshot) => string;
+  /**
+   * Armed timers: `after` delays, state and invoke `timeout`s, and delayed
+   * `enq.raise` events (`snapshot.timers` entries the machine delivers to
+   * itself). `"fire"` (default): each armed timer whose event the active
+   * states take is an event that may arrive, offered where host events are
+   * (at idle waits, and while work is pending under `interleave: "pending"`),
+   * in any order regardless of its delay. A fired timer records its event in
+   * the path, e.g. `{ type: 'xstate.after', delay: 1000, stateId: 'm.waiting' }`.
+   * `"ignore"`: timers never fire; a wait with an armed timer adds an
+   * `unexplored` note and lists the timer's event type in `unexpandedEvents`,
+   * so the report is not complete.
+   */
+  timers?: "fire" | "ignore";
+  /**
+   * Usage values to try per text-request src. When a request with an entry
+   * settles at the root and the active states take `@agent.usage`, the
+   * search delivers `{ type: '@agent.usage', kind: 'text', id, src, model,
+   * name?, usage }` to the root immediately before the request's completion,
+   * as a run does: once per listed value, each a fork that counts against
+   * `maxDepth` and records the usage event in the path (one value with one
+   * canned output resolves straight through, like an output). No `budget`
+   * field is sent. A settling request with no entry while a usage transition
+   * is active lists `@agent.usage` in `vacuous`. Requests inside child
+   * machines and decisions deliver no usage.
+   */
+  usage?: Record<string, AgentCallUsage[]>;
 }
 
 /** A single explored path's terminal outcome. */
@@ -1292,8 +1350,10 @@ export interface AgentPathReport {
    * guard, `matches`, or context mapper): no `payloads` entry, no decision
    * option, and no schema variant beyond `{ type }` (no schema, or one whose
    * fields the fill cannot enumerate). A subset of `unexpandedEvents`: the
-   * payload-reading logic was exercised with no payload at all. Data only;
-   * it does not change completeness.
+   * payload-reading logic was exercised with no payload at all. Also lists
+   * `@agent.usage` when a text request settled while a usage transition was
+   * active and `usage` had no entry for its src. Data only; it does not
+   * change completeness.
    */
   vacuous: string[];
 }
@@ -1319,6 +1379,8 @@ interface InvokeFork {
   incompleteSrc?: string;
   /** Text requests resolve to `{ result, messages }`, not the bare output. */
   isText?: boolean;
+  /** `usage` events to deliver before each output, one branch per event. */
+  usage?: AgentUsageEvent[];
   /** An explored child's events to its parent, each delivered at most once per path. */
   events?: EventObject[];
   /** The child actor's session, keying its delivered events. */
@@ -1676,9 +1738,37 @@ const MAX_PUMP = 1_000;
 function childStartStep(machine: AnyStateMachine, input: unknown, ref?: ChildRef): AgentStep {
   const fresh = initialAgentStep(machine, input);
   const snapshot = ref?.getSnapshot?.();
-  return isRecord(snapshot) && snapshot["status"] === "active"
-    ? { ...fresh, snapshot: snapshot as unknown as AnyMachineSnapshot }
-    : fresh;
+  return withLiveRequests(
+    isRecord(snapshot) && snapshot["status"] === "active"
+      ? { ...fresh, snapshot: snapshot as unknown as AnyMachineSnapshot }
+      : fresh,
+  );
+}
+
+// A request is classified by the logic the machine actually runs, as at run
+// time: a src registered as a text or decision request but provided a plain
+// actor (`.provide({ actors })`) is a plain invoke.
+function withLiveRequests(step: AgentStep): AgentStep {
+  if (step.requests.length === 0) {
+    return step;
+  }
+  const children = (step.snapshot.children ?? {}) as Record<
+    string,
+    { logic?: unknown } | undefined
+  >;
+  const requests = step.requests.filter((request) => {
+    const logic = children[request.id]?.logic;
+    return logic === undefined || isTextLogic(logic) || isDecisionLogic(logic);
+  });
+  return requests.length === step.requests.length ? step : { ...step, requests };
+}
+
+// Whether the active states take `@agent.usage`: an explicit transition or a
+// `'*'` wildcard, as the runtime decides whether to deliver it.
+function declaresUsageTransition(snapshot: AnyMachineSnapshot): boolean {
+  return getNextTransitions(snapshot).some(
+    (transition) => transition.eventType === AGENT_USAGE_EVENT_TYPE || transition.eventType === "*",
+  );
 }
 
 // The key a child's delivered events are recorded under: its actor session,
@@ -1781,6 +1871,9 @@ function explore(
   const errorScript = options.errors ?? {};
   const outputScript = options.outputs ?? {};
   const coupled = options.children === "coupled";
+  const timerMode = options.timers ?? "fire";
+  // A run delivers usage to its root, so `usage` covers the root's own requests.
+  const usageScript = nesting === 0 && !stepping ? (options.usage ?? {}) : undefined;
   // A coupled child's pending work always races what can reach it.
   const interleaving = options.interleave === "pending" || stepping;
   // An `errors` entry's failure values: an array is one per element (`[]` is
@@ -1814,6 +1907,7 @@ function explore(
     next: AgentStep,
     microsteps: () => Array<[AnyMachineSnapshot, ...unknown[]]>,
   ): AgentStep => {
+    next = withLiveRequests(next);
     if (unseenTransient.size > 0 || keepTracking) {
       const passed = microsteps()
         .slice(0, -1)
@@ -1837,6 +1931,57 @@ function explore(
     withTransits(transitionAgentStep(machine, prev, event as never), () =>
       getMicrosteps(machine, prev.snapshot, event as never),
     );
+  // An invoke's completion, preceded by its request's `usage` event when it
+  // has one. A usage transition that leaves the invoking state cancels the
+  // invoke: its completion never arrives (`completed: false`).
+  const settleStep = (
+    prev: AgentStep,
+    id: string,
+    output: unknown,
+    usage?: AgentUsageEvent,
+  ): { step: AgentStep; completed: boolean } => {
+    if (!usage) {
+      return { step: resolveStep(prev, id, output), completed: true };
+    }
+    const charged = transitionStep(prev, usage);
+    if (!pendingInvokes(charged).some((invoke) => invoke.id === id)) {
+      return { step: charged, completed: false };
+    }
+    const resolved = resolveStep(charged, id, output);
+    // The snapshot between the two is passed through, for `stopWhen` and `reachedStates`.
+    transits.set(resolved, [
+      ...(transits.get(charged) ?? []),
+      charged.snapshot as AnyMachineSnapshot,
+      ...(transits.get(resolved) ?? []),
+    ]);
+    return { step: resolved, completed: true };
+  };
+  // The usage events to deliver before a root text request settles, one per
+  // `usage` value, when the active states take `@agent.usage`. A settling
+  // request with no entry there leaves the usage transition vacuous.
+  const usageFor = (step: AgentStep, request: AgentStepRequest): AgentUsageEvent[] | undefined => {
+    if (
+      !usageScript ||
+      request.kind !== "text" ||
+      !declaresUsageTransition(step.snapshot as AnyMachineSnapshot)
+    ) {
+      return undefined;
+    }
+    const values = usageScript[request.src];
+    if (!values?.length) {
+      vacuous.add(AGENT_USAGE_EVENT_TYPE);
+      return undefined;
+    }
+    return values.map((usage) => ({
+      type: AGENT_USAGE_EVENT_TYPE,
+      kind: "text",
+      id: request.id,
+      src: request.src,
+      model: request.input.model,
+      ...(request.input.name !== undefined ? { name: request.input.name } : {}),
+      usage,
+    }));
+  };
   // `stopWhen` on the settled snapshot or any state passed through to reach it.
   const stops = (step: AgentStep): boolean =>
     stopWhen !== undefined &&
@@ -1992,6 +2137,7 @@ function explore(
     src: string,
     isText: boolean,
     invoke?: PendingInvoke,
+    usage?: AgentUsageEvent[],
   ): { fork: InvokeFork } | { output: unknown } | { blocked: true } | { never: true } => {
     const failures = errorsFor(src);
     if (neverSettles(src)) {
@@ -2035,7 +2181,7 @@ function explore(
       };
     }
     const outputs = outputScript[src] ?? [];
-    if (failures || outputs.length > 1) {
+    if (failures || outputs.length > 1 || (outputs.length === 1 && (usage?.length ?? 0) > 1)) {
       return {
         fork: {
           id,
@@ -2043,6 +2189,7 @@ function explore(
           recordError: failures?.record ?? false,
           outputs,
           isText,
+          ...(usage ? { usage } : {}),
         },
       };
     }
@@ -2086,6 +2233,7 @@ function explore(
       id: string,
       src: string,
       isText: boolean,
+      usage?: AgentUsageEvent[],
     ): InvokeFork[] => {
       if ("fork" in settle) {
         return [settle.fork];
@@ -2097,7 +2245,7 @@ function explore(
       if ("never" in settle) {
         return [];
       }
-      return [{ id, errors: [], outputs: [settle.output], isText }];
+      return [{ id, errors: [], outputs: [settle.output], isText, ...(usage ? { usage } : {}) }];
     };
     const texts = step.requests.filter(
       (request): request is AgentStepRequest & { kind: "text" } => request.kind === "text",
@@ -2106,9 +2254,16 @@ function explore(
     // are the decision branch's to expand, not a settlement.
     const requestIds = new Set(step.requests.map((request) => request.id));
     const forks = [
-      ...texts.flatMap((request) =>
-        asFork(settleFor(request.id, request.src, true), request.id, request.src, true),
-      ),
+      ...texts.flatMap((request) => {
+        const usage = usageFor(step, request);
+        return asFork(
+          settleFor(request.id, request.src, true, undefined, usage),
+          request.id,
+          request.src,
+          true,
+          usage,
+        );
+      }),
       ...invokes
         .filter((invoke) => !requestIds.has(invoke.id) && !kids.includes(invoke))
         .flatMap((invoke) =>
@@ -2262,7 +2417,10 @@ function explore(
   // a move of its own, so the parent's sends and the child's sends to the
   // parent can fall between them.
   const races = (step: AgentStep): boolean =>
-    stepping || (interleaving && arriving(step.snapshot as AnyMachineSnapshot).length > 0);
+    stepping ||
+    (interleaving &&
+      (arriving(step.snapshot as AnyMachineSnapshot).length > 0 ||
+        (timerMode === "fire" && armedTimers(step.snapshot as AnyMachineSnapshot).length > 0)));
   const advance = (
     step: AgentStep,
   ): {
@@ -2278,7 +2436,7 @@ function explore(
     decisions?: AgentStepRequest[];
     /** `children: "coupled"`: child machines pending, stepped by the parent. */
     kids?: PendingInvoke[];
-    pending?: { id: string; output: unknown };
+    pending?: { id: string; output: unknown; usage?: AgentUsageEvent };
   } => {
     let current = step;
     // Bounded loop: each iteration resolves one text or scripted invoke.
@@ -2304,7 +2462,8 @@ function explore(
         };
       }
       if (request && request.kind === "text") {
-        const settle = settleFor(request.id, request.src, true);
+        const usage = usageFor(current, request);
+        const settle = settleFor(request.id, request.src, true, undefined, usage);
         if ("fork" in settle) {
           return { step: current, fork: settle.fork };
         }
@@ -2317,10 +2476,14 @@ function explore(
         if (races(current)) {
           return {
             step: current,
-            pending: { id: request.id, output: asTextResult(settle.output) },
+            pending: {
+              id: request.id,
+              output: asTextResult(settle.output),
+              ...(usage ? { usage: usage[0] } : {}),
+            },
           };
         }
-        current = resolveStep(current, request, asTextResult(settle.output));
+        current = settleStep(current, request.id, asTextResult(settle.output), usage?.[0]).step;
         recordState(current);
         continue;
       }
@@ -2379,8 +2542,8 @@ function explore(
     path: PathLink | undefined,
     table: Partial<Record<string, Record<string, unknown>[]>>,
     except?: ReadonlySet<string>,
-  ): ChosenEvent[] =>
-    arriving(snapshot).flatMap((descriptor) => {
+  ): ChosenEvent[] => [
+    ...arriving(snapshot).flatMap((descriptor) => {
       if (except?.has(descriptor.type)) {
         return [];
       }
@@ -2394,7 +2557,69 @@ function explore(
         );
       }
       return variantsOf(descriptor.type, snapshot, table);
+    }),
+    ...timerEvents(snapshot, path),
+  ];
+
+  // Fired timers: the event a path records, mapped to the timer firing that
+  // delivers it (and disarms the timer, as a run does).
+  const timerFires = new WeakMap<ChosenEvent, EventObject>();
+  const applied = (event: ChosenEvent): EventObject => timerFires.get(event) ?? event;
+  const ignoredTimers = new Set<string>();
+  // Each armed timer the machine delivers to itself (`after`, `timeout`, a
+  // delayed `enq.raise`) whose event the active states take now.
+  function armedTimers(
+    snapshot: AnyMachineSnapshot,
+  ): Array<{ event: EventObject; key: Record<string, unknown> }> {
+    const timers = (snapshot as { timers?: unknown }).timers;
+    if (!Array.isArray(timers) || timers.length === 0) {
+      return [];
+    }
+    return timers.flatMap((timer) => {
+      if (
+        !isRecord(timer) ||
+        timer["target"] !== "self" ||
+        !isRecord(timer["event"]) ||
+        typeof timer["event"]["type"] !== "string"
+      ) {
+        return [];
+      }
+      const event = timer["event"] as EventObject;
+      if (!snapshot.can(event)) {
+        return [];
+      }
+      const key =
+        typeof timer["id"] === "string"
+          ? { id: timer["id"] }
+          : typeof timer["seq"] === "number"
+            ? { seq: timer["seq"] }
+            : { event };
+      return [{ event, key }];
     });
+  }
+  // The armed timers a wait offers beside host events (none under `timers: "ignore"`).
+  const timerEvents = (snapshot: AnyMachineSnapshot, path: PathLink | undefined): ChosenEvent[] => {
+    const armed = armedTimers(snapshot);
+    if (timerMode === "ignore") {
+      for (const { event } of armed) {
+        unexpanded.add(event.type);
+        const key = JSON.stringify(event);
+        if (!ignoredTimers.has(key)) {
+          ignoredTimers.add(key);
+          note(
+            () =>
+              `timers: ${key} is armed at path [${pathTypes(path)}], and timers: "ignore" never fires it`,
+          );
+        }
+      }
+      return [];
+    }
+    return armed.map(({ event, key }) => {
+      const entry = { ...event } as ChosenEvent;
+      timerFires.set(entry, { type: "xstate.timer", ...key });
+      return entry;
+    });
+  };
 
   // `interleave: "pending"`: each accepted event (bar `except`) arriving
   // while an invoke is outstanding, one branch each.
@@ -2414,7 +2639,7 @@ function explore(
         prunedByGuard++;
         continue;
       }
-      const next = transitionStep(settled, event);
+      const next = transitionStep(settled, applied(event));
       recordState(next);
       yield { step: next, path: extend(path, event), depth: depth + 1 };
     }
@@ -2439,21 +2664,34 @@ function explore(
       depth: depth + 1,
     };
   };
-  const doneBranch = (
+  // A forked completion, once per `usage` event its request delivers first.
+  // A text request records its result, not the envelope.
+  function* doneBranches(
     settled: AgentStep,
     path: PathLink | undefined,
     depth: number,
     fork: InvokeFork,
     output: unknown,
-  ): ExploreNode => {
-    const resolved = resolveStep(settled, fork.id, fork.isText ? asTextResult(output) : output);
-    recordState(resolved);
-    return {
-      step: resolved,
-      path: extend(path, { type: "xstate.done.actor", actorId: fork.id, output }),
-      depth: depth + 1,
-    };
-  };
+  ): Generator<ExploreNode> {
+    const value = fork.isText ? asTextResult(output) : output;
+    const recorded = fork.isText ? (value as AgentTextResult).result : output;
+    const usages = fork.usage?.length ? fork.usage : [undefined];
+    for (const [i, usage] of usages.entries()) {
+      if (i > 0 && (witness !== undefined || capped())) {
+        return;
+      }
+      const { step, completed } = settleStep(settled, fork.id, value, usage);
+      recordState(step);
+      const charged = usage ? extend(path, usage as unknown as ChosenEvent) : path;
+      yield {
+        step,
+        path: completed
+          ? extend(charged, { type: "xstate.done.actor", actorId: fork.id, output: recorded })
+          : charged,
+        depth: depth + 1,
+      };
+    }
+  }
 
   const maxDepthTerminal = (settled: AgentStep, path: PathLink | undefined): void => {
     endPath(path, { status: "max-depth", state: settled.snapshot.value });
@@ -2816,7 +3054,7 @@ function explore(
         maxDepthTerminal(settled, path);
         return;
       }
-      const resolved = resolveStep(settled, pending.id, pending.output);
+      const resolved = settleStep(settled, pending.id, pending.output, pending.usage).step;
       recordState(resolved);
       yield {
         step: resolved,
@@ -2943,7 +3181,7 @@ function explore(
           if (witness !== undefined || capped()) {
             return;
           }
-          yield doneBranch(settled, path, depth, other, output);
+          yield* doneBranches(settled, path, depth, other, output);
         }
       }
       for (const src of blockedSiblings ?? []) {
@@ -2987,7 +3225,7 @@ function explore(
           if (witness !== undefined || capped()) {
             return;
           }
-          yield doneBranch(settled, path, depth, fork, output);
+          yield* doneBranches(settled, path, depth, fork, output);
         }
         // Explored children settle in any order, and each child event can
         // reach the parent before any of them settles.
@@ -3002,7 +3240,7 @@ function explore(
             if (witness !== undefined || capped()) {
               return;
             }
-            yield doneBranch(settled, path, depth, other, output);
+            yield* doneBranches(settled, path, depth, other, output);
           }
         }
         for (const child of [fork, ...(siblings ?? [])]) {
@@ -3145,7 +3383,7 @@ function explore(
           continue;
         }
         taken++;
-        const next = transitionStep(settled, event);
+        const next = transitionStep(settled, applied(event));
         recordState(next);
         yield { step: next, path: extend(path, event), depth: depth + 1 };
       }
