@@ -3,10 +3,10 @@
 Install core:
 
 ```sh
-pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.69 zod
+pnpm add @statelyai/agent@alpha xstate@6.0.0-beta.0 zod
 ```
 
-XState is pinned to the exact version the package's peer dependency names, because its experimental durable restoration API (`xstate/durable`) still changes between alphas. `xstate@alpha` can resolve to a newer alpha that the package does not support.
+XState is pinned to the exact version the package's peer dependency names, because its experimental durable restoration API (`xstate/durable`) can still change between prereleases. `xstate@beta` can resolve to a newer prerelease that the package does not support.
 
 Add `ai` and a provider only when using the optional AI SDK adapter.
 

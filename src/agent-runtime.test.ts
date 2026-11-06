@@ -66,7 +66,8 @@ describe("createAgentRuntime", () => {
       inspected.some(
         (event) =>
           event.type === "@xstate.transition" &&
-          event.actorRef === childRef &&
+          // A stable handle per actor session, not the step's actor object.
+          event.actorRef.sessionId === childRef.sessionId &&
           event.event.type === "PING",
       ),
     ).toBe(true);

@@ -34,6 +34,7 @@ function classify(message: string): Classification {
 export function createFakeWorld(options: { flakyClassify?: number } = {}): FakeWorld {
   let failures = options.flakyClassify ?? 0;
   const refunds: FakeWorld["refunds"] = [];
+  const refundIds = new Map<string, string>();
   const escalations: FakeWorld["escalations"] = [];
   const effects: SupportEffects = {
     // One model behind two structured-output tasks.
@@ -49,9 +50,14 @@ export function createFakeWorld(options: { flakyClassify?: number } = {}): FakeW
       return classify(request.ticket) as never;
     },
     lookupOrder: async (orderId) => ORDERS.find((order) => order.orderId === orderId) ?? null,
-    issueRefund: async (orderId, amount) => {
+    // A real provider deduplicates on the key; so does the fake.
+    issueRefund: async (orderId, amount, idempotencyKey) => {
+      const issued = refundIds.get(idempotencyKey);
+      if (issued) return { refundId: issued };
       refunds.push({ orderId, amount });
-      return { refundId: `rf_${orderId}_${refunds.length}` };
+      const refundId = `rf_${orderId}_${refunds.length}`;
+      refundIds.set(idempotencyKey, refundId);
+      return { refundId };
     },
     escalate: async (ticketId, reason) => {
       escalations.push({ ticketId, reason });

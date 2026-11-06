@@ -64,6 +64,7 @@ const policy = setupAgent({
   output: proposal,
   events: { REFUND: z.object({ amount: z.number() }), ESCALATE: z.object({}) },
 }).createMachine({
+  id: "refunds",
   version: "1",
   context: ({ input }) => ({ ...input, chosen: null }),
   initial: "checking",

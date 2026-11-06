@@ -1,6 +1,6 @@
 {
   "name": "@statelyai/example-cloudflare-workers-ai-host",
-  "version": "0.0.1-alpha.23",
+  "version": "0.0.1-alpha.24",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
   "dependencies": {
     "@statelyai/agent": "workspace:*",
     "ai": "^7.0.133",
-    "xstate": "6.0.0-alpha.69",
+    "xstate": "6.0.0-beta.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

@@ -27,6 +27,9 @@ export async function runTicket(ticket: Ticket, effects: SupportEffects): Promis
 - Each effect is an async function.
 - A call made around `effects` (a module-level client, `fetch`) is invisible to the machine, to traces, and to recordings. Move it into `effects` first.
 - Keep effect arguments and results JSON-shaped where you can: they are journaled and recorded. Pass live objects (a chat session, an `AbortSignal`) by closure, not as arguments.
+- An effect whose natural result is a live object (an agent instance) returns its name or id instead. The host keeps a registry from id to object.
+- An effect that writes host state by reference (a tool mutating a shared `state` object) returns the change instead, and the wrapper applies it.
+- A synchronous host callback (a stop predicate) or a diagnostic logger is not an effect. The workflow or the machine factory closes over it.
 
 ### Class-shaped code
 
@@ -34,6 +37,16 @@ When the loop is a class method that calls its own private methods for the model
 
 - `run: (input, effects) => { const executor = createExecutor(input); executor.callModel = (...args) => effects.callModel(...args); return executor.run(); }`, with each effect calling the original method.
 - Route the old test suite through the wrap with a factory or a static `create` stand-in, not a subclass, when the constructor is private.
+
+### Seams for other shapes
+
+| Shape                                                     | Seam                                                                                                                                                                                                                                                          |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Effect-TS generator                                       | Transliterate the generator to async, statement for statement, and bridge each effect from Effect to Promise, keeping the fiber context, typed failures, and interrupts. The parity baseline is the async transliteration; the old suite covers the original. |
+| Redux thunk                                               | The thunk's `extra` argument plus its nested dispatches. Wrap `dispatch` so every nested thunk gets the effects-backed `extra`.                                                                                                                               |
+| LangGraph graph                                           | Wrap `graph.invoke`. Fake the model factory with the test runner's module mock (`vi.mock`); the fake calls the run's effects.                                                                                                                                 |
+| A closure inside a DI or Layer factory                    | Copy the module, identical outside the carved function, and swap it in with a module mock.                                                                                                                                                                    |
+| A step loop inside the model SDK (`stopWhen`, `maxSteps`) | No loop to carve. The SDK call stays one effect; carve the control flow around it, such as handoff or approval.                                                                                                                                               |
 
 ## Step 0: wrap
 
@@ -49,12 +62,15 @@ interface Ticket {
 
 const effects = {
   lookupOrder: async (orderId: string) => ({ orderId, total: 20 }),
-  issueRefund: async (orderId: string, amount: number) => ({ refundId: `rf_${orderId}` }),
+  // Keyed, so a retried or resumed run cannot refund twice.
+  issueRefund: async (orderId: string, amount: number, idempotencyKey: string) => ({
+    refundId: `rf_${orderId}`,
+  }),
 };
 
 async function runTicket(ticket: Ticket, fx: typeof effects) {
   const order = await fx.lookupOrder(ticket.id);
-  return fx.issueRefund(order.orderId, order.total);
+  return fx.issueRefund(order.orderId, order.total, `refund:${ticket.id}`);
 }
 
 const support = wrapWorkflow({
@@ -87,6 +103,7 @@ Each effect call is two events, `effect.call` then `effect.done` or `effect.erro
 - Once the run's `signal` aborts, an effect throws the abort reason instead of running, even in a workflow that ignores its signal.
 - `effects` can be a class instance: its prototype methods count, bound to it.
 - `onTransition`, `onTrace`, `onEvent`, and `inspect` see every effect call.
+- An effect that returns a stream settles once the stream is read: `effect.done` carries the chunks (`{ chunks, returned }` when a generator returned a value), and a throw mid-stream is `effect.error`.
 
 ### Run options
 
@@ -96,6 +113,8 @@ Each effect call is two events, `effect.call` then `effect.done` or `effect.erro
 | ---------- | ------------------------------------------------------------------------------------------- |
 | `effects`  | Replaces some effects for one run: fakes, stubs, replay stand-ins                           |
 | `recorder` | Wraps every effect with `recorder.fn(name, fn)` and records the result with `recorder.output` |
+
+Effects bound to one call's live objects (a request context, a span) go in per call: create the workflow once and pass `run(input, { effects })` on every call. The `effects` given to `wrapWorkflow` are then the defaults.
 
 ## Record a baseline
 
@@ -153,9 +172,17 @@ resolving: {
 ```
 
 - Build the actors per run from `effects`, and pass them as `runAgent`'s `actors`.
+- Give the runner a third `options` argument passed through to `runAgent` (`threadId`, `store`, `metadata`, `onTrace`, `inspect`). Traces and inspection then need no copy of it.
+- Move prompt or warning text the carved phase sends into a versioned request config as you carve. That file is the lever `improve-machine` may edit later.
 - Carve one phase per commit.
 - A phase in the middle of a `try`/`finally`: the setup before it moves into the runner, and the `finally` becomes a state every exit passes through, so a proof can say cleanup runs first.
-- An invoke whose actor resolves `null` reaches `onDone` with `output` `undefined` (XState v6 alpha). Test for `output == null`, not `=== null`.
+- A legacy body that owns abort (it returns its own `stopped` result): pass the `signal` to the legacy body only, not to `runAgent`. Its result then reaches the machine as a normal final; `runAgent`'s `signal` would settle the run as `aborted` instead.
+- An invoke whose error must reach the caller unchanged: omit `onError`. The run settles `{ status: "error", error }` with the original error, and the runner rethrows it. Pass `disable: ["invoke-without-on-error"]` to `lintAgentMachine` for that machine, or `ignore: [{ code: "invoke-without-on-error", path }]` for one state.
+
+### A phase in the middle of a method
+
+- Copy only that phase's lines into the carved actor, with a comment listing the copied line ranges. `checkParity` call-args keep the copy honest: a drifted copy calls its effects with other arguments.
+- When the class has a public per-turn hook, replace that method on the instance instead, and let the machine decide at that boundary. The rest of the method stays legacy.
 
 ## Check parity
 
@@ -201,6 +228,59 @@ What it does per scenario:
 - When both sides throw, they match on the error's name and message.
 - `compare` passes options through to `compareRecordings`, such as `normalize` for generated ids.
 
+### Generated ids
+
+Ids and timestamps differ on every run. Scrub them on both sides:
+
+```ts
+import { randomUUID } from "node:crypto";
+import { wrapWorkflow } from "@statelyai/agent";
+import { checkParity } from "@statelyai/agent/testing";
+
+const createEffects = () => ({
+  saveDraft: async (draft: { id: string; text: string }) => ({ saved: draft.id }),
+});
+
+async function before(text: string, fx: ReturnType<typeof createEffects>) {
+  const id = randomUUID();
+  if (!text) throw new Error(`Draft ${id} is empty`);
+  await fx.saveDraft({ id, text });
+  return { id, text };
+}
+
+const step0 = wrapWorkflow({ id: "drafts", effects: createEffects(), run: before });
+
+const UUID = /[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/g;
+const scrub = <T>(value: T): T => JSON.parse(JSON.stringify(value).replace(UUID, "<id>"));
+
+const report = await checkParity({
+  scenarios: [
+    { id: "saved", input: "Hello" },
+    { id: "empty", input: "" },
+  ],
+  effects: () => createEffects(),
+  before,
+  after: (input, fx) => step0.run(input, { effects: fx }),
+  compare: { normalize: scrub }, // effect arguments and results, and the recorded output
+  normalizeOutput: scrub, // the output, before it is recorded
+  normalizeError: (error) => String(error).replace(UUID, "<id>"), // thrown errors
+});
+report.equivalent; // true
+```
+
+- `compare.normalize` maps every recorded effect on both sides. Without it, `saved` diverges on `call-args`.
+- `normalizeOutput` maps each side's output before it is recorded. Use it when the scrub is not on every effect, or for a value only the output carries.
+- `normalizeError` maps each side's thrown error. Errors are compared outside the recording, so without it `empty` diverges on `output`.
+
+### The old suite on the port
+
+Run the module's own tests against the port by swapping the module.
+
+- Snapshot files are named after the test file that runs them. A swap file that imports the old suite writes fresh snapshots on its first run, and `toMatchSnapshot` passes without comparing. Copy the old `__snapshots__/<old>.snap` to the swap file's name, and run with `CI=true` so a missing snapshot fails.
+- A module mock whose factory imports the port deadlocks or recurses when the port imports the mocked module. Load the port with a dynamic import in `beforeAll`, and call it from inside the mocked functions.
+- When a module mock does not reach the code's own import of the module (one runner did not apply it to a relative import inside the package), patch the class prototype from a setup file instead. Import both modules dynamically in its `beforeAll`: a static import loads the module before the test file's mocks apply.
+- `runAgent` starts asynchronously. Fire-and-forget work the old code starts at the same time may settle in a different order. An old test that asserts the exact order of actions across concurrent tasks is a structural failure only when those actions commute and their order is not part of the contract; an order that reaches users or storage is behavioral.
+
 ## Repeat
 
 Each carved phase adds what the machine can prove:
@@ -229,7 +309,8 @@ Step 0 cannot give this proof: its one `running` state holds the whole function.
 - A wrapped workflow is a black box. The machine has one state for all of it.
 - No resume in the middle of the function. A resumed run starts the workflow again.
 - `canReach` and `explorePaths` prove nothing about the wrapped function's inside.
-- Effect arguments and results are journaled JSON-safe. A value that is not JSON (a class instance, a stream) loses what JSON cannot hold.
+- Effect arguments and results are journaled JSON-safe. A value that is not JSON (a class instance) loses what JSON cannot hold. A stream is journaled as the chunks read through `for await` or `next()`; one read another way (a `ReadableStream` reader) never settles its effect.
+- Parity cannot see an effect that mutates host state by reference, or one whose result is a live object. Return a change, a name, or an id, and keep a registry on the host side.
 - `checkParity` runs `before` on the effects you give it for real. Give it fakes or an isolated fixture, never production writes.
 - `effects` are async functions only. A sync function or a client object goes behind an async function first.
 - Parity covers what goes through `effects` and the output. A change in a call made around `effects` is not seen.

@@ -36,7 +36,9 @@ import {
 } from "./decision.js";
 import { isRecord } from "./internal/is-record.js";
 import { getJsonSchemaSync } from "./utils.js";
-import { isTextLogic, type AgentTextResult } from "./text-logic.js";
+import { isTextLogic, type AgentCallUsage, type AgentTextResult } from "./text-logic.js";
+import type { AgentMessage } from "./types.js";
+import { AGENT_USAGE_EVENT_TYPE, type AgentUsageEvent } from "./usage.js";
 import { executorBoundLogics, getRegisteredAgentExecutionOptions } from "./internal/registry.js";
 import {
   doneEvent,
@@ -81,6 +83,12 @@ export interface AgentLintDiagnostic {
 export interface LintAgentMachineOptions {
   /** Skip these check codes entirely. */
   disable?: AgentLintDiagnostic["code"][];
+  /**
+   * Skip one check at one state: `{ code: "invoke-without-on-error", path:
+   * "listening" }` for a callback bridge that cannot fail. `path` is the
+   * diagnostic's `path`.
+   */
+  ignore?: Array<{ code: AgentLintDiagnostic["code"]; path: string }>;
   /**
    * Throw {@link AgentLintError} on failing diagnostics instead of returning
    * them. Fails on error-severity findings; add `warnings: true` to fail on
@@ -447,8 +455,11 @@ export function lintAgentMachine(
   };
 
   const disabled = new Set(options.disable ?? []);
+  const ignored = options.ignore ?? [];
   const diagnostics = LINT_CHECKS.flatMap((check) => check(ctx)).filter(
-    (d) => !disabled.has(d.code),
+    (d) =>
+      !disabled.has(d.code) &&
+      !ignored.some((entry) => entry.code === d.code && entry.path === d.path),
   );
 
   if (options.throw) {
@@ -456,7 +467,7 @@ export function lintAgentMachine(
       ? diagnostics
       : diagnostics.filter((d) => d.severity === "error");
     if (failing.length > 0) {
-      throw new AgentLintError(machine.id ?? "(machine)", failing);
+      throw new AgentLintError(machine.id, failing);
     }
   }
 
@@ -627,11 +638,13 @@ function pendingInvokes(step: AgentStep): PendingInvoke[] {
   const out: PendingInvoke[] = [];
   const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
   for (const metadata of getPendingInvokes(step.snapshot as AnyMachineSnapshot)) {
-    if (typeof metadata.src === "string") {
+    // XState leaves `src` undefined for inline logic; key it by the invoke id.
+    const src = typeof metadata.src === "string" ? metadata.src : metadata.id;
+    if (typeof src === "string") {
       const ref = children[metadata.id];
       out.push({
         id: metadata.id,
-        src: metadata.src,
+        src,
         // A machine child's snapshot carries no `input`; its actor options do.
         input: metadata.input ?? ref?.options?.input,
         logic: metadata.logic,
@@ -999,10 +1012,43 @@ function resolveRegisteredDecisionLogic(
   return isDecisionLogic(candidate) ? candidate : undefined;
 }
 
+// A usage event to deliver before a completion, or `undefined` for a value the
+// machine refuses (a run drops it).
+type UsageChoice = AgentUsageEvent | undefined;
+
+// Envelopes made by `textOutput`.
+const textOutputs = new WeakSet<object>();
+
+/**
+ * Marks a canned text-request output for {@link explorePaths},
+ * {@link canReach}, or {@link simulateAgent} as the whole
+ * `{ result, messages }` envelope the invoke resolves with, so a machine that
+ * reads `output.messages` sees them. A plain canned value is the `result`,
+ * with `messages: []`.
+ *
+ * @example
+ * ```ts
+ * await explorePaths(machine, {
+ *   outputs: { reply: [textOutput('hi', { messages: [{ role: 'assistant', content: 'hi' }] })] },
+ * });
+ * ```
+ */
+export function textOutput<TResult>(
+  result: TResult,
+  options: { messages?: AgentMessage[] } = {},
+): AgentTextResult<TResult> {
+  const envelope = { result, messages: options.messages ?? [] };
+  textOutputs.add(envelope);
+  return envelope;
+}
+
 // A scripted text value is the bare `result`; the invoke resolves to the same
-// `{ result, messages }` a live executor produces, with no messages.
+// `{ result, messages }` a live executor produces, with no messages, unless
+// `textOutput` made it the whole envelope.
 function asTextResult(value: unknown): AgentTextResult {
-  return { result: value, messages: [] };
+  return isRecord(value) && textOutputs.has(value)
+    ? (value as unknown as AgentTextResult)
+    : { result: value, messages: [] };
 }
 
 function mapValues<T, U>(obj: Record<string, T>, fn: (value: T) => U): Record<string, U> {
@@ -1092,13 +1138,16 @@ export interface ExplorePathsOptions {
    * `setupAgent({ requests })` key, or `agent.generateText`/`agent.streamText`)
    * or any other invoked actor's src. A one-element list is a canned output,
    * reused every time that src is reached; a text request resolves with it as
-   * its `result` (`{ result, messages: [] }`). A src with two or more outputs
+   * its `result` (`{ result, messages: [] }`), or with the whole envelope a
+   * {@link textOutput} value carries. A src with two or more outputs
    * forks one branch per output (plus the `errors` branch when the src is
    * listed there too), so a machine whose `onDone` branches on the output is
    * explored down every arm. Each fork counts against `maxDepth`, and each
-   * forked branch records `{ type: 'xstate.done.actor.<id>', output }` in the
+   * forked branch records `{ type: 'xstate.done.actor', actorId, output }` in the
    * path. A src with no entry (and no `errors` entry) halts that branch with a
-   * `needs-output` terminal.
+   * `needs-output` terminal. An empty list, `[]`, is a src that never settles
+   * (a callback bridge, a long-lived listener): its invoke stays pending and
+   * only events move the machine on.
    */
   outputs?: Record<string, unknown[]>;
   /**
@@ -1108,7 +1157,7 @@ export interface ExplorePathsOptions {
    * are explored. When the src also has an output, both branches are explored;
    * when it has only an error, only the failing one is. Each fork counts
    * against `maxDepth`, and the failing branch records
-   * `{ type: 'xstate.error.actor.<id>' }` in the path.
+   * `{ type: 'xstate.error.actor', actorId }` in the path.
    *
    * A decision invoke can be keyed here too — by its src (usually
    * `agent.decide`) or by its invoke id — standing in for retry exhaustion.
@@ -1222,6 +1271,32 @@ export interface ExplorePathsOptions {
    * Without it, every path is explored in full.
    */
   dedupeBy?: (snapshot: ExploreSnapshot) => string;
+  /**
+   * Armed timers: `after` delays, state and invoke `timeout`s, and delayed
+   * `enq.raise` events (`snapshot.timers` entries the machine delivers to
+   * itself). `"fire"` (default): each armed timer whose event the active
+   * states take is an event that may arrive, offered where host events are
+   * (at idle waits, and while work is pending under `interleave: "pending"`),
+   * in any order regardless of its delay. A fired timer records its event in
+   * the path, e.g. `{ type: 'xstate.after', delay: 1000, stateId: 'm.waiting' }`.
+   * `"ignore"`: timers never fire; a wait with an armed timer adds an
+   * `unexplored` note and lists the timer's event type in `unexpandedEvents`,
+   * so the report is not complete.
+   */
+  timers?: "fire" | "ignore";
+  /**
+   * Usage values to try per text-request src. When a request with an entry
+   * settles at the root and the active states take `@agent.usage`, the
+   * search delivers `{ type: '@agent.usage', kind: 'text', id, src, model,
+   * name?, usage }` to the root immediately before the request's completion,
+   * as a run does (a value the active states refuse is dropped, as a run drops it): once per listed value, each a fork that counts against
+   * `maxDepth` and records the usage event in the path. One value with one
+   * canned output is no fork, but its usage event is still recorded. No `budget`
+   * field is sent. A settling request with no entry while a usage transition
+   * is active lists `@agent.usage` in `vacuous`. Requests inside child
+   * machines and decisions deliver no usage.
+   */
+  usage?: Record<string, AgentCallUsage[]>;
 }
 
 /** A single explored path's terminal outcome. */
@@ -1239,6 +1314,8 @@ export interface AgentPathTerminal {
   missingSrc?: string;
   /** For `error`: the failure value that errored the machine. */
   error?: unknown;
+  /** For `done`: the machine's output (absent when it has none). */
+  output?: unknown;
 }
 
 /** The report returned by {@link explorePaths}. */
@@ -1277,8 +1354,10 @@ export interface AgentPathReport {
    * guard, `matches`, or context mapper): no `payloads` entry, no decision
    * option, and no schema variant beyond `{ type }` (no schema, or one whose
    * fields the fill cannot enumerate). A subset of `unexpandedEvents`: the
-   * payload-reading logic was exercised with no payload at all. Data only;
-   * it does not change completeness.
+   * payload-reading logic was exercised with no payload at all. Also lists
+   * `@agent.usage` when a text request settled while a usage transition was
+   * active and `usage` had no entry for its src. Data only; it does not
+   * change completeness.
    */
   vacuous: string[];
 }
@@ -1304,6 +1383,11 @@ interface InvokeFork {
   incompleteSrc?: string;
   /** Text requests resolve to `{ result, messages }`, not the bare output. */
   isText?: boolean;
+  /**
+   * `usage` events to deliver before each output, one branch per entry;
+   * `undefined` is a value the machine refuses, so nothing is delivered.
+   */
+  usage?: UsageChoice[];
   /** An explored child's events to its parent, each delivered at most once per path. */
   events?: EventObject[];
   /** The child actor's session, keying its delivered events. */
@@ -1556,7 +1640,9 @@ function pathOf(link: PathLink | undefined): ChosenEvent[] {
 
 function pathTypes(link: PathLink | undefined): string {
   return pathOf(link)
-    .map((event) => event.type)
+    .map((event) =>
+      typeof event.actorId === "string" ? `${event.type}(${event.actorId})` : event.type,
+    )
     .join(", ");
 }
 
@@ -1659,9 +1745,37 @@ const MAX_PUMP = 1_000;
 function childStartStep(machine: AnyStateMachine, input: unknown, ref?: ChildRef): AgentStep {
   const fresh = initialAgentStep(machine, input);
   const snapshot = ref?.getSnapshot?.();
-  return isRecord(snapshot) && snapshot["status"] === "active"
-    ? { ...fresh, snapshot: snapshot as unknown as AnyMachineSnapshot }
-    : fresh;
+  return withLiveRequests(
+    isRecord(snapshot) && snapshot["status"] === "active"
+      ? { ...fresh, snapshot: snapshot as unknown as AnyMachineSnapshot }
+      : fresh,
+  );
+}
+
+// A request is classified by the logic the machine actually runs, as at run
+// time: a src registered as a text or decision request but provided a plain
+// actor (`.provide({ actors })`) is a plain invoke.
+function withLiveRequests(step: AgentStep): AgentStep {
+  if (step.requests.length === 0) {
+    return step;
+  }
+  const children = (step.snapshot.children ?? {}) as Record<
+    string,
+    { logic?: unknown } | undefined
+  >;
+  const requests = step.requests.filter((request) => {
+    const logic = children[request.id]?.logic;
+    return logic === undefined || isTextLogic(logic) || isDecisionLogic(logic);
+  });
+  return requests.length === step.requests.length ? step : { ...step, requests };
+}
+
+// Whether the active states take `@agent.usage`: an explicit transition or a
+// `'*'` wildcard, as the runtime decides whether to deliver it.
+function declaresUsageTransition(snapshot: AnyMachineSnapshot): boolean {
+  return getNextTransitions(snapshot).some(
+    (transition) => transition.eventType === AGENT_USAGE_EVENT_TYPE || transition.eventType === "*",
+  );
 }
 
 // The key a child's delivered events are recorded under: its actor session,
@@ -1764,6 +1878,9 @@ function explore(
   const errorScript = options.errors ?? {};
   const outputScript = options.outputs ?? {};
   const coupled = options.children === "coupled";
+  const timerMode = options.timers ?? "fire";
+  // A run delivers usage to its root, so `usage` covers the root's own requests.
+  const usageScript = nesting === 0 && !stepping ? (options.usage ?? {}) : undefined;
   // A coupled child's pending work always races what can reach it.
   const interleaving = options.interleave === "pending" || stepping;
   // An `errors` entry's failure values: an array is one per element (`[]` is
@@ -1797,6 +1914,7 @@ function explore(
     next: AgentStep,
     microsteps: () => Array<[AnyMachineSnapshot, ...unknown[]]>,
   ): AgentStep => {
+    next = withLiveRequests(next);
     if (unseenTransient.size > 0 || keepTracking) {
       const passed = microsteps()
         .slice(0, -1)
@@ -1820,6 +1938,72 @@ function explore(
     withTransits(transitionAgentStep(machine, prev, event as never), () =>
       getMicrosteps(machine, prev.snapshot, event as never),
     );
+  // An invoke's completion, preceded by its request's `usage` event when it
+  // has one. A usage transition that leaves the invoking state cancels the
+  // invoke: its completion never arrives (`completed: false`).
+  const settleStep = (
+    prev: AgentStep,
+    id: string,
+    output: unknown,
+    usage?: AgentUsageEvent,
+  ): { step: AgentStep; completed: boolean } => {
+    if (!usage) {
+      return { step: resolveStep(prev, id, output), completed: true };
+    }
+    // The invoke's actor session, so one restarted under the same id (a
+    // re-entered state) is a new invoke this completion never reaches.
+    const sessionOf = (step: AgentStep): string | undefined => {
+      const invoke = pendingInvokes(step).find((pending) => pending.id === id);
+      return invoke && childSession(id, invoke.ref);
+    };
+    const session = sessionOf(prev);
+    const charged = transitionStep(prev, usage);
+    if (session === undefined || sessionOf(charged) !== session) {
+      return { step: charged, completed: false };
+    }
+    const resolved = resolveStep(charged, id, output);
+    // The snapshot between the two is passed through, for `stopWhen` and `reachedStates`.
+    transits.set(resolved, [
+      ...(transits.get(charged) ?? []),
+      charged.snapshot as AnyMachineSnapshot,
+      ...(transits.get(resolved) ?? []),
+    ]);
+    return { step: resolved, completed: true };
+  };
+  // The usage events to deliver before a root text request settles, one per
+  // `usage` value, when the active states take `@agent.usage`. A value the
+  // machine refuses (`can` is false) is dropped, as a run drops it: one
+  // `undefined` entry stands for all of them. A settling request with no
+  // entry there leaves the usage transition vacuous.
+  const usageFor = (step: AgentStep, request: AgentStepRequest): UsageChoice[] | undefined => {
+    if (
+      !usageScript ||
+      request.kind !== "text" ||
+      !declaresUsageTransition(step.snapshot as AnyMachineSnapshot)
+    ) {
+      return undefined;
+    }
+    const values = usageScript[request.src];
+    if (!values?.length) {
+      vacuous.add(AGENT_USAGE_EVENT_TYPE);
+      return undefined;
+    }
+    const snapshot = step.snapshot as AnyMachineSnapshot;
+    const events: AgentUsageEvent[] = values.map((usage) => ({
+      type: AGENT_USAGE_EVENT_TYPE,
+      kind: "text",
+      id: request.id,
+      src: request.src,
+      model: request.input.model,
+      ...(request.input.name !== undefined ? { name: request.input.name } : {}),
+      usage,
+    }));
+    const accepted: UsageChoice[] = events.filter((event) => snapshot.can(event as never));
+    if (accepted.length === 0) {
+      return undefined;
+    }
+    return accepted.length < events.length ? [...accepted, undefined] : accepted;
+  };
   // `stopWhen` on the settled snapshot or any state passed through to reach it.
   const stops = (step: AgentStep): boolean =>
     stopWhen !== undefined &&
@@ -1967,13 +2151,20 @@ function explore(
   // How a text request or scripted invoke settles: resolved straight through
   // with its single output, forked (an `errors` entry, several `outputs`, or
   // an explored child's outcomes), or blocked on a missing output.
+  // `outputs: { src: [] }`: the src never settles (a callback bridge or a
+  // long-lived listener), so its invoke stays pending and only events move on.
+  const neverSettles = (src: string): boolean => outputScript[src]?.length === 0 && !errorsFor(src);
   const settleFor = (
     id: string,
     src: string,
     isText: boolean,
     invoke?: PendingInvoke,
-  ): { fork: InvokeFork } | { output: unknown } | { blocked: true } => {
+    usage?: UsageChoice[],
+  ): { fork: InvokeFork } | { output: unknown } | { blocked: true } | { never: true } => {
     const failures = errorsFor(src);
+    if (neverSettles(src)) {
+      return { never: true };
+    }
     if (
       options.children === "explore" &&
       !(src in outputScript) &&
@@ -2012,7 +2203,7 @@ function explore(
       };
     }
     const outputs = outputScript[src] ?? [];
-    if (failures || outputs.length > 1) {
+    if (failures || outputs.length > 1 || (outputs.length === 1 && (usage?.length ?? 0) > 1)) {
       return {
         fork: {
           id,
@@ -2020,6 +2211,7 @@ function explore(
           recordError: failures?.record ?? false,
           outputs,
           isText,
+          ...(usage ? { usage } : {}),
         },
       };
     }
@@ -2063,6 +2255,7 @@ function explore(
       id: string,
       src: string,
       isText: boolean,
+      usage?: UsageChoice[],
     ): InvokeFork[] => {
       if ("fork" in settle) {
         return [settle.fork];
@@ -2071,7 +2264,10 @@ function explore(
         blocked.push(src);
         return [];
       }
-      return [{ id, errors: [], outputs: [settle.output], isText }];
+      if ("never" in settle) {
+        return [];
+      }
+      return [{ id, errors: [], outputs: [settle.output], isText, ...(usage ? { usage } : {}) }];
     };
     const texts = step.requests.filter(
       (request): request is AgentStepRequest & { kind: "text" } => request.kind === "text",
@@ -2080,9 +2276,16 @@ function explore(
     // are the decision branch's to expand, not a settlement.
     const requestIds = new Set(step.requests.map((request) => request.id));
     const forks = [
-      ...texts.flatMap((request) =>
-        asFork(settleFor(request.id, request.src, true), request.id, request.src, true),
-      ),
+      ...texts.flatMap((request) => {
+        const usage = usageFor(step, request);
+        return asFork(
+          settleFor(request.id, request.src, true, undefined, usage),
+          request.id,
+          request.src,
+          true,
+          usage,
+        );
+      }),
       ...invokes
         .filter((invoke) => !requestIds.has(invoke.id) && !kids.includes(invoke))
         .flatMap((invoke) =>
@@ -2236,9 +2439,15 @@ function explore(
   // a move of its own, so the parent's sends and the child's sends to the
   // parent can fall between them.
   const races = (step: AgentStep): boolean =>
-    stepping || (interleaving && arriving(step.snapshot as AnyMachineSnapshot).length > 0);
+    stepping ||
+    (interleaving &&
+      (arriving(step.snapshot as AnyMachineSnapshot).length > 0 ||
+        (timerMode === "fire" && armedTimers(step.snapshot as AnyMachineSnapshot).length > 0)));
+  // `recordEvent` receives each event the advance delivers that belongs on
+  // the path (a request's `usage` event), before `stopWhen` sees its result.
   const advance = (
     step: AgentStep,
+    recordEvent: (event: ChosenEvent) => void,
   ): {
     step: AgentStep;
     blockedSrc?: string;
@@ -2252,7 +2461,7 @@ function explore(
     decisions?: AgentStepRequest[];
     /** `children: "coupled"`: child machines pending, stepped by the parent. */
     kids?: PendingInvoke[];
-    pending?: { id: string; output: unknown };
+    pending?: { id: string; output: unknown; usage?: AgentUsageEvent };
   } => {
     let current = step;
     // Bounded loop: each iteration resolves one text or scripted invoke.
@@ -2263,7 +2472,9 @@ function explore(
       if (current.done) {
         return { step: current };
       }
-      const request = current.requests[0] as AgentStepRequest | undefined;
+      const request = current.requests.find(
+        (pending) => pending.kind !== "text" || !neverSettles(pending.src),
+      );
       const concurrent = concurrentForks(current);
       if (concurrent) {
         return {
@@ -2276,20 +2487,31 @@ function explore(
         };
       }
       if (request && request.kind === "text") {
-        const settle = settleFor(request.id, request.src, true);
+        const usage = usageFor(current, request);
+        const settle = settleFor(request.id, request.src, true, undefined, usage);
         if ("fork" in settle) {
           return { step: current, fork: settle.fork };
         }
         if ("blocked" in settle) {
           return { step: current, blockedSrc: request.src };
         }
+        if ("never" in settle) {
+          return { step: current };
+        }
         if (races(current)) {
           return {
             step: current,
-            pending: { id: request.id, output: asTextResult(settle.output) },
+            pending: {
+              id: request.id,
+              output: asTextResult(settle.output),
+              ...(usage?.[0] ? { usage: usage[0] } : {}),
+            },
           };
         }
-        current = resolveStep(current, request, asTextResult(settle.output));
+        if (usage?.[0]) {
+          recordEvent(usage[0] as unknown as ChosenEvent);
+        }
+        current = settleStep(current, request.id, asTextResult(settle.output), usage?.[0]).step;
         recordState(current);
         continue;
       }
@@ -2313,7 +2535,7 @@ function explore(
           : { step: current };
       }
       // No request: maybe a pending scripted invoke, else a wait.
-      const [invoke] = pendingInvokes(current);
+      const [invoke] = pendingInvokes(current).filter((pending) => !neverSettles(pending.src));
       if (invoke) {
         const settle = settleFor(invoke.id, invoke.src, false, invoke);
         if ("fork" in settle) {
@@ -2321,6 +2543,9 @@ function explore(
         }
         if ("blocked" in settle) {
           return { step: current, blockedSrc: invoke.src };
+        }
+        if ("never" in settle) {
+          return { step: current };
         }
         if (races(current)) {
           return { step: current, pending: { id: invoke.id, output: settle.output } };
@@ -2345,8 +2570,8 @@ function explore(
     path: PathLink | undefined,
     table: Partial<Record<string, Record<string, unknown>[]>>,
     except?: ReadonlySet<string>,
-  ): ChosenEvent[] =>
-    arriving(snapshot).flatMap((descriptor) => {
+  ): ChosenEvent[] => [
+    ...arriving(snapshot).flatMap((descriptor) => {
       if (except?.has(descriptor.type)) {
         return [];
       }
@@ -2360,7 +2585,69 @@ function explore(
         );
       }
       return variantsOf(descriptor.type, snapshot, table);
+    }),
+    ...timerEvents(snapshot, path),
+  ];
+
+  // Fired timers: the event a path records, mapped to the timer firing that
+  // delivers it (and disarms the timer, as a run does).
+  const timerFires = new WeakMap<ChosenEvent, EventObject>();
+  const applied = (event: ChosenEvent): EventObject => timerFires.get(event) ?? event;
+  const ignoredTimers = new Set<string>();
+  // Each armed timer the machine delivers to itself (`after`, `timeout`, a
+  // delayed `enq.raise`) whose event the active states take now.
+  function armedTimers(
+    snapshot: AnyMachineSnapshot,
+  ): Array<{ event: EventObject; key: Record<string, unknown> }> {
+    const timers = (snapshot as { timers?: unknown }).timers;
+    if (!Array.isArray(timers) || timers.length === 0) {
+      return [];
+    }
+    return timers.flatMap((timer) => {
+      if (
+        !isRecord(timer) ||
+        timer["target"] !== "self" ||
+        !isRecord(timer["event"]) ||
+        typeof timer["event"]["type"] !== "string"
+      ) {
+        return [];
+      }
+      const event = timer["event"] as EventObject;
+      if (!snapshot.can(event)) {
+        return [];
+      }
+      const key =
+        typeof timer["id"] === "string"
+          ? { id: timer["id"] }
+          : typeof timer["seq"] === "number"
+            ? { seq: timer["seq"] }
+            : { event };
+      return [{ event, key }];
     });
+  }
+  // The armed timers a wait offers beside host events (none under `timers: "ignore"`).
+  const timerEvents = (snapshot: AnyMachineSnapshot, path: PathLink | undefined): ChosenEvent[] => {
+    const armed = armedTimers(snapshot);
+    if (timerMode === "ignore") {
+      for (const { event } of armed) {
+        unexpanded.add(event.type);
+        const key = JSON.stringify(event);
+        if (!ignoredTimers.has(key)) {
+          ignoredTimers.add(key);
+          note(
+            () =>
+              `timers: ${key} is armed at path [${pathTypes(path)}], and timers: "ignore" never fires it`,
+          );
+        }
+      }
+      return [];
+    }
+    return armed.map(({ event, key }) => {
+      const entry = { ...event } as ChosenEvent;
+      timerFires.set(entry, { type: "xstate.timer", ...key });
+      return entry;
+    });
+  };
 
   // `interleave: "pending"`: each accepted event (bar `except`) arriving
   // while an invoke is outstanding, one branch each.
@@ -2380,7 +2667,7 @@ function explore(
         prunedByGuard++;
         continue;
       }
-      const next = transitionStep(settled, event);
+      const next = transitionStep(settled, applied(event));
       recordState(next);
       yield { step: next, path: extend(path, event), depth: depth + 1 };
     }
@@ -2398,27 +2685,41 @@ function explore(
     return {
       step: failed,
       path: extend(path, {
-        type: `xstate.error.actor.${fork.id}`,
+        type: "xstate.error.actor",
+        actorId: fork.id,
         ...(fork.recordError ? { error } : {}),
       }),
       depth: depth + 1,
     };
   };
-  const doneBranch = (
+  // A forked completion, once per `usage` event its request delivers first.
+  // A text request records its result, not the envelope.
+  function* doneBranches(
     settled: AgentStep,
     path: PathLink | undefined,
     depth: number,
     fork: InvokeFork,
     output: unknown,
-  ): ExploreNode => {
-    const resolved = resolveStep(settled, fork.id, fork.isText ? asTextResult(output) : output);
-    recordState(resolved);
-    return {
-      step: resolved,
-      path: extend(path, { type: `xstate.done.actor.${fork.id}`, output }),
-      depth: depth + 1,
-    };
-  };
+  ): Generator<ExploreNode> {
+    const value = fork.isText ? asTextResult(output) : output;
+    const recorded = fork.isText ? (value as AgentTextResult).result : output;
+    const usages = fork.usage?.length ? fork.usage : [undefined];
+    for (const [i, usage] of usages.entries()) {
+      if (i > 0 && (witness !== undefined || capped())) {
+        return;
+      }
+      const { step, completed } = settleStep(settled, fork.id, value, usage);
+      recordState(step);
+      const charged = usage ? extend(path, usage as unknown as ChosenEvent) : path;
+      yield {
+        step,
+        path: completed
+          ? extend(charged, { type: "xstate.done.actor", actorId: fork.id, output: recorded })
+          : charged,
+        depth: depth + 1,
+      };
+    }
+  }
 
   const maxDepthTerminal = (settled: AgentStep, path: PathLink | undefined): void => {
     endPath(path, { status: "max-depth", state: settled.snapshot.value });
@@ -2646,10 +2947,18 @@ function explore(
         const settledKid = kid.step.snapshot as AnyMachineSnapshot & { error?: unknown };
         if (settledKid.status === "done") {
           step = resolveStep(step, kid.id, settledKid.output);
-          link = extend(link, { type: `xstate.done.actor.${kid.id}`, output: settledKid.output });
+          link = extend(link, {
+            type: "xstate.done.actor",
+            actorId: kid.id,
+            output: settledKid.output,
+          });
         } else {
           step = rejectStep(step, kid.id, settledKid.error);
-          link = extend(link, { type: `xstate.error.actor.${kid.id}`, error: settledKid.error });
+          link = extend(link, {
+            type: "xstate.error.actor",
+            actorId: kid.id,
+            error: settledKid.error,
+          });
         }
       }
       recordState(step);
@@ -2716,7 +3025,9 @@ function explore(
       decisions,
       pending,
       kids: pendingKids,
-    } = advance(step);
+    } = advance(step, (event) => {
+      path = extend(path, event);
+    });
     if (hit) {
       witness = pathOf(path);
       return;
@@ -2773,14 +3084,20 @@ function explore(
         maxDepthTerminal(settled, path);
         return;
       }
-      const resolved = resolveStep(settled, pending.id, pending.output);
+      const resolved = settleStep(settled, pending.id, pending.output, pending.usage).step;
       recordState(resolved);
+      // A delivered usage event is an event the machine receives: it is on the path.
+      const charged = pending.usage ? extend(path, pending.usage as unknown as ChosenEvent) : path;
       yield {
         step: resolved,
         // A coupled child's settled work is a move of its own, shown on the path.
         path: stepping
-          ? extend(path, { type: `xstate.done.actor.${pending.id}`, output: pending.output })
-          : path,
+          ? extend(charged, {
+              type: "xstate.done.actor",
+              actorId: pending.id,
+              output: pending.output,
+            })
+          : charged,
         depth,
       };
       yield* raceBranches(settled, path, depth);
@@ -2900,7 +3217,7 @@ function explore(
           if (witness !== undefined || capped()) {
             return;
           }
-          yield doneBranch(settled, path, depth, other, output);
+          yield* doneBranches(settled, path, depth, other, output);
         }
       }
       for (const src of blockedSiblings ?? []) {
@@ -2944,7 +3261,7 @@ function explore(
           if (witness !== undefined || capped()) {
             return;
           }
-          yield doneBranch(settled, path, depth, fork, output);
+          yield* doneBranches(settled, path, depth, fork, output);
         }
         // Explored children settle in any order, and each child event can
         // reach the parent before any of them settles.
@@ -2959,7 +3276,7 @@ function explore(
             if (witness !== undefined || capped()) {
               return;
             }
-            yield doneBranch(settled, path, depth, other, output);
+            yield* doneBranches(settled, path, depth, other, output);
           }
         }
         for (const child of [fork, ...(siblings ?? [])]) {
@@ -3038,8 +3355,13 @@ function explore(
     }
 
     if (settled.done) {
-      endPath(path, { status: "done", state: settled.snapshot.value });
-      pushDistinct(doneOutputs, seenOutputs, (settled.snapshot as AnyMachineSnapshot).output);
+      const output: unknown = (settled.snapshot as AnyMachineSnapshot).output;
+      endPath(path, {
+        status: "done",
+        state: settled.snapshot.value,
+        ...(output === undefined ? {} : { output }),
+      });
+      pushDistinct(doneOutputs, seenOutputs, output);
       return;
     }
 
@@ -3059,7 +3381,7 @@ function explore(
     // Beside an explored child, every pending decision is a branch point.
     const branchRequests: (AgentStepRequest | undefined)[] = decisions?.length
       ? decisions
-      : [settled.requests[0]];
+      : [settled.requests.find((request) => request.kind !== "text" || !neverSettles(request.src))];
     for (const request of branchRequests) {
       // A closed choice's options, rebuilt over the live candidates as a run
       // does but not yet filtered: the loop below prunes them, so guard-rejected
@@ -3097,7 +3419,7 @@ function explore(
           continue;
         }
         taken++;
-        const next = transitionStep(settled, event);
+        const next = transitionStep(settled, applied(event));
         recordState(next);
         yield { step: next, path: extend(path, event), depth: depth + 1 };
       }
@@ -3134,7 +3456,7 @@ function explore(
         recordState(failed);
         yield {
           step: failed,
-          path: extend(path, { type: `xstate.error.actor.${request.id}` }),
+          path: extend(path, { type: "xstate.error.actor", actorId: request.id }),
           depth: depth + 1,
         };
       }
@@ -3378,6 +3700,14 @@ export interface CanReachResult {
    * unreachability only when `complete` is true.
    */
   complete: boolean;
+  /**
+   * Why the search is not complete, present only when `complete` is false:
+   * the {@link explorePaths} report's `unexplored` notes (such as
+   * `needs-output: no \`outputs\` entry for src 'resume' at path []`), plus a
+   * `path-cap`, `unexpanded-events`, or `max-depth` note for the causes the
+   * report records elsewhere.
+   */
+  unexplored?: string[];
 }
 
 /** Thrown when a string reachability target is not a state in the machine. */
@@ -3462,7 +3792,31 @@ export async function canReach(
     };
   }
   const complete = isExplorationComplete(report);
-  return { reachable: false, complete, ...(resolvedTarget ? { target: resolvedTarget } : {}) };
+  return {
+    reachable: false,
+    complete,
+    ...(resolvedTarget ? { target: resolvedTarget } : {}),
+    ...(complete
+      ? {}
+      : {
+          unexplored: [
+            ...report.unexplored,
+            ...(report.hitPathCap
+              ? [
+                  `path-cap: maxPaths or maxNodes cut the search short after ${report.pathsExplored} paths`,
+                ]
+              : []),
+            ...(report.unexpandedEvents.length
+              ? [
+                  `unexpanded-events: not every payload variant was explored for ${report.unexpandedEvents.join(", ")}`,
+                ]
+              : []),
+            ...(report.terminals.some((terminal) => terminal.status === "max-depth")
+              ? ["max-depth: a path reached maxDepth before settling"]
+              : []),
+          ],
+        }),
+  };
 }
 
 /**

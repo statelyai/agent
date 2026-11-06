@@ -3205,6 +3205,7 @@ describe("machine version prop (createMachine({ version }))", () => {
       events: { GO: {} },
     });
     return agentSetup.createMachine({
+      id: "versioned",
       version,
       ...(migrate ? { migrate } : {}),
       context: () => ({}),
@@ -5812,12 +5813,12 @@ describe("runAgent (sugar over createAgentRuntime + runToQuiescence)", () => {
 
 describe("invoked async actor completing without a value", () => {
   // XState's `createAsyncLogic` completes with `output: undefined` for a void
-  // `run`, and (via its `data ?? output` coalesce) for one resolving `null`.
-  // The journal must accept both rather than reject the explicit `undefined`.
+  // `run` and `output: null` for one resolving `null`. The journal must accept
+  // both: it drops the explicit `undefined` and keeps `null`.
   test.each([
-    ["undefined", async () => {}],
-    ["null", async () => null],
-  ])("journals the done event when run resolves %s", async (_label, run) => {
+    ["undefined", async () => {}, false],
+    ["null", async () => null, true],
+  ])("journals the done event when run resolves %s", async (_label, run, hasOutput) => {
     const machine = setupAgent({
       context: z.object({}),
       output: z.object({ ok: z.boolean() }),
@@ -5846,7 +5847,7 @@ describe("invoked async actor completing without a value", () => {
     expect(result.status).toBe("done");
     const done = entries.find((entry) => entry.event.type === "xstate.done.actor");
     expect(done).toBeDefined();
-    expect(Object.hasOwn(done!.event, "output")).toBe(false);
+    expect(Object.hasOwn(done!.event, "output")).toBe(hasOutput);
     expect(() => JSON.parse(JSON.stringify(done))).not.toThrow();
   });
 
@@ -5884,5 +5885,234 @@ describe("invoked async actor completing without a value", () => {
     // A JSON round-trip (what a store does) must replay to the same state.
     const replayed = replay(machine, JSON.parse(JSON.stringify(entries)) as AgentLogEntry[]);
     expect(replayed.snapshot.output).toEqual({ hadKey: true });
+  });
+});
+
+describe("host-owned timers across resumes", () => {
+  const waiting = setupAgent({
+    context: z.object({}),
+    events: { GO: z.object({}) },
+  }).createMachine({
+    context: {},
+    initial: "wait",
+    states: {
+      wait: { after: { 1000: { target: "late" } }, on: { GO: { target: "done" } } },
+      late: { on: { GO: { target: "done" } } },
+      done: { type: "final" },
+    },
+  });
+
+  test("an onIdle pass resumes a snapshot whose timer carries a wall-clock start", async () => {
+    const result = await runAgent(waiting, {
+      timers: { schedule: () => {}, cancel: () => {} },
+      store: createInMemoryEventLogStore(),
+      threadId: "t",
+      onIdle: async () => ({ type: "GO" as const }),
+    });
+    expect(result.status).toBe("done");
+  });
+});
+
+describe("onIdle passes", () => {
+  const counter = setupAgent({
+    context: z.object({ count: z.number() }),
+    events: { TICK: z.object({}), STOP: z.object({}) },
+  }).createMachine({
+    id: "counter",
+    context: { count: 0 },
+    initial: "waiting",
+    states: {
+      waiting: {
+        on: {
+          TICK: ({ context }) => ({ context: { count: context.count + 1 } }),
+          STOP: { target: "done" },
+        },
+      },
+      done: { type: "final" },
+    },
+  });
+
+  test("an inspector sees the root once across every pass", async () => {
+    const announced: Array<string | undefined> = [];
+    let answers = 0;
+    const result = await runAgent(counter, {
+      inspect: (event) => {
+        if (event.type === "@xstate.actor") announced.push(event.actorRef.sessionId);
+      },
+      onIdle: async () => (answers++ < 3 ? { type: "TICK" as const } : { type: "STOP" as const }),
+    });
+    expect(result.status).toBe("done");
+    expect(answers).toBe(4);
+    expect(announced).toHaveLength(1);
+  });
+
+  test("aborting the signal while onIdle waits settles the run", async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+    const pending = runAgent(counter, {
+      signal: controller.signal,
+      onIdle: (_snapshot, { signal }) => {
+        seen = signal;
+        return new Promise(() => {});
+      },
+    });
+    await vi.waitFor(() => expect(seen).toBe(controller.signal));
+    controller.abort(new Error("stop"));
+    const result = await pending;
+    expect(result).toMatchObject({ status: "error", cause: "aborted" });
+  });
+});
+
+describe("a request failing inside a child machine", () => {
+  test("reaches the child's onError", async () => {
+    const child = setupAgent({
+      context: z.object({}),
+      events: {},
+      output: z.object({ ok: z.boolean() }),
+      requests: {
+        ask: { model: "m", schemas: { input: z.object({}), output: z.string() }, prompt: "hi" },
+      },
+    }).createMachine({
+      context: {},
+      initial: "asking",
+      states: {
+        asking: {
+          invoke: {
+            src: "ask",
+            input: {},
+            onDone: { target: "ok" },
+            onError: { target: "failed" },
+          },
+        },
+        ok: { type: "final", output: () => ({ ok: true }) },
+        failed: { type: "final", output: () => ({ ok: false }) },
+      },
+    });
+    const parent = setupAgent({
+      context: z.object({ ok: z.boolean().nullable() }),
+      events: {},
+      actors: { child },
+    }).createMachine({
+      context: { ok: null },
+      initial: "running",
+      states: {
+        running: {
+          invoke: {
+            src: "child",
+            input: {},
+            onDone: ({ event }) => ({ target: "done", context: { ok: event.output.ok } }),
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    const result = await runAgent(parent, {
+      executors: {
+        generateText: async () => {
+          throw new Error("provider 500");
+        },
+      },
+    });
+    expect(result.status).toBe("done");
+    expect(result.snapshot.context.ok).toBe(false);
+  });
+});
+
+describe("usage from concurrent children", () => {
+  test("reaches the parent before the children's completions", async () => {
+    const child = setupAgent({
+      context: z.object({}),
+      events: {},
+      actors: { tool: createAsyncLogic({ run: async () => 1 }) },
+      requests: {
+        summarize: {
+          model: "m",
+          schemas: { input: z.object({}), output: z.string() },
+          prompt: "x",
+        },
+      },
+    }).createMachine({
+      context: {},
+      initial: "tool",
+      states: {
+        tool: { invoke: { src: "tool", onDone: { target: "work" } } },
+        work: { invoke: { src: "summarize", input: {}, onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const parent = setupAgent({
+      context: z.object({ tokens: z.number(), joined: z.number() }),
+      events: {},
+      actors: { child },
+    }).createMachine({
+      context: { tokens: 0, joined: 0 },
+      initial: "start",
+      states: {
+        start: {
+          entry: (_, enq) => {
+            enq.spawn("child", { id: "c1" });
+            enq.spawn("child", { id: "c2" });
+          },
+          always: { target: "researching" },
+        },
+        researching: {
+          on: {
+            [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
+              context: { ...context, tokens: context.tokens + (event.usage.totalTokens ?? 0) },
+            }),
+            "xstate.done.actor": ({ context }) => ({
+              context: { ...context, joined: context.joined + 1 },
+            }),
+          },
+          always: ({ context }) => (context.joined === 2 ? { target: "done" } : undefined),
+        },
+        done: { type: "final" },
+      },
+    });
+    const result = await runAgent(parent, {
+      executors: {
+        generateText: async () => {
+          await Promise.resolve();
+          return { result: "s", usage: { totalTokens: 100 } };
+        },
+      },
+    });
+    expect(result.status).toBe("done");
+    expect(result.snapshot.context.tokens).toBe(200);
+  });
+});
+
+describe("onIdle passes with a persisted child", () => {
+  test("an inspector sees the child once across passes", async () => {
+    const worker = setupAgent({
+      context: z.object({}),
+      events: { PING: z.object({}) },
+    }).createMachine({ context: {}, initial: "idle", states: { idle: { on: { PING: {} } } } });
+    const parent = setupAgent({
+      context: z.object({}),
+      events: { NEXT: z.object({}), STOP: z.object({}) },
+      actors: { worker },
+    }).createMachine({
+      id: "parent",
+      context: {},
+      invoke: { id: "worker", src: "worker" },
+      initial: "waiting",
+      states: {
+        waiting: { on: { NEXT: {}, STOP: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const announced = new Map<string, number>();
+    let answers = 0;
+    const result = await runAgent(parent, {
+      inspect: (event) => {
+        if (event.type !== "@xstate.actor") return;
+        const id = (event.actorRef as { id?: string }).id ?? "";
+        announced.set(id, (announced.get(id) ?? 0) + 1);
+      },
+      onIdle: async () => (answers++ < 2 ? { type: "NEXT" as const } : { type: "STOP" as const }),
+    });
+    expect(result.status).toBe("done");
+    expect(Object.fromEntries(announced)).toEqual({ parent: 1, worker: 1 });
   });
 });

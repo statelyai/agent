@@ -14,6 +14,7 @@ export {
   explorePaths,
   lintAgentMachine,
   simulateAgent,
+  textOutput,
 } from "../verify.js";
 export type {
   AgentLintDiagnostic,

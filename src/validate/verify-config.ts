@@ -431,7 +431,11 @@ async function checkExplore(
     }
     for (const terminal of report.terminals) {
       if (allowed.includes(terminal.status)) continue;
-      const trail = `path [${terminal.path.map((event) => event.type).join(", ")}]`;
+      const trail = `path [${terminal.path
+        .map((event) =>
+          typeof event.actorId === "string" ? `${event.type}(${event.actorId})` : event.type,
+        )
+        .join(", ")}]`;
       const state = JSON.stringify(terminal.state);
       switch (terminal.status) {
         case "max-depth":

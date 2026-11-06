@@ -70,16 +70,16 @@ describe("accepted-event descriptors (unified chat)", () => {
 
 describe("meta.interaction.component (custom composer renderer)", () => {
   const machineWith = (interaction: Record<string, unknown>): AnyStateMachine =>
-    createMachine({
+    setup({ schemas: { meta: interactionMetaSchema } }).createMachine({
       initial: "waiting",
       states: {
-        waiting: { meta: { interaction }, on: { RATE: "done" } },
+        waiting: { meta: { interaction }, on: { RATE: { target: "done" } } },
         done: { type: "final" },
       },
-    } as never) as AnyStateMachine;
+    }) as AnyStateMachine;
 
   const idleOf = (machine: AnyStateMachine) =>
-    describeIdle(machine, createActor(machine).start().getSnapshot() as never);
+    describeIdle(machine, createActor(machine).start().getSnapshot());
 
   test("a declared component name flows into the ChatIdle descriptor", () => {
     expect(idleOf(machineWith({ component: "rating" })).component).toBe("rating");
@@ -148,12 +148,12 @@ describe("idle prompt fallbacks", () => {
       states: {
         // No meta.interaction — the description carries the prompt, and
         // `{key}` placeholders still resolve against context.
-        waiting: { description: "Your move, {who}.", on: { GO: "done" } },
+        waiting: { description: "Your move, {who}.", on: { GO: { target: "done" } } },
         done: { type: "final" },
       },
-    } as never) as AnyStateMachine;
+    }) as AnyStateMachine;
     const actor = createActor(machine).start();
-    expect(describeIdle(machine, actor.getSnapshot() as never).prompt).toBe("Your move, Ada.");
+    expect(describeIdle(machine, actor.getSnapshot()).prompt).toBe("Your move, Ada.");
   });
 
   test("resolves dotted placeholders against nested context", async () => {
@@ -161,12 +161,12 @@ describe("idle prompt fallbacks", () => {
       initial: "waiting",
       context: { employee: { name: "Jordan" } },
       states: {
-        waiting: { description: "Waiting on {employee.name}'s documents.", on: { GO: "done" } },
+        waiting: { description: "Waiting on {employee.name}'s documents.", on: { GO: { target: "done" } } },
         done: { type: "final" },
       },
-    } as never) as AnyStateMachine;
+    }) as AnyStateMachine;
     const actor = createActor(machine).start();
-    expect(describeIdle(machine, actor.getSnapshot() as never).prompt).toBe(
+    expect(describeIdle(machine, actor.getSnapshot()).prompt).toBe(
       "Waiting on Jordan's documents.",
     );
   });
@@ -477,7 +477,7 @@ describe("meta.interaction payload choices", () => {
       done: { type: "final" },
     },
   });
-  const idle = describeIdle(machine, createActor(machine).start().getSnapshot() as never);
+  const idle = describeIdle(machine, createActor(machine).start().getSnapshot());
 
   test("lists accepted choices as full events and marks the types they cover", () => {
     expect(idle.choices).toEqual([
@@ -503,7 +503,7 @@ describe("meta.interaction payload choices", () => {
         done: { type: "final" },
       },
     });
-    const refusedIdle = describeIdle(refused, createActor(refused).start().getSnapshot() as never);
+    const refusedIdle = describeIdle(refused, createActor(refused).start().getSnapshot());
     expect(refusedIdle.choices).toEqual([]);
     expect(
       refusedIdle.events.find((event) => event.type === "ACCUSE")?.coveredByChoices,
@@ -515,11 +515,11 @@ describe("meta.interaction payload choices", () => {
   });
 
   test("states without choices carry none", () => {
-    const plain = createMachine({
+    const plain = setup({ schemas: { meta: interactionMetaSchema } }).createMachine({
       initial: "waiting",
-      states: { waiting: { meta: { interaction: { label: "?" } }, on: { GO: "waiting" } } },
-    } as never) as AnyStateMachine;
-    expect(describeIdle(plain, createActor(plain).start().getSnapshot() as never).choices).toBe(
+      states: { waiting: { meta: { interaction: { label: "?" } }, on: { GO: { target: "waiting" } } } },
+    }) as AnyStateMachine;
+    expect(describeIdle(plain, createActor(plain).start().getSnapshot()).choices).toBe(
       undefined,
     );
   });

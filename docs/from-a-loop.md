@@ -289,6 +289,8 @@ A loop on a client other than the AI SDK or `openai` (Anthropic, Gemini, a frame
 
 ## Part 2: a factory loop that improves
 
+> **Experimental:** self-improvement is experimental. The gates are stable, but the round itself may change, and on a loop with no decision point it mostly proposes wording, cap, and approval-rule changes. Code-level causes come back as change requests for a person.
+
 Part 2 starts from a working software factory. An author writes a patch, a self-check and an independent review run in parallel, and the task's visible tests run. Then the loop ships, retries, or asks a person.
 
 The loop works. Part 2 makes its triage improve from its own runs, and keeps its rules fixed: nothing ships without passing checks and approval, three autonomous rounds at most, and a task whose spec is broken goes to a person.

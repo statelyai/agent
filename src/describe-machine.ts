@@ -16,6 +16,7 @@ import {
   type AnyStateNode,
 } from "xstate";
 import { getAgentExecutionOptions } from "./internal/registry.js";
+import { readContextSource, readTransitionSource } from "./internal/transition-source.js";
 import type { StandardSchemaV1 } from "./types.js";
 import { getJsonSchemaSync } from "./utils.js";
 
@@ -23,6 +24,17 @@ import { getJsonSchemaSync } from "./utils.js";
 export interface DescribeMachineOptions {
   /** Marks the state nodes active in this snapshot with `*`. */
   snapshot?: AnyMachineSnapshot;
+  /**
+   * Prints each transition written as a function under its line, so one read
+   * shows both where it goes and what it computes.
+   */
+  source?: boolean;
+  /**
+   * Functions the machine's transitions call by name (guards, reducers), each
+   * printed with its source in a `Helpers` section, so a call such as
+   * `withinLimit(context.turn, context.limit)` can be read through.
+   */
+  helpers?: Record<string, (...args: never[]) => unknown>;
 }
 
 type Json = Record<string, unknown>;
@@ -37,9 +49,20 @@ const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
 
 /** The source of a function as serialized (`{ "@code" }`) or as a live function. */
 function codeOf(value: unknown): string | undefined {
-  if (typeof value === "function") return String(value);
-  if (isObject(value) && typeof value["@code"] === "string") return value["@code"];
-  return undefined;
+  const code =
+    typeof value === "function"
+      ? String(value)
+      : isObject(value) && typeof value["@code"] === "string"
+        ? value["@code"]
+        : undefined;
+  return code === undefined ? undefined : unbundle(code);
+}
+
+/** Source as written: vite SSR's named-import rewrites (`(0, __vite_ssr_import_3__.f)`) undone; a default import's `.default` stays, as bare `default` would not parse. */
+function unbundle(code: string): string {
+  return code
+    .replace(/\(0,\s*__vite_ssr_import_\d+__\.(?!default\b)([\w$]+)\)/g, "$1")
+    .replace(/__vite_ssr_import_\d+__\.(?!default\b)/g, "");
 }
 
 /** The decoded value of a fromConfig `{ "@expr": "<json>" }` slot, or the value itself. */
@@ -75,75 +98,14 @@ function resolveTarget(source: AnyStateNode, target: string): AnyStateNode | und
 const nameOf = (source: AnyStateNode, target: AnyStateNode) =>
   target.parent === source.parent ? target.key : target.path.join(".");
 
-/**
- * The keys of the object literal whose `{` is at `open` in `text`, at its top
- * level: `a`, `b` for `{ a: 1, b, ...c }`, and `…c` for a spread, whose keys
- * cannot be read. Strings, templates and nested brackets are skipped over.
- */
-function objectKeys(text: string, open: number): string[] {
-  const keys: string[] = [];
-  let depth = 0;
-  let expectKey = false;
-  for (let i = open; i < text.length; i++) {
-    const c = text[i]!;
-    if (c === '"' || c === "'" || c === "`") {
-      const end = text.indexOf(c, i + 1);
-      if (end < 0) break;
-      i = end;
-      continue;
-    }
-    if (c === "{" || c === "(" || c === "[") {
-      depth++;
-      if (depth === 1) expectKey = true;
-      continue;
-    }
-    if (c === "}" || c === ")" || c === "]") {
-      if (--depth === 0) break;
-      continue;
-    }
-    if (depth !== 1) continue;
-    if (c === ",") {
-      expectKey = true;
-      continue;
-    }
-    if (expectKey && !/\s/.test(c)) {
-      expectKey = false;
-      if (text.startsWith("...", i)) {
-        const spread = /^\.\.\.\s*([\w$.]+)(\()?/.exec(text.slice(i));
-        keys.push(`…${spread?.[1] ?? ""}${spread?.[2] ? "()" : ""}`);
-        continue;
-      }
-      const key = /^[A-Za-z_$][\w$]*/.exec(text.slice(i))?.[0];
-      if (key) {
-        keys.push(key);
-        i += key.length - 1;
-      }
-    }
-  }
-  return keys;
-}
-
-/** Every key of each object literal that follows a match of `at` in `code`; `…name` when what follows is not a literal. */
-function keysInSource(code: string, at: RegExp, keys: Set<string>): void {
-  for (const match of code.matchAll(at)) {
-    const open = match.index + match[0].length - 1;
-    if (code[open] === "{") {
-      for (const key of objectKeys(code, open)) keys.add(key);
-    } else {
-      const from = /^[\w$.]+(\()?/.exec(code.slice(open));
-      keys.add(from ? `…${from[0]}${from[1] ? ")" : ""}` : "…");
-    }
-  }
-}
-
-/** What a transition sets in context: a declarative patch's keys, or each `context: { … }` in a function's source. */
+/** What a transition sets in context: a declarative patch's keys, or each returned `context` in a function's source. */
 function contextKeys(transition: Json | undefined, code: string | undefined): string[] {
   const keys = new Set<string>();
-  if (code) keysInSource(code, /\bcontext\s*:\s*[^\s]/g, keys);
+  if (code) for (const key of readTransitionSource(code)?.context ?? []) keys.add(key);
   if (transition) {
     const context = decodeExpr(transition.context);
     const contextCode = codeOf(context);
-    if (contextCode) keysInSource(contextCode, /=>\s*\(\s*\{|\breturn\s*\{/g, keys);
+    if (contextCode) for (const key of readContextSource(contextCode) ?? ["…"]) keys.add(key);
     else if (isObject(context)) for (const key of Object.keys(context)) keys.add(key);
     for (const action of toList(transition.actions)) {
       if (isObject(action) && action.type === "@xstate.assign") {
@@ -170,77 +132,25 @@ function guardText(guard: unknown): string | undefined {
 }
 
 /**
- * True when a transition function's source has a path that returns no
- * transition, so it may not be taken. Matches minified source too: `void 0`
- * for `undefined`, and a ternary `?` with no spaces (but not `?.` or `??`).
- * String and template literals are blanked first, so their text never counts.
- */
-const mayDecline = (code: string) =>
-  /\bundefined\b|\bnull\b|\bvoid 0\b|\breturn\s*;|\bif\s*\(|(?<!\?)\?(?![.?])|&&/.test(
-    code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""'),
-  );
-
-/**
- * True when the function returns a call's result (`=> next(ctx)`, `return
- * pick(x)`), so its target is not in its own source. Reads only the
- * function's own returned expressions, not those of callbacks nested in it.
- */
-function returnsCall(code: string): boolean {
-  const text = code.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '""');
-  // Grouping parentheses first: `=> (next(x))` returns a call; `=> ({ … })` does not.
-  const startsWithCall = (at: number) => /^[\s(]*[A-Za-z_$][\w$.]*\s*\(/.test(text.slice(at));
-  // The outer function's body: after its arrow, or its first brace, outside the parameters.
-  let parens = 0;
-  let body = -1;
-  for (let i = 0; i < text.length && body < 0; i++) {
-    const char = text[i];
-    if (char === "(") parens++;
-    else if (char === ")") parens--;
-    else if (parens === 0 && char === "=" && text[i + 1] === ">") body = i + 2;
-    else if (parens === 0 && char === "{") body = i;
-  }
-  if (body < 0) return false;
-  while (/\s/.test(text[body] ?? "")) body++;
-  if (text[body] !== "{") return startsWithCall(body);
-  // A block body: its own `return` statements, at depth 1.
-  let depth = 0;
-  for (let i = body; i < text.length; i++) {
-    if (text[i] === "{") depth++;
-    else if (text[i] === "}" && --depth === 0) return false;
-    else if (
-      depth === 1 &&
-      text.startsWith("return", i) &&
-      !/[\w$]/.test(text[i - 1] ?? "") &&
-      !/[\w$]/.test(text[i + 6] ?? "") &&
-      startsWithCall(i + 6)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Where a transition written as a function goes: every string literal after a
- * `target:` that names a real state node, `(conditional)` when it may decline
- * or pick among several, `(stays)` when its source has no `target`, `?` when
- * it names none that resolves or returns a helper call's result.
+ * Where a transition written as a function goes, read from its return paths:
+ * each literal target (`x ?` when it names no state node), `?` for one the
+ * source does not spell out (a variable's value, a helper call's result),
+ * `(conditional)` when it may decline, stay, or pick among several, and
+ * `(stays)` when no path names a target.
  */
 function targetsInSource(source: AnyStateNode, code: string, choice: boolean): string {
-  const found = new Set<AnyStateNode>();
-  for (const [, expression] of code.matchAll(/\btarget\s*:\s*(\[[^\]]*\]|[^,}\n]+)/g)) {
-    for (const [, , literal] of expression!.matchAll(/(['"`])([^'"`$]+)\1/g)) {
-      const node = resolveTarget(source, literal!);
-      if (node) found.add(node);
-    }
-  }
-  const names = [...found].map((node) => nameOf(source, node));
-  if (names.length) {
-    const conditional = names.length > 1 || (!choice && mayDecline(code));
-    return `${names.join(", ")}${conditional ? " (conditional)" : ""}`;
-  }
-  // A target the source does not spell out, or one a helper call returns, is unknown.
-  return /\btarget\s*:/.test(code) || returnsCall(code) ? "?" : "(stays)";
+  const read = readTransitionSource(code);
+  if (!read) return "?";
+  const names = read.targets.map((target) => {
+    const node = resolveTarget(source, target);
+    return node ? nameOf(source, node) : `${target} ?`;
+  });
+  const parts = [...new Set(names)];
+  if (read.unknown) parts.push("?");
+  if (!parts.length) return "(stays)";
+  if (parts.length === 1 && read.unknown) return "?";
+  const conditional = parts.length > 1 || (!choice && (read.declines || read.stays));
+  return `${parts.join(", ")}${conditional ? " (conditional)" : ""}`;
 }
 
 /** One transition, as a line: `on GO (human) if context.ready → review; sets draft — description`. */
@@ -298,14 +208,49 @@ function delayText(key: string, delays: Json): string {
   return typeof delay === "number" ? `${key} (${formatMs(delay)})` : key;
 }
 
+/** A transition function's source (or a config transition's context function), dedented, at `pad`. */
+function sourceLines(transition: unknown, pad: string): string[] {
+  const code =
+    codeOf(transition) ??
+    (isObject(transition) ? codeOf(decodeExpr(transition.context)) : undefined);
+  if (!code) return [];
+  const [first = "", ...rest] = code.split("\n");
+  const indent = Math.min(
+    ...rest.filter((line) => line.trim()).map((line) => /^\s*/.exec(line)![0].length),
+  );
+  return [first, ...rest.map((line) => line.slice(Number.isFinite(indent) ? indent : 0))]
+    .filter((line) => line.trim())
+    .map((line) => `${pad}  | ${line.trimEnd()}`);
+}
+
 /** Every transition leaving one state node, as lines at `pad`. */
-function transitionLines(node: AnyStateNode, json: Json, delays: Json, pad: string): string[] {
+function transitionLines(
+  node: AnyStateNode,
+  json: Json,
+  delays: Json,
+  pad: string,
+  source: boolean,
+): string[] {
   const lines: string[] = [];
-  const push = (head: string, value: unknown) => {
-    for (const transition of toList(value)) {
-      lines.push(`${pad}${transitionLine(node, head, transition)}`);
-    }
+  const line = (
+    head: string,
+    transition: unknown,
+    options?: Parameters<typeof transitionLine>[3],
+  ) => {
+    lines.push(`${pad}${transitionLine(node, head, transition, options)}`);
+    if (source) lines.push(...sourceLines(transition, pad));
   };
+  const push = (head: string, value: unknown) => {
+    for (const transition of toList(value)) line(head, transition);
+  };
+  if (source) {
+    for (const key of ["entry", "exit"] as const) {
+      for (const action of toList(json[key])) {
+        const code = sourceLines(action, pad);
+        if (code.length) lines.push(`${pad}${key}`, ...code);
+      }
+    }
+  }
   for (const [event, value] of Object.entries(isObject(json.on) ? json.on : {})) {
     // fromConfig lowers a state-level `onDone` to its own done event.
     push(event === "xstate.done.state" ? "onDone" : `on ${event}`, value);
@@ -328,7 +273,7 @@ function transitionLines(node: AnyStateNode, json: Json, delays: Json, pad: stri
     branches.forEach((branch, index) => {
       const guarded = isObject(branch) && branch.when !== undefined;
       const head = guarded || index === 0 ? "choice" : "choice else";
-      lines.push(`${pad}${transitionLine(node, head, branch, { guardKey: "when", choice: true })}`);
+      line(head, branch, { guardKey: "when", choice: true });
     });
   }
   return lines;
@@ -416,7 +361,11 @@ function eventLines(machine: AnyStateMachine): string[] {
  * A transition written as a function shows the targets its source names
  * (`→ review (conditional)` when it may decline or pick among several),
  * `(stays)` when its source has no `target`, or `→ ?` when no target can be
- * read. A `setupAgent.fromConfig(...)` machine is read from its config, so
+ * read (a variable's value, a helper call's result). Function sources are
+ * parsed, so every return path counts: ternaries, `&&`/`||`, early returns and
+ * local constants. With `source: true`, each function is printed under its
+ * line, along with entry and exit actions; pass `helpers` to print the
+ * functions they call by name. A `setupAgent.fromConfig(...)` machine is read from its config, so
  * its targets, guards and context patches are always known.
  *
  * @example
@@ -431,12 +380,13 @@ export function describeMachine(
   const json = machineToJSON(machine) as Json;
   const delays = isObject(json.delays) ? json.delays : {};
   const active = new Set(options.snapshot?.nodes.map((node) => node.id) ?? []);
+  const source = options.source ?? false;
   const root = machine.root;
 
   const lines = [`Machine ${machine.id}`];
   if (root.description) lines.push(`Goal: ${root.description.trim()}`);
 
-  const rootTransitions = transitionLines(root, json, delays, "  ");
+  const rootTransitions = transitionLines(root, json, delays, "  ", source);
   if (rootTransitions.length) lines.push("Any state:", ...rootTransitions);
 
   const initial = typeof json.initial === "string" ? ` (initial: ${json.initial})` : "";
@@ -445,7 +395,7 @@ export function describeMachine(
     const pad = "  ".repeat(depth);
     const mark = active.has(node.id) ? `${pad.slice(2)}* ` : pad;
     lines.push(`${mark}${stateLine(node, nodeJson)}`);
-    lines.push(...transitionLines(node, nodeJson, delays, `${pad}    `));
+    lines.push(...transitionLines(node, nodeJson, delays, `${pad}    `, source));
     const childJson = isObject(nodeJson.states) ? nodeJson.states : {};
     for (const [key, child] of Object.entries(node.states)) {
       walk(child, isObject(childJson[key]) ? childJson[key] : {}, depth + 1);
@@ -458,5 +408,10 @@ export function describeMachine(
 
   const events = eventLines(machine);
   if (events.length) lines.push("Events:", ...events);
+  const helpers = Object.entries(options.helpers ?? {});
+  if (helpers.length) {
+    lines.push("Helpers:");
+    for (const [name, helper] of helpers) lines.push(`  ${name}`, ...sourceLines(helper, "  "));
+  }
   return lines.join("\n");
 }

@@ -32,7 +32,7 @@ List:
 
 - the decision states: an `agent.decide` invoke, a `decision` tag, or a state a host answers with `decideNext`. A machine whose model choice is the output of a text request (a tool call it then checks) has no decision states: eval that choice at the **request** level with `runSeam`;
 - the person's steps: idle states a person answers (`meta.interaction`, the runner's `onIdle`). What the person decides is ground truth, not something to eval; the routing after their answer is a rule;
-- the guards. `describeMachine` shows where a transition function can go and marks it `(conditional)`, but not the guard's name or logic. Read the source for those;
+- the guards. `describeMachine` shows where a transition function can go and marks it `(conditional)`; `describeMachine(machine, { source: true })` also prints each function, so its guard logic is in the same read;
 - the sentinel states and the final states.
 
 **No model decisions.** When the machine has no decision states and its model only picks tools inside one text request (a scheduler, a tool runner), eval two levels: **rule** evals for every guard, cap, and approval rule (an "always allow" rule on both sides of its pattern; the barrier before execute; cancel), and **stats** from traces (`foldTraces` per state, approve/reject counts per tool). Skip decision evals. Add request evals only if a person can label which tool calls were right. The objective is rule violations (0) plus the per-state failure and cost numbers `improve-machine` reads.

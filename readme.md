@@ -33,20 +33,20 @@ Stately Agent 2 is in alpha. APIs may change before the stable release.
 
 - **Wrap an existing workflow, then carve it.** `wrapWorkflow` runs an async workflow unchanged inside a machine. In minutes and with no rewrite, you get inspection, traces, the event log, and a recorded baseline. Reliability proofs such as `canReach` arrive per phase, as each phase moves into states, with `checkParity` against the original after each. See [Strangler-fig retrofit](https://github.com/statelyai/agent/blob/next/docs/strangler-fig.md).
 - **Retrofit an existing agent.** Turn a `while` loop into a machine: your SDK calls, tools, and retry code become the executors; the machine replaces only the control flow. See [Migrating from a hand-rolled loop](https://github.com/statelyai/agent/blob/next/docs/from-a-loop.md). A coding agent does it with the shipped `loop-to-machine` skill (see [Agent skills](#agent-skills)): "Use the loop-to-machine skill to convert `src/support-agent.ts` to a machine."
-- **Let an agent improve its own logic.** Keep the rules in a fixed TypeScript environment and let a model rewrite the JSON policy inside it, gated by `verifyAgentConfig` and promoted only when held-out scenarios improve. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md) and the [`improve-machine` skill](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md).
+- **Let an agent improve its own logic (experimental).** Keep the rules in a fixed TypeScript environment and let a model rewrite the JSON policy inside it, gated by `verifyAgentConfig` and promoted only when held-out scenarios improve. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md) and the [`improve-machine` skill](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md).
 
 ## Environment and policy
 
 - The environment is code you own and can verify; the policy is something a model can write inside it.
 - The environment holds the rules and invariants as TypeScript states and guards, fixed and checked with `canReach`.
-- The policy is a JSON machine a model can author and improve from traces, gated before it runs and promoted only on a measured gain. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md).
+- The policy is a JSON machine a model can author and, experimentally, improve from traces, gated before it runs and promoted only on a measured gain. See [Environment and policy](https://github.com/statelyai/agent/blob/next/docs/environment-and-policy.md).
 
 ## Install
 
 <!-- install command matching the package prerelease channel and package.json peers -->
 
 ```sh
-pnpm add @statelyai/agent@alpha xstate@6.0.0-alpha.69 zod
+pnpm add @statelyai/agent@alpha xstate@6.0.0-beta.0 zod
 ```
 
 XState is pinned while its experimental durable restoration API evolves.
@@ -75,7 +75,7 @@ Upgrading from an earlier alpha: see [Upgrading between alphas](https://github.c
 
 Requirements:
 
-- Node 22 or newer, and XState exactly `6.0.0-alpha.69`.
+- Node 22 or newer, and XState exactly `6.0.0-beta.0`.
 - TypeScript 5.4 or newer. Older versions accept the code, but callback parameters in `createMachine` silently become `any`.
 - A [Standard Schema](https://standardschema.dev) library: zod 4, zod 3.24 or newer, Valibot, or ArkType. `setupAgent` throws `invalid-schema` for zod 3.23 and earlier.
 - The package is ESM-first. CommonJS builds are published too, so `require()` works. Subpath imports (`@statelyai/agent/testing`) resolve under every `moduleResolution`, including `node`.
@@ -88,7 +88,7 @@ An app that already uses XState 4 or 5 keeps it: put the agent in its own worksp
 | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | `createAsyncLogic is not a function`                                                                                            | `xstate` resolved to 4 or 5 from CommonJS   |
 | `Cannot find module '…/node_modules/xstate/durable'`                                                                            | `xstate` resolved to 4 or 5 from ESM        |
-| `unmet peer dependency "xstate@6.0.0-alpha.69"` (pnpm, npm) or `has incorrect peer dependency "xstate@6.0.0-alpha.69"` (yarn 1) | The install's only warning of the two above |
+| `unmet peer dependency "xstate@6.0.0-beta.0"` (pnpm, npm) or `has incorrect peer dependency "xstate@6.0.0-beta.0"` (yarn 1) | The install's only warning of the two above |
 
 ## Agent skills
 
@@ -103,10 +103,11 @@ cp -R node_modules/@statelyai/agent/skills/* .claude/skills/
 | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | [`graph-engineering`](https://github.com/statelyai/agent/blob/next/skills/graph-engineering/SKILL.md) | Finds which step a project is at and routes to the next skill                    |
 | [`loop-to-machine`](https://github.com/statelyai/agent/blob/next/skills/loop-to-machine/SKILL.md)     | Converts existing agent code into a machine and checks parity with `compareRuns` |
+| [`build-machine`](https://github.com/statelyai/agent/blob/next/skills/build-machine/SKILL.md)         | Builds a TypeScript machine from a spec and proves its invariants                |
 | [`generate-machine`](https://github.com/statelyai/agent/blob/next/skills/generate-machine/SKILL.md)   | Authors a JSON policy machine from scratch and runs `verifyAgentConfig`          |
 | [`add-traces`](https://github.com/statelyai/agent/blob/next/skills/add-traces/SKILL.md)               | Stamps and persists every run so it replays                                      |
 | [`add-evals`](https://github.com/statelyai/agent/blob/next/skills/add-evals/SKILL.md)                 | Writes evals per state, at the cheapest level that catches the failure           |
-| [`improve-machine`](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md)     | Improves a policy from traces and hands the change to a person as a pull request |
+| [`improve-machine`](https://github.com/statelyai/agent/blob/next/skills/improve-machine/SKILL.md)     | Experimental. Improves a policy from traces; a person reviews the pull request   |
 
 ## Quick start
 

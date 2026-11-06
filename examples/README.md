@@ -20,7 +20,7 @@ they happen to call.
 
 ## Environment and policy
 
-[self-improving-refunds](self-improving-refunds) is the worked example of [Environment and policy](../docs/environment-and-policy.md): a refund desk whose rules are fixed guards, and a JSON playbook the agent improves between batches.
+[self-improving-refunds](self-improving-refunds) is the worked, experimental example of [Environment and policy](../docs/environment-and-policy.md): a refund desk whose rules are fixed guards, and a JSON playbook the agent improves between batches.
 
 - Environment only: [verification](verification), [booking-compensation](booking-compensation), [human-in-the-loop](human-in-the-loop)
 - Policy with a judgment inside: [triage](triage), [joke](joke)
@@ -127,7 +127,7 @@ key or a specific runtime, so they set `manual: true` and are not exported from
 - [rank-candidates](rank-candidates): Jev decides, code sorts — a Jev score per candidate against a brief and a yes/no per shortlisted pair, while the threshold, sort, per-bucket quota and top-k cut-off are plain code, and every cut carries a reason
 - [code-review-loop](code-review-loop): generate, then a self-check and an independent review in parallel, then checks, then ship, retry, or ask a person. The loop is a fixed machine, and `canReach` proves it never ships without passing checks and approval. The triage policy is JSON improved from event-log traces against hidden tests, and it runs on Claude Code in headless mode
 - [tic-tac-toe](tic-tac-toe): a plain XState game where `decideNext` picks O's move. A JSON policy over low-level board features climbs from "first empty cell" to a policy `canReach` proves never loses to any opponent, gated by `verifyAgentConfig` and an objective that counts losing lines first
-- [self-improving-refunds](self-improving-refunds): the agent rewrites its own playbook, a JSON machine gated by `verifyAgentConfig` and a held-out replay before promotion, while the desk's business rules stay guards it cannot touch and an `illegallyIssued` sentinel stays provably unreachable
+- [self-improving-refunds](self-improving-refunds) (experimental): the agent rewrites its own playbook, a JSON machine gated by `verifyAgentConfig` and a held-out replay before promotion, while the desk's business rules stay guards it cannot touch and an `illegallyIssued` sentinel stays provably unreachable
 
 ## Statechart policies
 

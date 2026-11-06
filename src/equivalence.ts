@@ -29,6 +29,7 @@
  * neither `ai` nor `openai`.
  * @module
  */
+import { isAsyncIterable } from "./internal/effects.js";
 
 /** An error as recorded: JSON-safe. */
 export interface RecordedError {
@@ -42,6 +43,8 @@ export interface RecordedError {
    * `vercel.ai.error.AI_APICallError`; replay restores them, so checks like
    * `APICallError.isInstance` still pass. */
   markers?: string[];
+  /** `name` was an own enumerable field, as the AI SDK's errors set it; replay keeps it so. */
+  ownName?: true;
 }
 
 /** One model call. `call` is its 0-based position among model calls. */
@@ -307,6 +310,7 @@ export class RecordingDivergenceError extends Error {
 function toRecordedError(error: unknown): RecordedError {
   if (!(error instanceof Error)) return { name: "Error", message: String(error) };
   const recorded: RecordedError = { name: error.name, message: error.message };
+  if (Object.prototype.propertyIsEnumerable.call(error, "name")) recorded.ownName = true;
   const code = (error as { code?: unknown }).code;
   if (code !== undefined) recorded.code = toJson(code);
   // Only number and boolean fields: string and object fields (a URL with a
@@ -330,8 +334,17 @@ function toRecordedError(error: unknown): RecordedError {
   return recorded;
 }
 
-function fromRecordedError({ data, markers, ...fields }: RecordedError): Error {
+function fromRecordedError({ data, markers, name, ownName, ...fields }: RecordedError): Error {
   const error = Object.assign(new Error(fields.message), fields, data);
+  // Enumerable only when the original's was, so the revived one serializes alike.
+  if (ownName || name !== "Error") {
+    Object.defineProperty(error, "name", {
+      value: name,
+      writable: true,
+      configurable: true,
+      enumerable: ownName ?? false,
+    });
+  }
   for (const marker of markers ?? []) {
     (error as unknown as Record<symbol, boolean>)[Symbol.for(marker)] = true;
   }
@@ -378,8 +391,11 @@ function omit(value: unknown, keys: string[]): unknown {
   return Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
 }
 
-/** Key-order-independent JSON, for equality. */
-function stableStringify(value: unknown): string {
+/**
+ * Key-order-independent JSON, for equality.
+ * @internal
+ */
+export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
   if (value && typeof value === "object") {
     return `{${Object.keys(value)
@@ -404,14 +420,6 @@ function streamFrom(parts: unknown[]): ReadableStream<unknown> {
       controller.close();
     },
   });
-}
-
-function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    typeof (value as Record<symbol, unknown>)[Symbol.asyncIterator] === "function"
-  );
 }
 
 async function* iterate(chunks: unknown[]): AsyncGenerator<unknown> {
@@ -1188,9 +1196,13 @@ export function compareRecordings(
       if (k === -1) {
         changed.push({
           index,
-          reason: "missing-effect",
+          // A missing output is a run that did not return: the outputs differ.
+          reason: left.kind === "output" ? "output" : "missing-effect",
           expected: left,
-          message: `The port never made ${describe(left)}.`,
+          message:
+            left.kind === "output"
+              ? `The port never returned; the original returned ${JSON.stringify(left.value)}.`
+              : `The port never made ${describe(left)}.`,
         });
         continue;
       }
@@ -1200,11 +1212,15 @@ export function compareRecordings(
     }
     // An extra effect comes first: it is usually the cause of what follows.
     for (const j of unpairedRights) {
+      const extra = b[j]!;
       divergences.push({
         index: lefts[0] ?? at,
-        reason: "extra-effect",
-        actual: b[j],
-        message: `The port made ${describe(b[j]!)}, which the original never made.`,
+        reason: extra.kind === "output" ? "output" : "extra-effect",
+        actual: extra,
+        message:
+          extra.kind === "output"
+            ? `The original never returned; the port returned ${JSON.stringify(extra.value)}.`
+            : `The port made ${describe(extra)}, which the original never made.`,
       });
     }
     divergences.push(...changed);

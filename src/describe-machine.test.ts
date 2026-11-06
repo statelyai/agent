@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { setup } from "xstate";
+import { createAsyncLogic, setup } from "xstate";
 import { z } from "zod";
 import { describeMachine } from "./describe-machine.js";
 import { setupAgent } from "./setup-agent.js";
@@ -65,6 +65,7 @@ const refundMachine = refundAgent.createMachine({
       invoke: {
         src: "agent.generateText",
         id: "payout",
+        input: { model: "quick", prompt: "Pay out the refund" },
         onDone: { target: "done" },
         onError: ({ context }) =>
           context.attempts < 3
@@ -170,6 +171,138 @@ describe("describeMachine", () => {
     expect(text).toContain("on NOTE → (stays)");
     // A call inside a nested callback is not the transition's own result.
     expect(text).toContain("on MAP → (stays)");
+  });
+
+  test("a target held in a variable is unknown, not (stays)", () => {
+    const machine = setup({}).createMachine({
+      context: { step: 0 },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            NEXT: ({ context }) => {
+              const next = ["working", "done"][context.step]!;
+              return { target: next };
+            },
+            SHORT: ({ context }) => {
+              const target = context.step > 0 ? "#done" : "#working";
+              return { target };
+            },
+          },
+        },
+        done: { id: "done" },
+      },
+    });
+    // As the dev build prints them: minified, no spaces.
+    const { on } = (
+      machine.config as unknown as { states: { working: { on: Record<string, unknown> } } }
+    ).states.working;
+    Object.defineProperty(on.NEXT, "toString", {
+      value: () => '({context:e})=>{const t=["working","done"][e.step];return{target:t}}',
+    });
+    Object.defineProperty(on.SHORT, "toString", {
+      value: () => "({ context }) => { const target = pick(context); return { target }; }",
+    });
+
+    const text = describeMachine(machine);
+    expect(text).toContain("on NEXT → ?");
+    expect(text).toContain("on SHORT → ?");
+  });
+
+  test("a shorthand target inside a context patch stays", () => {
+    const machine = setup({}).createMachine({
+      context: { target: "" },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            SAVE: ({ event }) => {
+              const target = (event as unknown as { target: string }).target;
+              return { context: { target } };
+            },
+          },
+        },
+      },
+    });
+    expect(describeMachine(machine)).toContain("on SAVE → (stays); sets target");
+  });
+
+  test("a conditional target expression stays conditional, and a returned context is not an alias", () => {
+    const machine = setup({}).createMachine({
+      context: { ready: false, n: 0 },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            GO: ({ context }) => ({ target: context.ready ? "done" : "working" }),
+            SET: ({ event }) => {
+              const patch = (event as unknown as { patch: { n: number } }).patch;
+              return { context: { ...patch } };
+            },
+          },
+        },
+        done: {},
+      },
+    });
+    const text = describeMachine(machine);
+    expect(text).toMatch(/on GO → .*\(conditional\)/);
+    expect(text).toContain("…patch");
+  });
+
+  test("a spread of the current context sets nothing", () => {
+    const machine = setup({}).createMachine({
+      context: { outcome: "", toExecute: [] as string[], extra: {} as object },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            DECIDE: ({ context: ctx }) => ({
+              context: { ...ctx, outcome: "ok", toExecute: [] },
+            }),
+            MERGE: ({ context, event }) => ({
+              context: { ...context, ...(event as unknown as { patch: object }).patch },
+            }),
+          },
+        },
+      },
+    });
+    const { on } = (
+      machine.config as unknown as { states: { working: { on: Record<string, unknown> } } }
+    ).states.working;
+    // Minified: the context binding is renamed.
+    Object.defineProperty(on.DECIDE, "toString", {
+      value: () => '({context:e})=>({context:{...e,outcome:"ok",toExecute:[]}})',
+    });
+    const text = describeMachine(machine);
+    expect(text).toContain("on DECIDE → (stays); sets outcome, toExecute");
+    // A spread of anything else may set keys the source cannot name.
+    expect(text).toContain("on MERGE → (stays); sets …event.patch");
+  });
+
+  test("an unconditional onError is not (conditional)", () => {
+    const machine = setup({
+      actors: { work: createAsyncLogic({ run: async () => 1 }) },
+    }).createMachine({
+      context: { error: null as string | null },
+      initial: "working",
+      states: {
+        working: {
+          invoke: {
+            src: "work",
+            onDone: { target: "done" },
+            onError: ({ event }) => ({
+              target: "failed",
+              context: {
+                error: event.error instanceof Error ? event.error.message : null,
+              },
+            }),
+          },
+        },
+        done: {},
+        failed: {},
+      },
+    });
+    expect(describeMachine(machine)).toContain("error → failed; sets error");
   });
 
   test("describes a TS-authored machine", () => {
@@ -390,10 +523,260 @@ describe("describeMachine", () => {
             on COMPUTED → ?
             on COUNT → (stays); sets count
             on ALWAYS_B → b
-            on SPREAD → (stays); sets …context, count
+            on SPREAD → (stays); sets count
         b (parallel)
           x
           y"
     `);
+  });
+
+  test("reads every return path: local constants, early returns and fall-through", () => {
+    const machine = setup({}).createMachine({
+      context: { step: 0, ready: false },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            SHORT: ({ context }) => {
+              const target = context.step > 0 ? "done" : "failed";
+              return { target };
+            },
+            EARLY: ({ context }) => {
+              if (!context.ready) return { target: "failed" };
+              return { target: "done", context: { step: context.step + 1 } };
+            },
+            MAYBE: ({ context }) => {
+              if (context.ready) return { target: "done" };
+            },
+            STAY_OR_GO: ({ context }) =>
+              context.ready ? { target: "done" } : { context: { step: 1 } },
+            TEMPLATE: () => ({ target: `done` }),
+            THROWS: ({ context }) => {
+              if (context.ready) return { target: "done" };
+              throw new Error("not ready");
+            },
+          },
+        },
+        done: {},
+        failed: {},
+      },
+    });
+    const text = describeMachine(machine);
+    expect(text).toContain("on SHORT → done, failed (conditional)");
+    expect(text).toContain("on EARLY → failed, done (conditional); sets step");
+    expect(text).toContain("on MAYBE → done (conditional)");
+    expect(text).toContain("on STAY_OR_GO → done (conditional); sets step");
+    expect(text).toContain("on TEMPLATE → done");
+    expect(text).toContain("on THROWS → done\n");
+  });
+
+  test("a known target beside an unknown one shows both", () => {
+    const pick = (ready: boolean) => (ready ? "done" : "working");
+    const machine = setup({}).createMachine({
+      context: { ready: false },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            GO: ({ context }) =>
+              context.ready ? { target: "done" } : { target: pick(context.ready) },
+          },
+        },
+        done: {},
+      },
+    });
+    expect(describeMachine(machine)).toContain("on GO → done, ? (conditional)");
+  });
+
+  test("reads a method-shorthand transition and an unparseable source", () => {
+    const machine = setup({}).createMachine({
+      context: { n: 0 },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            METHOD: ({ context }) => ({ target: "done", context: { n: context.n + 1 } }),
+            NATIVE: () => ({ target: "done" }),
+          },
+        },
+        done: {},
+      },
+    });
+    const { on } = (
+      machine.config as unknown as { states: { working: { on: Record<string, unknown> } } }
+    ).states.working;
+    Object.defineProperty(on.METHOD, "toString", {
+      value: () =>
+        'METHOD({ context }) { return { target: "done", context: { n: context.n + 1 } }; }',
+    });
+    Object.defineProperty(on.NATIVE, "toString", { value: () => "function () { [native code] }" });
+    const text = describeMachine(machine);
+    expect(text).toContain("on METHOD → done; sets n");
+    expect(text).toContain("on NATIVE → ?");
+  });
+
+  test("prints each function transition's source with source: true", () => {
+    const machine = setup({}).createMachine({
+      context: { ready: false },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            GO: { target: "done" },
+            CHECK: ({ context }) => (context.ready ? { target: "done" } : undefined),
+          },
+        },
+        done: {},
+      },
+    });
+    const { on } = (
+      machine.config as unknown as { states: { working: { on: Record<string, unknown> } } }
+    ).states.working;
+    Object.defineProperty(on.CHECK, "toString", {
+      value: () =>
+        '({ context }) => {\n          if (!context.ready) return undefined;\n          return { target: "done" };\n        }',
+    });
+    expect(describeMachine(machine, { source: true })).toMatchInlineSnapshot(`
+      "Machine 
+      States (initial: working):
+        working
+            on GO → done
+            on CHECK → done (conditional)
+              | ({ context }) => {
+              |   if (!context.ready) return undefined;
+              |   return { target: "done" };
+              | }
+        done"
+    `);
+    expect(describeMachine(machine)).not.toContain("|");
+  });
+
+  test("source: true prints entry and exit actions; helpers print in their own section", () => {
+    const fn = (code: string) => new Function(`return ${code}`)() as never;
+    const withinLimit = fn(`(turn, limit) => turn < limit`);
+    const machine = setup({}).createMachine({
+      context: { turn: 0, limit: 3 },
+      initial: "working",
+      states: {
+        working: {
+          entry: fn(`(_, enq) => enq.emit({ type: "started" })`),
+          exit: fn(`() => {}`),
+          on: {
+            NEXT: fn(
+              `({ context }) => withinLimit(context.turn, context.limit) ? { target: "working" } : { target: "done" }`,
+            ),
+          },
+        },
+        done: {},
+      },
+    });
+    expect(describeMachine(machine, { source: true, helpers: { withinLimit } }))
+      .toMatchInlineSnapshot(`
+        "Machine 
+        States (initial: working):
+          working
+              entry
+                | (_, enq) => enq.emit({ type: "started" })
+              exit
+                | () => {}
+              on NEXT → working, done (conditional)
+                | ({ context }) => withinLimit(context.turn, context.limit) ? { target: "working" } : { target: "done" }
+          done
+        Helpers:
+          withinLimit
+            | (turn, limit) => turn < limit"
+      `);
+    expect(describeMachine(machine)).not.toContain("entry");
+  });
+
+  test("vite SSR import rewrites are read and printed as written", () => {
+    const fn = (code: string) =>
+      new Function("__vite_ssr_import_3__", `return ${code}`)({
+        next: () => "done",
+        Target: { done: "done" },
+      }) as never;
+    const machine = setup({}).createMachine({
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            GO: fn(
+              `({ context }) => ({ target: __vite_ssr_import_3__.Target.done, context: (0, __vite_ssr_import_3__.next)(context) })`,
+            ),
+          },
+        },
+        done: {},
+      },
+    });
+    const text = describeMachine(machine, { source: true });
+    expect(text).not.toContain("__vite_ssr_import");
+    expect(text).toContain("| ({ context }) => ({ target: Target.done, context: next(context) })");
+    const withDefault = setup({}).createMachine({
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            GO: fn(
+              `({ context }) => (__vite_ssr_import_3__.default(context) ? { target: "done" } : undefined)`,
+            ),
+          },
+        },
+        done: {},
+      },
+    });
+    expect(describeMachine(withDefault)).toContain("on GO → done (conditional)");
+  });
+
+  test("an exhaustive switch or if/else does not decline; spreads and mutations count", () => {
+    const fn = (code: string) => new Function(`return ${code}`)() as never;
+    const machine = setup({}).createMachine({
+      context: { failed: false },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            SWITCH: fn(`({ event }) => {
+              switch (event.kind) {
+                case "a": return { target: "done" };
+                default: return { target: "done" };
+              }
+            }`),
+            SWITCH_BREAK: fn(`({ event }) => {
+              switch (event.kind) {
+                case "a": break;
+                default: return { target: "done" };
+              }
+            }`),
+            IF_ELSE: fn(`({ context }) => {
+              if (context.failed) { return { target: "failed" }; } else { throw new Error("x"); }
+            }`),
+            SPREAD_OVERRIDE: fn(`() => ({ target: "done", ...{ target: "failed" } })`),
+            SPREAD_UNKNOWN: fn(`({ event }) => ({ target: "done", ...event.patch })`),
+            SPREAD_BEFORE: fn(`({ event }) => ({ ...event.patch, target: "done" })`),
+            NESTED_WRITE: fn(`({ event }) => {
+              let next = "done";
+              event.items.forEach((item) => { if (item.failed) next = "failed"; });
+              return { target: next };
+            }`),
+            MUTATED: fn(`({ context }) => {
+              const transition = { target: "done" };
+              if (context.failed) transition.target = "failed";
+              return transition;
+            }`),
+          },
+        },
+        done: {},
+        failed: {},
+      },
+    });
+    const text = describeMachine(machine);
+    expect(text).toContain("on SWITCH → done\n");
+    expect(text).toContain("on SWITCH_BREAK → done (conditional)");
+    expect(text).toContain("on IF_ELSE → failed\n");
+    expect(text).toContain("on SPREAD_OVERRIDE → failed\n");
+    expect(text).toContain("on SPREAD_UNKNOWN → ?");
+    expect(text).toContain("on SPREAD_BEFORE → done\n");
+    expect(text).toContain("on MUTATED → ?");
+    expect(text).toContain("on NESTED_WRITE → ?");
   });
 });
