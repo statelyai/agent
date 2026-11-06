@@ -1086,8 +1086,9 @@ interface RunAgentBindContext {
    *
    * `self` is the settling request's own actor ref; the `provideExecutors`
    * path reads the invoking machine actor off it (`self._parent`) because it
-   * has no run-scoped root actor. `createAgentRuntime` ignores it and delivers to the
-   * run's root.
+   * has no run-scoped root actor. `createAgentRuntime` delivers to the run's
+   * root, sending from `self` through the actor system so the event reaches
+   * the root in order with the call's own completion.
    */
   recordUsage?: (
     usage: AgentCallUsage,
@@ -3191,7 +3192,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // still fold into the log, but the event is DROPPED rather than delivered,
   // so a late arrival can never affect an already-returned result. Dropped
   // stragglers are visible on `onTrace` as `usage.dropped`.
-  const recordUsage = (usage: AgentCallUsage, source: AgentUsageEventSource = {}) => {
+  const recordUsage = (
+    usage: AgentCallUsage,
+    source: AgentUsageEventSource = {},
+    self?: BoundActorSelf,
+  ) => {
     const event: AgentUsageEvent = {
       type: AGENT_USAGE_EVENT_TYPE,
       ...source,
@@ -3201,7 +3206,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     let delivered = false;
     deliverUsageEvent(
       event,
-      () => rootFacade(() => (delivered = true)),
+      // A decision's usage follows the event it chose (`recordLater`), so
+      // it keeps to the mailbox behind that event.
+      () => rootFacade(() => (delivered = true), source.kind === "decision" ? undefined : self),
       (dropped) => {
         if (!finished) {
           return false;
@@ -3264,12 +3271,27 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // The root, as the bind wrappers see it: its current snapshot, and a `send`
   // that queues onto the mailbox. The loop has no live root actor — every
   // transition is pure — so this facade is the one place "the root" lives.
-  const rootFacade = (onSend?: () => void): AnyActorRef =>
+  // `from` (a request's actor) sends through its actor system, which delivers
+  // to the root in the same order as the completions its batch produces; a
+  // send into the mailbox would land after them.
+  const rootFacade = (onSend?: () => void, from?: BoundActorSelf): AnyActorRef =>
     ({
       getSnapshot: () => current,
       send: (event: EventObject) => {
         onSend?.();
-        enqueue(event);
+        const sender = from as
+          | (AnyActorRef & {
+              _parent?: AnyActorRef;
+              system?: { sendEvent?: (source: object, target: object, event: object) => void };
+            })
+          | undefined;
+        let root = sender;
+        while (root?._parent) root = root._parent as typeof sender;
+        if (sender?.system?.sendEvent && root !== undefined && root !== sender) {
+          sender.system.sendEvent(sender, root, event);
+        } else {
+          enqueue(event);
+        }
       },
     }) as unknown as AnyActorRef;
   const actorHolder: { actorRef: AnyActorRef | undefined } = { actorRef: rootFacade() };

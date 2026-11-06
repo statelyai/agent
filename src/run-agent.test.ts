@@ -6017,3 +6017,67 @@ describe("a request failing inside a child machine", () => {
     expect(result.snapshot.context.ok).toBe(false);
   });
 });
+
+describe("usage from concurrent children", () => {
+  test("reaches the parent before the children's completions", async () => {
+    const child = setupAgent({
+      context: z.object({}),
+      events: {},
+      actors: { tool: createAsyncLogic({ run: async () => 1 }) },
+      requests: {
+        summarize: {
+          model: "m",
+          schemas: { input: z.object({}), output: z.string() },
+          prompt: "x",
+        },
+      },
+    }).createMachine({
+      context: {},
+      initial: "tool",
+      states: {
+        tool: { invoke: { src: "tool", onDone: { target: "work" } } },
+        work: { invoke: { src: "summarize", input: {}, onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const parent = setupAgent({
+      context: z.object({ tokens: z.number(), joined: z.number() }),
+      events: {},
+      actors: { child },
+    }).createMachine({
+      context: { tokens: 0, joined: 0 },
+      initial: "start",
+      states: {
+        start: {
+          entry: (_, enq) => {
+            enq.spawn("child", { id: "c1" });
+            enq.spawn("child", { id: "c2" });
+          },
+          always: { target: "researching" },
+        },
+        researching: {
+          on: {
+            [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
+              context: { ...context, tokens: context.tokens + (event.usage.totalTokens ?? 0) },
+            }),
+            "xstate.done.actor": ({ context }) => ({
+              context: { ...context, joined: context.joined + 1 },
+            }),
+          },
+          always: ({ context }) => (context.joined === 2 ? { target: "done" } : undefined),
+        },
+        done: { type: "final" },
+      },
+    });
+    const result = await runAgent(parent, {
+      executors: {
+        generateText: async () => {
+          await Promise.resolve();
+          return { result: "s", usage: { totalTokens: 100 } };
+        },
+      },
+    });
+    expect(result.status).toBe("done");
+    expect(result.snapshot.context.tokens).toBe(200);
+  });
+});
