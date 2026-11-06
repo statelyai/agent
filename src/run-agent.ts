@@ -4343,6 +4343,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // that arrives during the write is journaled too.
       const journaledUsage = new Set<EventObject>();
       for (;;) {
+        await drainJournal();
         const usage = mailbox.filter(
           (event) => event.type === AGENT_USAGE_EVENT_TYPE && !journaledUsage.has(event),
         );
@@ -4351,9 +4352,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           journaledUsage.add(event);
           appendLogEntry(event);
         }
-        await drainJournal();
       }
-      await drainJournal();
       const snapshot = current as AnyMachineSnapshot;
       let outcome: AgentRunOutcome<TMachine>;
       if (stopReason !== undefined) {
