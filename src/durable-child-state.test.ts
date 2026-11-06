@@ -691,6 +691,30 @@ describe("a plain actor that finishes in the step it starts an effect", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(ran).toEqual([]);
   });
+
+  test("drops that effect when the run is aborted while its cause is written", async () => {
+    const ran: string[] = [];
+    const root = createFinishing(ran);
+    const store = createInMemoryEventLogStore();
+    const controller = new AbortController();
+    const slow = {
+      ...store,
+      append: async (args: Parameters<typeof store.append>[0]) => {
+        if (args.entries.some((entry) => entry.event.type === "PING")) {
+          controller.abort(new Error("host stop"));
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return store.append(args);
+      },
+    };
+    const result = await runToQuiescence(
+      createAgentRuntime(root, { store: slow, threadId: "t", signal: controller.signal }),
+      { input: undefined, event: { type: "WORK" } } as AgentRunInit<typeof root>,
+    );
+    expect(result.status).not.toBe("done");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ran).toEqual([]);
+  });
 });
 
 describe("a restored child completion inside an active parent", () => {
