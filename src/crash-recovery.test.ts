@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createAsyncLogic } from "xstate";
+import { createAsyncLogic, createCallbackLogic } from "xstate";
 import { z } from "zod";
 import { checkCrashRecovery } from "./crash-recovery.js";
 import { createInMemoryEventLogStore, type AgentEventLogStore } from "./event-log-store.js";
@@ -7,7 +7,9 @@ import {
   AGENT_USAGE_EVENT_TYPE,
   createAgentSchemas,
   createDecisionLogic,
+  createAgentRuntime,
   createTextLogic,
+  runToQuiescence,
   setupAgent,
   type AgentDecisionExecutor,
 } from "./index.js";
@@ -291,6 +293,131 @@ describe("child inputs across a crash", () => {
       events: [{ type: "PING" }, { type: "DONE" }],
     });
     expect(report.baseline.output).toEqual({ notes: 1 });
+    expect(report.failures).toEqual([]);
+  });
+});
+
+describe("the final write", () => {
+  test("a rejected last batch settles the run as a journal error", async () => {
+    const machine = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: { GO: z.object({}) } }),
+    }).createMachine({
+      context: {},
+      initial: "waiting",
+      states: { waiting: { on: { GO: { target: "done" } } }, done: { type: "final" } },
+    });
+    const inner = createInMemoryEventLogStore();
+    let appends = 0;
+    const store: AgentEventLogStore = {
+      read: (threadId, options) => inner.read(threadId, options),
+      length: (threadId) => inner.length(threadId),
+      fork: (input) => inner.fork(input),
+      async append(input) {
+        if (appends++ > 0) throw new Error("disk full");
+        await inner.append(input);
+      },
+    };
+    const first = await runToQuiescence(createAgentRuntime(machine, { store, threadId: "t" }), {});
+    expect(first.status).toBe("idle");
+    const second = await runToQuiescence(createAgentRuntime(machine, { store, threadId: "t" }), {
+      event: { type: "GO" },
+    });
+    expect(second.status === "error" && second.cause).toBe("journal");
+  });
+});
+
+describe("harness coverage", () => {
+  test("a child machine under two sources is tracked under both", async () => {
+    const worker = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: { tool: createAsyncLogic({ run: async () => 1 }) },
+    }).createMachine({
+      context: {},
+      initial: "tool",
+      states: {
+        tool: { invoke: { id: "tool", src: "tool", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const parent = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: { first: worker, second: worker },
+    }).createMachine({
+      context: {},
+      initial: "a",
+      states: {
+        a: { invoke: { id: "a", src: "first", onDone: { target: "b" } } },
+        b: { invoke: { id: "b", src: "second", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const report = await checkCrashRecovery(parent, {});
+    expect(report.failures).toEqual([]);
+    expect(report.baseline.effects.map((effect) => effect.key)).toEqual([
+      "actor:a/tool",
+      "actor:b/tool",
+    ]);
+  });
+
+  test("a child machine supplied through `actors` replays", async () => {
+    const worker = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: { tool: createAsyncLogic({ run: async () => 1 }) },
+    }).createMachine({
+      context: {},
+      initial: "tool",
+      states: {
+        tool: { invoke: { id: "tool", src: "tool", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const parent = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: { worker: createAsyncLogic({ run: async () => 0 }) },
+    }).createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: { invoke: { id: "worker", src: "worker", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const report = await checkCrashRecovery(parent, { actors: { worker } });
+    expect(report.failures).toEqual([]);
+    expect(report.baseline.effects.map((effect) => effect.key)).toEqual(["actor:worker/tool"]);
+  });
+
+  test("a host event is not mistaken for an internal event of the same shape", async () => {
+    const parent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ pings: z.number() }),
+        events: { PING: z.object({}) },
+      }),
+      actors: {
+        pinger: createCallbackLogic(({ sendBack }) => {
+          sendBack({ type: "PING" });
+        }),
+      },
+    }).createMachine({
+      context: { pings: 0 },
+      initial: "first",
+      states: {
+        first: {
+          invoke: { src: "pinger" },
+          on: {
+            PING: ({ context }) => ({ target: "second", context: { pings: context.pings + 1 } }),
+          },
+        },
+        second: {
+          on: {
+            PING: ({ context }) => ({ target: "done", context: { pings: context.pings + 1 } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => context },
+      },
+    });
+    const report = await checkCrashRecovery(parent, { events: [{ type: "PING" }] });
+    expect(report.baseline.output).toEqual({ pings: 2 });
     expect(report.failures).toEqual([]);
   });
 });

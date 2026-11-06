@@ -149,6 +149,8 @@ type StartedEffect = CrashEffect & { site: string; completed: boolean; request?:
 /** One run's effects and how it decides to crash. */
 interface RunWorld {
   effects: StartedEffect[];
+  /** The log entry ids of the host events this run delivered, in order. */
+  hostEntries: string[];
   /** Each model call's result and how long it took, by key. */
   answers: Map<string, RecordedAnswer>;
   /** The uninterrupted run's answers: a call it made gets the same result again. */
@@ -187,7 +189,7 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
   const newStore = options.store ?? createInMemoryEventLogStore;
   const baselineStore = observedStore(newStore(), baselineWorld, () => false);
   const baseline = await withTimeout(
-    runTurns(machine, options, baselineWorld, baselineStore.store, "baseline"),
+    runTurns(machine, options, baselineWorld, baselineStore.store),
     timeout,
   );
   if (baseline === TIMED_OUT) {
@@ -198,8 +200,8 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
   const expected = outcomeOf(baseline);
 
   const points: CrashPoint[] = [];
-  // Before the first append, and after each one but the last.
-  for (const entries of new Set([0, ...baselineStore.appends.slice(0, -1)])) {
+  // Before the first append, and after each one.
+  for (const entries of new Set([0, ...baselineStore.appends])) {
     points.push({ kind: "log", entries });
   }
   baselineWorld.effects.forEach((effect, index) => {
@@ -285,7 +287,7 @@ async function crashAt<TMachine extends AnyStateMachine>(
   });
   if (point.kind === "log" && point.entries === 0) dying.freeze();
   const died = await withTimeout(
-    runTurns(machine, options, crashed, dying.store, "crash", controller.signal),
+    runTurns(machine, options, crashed, dying.store, undefined, controller.signal),
     timeout,
   );
   crash();
@@ -297,7 +299,10 @@ async function crashAt<TMachine extends AnyStateMachine>(
   const resumed = newWorld(() => false, ctx.recorded);
   let result: AgentRunResult<TMachine> | typeof TIMED_OUT;
   try {
-    result = await withTimeout(runTurns(machine, options, resumed, backing, "resume"), timeout);
+    result = await withTimeout(
+      runTurns(machine, options, resumed, backing, crashed.hostEntries),
+      timeout,
+    );
   } catch (error) {
     return [fail("threw", `the resume threw: ${String(error)}`)];
   }
@@ -355,7 +360,12 @@ async function crashAt<TMachine extends AnyStateMachine>(
 
   const log = await backing.read(THREAD);
   try {
-    const replayed = replay(machine, log);
+    const replayed = replay(
+      options.actors !== undefined
+        ? (machine.provide({ actors: options.actors as never }) as TMachine)
+        : machine,
+      log,
+    );
     const fromLog = stableStringify(
       toJsonValue({
         value: (replayed.snapshot as { value?: unknown }).value,
@@ -389,7 +399,8 @@ async function runTurns<TMachine extends AnyStateMachine>(
   options: CheckCrashRecoveryOptions<TMachine>,
   world: RunWorld,
   store: AgentEventLogStore,
-  phase: "baseline" | "crash" | "resume",
+  /** Resuming: the host events the crashed run delivered, by entry id. */
+  deliveredBefore?: readonly string[],
   signal?: AbortSignal,
 ): Promise<AgentRunResult<TMachine>> {
   const tracked = trackActors(machine, world);
@@ -403,10 +414,23 @@ async function runTurns<TMachine extends AnyStateMachine>(
           ]),
         )
       : undefined;
-  const turn = (event?: EventObject) =>
-    runToQuiescence(
+  const turn = (event?: EventObject) => {
+    // The host's event is the first root entry like it after the run opens.
+    let awaiting = event !== undefined ? canonicalEventJson(event) : undefined;
+    return runToQuiescence(
       createAgentRuntime(tracked, {
         ...options.runtime,
+        onEvent: (entry) => {
+          options.runtime?.onEvent?.(entry);
+          if (
+            awaiting !== undefined &&
+            entry.actorPath === undefined &&
+            canonicalEventJson(entry.event) === awaiting
+          ) {
+            world.hostEntries.push(entry.id);
+            awaiting = undefined;
+          }
+        },
         executors,
         ...(actors !== undefined ? { actors } : {}),
         store,
@@ -418,9 +442,14 @@ async function runTurns<TMachine extends AnyStateMachine>(
         ...(event !== undefined ? { event: event as never } : {}),
       },
     );
+  };
 
   const events = options.events ?? [];
-  let next = phase === "resume" ? delivered(await store.read(THREAD), events) : 0;
+  let next = 0;
+  if (deliveredBefore !== undefined) {
+    const durable = new Set((await store.read(THREAD)).map((entry) => entry.id));
+    while (next < deliveredBefore.length && durable.has(deliveredBefore[next]!)) next++;
+  }
   let result = await turn();
   while (result.status === "idle" && next < events.length && !world.crashed) {
     result = await turn(events[next++]);
@@ -430,23 +459,13 @@ async function runTurns<TMachine extends AnyStateMachine>(
   return result;
 }
 
-/** How many of `events` the log already holds, matched in order on the root. */
-function delivered(log: readonly AgentLogEntry[], events: readonly EventObject[]): number {
-  let next = 0;
-  for (const entry of log) {
-    if (next >= events.length) break;
-    if (entry.actorPath !== undefined) continue;
-    if (canonicalEventJson(entry.event) === canonicalEventJson(events[next])) next++;
-  }
-  return next;
-}
-
 function newWorld(
   crashesAt: (effect: StartedEffect) => boolean,
   recorded?: ReadonlyMap<string, RecordedAnswer>,
 ): RunWorld {
   return {
     effects: [],
+    hostEntries: [],
     answers: new Map(),
     ...(recorded !== undefined ? { recorded } : {}),
     crashed: false,
@@ -639,10 +658,12 @@ function never(signal: AbortSignal | undefined): Promise<never> {
 function trackActors<TMachine extends AnyStateMachine>(
   machine: TMachine,
   world: RunWorld,
-  visited = new Set<AnyStateMachine>(),
+  // The machines above this one: a machine that invokes itself stops here,
+  // while the same machine under two sources is tracked under both.
+  ancestors: ReadonlySet<AnyStateMachine> = new Set(),
 ): TMachine {
-  if (visited.has(machine)) return machine;
-  visited.add(machine);
+  if (ancestors.has(machine)) return machine;
+  const visited = new Set([...ancestors, machine]);
   const sources = (machine.sources?.actors ?? {}) as Record<string, AnyActorLogic>;
   const wrapped: Record<string, AnyActorLogic> = {};
   for (const [key, logic] of Object.entries(sources)) {

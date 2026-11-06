@@ -4315,6 +4315,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
           appendLogEntry(event);
         }
       }
+      // The last step's entries are written before the outcome is decided,
+      // so a write that fails here settles the run `cause: "journal"`.
+      await drainJournal();
       const snapshot = current as AnyMachineSnapshot;
       let outcome: AgentRunOutcome<TMachine>;
       if (stopReason !== undefined) {
