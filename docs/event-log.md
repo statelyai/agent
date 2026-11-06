@@ -13,7 +13,7 @@ Only external inputs, in the order the run accepted them:
 - Child completions: `xstate.done.actor` and `xstate.error.actor`, with output inline.
 - Timer firings.
 - `@agent.usage` spend records.
-- What an invoked child machine processes, marked with the child's `actorPath`: events sent to it, its own invokes' completions, and its decisions' chosen events.
+- What an invoked or spawned child machine processes, marked with the child's `actorPath`: events sent to it, its own invokes' completions, and its decisions' chosen events.
 
 Raised and internal events are never journaled. Replay re-derives them from the machine's own logic, so journaling them would apply them twice.
 

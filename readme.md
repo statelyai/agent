@@ -103,6 +103,7 @@ cp -R node_modules/@statelyai/agent/skills/* .claude/skills/
 | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | [`graph-engineering`](https://github.com/statelyai/agent/blob/next/skills/graph-engineering/SKILL.md) | Finds which step a project is at and routes to the next skill                    |
 | [`loop-to-machine`](https://github.com/statelyai/agent/blob/next/skills/loop-to-machine/SKILL.md)     | Converts existing agent code into a machine and checks parity with `compareRuns` |
+| [`build-machine`](https://github.com/statelyai/agent/blob/next/skills/build-machine/SKILL.md)         | Builds a TypeScript machine from a spec and proves its invariants                |
 | [`generate-machine`](https://github.com/statelyai/agent/blob/next/skills/generate-machine/SKILL.md)   | Authors a JSON policy machine from scratch and runs `verifyAgentConfig`          |
 | [`add-traces`](https://github.com/statelyai/agent/blob/next/skills/add-traces/SKILL.md)               | Stamps and persists every run so it replays                                      |
 | [`add-evals`](https://github.com/statelyai/agent/blob/next/skills/add-evals/SKILL.md)                 | Writes evals per state, at the cheapest level that catches the failure           |

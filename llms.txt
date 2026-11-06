@@ -49,5 +49,5 @@ Not v5: transitions are plain functions returning `{ target, context }` (no `ass
 
 ## Examples
 
-- [Examples index](examples/README.md): every runnable example, one flat directory each with an `index.ts` entrypoint, dual-mode against a real model or injected mocks.
+- [Examples index](https://github.com/statelyai/agent/blob/next/examples/README.md): every runnable example, one flat directory each with an `index.ts` entrypoint, dual-mode against a real model or injected mocks.
 - [Readme](readme.md): the pitch, the install command, and a complete machine that runs with no API key.

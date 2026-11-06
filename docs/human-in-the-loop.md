@@ -5,6 +5,12 @@ request, or in-process timer remains active, `runToQuiescence` settles as
 `idle`. Use `isAgentIdle(snapshot)` afterward to distinguish an intentional
 human wait from a stuck machine.
 
+A wait with an `after` timer (an SLA, a reminder) is not idle while that timer
+is armed in process: the run keeps waiting for it to fire. A host that answers
+the wait later passes `timers: { schedule, cancel }` so the run settles idle
+with the timer handed to the host. See
+[Host-owned timers](steps.md#host-owned-timers).
+
 ```ts no-check
 awaitingApproval: {
   meta: {
