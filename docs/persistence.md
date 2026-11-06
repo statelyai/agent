@@ -126,6 +126,7 @@ Each resumed run is checked against the uninterrupted one. Each failure names it
 | `stuck`           | The crashed run or its resume did not settle within `timeout` (default 5000 ms)           |
 | `threw`           | The crashed run, its resume, or the `store` factory threw                                 |
 
+- `report.unreached` lists the points no run died at, with why: the crashed run never started that effect, or one write took the log past that length. Their resumes were not checked. An effect point is the n-th run of its key, so concurrent effects starting in another order still hit it.
 - An effect in flight at the crash may run twice. That is the at-least-once contract (see [Idempotency keys](hosts.md#idempotency-keys)), and it is not reported.
 - Model calls are keyed by `callKey` without the execution id, and plain actors by invoke site. Only actors bound through string-keyed sources are seen.
 - Model calls run live only in the uninterrupted run. After a crash, a call it made gets its recorded answer, after the same delay, so a fake may answer by call order.

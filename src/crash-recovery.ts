@@ -84,6 +84,8 @@ export type CrashPoint =
       effect: CrashEffect;
       /** The effect's position among the baseline's effects, from 0. */
       index: number;
+      /** Which run of `effect.key` it is, from 0: the run dies at that one, whatever order concurrent effects start in. */
+      occurrence: number;
     };
 
 /** What went wrong after a crash. */
@@ -129,6 +131,12 @@ export interface CrashRecoveryReport {
   };
   /** Every point a run was killed at, in order. */
   points: CrashPoint[];
+  /**
+   * Points no run died at, with why: the crashed run never started that
+   * effect, or one write took the log past that length. Their resumes were
+   * not checked.
+   */
+  unreached: Array<{ point: CrashPoint; reason: string }>;
   failures: CrashRecoveryFailure[];
 }
 
@@ -204,22 +212,31 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
   for (const entries of new Set([0, ...baselineStore.appends])) {
     points.push({ kind: "log", entries });
   }
+  const seen = new Map<string, number>();
   baselineWorld.effects.forEach((effect, index) => {
-    points.push({ kind: "effect", effect: { kind: effect.kind, key: effect.key }, index });
+    const occurrence = seen.get(effect.key) ?? 0;
+    seen.set(effect.key, occurrence + 1);
+    points.push({
+      kind: "effect",
+      effect: { kind: effect.kind, key: effect.key },
+      index,
+      occurrence,
+    });
   });
 
   const failures: CrashRecoveryFailure[] = [];
+  const unreached: CrashRecoveryReport["unreached"] = [];
   for (const point of points) {
-    failures.push(
-      ...(await crashAt(point, {
-        machine,
-        options,
-        timeout,
-        baselineCounts,
-        recorded: baselineWorld.answers,
-        expected,
-      })),
-    );
+    const found = await crashAt(point, {
+      machine,
+      options,
+      timeout,
+      baselineCounts,
+      recorded: baselineWorld.answers,
+      expected,
+    });
+    if (Array.isArray(found)) failures.push(...found);
+    else unreached.push({ point, reason: found.unreached });
   }
 
   return {
@@ -231,6 +248,7 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
       effects: baselineWorld.effects.map(({ kind, key }) => ({ kind, key })),
     },
     points,
+    unreached,
     failures,
   };
 }
@@ -250,7 +268,7 @@ interface CrashContext<TMachine extends AnyStateMachine> {
 async function crashAt<TMachine extends AnyStateMachine>(
   point: CrashPoint,
   ctx: CrashContext<TMachine>,
-): Promise<CrashRecoveryFailure[]> {
+): Promise<CrashRecoveryFailure[] | { unreached: string }> {
   const { machine, options, timeout } = ctx;
   const fail = (problem: CrashRecoveryProblem, message: string, key?: string) => ({
     point,
@@ -268,9 +286,10 @@ async function crashAt<TMachine extends AnyStateMachine>(
 
   // ─── The run that dies ───
   const controller = new AbortController();
-  let started = 0;
+  let runs = 0;
   const crashed = newWorld(
-    () => point.kind === "effect" && started++ === point.index,
+    (effect) =>
+      point.kind === "effect" && effect.key === point.effect.key && runs++ === point.occurrence,
     ctx.recorded,
   );
   const crash = () => {
@@ -278,15 +297,27 @@ async function crashAt<TMachine extends AnyStateMachine>(
     crashed.crashed = true;
     controller.abort(new CrashError());
   };
+  // Why the run did not die at the point, if it did not.
+  let missed: string | undefined =
+    point.kind === "log" && point.entries === 0
+      ? undefined
+      : point.kind === "log"
+        ? "the log never reached that length"
+        : "the run never started that effect";
   const onEffect = crashed.onEffect;
   crashed.onEffect = (effect) => {
     const dies = onEffect(effect);
-    // The effect has started; the process dies before its result is recorded.
-    if (dies) queueMicrotask(crash);
+    if (dies) {
+      missed = undefined;
+      // The effect has started; the process dies before its result is recorded.
+      queueMicrotask(crash);
+    }
     return dies;
   };
   const dying = observedStore(backing, crashed, (accepted) => {
     if (point.kind !== "log" || accepted < point.entries) return false;
+    missed =
+      accepted === point.entries ? undefined : `one write took the log to ${accepted} entries`;
     crash();
     return true;
   });
@@ -308,19 +339,26 @@ async function crashAt<TMachine extends AnyStateMachine>(
   if (died === TIMED_OUT) {
     return [fail("stuck", `the run did not stop within ${timeout}ms after the crash`)];
   }
+  if (missed !== undefined) {
+    return { unreached: missed };
+  }
 
   // ─── The resume ───
   const resumed = newWorld(() => false, ctx.recorded);
+  const resumeController = new AbortController();
   let result: AgentRunResult<TMachine> | typeof TIMED_OUT;
   try {
     result = await withTimeout(
-      runTurns(machine, options, resumed, backing, crashed.hostEntries),
+      runTurns(machine, options, resumed, backing, crashed.hostEntries, resumeController.signal),
       timeout,
     );
   } catch (error) {
     return [fail("threw", `the resume threw: ${String(error)}`)];
   }
   if (result === TIMED_OUT) {
+    // Stop it, so nothing it still runs touches the next point's fakes.
+    resumed.crashed = true;
+    resumeController.abort(new CrashError());
     return [fail("stuck", `the resume did not settle within ${timeout}ms`)];
   }
 
@@ -360,7 +398,10 @@ async function crashAt<TMachine extends AnyStateMachine>(
   );
   for (const effect of resumed.effects) {
     if (effect.kind !== "model" || !crashedRequests.has(effect.key)) continue;
-    if (crashedRequests.get(effect.key) !== effect.request) {
+    const before = crashedRequests.get(effect.key);
+    // A request that cannot be fingerprinted is not compared.
+    if (before === undefined || effect.request === undefined) continue;
+    if (before !== effect.request) {
       failures.push(
         fail("request-changed", `'${effect.key}' re-executed with a different request`, effect.key),
       );

@@ -249,9 +249,11 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
     }
   | { type: "emit"; event: EmittedFrom<TMachine> }
   | {
-      /** A reserved `@agent.usage` event the run declined to deliver. The
-       * tokens still fold into {@link AgentRunResult.usage}; only the machine
-       * event is dropped. */
+      /** A reserved `@agent.usage` event the run declined to deliver. For
+       * `settled`, the tokens still fold into {@link AgentRunResult.usage};
+       * only the machine event is dropped. For `repeat`, the tokens are not
+       * added again (the log already holds them), but the call still counts
+       * toward `modelCalls`. */
       type: "usage.dropped";
       event: AgentUsageEvent;
       /**
@@ -4336,13 +4338,21 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // A decision's usage is queued after the event it chose; when that event
       // ends the machine, the usage is never handed out. Journal it out of
       // band, like usage the machine declares no transition for.
-      for (const event of mailbox) {
-        if (event.type === AGENT_USAGE_EVENT_TYPE) {
+      // The last step's entries are written before the outcome is decided,
+      // so a write that fails here settles the run `cause: "journal"`. Usage
+      // that arrives during the write is journaled too.
+      const journaledUsage = new Set<EventObject>();
+      for (;;) {
+        const usage = mailbox.filter(
+          (event) => event.type === AGENT_USAGE_EVENT_TYPE && !journaledUsage.has(event),
+        );
+        if (usage.length === 0) break;
+        for (const event of usage) {
+          journaledUsage.add(event);
           appendLogEntry(event);
         }
+        await drainJournal();
       }
-      // The last step's entries are written before the outcome is decided,
-      // so a write that fails here settles the run `cause: "journal"`.
       await drainJournal();
       const snapshot = current as AnyMachineSnapshot;
       let outcome: AgentRunOutcome<TMachine>;

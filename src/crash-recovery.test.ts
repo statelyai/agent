@@ -88,6 +88,7 @@ describe("checkCrashRecovery", () => {
       events: [{ type: "REVIEW", ok: true }],
     });
     expect(report.failures).toEqual([]);
+    expect(report.unreached).toEqual([]);
     expect(report.ok).toBe(true);
     expect(report.baseline.status).toBe("done");
     expect(report.baseline.output).toMatchObject({ fetched: 42, published: true });
