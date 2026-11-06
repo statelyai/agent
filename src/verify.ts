@@ -1286,8 +1286,8 @@ export interface ExplorePathsOptions {
    * search delivers `{ type: '@agent.usage', kind: 'text', id, src, model,
    * name?, usage }` to the root immediately before the request's completion,
    * as a run does: once per listed value, each a fork that counts against
-   * `maxDepth` and records the usage event in the path (one value with one
-   * canned output resolves straight through, like an output). No `budget`
+   * `maxDepth` and records the usage event in the path. One value with one
+   * canned output is no fork, but its usage event is still recorded. No `budget`
    * field is sent. A settling request with no entry while a usage transition
    * is active lists `@agent.usage` in `vacuous`. Requests inside child
    * machines and decisions deliver no usage.
@@ -2421,8 +2421,11 @@ function explore(
     (interleaving &&
       (arriving(step.snapshot as AnyMachineSnapshot).length > 0 ||
         (timerMode === "fire" && armedTimers(step.snapshot as AnyMachineSnapshot).length > 0)));
+  // `recordEvent` receives each event the advance delivers that belongs on
+  // the path (a request's `usage` event), before `stopWhen` sees its result.
   const advance = (
     step: AgentStep,
+    recordEvent: (event: ChosenEvent) => void,
   ): {
     step: AgentStep;
     blockedSrc?: string;
@@ -2482,6 +2485,9 @@ function explore(
               ...(usage ? { usage: usage[0] } : {}),
             },
           };
+        }
+        if (usage) {
+          recordEvent(usage[0] as unknown as ChosenEvent);
         }
         current = settleStep(current, request.id, asTextResult(settle.output), usage?.[0]).step;
         recordState(current);
@@ -2997,7 +3003,9 @@ function explore(
       decisions,
       pending,
       kids: pendingKids,
-    } = advance(step);
+    } = advance(step, (event) => {
+      path = extend(path, event);
+    });
     if (hit) {
       witness = pathOf(path);
       return;
@@ -3056,12 +3064,18 @@ function explore(
       }
       const resolved = settleStep(settled, pending.id, pending.output, pending.usage).step;
       recordState(resolved);
+      // A delivered usage event is an event the machine receives: it is on the path.
+      const charged = pending.usage ? extend(path, pending.usage as unknown as ChosenEvent) : path;
       yield {
         step: resolved,
         // A coupled child's settled work is a move of its own, shown on the path.
         path: stepping
-          ? extend(path, { type: "xstate.done.actor", actorId: pending.id, output: pending.output })
-          : path,
+          ? extend(charged, {
+              type: "xstate.done.actor",
+              actorId: pending.id,
+              output: pending.output,
+            })
+          : charged,
         depth,
       };
       yield* raceBranches(settled, path, depth);

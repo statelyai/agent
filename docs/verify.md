@@ -308,7 +308,8 @@ const result = await canReach(waitingMachine, "timedOut");
 
 - When a root text request with an entry settles and the active states take `@agent.usage`, the search delivers the usage event to the root immediately before the request's completion, as a run does.
 - The event is `{ type: '@agent.usage', kind: 'text', id, src, model, name?, usage }`, the run's shape without `budget`.
-- Each listed value forks one branch, recorded in the path before `xstate.done.actor`. One value with one canned output resolves straight through.
+- Each listed value forks one branch, recorded in the path before `xstate.done.actor`.
+- One value with one canned output is no fork: the output resolves straight through, but the usage event is still recorded in the path.
 - A usage transition that leaves the invoking state cancels the request: its completion is not recorded.
 - A settling request with no `usage` entry while a usage transition is active lists `@agent.usage` in `vacuous`. Completeness is unchanged.
 - Requests inside child machines and decisions deliver no usage.

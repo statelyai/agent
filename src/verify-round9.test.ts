@@ -195,6 +195,33 @@ describe("explorePaths — usage", () => {
     ]);
   });
 
+  test("a single output's usage event is on the witness, straight through or raced", async () => {
+    const over = {
+      type: AGENT_USAGE_EVENT_TYPE,
+      kind: "text",
+      id: "s",
+      src: "summarize",
+      model: "m",
+      name: "summarize",
+      usage: { totalTokens: 500 },
+    };
+    const options = {
+      outputs: { summarize: ["ok"] },
+      usage: { summarize: [{ totalTokens: 500 }] },
+    };
+    expect(await canReach(machine, "overBudget", options)).toMatchObject({
+      reachable: true,
+      witness: [over],
+    });
+    expect(
+      await canReach(machine, "overBudget", { ...options, interleave: "pending" }),
+    ).toMatchObject({ reachable: true, witness: [over] });
+    const under = { ...options, usage: { summarize: [{ totalTokens: 10 }] } };
+    expect((await explorePaths(machine, under)).terminals).toEqual([
+      { status: "done", path: [{ ...over, usage: { totalTokens: 10 } }], state: "done" },
+    ]);
+  });
+
   test("the event matches the one a run delivers, bar its budget", async () => {
     const seen: unknown[] = [];
     const run = await runAgent(
