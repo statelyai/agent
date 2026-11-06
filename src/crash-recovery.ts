@@ -59,9 +59,10 @@ export interface CheckCrashRecoveryOptions<TMachine extends AnyStateMachine> {
   >;
   /**
    * Milliseconds one run (the baseline, a crashed run, or its resume) may take.
-   * Default 5000. A run that times out is aborted and starts no more effects,
-   * but an effect already running that ignores its abort signal can still
-   * finish after the next point's `reset`.
+   * Default 5000. An uninterrupted run that times out throws, so no point
+   * runs after it. A crashed run or resume that times out is aborted and
+   * starts no more effects, but an effect already running that ignores its
+   * abort signal can still finish after the next point's `reset`.
    */
   timeout?: number;
 }
