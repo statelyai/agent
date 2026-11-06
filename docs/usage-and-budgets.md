@@ -183,9 +183,10 @@ A wrapper is still host-side. The machine cannot read its counts or react to the
 
 <!-- AGENT_USAGE_EVENT_TYPE and AgentUsageEvent from src/usage.ts -->
 
-`@agent.usage` is a reserved event that carries one model call's tokens into the machine. Four rules govern it.
+`@agent.usage` is a reserved event that carries one model call's tokens into the machine. These rules govern it.
 
-- You declare nothing. `setupAgent` and `createAgentSchemas` register `'@agent.usage'` and its payload schema in every agent's events, so the handler is typed and `event.usage.totalTokens` narrows. Declaring it yourself is an error, because the `@agent.` namespace is reserved.
+- You declare nothing for it. `setupAgent` and `createAgentSchemas` register `'@agent.usage'` and its payload schema in every agent's events, so the handler is typed and `event.usage.totalTokens` narrows. Declaring it yourself is an error, because the `@agent.` namespace is reserved. Pass `events` to `setupAgent`, even `events: {}`: without it every event type is accepted and every handler's event, `@agent.usage` and `xstate.error.actor` included, is typed with no payload.
+- Usage reaches the root before the completion of the call that reported it, also from a request inside a child machine. A budget guard on the call's `onDone` sees its tokens.
 - Delivery is opt-in. The event is delivered only when an active state declares a transition that matches it, either `'@agent.usage'` or the wildcard `'*'`. Otherwise no usage event is sent to the machine. Wildcard matching follows XState semantics, so a catch-all `on: { '*': … }` does receive `@agent.usage`. Narrow the handler on `event.type` when the catch-all is meant for other events.
 - Declare the handler at machine level. A root `on: { '@agent.usage': … }` catches every call regardless of which state made it. A state-scoped handler drops calls made in other states.
 - Delivery goes to the run's root machine, including usage from requests inside an invoked child machine. Attribute those calls with `id`, `src`, and `model`.

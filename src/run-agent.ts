@@ -21,7 +21,8 @@ import {
   type TimerKey,
 } from "xstate";
 import { canonicalJson, isPlainObject } from "./internal/is-record.js";
-import { stableInspection } from "./internal/stable-inspection.js";
+import { restoreMachineSnapshot } from "./internal/restore-snapshot.js";
+import { isStableInspection, stableInspection } from "./internal/stable-inspection.js";
 import { createDurable, type DurableExecution } from "xstate/durable";
 import type {
   AgentTools,
@@ -1085,8 +1086,9 @@ interface RunAgentBindContext {
    *
    * `self` is the settling request's own actor ref; the `provideExecutors`
    * path reads the invoking machine actor off it (`self._parent`) because it
-   * has no run-scoped root actor. `createAgentRuntime` ignores it and delivers to the
-   * run's root.
+   * has no run-scoped root actor. `createAgentRuntime` delivers to the run's
+   * root, sending from `self` through the actor system so the event reaches
+   * the root in order with the call's own completion.
    */
   recordUsage?: (
     usage: AgentCallUsage,
@@ -1138,6 +1140,13 @@ interface RunAgentBindContext {
    * off the runtime path.
    */
   onChildEvent?: (self: AnyActorRef, event: EventObject) => void;
+  /**
+   * The journal writes still in flight, or `undefined` when none are (or the
+   * run has no store). A plain actor a child machine starts waits for it, so
+   * the child's earlier entries are durable before the actor's side effect
+   * runs. Unset off the runtime path.
+   */
+  pendingJournal?: () => Promise<void> | undefined;
 }
 
 /**
@@ -2202,7 +2211,11 @@ function rebindChildMachine(
       }
       continue;
     }
-    // Non-agent actors and placeholders pass through untouched.
+    // A plain actor a child starts waits for the journal; placeholders pass
+    // through untouched.
+    if (runCtx.pendingJournal && typeof logic?.transition === "function") {
+      wrapped[key] = journalGatedLogic(logic, runCtx.pendingJournal);
+    }
   }
 
   const rebound =
@@ -2230,6 +2243,55 @@ function journaledMachine(
       },
     },
   }) as AnyStateMachine;
+}
+
+/**
+ * `logic`, with the side effects it starts (`@xstate.effect`: an async
+ * actor's run, a callback's body) held until `pending` resolves. A child
+ * machine runs live, so without this a plain actor it starts could do its
+ * work (or the process could die) before the child's earlier entries are
+ * durable, and a resume would run the earlier actor again.
+ */
+function journalGatedLogic(
+  logic: AnyActorLogic,
+  pending: () => Promise<void> | undefined,
+): AnyActorLogic {
+  type Result = [unknown, unknown[]];
+  type Effect = { type?: string; exec: (...args: unknown[]) => unknown };
+  const gate = (result: Result, self: AnyActorRef): Result => {
+    const [snapshot, effects] = result;
+    if (!Array.isArray(effects) || !effects.some((e) => (e as Effect)?.type === "@xstate.effect")) {
+      return result;
+    }
+    return [
+      snapshot,
+      effects.map((effect) => {
+        if ((effect as Effect)?.type !== "@xstate.effect") return effect;
+        const exec = (effect as Effect).exec;
+        const gated = (...args: unknown[]) => {
+          const waiting = pending();
+          if (waiting === undefined) return exec(...args);
+          void waiting.then(() => {
+            if (self.getSnapshot().status === "active") exec(...args);
+          });
+        };
+        return { ...(effect as object), exec: gated, action: gated };
+      }),
+    ];
+  };
+  const overrides: PropertyDescriptorMap = {
+    transition: {
+      value: (...args: Parameters<AnyActorLogic["transition"]>) =>
+        gate(logic.transition(...args) as unknown as Result, args[2].self),
+    },
+  };
+  if (typeof logic.initialTransition === "function") {
+    overrides["initialTransition"] = {
+      value: (...args: Parameters<NonNullable<AnyActorLogic["initialTransition"]>>) =>
+        gate(logic.initialTransition!(...args) as unknown as Result, args[1]!.self),
+    };
+  }
+  return Object.create(logic, overrides) as AnyActorLogic;
 }
 
 /**
@@ -2439,8 +2501,10 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
    * {@link runAgent} loops: each time the run settles `idle`, it calls
    * `onIdle` with the idle snapshot, persists the run, and resumes from that
    * persisted snapshot with the returned event — until the run is `done` or
-   * `error`. Each pass is a fresh {@link createAgentRuntime} over the same
-   * options, so nothing of the earlier pass is held across the wait; the log
+   * `error`. `signal` aborts the wait too: the run then settles as any abort
+   * does. Each pass is a fresh {@link createAgentRuntime} over the same
+   * options, so nothing of the earlier pass is held across the wait (an
+   * `inspect` callback still sees one root actor); the log
    * travels with the result (or the store's thread), so the final `events`
    * replays every pass, and `maxModelCalls` bounds the whole call. An answer
    * the idle state does not handle ends the loop: the result is `idle` with
@@ -2450,7 +2514,10 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
    * object) leaves this out, stores `result.persist()`, and calls
    * {@link runAgent} again later with `{ snapshot, event }`.
    */
-  onIdle?: (snapshot: SnapshotFrom<TMachine>) => Promise<EventFromLogic<TMachine>>;
+  onIdle?: (
+    snapshot: SnapshotFrom<TMachine>,
+    options: { signal: AbortSignal | undefined },
+  ) => Promise<EventFromLogic<TMachine>>;
   /**
    * A send handle for events pushed mid-run (a cancel, a user message), from
    * {@link createAgentInbox}. Each `inbox.send` goes to the current pass's
@@ -2564,17 +2631,44 @@ function bindInbox<TMachine extends AnyStateMachine>(
   };
 }
 
+const ABORTED = Symbol("aborted");
+
 // The next idle answer: a queued inbox event, else the first of `onIdle`'s
-// answer and an inbox send. `undefined` when neither can come.
+// answer and an inbox send. `undefined` when neither can come; `ABORTED` when
+// `signal` fires first.
 async function nextIdleEvent<TMachine extends AnyStateMachine>(
   snapshot: SnapshotFrom<TMachine>,
   onIdle: AgentRunOptions<TMachine>["onIdle"],
   inbox: InboxState | undefined,
-): Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean } | undefined> {
+  signal: AbortSignal | undefined,
+): Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean } | typeof ABORTED | undefined> {
+  if (signal?.aborted) return ABORTED;
   const queued = inbox?.queue.shift();
   if (queued !== undefined) return { event: queued as EventFromLogic<TMachine>, fromInbox: true };
   if (!onIdle) return undefined;
-  if (!inbox) return { event: await onIdle(snapshot), fromInbox: false };
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<typeof ABORTED>((resolve) => {
+    onAbort = () => resolve(ABORTED);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await waitForIdleAnswer(snapshot, onIdle, inbox, signal, aborted);
+  } finally {
+    signal?.removeEventListener("abort", onAbort!);
+  }
+}
+
+async function waitForIdleAnswer<TMachine extends AnyStateMachine>(
+  snapshot: SnapshotFrom<TMachine>,
+  onIdle: NonNullable<AgentRunOptions<TMachine>["onIdle"]>,
+  inbox: InboxState | undefined,
+  signal: AbortSignal | undefined,
+  aborted: Promise<typeof ABORTED>,
+): Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean } | typeof ABORTED> {
+  const answer = () => onIdle(snapshot, { signal });
+  if (!inbox) {
+    return Promise.race([aborted, answer().then((event) => ({ event, fromInbox: false }))]);
+  }
   // The waiter goes in before `onIdle` runs, so an `inbox.send` from inside
   // `onIdle` reaches it instead of a queue nobody reads.
   let waiter: InboxState["waiter"];
@@ -2590,8 +2684,9 @@ async function nextIdleEvent<TMachine extends AnyStateMachine>(
   };
   try {
     return await Promise.race([
+      aborted,
       sent,
-      onIdle(snapshot).then(
+      answer().then(
         (event) => {
           release();
           return { event, fromInbox: false };
@@ -2663,8 +2758,26 @@ async function runAgentPasses<TMachine extends AnyStateMachine>(
   onIdle: AgentRunOptions<TMachine>["onIdle"],
   inbox: InboxState | undefined,
 ): Promise<AgentRunResult<TMachine>> {
+  if (!onIdle && !inbox) {
+    return runToQuiescence(bindInbox(createAgentRuntime(machine, rest), inbox), rest);
+  }
+  // One inspection stream for every pass, so an inspector sees the root (and
+  // any persisted child) as one actor, not a new one per pass.
+  if (rest.inspect !== undefined && !isStableInspection(rest.inspect)) {
+    const userInspect = rest.inspect;
+    rest = {
+      ...rest,
+      inspect: stableInspection((event) => {
+        if (typeof userInspect === "function") userInspect(event);
+        else userInspect.next?.(event);
+      }),
+    };
+  }
+  const endPass = (persisted: unknown) => {
+    if (isStableInspection(rest.inspect)) rest.inspect.endPass(persisted);
+  };
   let result = await runToQuiescence(bindInbox(createAgentRuntime(machine, rest), inbox), rest);
-  if (!onIdle && !inbox) return result;
+  endPass(result.persist());
   // The budget is for the whole call: each pass starts from what the earlier
   // passes spent, since every runtime counts only its own calls.
   let modelCallsSpent = (rest.modelCallsSpent ?? 0) + result.usage.modelCalls;
@@ -2681,8 +2794,21 @@ async function runAgentPasses<TMachine extends AnyStateMachine>(
     (result.ignored === undefined ||
       (result.ignored !== answer && inbox?.passSent.has(result.ignored) === true))
   ) {
-    const next = await nextIdleEvent(result.snapshot, onIdle, inbox);
+    const next = await nextIdleEvent(result.snapshot, onIdle, inbox, rest.signal);
     if (next === undefined) break;
+    if (next === ABORTED) {
+      // One more pass with no event: the runtime sees the aborted signal and
+      // settles it the usual way (`abortWith`, or `cause: 'aborted'`).
+      result = await runToQuiescence(
+        createAgentRuntime(machine, { ...resumeOptions, modelCallsSpent }),
+        {
+          ...resumeOptions,
+          ...(rest.store === undefined ? { events: result.events } : {}),
+          snapshot: result.persist(),
+        },
+      );
+      break;
+    }
     const { event, fromInbox } = next;
     answer = fromInbox ? undefined : event;
     result = await runToQuiescence(
@@ -2702,6 +2828,7 @@ async function runAgentPasses<TMachine extends AnyStateMachine>(
       },
     );
     modelCallsSpent += result.usage.modelCalls;
+    endPass(result.persist());
   }
   return result;
 }
@@ -3065,7 +3192,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // still fold into the log, but the event is DROPPED rather than delivered,
   // so a late arrival can never affect an already-returned result. Dropped
   // stragglers are visible on `onTrace` as `usage.dropped`.
-  const recordUsage = (usage: AgentCallUsage, source: AgentUsageEventSource = {}) => {
+  const recordUsage = (
+    usage: AgentCallUsage,
+    source: AgentUsageEventSource = {},
+    self?: BoundActorSelf,
+  ) => {
     const event: AgentUsageEvent = {
       type: AGENT_USAGE_EVENT_TYPE,
       ...source,
@@ -3075,7 +3206,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     let delivered = false;
     deliverUsageEvent(
       event,
-      () => rootFacade(() => (delivered = true)),
+      // A decision's usage follows the event it chose (`recordLater`), so
+      // it keeps to the mailbox behind that event.
+      () => rootFacade(() => (delivered = true), source.kind === "decision" ? undefined : self),
       (dropped) => {
         if (!finished) {
           return false;
@@ -3138,12 +3271,27 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // The root, as the bind wrappers see it: its current snapshot, and a `send`
   // that queues onto the mailbox. The loop has no live root actor — every
   // transition is pure — so this facade is the one place "the root" lives.
-  const rootFacade = (onSend?: () => void): AnyActorRef =>
+  // `from` (a request's actor) sends through its actor system, which delivers
+  // to the root in the same order as the completions its batch produces; a
+  // send into the mailbox would land after them.
+  const rootFacade = (onSend?: () => void, from?: BoundActorSelf): AnyActorRef =>
     ({
       getSnapshot: () => current,
       send: (event: EventObject) => {
         onSend?.();
-        enqueue(event);
+        const sender = from as
+          | (AnyActorRef & {
+              _parent?: AnyActorRef;
+              system?: { sendEvent?: (source: object, target: object, event: object) => void };
+            })
+          | undefined;
+        let root = sender;
+        while (root?._parent) root = root._parent as typeof sender;
+        if (sender?.system?.sendEvent && root !== undefined && root !== sender) {
+          sender.system.sendEvent(sender, root, event);
+        } else {
+          enqueue(event);
+        }
       },
     }) as unknown as AnyActorRef;
   const actorHolder: { actorRef: AnyActorRef | undefined } = { actorRef: rootFacade() };
@@ -3184,6 +3332,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     // happen, but a child runs live, and a fold reproduces its state only from
     // its own inputs. Stopping a child is the root's doing, which the root's
     // own entries already fold.
+    pendingJournal: () =>
+      store !== undefined && journalPending > 0 ? awaitJournal().catch(() => {}) : undefined,
     onChildEvent: (self, event) => {
       if (finished || event.type === "xstate.stop") return;
       const actorPath = actorPathOf(self);
@@ -3319,15 +3469,17 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // async actor, a child machine whose own children are running — or an
   // in-process timer is armed (a child machine's timers are always
   // in-process). A child machine at rest is waiting for events, not doing
-  // work, so it does not count.
-  const childrenBusy = (snapshot: AnyMachineSnapshot | undefined): boolean =>
+  // work, so it does not count. Inside a child machine, a grandchild that has
+  // finished but is still listed has a done or error event on its way to that
+  // machine (XState removes a child once its parent processes the event).
+  const childrenBusy = (snapshot: AnyMachineSnapshot | undefined, nested = false): boolean =>
     Object.values((snapshot?.children ?? {}) as Record<string, AnyActorRef | undefined>).some(
       (child) => {
         const childSnapshot = child?.getSnapshot?.() as AnyMachineSnapshot | undefined;
         if (childSnapshot?.status !== "active") {
-          return false;
+          return nested && (childSnapshot?.status === "done" || childSnapshot?.status === "error");
         }
-        return isMachineSnapshot(childSnapshot) ? childrenBusy(childSnapshot) : true;
+        return isMachineSnapshot(childSnapshot) ? childrenBusy(childSnapshot, true) : true;
       },
     );
   const workInFlight = (): boolean => childrenBusy(current) || timerHandles.size > 0;
@@ -3431,13 +3583,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   const inspect =
     options.inspect === undefined
       ? undefined
-      : stableInspection((event: InspectionEvent) => {
-          if (typeof options.inspect === "function") {
-            options.inspect(event);
-          } else {
-            options.inspect?.next?.(event);
-          }
-        });
+      : isStableInspection(options.inspect)
+        ? options.inspect
+        : stableInspection((event: InspectionEvent) => {
+            if (typeof options.inspect === "function") {
+              options.inspect(event);
+            } else {
+              options.inspect?.next?.(event);
+            }
+          });
 
   let execution!: DurableExecution<TMachine>;
   const durableAdapter = {
@@ -3606,11 +3760,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // records the snapshot the machine will actually resume from.
       const restoredPersistedSnapshot = (): AgentPersistedSnapshot | undefined => {
         try {
-          const restored = (
-            logMachine as unknown as {
-              restoreSnapshot(persisted: AgentPersistedSnapshot): AnyMachineSnapshot;
-            }
-          ).restoreSnapshot(init.snapshot as AgentPersistedSnapshot);
+          const restored = restoreMachineSnapshot(
+            logMachine,
+            init.snapshot as AgentPersistedSnapshot,
+          );
           return logMachine.getPersistedSnapshot(restored) as AgentPersistedSnapshot;
         } catch {
           return undefined;

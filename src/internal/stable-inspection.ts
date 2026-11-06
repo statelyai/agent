@@ -1,20 +1,71 @@
 import type { InspectionEvent } from "xstate";
 import { isRecord } from "./is-record.js";
 
+/** An inspect callback from {@link stableInspection}. */
+export interface StableInspection {
+  (event: InspectionEvent): void;
+  /**
+   * Marks the end of one runtime's pass. In the next pass, an actor at the
+   * same path as one still live now is the same actor under a new
+   * `sessionId`, and keeps its handle. `persisted` is the pass's persisted
+   * snapshot: a child it lists was stopped only by the pass's teardown and
+   * carries over too.
+   */
+  endPass(persisted?: unknown): void;
+}
+
+const stableInspections = new WeakSet<object>();
+
+/** Whether `inspect` already came from {@link stableInspection}. */
+export function isStableInspection(inspect: unknown): inspect is StableInspection {
+  return typeof inspect === "function" && stableInspections.has(inspect);
+}
+
+// The actor's ids from the root down, read from the internal `_parent` chain.
+function actorPath(ref: Record<string, unknown>): string {
+  const ids: unknown[] = [];
+  let current: unknown = ref;
+  while (isRecord(current)) {
+    ids.unshift(current["id"]);
+    current = current["_parent"];
+  }
+  return JSON.stringify(ids);
+}
+
+// Each child's id path below the root, from a persisted snapshot's `children`.
+function persistedChildPaths(persisted: unknown, prefix: string[] = [], paths = new Set<string>()) {
+  const children = isRecord(persisted) ? persisted["children"] : undefined;
+  if (!isRecord(children)) return paths;
+  for (const [id, child] of Object.entries(children)) {
+    const path = [...prefix, id];
+    paths.add(JSON.stringify(path));
+    persistedChildPaths(isRecord(child) ? child["snapshot"] : undefined, path, paths);
+  }
+  return paths;
+}
+
 /**
  * Makes a durable run's inspection stream look like one live actor system to
  * an inspector. The durable runtime re-creates an actor object for each step
  * under the same `sessionId` and announces it again, so an inspector that
  * tracks actors by object (`@statelyai/sdk`) sees a duplicate and drops the
  * rest of the run. Each `sessionId` gets one stable handle that reads from the
- * newest actor object, and is announced once.
+ * newest actor object, and is announced once. Across runtimes (`runAgent`'s
+ * `onIdle` passes), {@link StableInspection.endPass} carries live actors over.
  */
-export function stableInspection(
-  inspect: (event: InspectionEvent) => void,
-): (event: InspectionEvent) => void {
+export function stableInspection(inspect: (event: InspectionEvent) => void): StableInspection {
   const handles = new Map<string, { latest: object; handle: object }>();
   const announced = new Set<string>();
   const snapshots = new WeakMap<object, object>();
+  // A later pass's sessionId → the sessionId its actor was first announced as.
+  const aliases = new Map<string, string>();
+  // Announced actors not yet seen done, by sessionId → path.
+  const live = new Map<string, string>();
+  // Announced actors seen stopped, by sessionId → path: a pass's teardown
+  // stops the children it persists.
+  const stopped = new Map<string, string>();
+  // At a pass boundary: path → the sessionId of the actor live there.
+  let carried = new Map<string, string>();
 
   // A snapshot whose `children` are handles too, so walking the actor tree
   // from it never reaches a step's raw actor object.
@@ -44,7 +95,7 @@ export function stableInspection(
     if (!isRecord(ref) || typeof ref["sessionId"] !== "string") {
       return ref;
     }
-    const sessionId = ref["sessionId"];
+    const sessionId = aliases.get(ref["sessionId"]) ?? ref["sessionId"];
     const known = handles.get(sessionId);
     if (known) {
       if (adopt) known.latest = ref;
@@ -61,6 +112,9 @@ export function stableInspection(
         }
         if (key === "ref") {
           return entry.handle;
+        }
+        if (key === "sessionId") {
+          return sessionId;
         }
         if (key === "getSnapshot") {
           return () => stableSnapshot((entry.latest as { getSnapshot(): unknown }).getSnapshot());
@@ -81,16 +135,33 @@ export function stableInspection(
     return entry.handle;
   };
 
-  return (event) => {
+  const stableInspect = ((event: InspectionEvent) => {
     const raw = event as unknown as Record<string, unknown>;
     const actorRef = raw["actorRef"];
-    const sessionId = isRecord(actorRef) ? actorRef["sessionId"] : undefined;
-    if (raw["type"] === "@xstate.actor" && typeof sessionId === "string") {
+    const rawSessionId = isRecord(actorRef) ? actorRef["sessionId"] : undefined;
+    if (raw["type"] === "@xstate.actor" && typeof rawSessionId === "string") {
+      const path = actorPath(actorRef as Record<string, unknown>);
+      const previous = carried.get(path);
+      if (previous !== undefined && previous !== rawSessionId) {
+        carried.delete(path);
+        aliases.set(rawSessionId, previous);
+      }
+      const sessionId = aliases.get(rawSessionId) ?? rawSessionId;
+      live.set(sessionId, path);
       if (announced.has(sessionId)) {
         stable(actorRef, true);
         return;
       }
       announced.add(sessionId);
+    }
+    if (typeof rawSessionId === "string" && isRecord(raw["snapshot"])) {
+      const status = raw["snapshot"]["status"];
+      if (status !== undefined && status !== "active") {
+        const sessionId = aliases.get(rawSessionId) ?? rawSessionId;
+        const path = live.get(sessionId);
+        live.delete(sessionId);
+        if (status === "stopped" && path !== undefined) stopped.set(sessionId, path);
+      }
     }
     const next: Record<string, unknown> = { ...raw, actorRef: stable(actorRef, true) };
     if (raw["snapshot"] !== undefined) next["snapshot"] = stableSnapshot(raw["snapshot"]);
@@ -106,5 +177,20 @@ export function stableInspection(
       if (raw[key] !== undefined) next[key] = stable(raw[key]);
     }
     inspect(next as unknown as InspectionEvent);
+  }) as StableInspection;
+  stableInspect.endPass = (persisted) => {
+    const kept = persistedChildPaths(persisted);
+    const root = [...live.values(), ...stopped.values()].find(
+      (path) => (JSON.parse(path) as unknown[]).length === 1,
+    );
+    const rootId = root === undefined ? undefined : (JSON.parse(root) as unknown[])[0];
+    const carriedStopped = [...stopped].filter(([, path]) => {
+      const [id, ...rest] = JSON.parse(path) as unknown[];
+      return id === rootId && kept.has(JSON.stringify(rest));
+    });
+    stopped.clear();
+    carried = new Map([...live, ...carriedStopped].map(([sessionId, path]) => [path, sessionId]));
   };
+  stableInspections.add(stableInspect);
+  return stableInspect;
 }

@@ -36,6 +36,7 @@ Execution is at-least-once. A host runs the request and then journals its comple
 - A resumed run re-executing an in-flight request passes the same `callKey` as the original attempt.
 - A fork mints its own lineage id (see [Fork](event-log.md#fork)), so none of its calls shares a key with its parent's.
 - It is `undefined` off the `runToQuiescence` path (a bare `provideExecutors` bind) and on a run with no event log.
+- Only model calls get one. A plain actor (`createAsyncLogic`, a tool) in flight at a crash runs again on resume with no key. Derive an idempotency key from the domain (an order id, a booking key) and dedupe inside the effect.
 
 The key names the call _site_, not the request. A version bridge keeps the lineage id, so a migrated machine that asks something else at the same invoke site produces the same key for a different request. Cache on `callKey` **and** a fingerprint of the request, and reuse the cached result only when the request also matches. Pass `callKey` to a provider as its dedupe key for that identical request:
 

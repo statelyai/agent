@@ -16,6 +16,7 @@
  * @module
  */
 import { isError, isPlainObject } from "./internal/is-record.js";
+import { restoreMachineSnapshot } from "./internal/restore-snapshot.js";
 import {
   initialTransition,
   isMachineSnapshot,
@@ -482,17 +483,22 @@ function normalizeEventErrors(
 // a persisted snapshot).
 const SNAPSHOT_VOLATILE_KEYS = new Set(["sessionId", "_nextTimerId", "_nextActorIds"]);
 const CHILD_VOLATILE_KEYS = new Set(["sessionId"]);
+// A live runtime stamps each timer with its wall-clock start; a replayed
+// snapshot never has one.
+const TIMER_VOLATILE_KEYS = new Set(["scheduledAt"]);
 
 /**
  * Where the walk is inside a persisted snapshot: the snapshot object itself,
- * its `children` record, one child entry, or plain application data (where no
- * key is ever reserved).
+ * its `children` record, one child entry, its `timers` list, one timer, or
+ * plain application data (where no key is ever reserved).
  */
-type HashPosition = "snapshot" | "children" | "child" | "data";
+type HashPosition = "snapshot" | "children" | "child" | "timers" | "timer" | "data";
 
 // The position a value occupies, given its parent's position and its key.
 function positionOf(parent: HashPosition, key: string): HashPosition {
-  if (parent === "snapshot") return key === "children" ? "children" : "data";
+  if (parent === "snapshot") {
+    return key === "children" ? "children" : key === "timers" ? "timers" : "data";
+  }
   if (parent === "children") return "child";
   if (parent === "child") return key === "snapshot" ? "snapshot" : "data";
   return "data";
@@ -541,14 +547,17 @@ function canonicalizeForHash(
         .sort(([a], [b]) => stableJson(a).localeCompare(stableJson(b)));
     }
     if (Array.isArray(value)) {
-      return value.map((item) => canonicalizeForHash(item, seen, "data"));
+      const itemPosition = position === "timers" ? "timer" : "data";
+      return value.map((item) => canonicalizeForHash(item, seen, itemPosition));
     }
     const volatileKeys =
       position === "snapshot"
         ? SNAPSHOT_VOLATILE_KEYS
         : position === "child"
           ? CHILD_VOLATILE_KEYS
-          : undefined;
+          : position === "timer"
+            ? TIMER_VOLATILE_KEYS
+            : undefined;
     // Null prototype, so an own `__proto__` key stays a key.
     const result: Record<string, unknown> = Object.create(null);
     for (const key of Object.keys(value).sort()) {
@@ -1276,7 +1285,7 @@ function verifyEntry(
  *
  * The first entry is the reserved {@link initEntry}: `input` folds from
  * `initialTransition`, `snapshot` restores the persisted snapshot purely
- * (`machine.restoreSnapshot`) and folds the rest of the log onto it.
+ * (`restoreActor` from `xstate/persist`) and folds the rest of the log onto it.
  */
 export function replay<TMachine extends AnyStateMachine>(
   machine: TMachine,
@@ -1329,11 +1338,7 @@ export function foldLog(
   const initEvent = entries[0]!.event as AgentInitEvent;
   let snapshot = (
     initEvent.snapshot !== undefined
-      ? (
-          machine as unknown as {
-            restoreSnapshot(persisted: AgentPersistedSnapshot): AnyMachineSnapshot;
-          }
-        ).restoreSnapshot(initEvent.snapshot)
+      ? restoreMachineSnapshot(machine, initEvent.snapshot)
       : initialTransition(machine, initEvent.input as never)[0]
   ) as AnyMachineSnapshot;
   let persisted = machine.getPersistedSnapshot(snapshot) as AgentPersistedSnapshot;
@@ -1405,11 +1410,7 @@ export function foldLog(
       next,
     ) as PersistedWithChildren;
     const before = snapshot;
-    snapshot = (
-      machine as unknown as {
-        restoreSnapshot(persisted: AgentPersistedSnapshot): AnyMachineSnapshot;
-      }
-    ).restoreSnapshot(root);
+    snapshot = restoreMachineSnapshot(machine, root);
     const reminted = new Map<string, string>();
     collectSessionRemints(before, snapshot, reminted);
     for (const map of sessions.values()) {
@@ -1474,6 +1475,11 @@ export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
   const entries: AgentLogEntry[] = [];
   let fold: LogFold | undefined;
   let failure: unknown;
+  // XState has no public flag for an actor made by `restoreActor`; until it
+  // starts, its persisted snapshot is the one it was restored from.
+  const restored = (actor as unknown as { _restored?: boolean })._restored
+    ? (actor.getPersistedSnapshot() as AgentPersistedSnapshot)
+    : undefined;
 
   const record = (event: EventObject): void => {
     if (fold === undefined) {
@@ -1482,7 +1488,6 @@ export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
           "recordLog must be attached before actor.start(): it missed the init event.",
         );
       }
-      const restored = actor.options.snapshot as AgentPersistedSnapshot | undefined;
       const init: AgentLogInit = restored
         ? { snapshot: restored }
         : { input: (event as { input?: unknown }).input };
