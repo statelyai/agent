@@ -483,17 +483,22 @@ function normalizeEventErrors(
 // a persisted snapshot).
 const SNAPSHOT_VOLATILE_KEYS = new Set(["sessionId", "_nextTimerId", "_nextActorIds"]);
 const CHILD_VOLATILE_KEYS = new Set(["sessionId"]);
+// A live runtime stamps each timer with its wall-clock start; a replayed
+// snapshot never has one.
+const TIMER_VOLATILE_KEYS = new Set(["scheduledAt"]);
 
 /**
  * Where the walk is inside a persisted snapshot: the snapshot object itself,
- * its `children` record, one child entry, or plain application data (where no
- * key is ever reserved).
+ * its `children` record, one child entry, its `timers` list, one timer, or
+ * plain application data (where no key is ever reserved).
  */
-type HashPosition = "snapshot" | "children" | "child" | "data";
+type HashPosition = "snapshot" | "children" | "child" | "timers" | "timer" | "data";
 
 // The position a value occupies, given its parent's position and its key.
 function positionOf(parent: HashPosition, key: string): HashPosition {
-  if (parent === "snapshot") return key === "children" ? "children" : "data";
+  if (parent === "snapshot") {
+    return key === "children" ? "children" : key === "timers" ? "timers" : "data";
+  }
   if (parent === "children") return "child";
   if (parent === "child") return key === "snapshot" ? "snapshot" : "data";
   return "data";
@@ -542,14 +547,17 @@ function canonicalizeForHash(
         .sort(([a], [b]) => stableJson(a).localeCompare(stableJson(b)));
     }
     if (Array.isArray(value)) {
-      return value.map((item) => canonicalizeForHash(item, seen, "data"));
+      const itemPosition = position === "timers" ? "timer" : "data";
+      return value.map((item) => canonicalizeForHash(item, seen, itemPosition));
     }
     const volatileKeys =
       position === "snapshot"
         ? SNAPSHOT_VOLATILE_KEYS
         : position === "child"
           ? CHILD_VOLATILE_KEYS
-          : undefined;
+          : position === "timer"
+            ? TIMER_VOLATILE_KEYS
+            : undefined;
     // Null prototype, so an own `__proto__` key stays a key.
     const result: Record<string, unknown> = Object.create(null);
     for (const key of Object.keys(value).sort()) {

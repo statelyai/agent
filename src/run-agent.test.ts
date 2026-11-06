@@ -5887,3 +5887,133 @@ describe("invoked async actor completing without a value", () => {
     expect(replayed.snapshot.output).toEqual({ hadKey: true });
   });
 });
+
+describe("host-owned timers across resumes", () => {
+  const waiting = setupAgent({
+    context: z.object({}),
+    events: { GO: z.object({}) },
+  }).createMachine({
+    context: {},
+    initial: "wait",
+    states: {
+      wait: { after: { 1000: { target: "late" } }, on: { GO: { target: "done" } } },
+      late: { on: { GO: { target: "done" } } },
+      done: { type: "final" },
+    },
+  });
+
+  test("an onIdle pass resumes a snapshot whose timer carries a wall-clock start", async () => {
+    const result = await runAgent(waiting, {
+      timers: { schedule: () => {}, cancel: () => {} },
+      store: createInMemoryEventLogStore(),
+      threadId: "t",
+      onIdle: async () => ({ type: "GO" as const }),
+    });
+    expect(result.status).toBe("done");
+  });
+});
+
+describe("onIdle passes", () => {
+  const counter = setupAgent({
+    context: z.object({ count: z.number() }),
+    events: { TICK: z.object({}), STOP: z.object({}) },
+  }).createMachine({
+    id: "counter",
+    context: { count: 0 },
+    initial: "waiting",
+    states: {
+      waiting: {
+        on: {
+          TICK: ({ context }) => ({ context: { count: context.count + 1 } }),
+          STOP: { target: "done" },
+        },
+      },
+      done: { type: "final" },
+    },
+  });
+
+  test("an inspector sees the root once across every pass", async () => {
+    const announced: Array<string | undefined> = [];
+    let answers = 0;
+    const result = await runAgent(counter, {
+      inspect: (event) => {
+        if (event.type === "@xstate.actor") announced.push(event.actorRef.sessionId);
+      },
+      onIdle: async () => (answers++ < 3 ? { type: "TICK" as const } : { type: "STOP" as const }),
+    });
+    expect(result.status).toBe("done");
+    expect(answers).toBe(4);
+    expect(announced).toHaveLength(1);
+  });
+
+  test("aborting the signal while onIdle waits settles the run", async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+    const pending = runAgent(counter, {
+      signal: controller.signal,
+      onIdle: (_snapshot, { signal }) => {
+        seen = signal;
+        return new Promise(() => {});
+      },
+    });
+    await vi.waitFor(() => expect(seen).toBe(controller.signal));
+    controller.abort(new Error("stop"));
+    const result = await pending;
+    expect(result).toMatchObject({ status: "error", cause: "aborted" });
+  });
+});
+
+describe("a request failing inside a child machine", () => {
+  test("reaches the child's onError", async () => {
+    const child = setupAgent({
+      context: z.object({}),
+      events: {},
+      output: z.object({ ok: z.boolean() }),
+      requests: {
+        ask: { model: "m", schemas: { input: z.object({}), output: z.string() }, prompt: "hi" },
+      },
+    }).createMachine({
+      context: {},
+      initial: "asking",
+      states: {
+        asking: {
+          invoke: {
+            src: "ask",
+            input: {},
+            onDone: { target: "ok" },
+            onError: { target: "failed" },
+          },
+        },
+        ok: { type: "final", output: () => ({ ok: true }) },
+        failed: { type: "final", output: () => ({ ok: false }) },
+      },
+    });
+    const parent = setupAgent({
+      context: z.object({ ok: z.boolean().nullable() }),
+      events: {},
+      actors: { child },
+    }).createMachine({
+      context: { ok: null },
+      initial: "running",
+      states: {
+        running: {
+          invoke: {
+            src: "child",
+            input: {},
+            onDone: ({ event }) => ({ target: "done", context: { ok: event.output.ok } }),
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    const result = await runAgent(parent, {
+      executors: {
+        generateText: async () => {
+          throw new Error("provider 500");
+        },
+      },
+    });
+    expect(result.status).toBe("done");
+    expect(result.snapshot.context.ok).toBe(false);
+  });
+});

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { createAsyncLogic } from "xstate";
 import { z } from "zod";
 import {
   createAgentRuntime,
@@ -469,5 +470,60 @@ describe("a long-lived child machine across resumes", () => {
     const timers = (events: typeof first.events) =>
       events?.filter((entry) => entry.event.type === "xstate.timer").length;
     expect(timers(second.events)).toBe(timers(first.events));
+  });
+});
+
+describe("a plain actor inside a child machine", () => {
+  test("starts only after the child's earlier completion is durable", async () => {
+    const seenAtB: string[][] = [];
+    const store = createInMemoryEventLogStore();
+    const slowStore = {
+      ...store,
+      append: async (args: Parameters<typeof store.append>[0]) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return store.append(args);
+      },
+    };
+    const toolA = createAsyncLogic({ run: async () => "a" });
+    const toolB = createAsyncLogic({
+      run: async () => {
+        seenAtB.push(
+          (await store.read("t")).map(
+            (entry) => `${entry.event.type}@${entry.actorPath?.join("/") ?? ""}`,
+          ),
+        );
+        return "b";
+      },
+    });
+    const child = setupAgent({
+      context: z.object({}),
+      events: {},
+      actors: { toolA, toolB },
+    }).createMachine({
+      context: {},
+      initial: "a",
+      states: {
+        a: { invoke: { src: "toolA", onDone: { target: "b" } } },
+        b: { invoke: { src: "toolB", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const root = setupAgent({
+      context: z.object({}),
+      events: {},
+      actors: { child },
+    }).createMachine({
+      context: {},
+      initial: "run",
+      states: {
+        run: { invoke: { id: "child", src: "child", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const runtime = createAgentRuntime(root, { store: slowStore, threadId: "t" });
+    const result = await runToQuiescence(runtime, {});
+    expect(result.status).toBe("done");
+    expect(seenAtB).toHaveLength(1);
+    expect(seenAtB[0]).toContain("xstate.done.actor@child");
   });
 });
