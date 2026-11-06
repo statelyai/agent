@@ -190,7 +190,7 @@ A wrapper is still host-side. The machine cannot read its counts or react to the
 - Delivery is opt-in. The event is delivered only when an active state declares a transition that matches it, either `'@agent.usage'` or the wildcard `'*'`. Otherwise no usage event is sent to the machine. Wildcard matching follows XState semantics, so a catch-all `on: { '*': … }` does receive `@agent.usage`. Narrow the handler on `event.type` when the catch-all is meant for other events.
 - Declare the handler at machine level. A root `on: { '@agent.usage': … }` catches every call regardless of which state made it. A state-scoped handler drops calls made in other states.
 - Delivery goes to the run's root machine, including usage from requests inside an invoked child machine. Attribute those calls with `id`, `src`, and `model`.
-- Each call is counted once across a crash. A call in flight at a crash re-executes on resume, and when the log already holds its usage, matched by `callKey`, the repeat is not delivered or journaled. `onTrace` reports it as `usage.dropped` with `reason: "repeat"`. Its tokens are not added to `result.usage` again, but the call still counts toward `usage.modelCalls`.
+- Usage counts real spend across a crash. A call that re-executes on resume reports its usage again, under the same `callKey`, so a token budget sees both attempts. A call in flight at the crash that never reported usage is not counted.
 
 The payload has this shape.
 

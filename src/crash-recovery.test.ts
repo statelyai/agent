@@ -220,7 +220,7 @@ describe("checkCrashRecovery", () => {
 });
 
 describe("usage across a crash", () => {
-  test("a re-executed call's usage is counted once", async () => {
+  test("a finished call's usage and result land in one append, so no crash re-runs it", async () => {
     const machine = setupAgent({
       schemas: createAgentSchemas({ context: z.object({ tokens: z.number() }), events: {} }),
       actors: { ask: createTextLogic({ model: "m", prompt: "q" }) },

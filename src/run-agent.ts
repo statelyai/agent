@@ -249,18 +249,13 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
     }
   | { type: "emit"; event: EmittedFrom<TMachine> }
   | {
-      /** A reserved `@agent.usage` event the run declined to deliver. For
-       * `settled`, the tokens still fold into {@link AgentRunResult.usage};
-       * only the machine event is dropped. For `repeat`, the tokens are not
-       * added again (the log already holds them), but the call still counts
-       * toward `modelCalls`. */
+      /** A reserved `@agent.usage` event the run declined to deliver. The
+       * tokens still fold into {@link AgentRunResult.usage}; only the machine
+       * event is dropped. */
       type: "usage.dropped";
       event: AgentUsageEvent;
-      /**
-       * `'settled'`: the call settled after the run's cycle had resolved.
-       * `'repeat'`: a call re-executed after a crash; the log already holds its usage.
-       */
-      reason: "settled" | "repeat";
+      /** `'settled'`: the call settled after the run's cycle had resolved. */
+      reason: "settled";
     }
   | (
       | {
@@ -3020,6 +3015,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   let unflushed: AgentLogEntry[] = [];
   // Barriers waiting for the loop to finish its current step.
   let flushWaiters: Array<() => void> = [];
+  // A text call reported usage; its result follows within microtasks. The
+  // next idle flush waits a task so both land in one append: a crash between
+  // them would re-run a call that already finished.
+  let resultOwed = false;
 
   const flushJournal = (): void => {
     const waiters = flushWaiters;
@@ -3259,19 +3258,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       usage,
       budget: { modelCalls: modelCallsSpent + modelCallCount, maxModelCalls },
     };
-    // At-least-once execution, exactly-once accounting: the log already
-    // holds this call's spend from before the crash.
-    if (
-      source.callKey !== undefined &&
-      logEntries.some(
-        (entry) =>
-          entry.event.type === AGENT_USAGE_EVENT_TYPE &&
-          (entry.event as AgentUsageEvent).callKey === source.callKey,
-      )
-    ) {
-      onTrace({ type: "usage.dropped", event, reason: "repeat" });
-      return;
-    }
+    if (source.kind === "text") resultOwed = true;
     let delivered = false;
     deliverUsageEvent(
       event,
@@ -3746,7 +3733,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         return queued;
       }
       // Nothing queued: the entries so far are one settled step. Write them.
-      flushJournal();
+      if (resultOwed) {
+        resultOwed = false;
+        setTimeout(flushJournal, 0);
+      } else {
+        flushJournal();
+      }
       if (stopReason !== undefined || finished || !workInFlight()) {
         return QUIESCENT as unknown as EventObject;
       }

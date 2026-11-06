@@ -42,7 +42,7 @@ type HandWrittenJsonSerializableTraceEvent = {
   | { type: "stream.chunk"; request: JsonValue; chunk: string }
   | { type: "machine.transition"; from: JsonValue; snapshot: JsonValue; event: JsonValue }
   | { type: "emit"; event: JsonValue }
-  | { type: "usage.dropped"; event: JsonValue; reason: "settled" | "repeat" }
+  | { type: "usage.dropped"; event: JsonValue; reason: "settled" }
   | { type: "run.end"; status: "done"; output: JsonValue; snapshot: JsonValue }
   | {
       type: "run.end";
