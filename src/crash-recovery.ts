@@ -57,7 +57,12 @@ export interface CheckCrashRecoveryOptions<TMachine extends AnyStateMachine> {
     AgentRuntimeOptions<TMachine>,
     "executors" | "actors" | "store" | "threadId" | "signal" | "timers" | "abortWith"
   >;
-  /** Milliseconds one run (the baseline, a crashed run, or its resume) may take. Default 5000. */
+  /**
+   * Milliseconds one run (the baseline, a crashed run, or its resume) may take.
+   * Default 5000. A run that times out is aborted and starts no more effects,
+   * but an effect already running that ignores its abort signal can still
+   * finish after the next point's `reset`.
+   */
   timeout?: number;
 }
 
@@ -118,7 +123,7 @@ export interface CrashRecoveryFailure {
 
 /** What {@link checkCrashRecovery} found. */
 export interface CrashRecoveryReport {
-  /** True when every crash point recovered. */
+  /** True when every crash point was reached and recovered: no failures, nothing unreached. */
   ok: boolean;
   /** The uninterrupted run. */
   baseline: {
@@ -240,7 +245,7 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
   }
 
   return {
-    ok: failures.length === 0,
+    ok: failures.length === 0 && unreached.length === 0,
     baseline: {
       status: baseline.status,
       ...(baseline.status === "done" ? { output: baseline.output } : {}),

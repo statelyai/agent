@@ -488,3 +488,38 @@ describe("a store that fails", () => {
     expect(new Set(report.failures.map((failure) => failure.problem))).toEqual(new Set(["threw"]));
   });
 });
+
+describe("unreached points", () => {
+  test("a point no run dies at is reported and fails the check", async () => {
+    // The first run takes the long way; every run after skips the second tool.
+    let runs = 0;
+    const machine = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: {
+        route: createAsyncLogic({ run: async () => (runs++ === 0 ? "long" : "short") }),
+        extra: createAsyncLogic({ run: async () => 1 }),
+      },
+    }).createMachine({
+      context: {},
+      initial: "routing",
+      states: {
+        routing: {
+          invoke: {
+            src: "route",
+            onDone: ({ event }) => ({ target: event.output === "long" ? "extra" : "done" }),
+          },
+        },
+        extra: { invoke: { src: "extra", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const report = await checkCrashRecovery(machine, {});
+    expect(
+      report.unreached.some(
+        ({ point, reason }) =>
+          point.kind === "effect" && reason === "the run never started that effect",
+      ),
+    ).toBe(true);
+    expect(report.ok).toBe(false);
+  });
+});
