@@ -325,3 +325,92 @@ describe("explorePaths — request classification and text envelopes", () => {
     ]);
   });
 });
+
+describe("explorePaths — usage delivery", () => {
+  const agent = setupAgent({
+    context: z.object({ retried: z.boolean() }),
+    events: {},
+    requests: {
+      summarize: { model: "m", schemas: { input: z.object({}), output: z.string() }, prompt: "x" },
+    },
+  });
+  const usageEvent = (totalTokens: number) => ({
+    type: AGENT_USAGE_EVENT_TYPE,
+    kind: "text",
+    id: "s",
+    src: "summarize",
+    model: "m",
+    name: "summarize",
+    usage: { totalTokens },
+  });
+
+  test("a usage value the machine refuses is neither delivered nor recorded", async () => {
+    const machine = agent.createMachine({
+      context: { retried: false },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            [AGENT_USAGE_EVENT_TYPE]: ({ event }) =>
+              (event.usage.totalTokens ?? 0) > 100 ? { target: "overBudget" } : undefined,
+          },
+          invoke: { id: "s", src: "summarize", input: {}, onDone: { target: "done" } },
+        },
+        overBudget: { type: "final" },
+        done: { type: "final" },
+      },
+    });
+    const forked = await explorePaths(machine, {
+      outputs: { summarize: ["ok"] },
+      usage: { summarize: [{ totalTokens: 500 }, { totalTokens: 10 }] },
+    });
+    expect(forked.terminals).toEqual([
+      { status: "done", path: [usageEvent(500)], state: "overBudget" },
+      {
+        status: "done",
+        path: [{ type: "xstate.done.actor", actorId: "s", output: "ok" }],
+        state: "done",
+      },
+    ]);
+    for (const interleave of ["idle", "pending"] as const) {
+      const straight = await explorePaths(machine, {
+        outputs: { summarize: ["ok"] },
+        usage: { summarize: [{ totalTokens: 10 }] },
+        interleave,
+      });
+      expect(straight.terminals).toEqual([{ status: "done", path: [], state: "done" }]);
+    }
+  });
+
+  test("a usage transition that restarts the invoke drops the old completion", async () => {
+    const machine = agent.createMachine({
+      context: { retried: false },
+      initial: "working",
+      states: {
+        working: {
+          on: {
+            [AGENT_USAGE_EVENT_TYPE]: ({ context }) =>
+              context.retried
+                ? { context: { retried: true } }
+                : { target: "working", reenter: true, context: { retried: true } },
+          },
+          invoke: { id: "s", src: "summarize", input: {}, onDone: { target: "done" } },
+        },
+        done: { type: "final", output: ({ context }) => context },
+      },
+    });
+    const report = await explorePaths(machine, {
+      outputs: { summarize: ["ok"] },
+      usage: { summarize: [{ totalTokens: 10 }] },
+    });
+    // The first completion belonged to the restarted invoke; the new one settles on its own.
+    expect(report.terminals).toEqual([
+      {
+        status: "done",
+        path: [usageEvent(10), usageEvent(10)],
+        state: "done",
+        output: { retried: true },
+      },
+    ]);
+  });
+});

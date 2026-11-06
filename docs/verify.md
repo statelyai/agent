@@ -310,7 +310,8 @@ const result = await canReach(waitingMachine, "timedOut");
 - The event is `{ type: '@agent.usage', kind: 'text', id, src, model, name?, usage }`, the run's shape without `budget`.
 - Each listed value forks one branch, recorded in the path before `xstate.done.actor`.
 - One value with one canned output is no fork: the output resolves straight through, but the usage event is still recorded in the path.
-- A usage transition that leaves the invoking state cancels the request: its completion is not recorded.
+- A usage value the active states refuse (`snapshot.can` is false) is dropped, as a run drops it: the request settles with no usage event delivered or recorded.
+- A usage transition that leaves the invoking state, or restarts its invoke, cancels the request: its completion is not recorded, and a restarted invoke settles later on its own.
 - A settling request with no `usage` entry while a usage transition is active lists `@agent.usage` in `vacuous`. Completeness is unchanged.
 - Requests inside child machines and decisions deliver no usage.
 

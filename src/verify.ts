@@ -1012,6 +1012,10 @@ function resolveRegisteredDecisionLogic(
   return isDecisionLogic(candidate) ? candidate : undefined;
 }
 
+// A usage event to deliver before a completion, or `undefined` for a value the
+// machine refuses (a run drops it).
+type UsageChoice = AgentUsageEvent | undefined;
+
 // Envelopes made by `textOutput`.
 const textOutputs = new WeakSet<object>();
 
@@ -1285,7 +1289,7 @@ export interface ExplorePathsOptions {
    * settles at the root and the active states take `@agent.usage`, the
    * search delivers `{ type: '@agent.usage', kind: 'text', id, src, model,
    * name?, usage }` to the root immediately before the request's completion,
-   * as a run does: once per listed value, each a fork that counts against
+   * as a run does (a value the active states refuse is dropped, as a run drops it): once per listed value, each a fork that counts against
    * `maxDepth` and records the usage event in the path. One value with one
    * canned output is no fork, but its usage event is still recorded. No `budget`
    * field is sent. A settling request with no entry while a usage transition
@@ -1379,8 +1383,11 @@ interface InvokeFork {
   incompleteSrc?: string;
   /** Text requests resolve to `{ result, messages }`, not the bare output. */
   isText?: boolean;
-  /** `usage` events to deliver before each output, one branch per event. */
-  usage?: AgentUsageEvent[];
+  /**
+   * `usage` events to deliver before each output, one branch per entry;
+   * `undefined` is a value the machine refuses, so nothing is delivered.
+   */
+  usage?: UsageChoice[];
   /** An explored child's events to its parent, each delivered at most once per path. */
   events?: EventObject[];
   /** The child actor's session, keying its delivered events. */
@@ -1943,8 +1950,15 @@ function explore(
     if (!usage) {
       return { step: resolveStep(prev, id, output), completed: true };
     }
+    // The invoke's actor session, so one restarted under the same id (a
+    // re-entered state) is a new invoke this completion never reaches.
+    const sessionOf = (step: AgentStep): string | undefined => {
+      const invoke = pendingInvokes(step).find((pending) => pending.id === id);
+      return invoke && childSession(id, invoke.ref);
+    };
+    const session = sessionOf(prev);
     const charged = transitionStep(prev, usage);
-    if (!pendingInvokes(charged).some((invoke) => invoke.id === id)) {
+    if (session === undefined || sessionOf(charged) !== session) {
       return { step: charged, completed: false };
     }
     const resolved = resolveStep(charged, id, output);
@@ -1957,9 +1971,11 @@ function explore(
     return { step: resolved, completed: true };
   };
   // The usage events to deliver before a root text request settles, one per
-  // `usage` value, when the active states take `@agent.usage`. A settling
-  // request with no entry there leaves the usage transition vacuous.
-  const usageFor = (step: AgentStep, request: AgentStepRequest): AgentUsageEvent[] | undefined => {
+  // `usage` value, when the active states take `@agent.usage`. A value the
+  // machine refuses (`can` is false) is dropped, as a run drops it: one
+  // `undefined` entry stands for all of them. A settling request with no
+  // entry there leaves the usage transition vacuous.
+  const usageFor = (step: AgentStep, request: AgentStepRequest): UsageChoice[] | undefined => {
     if (
       !usageScript ||
       request.kind !== "text" ||
@@ -1972,7 +1988,8 @@ function explore(
       vacuous.add(AGENT_USAGE_EVENT_TYPE);
       return undefined;
     }
-    return values.map((usage) => ({
+    const snapshot = step.snapshot as AnyMachineSnapshot;
+    const events: AgentUsageEvent[] = values.map((usage) => ({
       type: AGENT_USAGE_EVENT_TYPE,
       kind: "text",
       id: request.id,
@@ -1981,6 +1998,11 @@ function explore(
       ...(request.input.name !== undefined ? { name: request.input.name } : {}),
       usage,
     }));
+    const accepted: UsageChoice[] = events.filter((event) => snapshot.can(event as never));
+    if (accepted.length === 0) {
+      return undefined;
+    }
+    return accepted.length < events.length ? [...accepted, undefined] : accepted;
   };
   // `stopWhen` on the settled snapshot or any state passed through to reach it.
   const stops = (step: AgentStep): boolean =>
@@ -2137,7 +2159,7 @@ function explore(
     src: string,
     isText: boolean,
     invoke?: PendingInvoke,
-    usage?: AgentUsageEvent[],
+    usage?: UsageChoice[],
   ): { fork: InvokeFork } | { output: unknown } | { blocked: true } | { never: true } => {
     const failures = errorsFor(src);
     if (neverSettles(src)) {
@@ -2233,7 +2255,7 @@ function explore(
       id: string,
       src: string,
       isText: boolean,
-      usage?: AgentUsageEvent[],
+      usage?: UsageChoice[],
     ): InvokeFork[] => {
       if ("fork" in settle) {
         return [settle.fork];
@@ -2482,11 +2504,11 @@ function explore(
             pending: {
               id: request.id,
               output: asTextResult(settle.output),
-              ...(usage ? { usage: usage[0] } : {}),
+              ...(usage?.[0] ? { usage: usage[0] } : {}),
             },
           };
         }
-        if (usage) {
+        if (usage?.[0]) {
           recordEvent(usage[0] as unknown as ChosenEvent);
         }
         current = settleStep(current, request.id, asTextResult(settle.output), usage?.[0]).step;
