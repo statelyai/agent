@@ -612,8 +612,7 @@ describe("a child that finished just before a crash", () => {
 });
 
 describe("a plain actor that finishes in the step it starts an effect", () => {
-  test("still runs that effect when the journal holds it back", async () => {
-    const ran: string[] = [];
+  function createFinishing(ran: string[]) {
     const step = createStepLogic({
       context: {},
       run: ({ event }, enq) => {
@@ -658,6 +657,12 @@ describe("a plain actor that finishes in the step it starts an effect", () => {
         done: { type: "final" },
       },
     });
+    return root;
+  }
+
+  test("still runs that effect when the journal holds it back", async () => {
+    const ran: string[] = [];
+    const root = createFinishing(ran);
     const store = createInMemoryEventLogStore();
     const result = await runToQuiescence(createAgentRuntime(root, { store, threadId: "t" }), {
       input: undefined,
@@ -665,6 +670,26 @@ describe("a plain actor that finishes in the step it starts an effect", () => {
     } as AgentRunInit<typeof root>);
     expect(result.status).toBe("done");
     expect(ran).toEqual(["effect"]);
+  });
+
+  test("drops that effect when the write of its cause fails", async () => {
+    const ran: string[] = [];
+    const root = createFinishing(ran);
+    const store = createInMemoryEventLogStore();
+    const failing = {
+      ...store,
+      append: async (args: Parameters<typeof store.append>[0]) => {
+        if (args.entries.some((entry) => entry.event.type === "PING")) throw new Error("disk full");
+        return store.append(args);
+      },
+    };
+    const result = await runToQuiescence(
+      createAgentRuntime(root, { store: failing, threadId: "t" }),
+      { input: undefined, event: { type: "WORK" } } as AgentRunInit<typeof root>,
+    );
+    expect(result.status).not.toBe("done");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(ran).toEqual([]);
   });
 });
 

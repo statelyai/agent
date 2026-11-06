@@ -1144,9 +1144,10 @@ interface RunAgentBindContext {
    * The journal writes still in flight, or `undefined` when none are (or the
    * run has no store). A plain actor a child machine starts waits for it, so
    * the child's earlier entries are durable before the actor's side effect
-   * runs. Unset off the runtime path.
+   * runs. Resolves `false` when the write failed or the run stopped
+   * meanwhile. Unset off the runtime path.
    */
-  pendingJournal?: () => Promise<void> | undefined;
+  pendingJournal?: () => Promise<boolean> | undefined;
 }
 
 /**
@@ -2257,7 +2258,7 @@ function journaledMachine(
  */
 function journalGatedLogic(
   logic: AnyActorLogic,
-  pending: () => Promise<void> | undefined,
+  pending: () => Promise<boolean> | undefined,
 ): AnyActorLogic {
   type Result = [unknown, unknown[]];
   type Effect = { type?: string; exec: (...args: unknown[]) => unknown };
@@ -2266,8 +2267,8 @@ function journalGatedLogic(
     if (!Array.isArray(effects) || !effects.some((e) => (e as Effect)?.type === "@xstate.effect")) {
       return result;
     }
-    // The step that finishes the actor still runs its effects; only a stop
-    // before the journal catches up cancels them.
+    // The step that finishes the actor still runs its effects; a stop, or a
+    // failed write of the entries that caused them, cancels them.
     const finishing = (snapshot as { status?: string } | undefined)?.status === "done";
     return [
       snapshot,
@@ -2277,8 +2278,8 @@ function journalGatedLogic(
         const gated = (...args: unknown[]) => {
           const waiting = pending();
           if (waiting === undefined) return exec(...args);
-          void waiting.then(() => {
-            if (finishing || self.getSnapshot().status === "active") exec(...args);
+          void waiting.then((ok) => {
+            if (ok && (finishing || self.getSnapshot().status === "active")) exec(...args);
           });
         };
         return { ...(effect as object), exec: gated, action: gated };
@@ -3393,7 +3394,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     // own entries already fold.
     pendingJournal: () =>
       store !== undefined && (journalPending > 0 || unflushed.length > 0)
-        ? awaitJournal().catch(() => {})
+        ? awaitJournal().then(
+            () => stopReason === undefined,
+            () => false,
+          )
         : undefined,
     onChildEvent: (self, event) => {
       if (finished || event.type === "xstate.stop") return;
