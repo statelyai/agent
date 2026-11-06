@@ -62,7 +62,10 @@ expect(result).toMatchObject({ reachable: false, complete: true });
 
 ## 5. Crash and resume
 
-Run with a store and a thread id, kill the run mid-flight (throw from an executor, or exit the process), then call `runAgent` again with the same store and `threadId`.
+Call `checkCrashRecovery(machine, { input, events, executors })` from `@statelyai/agent/testing` for each scenario, and assert `report.failures` is `[]`. It kills the run after every log append and while every effect is in flight, resumes each from the log, and checks the resume against an uninterrupted run. See `docs/persistence.md#crash-testing`.
+
+- Executors and fake tools must answer from the request, not call order. A fake that keeps state passes `reset`.
+- A failure names the crash point and the problem (`reran`, `skipped`, `outcome`, `stuck`, …). Fix the machine or the effect, never the check.
 
 - A completed model call never runs again. An in-flight one re-runs with the same `info.callKey`.
 - A plain actor (`createAsyncLogic`) in flight at the crash re-runs. It gets no call key, so derive an idempotency key from the domain (the ticket id, the booking key) and dedupe in the effect.

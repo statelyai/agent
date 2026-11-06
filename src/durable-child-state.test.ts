@@ -527,3 +527,86 @@ describe("a plain actor inside a child machine", () => {
     expect(seenAtB[0]).toContain("xstate.done.actor@child");
   });
 });
+
+describe("a child that finished just before a crash", () => {
+  // root → middle → inner; the crash cuts the log after a child's last entry,
+  // before its parent journaled the child's completion.
+  function createNested() {
+    const inner = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: { summarize: createTextLogic({ model: "test-model", prompt: "Sum." }) },
+    }).createMachine({
+      context: {},
+      initial: "work",
+      states: {
+        work: { invoke: { id: "summarize", src: "summarize", onDone: { target: "done" } } },
+        done: { type: "final", output: () => "inner done" },
+      },
+    });
+    const middle = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({ got: z.unknown() }), events: {} }),
+      actors: { inner },
+    }).createMachine({
+      context: { got: undefined },
+      initial: "inner",
+      states: {
+        inner: {
+          invoke: {
+            id: "inner",
+            src: "inner",
+            onDone: ({ event }) => ({ target: "done", context: { got: event.output } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => context },
+      },
+    });
+    return setupAgent({
+      schemas: createAgentSchemas({ context: z.object({ got: z.unknown() }), events: {} }),
+      actors: { middle },
+    }).createMachine({
+      context: { got: undefined },
+      initial: "running",
+      states: {
+        running: {
+          invoke: {
+            id: "middle",
+            src: "middle",
+            onDone: ({ event }) => ({ target: "done", context: { got: event.output } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => context },
+      },
+    });
+  }
+
+  test.each([
+    ["the root", "middle"],
+    ["a child machine", "inner"],
+  ])("%s still gets its child's completion on resume", async (_, childId) => {
+    const machine = createNested();
+    const generateText = async () => ({ result: "sum" });
+    const full = await runToQuiescence(
+      createAgentRuntime(machine, { executors: { generateText } }),
+      {},
+    );
+    expect(full.status).toBe("done");
+    const cut = full.events.findIndex(
+      (entry) =>
+        entry.event.type === "xstate.done.actor" &&
+        (entry.event as { actorId?: string }).actorId === childId,
+    );
+    expect(cut).toBeGreaterThan(0);
+    const calls: unknown[] = [];
+    const resumed = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText: async () => (calls.push(1), { result: "sum" }) },
+      }),
+      { events: full.events.slice(0, cut) },
+    );
+    expect(resumed.status).toBe("done");
+    expect(resumed.status === "done" && resumed.output).toEqual(
+      full.status === "done" && full.output,
+    );
+    expect(calls).toEqual([]);
+  });
+});

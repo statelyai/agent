@@ -480,6 +480,7 @@ For machines authored as data, validate the config with `validateAgentConfig(con
 
 ## Related
 
+- [Crash testing](persistence.md#crash-testing): `checkCrashRecovery` kills a run at every log append and in-flight effect, and checks each resume.
 - [Debugging](debugging.md): scripted reproduction and the diagnostic codes in context.
 - [Evals](evals.md): scoring runs on output, trajectory, and budget.
 - [Quickstart](quickstart.md#define-and-run-one-artifact): a plain-function executor for `runToQuiescence`.

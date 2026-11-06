@@ -254,8 +254,11 @@ export type AgentTraceEvent<TMachine extends AnyStateMachine = AnyStateMachine> 
        * event is dropped. */
       type: "usage.dropped";
       event: AgentUsageEvent;
-      /** `'settled'`: the call settled after the run's cycle had resolved. */
-      reason: "settled";
+      /**
+       * `'settled'`: the call settled after the run's cycle had resolved.
+       * `'repeat'`: a call re-executed after a crash; the log already holds its usage.
+       */
+      reason: "settled" | "repeat";
     }
   | (
       | {
@@ -1383,6 +1386,7 @@ async function runTextRequest(
           ...(src !== "" ? { src } : {}),
           model: request.model,
           ...(request.name !== undefined ? { name: request.name } : {}),
+          ...(callKey !== undefined ? { callKey } : {}),
         },
         self,
       );
@@ -1598,6 +1602,7 @@ function createCountingDecide(
               ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
               ...(src !== "" ? { src } : {}),
               model: attemptRequest.model,
+              ...(callKey !== undefined ? { callKey } : {}),
             },
             self,
           ),
@@ -1662,6 +1667,7 @@ function createCountingFill(
               ...(id !== "" ? { id } : {}),
               ...(src !== "" ? { src } : {}),
               model: request.model,
+              ...(info?.callKey !== undefined ? { callKey: info.callKey } : {}),
             },
             self,
           ),
@@ -2984,8 +2990,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
 
   // ─── Write-ahead journaling (`options.store`) ───
   //
-  // Every appended entry is queued onto ONE chain, so writes reach the store in
-  // log order and each carries its own index as `expectedIndex`. The chain is
+  // Entries are written in batches on ONE chain, so writes reach the store in
+  // log order and each batch starts at its first entry's index as
+  // `expectedIndex`. The chain is
   // awaited at two points only: before a model call (`awaitJournal`, the
   // barrier the executors call) and at finish. Pure transitions never wait.
   // The first rejection wins, stops the run (`cause: 'journal'`) and blocks
@@ -3002,10 +3009,20 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   let journalPending = 0;
   let journalError: unknown;
 
-  const journalEntry = (entry: AgentLogEntry): void => {
-    if (store === undefined) {
+  // Entries not yet handed to the store. They are written together, in one
+  // append, whenever the loop waits (for an effect, or for nothing) and before
+  // a barrier, so the entries one input causes land atomically: a root event
+  // and the child inputs its transition sends, a child input and the event
+  // it sends back. A crash between them would otherwise keep the cause and
+  // lose the effect, which a fold cannot re-derive.
+  let unflushed: AgentLogEntry[] = [];
+
+  const flushJournal = (): void => {
+    if (store === undefined || unflushed.length === 0) {
       return;
     }
+    const entries = unflushed;
+    unflushed = [];
     journalPending++;
     journalChain = journalChain
       .then(async () => {
@@ -3014,8 +3031,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         }
         await store.append({
           threadId: threadId!,
-          expectedIndex: entry.index,
-          entries: [entry],
+          expectedIndex: entries[0]!.index,
+          entries,
         });
       })
       .catch((error: unknown) => {
@@ -3025,6 +3042,15 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       .finally(() => {
         journalPending--;
       });
+  };
+
+  const journalEntry = (entry: AgentLogEntry): void => {
+    if (store === undefined) {
+      return;
+    }
+    unflushed.push(entry);
+    // A straggler after the run settled has no loop left to flush it.
+    if (finished) flushJournal();
   };
 
   /**
@@ -3037,6 +3063,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (store === undefined) {
       return;
     }
+    flushJournal();
     let tail = journalChain;
     for (;;) {
       await tail;
@@ -3052,6 +3079,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (store === undefined) {
       return;
     }
+    flushJournal();
     while (journalPending > 0) {
       await journalChain;
     }
@@ -3203,6 +3231,19 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       usage,
       budget: { modelCalls: modelCallsSpent + modelCallCount, maxModelCalls },
     };
+    // At-least-once execution, exactly-once accounting: the log already
+    // holds this call's spend from before the crash.
+    if (
+      source.callKey !== undefined &&
+      logEntries.some(
+        (entry) =>
+          entry.event.type === AGENT_USAGE_EVENT_TYPE &&
+          (entry.event as AgentUsageEvent).callKey === source.callKey,
+      )
+    ) {
+      onTrace({ type: "usage.dropped", event, reason: "repeat" });
+      return;
+    }
     let delivered = false;
     deliverUsageEvent(
       event,
@@ -3332,8 +3373,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     // happen, but a child runs live, and a fold reproduces its state only from
     // its own inputs. Stopping a child is the root's doing, which the root's
     // own entries already fold.
-    pendingJournal: () =>
-      store !== undefined && journalPending > 0 ? awaitJournal().catch(() => {}) : undefined,
+    pendingJournal: () => {
+      flushJournal();
+      return store !== undefined && journalPending > 0 ? awaitJournal().catch(() => {}) : undefined;
+    },
     onChildEvent: (self, event) => {
       if (finished || event.type === "xstate.stop") return;
       const actorPath = actorPathOf(self);
@@ -3593,6 +3636,66 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             }
           });
 
+  // A child restored already finished never tells its parent: restoring does
+  // not replay the transition that finished it. That happens when the run
+  // died after the child's last entry was journaled but before its parent's
+  // completion was, so the parent still waits on it. Deliver the completion
+  // the child would have sent, at any depth.
+  type RestoredChild = AnyActorRef & {
+    id: string;
+    _restored?: boolean;
+    _parent?: AnyActorRef;
+    sessionId?: string;
+    system?: { sendEvent?: (source: object, target: object, event: object) => void };
+  };
+  type ChildSnapshot = {
+    status?: string;
+    output?: unknown;
+    error?: unknown;
+    children?: Record<string, AnyActorRef | undefined>;
+  };
+  const completionOf = (child: RestoredChild): EventObject | undefined => {
+    const snapshot = child.getSnapshot() as ChildSnapshot;
+    if (snapshot.status === "done") {
+      return {
+        type: "xstate.done.actor",
+        output: snapshot.output,
+        actorId: child.id,
+        sessionId: child.sessionId,
+      } as EventObject;
+    }
+    if (snapshot.status === "error") {
+      return {
+        type: "xstate.error.actor",
+        error: snapshot.error,
+        actorId: child.id,
+        sessionId: child.sessionId,
+      } as EventObject;
+    }
+    return undefined;
+  };
+  // The finished children of a restored root: their completions go to the mailbox.
+  const restoredRootCompletions = (snapshot: AnyMachineSnapshot): EventObject[] =>
+    Object.values((snapshot.children ?? {}) as Record<string, RestoredChild | undefined>)
+      .map((child) => (child ? completionOf(child) : undefined))
+      .filter((event): event is EventObject => event !== undefined);
+  // The restored, finished children inside a child machine: their completions
+  // go to that machine, which journals them as its own inputs. A child that
+  // finished live has already told its parent.
+  const reportRestoredCompletions = (actor: AnyActorRef): void => {
+    const snapshot = actor.getSnapshot() as ChildSnapshot;
+    if (snapshot.status !== "active") return;
+    for (const child of Object.values(snapshot.children ?? {}) as (RestoredChild | undefined)[]) {
+      if (!child) continue;
+      const event = completionOf(child);
+      if (event !== undefined && child._restored) {
+        child.system?.sendEvent?.(child, actor, event);
+      } else {
+        reportRestoredCompletions(child);
+      }
+    }
+  };
+
   let execution!: DurableExecution<TMachine>;
   const durableAdapter = {
     startActor: (actor: AnyActorRef) => {
@@ -3601,6 +3704,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // reporting a child error the machine already handles as unhandled.
       actor.subscribe({ next: recheck, complete: recheck, error: recheck });
       (actor as unknown as { start(): void }).start();
+      reportRestoredCompletions(actor);
     },
     enqueueRootEvent: (_source: unknown, event: EventObject) => enqueue(event),
     executeAction: (
@@ -3613,6 +3717,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       if (queued !== undefined) {
         return queued;
       }
+      // Nothing queued: the entries so far are one settled step. Write them.
+      flushJournal();
       if (stopReason !== undefined || finished || !workInFlight()) {
         return QUIESCENT as unknown as EventObject;
       }
@@ -4046,6 +4152,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             AnyMachineSnapshot,
             AgentEffects,
           ];
+          for (const event of restoredRootCompletions(snapshot)) enqueue(event);
         } catch (error) {
           // A snapshot this machine cannot restore fails the run on its own
           // terms rather than throwing out of the host.
@@ -4283,6 +4390,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       };
 
       finished = true;
+      flushJournal();
       releaseAllDeliveries();
       // Every write queued so far: the result waits for these. A straggler
       // entry appended after this point is still written, but not awaited.
