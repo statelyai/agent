@@ -421,3 +421,69 @@ describe("harness coverage", () => {
     expect(report.failures).toEqual([]);
   });
 });
+
+describe("child replies across a model call", () => {
+  test("a child's reply lands with its input when the same transition starts a model call", async () => {
+    const child = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: { REPORT: z.object({}) } }),
+    }).createMachine({
+      context: {},
+      on: {
+        REPORT: ({ parent }, enq) => {
+          if (parent) enq.sendTo(parent, { type: "REPORTED" });
+        },
+      },
+    });
+    const parent = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ reported: z.boolean() }),
+        events: { GO: z.object({}), REPORTED: z.object({}) },
+      }),
+      actors: { child, draft: createTextLogic({ model: "m", prompt: "Draft." }) },
+    }).createMachine({
+      context: { reported: false },
+      invoke: { id: "child", src: "child" },
+      initial: "waiting",
+      on: { REPORTED: ({ context }) => ({ context: { ...context, reported: true } }) },
+      states: {
+        waiting: {
+          on: {
+            GO: ({ children }, enq) => {
+              enq.sendTo(children.child, { type: "REPORT" });
+              return { target: "drafting" };
+            },
+          },
+        },
+        drafting: { invoke: { id: "draft", src: "draft", onDone: { target: "done" } } },
+        done: { type: "final", output: ({ context }) => context },
+      },
+    });
+    const report = await checkCrashRecovery(parent, { executors, events: [{ type: "GO" }] });
+    expect(report.baseline.output).toEqual({ reported: true });
+    expect(report.failures).toEqual([]);
+  });
+});
+
+describe("a store that fails", () => {
+  test("a read that rejects is reported per crash point", async () => {
+    let stores = 0;
+    const report = await checkCrashRecovery(createPipeline(), {
+      executors,
+      events: [{ type: "REVIEW", ok: true }],
+      store: () => {
+        const inner = createInMemoryEventLogStore();
+        // The baseline's store works; every later one fails to read.
+        const broken = stores++ > 0;
+        return {
+          read: (threadId, options) =>
+            broken ? Promise.reject(new Error("offline")) : inner.read(threadId, options),
+          length: (threadId) => inner.length(threadId),
+          fork: (input) => inner.fork(input),
+          append: (input) => inner.append(input),
+        };
+      },
+    });
+    expect(report.failures.length).toBe(report.points.length);
+    expect(new Set(report.failures.map((failure) => failure.problem))).toEqual(new Set(["threw"]));
+  });
+});

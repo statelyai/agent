@@ -102,7 +102,7 @@ export type CrashRecoveryProblem =
   | "replay"
   /** The crashed run or its resume never settled within `timeout`. */
   | "stuck"
-  /** The resume threw. */
+  /** The crashed run, its resume, or the store factory threw. */
   | "threw";
 
 /** One problem at one crash point. */
@@ -259,7 +259,12 @@ async function crashAt<TMachine extends AnyStateMachine>(
     ...(key !== undefined ? { key } : {}),
   });
   options.reset?.();
-  const backing = (options.store ?? createInMemoryEventLogStore)();
+  let backing: AgentEventLogStore;
+  try {
+    backing = (options.store ?? createInMemoryEventLogStore)();
+  } catch (error) {
+    return [fail("threw", `the store factory threw: ${String(error)}`)];
+  }
 
   // ─── The run that dies ───
   const controller = new AbortController();
@@ -286,10 +291,19 @@ async function crashAt<TMachine extends AnyStateMachine>(
     return true;
   });
   if (point.kind === "log" && point.entries === 0) dying.freeze();
-  const died = await withTimeout(
-    runTurns(machine, options, crashed, dying.store, undefined, controller.signal),
-    timeout,
-  );
+  let died: AgentRunResult<TMachine> | typeof TIMED_OUT | undefined;
+  try {
+    died = await withTimeout(
+      runTurns(machine, options, crashed, dying.store, undefined, controller.signal),
+      timeout,
+    );
+  } catch (error) {
+    // Dying is the point; anything else thrown is a finding.
+    if (!(error instanceof CrashError)) {
+      crash();
+      return [fail("threw", `the crashed run threw: ${String(error)}`)];
+    }
+  }
   crash();
   if (died === TIMED_OUT) {
     return [fail("stuck", `the run did not stop within ${timeout}ms after the crash`)];

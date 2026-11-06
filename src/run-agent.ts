@@ -3016,8 +3016,13 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // it sends back. A crash between them would otherwise keep the cause and
   // lose the effect, which a fold cannot re-derive.
   let unflushed: AgentLogEntry[] = [];
+  // Barriers waiting for the loop to finish its current step.
+  let flushWaiters: Array<() => void> = [];
 
   const flushJournal = (): void => {
+    const waiters = flushWaiters;
+    flushWaiters = [];
+    for (const resolve of waiters) resolve();
     if (store === undefined || unflushed.length === 0) {
       return;
     }
@@ -3054,6 +3059,27 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   };
 
   /**
+   * Resolves once the entries so far are handed to the store as one settled
+   * step. Mid-step (a transition's effects still running, its children's
+   * replies not yet delivered), a barrier waits for the loop to finish the
+   * step, so it cannot write a child's input without the reply it sends back.
+   * The loop flushes when it next waits; a host that is not reading
+   * `nextEvent` gets the flush on the next task instead.
+   */
+  const stepSettled = (): Promise<void> => {
+    if (wake !== undefined || finished || stopReason !== undefined) {
+      flushJournal();
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      flushWaiters.push(resolve);
+      // A host that drives `transition` itself may not come back to
+      // `nextEvent` until this call starts: by the next task, the step is over.
+      setTimeout(flushJournal, 0);
+    });
+  };
+
+  /**
    * Every journal write ISSUED SO FAR, including the stragglers appended after
    * the run settled. Re-reads the chain tail until it stops moving, so a write
    * queued while an earlier one was in flight is covered too. Never rejects: a
@@ -3079,7 +3105,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (store === undefined) {
       return;
     }
-    flushJournal();
+    await stepSettled();
     while (journalPending > 0) {
       await journalChain;
     }
@@ -3373,10 +3399,10 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     // happen, but a child runs live, and a fold reproduces its state only from
     // its own inputs. Stopping a child is the root's doing, which the root's
     // own entries already fold.
-    pendingJournal: () => {
-      flushJournal();
-      return store !== undefined && journalPending > 0 ? awaitJournal().catch(() => {}) : undefined;
-    },
+    pendingJournal: () =>
+      store !== undefined && (journalPending > 0 || unflushed.length > 0)
+        ? awaitJournal().catch(() => {})
+        : undefined,
     onChildEvent: (self, event) => {
       if (finished || event.type === "xstate.stop") return;
       const actorPath = actorPathOf(self);

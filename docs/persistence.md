@@ -124,7 +124,7 @@ Each resumed run is checked against the uninterrupted one. Each failure names it
 | `outcome`         | The resume ended with a different status, output, state, or context                       |
 | `replay`          | The final log does not replay to the resumed state                                        |
 | `stuck`           | The crashed run or its resume did not settle within `timeout` (default 5000 ms)           |
-| `threw`           | The resume threw                                                                          |
+| `threw`           | The crashed run, its resume, or the `store` factory threw                                 |
 
 - An effect in flight at the crash may run twice. That is the at-least-once contract (see [Idempotency keys](hosts.md#idempotency-keys)), and it is not reported.
 - Model calls are keyed by `callKey` without the execution id, and plain actors by invoke site. Only actors bound through string-keyed sources are seen.
