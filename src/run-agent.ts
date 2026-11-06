@@ -2773,11 +2773,11 @@ async function runAgentPasses<TMachine extends AnyStateMachine>(
       }),
     };
   }
-  const endPass = () => {
-    if (isStableInspection(rest.inspect)) rest.inspect.endPass();
+  const endPass = (persisted: unknown) => {
+    if (isStableInspection(rest.inspect)) rest.inspect.endPass(persisted);
   };
   let result = await runToQuiescence(bindInbox(createAgentRuntime(machine, rest), inbox), rest);
-  endPass();
+  endPass(result.persist());
   // The budget is for the whole call: each pass starts from what the earlier
   // passes spent, since every runtime counts only its own calls.
   let modelCallsSpent = (rest.modelCallsSpent ?? 0) + result.usage.modelCalls;
@@ -2828,7 +2828,7 @@ async function runAgentPasses<TMachine extends AnyStateMachine>(
       },
     );
     modelCallsSpent += result.usage.modelCalls;
-    endPass();
+    endPass(result.persist());
   }
   return result;
 }

@@ -6081,3 +6081,38 @@ describe("usage from concurrent children", () => {
     expect(result.snapshot.context.tokens).toBe(200);
   });
 });
+
+describe("onIdle passes with a persisted child", () => {
+  test("an inspector sees the child once across passes", async () => {
+    const worker = setupAgent({
+      context: z.object({}),
+      events: { PING: z.object({}) },
+    }).createMachine({ context: {}, initial: "idle", states: { idle: { on: { PING: {} } } } });
+    const parent = setupAgent({
+      context: z.object({}),
+      events: { NEXT: z.object({}), STOP: z.object({}) },
+      actors: { worker },
+    }).createMachine({
+      id: "parent",
+      context: {},
+      invoke: { id: "worker", src: "worker" },
+      initial: "waiting",
+      states: {
+        waiting: { on: { NEXT: {}, STOP: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const announced = new Map<string, number>();
+    let answers = 0;
+    const result = await runAgent(parent, {
+      inspect: (event) => {
+        if (event.type !== "@xstate.actor") return;
+        const id = (event.actorRef as { id?: string }).id ?? "";
+        announced.set(id, (announced.get(id) ?? 0) + 1);
+      },
+      onIdle: async () => (answers++ < 2 ? { type: "NEXT" as const } : { type: "STOP" as const }),
+    });
+    expect(result.status).toBe("done");
+    expect(Object.fromEntries(announced)).toEqual({ parent: 1, worker: 1 });
+  });
+});
