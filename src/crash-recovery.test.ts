@@ -576,6 +576,53 @@ describe("events sent mid-flight", () => {
     expect(report.baseline.effects.map(({ key }) => key)).toEqual(["actor:log"]);
   });
 
+  test("occurrence targets a later start of the same key", async () => {
+    // The first POST fails, the retry is aborted while it is out.
+    const machine = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ attempt: z.number() }),
+        events: { ABORT: z.object({}) },
+      }),
+      actors: {
+        post: createAsyncLogic({
+          run: async ({ input }: { input: { attempt: number } }) => {
+            // A real POST takes a while: the abort lands while it is out.
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            if (input.attempt === 0) throw new Error("503");
+            return "ok";
+          },
+        }),
+      },
+    }).createMachine({
+      context: { attempt: 0 },
+      initial: "posting",
+      on: { ABORT: { target: ".aborted" } },
+      states: {
+        posting: {
+          invoke: {
+            id: "post",
+            src: "post",
+            input: ({ context }) => ({ attempt: context.attempt }),
+            onDone: { target: "sent" },
+            onError: ({ context }) => ({
+              target: "posting",
+              reenter: true,
+              context: { attempt: context.attempt + 1 },
+            }),
+          },
+        },
+        sent: { type: "final", output: () => "sent" },
+        aborted: { type: "final", output: ({ context }) => `aborted at ${context.attempt}` },
+      },
+    });
+    const report = await checkCrashRecovery(machine, {
+      sendDuring: [{ during: "actor:post", occurrence: 1, event: { type: "ABORT" } }],
+    });
+    expect(report.baseline.output).toBe("aborted at 1");
+    expect(report.failures).toEqual([]);
+    expect(report.ok).toBe(true);
+  });
+
   test("a send whose effect never starts throws", async () => {
     await expect(
       checkCrashRecovery(createCancellable(), {
@@ -666,5 +713,65 @@ describe("host timers", () => {
     const report = await checkCrashRecovery(machine, { timers: "host" });
     expect(report.baseline.output).toEqual(["a", "b", "c"]);
     expect(report.failures).toEqual([]);
+  });
+
+  // Waiting for an answer, with a reminder at 12h and expiry at 72h.
+  function createSla() {
+    return setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ reminded: z.boolean() }),
+        events: { APPROVE: z.object({}) },
+      }),
+      actors: { ask: createTextLogic({ model: "m", prompt: "q" }) },
+    }).createMachine({
+      context: { reminded: false },
+      initial: "asking",
+      states: {
+        asking: { invoke: { src: "ask", onDone: { target: "waiting" } } },
+        waiting: {
+          after: {
+            43_200_000: ({ context }) =>
+              context.reminded ? undefined : { context: { reminded: true } },
+            259_200_000: { target: "expired" },
+          },
+          on: { APPROVE: { target: "approved" } },
+        },
+        approved: { type: "final", output: ({ context }) => ({ ...context, approved: true }) },
+        expired: { type: "final", output: ({ context }) => ({ ...context, approved: false }) },
+      },
+    });
+  }
+
+  test("host events go before pending timers; a timer's turn fires the soonest", async () => {
+    const answered = await checkCrashRecovery(createSla(), {
+      executors,
+      timers: "host",
+      events: [{ type: "APPROVE" }],
+    });
+    expect(answered.baseline.output).toEqual({ reminded: false, approved: true });
+    expect(answered.ok).toBe(true);
+
+    const reminded = await checkCrashRecovery(createSla(), {
+      executors,
+      timers: "host",
+      events: [{ type: "xstate.timer" }, { type: "APPROVE" }],
+    });
+    expect(reminded.baseline.output).toEqual({ reminded: true, approved: true });
+    expect(reminded.failures).toEqual([]);
+    expect(reminded.ok).toBe(true);
+
+    const expired = await checkCrashRecovery(createSla(), { executors, timers: "host" });
+    expect(expired.baseline.output).toEqual({ reminded: true, approved: false });
+    expect(expired.ok).toBe(true);
+  });
+
+  test("events left when the uninterrupted run ends throw", async () => {
+    await expect(
+      checkCrashRecovery(createSla(), {
+        executors,
+        timers: "host",
+        events: [{ type: "APPROVE" }, { type: "APPROVE" }],
+      }),
+    ).rejects.toThrow(/1 of `events` undelivered/);
   });
 });

@@ -34,12 +34,14 @@ export interface CheckCrashRecoveryOptions<TMachine extends AnyStateMachine> {
   /**
    * Host events, delivered one per turn: each time the run settles `idle`,
    * the next one resumes it. The run ends when it settles `done` or `error`,
-   * or `idle` with none left.
+   * or `idle` with none left. An uninterrupted run that ends with some left
+   * throws. With `timers: "host"`, an id-less `{ type: "xstate.timer" }`
+   * here is a timer's turn: the pending timer due soonest fires.
    */
-  events?: readonly EventFromLogic<TMachine>[];
+  events?: ReadonlyArray<EventFromLogic<TMachine> | { type: "xstate.timer" }>;
   /**
-   * Host events sent while the run is busy: each one goes out the first time
-   * the effect `during` starts (a key as {@link CrashEffect.key} names it,
+   * Host events sent while the run is busy: each one goes out when the effect
+   * `during` starts (its first start, or its `occurrence`-th) (a key as {@link CrashEffect.key} names it,
    * such as `draft#1` or `actor:fetch:0`), so it lands while that effect is
    * in flight. After a crash, one the log does not hold is sent again, as a
    * host retrying its delivery would: as its effect starts again, or, when
@@ -47,12 +49,18 @@ export interface CheckCrashRecoveryOptions<TMachine extends AnyStateMachine> {
    * the event. One whose
    * effect the uninterrupted run never starts throws.
    */
-  sendDuring?: ReadonlyArray<{ during: string; event: EventFromLogic<TMachine> }>;
+  sendDuring?: ReadonlyArray<{
+    during: string;
+    /** Which start of `during` to send it at, from 0, as {@link CrashPoint}'s `occurrence`. Default 0. */
+    occurrence?: number;
+    event: EventFromLogic<TMachine>;
+  }>;
   /**
    * `"host"` hands root `after` timers to the harness as a host scheduler
-   * (see `AgentTimerScheduler`) instead of arming them in process: each time
-   * the run settles `idle` with timers pending, the soonest one fires, before
-   * the next of `events`. Default `"in-process"`.
+   * (see `AgentTimerScheduler`) instead of arming them in process. The run
+   * settles `idle` with them pending: an id-less `{ type: "xstate.timer" }`
+   * in `events` fires the one due soonest, and once `events` run out, the
+   * pending ones fire in due order. Default `"in-process"`.
    */
   timers?: "in-process" | "host";
   /**
@@ -190,6 +198,8 @@ interface RunWorld {
   clock: { now: number; due: Map<string, number> };
   /** The `sendDuring` indexes whose effect never started in this run. */
   unsent: number[];
+  /** How many of `events` the run ended without delivering. */
+  undelivered: number;
   /** Each model call's result and how long it took, by key. */
   answers: Map<string, RecordedAnswer>;
   /** The uninterrupted run's answers: a call it made gets the same result again. */
@@ -235,9 +245,17 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
     throw new Error(`checkCrashRecovery: the uninterrupted run did not settle within ${timeout}ms`);
   }
   if (baselineWorld.unsent.length > 0) {
-    const keys = baselineWorld.unsent.map((index) => `'${options.sendDuring![index]!.during}'`);
+    const keys = baselineWorld.unsent.map((index) => {
+      const { during, occurrence = 0 } = options.sendDuring![index]!;
+      return occurrence === 0 ? `'${during}'` : `'${during}' (start ${occurrence})`;
+    });
     throw new Error(
       `checkCrashRecovery: sendDuring names effects the uninterrupted run never started: ${keys.join(", ")}`,
+    );
+  }
+  if (baselineWorld.undelivered > 0) {
+    throw new Error(
+      `checkCrashRecovery: the uninterrupted run settled '${baseline.status}' with ${baselineWorld.undelivered} of \`events\` undelivered`,
     );
   }
   const baselineEntries = await baselineStore.store.read(THREAD);
@@ -292,6 +310,8 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
 }
 
 const THREAD = "crash-recovery";
+// A timer's turn in `events` that found no timer pending: nothing to journal.
+const SKIPPED_TURN = "(no timer pending)";
 const TIMED_OUT = Symbol("timed out");
 
 interface CrashContext<TMachine extends AnyStateMachine> {
@@ -527,7 +547,12 @@ async function runTurns<TMachine extends AnyStateMachine>(
   const events = options.events ?? [];
   let next = 0;
   if (before !== undefined) {
-    while (next < before.hostEntries.length && durable.has(before.hostEntries[next]!)) next++;
+    while (
+      next < before.hostEntries.length &&
+      (before.hostEntries[next] === SKIPPED_TURN || durable.has(before.hostEntries[next]!))
+    ) {
+      next++;
+    }
   }
 
   // `sendDuring` events still to send. A run sends each as its effect
@@ -540,11 +565,19 @@ async function runTurns<TMachine extends AnyStateMachine>(
   const unsent = new Set<number>();
   const redeliver: number[] = [];
   const sendAt = new Map<number, number>();
-  sends.forEach(({ during }, index) => {
-    if (resuming === undefined) return void unsent.add(index);
+  // Which start of its key each unsent event waits for, in this run.
+  const waitsFor = new Map<number, number>();
+  sends.forEach(({ during, occurrence = 0 }, index) => {
+    if (resuming === undefined) {
+      waitsFor.set(index, occurrence);
+      return void unsent.add(index);
+    }
     const entry = before!.sentEntries.get(index);
     if (entry !== undefined && durable.has(entry.id)) return;
-    if (!before!.effects.some((effect) => effect.key === during && effect.completed)) {
+    const starts = before!.effects.filter((effect) => effect.key === during);
+    if (starts[occurrence]?.completed !== true) {
+      // The completed starts do not run again; the rest do, from the first.
+      waitsFor.set(index, occurrence - starts.filter((effect) => effect.completed).length);
       return void unsent.add(index);
     }
     const at = resuming.sentAt.get(index);
@@ -560,10 +593,13 @@ async function runTurns<TMachine extends AnyStateMachine>(
     awaitingSends.push({ index, json: canonicalEventJson(event) });
     live?.send(event as never);
   };
+  const startsSeen = new Map<string, number>();
   const onEffect = world.onEffect;
   world.onEffect = (effect) => {
+    const nth = startsSeen.get(effect.key) ?? 0;
+    startsSeen.set(effect.key, nth + 1);
     for (const index of unsent) {
-      if (sends[index]!.during !== effect.key) continue;
+      if (sends[index]!.during !== effect.key || waitsFor.get(index) !== nth) continue;
       unsent.delete(index);
       send(index);
     }
@@ -592,9 +628,12 @@ async function runTurns<TMachine extends AnyStateMachine>(
         }
       : undefined;
 
-  const turn = (event?: EventObject, host = true) => {
-    // The host's event is the first root entry like it after the run opens.
-    let awaiting = event !== undefined && host ? canonicalEventJson(event) : undefined;
+  /** `track`: the turn delivers one of `events` (a host event, or a timer's turn), whose entry is recorded. */
+  const turn = (event?: EventObject, track?: "host" | "timer") => {
+    // The host's event is the first root entry like it after the run opens;
+    // a timer's, the first root timer entry.
+    let awaiting = event !== undefined && track === "host" ? canonicalEventJson(event) : undefined;
+    let awaitingTimer = track === "timer";
     live = createAgentRuntime(tracked, {
       ...options.runtime,
       onEvent: (entry) => {
@@ -609,6 +648,11 @@ async function runTurns<TMachine extends AnyStateMachine>(
         if (awaiting !== undefined && json === awaiting) {
           world.hostEntries.push(entry.id);
           awaiting = undefined;
+          return;
+        }
+        if (awaitingTimer && entry.event.type === "xstate.timer") {
+          world.hostEntries.push(entry.id);
+          awaitingTimer = false;
           return;
         }
         const sent = awaitingSends.findIndex((item) => item.json === json);
@@ -644,14 +688,33 @@ async function runTurns<TMachine extends AnyStateMachine>(
 
   let result = await turn();
   while (result.status === "idle" && !world.crashed) {
-    const timer = soonestTimer();
-    if (timer !== undefined) result = await turn(timer, false);
-    else if (next < events.length) result = await turn(events[next++]);
-    else break;
+    let event: EventObject | undefined;
+    let host = true;
+    let marked = false;
+    if (next < events.length) {
+      event = events[next++];
+      if (event!.type === "xstate.timer" && !("id" in event!)) {
+        // Marks a timer's turn: the one due soonest fires here, if any is pending.
+        event = soonestTimer();
+        host = false;
+        marked = true;
+        if (event === undefined) {
+          // Counted as delivered, so a resume does not fire it again.
+          world.hostEntries.push(SKIPPED_TURN);
+          continue;
+        }
+      }
+    } else {
+      event = soonestTimer();
+      host = false;
+    }
+    if (event === undefined) break;
+    result = await turn(event, host ? "host" : marked ? "timer" : undefined);
     await result.drain?.();
   }
   await result.drain?.();
   world.unsent = [...unsent];
+  world.undelivered = events.length - next;
   return result;
 }
 
@@ -664,6 +727,7 @@ function newWorld(
     hostEntries: [],
     sentEntries: new Map(),
     unsent: [],
+    undelivered: 0,
     clock: { now: 0, due: new Map() },
     answers: new Map(),
     ...(recorded !== undefined ? { recorded } : {}),

@@ -2528,7 +2528,7 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
   onIdle?: (
     snapshot: SnapshotFrom<TMachine>,
     options: { signal: AbortSignal | undefined },
-  ) => Promise<EventFromLogic<TMachine>>;
+  ) => Promise<EventFromLogic<TMachine> | AgentTimerEvent>;
   /**
    * A send handle for events pushed mid-run (a cancel, a user message), from
    * {@link createAgentInbox}. Each `inbox.send` goes to the current pass's
@@ -2676,7 +2676,8 @@ async function waitForIdleAnswer<TMachine extends AnyStateMachine>(
   signal: AbortSignal | undefined,
   aborted: Promise<typeof ABORTED>,
 ): Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean } | typeof ABORTED> {
-  const answer = () => onIdle(snapshot, { signal });
+  // A host timer firing is delivered like any event (see `toTimerInput`).
+  const answer = () => onIdle(snapshot, { signal }) as Promise<EventFromLogic<TMachine>>;
   if (!inbox) {
     return Promise.race([aborted, answer().then((event) => ({ event, fromInbox: false }))]);
   }
@@ -3431,8 +3432,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // Wrap every effective TextLogic/DecisionLogic (and the agent.* builtins)
   // with a host-backed executor. Invoked child machines are recursively
   // rebound so their requests inherit the same executors at any depth (see
-  // rebindChildMachine). Every other source (plain actors, non-agent logic)
-  // passes through untouched.
+  // rebindChildMachine). Plain actors are held until the journal is durable.
   for (const [key, logic] of Object.entries(effectiveSources)) {
     if (isActLogic(logic)) {
       wrappedSources[key] = bindActLogic(runCtx);
@@ -3458,6 +3458,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         wrappedSources[key] = rebound;
       }
       continue;
+    }
+
+    // A plain actor waits for the journal like a model call does, so the
+    // event that started it is durable before its side effect runs.
+    if (runCtx.pendingJournal && typeof logic?.transition === "function") {
+      wrappedSources[key] = journalGatedLogic(logic, runCtx.pendingJournal);
     }
   }
 
