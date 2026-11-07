@@ -133,6 +133,8 @@ Each resumed run is checked against the uninterrupted one. Each failure names it
 - Plain actors run live every time, so they must give the same result however often they run. A fake that keeps state passes `reset`, which runs before the baseline and each crashed run. It does not run before the resume, so the fake keeps what the crashed run did, as a real dependency would.
 - The outcome check compares final states, so a machine whose result depends on which concurrent call finishes first can fail it after a crash. Make the result order-independent, or test that part without concurrency.
 - `events` are host events, delivered one per idle settle. A resume skips the ones its log already holds.
+- `sendDuring` sends host events while the run is busy: `{ during: "draft#1", event: { type: "CANCEL" } }` goes out the first time that effect starts, keyed as in `report.baseline.effects`. After a crash, one the log does not hold is sent again, as a retrying host would: when its effect starts in the resume, or at once if the crashed run had started it.
+- `timers: "host"` makes the harness the host scheduler for root `after` timers (see [Host-owned timers](steps.md#host-owned-timers)). When the run settles `idle` with timers pending, the soonest one fires before the next of `events`, without waiting for its delay. The default, in-process timers, fire after their real delay.
 - `store` takes a factory for your own store adapter, one fresh store per run. A store that acknowledges a write it then loses shows up as `reran`.
 
 Run it in CI next to the machine's other tests. It needs no API key.

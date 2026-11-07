@@ -523,3 +523,76 @@ describe("unreached points", () => {
     expect(report.ok).toBe(false);
   });
 });
+
+describe("events sent mid-flight", () => {
+  // draft → review; CANCEL while drafting stops the draft.
+  function createCancellable(draftRuns: { n: number }) {
+    return setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({}),
+        events: { CANCEL: z.object({}) },
+      }),
+      actors: {
+        draft: createTextLogic({ model: "m", prompt: "Draft." }),
+        log: createAsyncLogic({ run: async () => void draftRuns.n++ }),
+      },
+    }).createMachine({
+      context: {},
+      initial: "logging",
+      states: {
+        logging: { invoke: { src: "log", onDone: { target: "drafting" } } },
+        drafting: {
+          invoke: {
+            id: "draft",
+            src: "draft",
+            onDone: { target: "done" },
+          },
+          on: { CANCEL: { target: "cancelled" } },
+        },
+        cancelled: { type: "final", output: () => "cancelled" },
+        done: { type: "final", output: () => "drafted" },
+      },
+    });
+  }
+
+  // Killed while the draft is out, the cancel never reaches the log: the
+  // resume redelivers it.
+  test("a cancel sent while the call is out wins at every crash point", async () => {
+    const runs = { n: 0 };
+    const report = await checkCrashRecovery(createCancellable(runs), {
+      executors,
+      sendDuring: [{ during: "draft#1", event: { type: "CANCEL" } }],
+    });
+    expect(report.baseline.output).toBe("cancelled");
+    expect(report.failures).toEqual([]);
+    expect(report.ok).toBe(true);
+  });
+});
+
+describe("host timers", () => {
+  test("the harness fires root timers a host would schedule", async () => {
+    const machine = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({ waited: z.boolean() }), events: {} }),
+      actors: { ask: createTextLogic({ model: "m", prompt: "q" }) },
+    }).createMachine({
+      context: { waited: false },
+      initial: "asking",
+      states: {
+        asking: { invoke: { src: "ask", onDone: { target: "cooling" } } },
+        // An hour: the run would never settle if the timer were armed in process.
+        cooling: { after: { 3_600_000: { target: "again" } } },
+        again: {
+          invoke: {
+            src: "ask",
+            onDone: () => ({ target: "done", context: { waited: true } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => context },
+      },
+    });
+    const report = await checkCrashRecovery(machine, { executors, timers: "host" });
+    expect(report.baseline.output).toEqual({ waited: true });
+    expect(report.failures).toEqual([]);
+    expect(report.ok).toBe(true);
+  });
+});

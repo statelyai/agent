@@ -22,6 +22,7 @@ import {
   runToQuiescence,
   toJsonValue,
   type AgentRunResult,
+  type AgentRuntime,
   type AgentRuntimeOptions,
 } from "./run-agent.js";
 import { isTextLogic, type AgentRequestExecutors } from "./text-logic.js";
@@ -36,6 +37,22 @@ export interface CheckCrashRecoveryOptions<TMachine extends AnyStateMachine> {
    * or `idle` with none left.
    */
   events?: readonly EventFromLogic<TMachine>[];
+  /**
+   * Host events sent while the run is busy: each one goes out the first time
+   * the effect `during` starts (a key as {@link CrashEffect.key} names it,
+   * such as `draft#1` or `actor:fetch:0`), so it lands while that effect is
+   * in flight. After a crash, one the log does not hold is sent again: when
+   * its effect starts in the resume, or at once when the crashed run had
+   * already started it, as a host retrying its delivery would.
+   */
+  sendDuring?: ReadonlyArray<{ during: string; event: EventFromLogic<TMachine> }>;
+  /**
+   * `"host"` hands root `after` timers to the harness as a host scheduler
+   * (see `AgentTimerScheduler`) instead of arming them in process: each time
+   * the run settles `idle` with timers pending, the soonest one fires, before
+   * the next of `events`. Default `"in-process"`.
+   */
+  timers?: "in-process" | "host";
   /**
    * Model executors. Each call is recorded by its `callKey`. They run in the
    * uninterrupted run only: after a crash, a call it made gets its recorded
@@ -165,6 +182,8 @@ interface RunWorld {
   effects: StartedEffect[];
   /** The log entry ids of the host events this run delivered, in order. */
   hostEntries: string[];
+  /** The log entry id of each `sendDuring` event this run delivered, by its index. */
+  sentEntries: Map<number, string>;
   /** Each model call's result and how long it took, by key. */
   answers: Map<string, RecordedAnswer>;
   /** The uninterrupted run's answers: a call it made gets the same result again. */
@@ -355,7 +374,7 @@ async function crashAt<TMachine extends AnyStateMachine>(
   let result: AgentRunResult<TMachine> | typeof TIMED_OUT;
   try {
     result = await withTimeout(
-      runTurns(machine, options, resumed, backing, crashed.hostEntries, resumeController.signal),
+      runTurns(machine, options, resumed, backing, crashed, resumeController.signal),
       timeout,
     );
   } catch (error) {
@@ -455,16 +474,17 @@ async function crashAt<TMachine extends AnyStateMachine>(
 }
 
 /**
- * Runs the turns: start from `input`, then one host event per idle settle.
- * Resuming, the events already in the log are skipped.
+ * Runs the turns: start from `input`, then one host event per idle settle,
+ * with `sendDuring` events sent as their effects start and host timers fired
+ * when the run is idle. Resuming, what the crashed run's log holds is skipped.
  */
 async function runTurns<TMachine extends AnyStateMachine>(
   machine: TMachine,
   options: CheckCrashRecoveryOptions<TMachine>,
   world: RunWorld,
   store: AgentEventLogStore,
-  /** Resuming: the host events the crashed run delivered, by entry id. */
-  deliveredBefore?: readonly string[],
+  /** Resuming: the run that crashed. */
+  before?: RunWorld,
   signal?: AbortSignal,
 ): Promise<AgentRunResult<TMachine>> {
   const tracked = trackActors(machine, world);
@@ -478,45 +498,109 @@ async function runTurns<TMachine extends AnyStateMachine>(
           ]),
         )
       : undefined;
-  const turn = (event?: EventObject) => {
-    // The host's event is the first root entry like it after the run opens.
-    let awaiting = event !== undefined ? canonicalEventJson(event) : undefined;
-    return runToQuiescence(
-      createAgentRuntime(tracked, {
-        ...options.runtime,
-        onEvent: (entry) => {
-          options.runtime?.onEvent?.(entry);
-          if (
-            awaiting !== undefined &&
-            entry.actorPath === undefined &&
-            canonicalEventJson(entry.event) === awaiting
-          ) {
-            world.hostEntries.push(entry.id);
-            awaiting = undefined;
-          }
-        },
-        executors,
-        ...(actors !== undefined ? { actors } : {}),
-        store,
-        threadId: THREAD,
-        ...(signal !== undefined ? { signal } : {}),
-      }),
-      {
-        ...(options.input !== undefined ? { input: options.input as never } : {}),
-        ...(event !== undefined ? { event: event as never } : {}),
-      },
-    );
-  };
 
+  const durable =
+    before !== undefined
+      ? new Set((await store.read(THREAD)).map((entry) => entry.id))
+      : new Set<string>();
   const events = options.events ?? [];
   let next = 0;
-  if (deliveredBefore !== undefined) {
-    const durable = new Set((await store.read(THREAD)).map((entry) => entry.id));
-    while (next < deliveredBefore.length && durable.has(deliveredBefore[next]!)) next++;
+  if (before !== undefined) {
+    while (next < before.hostEntries.length && durable.has(before.hostEntries[next]!)) next++;
   }
+
+  // `sendDuring` events still to send, and those sent but not yet in the log.
+  const sends = options.sendDuring ?? [];
+  const unsent = new Set<number>();
+  const redeliver: number[] = [];
+  sends.forEach(({ during }, index) => {
+    const entry = before?.sentEntries.get(index);
+    if (entry !== undefined && durable.has(entry)) return;
+    if (before?.effects.some((effect) => effect.key === during)) redeliver.push(index);
+    else unsent.add(index);
+  });
+  // Root entries a sent event should land as, matched in send order.
+  const awaitingSends: Array<{ index: number; json: string }> = [];
+  let live: AgentRuntime<TMachine> | undefined;
+  const send = (index: number) => {
+    const { event } = sends[index]!;
+    awaitingSends.push({ index, json: canonicalEventJson(event) });
+    live?.send(event as never);
+  };
+  const onEffect = world.onEffect;
+  world.onEffect = (effect) => {
+    for (const index of unsent) {
+      if (sends[index]!.during !== effect.key) continue;
+      unsent.delete(index);
+      send(index);
+    }
+    return onEffect(effect);
+  };
+
+  // Host timers: scheduled by the runtime, fired by the turn loop.
+  const pendingTimers = new Map<string, number>();
+  const timers =
+    options.timers === "host"
+      ? {
+          schedule: ({ id, delay }: { id: string; delay: number }) => {
+            pendingTimers.set(id, delay);
+          },
+          cancel: (id: string) => {
+            pendingTimers.delete(id);
+          },
+        }
+      : undefined;
+
+  const turn = (event?: EventObject, host = true) => {
+    // The host's event is the first root entry like it after the run opens.
+    let awaiting = event !== undefined && host ? canonicalEventJson(event) : undefined;
+    live = createAgentRuntime(tracked, {
+      ...options.runtime,
+      onEvent: (entry) => {
+        options.runtime?.onEvent?.(entry);
+        if (entry.actorPath !== undefined) return;
+        const json = canonicalEventJson(entry.event);
+        if (awaiting !== undefined && json === awaiting) {
+          world.hostEntries.push(entry.id);
+          awaiting = undefined;
+          return;
+        }
+        const sent = awaitingSends.findIndex((item) => item.json === json);
+        if (sent !== -1) {
+          world.sentEntries.set(awaitingSends[sent]!.index, entry.id);
+          awaitingSends.splice(sent, 1);
+        }
+      },
+      executors,
+      ...(actors !== undefined ? { actors } : {}),
+      store,
+      threadId: THREAD,
+      ...(timers !== undefined ? { timers } : {}),
+      ...(signal !== undefined ? { signal } : {}),
+    });
+    // Sent before the run opens, they are read after it: a host retrying.
+    for (const index of redeliver.splice(0)) send(index);
+    return runToQuiescence(live, {
+      ...(options.input !== undefined ? { input: options.input as never } : {}),
+      ...(event !== undefined ? { event: event as never } : {}),
+    });
+  };
+
+  const soonestTimer = (): EventObject | undefined => {
+    let soonest: [string, number] | undefined;
+    for (const timer of pendingTimers)
+      if (soonest === undefined || timer[1] < soonest[1]) soonest = timer;
+    if (soonest === undefined) return undefined;
+    pendingTimers.delete(soonest[0]);
+    return { type: "xstate.timer", id: soonest[0] } as EventObject;
+  };
+
   let result = await turn();
-  while (result.status === "idle" && next < events.length && !world.crashed) {
-    result = await turn(events[next++]);
+  while (result.status === "idle" && !world.crashed) {
+    const timer = soonestTimer();
+    if (timer !== undefined) result = await turn(timer, false);
+    else if (next < events.length) result = await turn(events[next++]);
+    else break;
     await result.drain?.();
   }
   await result.drain?.();
@@ -530,6 +614,7 @@ function newWorld(
   return {
     effects: [],
     hostEntries: [],
+    sentEntries: new Map(),
     answers: new Map(),
     ...(recorded !== undefined ? { recorded } : {}),
     crashed: false,
