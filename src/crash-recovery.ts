@@ -41,9 +41,11 @@ export interface CheckCrashRecoveryOptions<TMachine extends AnyStateMachine> {
    * Host events sent while the run is busy: each one goes out the first time
    * the effect `during` starts (a key as {@link CrashEffect.key} names it,
    * such as `draft#1` or `actor:fetch:0`), so it lands while that effect is
-   * in flight. After a crash, one the log does not hold is sent again: when
-   * its effect starts in the resume, or at once when the crashed run had
-   * already started it, as a host retrying its delivery would.
+   * in flight. After a crash, one the log does not hold is sent again, as a
+   * host retrying its delivery would: as its effect starts again, or, when
+   * that effect's completion was durable, where the uninterrupted log holds
+   * the event. One whose
+   * effect the uninterrupted run never starts throws.
    */
   sendDuring?: ReadonlyArray<{ during: string; event: EventFromLogic<TMachine> }>;
   /**
@@ -182,8 +184,12 @@ interface RunWorld {
   effects: StartedEffect[];
   /** The log entry ids of the host events this run delivered, in order. */
   hostEntries: string[];
-  /** The log entry id of each `sendDuring` event this run delivered, by its index. */
-  sentEntries: Map<number, string>;
+  /** The log entry of each `sendDuring` event this run delivered, by its index. */
+  sentEntries: Map<number, { id: string; index: number }>;
+  /** Host timers: the virtual clock and each pending timer's due time. */
+  clock: { now: number; due: Map<string, number> };
+  /** The `sendDuring` indexes whose effect never started in this run. */
+  unsent: number[];
   /** Each model call's result and how long it took, by key. */
   answers: Map<string, RecordedAnswer>;
   /** The uninterrupted run's answers: a call it made gets the same result again. */
@@ -228,6 +234,12 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
   if (baseline === TIMED_OUT) {
     throw new Error(`checkCrashRecovery: the uninterrupted run did not settle within ${timeout}ms`);
   }
+  if (baselineWorld.unsent.length > 0) {
+    const keys = baselineWorld.unsent.map((index) => `'${options.sendDuring![index]!.during}'`);
+    throw new Error(
+      `checkCrashRecovery: sendDuring names effects the uninterrupted run never started: ${keys.join(", ")}`,
+    );
+  }
   const baselineEntries = await baselineStore.store.read(THREAD);
   const baselineCounts = countBy(baselineWorld.effects);
   const expected = outcomeOf(baseline);
@@ -259,6 +271,7 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
       baselineCounts,
       recorded: baselineWorld.answers,
       expected,
+      sentAt: new Map([...baselineWorld.sentEntries].map(([index, entry]) => [index, entry.index])),
     });
     if (Array.isArray(found)) failures.push(...found);
     else unreached.push({ point, reason: found.unreached });
@@ -288,6 +301,8 @@ interface CrashContext<TMachine extends AnyStateMachine> {
   baselineCounts: Map<string, number>;
   recorded: ReadonlyMap<string, RecordedAnswer>;
   expected: string;
+  /** Where each `sendDuring` event landed in the uninterrupted log. */
+  sentAt: ReadonlyMap<number, number>;
 }
 
 async function crashAt<TMachine extends AnyStateMachine>(
@@ -374,7 +389,14 @@ async function crashAt<TMachine extends AnyStateMachine>(
   let result: AgentRunResult<TMachine> | typeof TIMED_OUT;
   try {
     result = await withTimeout(
-      runTurns(machine, options, resumed, backing, crashed, resumeController.signal),
+      runTurns(
+        machine,
+        options,
+        resumed,
+        backing,
+        { crashed, sentAt: ctx.sentAt },
+        resumeController.signal,
+      ),
       timeout,
     );
   } catch (error) {
@@ -483,8 +505,8 @@ async function runTurns<TMachine extends AnyStateMachine>(
   options: CheckCrashRecoveryOptions<TMachine>,
   world: RunWorld,
   store: AgentEventLogStore,
-  /** Resuming: the run that crashed. */
-  before?: RunWorld,
+  /** Resuming: the run that crashed, and where each `sendDuring` event landed in the uninterrupted log. */
+  resuming?: { crashed: RunWorld; sentAt: ReadonlyMap<number, number> },
   signal?: AbortSignal,
 ): Promise<AgentRunResult<TMachine>> {
   const tracked = trackActors(machine, world);
@@ -499,25 +521,36 @@ async function runTurns<TMachine extends AnyStateMachine>(
         )
       : undefined;
 
-  const durable =
-    before !== undefined
-      ? new Set((await store.read(THREAD)).map((entry) => entry.id))
-      : new Set<string>();
+  const before = resuming?.crashed;
+  const log = before !== undefined ? await store.read(THREAD) : [];
+  const durable = new Set(log.map((entry) => entry.id));
   const events = options.events ?? [];
   let next = 0;
   if (before !== undefined) {
     while (next < before.hostEntries.length && durable.has(before.hostEntries[next]!)) next++;
   }
 
-  // `sendDuring` events still to send, and those sent but not yet in the log.
+  // `sendDuring` events still to send. A run sends each as its effect
+  // starts. A resume does too when that effect runs again (its completion was
+  // not durable). When it will not, the resume sends the event where the
+  // uninterrupted log holds it, so it lands in the same order: at once when
+  // the log is already past that point, else once the entry before it is
+  // written.
   const sends = options.sendDuring ?? [];
   const unsent = new Set<number>();
   const redeliver: number[] = [];
+  const sendAt = new Map<number, number>();
   sends.forEach(({ during }, index) => {
-    const entry = before?.sentEntries.get(index);
-    if (entry !== undefined && durable.has(entry)) return;
-    if (before?.effects.some((effect) => effect.key === during)) redeliver.push(index);
-    else unsent.add(index);
+    if (resuming === undefined) return void unsent.add(index);
+    const entry = before!.sentEntries.get(index);
+    if (entry !== undefined && durable.has(entry.id)) return;
+    if (!before!.effects.some((effect) => effect.key === during && effect.completed)) {
+      return void unsent.add(index);
+    }
+    const at = resuming.sentAt.get(index);
+    if (at === undefined) return;
+    if (at <= log.length) redeliver.push(index);
+    else sendAt.set(index, at);
   });
   // Root entries a sent event should land as, matched in send order.
   const awaitingSends: Array<{ index: number; json: string }> = [];
@@ -537,13 +570,21 @@ async function runTurns<TMachine extends AnyStateMachine>(
     return onEffect(effect);
   };
 
-  // Host timers: scheduled by the runtime, fired by the turn loop.
+  // Host timers: scheduled by the runtime, fired by the turn loop on a
+  // virtual clock, so each is due `delay` after the moment it was scheduled.
   const pendingTimers = new Map<string, number>();
+  world.clock = { now: before?.clock.now ?? 0, due: pendingTimers };
+  // A resume's runtime re-schedules the crashed run's timers: same due times.
+  const dueBefore = before?.clock.due ?? new Map<string, number>();
   const timers =
     options.timers === "host"
       ? {
+          // Each turn's runtime re-schedules the timers it restores; one
+          // already pending keeps its due time.
           schedule: ({ id, delay }: { id: string; delay: number }) => {
-            pendingTimers.set(id, delay);
+            if (!pendingTimers.has(id)) {
+              pendingTimers.set(id, dueBefore.get(id) ?? world.clock.now + delay);
+            }
           },
           cancel: (id: string) => {
             pendingTimers.delete(id);
@@ -558,6 +599,11 @@ async function runTurns<TMachine extends AnyStateMachine>(
       ...options.runtime,
       onEvent: (entry) => {
         options.runtime?.onEvent?.(entry);
+        for (const [index, at] of sendAt) {
+          if (entry.index + 1 < at) continue;
+          sendAt.delete(index);
+          send(index);
+        }
         if (entry.actorPath !== undefined) return;
         const json = canonicalEventJson(entry.event);
         if (awaiting !== undefined && json === awaiting) {
@@ -567,7 +613,7 @@ async function runTurns<TMachine extends AnyStateMachine>(
         }
         const sent = awaitingSends.findIndex((item) => item.json === json);
         if (sent !== -1) {
-          world.sentEntries.set(awaitingSends[sent]!.index, entry.id);
+          world.sentEntries.set(awaitingSends[sent]!.index, { id: entry.id, index: entry.index });
           awaitingSends.splice(sent, 1);
         }
       },
@@ -592,6 +638,7 @@ async function runTurns<TMachine extends AnyStateMachine>(
       if (soonest === undefined || timer[1] < soonest[1]) soonest = timer;
     if (soonest === undefined) return undefined;
     pendingTimers.delete(soonest[0]);
+    world.clock.now = soonest[1];
     return { type: "xstate.timer", id: soonest[0] } as EventObject;
   };
 
@@ -604,6 +651,7 @@ async function runTurns<TMachine extends AnyStateMachine>(
     await result.drain?.();
   }
   await result.drain?.();
+  world.unsent = [...unsent];
   return result;
 }
 
@@ -615,6 +663,8 @@ function newWorld(
     effects: [],
     hostEntries: [],
     sentEntries: new Map(),
+    unsent: [],
+    clock: { now: 0, due: new Map() },
     answers: new Map(),
     ...(recorded !== undefined ? { recorded } : {}),
     crashed: false,

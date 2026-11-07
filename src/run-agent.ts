@@ -1352,6 +1352,8 @@ async function runTextRequest(
     const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
     // Write-ahead: the log up to this point must be durable before the call.
     await runCtx.awaitJournal?.();
+    // The step that started the call may also have left its state.
+    signal.throwIfAborted();
     const raw = await executor(requestWithTools as AgentExecutorTextRequest, {
       onChunk: (chunk: string) => {
         runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
@@ -1576,6 +1578,7 @@ function createCountingDecide(
           : `${invokeCallKey}.${attemptRequest.attempts?.length ?? 0}`;
       // Write-ahead: the log up to this point must be durable before the call.
       await runCtx.awaitJournal?.();
+      info?.signal?.throwIfAborted();
       // `runId` rides on the request like `signal` does: host-injected
       // correlation, never serialized into machine state. It also rides on the
       // `info` second argument, where generateText/streamText carry it.
@@ -1648,6 +1651,7 @@ function createCountingFill(
     runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
     try {
       await runCtx.awaitJournal?.();
+      info?.signal?.throwIfAborted();
       const raw = await runCtx.generateText!(request, {
         ...info,
         ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),

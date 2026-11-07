@@ -525,8 +525,8 @@ describe("unreached points", () => {
 });
 
 describe("events sent mid-flight", () => {
-  // draft → review; CANCEL while drafting stops the draft.
-  function createCancellable(draftRuns: { n: number }) {
+  // log → draft; CANCEL while either is out ends the run.
+  function createCancellable() {
     return setupAgent({
       schemas: createAgentSchemas({
         context: z.object({}),
@@ -534,38 +534,55 @@ describe("events sent mid-flight", () => {
       }),
       actors: {
         draft: createTextLogic({ model: "m", prompt: "Draft." }),
-        log: createAsyncLogic({ run: async () => void draftRuns.n++ }),
+        log: createAsyncLogic({ run: async () => 1 }),
       },
     }).createMachine({
       context: {},
       initial: "logging",
+      on: { CANCEL: { target: ".cancelled" } },
       states: {
-        logging: { invoke: { src: "log", onDone: { target: "drafting" } } },
-        drafting: {
-          invoke: {
-            id: "draft",
-            src: "draft",
-            onDone: { target: "done" },
-          },
-          on: { CANCEL: { target: "cancelled" } },
-        },
+        logging: { invoke: { id: "log", src: "log", onDone: { target: "drafting" } } },
+        drafting: { invoke: { id: "draft", src: "draft", onDone: { target: "done" } } },
         cancelled: { type: "final", output: () => "cancelled" },
         done: { type: "final", output: () => "drafted" },
       },
     });
   }
 
-  // Killed while the draft is out, the cancel never reaches the log: the
+  // Killed while the effect is out, the cancel never reaches the log: the
   // resume redelivers it.
-  test("a cancel sent while the call is out wins at every crash point", async () => {
-    const runs = { n: 0 };
-    const report = await checkCrashRecovery(createCancellable(runs), {
+  test.each(["draft#1", "actor:log"])(
+    "a cancel sent while %s is out wins at every crash point",
+    async (during) => {
+      const report = await checkCrashRecovery(createCancellable(), {
+        executors,
+        sendDuring: [{ during, event: { type: "CANCEL" } }],
+      });
+      expect(report.baseline.output).toBe("cancelled");
+      expect(report.baseline.effects.map(({ key }) => key)).toContain(during);
+      expect(report.failures).toEqual([]);
+      expect(report.ok).toBe(true);
+    },
+  );
+
+  test("a call whose state is left while its write-ahead lands never reaches the executor", async () => {
+    // The cancel lands with the log's completion, so drafting is entered and
+    // left in one step: the draft call waits on the journal, then finds its
+    // invoke stopped.
+    const report = await checkCrashRecovery(createCancellable(), {
       executors,
-      sendDuring: [{ during: "draft#1", event: { type: "CANCEL" } }],
+      sendDuring: [{ during: "actor:log", event: { type: "CANCEL" } }],
     });
-    expect(report.baseline.output).toBe("cancelled");
-    expect(report.failures).toEqual([]);
-    expect(report.ok).toBe(true);
+    expect(report.baseline.effects.map(({ key }) => key)).toEqual(["actor:log"]);
+  });
+
+  test("a send whose effect never starts throws", async () => {
+    await expect(
+      checkCrashRecovery(createCancellable(), {
+        executors,
+        sendDuring: [{ during: "draft#2", event: { type: "CANCEL" } }],
+      }),
+    ).rejects.toThrow(/'draft#2'/);
   });
 });
 
@@ -594,5 +611,60 @@ describe("host timers", () => {
     expect(report.baseline.output).toEqual({ waited: true });
     expect(report.failures).toEqual([]);
     expect(report.ok).toBe(true);
+  });
+
+  test("timers fire in due order across a timer that schedules another", async () => {
+    // `a` (100) schedules `c` (150, due at 250); `b` (200) is due first.
+    const machine = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ fired: z.array(z.string()) }),
+        events: {},
+      }),
+    }).createMachine({
+      context: { fired: [] },
+      type: "parallel",
+      output: ({ context }) => context.fired,
+      states: {
+        a: {
+          initial: "wait",
+          states: {
+            wait: {
+              after: {
+                100: ({ context }) => ({
+                  target: "next",
+                  context: { fired: [...context.fired, "a"] },
+                }),
+              },
+            },
+            next: {
+              after: {
+                150: ({ context }) => ({
+                  target: "end",
+                  context: { fired: [...context.fired, "c"] },
+                }),
+              },
+            },
+            end: { type: "final" },
+          },
+        },
+        b: {
+          initial: "wait",
+          states: {
+            wait: {
+              after: {
+                200: ({ context }) => ({
+                  target: "end",
+                  context: { fired: [...context.fired, "b"] },
+                }),
+              },
+            },
+            end: { type: "final" },
+          },
+        },
+      },
+    });
+    const report = await checkCrashRecovery(machine, { timers: "host" });
+    expect(report.baseline.output).toEqual(["a", "b", "c"]);
+    expect(report.failures).toEqual([]);
   });
 });
