@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { createAsyncLogic } from "xstate";
+import { createAsyncLogic, createStepLogic } from "xstate";
 import { z } from "zod";
 import {
   createAgentRuntime,
@@ -525,5 +525,248 @@ describe("a plain actor inside a child machine", () => {
     expect(result.status).toBe("done");
     expect(seenAtB).toHaveLength(1);
     expect(seenAtB[0]).toContain("xstate.done.actor@child");
+  });
+});
+
+describe("a child that finished just before a crash", () => {
+  // root → middle → inner; the crash cuts the log after a child's last entry,
+  // before its parent journaled the child's completion.
+  function createNested() {
+    const inner = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: { summarize: createTextLogic({ model: "test-model", prompt: "Sum." }) },
+    }).createMachine({
+      context: {},
+      initial: "work",
+      states: {
+        work: { invoke: { id: "summarize", src: "summarize", onDone: { target: "done" } } },
+        done: { type: "final", output: () => "inner done" },
+      },
+    });
+    const middle = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({ got: z.unknown() }), events: {} }),
+      actors: { inner },
+    }).createMachine({
+      context: { got: undefined },
+      initial: "inner",
+      states: {
+        inner: {
+          invoke: {
+            id: "inner",
+            src: "inner",
+            onDone: ({ event }) => ({ target: "done", context: { got: event.output } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => context },
+      },
+    });
+    return setupAgent({
+      schemas: createAgentSchemas({ context: z.object({ got: z.unknown() }), events: {} }),
+      actors: { middle },
+    }).createMachine({
+      context: { got: undefined },
+      initial: "running",
+      states: {
+        running: {
+          invoke: {
+            id: "middle",
+            src: "middle",
+            onDone: ({ event }) => ({ target: "done", context: { got: event.output } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => context },
+      },
+    });
+  }
+
+  test.each([
+    ["the root", "middle"],
+    ["a child machine", "inner"],
+  ])("%s still gets its child's completion on resume", async (_, childId) => {
+    const machine = createNested();
+    const generateText = async () => ({ result: "sum" });
+    const full = await runToQuiescence(
+      createAgentRuntime(machine, { executors: { generateText } }),
+      {},
+    );
+    expect(full.status).toBe("done");
+    const cut = full.events.findIndex(
+      (entry) =>
+        entry.event.type === "xstate.done.actor" &&
+        (entry.event as { actorId?: string }).actorId === childId,
+    );
+    expect(cut).toBeGreaterThan(0);
+    const calls: unknown[] = [];
+    const resumed = await runToQuiescence(
+      createAgentRuntime(machine, {
+        executors: { generateText: async () => (calls.push(1), { result: "sum" }) },
+      }),
+      { events: full.events.slice(0, cut) },
+    );
+    expect(resumed.status).toBe("done");
+    expect(resumed.status === "done" && resumed.output).toEqual(
+      full.status === "done" && full.output,
+    );
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("a plain actor that finishes in the step it starts an effect", () => {
+  function createFinishing(ran: string[]) {
+    const step = createStepLogic({
+      context: {},
+      run: ({ event }, enq) => {
+        if (event.type !== "GO") return;
+        enq.effect(() => void ran.push("effect"));
+        return { status: "done", output: "ok" };
+      },
+    });
+    const child = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: { PING: z.object({}) } }),
+      actors: { step },
+    }).createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: {
+          invoke: { id: "step", src: "step", onDone: { target: "done" } },
+          on: {
+            PING: ({ children }, enq) => {
+              enq.sendTo(children.step as never, { type: "GO" });
+            },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    const root = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: { WORK: z.object({}) } }),
+      actors: { child },
+    }).createMachine({
+      context: {},
+      initial: "run",
+      states: {
+        run: {
+          invoke: { id: "child", src: "child", onDone: { target: "done" } },
+          on: {
+            WORK: ({ children }, enq) => {
+              enq.sendTo(children.child as never, { type: "PING" });
+            },
+          },
+        },
+        done: { type: "final" },
+      },
+    });
+    return root;
+  }
+
+  test("still runs that effect when the journal holds it back", async () => {
+    const ran: string[] = [];
+    const root = createFinishing(ran);
+    const store = createInMemoryEventLogStore();
+    const result = await runToQuiescence(createAgentRuntime(root, { store, threadId: "t" }), {
+      input: undefined,
+      event: { type: "WORK" },
+    } as AgentRunInit<typeof root>);
+    expect(result.status).toBe("done");
+    expect(ran).toEqual(["effect"]);
+  });
+
+  test("drops that effect when the write of its cause fails", async () => {
+    const ran: string[] = [];
+    const root = createFinishing(ran);
+    const store = createInMemoryEventLogStore();
+    const failing = {
+      ...store,
+      append: async (args: Parameters<typeof store.append>[0]) => {
+        if (args.entries.some((entry) => entry.event.type === "PING")) throw new Error("disk full");
+        return store.append(args);
+      },
+    };
+    const result = await runToQuiescence(
+      createAgentRuntime(root, { store: failing, threadId: "t" }),
+      { input: undefined, event: { type: "WORK" } } as AgentRunInit<typeof root>,
+    );
+    expect(result.status).not.toBe("done");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(ran).toEqual([]);
+  });
+
+  test("drops that effect when the run is aborted while its cause is written", async () => {
+    const ran: string[] = [];
+    const root = createFinishing(ran);
+    const store = createInMemoryEventLogStore();
+    const controller = new AbortController();
+    const slow = {
+      ...store,
+      append: async (args: Parameters<typeof store.append>[0]) => {
+        if (args.entries.some((entry) => entry.event.type === "PING")) {
+          controller.abort(new Error("host stop"));
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return store.append(args);
+      },
+    };
+    const result = await runToQuiescence(
+      createAgentRuntime(root, { store: slow, threadId: "t", signal: controller.signal }),
+      { input: undefined, event: { type: "WORK" } } as AgentRunInit<typeof root>,
+    );
+    expect(result.status).not.toBe("done");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ran).toEqual([]);
+  });
+});
+
+describe("a restored child completion inside an active parent", () => {
+  test("reaches its parent once", async () => {
+    const inner = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: { summarize: createTextLogic({ model: "test-model", prompt: "Sum." }) },
+    }).createMachine({
+      context: {},
+      initial: "work",
+      states: {
+        work: { invoke: { id: "summarize", src: "summarize", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    // `middle` stays put on its child's completion, so a second delivery would count twice.
+    const middle = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({ done: z.number() }), events: {} }),
+      actors: { inner },
+    }).createMachine({
+      context: { done: 0 },
+      invoke: {
+        id: "inner",
+        src: "inner",
+        onDone: ({ context }) => ({ context: { done: context.done + 1 } }),
+      },
+    });
+    const root = setupAgent({
+      schemas: createAgentSchemas({ context: z.object({}), events: {} }),
+      actors: { middle },
+    }).createMachine({ context: {}, invoke: { id: "middle", src: "middle" } });
+    const generateText = async () => ({ result: "sum" });
+    const full = await runToQuiescence(
+      createAgentRuntime(root, { executors: { generateText } }),
+      {},
+    );
+    const cut = full.events.findIndex(
+      (entry) =>
+        entry.event.type === "xstate.done.actor" &&
+        (entry.event as { actorId?: string }).actorId === "inner",
+    );
+    expect(cut).toBeGreaterThan(0);
+    const resumed = await runToQuiescence(
+      createAgentRuntime(root, { executors: { generateText } }),
+      {
+        events: full.events.slice(0, cut),
+      },
+    );
+    const middleDone = (persisted: unknown) =>
+      (persisted as { children: { middle: { snapshot: { context: { done: number } } } } }).children
+        .middle.snapshot.context.done;
+    expect(middleDone(full.persist())).toBe(1);
+    expect(middleDone(resumed.persist())).toBe(1);
   });
 });

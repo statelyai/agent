@@ -105,7 +105,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
     expect(result.usage).toEqual({ totalTokens: 1200, inputTokens: 900, modelCalls: 3 });
   });
 
-  test("carries attribution: kind, invoke id, src, model, and the request name", async () => {
+  test("carries attribution: kind, invoke id, src, model, the request name, and the call key", async () => {
     const delivered: AgentUsageEvent[] = [];
     await runToQuiescence(
       createAgentRuntime(budgetMachine, {
@@ -129,6 +129,7 @@ describe("@agent.usage (reserved per-call usage event)", () => {
       src: "researchStep",
       model: "test-model",
       name: "researchStep",
+      callKey: expect.stringMatching(/:research#1$/),
       usage: { totalTokens: 400, inputTokens: 300 },
       budget: { modelCalls: 1, maxModelCalls: 100 },
     });
