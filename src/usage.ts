@@ -14,8 +14,8 @@ export interface AgentUsageEvent extends EventObject {
   model?: string;
   name?: string;
   /**
-   * The call's `info.callKey`, when the run has an event log. A call re-executed
-   * after a crash, whose usage the log already holds, is not reported again.
+   * The call's `info.callKey`, when the run has an event log. A call
+   * re-executed after a crash reports its usage again: usage counts real spend.
    */
   callKey?: string;
   /**

@@ -765,6 +765,59 @@ describe("host timers", () => {
     expect(expired.ok).toBe(true);
   });
 
+  test("a timer armed again after a resume is due from its new arming", async () => {
+    // `loop.wait` re-arms the same timer id each round (due 1000, then 2000);
+    // `watch` reads the round at 1500. A restored due time that outlived its
+    // first schedule would fire the second wait at 1000, before the watch.
+    const machine = setupAgent({
+      schemas: createAgentSchemas({
+        context: z.object({ rounds: z.number(), seen: z.number() }),
+        events: {},
+      }),
+      actors: { ask: createTextLogic({ model: "m", prompt: "q" }) },
+    }).createMachine({
+      context: { rounds: 0, seen: -1 },
+      type: "parallel",
+      output: ({ context }) => context,
+      states: {
+        loop: {
+          initial: "work",
+          states: {
+            work: {
+              invoke: {
+                src: "ask",
+                onDone: ({ context }) => ({
+                  target: context.rounds === 2 ? "done" : "wait",
+                  context: { ...context, rounds: context.rounds + 1 },
+                }),
+              },
+            },
+            wait: { after: { 1000: { target: "work" } } },
+            done: { type: "final" },
+          },
+        },
+        watch: {
+          initial: "waiting",
+          states: {
+            waiting: {
+              after: {
+                1500: ({ context }) => ({
+                  target: "seen",
+                  context: { ...context, seen: context.rounds },
+                }),
+              },
+            },
+            seen: { type: "final" },
+          },
+        },
+      },
+    });
+    const report = await checkCrashRecovery(machine, { executors, timers: "host" });
+    expect(report.baseline.output).toEqual({ rounds: 3, seen: 2 });
+    expect(report.failures).toEqual([]);
+    expect(report.ok).toBe(true);
+  });
+
   test("events left when the uninterrupted run ends throw", async () => {
     await expect(
       checkCrashRecovery(createSla(), {

@@ -135,6 +135,8 @@ export type CrashRecoveryProblem =
   | "outcome"
   /** The final log does not replay to the resumed run's state. */
   | "replay"
+  /** A `sendDuring` event the crash lost, which the resume never sent again. */
+  | "undelivered"
   /** The crashed run or its resume never settled within `timeout`. */
   | "stuck"
   /** The crashed run, its resume, or the store factory threw. */
@@ -198,6 +200,8 @@ interface RunWorld {
   clock: { now: number; due: Map<string, number> };
   /** The `sendDuring` indexes whose effect never started in this run. */
   unsent: number[];
+  /** Resuming: the lost `sendDuring` events this run never got to send again. */
+  unsentAfterCrash: number[];
   /** How many of `events` the run ended without delivering. */
   undelivered: number;
   /** Each model call's result and how long it took, by key. */
@@ -281,16 +285,22 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
 
   const failures: CrashRecoveryFailure[] = [];
   const unreached: CrashRecoveryReport["unreached"] = [];
+  const ctx: CrashContext<TMachine> = {
+    machine,
+    options,
+    timeout,
+    baselineCounts,
+    recorded: baselineWorld.answers,
+    expected,
+    sentAt: new Map([...baselineWorld.sentEntries].map(([index, entry]) => [index, entry.index])),
+  };
   for (const point of points) {
-    const found = await crashAt(point, {
-      machine,
-      options,
-      timeout,
-      baselineCounts,
-      recorded: baselineWorld.answers,
-      expected,
-      sentAt: new Map([...baselineWorld.sentEntries].map(([index, entry]) => [index, entry.index])),
-    });
+    // Concurrent effects can settle in another order and merge two of the
+    // baseline's writes into one: a point a run misses is tried again.
+    let found = await crashAt(point, ctx);
+    for (let retry = 1; !Array.isArray(found) && retry < UNREACHED_RETRIES; retry++) {
+      found = await crashAt(point, ctx);
+    }
     if (Array.isArray(found)) failures.push(...found);
     else unreached.push({ point, reason: found.unreached });
   }
@@ -310,6 +320,8 @@ export async function checkCrashRecovery<TMachine extends AnyStateMachine>(
 }
 
 const THREAD = "crash-recovery";
+// Runs at one point before it counts as unreached.
+const UNREACHED_RETRIES = 3;
 // A timer's turn in `events` that found no timer pending: nothing to journal.
 const SKIPPED_TURN = "(no timer pending)";
 const TIMED_OUT = Symbol("timed out");
@@ -433,6 +445,16 @@ async function crashAt<TMachine extends AnyStateMachine>(
   }
 
   const failures: CrashRecoveryFailure[] = [];
+
+  for (const index of resumed.unsentAfterCrash) {
+    const { during, occurrence = 0 } = options.sendDuring![index]!;
+    failures.push(
+      fail(
+        "undelivered",
+        `the sendDuring event for '${during}' (start ${occurrence}) was lost in the crash and never sent again`,
+      ),
+    );
+  }
 
   // Effects: every baseline effect ran, nothing else ran, and only what was
   // in flight at the crash ran twice.
@@ -611,7 +633,8 @@ async function runTurns<TMachine extends AnyStateMachine>(
   const pendingTimers = new Map<string, number>();
   world.clock = { now: before?.clock.now ?? 0, due: pendingTimers };
   // A resume's runtime re-schedules the crashed run's timers: same due times.
-  const dueBefore = before?.clock.due ?? new Map<string, number>();
+  // Each restored due time serves its timer's first schedule only.
+  const dueBefore = new Map(before?.clock.due ?? []);
   const timers =
     options.timers === "host"
       ? {
@@ -619,7 +642,9 @@ async function runTurns<TMachine extends AnyStateMachine>(
           // already pending keeps its due time.
           schedule: ({ id, delay }: { id: string; delay: number }) => {
             if (!pendingTimers.has(id)) {
-              pendingTimers.set(id, dueBefore.get(id) ?? world.clock.now + delay);
+              const restored = dueBefore.get(id);
+              dueBefore.delete(id);
+              pendingTimers.set(id, restored ?? world.clock.now + delay);
             }
           },
           cancel: (id: string) => {
@@ -714,6 +739,7 @@ async function runTurns<TMachine extends AnyStateMachine>(
   }
   await result.drain?.();
   world.unsent = [...unsent];
+  world.unsentAfterCrash = resuming !== undefined ? [...unsent, ...sendAt.keys()] : [];
   world.undelivered = events.length - next;
   return result;
 }
@@ -727,6 +753,7 @@ function newWorld(
     hostEntries: [],
     sentEntries: new Map(),
     unsent: [],
+    unsentAfterCrash: [],
     undelivered: 0,
     clock: { now: 0, due: new Map() },
     answers: new Map(),
