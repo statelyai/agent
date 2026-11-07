@@ -19,15 +19,15 @@ Write each spec rule as one sentence a search can falsify: "`book_table` never r
 
 ## 2. Make each one structural
 
-| Rule shape | Structure |
-| --- | --- |
-| Needs approval first | A waiting state the effect state is entered only from, on the approval event |
-| A cap (turns, retries, rejections) | A counter in `context`, checked inline in the transition that would exceed it |
-| A threshold (confidence ≥ 0.8) | An inline guard in the transition function |
+| Rule shape                             | Structure                                                                                                    |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Needs approval first                   | A waiting state the effect state is entered only from, on the approval event                                 |
+| A cap (turns, retries, rejections)     | A counter in `context`, checked inline in the transition that would exceed it                                |
+| A threshold (confidence ≥ 0.8)         | An inline guard in the transition function                                                                   |
 | Any time (cancel, takeover, interrupt) | A root-level `on` handler targeting a final state, or a state-scoped `on` in every state that must accept it |
-| Wait for all parallel work | Children (`enq.spawn` or parallel invokes) plus a join that counts settled results |
-| Timeout / SLA | An `after` transition |
-| Token budget | A root `on: { '@agent.usage': … }` fold plus a guard |
+| Wait for all parallel work             | Children (`enq.spawn` or parallel invokes) plus a join that counts settled results                           |
+| Timeout / SLA                          | An `after` transition                                                                                        |
+| Token budget                           | A root `on: { '@agent.usage': … }` fold plus a guard                                                         |
 
 - Write guards inline and keep targets in the transition function, so `describeMachine` can read them.
 - Pass `events` to `setupAgent`, even `events: {}`, so built-in events (`@agent.usage`, `xstate.error.actor`) are typed.
