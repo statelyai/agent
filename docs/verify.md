@@ -313,7 +313,8 @@ const result = await canReach(waitingMachine, "timedOut");
 - A usage value the active states refuse (`snapshot.can` is false) is dropped, as a run drops it: the request settles with no usage event delivered or recorded.
 - A usage transition that leaves the invoking state, or restarts its invoke, cancels the request: its completion is not recorded, and a restarted invoke settles later on its own.
 - A settling request with no `usage` entry while a usage transition is active lists `@agent.usage` in `vacuous`. Completeness is unchanged.
-- Requests inside child machines and decisions deliver no usage.
+- With `children: "coupled"`, a child's text request with an entry forks one branch per value. The usage event goes to the root before the child's completion reaches its parent. The root takes it or drops it by the same rules. A child's request with no entry is not listed in `vacuous`.
+- Requests inside `"outputs"` or `"explore"` children, and decisions, deliver no usage.
 
 ```ts no-check
 const overBudget = await canReach(researchMachine, "outOfBudget", {
@@ -361,7 +362,9 @@ const report = await explorePaths(parentMachine, {
 - The parent's host events arrive at its idle waits, including while every child waits on the host. While a child or the parent has work pending, they race it only with `interleave: "pending"`.
 - What a child's move sends its own children, and their replies, happen in the same move. A child's send to a sibling is delivered to that sibling, entry sends included. A child's sends reach their targets in the order it made them, each run to quiescence before the next, as a live run does. A send to an actor the search does not model lists the event type in `unexpandedEvents`, so the report is not complete.
 - Child moves count against `maxDepth` like the parent's own branches. On a path they carry `actor` with the child's id (a grandchild's as `child.grandchild`): the host events it received, its choices, its settled work. The events it sends the parent appear as the parent receives them.
+- A target predicate and `dedupeBy` see each coupled child's explored state: `snapshot.children[id].getSnapshot()` returns the state the search stepped the child to, its own coupled children likewise. A parent's send and the child's receipt are one state, so a cross-actor invariant such as "every chunk the parent forwarded, a child received" can be a target.
 - With `dedupeBy`, each child's state joins the key. Without it, every interleaving is explored in full.
+- A coupled child's text requests deliver `@agent.usage` to the root, as a run does. See [Usage events](#usage-events).
 - A child that stops on `needs-output` or `max-depth` ends the parent branch the same way, so the parent report is not complete.
 
 Pass `hostEvents` when some types the parent accepts come only from its children, such as a child's status events. The search then offers only the listed types at the parent's waits.
