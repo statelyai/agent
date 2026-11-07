@@ -222,7 +222,7 @@ describe("explorePaths — usage", () => {
     ]);
   });
 
-  test("the event matches the one a run delivers, bar its budget", async () => {
+  test("the event matches the one a run delivers, bar its budget and call key", async () => {
     const seen: unknown[] = [];
     const run = await runAgent(
       createBudgetMachine((event) => seen.push(event)),
@@ -233,7 +233,7 @@ describe("explorePaths — usage", () => {
       outputs: { summarize: ["ok", "ok2"] },
       usage: { summarize: [{ totalTokens: 10 }] },
     });
-    const { budget: _budget, ...live } = seen[0] as Record<string, unknown>;
+    const { budget: _budget, callKey: _callKey, ...live } = seen[0] as Record<string, unknown>;
     expect(report.terminals[0]!.path[0]).toEqual(live);
   });
 

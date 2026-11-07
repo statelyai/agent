@@ -70,6 +70,77 @@ if (result.ignored) {
 - A log that already reached a final state settles immediately with the recorded output.
 - The resumed result's `events` extends the same log, so the whole history stays replayable.
 
+## Crash testing
+
+`checkCrashRecovery` from `@statelyai/agent/testing` kills a run at every point it could die and checks that the resume matches a run that never died.
+
+```ts
+import { createAsyncLogic } from "xstate";
+import { z } from "zod";
+import { setupAgent, createTextLogic } from "@statelyai/agent";
+import { checkCrashRecovery } from "@statelyai/agent/testing";
+
+const machine = setupAgent({
+  context: z.object({ order: z.string() }),
+  events: {},
+  actors: {
+    lookup: createAsyncLogic({ run: async () => "order-7" }),
+    reply: createTextLogic({ model: "m", prompt: "Reply." }),
+  },
+}).createMachine({
+  context: { order: "" },
+  initial: "lookup",
+  states: {
+    lookup: {
+      invoke: {
+        src: "lookup",
+        onDone: ({ event }) => ({ target: "reply", context: { order: event.output } }),
+      },
+    },
+    reply: { invoke: { src: "reply", onDone: { target: "done" } } },
+    done: { type: "final" },
+  },
+});
+
+const report = await checkCrashRecovery(machine, {
+  executors: { generateText: async () => ({ result: "Your order shipped." }) },
+});
+report.failures; // [] when every crash point recovers
+```
+
+It runs the machine once uninterrupted, then once per crash point, each resumed from the store's log by a fresh runtime:
+
+- **Log points:** before the first append, and after each append. The next write never lands.
+- **Effect points:** while each model call or plain actor is in flight. It ran, but its result was never recorded.
+
+Each resumed run is checked against the uninterrupted one. Each failure names its crash point and one of these problems:
+
+| `problem`         | Meaning                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------- |
+| `reran`           | An effect ran again although its completion was durable before the crash                    |
+| `skipped`         | An effect of the uninterrupted run never ran                                                |
+| `unexpected`      | An effect ran that the uninterrupted run never made, such as a call under a new `callKey`   |
+| `request-changed` | A model call re-executed under its `callKey` with a different request                       |
+| `outcome`         | The resume ended with a different status, output, state, or context                         |
+| `replay`          | The final log does not replay to the resumed state                                          |
+| `undelivered`     | A `sendDuring` event the crash lost, which the resume never reached the point to send again |
+| `stuck`           | The crashed run or its resume did not settle within `timeout` (default 5000 ms)             |
+| `threw`           | The crashed run, its resume, or the `store` factory threw                                   |
+
+- `report.unreached` lists the points no run died at, with why: the crashed run never started that effect, or one write took the log past that length. A point is tried 3 times before it counts, since concurrent effects can settle in another order and merge two writes. Their resumes were not checked, so `report.ok` is `false`. An effect point is the n-th run of its key, so concurrent effects starting in another order still hit it.
+- An effect in flight at the crash may run twice. That is the at-least-once contract (see [Idempotency keys](hosts.md#idempotency-keys)), and it is not reported.
+- Model calls are keyed by `callKey` without the execution id, and plain actors by invoke site. Only actors bound through string-keyed sources are seen.
+- Model calls run live only in the uninterrupted run. After a crash, a call it made gets its recorded answer, after the same delay, so a fake may answer by call order.
+- Plain actors run live every time, so they must give the same result however often they run. A fake that keeps state passes `reset`, which runs before the baseline and each crashed run. It does not run before the resume, so the fake keeps what the crashed run did, as a real dependency would.
+- The outcome check compares the root's final status, output, state, and context, not spawned children's. A child's progress counts only through what it reports to the root. It compares final states, so a machine whose result depends on which concurrent call finishes first can fail it after a crash. Make the result order-independent, or test that part without concurrency.
+- `events` are host events, delivered one per idle settle. A resume skips the ones its log already holds.
+- `sendDuring` sends host events while the run is busy: `{ during: "draft#1", event: { type: "CANCEL" } }` goes out the first time that effect starts, keyed as in `report.baseline.effects`: `<site>#<n>` for a model call, `actor:<site>` for a plain actor. Pass `occurrence` (from 0) to target a later start of the same key, such as a retry's second POST. After a crash, one the log does not hold is sent again, as a retrying host would, as its effect starts again or, when that effect's completion was durable, at the point the uninterrupted log holds it, so it lands in the same order. A `during` key (or `occurrence`) the uninterrupted run never starts throws, so a typo cannot pass silently.
+- `timers: "host"` makes the harness the host scheduler for root `after` timers (see [Host-owned timers](steps.md#host-owned-timers)). The run settles `idle` with them pending. An id-less `{ type: "xstate.timer" }` in `events` is a timer's turn: the timer due soonest fires there. Once `events` run out, the pending timers fire in due order, without waiting for their delays. Each is due its delay after it was scheduled, on a clock that advances as timers fire. The default, in-process timers, fire after their real delay.
+- An uninterrupted run that ends with some of `events` undelivered throws, so an event a final state never sees cannot pass silently.
+- `store` takes a factory for your own store adapter, one fresh store per run. A store that acknowledges a write it then loses shows up as `reran`.
+
+Run it in CI next to the machine's other tests. It needs no API key.
+
 ## Snapshot as cache
 
 `persist()` output carries `agentMeta: { machineId, version, logId, logIndex }` — the lineage and position of the log it caches.

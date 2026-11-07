@@ -32,6 +32,15 @@ export type {
   SimulationScript,
   SimulationTrailEntry,
 } from "../verify.js";
+export { checkCrashRecovery } from "../crash-recovery.js";
+export type {
+  CheckCrashRecoveryOptions,
+  CrashEffect,
+  CrashPoint,
+  CrashRecoveryFailure,
+  CrashRecoveryProblem,
+  CrashRecoveryReport,
+} from "../crash-recovery.js";
 export { matchesTrajectory } from "../trajectory.js";
 export type {
   MatchTrajectoryOptions,

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { createAsyncLogic, createMachine, type AnyStateMachine } from "xstate";
-import { setupAgent } from "./index.js";
-import { canReach, explorePaths } from "./testing/index.js";
+import { AGENT_USAGE_EVENT_TYPE, runAgent, setupAgent } from "./index.js";
+import { canReach, explorePaths, type ExplorePathsOptions } from "./testing/index.js";
 import { isExplorationComplete } from "./verify.js";
 
 type Enq = { sendTo: (to: unknown, event: unknown) => void };
@@ -743,5 +743,228 @@ describe("explorePaths — children: 'coupled'", () => {
       });
       expect(finished.witness).toContainEqual({ type: "PING", actor: "middle.leaf" });
     });
+  });
+});
+
+describe("coupled child snapshots in predicates", () => {
+  const counter = setupAgent({
+    context: z.object({ n: z.number() }),
+    events: { PING: z.object({}) },
+  }).createMachine({
+    context: { n: 0 },
+    initial: "a",
+    states: {
+      a: { on: { PING: ({ context }) => ({ target: "b", context: { n: context.n + 1 } }) } },
+      b: {},
+    },
+  });
+
+  const pinger = setupAgent({
+    context: z.object({ sent: z.number() }),
+    events: { GO: z.object({}) },
+    actors: { counter },
+  }).createMachine({
+    context: { sent: 0 },
+    entry: ({ actors }, enq) => {
+      enq.spawn(actors.counter, { id: "c" });
+    },
+    on: {
+      GO: ({ context, children }, enq) => {
+        if (context.sent > 0) return undefined;
+        enq.sendTo(children.c, { type: "PING" });
+        return { context: { sent: context.sent + 1 } };
+      },
+    },
+  });
+
+  const childState = (snapshot: any, id: string) => snapshot.children[id]?.getSnapshot();
+
+  test("a coupled predicate sees the child's explored state", async () => {
+    const seen = new Set<unknown>();
+    const reached = await canReach(
+      pinger,
+      (snapshot) => {
+        seen.add(childState(snapshot, "c")?.value);
+        return childState(snapshot, "c")?.value === "b";
+      },
+      { children: "coupled", maxDepth: 3 },
+    );
+    expect(reached.reachable).toBe(true);
+    expect(reached.witness).toEqual([{ type: "GO" }]);
+    expect(seen).toEqual(new Set(["a", "b"]));
+  });
+
+  test("a parent send and the child's receipt are one state to a predicate", async () => {
+    // sent === child n on every explored state: the send applies at once.
+    const broken = await canReach(
+      pinger,
+      (snapshot) => snapshot.context.sent !== childState(snapshot, "c")?.context.n,
+      { children: "coupled", maxDepth: 3 },
+    );
+    expect(broken.reachable).toBe(false);
+  });
+
+  const stepper = setupAgent({ events: { GO: z.object({}) }, context: z.object({}) }).createMachine(
+    {
+      context: {},
+      initial: "a",
+      states: {
+        a: { on: { GO: { target: "b" } } },
+        b: { on: { GO: { target: "c" } } },
+        c: { type: "final" },
+      },
+    },
+  );
+
+  const host = setupAgent({ events: {}, context: z.object({}), actors: { stepper } }).createMachine(
+    {
+      context: {},
+      initial: "running",
+      states: {
+        running: { invoke: { id: "kid", src: "stepper", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    },
+  );
+
+  test("a predicate sees an invoked child's own moves", async () => {
+    const reached = await canReach(host, (snapshot) => childState(snapshot, "kid")?.value === "b", {
+      children: "coupled",
+      childEvents: { stepper: ["GO"] },
+    });
+    expect(reached.reachable).toBe(true);
+    expect(reached.witness).toEqual([{ type: "GO", actor: "kid" }]);
+  });
+
+  test("dedupeBy sees the coupled child's explored state", async () => {
+    const keys = new Set<string>();
+    await explorePaths(host, {
+      children: "coupled",
+      childEvents: { stepper: ["GO"] },
+      dedupeBy: (snapshot) => {
+        const key = `${JSON.stringify(snapshot.value)}:${String(childState(snapshot, "kid")?.value)}`;
+        keys.add(key);
+        return key;
+      },
+    });
+    expect(keys).toEqual(new Set(['"running":a', '"running":b', '"done":undefined']));
+  });
+});
+
+describe("coupled child usage", () => {
+  const workerAgent = setupAgent({
+    context: z.object({}),
+    events: {},
+    requests: {
+      summarize: { model: "m", schemas: { input: z.object({}), output: z.string() }, prompt: "x" },
+    },
+  });
+  const worker = workerAgent.createMachine({
+    context: {},
+    initial: "working",
+    states: {
+      working: { invoke: { id: "s", src: "summarize", input: {}, onDone: { target: "done" } } },
+      done: { type: "final" },
+    },
+  });
+  // A token budget the child's request feeds: the root is charged, as in a run.
+  const createBudget = (onUsage?: (event: unknown) => void) =>
+    setupAgent({
+      context: z.object({ tokens: z.number() }),
+      events: {},
+      actors: { worker },
+    }).createMachine({
+      context: { tokens: 0 },
+      initial: "running",
+      states: {
+        running: {
+          on: {
+            [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => {
+              onUsage?.(event);
+              const tokens = context.tokens + (event.usage.totalTokens ?? 0);
+              return tokens > 100
+                ? { target: "overBudget", context: { tokens } }
+                : { context: { tokens } };
+            },
+          },
+          invoke: { id: "w", src: "worker", onDone: { target: "done" } },
+        },
+        overBudget: { type: "final" },
+        done: { type: "final" },
+      },
+    });
+  const usageEvent = (totalTokens: number) => ({
+    type: AGENT_USAGE_EVENT_TYPE,
+    kind: "text",
+    id: "s",
+    src: "summarize",
+    model: "m",
+    name: "summarize",
+    usage: { totalTokens },
+  });
+  const options: ExplorePathsOptions = {
+    children: "coupled",
+    outputs: { summarize: ["ok"] },
+    usage: { summarize: [{ totalTokens: 10 }, { totalTokens: 500 }] },
+  };
+
+  test("a child request's usage is delivered to the root before its completion", async () => {
+    const report = await explorePaths(createBudget(), options);
+    expect(report.complete).toBe(true);
+    expect(report.terminals).toEqual([
+      {
+        status: "done",
+        path: [
+          { type: "xstate.done.actor", actorId: "s", output: "ok", actor: "w" },
+          usageEvent(10),
+          { type: "xstate.done.actor", actorId: "w" },
+        ],
+        state: "done",
+      },
+      {
+        status: "done",
+        path: [
+          { type: "xstate.done.actor", actorId: "s", output: "ok", actor: "w" },
+          usageEvent(500),
+        ],
+        state: "overBudget",
+      },
+    ]);
+    expect(
+      await canReach(createBudget(), (snapshot) => snapshot.context.tokens > 100, options),
+    ).toMatchObject({ reachable: true });
+  });
+
+  test("the root drops usage it does not take", async () => {
+    const plain = setupAgent({
+      context: z.object({}),
+      events: {},
+      actors: { worker },
+    }).createMachine({
+      context: {},
+      initial: "running",
+      states: {
+        running: { invoke: { id: "w", src: "worker", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const report = await explorePaths(plain, options);
+    expect(report.complete).toBe(true);
+    expect(report.vacuous).toEqual([]);
+    for (const terminal of report.terminals) {
+      expect(terminal.path.map((event) => event.type)).not.toContain(AGENT_USAGE_EVENT_TYPE);
+      expect(terminal.state).toBe("done");
+    }
+  });
+
+  test("a run charges the root with the same event, bar its budget and call key", async () => {
+    const seen: unknown[] = [];
+    const run = await runAgent(
+      createBudget((event) => seen.push(event)),
+      { executors: { generateText: async () => ({ result: "ok", usage: { totalTokens: 10 } }) } },
+    );
+    expect(run.status).toBe("done");
+    const { budget: _budget, callKey: _callKey, ...live } = seen[0] as Record<string, unknown>;
+    expect(live).toEqual(usageEvent(10));
   });
 });

@@ -1221,7 +1221,9 @@ export interface ExplorePathsOptions {
    * like the parent's, and appear on a path with `actor` set to the child's
    * id (the child's own events, its choices, its settled work); the events
    * it sends the parent appear as the parent receives them. With `dedupeBy`,
-   * each child's state is part of the key. More precise and often cheaper
+   * each child's state is part of the key. A target predicate and `dedupeBy`
+   * read each child's explored state through `snapshot.children[id]
+   * .getSnapshot()`. More precise and often cheaper
    * than `"explore"` for authored child machines; `"explore"` remains the
    * over-approximation for a child whose behavior you do not want to trust.
    */
@@ -1293,8 +1295,11 @@ export interface ExplorePathsOptions {
    * `maxDepth` and records the usage event in the path. One value with one
    * canned output is no fork, but its usage event is still recorded. No `budget`
    * field is sent. A settling request with no entry while a usage transition
-   * is active lists `@agent.usage` in `vacuous`. Requests inside child
-   * machines and decisions deliver no usage.
+   * is active lists `@agent.usage` in `vacuous`. With `children:
+   * "coupled"`, a child's text request forks once per value and its usage
+   * event goes to the root, which takes or drops it the same way (no
+   * `vacuous` entry). Requests inside other children, and decisions, deliver
+   * no usage.
    */
   usage?: Record<string, AgentCallUsage[]>;
 }
@@ -1722,8 +1727,9 @@ interface ChildStepper {
   vacuous: ReadonlySet<string>;
 }
 
-// What a child sent beyond itself: an event to its parent, or one to route.
-type Outbound = { event: EventObject } | { route: Routed };
+// What a child sent beyond itself: an event to its parent, one to route, or
+// a request's usage event for the root.
+type Outbound = { event: EventObject } | { route: Routed } | { usage: AgentUsageEvent };
 
 // What a coupled pump delivers next: an event to the machine, one to route, or a child that settled.
 type Delivery = Outbound | { settle: string };
@@ -1782,6 +1788,37 @@ function declaresUsageTransition(snapshot: AnyMachineSnapshot): boolean {
 // so a child restarted under the same id is a new sender.
 function childSession(id: string, ref: ChildRef | undefined): string {
   return typeof ref?.sessionId === "string" ? ref.sessionId : id;
+}
+
+// `children: "coupled"`: the snapshot a predicate sees, whose child refs'
+// `getSnapshot()` return each coupled child's explored state (its own
+// coupled children likewise), not the state the child actor started in.
+function withKidSnapshots(
+  snapshot: AnyMachineSnapshot,
+  kids: KidsMap | undefined,
+): AnyMachineSnapshot {
+  if (!kids || kids.size === 0) {
+    return snapshot;
+  }
+  const children = { ...(snapshot.children ?? {}) } as Record<string, ChildRef | undefined>;
+  let changed = false;
+  for (const [id, ref] of Object.entries(children)) {
+    const kid = kids.get(childSession(id, ref));
+    if (!kid || !ref) continue;
+    const kidSnapshot = withKidSnapshots(kid.step.snapshot as AnyMachineSnapshot, kid.kids);
+    children[id] = Object.assign(Object.create(ref) as ChildRef, {
+      getSnapshot: () => kidSnapshot,
+    });
+    changed = true;
+  }
+  if (!changed) {
+    return snapshot;
+  }
+  return Object.assign(
+    Object.create(Object.getPrototypeOf(snapshot)) as AnyMachineSnapshot,
+    snapshot,
+    { children },
+  );
 }
 
 // Drops delivered child events whose child actor is no longer running.
@@ -1879,8 +1916,11 @@ function explore(
   const outputScript = options.outputs ?? {};
   const coupled = options.children === "coupled";
   const timerMode = options.timers ?? "fire";
-  // A run delivers usage to its root, so `usage` covers the root's own requests.
-  const usageScript = nesting === 0 && !stepping ? (options.usage ?? {}) : undefined;
+  // A run delivers usage to its root, so `usage` covers the root's own
+  // requests and those of its coupled children (sent up to the root).
+  const usageScript = nesting === 0 || stepping ? (options.usage ?? {}) : undefined;
+  // In a coupled child: the usage event a settled step sends the root.
+  const charges = new WeakMap<AgentStep, AgentUsageEvent>();
   // A coupled child's pending work always races what can reach it.
   const interleaving = options.interleave === "pending" || stepping;
   // An `errors` entry's failure values: an array is one per element (`[]` is
@@ -1950,6 +1990,12 @@ function explore(
     if (!usage) {
       return { step: resolveStep(prev, id, output), completed: true };
     }
+    // A coupled child's usage goes to the root, which takes it or drops it.
+    if (stepping) {
+      const resolved = resolveStep(prev, id, output);
+      charges.set(resolved, usage);
+      return { step: resolved, completed: true };
+    }
     // The invoke's actor session, so one restarted under the same id (a
     // re-entered state) is a new invoke this completion never reaches.
     const sessionOf = (step: AgentStep): string | undefined => {
@@ -1975,17 +2021,18 @@ function explore(
   // machine refuses (`can` is false) is dropped, as a run drops it: one
   // `undefined` entry stands for all of them. A settling request with no
   // entry there leaves the usage transition vacuous.
+  // In a coupled child, every value is a branch: the root gates it on delivery.
   const usageFor = (step: AgentStep, request: AgentStepRequest): UsageChoice[] | undefined => {
     if (
       !usageScript ||
       request.kind !== "text" ||
-      !declaresUsageTransition(step.snapshot as AnyMachineSnapshot)
+      (!stepping && !declaresUsageTransition(step.snapshot as AnyMachineSnapshot))
     ) {
       return undefined;
     }
     const values = usageScript[request.src];
     if (!values?.length) {
-      vacuous.add(AGENT_USAGE_EVENT_TYPE);
+      if (!stepping) vacuous.add(AGENT_USAGE_EVENT_TYPE);
       return undefined;
     }
     const snapshot = step.snapshot as AnyMachineSnapshot;
@@ -1998,6 +2045,9 @@ function explore(
       ...(request.input.name !== undefined ? { name: request.input.name } : {}),
       usage,
     }));
+    if (stepping) {
+      return events;
+    }
     const accepted: UsageChoice[] = events.filter((event) => snapshot.can(event as never));
     if (accepted.length === 0) {
       return undefined;
@@ -2005,10 +2055,13 @@ function explore(
     return accepted.length < events.length ? [...accepted, undefined] : accepted;
   };
   // `stopWhen` on the settled snapshot or any state passed through to reach it.
-  const stops = (step: AgentStep): boolean =>
+  // With `children: "coupled"`, each snapshot shows the coupled children's
+  // explored state (`kids`).
+  const stops = (step: AgentStep, kids?: KidsMap): boolean =>
     stopWhen !== undefined &&
-    (stopWhen(step.snapshot as AnyMachineSnapshot) ||
-      (transits.get(step)?.some((snapshot) => stopWhen(snapshot)) ?? false));
+    (stopWhen(withKidSnapshots(step.snapshot as AnyMachineSnapshot, kids)) ||
+      (transits.get(step)?.some((snapshot) => stopWhen(withKidSnapshots(snapshot, kids))) ??
+        false));
 
   // Schema-derived payloads per event type, computed once per type. A type
   // with no schema is applied bare. That covers it only when no transition
@@ -2448,6 +2501,7 @@ function explore(
   const advance = (
     step: AgentStep,
     recordEvent: (event: ChosenEvent) => void,
+    kids?: KidsMap,
   ): {
     step: AgentStep;
     blockedSrc?: string;
@@ -2466,7 +2520,9 @@ function explore(
     let current = step;
     // Bounded loop: each iteration resolves one text or scripted invoke.
     for (let i = 0; i < MAX_ADVANCE_STEPS; i++) {
-      if (stops(current)) {
+      // A step whose sends to coupled children are not delivered yet is not a
+      // state the machines are in: they apply at once.
+      if (!awaitsKids(current, kids) && stops(current, kids)) {
         return { step: current, hit: true };
       }
       if (current.done) {
@@ -2710,7 +2766,7 @@ function explore(
       }
       const { step, completed } = settleStep(settled, fork.id, value, usage);
       recordState(step);
-      const charged = usage ? extend(path, usage as unknown as ChosenEvent) : path;
+      const charged = usage && !stepping ? extend(path, usage as unknown as ChosenEvent) : path;
       yield {
         step,
         path: completed
@@ -2829,6 +2885,28 @@ function explore(
     return undefined;
   };
 
+  // Whether `step` still has sends to deliver to coupled children, or
+  // children to start, before the machines settle.
+  const awaitsKids = (step: AgentStep, kids: KidsMap | undefined): boolean => {
+    if (!coupled || pumped.has(step)) {
+      return false;
+    }
+    const held = kids ?? new Map<string, KidState>();
+    if (
+      pendingInvokes(step)
+        .filter(isExploredChild)
+        .some((invoke) => !held.has(childSession(invoke.id, invoke.ref)))
+    ) {
+      return true;
+    }
+    return (Array.isArray(step.actions) ? step.actions : []).some(
+      (effect) =>
+        isRecord(effect) &&
+        effect["type"] === "@xstate.sendTo" &&
+        kidSessionFor(step, effect["target"], held) !== undefined,
+    );
+  };
+
   // Delivers, in order, everything that follows from `start` with no choice:
   // the events its transition sent its coupled children, their replies to it,
   // the children that settled, and so on. Returns where that leaves the
@@ -2926,13 +3004,25 @@ function explore(
         break;
       }
       const item = queue.shift()!;
-      if ("route" in item) {
+      if ("usage" in item) {
+        if (stepping) {
+          outbound.push(item);
+          continue;
+        }
+        // The root takes a child's usage as a run does: only when its active
+        // states take `@agent.usage` and accept this one.
+        const snapshot = step.snapshot as AnyMachineSnapshot;
+        if (!declaresUsageTransition(snapshot) || !snapshot.can(item.usage as never)) {
+          continue;
+        }
+        step = transitionStep(step, item.usage);
+        link = extend(link, item.usage as unknown as ChosenEvent);
+      } else if ("route" in item) {
         if (!deliverTo(step, item.route.target, item.route.event)) {
           unrouted(item.route);
         }
         continue;
-      }
-      if ("event" in item) {
+      } else if ("event" in item) {
         const accepted = (step.snapshot as AnyMachineSnapshot).can(item.event);
         step = transitionStep(step, item.event);
         if (accepted) {
@@ -2963,11 +3053,11 @@ function explore(
       }
       recordState(step);
       outbound.push(...outboundOf(step.actions, outParent, step.snapshot.children));
-      if (stops(step)) {
+      flush(step);
+      if (!overflow && stops(step, kids)) {
         witness = pathOf(link);
         break;
       }
-      flush(step);
     }
     return { step, link, kids, outbound, overflow };
   };
@@ -3025,9 +3115,13 @@ function explore(
       decisions,
       pending,
       kids: pendingKids,
-    } = advance(step, (event) => {
-      path = extend(path, event);
-    });
+    } = advance(
+      step,
+      (event) => {
+        path = extend(path, event);
+      },
+      nodeKids,
+    );
     if (hit) {
       witness = pathOf(path);
       return;
@@ -3059,6 +3153,11 @@ function explore(
         }
         return;
       }
+      // Nothing to deliver after all: the check `advance` held back.
+      if (stops(settled, nodeKids)) {
+        witness = pathOf(path);
+        return;
+      }
     }
 
     // A key already explored at this depth or shallower has nothing new
@@ -3067,7 +3166,7 @@ function explore(
     // shallow).
     if (options.dedupeBy) {
       const key =
-        options.dedupeBy(settled.snapshot as AnyMachineSnapshot) +
+        options.dedupeBy(withKidSnapshots(settled.snapshot as AnyMachineSnapshot, nodeKids)) +
         (delivered?.size ? `\u0001${[...delivered].sort().join("\u0001")}` : "") +
         kidsKey(nodeKids);
       const seenAt = visited.get(key);
@@ -3087,7 +3186,8 @@ function explore(
       const resolved = settleStep(settled, pending.id, pending.output, pending.usage).step;
       recordState(resolved);
       // A delivered usage event is an event the machine receives: it is on the path.
-      const charged = pending.usage ? extend(path, pending.usage as unknown as ChosenEvent) : path;
+      const charged =
+        pending.usage && !stepping ? extend(path, pending.usage as unknown as ChosenEvent) : path;
       yield {
         step: resolved,
         // A coupled child's settled work is a move of its own, shown on the path.
@@ -3502,6 +3602,7 @@ function explore(
               depth: node.depth,
               kids: settledMove.kids,
               outbound: [
+                ...(charges.has(node.step) ? [{ usage: charges.get(node.step)! }] : []),
                 ...(node.outbound ??
                   outboundOf(node.step.actions, kid.parent, node.step.snapshot.children)),
                 ...settledMove.outbound,

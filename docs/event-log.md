@@ -74,7 +74,8 @@ const result = await runToQuiescence(
 );
 ```
 
-- Each entry is written at its own `index` as `expectedIndex`, so a concurrent writer conflicts instead of interleaving.
+- Entries are written in batches, each at its first entry's `index` as `expectedIndex`, so a concurrent writer conflicts instead of interleaving.
+- A batch holds every entry since the loop last waited: an event, the child inputs its transition sent, and the events those children sent back land in one atomic append. A crash never keeps a cause without its effect.
 - No model call starts until every entry before it is durable. Pure transitions never wait.
 - A rejected write (an `AgentEventLogConflictError`, or any storage failure) aborts in-flight work and settles the run `{ status: "error", cause: "journal" }`. No further calls run.
 - A `@agent.usage` entry that arrives after the run settled is still written, but the result does not wait for it. Await `result.drain()` before terminating the process if you care about those straggler entries; it resolves once every write issued so far has landed, and never rejects (a failed write already settled the run with `cause: "journal"`).

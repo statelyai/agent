@@ -14,6 +14,11 @@ export interface AgentUsageEvent extends EventObject {
   model?: string;
   name?: string;
   /**
+   * The call's `info.callKey`, when the run has an event log. A call
+   * re-executed after a crash reports its usage again: usage counts real spend.
+   */
+  callKey?: string;
+  /**
    * The run's model-call budget after this call: `modelCalls` counted against
    * `maxModelCalls` so far, including `modelCallsSpent`. Guard on
    * `maxModelCalls - modelCalls` to keep calls in reserve. Absent under

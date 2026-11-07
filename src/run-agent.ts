@@ -1144,9 +1144,10 @@ interface RunAgentBindContext {
    * The journal writes still in flight, or `undefined` when none are (or the
    * run has no store). A plain actor a child machine starts waits for it, so
    * the child's earlier entries are durable before the actor's side effect
-   * runs. Unset off the runtime path.
+   * runs. Resolves `false` when the write failed or the run stopped
+   * meanwhile. Unset off the runtime path.
    */
-  pendingJournal?: () => Promise<void> | undefined;
+  pendingJournal?: () => Promise<boolean> | undefined;
 }
 
 /**
@@ -1351,6 +1352,8 @@ async function runTextRequest(
     const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
     // Write-ahead: the log up to this point must be durable before the call.
     await runCtx.awaitJournal?.();
+    // The step that started the call may also have left its state.
+    signal.throwIfAborted();
     const raw = await executor(requestWithTools as AgentExecutorTextRequest, {
       onChunk: (chunk: string) => {
         runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
@@ -1383,6 +1386,7 @@ async function runTextRequest(
           ...(src !== "" ? { src } : {}),
           model: request.model,
           ...(request.name !== undefined ? { name: request.name } : {}),
+          ...(callKey !== undefined ? { callKey } : {}),
         },
         self,
       );
@@ -1574,6 +1578,7 @@ function createCountingDecide(
           : `${invokeCallKey}.${attemptRequest.attempts?.length ?? 0}`;
       // Write-ahead: the log up to this point must be durable before the call.
       await runCtx.awaitJournal?.();
+      info?.signal?.throwIfAborted();
       // `runId` rides on the request like `signal` does: host-injected
       // correlation, never serialized into machine state. It also rides on the
       // `info` second argument, where generateText/streamText carry it.
@@ -1598,6 +1603,7 @@ function createCountingDecide(
               ...(attemptRequest.id ? { id: attemptRequest.id } : {}),
               ...(src !== "" ? { src } : {}),
               model: attemptRequest.model,
+              ...(callKey !== undefined ? { callKey } : {}),
             },
             self,
           ),
@@ -1645,6 +1651,7 @@ function createCountingFill(
     runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
     try {
       await runCtx.awaitJournal?.();
+      info?.signal?.throwIfAborted();
       const raw = await runCtx.generateText!(request, {
         ...info,
         ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
@@ -1662,6 +1669,7 @@ function createCountingFill(
               ...(id !== "" ? { id } : {}),
               ...(src !== "" ? { src } : {}),
               model: request.model,
+              ...(info?.callKey !== undefined ? { callKey: info.callKey } : {}),
             },
             self,
           ),
@@ -2254,7 +2262,7 @@ function journaledMachine(
  */
 function journalGatedLogic(
   logic: AnyActorLogic,
-  pending: () => Promise<void> | undefined,
+  pending: () => Promise<boolean> | undefined,
 ): AnyActorLogic {
   type Result = [unknown, unknown[]];
   type Effect = { type?: string; exec: (...args: unknown[]) => unknown };
@@ -2263,6 +2271,9 @@ function journalGatedLogic(
     if (!Array.isArray(effects) || !effects.some((e) => (e as Effect)?.type === "@xstate.effect")) {
       return result;
     }
+    // The step that finishes the actor still runs its effects; a stop, or a
+    // failed write of the entries that caused them, cancels them.
+    const finishing = (snapshot as { status?: string } | undefined)?.status === "done";
     return [
       snapshot,
       effects.map((effect) => {
@@ -2271,8 +2282,8 @@ function journalGatedLogic(
         const gated = (...args: unknown[]) => {
           const waiting = pending();
           if (waiting === undefined) return exec(...args);
-          void waiting.then(() => {
-            if (self.getSnapshot().status === "active") exec(...args);
+          void waiting.then((ok) => {
+            if (ok && (finishing || self.getSnapshot().status === "active")) exec(...args);
           });
         };
         return { ...(effect as object), exec: gated, action: gated };
@@ -2517,7 +2528,7 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
   onIdle?: (
     snapshot: SnapshotFrom<TMachine>,
     options: { signal: AbortSignal | undefined },
-  ) => Promise<EventFromLogic<TMachine>>;
+  ) => Promise<EventFromLogic<TMachine> | AgentTimerEvent>;
   /**
    * A send handle for events pushed mid-run (a cancel, a user message), from
    * {@link createAgentInbox}. Each `inbox.send` goes to the current pass's
@@ -2665,7 +2676,8 @@ async function waitForIdleAnswer<TMachine extends AnyStateMachine>(
   signal: AbortSignal | undefined,
   aborted: Promise<typeof ABORTED>,
 ): Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean } | typeof ABORTED> {
-  const answer = () => onIdle(snapshot, { signal });
+  // A host timer firing is delivered like any event (see `toTimerInput`).
+  const answer = () => onIdle(snapshot, { signal }) as Promise<EventFromLogic<TMachine>>;
   if (!inbox) {
     return Promise.race([aborted, answer().then((event) => ({ event, fromInbox: false }))]);
   }
@@ -2984,8 +2996,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
 
   // ─── Write-ahead journaling (`options.store`) ───
   //
-  // Every appended entry is queued onto ONE chain, so writes reach the store in
-  // log order and each carries its own index as `expectedIndex`. The chain is
+  // Entries are written in batches on ONE chain, so writes reach the store in
+  // log order and each batch starts at its first entry's index as
+  // `expectedIndex`. The chain is
   // awaited at two points only: before a model call (`awaitJournal`, the
   // barrier the executors call) and at finish. Pure transitions never wait.
   // The first rejection wins, stops the run (`cause: 'journal'`) and blocks
@@ -3002,10 +3015,29 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   let journalPending = 0;
   let journalError: unknown;
 
-  const journalEntry = (entry: AgentLogEntry): void => {
-    if (store === undefined) {
+  // Entries not yet handed to the store. They are written together, in one
+  // append, whenever the loop waits (for an effect, or for nothing) and before
+  // a barrier, so the entries one input causes land atomically: a root event
+  // and the child inputs its transition sends, a child input and the event
+  // it sends back. A crash between them would otherwise keep the cause and
+  // lose the effect, which a fold cannot re-derive.
+  let unflushed: AgentLogEntry[] = [];
+  // Barriers waiting for the loop to finish its current step.
+  let flushWaiters: Array<() => void> = [];
+  // A text call reported usage; its result follows within microtasks. The
+  // next idle flush waits a task so both land in one append: a crash between
+  // them would re-run a call that already finished.
+  let resultOwed = false;
+
+  const flushJournal = (): void => {
+    const waiters = flushWaiters;
+    flushWaiters = [];
+    for (const resolve of waiters) resolve();
+    if (store === undefined || unflushed.length === 0) {
       return;
     }
+    const entries = unflushed;
+    unflushed = [];
     journalPending++;
     journalChain = journalChain
       .then(async () => {
@@ -3014,8 +3046,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         }
         await store.append({
           threadId: threadId!,
-          expectedIndex: entry.index,
-          entries: [entry],
+          expectedIndex: entries[0]!.index,
+          entries,
         });
       })
       .catch((error: unknown) => {
@@ -3025,6 +3057,36 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       .finally(() => {
         journalPending--;
       });
+  };
+
+  const journalEntry = (entry: AgentLogEntry): void => {
+    if (store === undefined) {
+      return;
+    }
+    unflushed.push(entry);
+    // A straggler after the run settled has no loop left to flush it.
+    if (finished) flushJournal();
+  };
+
+  /**
+   * Resolves once the entries so far are handed to the store as one settled
+   * step. Mid-step (a transition's effects still running, its children's
+   * replies not yet delivered), a barrier waits for the loop to finish the
+   * step, so it cannot write a child's input without the reply it sends back.
+   * The loop flushes when it next waits; a host that is not reading
+   * `nextEvent` gets the flush on the next task instead.
+   */
+  const stepSettled = (): Promise<void> => {
+    if (wake !== undefined || finished || stopReason !== undefined) {
+      flushJournal();
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      flushWaiters.push(resolve);
+      // A host that drives `transition` itself may not come back to
+      // `nextEvent` until this call starts: by the next task, the step is over.
+      setTimeout(flushJournal, 0);
+    });
   };
 
   /**
@@ -3037,6 +3099,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (store === undefined) {
       return;
     }
+    flushJournal();
     let tail = journalChain;
     for (;;) {
       await tail;
@@ -3052,6 +3115,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (store === undefined) {
       return;
     }
+    await stepSettled();
     while (journalPending > 0) {
       await journalChain;
     }
@@ -3203,6 +3267,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       usage,
       budget: { modelCalls: modelCallsSpent + modelCallCount, maxModelCalls },
     };
+    if (source.kind === "text") resultOwed = true;
     let delivered = false;
     deliverUsageEvent(
       event,
@@ -3333,7 +3398,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     // its own inputs. Stopping a child is the root's doing, which the root's
     // own entries already fold.
     pendingJournal: () =>
-      store !== undefined && journalPending > 0 ? awaitJournal().catch(() => {}) : undefined,
+      store !== undefined && (journalPending > 0 || unflushed.length > 0)
+        ? awaitJournal().then(
+            () => stopReason === undefined,
+            () => false,
+          )
+        : undefined,
     onChildEvent: (self, event) => {
       if (finished || event.type === "xstate.stop") return;
       const actorPath = actorPathOf(self);
@@ -3362,8 +3432,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // Wrap every effective TextLogic/DecisionLogic (and the agent.* builtins)
   // with a host-backed executor. Invoked child machines are recursively
   // rebound so their requests inherit the same executors at any depth (see
-  // rebindChildMachine). Every other source (plain actors, non-agent logic)
-  // passes through untouched.
+  // rebindChildMachine). Plain actors are held until the journal is durable.
   for (const [key, logic] of Object.entries(effectiveSources)) {
     if (isActLogic(logic)) {
       wrappedSources[key] = bindActLogic(runCtx);
@@ -3389,6 +3458,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         wrappedSources[key] = rebound;
       }
       continue;
+    }
+
+    // A plain actor waits for the journal like a model call does, so the
+    // event that started it is durable before its side effect runs.
+    if (runCtx.pendingJournal && typeof logic?.transition === "function") {
+      wrappedSources[key] = journalGatedLogic(logic, runCtx.pendingJournal);
     }
   }
 
@@ -3593,6 +3668,66 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             }
           });
 
+  // A child restored already finished never tells its parent: restoring does
+  // not replay the transition that finished it. That happens when the run
+  // died after the child's last entry was journaled but before its parent's
+  // completion was, so the parent still waits on it. Deliver the completion
+  // the child would have sent, at any depth.
+  type RestoredChild = AnyActorRef & {
+    id: string;
+    _restored?: boolean;
+    _parent?: AnyActorRef;
+    sessionId?: string;
+    system?: { sendEvent?: (source: object, target: object, event: object) => void };
+  };
+  type ChildSnapshot = {
+    status?: string;
+    output?: unknown;
+    error?: unknown;
+    children?: Record<string, AnyActorRef | undefined>;
+  };
+  const completionOf = (child: RestoredChild): EventObject | undefined => {
+    const snapshot = child.getSnapshot() as ChildSnapshot;
+    if (snapshot.status === "done") {
+      return {
+        type: "xstate.done.actor",
+        output: snapshot.output,
+        actorId: child.id,
+        sessionId: child.sessionId,
+      } as EventObject;
+    }
+    if (snapshot.status === "error") {
+      return {
+        type: "xstate.error.actor",
+        error: snapshot.error,
+        actorId: child.id,
+        sessionId: child.sessionId,
+      } as EventObject;
+    }
+    return undefined;
+  };
+  // The finished children of a restored root: their completions go to the mailbox.
+  const restoredRootCompletions = (snapshot: AnyMachineSnapshot): EventObject[] =>
+    Object.values((snapshot.children ?? {}) as Record<string, RestoredChild | undefined>)
+      .map((child) => (child ? completionOf(child) : undefined))
+      .filter((event): event is EventObject => event !== undefined);
+  // The restored, finished children inside a child machine: their completions
+  // go to that machine, which journals them as its own inputs. A child that
+  // finished live has already told its parent.
+  const reportRestoredCompletions = (actor: AnyActorRef): void => {
+    const snapshot = actor.getSnapshot() as ChildSnapshot;
+    if (snapshot.status !== "active") return;
+    for (const child of Object.values(snapshot.children ?? {}) as (RestoredChild | undefined)[]) {
+      if (!child) continue;
+      const event = completionOf(child);
+      if (event !== undefined && child._restored) {
+        child.system?.sendEvent?.(child, actor, event);
+      } else {
+        reportRestoredCompletions(child);
+      }
+    }
+  };
+
   let execution!: DurableExecution<TMachine>;
   const durableAdapter = {
     startActor: (actor: AnyActorRef) => {
@@ -3601,6 +3736,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // reporting a child error the machine already handles as unhandled.
       actor.subscribe({ next: recheck, complete: recheck, error: recheck });
       (actor as unknown as { start(): void }).start();
+      reportRestoredCompletions(actor);
     },
     enqueueRootEvent: (_source: unknown, event: EventObject) => enqueue(event),
     executeAction: (
@@ -3612,6 +3748,13 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       const queued = mailbox.shift();
       if (queued !== undefined) {
         return queued;
+      }
+      // Nothing queued: the entries so far are one settled step. Write them.
+      if (resultOwed) {
+        resultOwed = false;
+        setTimeout(flushJournal, 0);
+      } else {
+        flushJournal();
       }
       if (stopReason !== undefined || finished || !workInFlight()) {
         return QUIESCENT as unknown as EventObject;
@@ -4046,6 +4189,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
             AnyMachineSnapshot,
             AgentEffects,
           ];
+          for (const event of restoredRootCompletions(snapshot)) enqueue(event);
         } catch (error) {
           // A snapshot this machine cannot restore fails the run on its own
           // terms rather than throwing out of the host.
@@ -4203,8 +4347,18 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       // A decision's usage is queued after the event it chose; when that event
       // ends the machine, the usage is never handed out. Journal it out of
       // band, like usage the machine declares no transition for.
-      for (const event of mailbox) {
-        if (event.type === AGENT_USAGE_EVENT_TYPE) {
+      // The last step's entries are written before the outcome is decided,
+      // so a write that fails here settles the run `cause: "journal"`. Usage
+      // that arrives during the write is journaled too.
+      const journaledUsage = new Set<EventObject>();
+      for (;;) {
+        await drainJournal();
+        const usage = mailbox.filter(
+          (event) => event.type === AGENT_USAGE_EVENT_TYPE && !journaledUsage.has(event),
+        );
+        if (usage.length === 0) break;
+        for (const event of usage) {
+          journaledUsage.add(event);
           appendLogEntry(event);
         }
       }
@@ -4283,6 +4437,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       };
 
       finished = true;
+      flushJournal();
       releaseAllDeliveries();
       // Every write queued so far: the result waits for these. A straggler
       // entry appended after this point is still written, but not awaited.

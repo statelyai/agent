@@ -40,6 +40,8 @@ with an external timer pending. When it fires, deliver
 `{ type: "xstate.timer", id }` through `transition` or as the `event` passed to
 `runToQuiescence`.
 
+A resumed run calls `schedule` again for each timer still pending, with what is left of its delay by the wall clock. Treat `schedule` as an upsert by `id`: a host that already holds that timer keeps its own due time. An `id` names a timer by its state and delay, not by arming, so a state entered again schedules the same `id` once the earlier timer has fired or been cancelled.
+
 An invoked child machine's `after` timers always run in process, and the run
 waits for them, whichever `timers` option you pass.
 
