@@ -1352,6 +1352,8 @@ async function runTextRequest(
     const callKey = id !== "" ? runCtx.callKey?.(id, self) : undefined;
     // Write-ahead: the log up to this point must be durable before the call.
     await runCtx.awaitJournal?.();
+    // The step that started the call may also have left its state.
+    signal.throwIfAborted();
     const raw = await executor(requestWithTools as AgentExecutorTextRequest, {
       onChunk: (chunk: string) => {
         runCtx.emitTrace?.({ type: "stream.chunk", request: agentRequest, chunk }, self);
@@ -1576,6 +1578,7 @@ function createCountingDecide(
           : `${invokeCallKey}.${attemptRequest.attempts?.length ?? 0}`;
       // Write-ahead: the log up to this point must be durable before the call.
       await runCtx.awaitJournal?.();
+      info?.signal?.throwIfAborted();
       // `runId` rides on the request like `signal` does: host-injected
       // correlation, never serialized into machine state. It also rides on the
       // `info` second argument, where generateText/streamText carry it.
@@ -1648,6 +1651,7 @@ function createCountingFill(
     runCtx.emitTrace?.({ type: "request.start", request: agentRequest }, self);
     try {
       await runCtx.awaitJournal?.();
+      info?.signal?.throwIfAborted();
       const raw = await runCtx.generateText!(request, {
         ...info,
         ...(runCtx.runId !== undefined ? { runId: runCtx.runId } : {}),
@@ -2524,7 +2528,7 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
   onIdle?: (
     snapshot: SnapshotFrom<TMachine>,
     options: { signal: AbortSignal | undefined },
-  ) => Promise<EventFromLogic<TMachine>>;
+  ) => Promise<EventFromLogic<TMachine> | AgentTimerEvent>;
   /**
    * A send handle for events pushed mid-run (a cancel, a user message), from
    * {@link createAgentInbox}. Each `inbox.send` goes to the current pass's
@@ -2672,7 +2676,8 @@ async function waitForIdleAnswer<TMachine extends AnyStateMachine>(
   signal: AbortSignal | undefined,
   aborted: Promise<typeof ABORTED>,
 ): Promise<{ event: EventFromLogic<TMachine>; fromInbox: boolean } | typeof ABORTED> {
-  const answer = () => onIdle(snapshot, { signal });
+  // A host timer firing is delivered like any event (see `toTimerInput`).
+  const answer = () => onIdle(snapshot, { signal }) as Promise<EventFromLogic<TMachine>>;
   if (!inbox) {
     return Promise.race([aborted, answer().then((event) => ({ event, fromInbox: false }))]);
   }
@@ -3427,8 +3432,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // Wrap every effective TextLogic/DecisionLogic (and the agent.* builtins)
   // with a host-backed executor. Invoked child machines are recursively
   // rebound so their requests inherit the same executors at any depth (see
-  // rebindChildMachine). Every other source (plain actors, non-agent logic)
-  // passes through untouched.
+  // rebindChildMachine). Plain actors are held until the journal is durable.
   for (const [key, logic] of Object.entries(effectiveSources)) {
     if (isActLogic(logic)) {
       wrappedSources[key] = bindActLogic(runCtx);
@@ -3454,6 +3458,12 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         wrappedSources[key] = rebound;
       }
       continue;
+    }
+
+    // A plain actor waits for the journal like a model call does, so the
+    // event that started it is durable before its side effect runs.
+    if (runCtx.pendingJournal && typeof logic?.transition === "function") {
+      wrappedSources[key] = journalGatedLogic(logic, runCtx.pendingJournal);
     }
   }
 
