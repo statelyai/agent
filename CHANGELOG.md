@@ -1,5 +1,32 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.37
+
+### Patch Changes
+
+- [#225](https://github.com/statelyai/agent/pull/225) [`d6c41bc`](https://github.com/statelyai/agent/commit/d6c41bcb72420a0a2f4e0ec6c411f7b091314e75) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `children: "coupled"` exploration closes two proof gaps:
+  
+  - A `canReach` predicate and `dedupeBy` now see each coupled child's explored state through `snapshot.children[id].getSnapshot()`, not the state it started in. A parent's send and the child's receipt are one state, so cross-actor invariants can be targets.
+  - A coupled child's text requests deliver `@agent.usage` to the root, as a run does: each `usage` value forks a branch, and the root takes or drops the event by the usual rules. Token budgets fed by child calls can now be proved.
+
+- [#224](https://github.com/statelyai/agent/pull/224) [`12fab4f`](https://github.com/statelyai/agent/commit/12fab4f56ac0c78c4071a9ef674c71f6a8ca124c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `checkCrashRecovery` takes `sendDuring` (host events sent while a named effect, or its `occurrence`-th start, is in flight, and redelivered after a crash when the log lost them) and `timers: "host"` (the harness hosts root `after` timers on a virtual clock; an id-less `{ type: "xstate.timer" }` in `events` fires the soonest). A `sendDuring` key the run never starts, or `events` left undelivered, now throw.
+  
+  Fix: a model call (text, decision, or fill) whose invoke is stopped while it waits for the journal write no longer reaches the executor, so a cancel that lands in the same step costs no tokens.
+  
+  Fix: a plain actor at the root waits for the journal like a model call does, so the event that started it is durable before its side effect runs.
+  
+  `runAgent`'s `onIdle` may return a host timer firing (`{ type: "xstate.timer", id }`).
+
+- [#223](https://github.com/statelyai/agent/pull/223) [`106e3c6`](https://github.com/statelyai/agent/commit/106e3c67a0dd1e05c7d559aeeb3a355e0f593b70) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add `checkCrashRecovery` to `@statelyai/agent/testing`: it kills a durable run after every log append and while every effect is in flight, resumes each from the store's log, and checks the resume against an uninterrupted run (no durable effect re-runs, none skipped, same `callKey` and request, same outcome, the log replays). Pass `store` to check your own store adapter.
+  
+  Fix: a child machine that finished just before a crash (its last entry journaled, its parent's `xstate.done.actor` not yet) no longer leaves the resumed parent waiting forever. The restored child's completion is now delivered to its parent, at any depth.
+  
+  `@agent.usage` now carries the call's `callKey`.
+  
+  Fix: a parent's `sendTo` into a journaled child machine, and the child's reply, are no longer lost when the run dies between appends. The store now receives every entry since the loop last waited in one atomic append (`expectedIndex` is the batch's first index), so an event and the child inputs it caused land together.
+
+- [#221](https://github.com/statelyai/agent/pull/221) [`cd6148c`](https://github.com/statelyai/agent/commit/cd6148c01d45a547bed9df5b7601e8a871f9a412) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `explorePaths` delivers a scripted `@agent.usage` event only when the machine accepts it, as a run does, and a usage transition that restarts the invoke no longer receives the old request's completion.
+
 ## 2.0.0-alpha.36
 
 ### Minor Changes
