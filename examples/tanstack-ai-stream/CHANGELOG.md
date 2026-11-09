@@ -1,5 +1,12 @@
 # @statelyai/example-tanstack-ai-stream
 
+## 0.0.1-alpha.26
+
+### Patch Changes
+
+- Updated dependencies [[`11fe8e7`](https://github.com/statelyai/agent/commit/11fe8e75b7ec3255a41cc9b2460abbbdcac5d572)]:
+  - @statelyai/agent@2.0.0-alpha.38
+
 ## 0.0.1-alpha.25
 
 ### Patch Changes
