@@ -170,7 +170,7 @@ Retry behavior:
 
 Core validates and retries. It never calls a model. Coercing the model into choosing exactly one option is the host's responsibility. The shipped AI SDK, OpenAI, and TanStack AI executors offer two modes, set by the `decideMode` option on each adapter:
 
-- `'object'` (default for object payloads): one structured-output call. An open choice answers `{ event }`, where `event` is one candidate event, `type` included. Root unions of object payloads become separate event variants. A closed choice answers `{ choice }`, an enum of option ids. The answer holds one event by construction.
+- `'object'` (default for object payloads): one structured-output call. An open choice answers `{ event }`, where `event` is one candidate event, `type` included. Root unions of object payloads become separate event variants. A closed choice answers `{ choice }`, an enum of option ids. The schema allows only one event per answer.
 - `'tool'`: one tool per candidate event under a forced tool choice. Parallel tool calls are turned off where the provider allows it, and an answer that still calls more than one tool is rejected.
 - A function of the request picks the mode per request. Returning `undefined` uses the default: `'object'` when every payload can be represented as object variants, otherwise `'tool'`. This avoids unsupported `allOf` schemas in strict structured-output providers.
 

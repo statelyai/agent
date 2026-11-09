@@ -85,7 +85,7 @@ Requests have a semantic `name`, resolved `input`, model reference, schemas,
 prompt/messages, and tools. The machine owns control flow; the executor owns
 the provider call.
 
-An executor is just a function, so the machine runs anywhere a function does.
+An executor is a function, so the machine runs anywhere a function does.
 When several requests each need their own canned answer, the executor routes on
 `request.name`. See [Evals](evals.md#testing-without-a-provider).
 
