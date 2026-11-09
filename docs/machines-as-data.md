@@ -408,9 +408,9 @@ The machine's `description` is its goal, so it leads the text. An excerpt:
 Machine ticket
 Goal: Answer the customer's ticket so they never write back.
 States (initial: triaging):
-  triaging — Decide how to handle the ticket
+  triaging - Decide how to handle the ticket
       on ESCALATE → escalated
-      on REPLY → drafting; sets tone — Draft a reply
+      on REPLY → drafting; sets tone - Draft a reply
       invoke agent.decide
         error → escalated
   checking (choice)
@@ -418,10 +418,10 @@ States (initial: triaging):
       choice if isRetryable → drafting
       choice else → escalated
   sent (final) [tags: done]
-  escalated (final) — A human owns it now
+  escalated (final) - A human owns it now
 Events:
-  REPLY — Answer the ticket directly
-    tone: "formal" | "casual" — Reply tone
+  REPLY - Answer the ticket directly
+    tone: "formal" | "casual" - Reply tone
 ```
 
 - **States:** one line each, indented by depth, with the type, tags, `meta.interaction.label`, and description. Pass `snapshot` to mark the active states with `*`.

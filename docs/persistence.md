@@ -4,7 +4,7 @@ The [event log](event-log.md) is the durable artifact. A snapshot is a cache ove
 
 - The log is an ordered array of the external inputs the machine received. A run is fully reconstructed from it.
 - The persisted snapshot is the machine's serialized state at one point. It lets a resume skip the fold.
-- Live run state — the actor, in-flight requests, stream chunks — is derived and disposable.
+- Live run state (the actor, in-flight requests, stream chunks) is derived and disposable.
 
 ## Persist the log
 
@@ -19,7 +19,7 @@ const result = await runToQuiescence(createAgentRuntime(machine, { store, thread
 - A rejected write stops the run: `{ status: "error", cause: "journal" }`.
 - `threadId` is required whenever `store` is given.
 
-`onEvent` remains the observer seam — synchronous, never awaited. Persisting there is at-least-once: a crash between an entry and the host's flush loses it. See [Record a log](event-log.md#record-a-log).
+`onEvent` remains the observer seam. It is synchronous and never awaited. Persisting there is at-least-once: a crash between an entry and the host's flush loses it. See [Record a log](event-log.md#record-a-log).
 
 `result.events` is a complete, self-contained segment: its first entry is the reserved `@agent.init` entry, so it replays with no side channel.
 
@@ -143,7 +143,7 @@ Run it in CI next to the machine's other tests. It needs no API key.
 
 ## Snapshot as cache
 
-`persist()` output carries `agentMeta: { machineId, version, logId, logIndex }` — the lineage and position of the log it caches.
+`persist()` output carries `agentMeta: { machineId, version, logId, logIndex }`: the lineage and position of the log it caches.
 
 Pass `snapshot` alongside `events` to skip the fold:
 
@@ -155,13 +155,13 @@ const resumed = await runToQuiescence(createAgentRuntime(machine, { executors })
 });
 ```
 
-- Fast path: `agentMeta.logId` names the log, `logIndex` equals the log length, and the snapshot's state hash matches the tail entry's `verification.stateHash`. Length alone is not enough — a fork or a sibling thread can sit at the same index.
+- Fast path: `agentMeta.logId` names the log, `logIndex` equals the log length, and the snapshot's state hash matches the tail entry's `verification.stateHash`. Length alone is not enough, because a fork or a sibling thread can sit at the same index.
 - Otherwise the log is replayed and the run resumes from the replayed state.
 - A cache that disagrees with the state the log replays to throws `AgentSnapshotDivergedError` (code `snapshot-diverged`). Drop the snapshot and resume from `events` alone.
 
 A snapshot is never authoritative within a version. Snapshot only at quiescent points: a mid-flight snapshot cannot carry in-flight request state, but the log can.
 
-Resuming from a snapshot with no log also yields a self-contained log — the new segment's init entry carries that snapshot — so every result is replayable.
+Resuming from a snapshot with no log also yields a self-contained log (the new segment's init entry carries that snapshot), so every result is replayable.
 
 ## Version bridge
 

@@ -310,30 +310,30 @@ describe("describeMachine", () => {
       "Machine refund
       Goal: Resolve every refund request correctly and quickly.
       States (initial: triage):
-        triage (choice) — Route the request by amount
+        triage (choice) - Route the request by amount
             choice → review, paying (conditional)
-        review (initial: pending) [tags: waiting] [interaction: "Approve this refund?"] — A human reviews large refunds
-            on APPROVE → paying — Pay it out
+        review (initial: pending) [tags: waiting] [interaction: "Approve this refund?"] - A human reviews large refunds
+            on APPROVE → paying - Pay it out
             on REJECT → rejected; sets note
           pending
               on NOTE → (stays); sets note
               after reviewTimeout (60s) → escalated
-          escalated — Waited too long
+          escalated - Waited too long
         paying
             on RETRY → paying (conditional)
             after 5s → rejected
             invoke agent.generateText (payout)
               done → done
               error → paying, rejected (conditional); sets attempts
-        done (final) — Refund paid
+        done (final) - Refund paid
         rejected (final)
       Events:
-        APPROVE — A reviewer approves the refund
+        APPROVE - A reviewer approves the refund
         NOTE
           text: string
           urgent?: boolean
-        REJECT — A reviewer rejects the refund
-          reason: string — Why the refund was rejected
+        REJECT - A reviewer rejects the refund
+          reason: string - Why the refund was rejected
         RETRY"
     `);
   });
@@ -347,7 +347,7 @@ describe("describeMachine", () => {
       states: { idle: { on: { X: { target: "idle" } } } },
     });
     expect(describeMachine(machine).split("\n").slice(-2)).toEqual([
-      "  X — pay",
+      "  X - pay",
       "    amount: number",
     ]);
   });
@@ -367,30 +367,30 @@ describe("describeMachine", () => {
       "Machine refund
       Goal: Resolve every refund request correctly and quickly.
       States (initial: triage) (* = current):
-        triage (choice) — Route the request by amount
+        triage (choice) - Route the request by amount
             choice → review, paying (conditional)
-      * review (initial: pending) [tags: waiting] [interaction: "Approve this refund?"] — A human reviews large refunds
-            on APPROVE → paying — Pay it out
+      * review (initial: pending) [tags: waiting] [interaction: "Approve this refund?"] - A human reviews large refunds
+            on APPROVE → paying - Pay it out
             on REJECT → rejected; sets note
         * pending
               on NOTE → (stays); sets note
               after reviewTimeout (60s) → escalated
-          escalated — Waited too long
+          escalated - Waited too long
         paying
             on RETRY → paying (conditional)
             after 5s → rejected
             invoke agent.generateText (payout)
               done → done
               error → paying, rejected (conditional); sets attempts
-        done (final) — Refund paid
+        done (final) - Refund paid
         rejected (final)
       Events:
-        APPROVE — A reviewer approves the refund
+        APPROVE - A reviewer approves the refund
         NOTE
           text: string
           urgent?: boolean
-        REJECT — A reviewer rejects the refund
-          reason: string — Why the refund was rejected
+        REJECT - A reviewer rejects the refund
+          reason: string - Why the refund was rejected
         RETRY"
     `);
   });
@@ -470,9 +470,9 @@ describe("describeMachine", () => {
       "Machine ticket
       Goal: Answer the customer's ticket so they never write back.
       States (initial: triaging):
-        triaging — Decide how to handle the ticket
+        triaging - Decide how to handle the ticket
             on ESCALATE → escalated
-            on REPLY → drafting; sets tone — Draft a reply
+            on REPLY → drafting; sets tone - Draft a reply
             invoke agent.decide
               error → escalated
         drafting (initial: writing)
@@ -486,11 +486,11 @@ describe("describeMachine", () => {
             choice if isRetryable → drafting
             choice else → escalated
         sent (final) [tags: done]
-        escalated (final) — A human owns it now
+        escalated (final) - A human owns it now
       Events:
-        ESCALATE — Hand the ticket to a human
-        REPLY — Answer the ticket directly
-          tone: "formal" | "casual" — Reply tone"
+        ESCALATE - Hand the ticket to a human
+        REPLY - Answer the ticket directly
+          tone: "formal" | "casual" - Reply tone"
     `);
   });
 
