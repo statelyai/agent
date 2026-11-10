@@ -153,7 +153,7 @@ function targetsInSource(source: AnyStateNode, code: string, choice: boolean): s
   return `${parts.join(", ")}${conditional ? " (conditional)" : ""}`;
 }
 
-/** One transition, as a line: `on GO (human) if context.ready → review; sets draft — description`. */
+/** One transition, as a line: `on GO (human) if context.ready → review; sets draft - description`. */
 function transitionLine(
   source: AnyStateNode,
   head: string,
@@ -192,7 +192,7 @@ function transitionLine(
     sets = [];
   }
   return `${head}${human ? " (human)" : ""}${guard ? ` if ${guard}` : ""} → ${to}${sets.length ? `; sets ${sets.join(", ")}` : ""}${
-    description ? ` — ${oneLine(description)}` : ""
+    description ? ` - ${oneLine(description)}` : ""
   }`;
 }
 
@@ -298,7 +298,7 @@ function stateLine(node: AnyStateNode, json: Json): string {
       : typeof interaction.label === "function"
         ? " [interaction: computed label]"
         : " [interaction]";
-  const description = node.description ? ` — ${oneLine(node.description)}` : "";
+  const description = node.description ? ` - ${oneLine(node.description)}` : "";
   return `${node.key}${marker}${tags}${label}${description}`;
 }
 
@@ -324,7 +324,7 @@ function eventLines(machine: AnyStateMachine): string[] {
         : typeof direct === "string"
           ? direct
           : undefined;
-    lines.push(`  ${type}${description ? ` — ${oneLine(description)}` : ""}`);
+    lines.push(`  ${type}${description ? ` - ${oneLine(description)}` : ""}`);
     const properties = isObject(schema?.properties) ? schema.properties : {};
     const required = new Set(Array.isArray(schema?.required) ? schema.required : []);
     for (const [field, property] of Object.entries(properties)) {
@@ -337,7 +337,7 @@ function eventLines(machine: AnyStateMachine): string[] {
             ? property.type
             : undefined;
       const fieldDescription =
-        typeof property.description === "string" ? ` — ${oneLine(property.description)}` : "";
+        typeof property.description === "string" ? ` - ${oneLine(property.description)}` : "";
       lines.push(
         `    ${field}${required.has(field) ? "" : "?"}${fieldType ? `: ${fieldType}` : ""}${fieldDescription}`,
       );

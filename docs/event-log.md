@@ -154,7 +154,7 @@ const { snapshot, persistedSnapshot } = replay(machine, entries);
 ```
 
 - The first entry seeds the fold: `input` folds from `initialTransition`, `snapshot` restores purely and the rest of the log folds onto it.
-- `replay(machine, entries.slice(0, n))` rebuilds the state as of any point in the log — time travel with no side effects.
+- `replay(machine, entries.slice(0, n))` rebuilds the state as of any point in the log, with no side effects.
 - Journaled child sessions are rebound to the sessions the current fold minted, so completions still apply.
 
 ## Verification
