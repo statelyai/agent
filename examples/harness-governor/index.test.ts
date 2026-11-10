@@ -17,10 +17,10 @@ type Context = { clearance: Level; level: Level; active: Tool | null };
 const context = (snapshot: Snapshot) => snapshot.context as Context;
 const rank = (level: Level) => LEVELS.indexOf(level);
 
-/** Every clearance, every classifier verdict, and a classifier failure. */
+/** Every classifier verdict, a label that is not a level, and a classifier failure. */
 const everyBranch = (clearance: Level) => ({
   input: { clearance },
-  outputs: { classify: [...LEVELS] },
+  outputs: { classify: [...LEVELS, "unlabelled"] },
   errors: { classify: new Error("classifier down") },
   dedupeBy: (snapshot: Snapshot) => JSON.stringify([snapshot.value, snapshot.context]),
 });
@@ -63,12 +63,45 @@ test("a classifier failure locks the session", async () => {
   expect(governor.allowedTools()).toEqual([]);
 });
 
+test("a verdict that is not a level locks the session", async () => {
+  const governor = createGovernor({
+    clearance: "secret",
+    classify: async () => "unlabelled" as Level,
+  });
+  governor.authorize("query_records");
+  expect(await governor.admit("anything")).toEqual({ admitted: false, reason: "locked" });
+});
+
+test("a file read raises the level like any other result", async () => {
+  const governor = createGovernor({ clearance: "secret", classify: async () => "confidential" });
+  governor.authorize("read_file");
+  await governor.admit("a confidential file");
+  expect(governor.allowedTools()).toEqual(["read_file", "query_records"]);
+});
+
+test("a result with no authorized call behind it is refused", async () => {
+  const classified: string[] = [];
+  const governor = createGovernor({
+    clearance: "secret",
+    classify: async (_tool, result) => {
+      classified.push(result);
+      return "public";
+    },
+  });
+  expect(await governor.admit("never authorized")).toEqual({
+    admitted: false,
+    reason: "not-running",
+  });
+  expect(classified).toEqual([]);
+});
+
 test("the log keeps refused attempts, holds no tool result, and replays", async () => {
   const result = await runHarnessGovernorExample();
   expect(result.entries.map((entry) => entry.event.type)).toEqual([
     "@agent.init",
     "TOOL_CALL",
     "TOOL_RESULT",
+    "xstate.done.actor",
     "MODEL_REQUEST",
     "TOOL_CALL",
     "TOOL_RESULT",
@@ -83,6 +116,7 @@ test("the log keeps refused attempts, holds no tool result, and replays", async 
     "DISCARD",
     "TOOL_CALL",
     "TOOL_RESULT",
+    "xstate.done.actor",
     "MODEL_REQUEST",
     "END",
   ]);
@@ -139,7 +173,7 @@ test("canReach: the search does reach the states the proofs rule on", async () =
   const { errors: _errors, ...verdictsOnly } = everyBranch("confidential");
   const locked = await canReach(governorMachine, "locked", verdictsOnly);
   expect(locked.witness).toMatchObject([
-    { type: "TOOL_CALL", tool: "query_records" },
+    { type: "TOOL_CALL" },
     { type: "TOOL_RESULT" },
     { type: "xstate.done.actor", output: "secret" },
   ]);

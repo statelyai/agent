@@ -11,11 +11,11 @@
  *     machine with `snapshot.can`, not kept in a second table.
  *   - `web_search` sends text out of the session. It is accepted only while
  *     the session level is `public`. The level only rises.
- *   - A `query_records` result is held in `quarantined` until a classifier
- *     returns its level. The model cannot be called and no tool can run while
- *     a result is held.
- *   - A result above the user's clearance, or a classifier failure, moves the
- *     session to `locked`. The result is withheld. Only an operator `DISCARD`
+ *   - Every tool result is held in `quarantined` until a classifier returns
+ *     its level, a file read included. The model cannot be called and no tool
+ *     can run while a result is held.
+ *   - A result above the user's clearance, a verdict that is not a known
+ *     level, or a classifier failure moves the session to `locked`. The result is withheld. Only an operator `DISCARD`
  *     leaves `locked`.
  *
  * The machine imports only from `xstate`. `@statelyai/agent` supplies what
@@ -48,9 +48,6 @@ const rank = (level: Level): number => LEVELS.indexOf(level);
 
 /** Tools that send session content to a third party. */
 const EGRESS_TOOLS: ReadonlySet<Tool> = new Set(["web_search"]);
-
-/** Tools whose results are held until classified. */
-const QUARANTINED_TOOLS: ReadonlySet<Tool> = new Set(["query_records"]);
 
 // ─── The governor machine: only `xstate` ───
 
@@ -105,13 +102,10 @@ export const governorMachine = setup({
         END: { target: "ended" },
       },
     },
+    // Every result is classified. A tool the machine trusted by name would
+    // let its content reach an egress tool with the level still `public`.
     running: {
-      on: {
-        TOOL_RESULT: ({ context }) =>
-          context.active && QUARANTINED_TOOLS.has(context.active)
-            ? { target: "quarantined" }
-            : { target: "ready", context: { active: null } },
-      },
+      on: { TOOL_RESULT: { target: "quarantined" } },
     },
     // No `on` here: while a result is held, the machine accepts no event from
     // the loop. The classifier's verdict is the only way out.
@@ -121,7 +115,9 @@ export const governorMachine = setup({
         src: "classify",
         input: ({ context }) => ({ tool: context.active! }),
         onDone: ({ context, output }) =>
-          rank(output) > rank(context.clearance)
+          // `rank` is -1 for a label that is not a level, which would compare
+          // as below every clearance. An unknown verdict locks instead.
+          !LEVELS.includes(output) || rank(output) > rank(context.clearance)
             ? { target: "locked" }
             : {
                 target: "ready",
@@ -146,7 +142,9 @@ export const governorMachine = setup({
 
 // ─── The host side: what the loop calls ───
 
-export type Admission = { admitted: true; result: string } | { admitted: false; reason: "locked" };
+export type Admission =
+  | { admitted: true; result: string }
+  | { admitted: false; reason: "locked" | "not-running" };
 
 /**
  * Binds the machine to one session. The three methods mirror the points where
@@ -190,10 +188,17 @@ export function createGovernor(options: {
       actor.send(event);
       return allowed;
     },
-    /** Returns the result once it is safe for the model, or withholds it. */
+    /**
+     * Returns the result once it is safe for the model, or withholds it. A
+     * result with no authorized call behind it is refused: the machine would
+     * ignore the event, and nothing would classify the result.
+     */
     async admit(result: string): Promise<Admission> {
-      held = result;
-      actor.send({ type: "TOOL_RESULT" });
+      const event = { type: "TOOL_RESULT" } as const;
+      const running = actor.getSnapshot().can(event);
+      if (running) held = result;
+      actor.send(event);
+      if (!running) return { admitted: false, reason: "not-running" };
       const settled = await waitFor(actor, (snapshot) => !snapshot.matches("quarantined"));
       held = null;
       return settled.matches("locked")
