@@ -42,6 +42,11 @@ export {
   supportMachine as stranglerFigMachine,
 } from "./strangler-fig/index.js";
 export {
+  createGovernor,
+  governorMachine,
+  runHarnessGovernorExample,
+} from "./harness-governor/index.js";
+export {
   jsonAgentMachine,
   runJsonAgentDemo,
   workflowConfig as jsonAgentWorkflowConfig,
