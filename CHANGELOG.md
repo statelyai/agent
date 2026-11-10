@@ -4,7 +4,7 @@
 
 ### Patch Changes
 
-- [#226](https://github.com/statelyai/agent/pull/226) [`11fe8e7`](https://github.com/statelyai/agent/commit/11fe8e75b7ec3255a41cc9b2460abbbdcac5d572) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `describeMachine` separates descriptions with an ASCII hyphen surrounded by spaces, so its output is plain ASCII.
+- [#226](https://github.com/statelyai/agent/pull/226) [`11fe8e7`](https://github.com/statelyai/agent/commit/11fe8e75b7ec3255a41cc9b2460abbbdcac5d572) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `describeMachine` separates descriptions with an ASCII hyphen surrounded by spaces.
 
 ## 2.0.0-alpha.37
 
