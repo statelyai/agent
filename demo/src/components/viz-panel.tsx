@@ -121,27 +121,17 @@ export function VizPanel({
             config={outlineConfig}
             value={step?.value ?? null}
             hints={outlineHints}
+            liveChartAvailable={preferOutline && !inspectionDown && !!liveUrl}
           />
         ) : liveUrl ? (
-          <>
-            <iframe
-              key={machineKey}
-              className="viz-embed"
-              title={`Live inspection for ${title}`}
-              src={liveUrl}
-              allow="clipboard-read; clipboard-write"
-              referrerPolicy="strict-origin"
-            />
-            <a
-              className="viz-open-link"
-              href={liveUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={`Open full statechart for ${title}`}
-            >
-              Open full chart ↗
-            </a>
-          </>
+          <iframe
+            key={machineKey}
+            className="viz-embed"
+            title={`Live inspection for ${title}`}
+            src={liveUrl}
+            allow="clipboard-read; clipboard-write"
+            referrerPolicy="strict-origin"
+          />
         ) : inspectionUnavailable ? (
           <div className="viz-state" role="status">
             <strong>Live inspection unavailable</strong>
@@ -152,6 +142,17 @@ export function VizPanel({
             <strong>Loading the statechart</strong>
             <p>Publishing this machine to the inspection room.</p>
           </div>
+        )}
+        {hasMachine && liveUrl && !inspectionDown && (
+          <a
+            className="viz-open-link"
+            href={liveUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open full statechart for ${title}`}
+          >
+            Open full chart ↗
+          </a>
         )}
       </div>
     </section>

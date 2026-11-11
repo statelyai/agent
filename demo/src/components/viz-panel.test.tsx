@@ -46,6 +46,8 @@ describe("VizPanel", () => {
     );
     expect(html).toContain('aria-label="Statechart outline for Test machine"');
     expect(html).toContain('data-active="true"');
+    expect(html).toContain("Live inspection is unavailable");
+    expect(html).not.toContain('aria-label="Open full statechart for Test machine"');
     expect(html).not.toContain("<iframe");
   });
 
@@ -63,6 +65,9 @@ describe("VizPanel", () => {
     );
     expect(html).toContain('aria-label="Statechart outline for Test machine"');
     expect(html).toContain('data-active="true"');
+    expect(html).toContain('aria-label="Open full statechart for Test machine"');
+    expect(html).toContain("Open full chart for the live diagram.");
+    expect(html).not.toContain("Live inspection is unavailable");
     expect(html).not.toContain("<iframe");
   });
 
