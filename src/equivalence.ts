@@ -47,8 +47,9 @@ export interface RecordedError {
   ownName?: true;
   /** The error's `cause`, when it was an Error; replay restores it. */
   cause?: RecordedError;
-  /** An `AggregateError`'s `errors`; replay revives an `AggregateError`. */
-  errors?: RecordedError[];
+  /** An `AggregateError`'s `errors`, each a recorded error or `{ value }`
+   * for a reason that was not an Error; replay revives an `AggregateError`. */
+  errors?: (RecordedError | { value: unknown })[];
 }
 
 /** One model call. `call` is its 0-based position among model calls. */
@@ -324,9 +325,9 @@ export class RecordingDivergenceError extends Error {
   override name = "RecordingDivergenceError";
 }
 
-function toRecordedError(error: unknown, seen = new Set<unknown>()): RecordedError {
+function toRecordedError(error: unknown, path = new Set<unknown>()): RecordedError {
   if (!(error instanceof Error)) return { name: "Error", message: String(error) };
-  seen.add(error);
+  path.add(error);
   const recorded: RecordedError = { name: error.name, message: error.message };
   if (Object.prototype.propertyIsEnumerable.call(error, "name")) recorded.ownName = true;
   const code = (error as { code?: unknown }).code;
@@ -349,14 +350,19 @@ function toRecordedError(error: unknown, seen = new Set<unknown>()): RecordedErr
     }
   }
   if (markers.size) recorded.markers = [...markers];
-  if (error.cause instanceof Error && !seen.has(error.cause)) {
-    recorded.cause = toRecordedError(error.cause, seen);
+  // `path` holds the errors above this one, so only a cycle is cut.
+  if (error.cause instanceof Error && !path.has(error.cause)) {
+    recorded.cause = toRecordedError(error.cause, path);
   }
   if (error instanceof AggregateError && Array.isArray(error.errors)) {
-    recorded.errors = error.errors.map((item: unknown) =>
-      seen.has(item) ? { name: "Error", message: "[Circular]" } : toRecordedError(item, seen),
+    recorded.errors = error.errors.flatMap(
+      (item: unknown): NonNullable<RecordedError["errors"]> => {
+        if (!(item instanceof Error)) return [{ value: toJson(item) }];
+        return path.has(item) ? [] : [toRecordedError(item, path)];
+      },
     );
   }
+  path.delete(error);
   return recorded;
 }
 
@@ -364,24 +370,26 @@ function fromRecordedError(
   recorded: RecordedError,
   reviveError?: CreateRecorderOptions["reviveError"],
 ): Error {
-  const custom = reviveError?.(structuredClone(recorded));
-  if (custom) return custom;
   const { data, markers, name, ownName, cause, errors, ...fields } = recorded;
-  const base = errors
-    ? new AggregateError(
-        errors.map((item) => fromRecordedError(item, reviveError)),
-        fields.message,
-      )
+  const revivedErrors = errors?.map((item) =>
+    "value" in item ? structuredClone(item.value) : fromRecordedError(item, reviveError),
+  );
+  // Non-enumerable, as `new Error(message, { cause })` and `AggregateError` set them.
+  const define = (target: Error, key: "cause" | "errors", value: unknown) =>
+    Object.defineProperty(target, key, { value, writable: true, configurable: true });
+  const custom = reviveError?.(structuredClone(recorded));
+  if (custom) {
+    // A custom class still gets the recorded children, revived the same way.
+    if (cause && custom.cause === undefined)
+      define(custom, "cause", fromRecordedError(cause, reviveError));
+    if (revivedErrors && custom instanceof AggregateError) define(custom, "errors", revivedErrors);
+    return custom;
+  }
+  const base = revivedErrors
+    ? new AggregateError(revivedErrors, fields.message)
     : new Error(fields.message);
   const error = Object.assign(base, fields, data);
-  if (cause) {
-    // Non-enumerable, as `new Error(message, { cause })` sets it.
-    Object.defineProperty(error, "cause", {
-      value: fromRecordedError(cause, reviveError),
-      writable: true,
-      configurable: true,
-    });
-  }
+  if (cause) define(error, "cause", fromRecordedError(cause, reviveError));
   // Enumerable only when the original's was, so the revived one serializes alike.
   if (ownName || name !== "Error") {
     Object.defineProperty(error, "name", {

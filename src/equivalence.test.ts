@@ -879,6 +879,40 @@ describe("a replayed error", () => {
     expect((error as AggregateError).errors.map((e: Error) => e.message)).toEqual(["one", "two"]);
   });
 
+  test("keeps a shared entry and non-Error reasons in an AggregateError", async () => {
+    const failure = new Error("shared");
+    const error = (await replayFailure(
+      new AggregateError([failure, failure, "timeout", 503], "requests failed"),
+    )) as AggregateError;
+    expect(error.errors.map((e: unknown) => (e instanceof Error ? e.message : e))).toEqual([
+      "shared",
+      "shared",
+      "timeout",
+      503,
+    ]);
+  });
+
+  test("reviveError's class still gets the recorded cause and errors", async () => {
+    class AbortError extends Error {
+      override name = "AbortError";
+    }
+    class BatchError extends AggregateError {
+      override name = "BatchError";
+    }
+    const error = (await replayFailure(
+      new BatchError([new AbortError("stop")], "failed", { cause: new AbortError("root") }),
+      (recorded) =>
+        recorded.name === "BatchError"
+          ? new BatchError([], recorded.message)
+          : recorded.name === "AbortError"
+            ? new AbortError(recorded.message)
+            : undefined,
+    )) as AggregateError;
+    expect(error).toBeInstanceOf(BatchError);
+    expect(error.errors[0]).toBeInstanceOf(AbortError);
+    expect(error.cause).toBeInstanceOf(AbortError);
+  });
+
   test("a cyclic cause records once", async () => {
     const error = new Error("loop");
     error.cause = error;
