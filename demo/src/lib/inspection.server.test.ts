@@ -134,6 +134,24 @@ describe("demo inspection transport", () => {
     expect(inspector.selectActor).toHaveBeenCalledWith("agent-demo-runner:root");
   });
 
+  it("times out a stalled viewer registration so the demo can show its outline", async () => {
+    await ensureInspectionRelay();
+    const room = openInspectionRoom();
+    declareInspectionMachine(room, "declared source");
+    const inspector = createInspectorMock.mock.results.at(-1)?.value;
+    inspector.ready = new Promise<void>(() => {});
+    vi.useFakeTimers();
+    try {
+      const viewer = inspectionViewerUrl(room);
+      const rejected = expect(viewer).rejects.toThrow("Inspection viewer timed out");
+      await vi.advanceTimersByTimeAsync(6000);
+      await rejected;
+      expect(inspector.destroy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("pins the root selection for a run but never for a bare declaration", async () => {
     await ensureInspectionRelay();
     const room = openInspectionRoom();

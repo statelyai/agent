@@ -163,6 +163,25 @@ export function openInspectionRoom(): string {
   return roomId;
 }
 
+function beforeInspectionDeadline<T>(operation: Promise<T>, deadline: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Inspection viewer timed out")),
+      Math.max(0, deadline - Date.now()),
+    );
+    operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /** Open the room's producer before handing a viewer link to the browser. */
 export async function inspectionViewerUrl(roomId: string): Promise<{
   url: string;
@@ -174,9 +193,19 @@ export async function inspectionViewerUrl(roomId: string): Promise<{
     room.declarationOnly = true;
   }
   const inspector = room.inspector;
-  await inspector.ready;
-  const link = await inspector.createViewerLink({ maxUses: 20, ttlSeconds: 3600 });
-  return { url: link.openUrl, hosted: inspector.session !== null };
+  const deadline = Date.now() + 6000;
+  try {
+    await beforeInspectionDeadline(inspector.ready, deadline);
+    const link = await beforeInspectionDeadline(
+      inspector.createViewerLink({ maxUses: 20, ttlSeconds: 3600 }),
+      deadline,
+    );
+    return { url: link.openUrl, hosted: inspector.session !== null };
+  } catch (error) {
+    inspector.destroy();
+    rooms.delete(roomId);
+    throw error;
+  }
 }
 
 /**
