@@ -893,6 +893,14 @@ describe("a replayed error", () => {
     ]);
   });
 
+  test("an unprintable reason does not mask the failure", async () => {
+    const reason = Object.create(null) as Record<string, unknown>;
+    reason.self = reason;
+    const error = (await replayFailure(new AggregateError([reason], "failed"))) as AggregateError;
+    expect(error.message).toBe("failed");
+    expect(error.errors).toEqual(["[object Object]"]);
+  });
+
   test("reviveError's class still gets the recorded cause and errors", async () => {
     class AbortError extends Error {
       override name = "AbortError";

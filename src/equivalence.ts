@@ -363,7 +363,11 @@ function toRecordedError(error: unknown, path = new Set<unknown>()): RecordedErr
           try {
             return [{ value: toJson(item) }];
           } catch {
-            return [{ value: String(item) }];
+            try {
+              return [{ value: String(item) }];
+            } catch {
+              return [{ value: Object.prototype.toString.call(item) }];
+            }
           }
         }
         return path.has(item) ? [] : [toRecordedError(item, path)];
