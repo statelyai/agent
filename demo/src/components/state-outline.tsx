@@ -176,20 +176,25 @@ export function StateOutline({
   config,
   value,
   hints,
+  inspectionStatus = "unavailable",
 }: {
   title: string;
   config: VizNode;
   /** The latest snapshot `value`, or null before a run starts. */
   value: unknown;
   hints?: DiagramHints | null;
+  inspectionStatus?: "available" | "loading" | "unavailable";
 }) {
   const states = (config.states ?? {}) as Record<string, VizNode>;
   const active = value == null ? initialActivePaths(config) : activePaths(value);
   return (
     <div className="state-outline" role="region" aria-label={`Statechart outline for ${title}`}>
-      <p className="state-outline__note">
-        Live inspection is unavailable, so this is the machine's outline. The active state follows
-        the run.
+      <p className="state-outline__note" role="status">
+        {inspectionStatus === "available"
+          ? "This outline lists the machine's states and transitions. Open full chart for the live diagram. The active state follows the run."
+          : inspectionStatus === "loading"
+            ? "Publishing the live chart. This outline shows the machine while it connects. The active state follows the run."
+            : "Live inspection is unavailable, so this is the machine's outline. The active state follows the run."}
       </p>
       <ul className="state-outline__children state-outline__root">
         {Object.entries(states).map(([name, node]) => (
