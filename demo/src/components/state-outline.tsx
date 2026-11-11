@@ -77,6 +77,24 @@ function hasDynamic(transition: unknown): boolean {
   return !!transition && typeof transition === "object" && "dynamic" in transition;
 }
 
+/** Initial active paths, including every region of a parallel state. */
+export function initialActivePaths(config: VizNode): Set<string> {
+  const active = new Set<string>();
+  const visit = (node: VizNode, path: string) => {
+    active.add(path);
+    const children = (node.states ?? {}) as Record<string, VizNode>;
+    if (node.type === "parallel") {
+      for (const [name, child] of Object.entries(children))
+        visit(child, path ? `${path}.${name}` : name);
+    } else if (typeof node.initial === "string" && children[node.initial]) {
+      visit(children[node.initial], path ? `${path}.${node.initial}` : node.initial);
+    }
+  };
+  visit(config, "");
+  active.delete("");
+  return active;
+}
+
 function StateNode({
   name,
   node,
@@ -94,11 +112,20 @@ function StateNode({
   const kind = node.type === "final" ? "final" : node.type === "parallel" ? "parallel" : "state";
   const children = (node.states ?? {}) as Record<string, VizNode>;
   const hinted = hints?.[path] ?? [];
+  const staticRows = transitionRows(node);
   const rows: Array<{ event: string; targets: string[]; dynamic?: boolean }> = [
-    ...transitionRows(node).filter(
+    ...staticRows.filter(
       (row) => !row.dynamic || !hinted.some((hint) => hint.event.startsWith(row.event)),
     ),
-    ...hinted,
+    ...hinted.filter(
+      (hint) =>
+        !staticRows.some(
+          (row) =>
+            row.event === hint.event &&
+            row.targets.length === hint.targets.length &&
+            row.targets.every((target, index) => target === hint.targets[index]),
+        ),
+    ),
   ];
   return (
     <li className="state-outline__state" data-active={isActive || undefined} data-kind={kind}>
@@ -157,8 +184,7 @@ export function StateOutline({
   hints?: DiagramHints | null;
 }) {
   const states = (config.states ?? {}) as Record<string, VizNode>;
-  const initial = typeof config.initial === "string" ? config.initial : null;
-  const active = value == null && initial ? new Set([initial]) : activePaths(value);
+  const active = value == null ? initialActivePaths(config) : activePaths(value);
   return (
     <div className="state-outline" role="region" aria-label={`Statechart outline for ${title}`}>
       <p className="state-outline__note">
