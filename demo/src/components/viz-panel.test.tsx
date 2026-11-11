@@ -49,6 +49,23 @@ describe("VizPanel", () => {
     expect(html).not.toContain("<iframe");
   });
 
+  it("prefers the authored outline for the hosted viewer", () => {
+    const html = renderToStaticMarkup(
+      <VizPanel
+        title="Test machine"
+        hasMachine
+        machineKey="scenario:test"
+        outlineConfig={{ id: "test", initial: "a", states: { a: {} } }}
+        preferOutline
+        liveWs={null}
+        liveUrl="https://editor.stately.ai/inspect?ws=wss%3A%2F%2Fsky&r=room"
+      />,
+    );
+    expect(html).toContain('aria-label="Statechart outline for Test machine"');
+    expect(html).toContain('data-active="true"');
+    expect(html).not.toContain("<iframe");
+  });
+
   it("says so when the relay is unreachable and there is nothing to draw", () => {
     const html = renderPanel(null, true, true);
     expect(html).toContain("Live inspection unavailable");

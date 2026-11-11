@@ -28,6 +28,8 @@ type VizPanelProps = {
   /** The latest settled step of the run, for the active state. */
   step?: EmbedStep | null;
   theme?: "light" | "dark";
+  /** Prefer the authored outline when the hosted viewer has no browser reachability signal. */
+  preferOutline?: boolean;
   /**
    * Live inspection relay. The panel joins the room as a viewer purely as a
    * reachability canary — the /inspect page connects to the relay itself for
@@ -51,6 +53,7 @@ export function VizPanel({
   outlineHints = null,
   step = null,
   theme = "light",
+  preferOutline = false,
   liveWs,
   liveUrl,
 }: VizPanelProps) {
@@ -91,7 +94,7 @@ export function VizPanel({
   }, [liveWs?.relayUrl]);
 
   const inspectionDown = inspectionUnavailable || socketUnavailable;
-  const showOutline = inspectionDown && outlineConfig;
+  const showOutline = (preferOutline || inspectionDown) && outlineConfig;
   const showEmbed = inspectionDown && !showOutline && machineConfig != null && !embedUnavailable;
 
   return (

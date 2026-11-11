@@ -784,6 +784,7 @@ export function DemoShell() {
       }
       step={latestStep}
       theme={theme}
+      preferOutline={!!inspection?.hosted}
       liveWs={liveWs}
       liveUrl={liveUrl}
     />
