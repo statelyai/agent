@@ -426,24 +426,20 @@ describe("provideExecutors + '@agent.usage'", () => {
   });
   const usageAgent = setupAgent({ schemas: usageSchemas, actors: { researchStep } });
 
-  const buildBudgetMachine = (declareUsage: boolean) =>
+  const buildBudgetMachine = () =>
     usageAgent.createMachine({
       context: ({ input }) => ({ notes: [], tokens: 0, maxTokens: input.maxTokens, seen: [] }),
-      on: declareUsage
-        ? {
-            [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
-              context: {
-                tokens: context.tokens + (event.usage.totalTokens ?? 0),
-                seen: [
-                  ...context.seen,
-                  `${event.kind ?? "?"}:${event.id ?? "?"}:${event.model ?? "?"}`,
-                ],
-              },
-            }),
-          }
-        : {
-            "*": ({ context, event }) => ({ context: { seen: [...context.seen, event.type] } }),
+      on: {
+        [AGENT_USAGE_EVENT_TYPE]: ({ context, event }) => ({
+          context: {
+            tokens: context.tokens + (event.usage.totalTokens ?? 0),
+            seen: [
+              ...context.seen,
+              `${event.kind ?? "?"}:${event.id ?? "?"}:${event.model ?? "?"}`,
+            ],
           },
+        }),
+      },
       initial: "researching",
       states: {
         researching: {
@@ -473,7 +469,7 @@ describe("provideExecutors + '@agent.usage'", () => {
   };
 
   test("delivers a settled call's usage to the invoking machine actor, so a guard can stop it", async () => {
-    const bound = provideExecutors(buildBudgetMachine(true), usageExecutors);
+    const bound = provideExecutors(buildBudgetMachine(), usageExecutors);
     const actor = createActor(bound, { input: { maxTokens: 1000 } });
     actor.start();
     const output = await toPromise(actor);

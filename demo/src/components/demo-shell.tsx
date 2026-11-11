@@ -5,6 +5,7 @@ import { traceSteps, type TraceStep } from "@/lib/trace-view";
 import { ExampleIntro, ScenarioIntro, type StarterAction } from "@/components/chat-intros";
 import { SiteHeader } from "@/components/site-header";
 import { VizPanel } from "@/components/viz-panel";
+import type { EmbedStep } from "@/components/machine-embed";
 import {
   declareExampleMachine,
   getExample,
@@ -31,8 +32,9 @@ import {
   startScenario,
 } from "@/lib/run-demo-agent";
 import type { TraceEntry } from "@/lib/agent-runner";
-import { readRunStream, type RunChunk } from "@/lib/run-stream";
-import { getScenario, scenarios, scenarioVizConfig } from "@/lib/scenarios";
+import { readRunStream, type RunChunk, type RunStreamEvent } from "@/lib/run-stream";
+import { getScenario, scenarios, scenarioDiagramHints, scenarioVizConfig } from "@/lib/scenarios";
+import { exampleDiagramHints } from "@/lib/example-diagram-hints";
 import type { Selection } from "@/lib/selection";
 import {
   createShellStore,
@@ -78,6 +80,7 @@ const vizOrigin = new URL(import.meta.env.VITE_VIZ_URL || "https://editor.statel
 const inspectUrl = import.meta.env.VITE_VIZ_INSPECT_URL || `${vizOrigin}/inspect`;
 
 function createLiveInspectUrl(baseUrl: string, inspection: InspectionInfo): string {
+  if (inspection.hosted) return inspection.viewerUrl;
   const url = new URL(baseUrl);
   url.searchParams.set("ws", inspection.relayUrl);
   url.searchParams.set("r", inspection.roomId);
@@ -122,6 +125,7 @@ export function DemoShell() {
       const fromHash = selectionFromHash();
       const current = store.getSnapshot().context.selection;
       if (fromHash && (fromHash.type !== current.type || fromHash.id !== current.id)) {
+        discardRun();
         store.trigger.exampleSelected({ selection: fromHash });
       }
     }
@@ -129,27 +133,30 @@ export function DemoShell() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [store]);
 
-  // Live inspection: use Sky by default; boot a local relay only when opted in.
-  const [inspection, setInspection] = useState<InspectionInfo | null>(null);
-  const [inspectionChecked, setInspectionChecked] = useState(false);
+  // Each selection gets a room and a viewer ticket for its own machine.
+  const selectionRoomKey = `${selection.type}:${selection.id}:${machineIndex}`;
+  const [inspectionState, setInspectionState] = useState<{
+    key: string;
+    info: InspectionInfo | null;
+  } | null>(null);
+  const inspection = inspectionState?.key === selectionRoomKey ? inspectionState.info : null;
+  const inspectionChecked = inspectionState?.key === selectionRoomKey;
   useEffect(() => {
     let cancelled = false;
     void getInspection().then(
       (info) => {
         if (cancelled) return;
-        setInspection(info);
-        setInspectionChecked(true);
+        setInspectionState({ key: selectionRoomKey, info });
       },
       () => {
         if (cancelled) return;
-        setInspection(null);
-        setInspectionChecked(true);
+        setInspectionState({ key: selectionRoomKey, info: null });
       },
     );
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectionRoomKey]);
 
   // Every run needs both model keys on the server (OpenAI and TypeSafe).
   // Unknown until this resolves; only a confirmed `false` blocks runs.
@@ -222,14 +229,13 @@ export function DemoShell() {
 
   // Publish the selected machine to the inspection room BEFORE any run, so the
   // visualizer draws its statechart on selection instead of an empty room. The
-  // /inspect URL is the room, not the run, so it stays mounted across
-  // selections: each declaration swaps the graph in place rather than
-  // reloading the page.
+  // /inspect URL is the room, not the run. Each selection opens its own room.
   // Which machine the room is currently showing, not merely that something was
-  // declared once: the /inspect page stays mounted across selections, so a
+  // declared once: the previous room can still be open, so a
   // `liveUrl` that ignored the key would keep the PREVIOUS example's chart on
   // screen while the new declaration is still in flight (or after it failed).
   const [declaredKey, setDeclaredKey] = useState<string | null>(null);
+  const [declarationFailedKey, setDeclarationFailedKey] = useState<string | null>(null);
   const inspectScenarioId = isScenario ? scenario.id : null;
   const inspectExampleId = !isScenario && activeMachine ? selection.id : null;
   const inspectExportName = !isScenario && activeMachine ? activeMachine.exportName : null;
@@ -241,20 +247,27 @@ export function DemoShell() {
   useEffect(() => {
     if (!inspection) return;
     let cancelled = false;
+    const key = `${inspection.roomId}:${inspectKey}`;
     const onDeclared = ({ declared }: { declared: boolean }) => {
-      if (!cancelled && declared) setDeclaredKey(inspectKey);
+      if (cancelled) return;
+      if (declared) {
+        setDeclaredKey(key);
+        setDeclarationFailedKey(null);
+      } else {
+        setDeclarationFailedKey(key);
+      }
     };
-    // A failed declaration is not worth surfacing: the panel keeps whatever it
-    // was showing, and the run's own inspection still lights the chart up.
-    const ignore = () => {};
+    const onFailed = () => {
+      if (!cancelled) setDeclarationFailedKey(key);
+    };
     if (inspectScenarioId) {
       void declareScenarioMachine({
         data: { scenarioId: inspectScenarioId, room: inspection.roomId },
-      }).then(onDeclared, ignore);
+      }).then(onDeclared, onFailed);
     } else if (inspectExampleId && inspectExportName) {
       void declareExampleMachine({
         data: { id: inspectExampleId, exportName: inspectExportName, room: inspection.roomId },
-      }).then(onDeclared, ignore);
+      }).then(onDeclared, onFailed);
     }
     return () => {
       cancelled = true;
@@ -274,11 +287,18 @@ export function DemoShell() {
   // showed: the settle callbacks run long after the render that created them.
   const liveStepsRef = useRef<TraceStep[]>([]);
   const [liveSteps, setLiveSteps] = useState<TraceStep[]>([]);
+  const [liveState, setLiveState] = useState<EmbedStep | null>(null);
   const appendStep = useCallback((entry: TraceEntry) => {
     const [step] = traceSteps([entry]);
     if (!step) return;
     liveStepsRef.current = [...liveStepsRef.current, step];
     setLiveSteps(liveStepsRef.current);
+    setLiveState({
+      value: entry.value,
+      context: entry.context,
+      event: entry.event,
+      status: "active",
+    });
   }, []);
   // Streamed text of the turn in flight, one lane per streaming request.
   const liveTextRef = useRef<LiveText[]>([]);
@@ -301,17 +321,38 @@ export function DemoShell() {
     setLiveText(next);
   }, []);
 
+  function readCurrentRunStream<TResult>(
+    stream: ReadableStream<RunStreamEvent<TResult>>,
+    signal: AbortSignal,
+  ): Promise<TResult> {
+    return readRunStream(
+      stream,
+      (chunk) => {
+        if (abortRef.current?.signal === signal && !signal.aborted) appendChunk(chunk);
+      },
+      signal,
+      (entry) => {
+        if (abortRef.current?.signal === signal && !signal.aborted) appendStep(entry);
+      },
+    );
+  }
+
   const clearLive = () => {
     liveStepsRef.current = [];
     liveTextRef.current = [];
     setLiveSteps([]);
     setLiveText([]);
+    setLiveState(null);
+  };
+  const discardRun = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    clearLive();
   };
   const beginRun = () => {
-    abortRef.current?.abort();
+    discardRun();
     const controller = new AbortController();
     abortRef.current = controller;
-    clearLive();
     return controller.signal;
   };
   const endRun = () => {
@@ -321,23 +362,28 @@ export function DemoShell() {
   const cancelRun = () => abortRef.current?.abort();
 
   const resetRun = () => {
+    discardRun();
     store.trigger.runReset();
   };
 
   const select = (next: Selection) => {
+    discardRun();
     store.trigger.exampleSelected({ selection: next });
   };
 
   const selectMachine = (index: number) => {
+    discardRun();
     store.trigger.machineSelected({ index });
   };
 
-  const settle = (epoch: number, turnId: number, result: AnyRunResult) => {
+  const settle = (epoch: number, turnId: number, result: AnyRunResult, signal: AbortSignal) => {
+    if (abortRef.current?.signal !== signal) return;
     endRun();
     store.trigger.turnSettled({ epoch, id: turnId, result });
   };
 
-  const fail = (epoch: number, turnId: number, error: unknown) => {
+  const fail = (epoch: number, turnId: number, error: unknown, signal: AbortSignal) => {
+    if (abortRef.current?.signal !== signal) return;
     // An aborted fetch is the user's Cancel, not a failure worth a stack trace.
     // What the run showed before the stop stays in its turn.
     const cancelled = error instanceof DOMException && error.name === "AbortError";
@@ -396,10 +442,10 @@ export function DemoShell() {
       },
       signal,
     })
-      .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+      .then((stream) => readCurrentRunStream(stream, signal))
       .then(
         (result) => {
-          settle(epoch, id, result);
+          settle(epoch, id, result, signal);
           if (
             followUpText &&
             result?.status === "idle" &&
@@ -408,7 +454,7 @@ export function DemoShell() {
             sendIdleText(followUpText, result.idle ?? null);
           }
         },
-        (error) => fail(epoch, id, error),
+        (error) => fail(epoch, id, error, signal),
       );
   };
 
@@ -429,10 +475,10 @@ export function DemoShell() {
       },
       signal,
     })
-      .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+      .then((stream) => readCurrentRunStream(stream, signal))
       .then(
-        (result) => settle(epoch, id, result),
-        (error) => fail(epoch, id, error),
+        (result) => settle(epoch, id, result, signal),
+        (error) => fail(epoch, id, error, signal),
       );
   };
 
@@ -457,7 +503,7 @@ export function DemoShell() {
             room: inspection?.roomId,
           },
           signal,
-        }).then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+        }).then((stream) => readCurrentRunStream(stream, signal))
       : resumeExample({
           data: {
             id: selection.type === "example" ? selection.id : "",
@@ -467,10 +513,10 @@ export function DemoShell() {
             room: inspection?.roomId,
           },
           signal,
-        }).then((stream) => readRunStream(stream, appendChunk, signal, appendStep));
+        }).then((stream) => readCurrentRunStream(stream, signal));
     void deliver.then(
-      (result) => settle(epoch, id, result),
-      (error) => fail(epoch, id, error),
+      (result) => settle(epoch, id, result, signal),
+      (error) => fail(epoch, id, error, signal),
     );
   };
 
@@ -555,10 +601,10 @@ export function DemoShell() {
           data: { scenarioId: scenario.id, prompt: text, room: inspection?.roomId },
           signal,
         })
-          .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+          .then((stream) => readCurrentRunStream(stream, signal))
           .then(
-            (result) => settle(epoch, id, result),
-            (error) => fail(epoch, id, error),
+            (result) => settle(epoch, id, result, signal),
+            (error) => fail(epoch, id, error, signal),
           );
       } else if (activeMachine?.promptField) {
         startExampleRun(text, { [activeMachine.promptField]: text });
@@ -690,49 +736,55 @@ export function DemoShell() {
   // The room, not the run: once a machine is published the chart is worth
   // showing, and the first turn animates a diagram already on screen.
   const liveUrl =
-    inspection && declaredKey !== null && declaredKey === inspectKey
+    inspection && declaredKey === `${inspection.roomId}:${inspectKey}`
       ? createLiveInspectUrl(inspectUrl, inspection)
       : null;
-  const liveWs = inspection;
+  const liveWs = inspection && !inspection.hosted ? inspection : null;
 
-  // Without live inspection the pane draws the machine itself: the SDK embed
-  // takes the machine's source (examples) or JSON config (scenarios), and the
-  // plain outline is the last resort. Both light the latest settled step.
+  // The outline draws immediately when hosted inspection is unavailable.
+  // It follows streamed steps as well as the latest settled state.
   const machineConfig: unknown = isScenario
     ? scenarioVizConfig[scenario.id]
     : (activeMachine?.vizConfig ?? null);
   const outlineConfig = isScenario
     ? scenarioVizConfig[scenario.id]
-    : activeMachine && typeof activeMachine.vizConfig === "object"
-      ? activeMachine.vizConfig
-      : null;
-  const latestStep = (() => {
-    for (let index = turns.length - 1; index >= 0; index--) {
-      const turn = turns[index];
-      if (turn.status !== "ready" || !turn.result) continue;
-      const last = turn.result.trace[turn.result.trace.length - 1];
-      if (!last) continue;
-      const status =
-        turn.result.status === "done"
-          ? "done"
-          : turn.result.status === "error"
-            ? "error"
-            : "active";
-      return { value: last.value, context: last.context, event: last.event, status } as const;
-    }
-    return null;
-  })();
+    : (activeMachine?.outlineConfig ?? null);
+  const latestStep =
+    liveState ??
+    (() => {
+      for (let index = turns.length - 1; index >= 0; index--) {
+        const turn = turns[index];
+        if (turn.status !== "ready" || !turn.result) continue;
+        const last = turn.result.trace[turn.result.trace.length - 1];
+        if (!last) continue;
+        const status =
+          turn.result.status === "done"
+            ? "done"
+            : turn.result.status === "error"
+              ? "error"
+              : "active";
+        return { value: last.value, context: last.context, event: last.event, status } as const;
+      }
+      return null;
+    })();
 
   const vizPanel = (
     <VizPanel
       title={headerName}
       hasMachine={isScenario || !!activeMachine?.vizConfig}
-      inspectionUnavailable={inspectionChecked && !inspection}
+      inspectionUnavailable={
+        inspectionChecked &&
+        (!inspection || declarationFailedKey === `${inspection.roomId}:${inspectKey}`)
+      }
       machineKey={inspectKey ?? ""}
       machineConfig={machineConfig}
       outlineConfig={outlineConfig}
+      outlineHints={
+        isScenario ? scenarioDiagramHints[scenario.id] : exampleDiagramHints[selection.id]
+      }
       step={latestStep}
       theme={theme}
+      preferOutline={!!inspection?.hosted}
       liveWs={liveWs}
       liveUrl={liveUrl}
     />

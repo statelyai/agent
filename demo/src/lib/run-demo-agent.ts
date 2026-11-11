@@ -64,7 +64,7 @@ export const declareScenarioMachine = createServerFn({ method: "POST" })
     // Claimed before the first await, so a slower earlier selection cannot
     // land on top of a newer one.
     const declaration = nextDeclaration();
-    const [{ machineFor }, { scenarioSource }, inspection] = await Promise.all([
+    const [{ machineFor }, { scenarioDiagramHints }, inspection] = await Promise.all([
       import("./agent-runner"),
       import("./scenarios"),
       import("./inspection.server"),
@@ -74,7 +74,7 @@ export const declareScenarioMachine = createServerFn({ method: "POST" })
     return {
       declared: inspection.declareInspectionMachine(
         data.room,
-        inspection.rootMachinePayload(machineFor(id), scenarioSource[id]),
+        inspection.guidedMachinePayload(machineFor(id), scenarioDiagramHints[id]),
         declaration,
       ),
     };

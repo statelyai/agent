@@ -13,7 +13,7 @@ import type { AnyStateMachine } from "xstate";
 import ts from "@typescript/typescript6";
 import { describeMachineInput } from "./machine-chat.server";
 import { humanizeFieldName, type JsonObject } from "./machine-ui";
-import { toVizConfig } from "./scenarios";
+import { toOutlineConfig, toVizConfig } from "./scenarios";
 
 /** JSON-safe value — server fns must return serializable data. */
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -53,6 +53,8 @@ export type ExampleMachine = {
    * `fromConfig`), its plain-JSON config.
    */
   vizConfig: string | JsonObject;
+  /** Serializable structure for the outline when the hosted viewer is down. */
+  outlineConfig: JsonObject;
   initial: string | null;
   /** JSON Schema of the machine's `input`, when declared via setupAgent. */
   inputJsonSchema: JsonObject | null;
@@ -328,11 +330,13 @@ async function loadDetail(id: string): Promise<ExampleDetail> {
         const machineSource = await findMachineSource(id, exportName, source);
         const config = (value as { config: { initial?: unknown } }).config;
         const inputInfo = describeMachineInput(value as AnyStateMachine);
+        const outlineConfig = toOutlineConfig(value as AnyStateMachine) as JsonObject;
         machines.push({
           exportName,
           vizConfig: isAuthoredInSource(machineSource, exportName)
             ? sourceForMachine(machineSource, exportName, exportedMachines.length)
             : (toVizConfig(value as AnyStateMachine) as JsonObject),
+          outlineConfig,
           initial: typeof config.initial === "string" ? config.initial : null,
           inputJsonSchema: inputInfo.jsonSchema,
           promptField: inputInfo.promptField,

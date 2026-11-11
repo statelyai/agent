@@ -12,7 +12,8 @@ vi.mock("@statelyai/sdk/inspect", () => ({ createInspector: vi.fn(() => inspecto
 
 import { resumeScenarioRun, startScenarioRun } from "./agent-runner";
 import { ensureInspectionRelay, openInspectionRoom } from "./inspection.server";
-import { scenarioSource } from "./scenarios";
+import { refundMachine } from "@/agents/refund";
+import { scenarioDiagramHints, toGuidedVizConfig } from "./scenarios";
 
 // The model's one move in this run: an over-limit refund that waits for approval.
 const executors = {
@@ -24,10 +25,10 @@ afterEach(() => {
 });
 
 // Drives a REAL scenario run through the manual inspector API and checks what
-// hits the wire: the root keeps one stable id, carries its source machine, and
+// hits the wire: the root keeps one stable id, carries its guided graph, and
 // a resumed turn arrives as snapshot updates rather than a re-registration.
 describe("run inspection over a real scenario", () => {
-  it("registers the root once with its source and updates it across resume", async () => {
+  it("registers the root once with its complete graph and updates it across resume", async () => {
     vi.stubEnv("DEMO_INSPECT_WS_URL", "");
     vi.stubEnv("DEMO_INSPECT_PORT", "");
     vi.stubEnv("STATELY_INSPECT_URL", "");
@@ -48,7 +49,9 @@ describe("run inspection over a real scenario", () => {
     const rootRegistrations = inspectorMock.actor.mock.calls.filter(([id]) => id === "root");
     expect(rootRegistrations).toHaveLength(1);
     expect(rootRegistrations[0][1]).toEqual(
-      expect.objectContaining({ machine: scenarioSource.refund }),
+      expect.objectContaining({
+        machine: toGuidedVizConfig(refundMachine, scenarioDiagramHints.refund),
+      }),
     );
     expect(rootRegistrations[0][1]).not.toHaveProperty("parent");
 

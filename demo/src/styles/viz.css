@@ -34,6 +34,25 @@
   border: 0;
 }
 
+.viz-open-link {
+  position: absolute;
+  z-index: 2;
+  right: 72px;
+  bottom: 17px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.viz-open-link:hover,
+.viz-open-link:focus-visible {
+  border-color: var(--accent);
+}
+
 /* ---------- Loading / error / empty ---------- */
 .viz-state {
   position: absolute;

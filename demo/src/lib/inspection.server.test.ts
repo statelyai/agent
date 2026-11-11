@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { createMachine } from "xstate";
 const createInspectorMock = vi.hoisted(() =>
   vi.fn((_options: unknown) => ({
+    ready: Promise.resolve(),
+    session: null as object | null,
+    createViewerLink: vi.fn(async () => ({ openUrl: "https://example.test/claim" })),
+    selectActor: vi.fn(),
     actor: vi.fn(),
     machine: vi.fn(),
     snapshot: vi.fn(),
@@ -15,6 +19,7 @@ vi.mock("@statelyai/sdk/inspect", () => ({ createInspector: createInspectorMock 
 import {
   declareInspectionMachine,
   ensureInspectionRelay,
+  inspectionViewerUrl,
   inspectionRelayUrl,
   inspectionWsUrl,
   machineForInspection,
@@ -102,6 +107,44 @@ describe("demo inspection transport", () => {
     expect(createInspectorMock.mock.calls.length).toBe(created);
     expect(inspector.destroy).not.toHaveBeenCalled();
     expect(inspector.machine).toHaveBeenCalledWith("root", "second source");
+  });
+
+  it("keeps the hosted viewer's inspector through declaration and run start", async () => {
+    await ensureInspectionRelay();
+    const room = openInspectionRoom();
+    const viewer = await inspectionViewerUrl(room);
+    const inspector = createInspectorMock.mock.results.at(-1)?.value;
+    inspector.session = {};
+    const created = createInspectorMock.mock.calls.length;
+    const machine = createMachine({ id: "hosted", initial: "idle", states: { idle: {} } });
+
+    expect(viewer.url).toBe("https://example.test/claim");
+    expect((await inspectionViewerUrl(room)).hosted).toBe(true);
+    expect(rootMachinePayload(machine, "source to convert")).toBe("source to convert");
+    declareInspectionMachine(room, "declared source");
+    maybeCreateRunInspection(room, {} as never, "declared source", "start");
+
+    expect(createInspectorMock.mock.calls.length).toBe(created);
+    expect(inspector.destroy).not.toHaveBeenCalled();
+    expect(inspector.selectActor).toHaveBeenCalledWith("agent-demo-runner:root");
+  });
+
+  it("times out a stalled viewer registration so the demo can show its outline", async () => {
+    await ensureInspectionRelay();
+    const room = openInspectionRoom();
+    declareInspectionMachine(room, "declared source");
+    const inspector = createInspectorMock.mock.results.at(-1)?.value;
+    inspector.ready = new Promise<void>(() => {});
+    vi.useFakeTimers();
+    try {
+      const viewer = inspectionViewerUrl(room);
+      const rejected = expect(viewer).rejects.toThrow("Inspection viewer timed out");
+      await vi.advanceTimersByTimeAsync(6000);
+      await rejected;
+      expect(inspector.destroy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("pins the root selection for a run but never for a bare declaration", async () => {

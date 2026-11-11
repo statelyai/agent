@@ -21,23 +21,37 @@ export const listExamples = createServerFn({ method: "GET" }).handler(async () =
   return listExampleSummaries();
 });
 
-export type InspectionInfo = { relayUrl: string; roomId: string };
+export type InspectionInfo = {
+  relayUrl: string;
+  roomId: string;
+  viewerUrl: string;
+  hosted: boolean;
+};
 
 /** A run's streamed chunks and steps, then its result — see `run-stream.ts`. */
 export type MachineChatStream = ReadableStream<RunStreamEvent<MachineChatResult>>;
 
 /**
- * Returns hosted inspection info, starting a local relay only when opted in.
- * Every call opens a new room: the caller's browser session sends its id back
+ * Returns inspection info for a new room. The caller sends its id back
  * with each declaration and run, so sessions never share a visualizer.
  */
 export const getInspection = createServerFn({ method: "GET" }).handler(
-  async (): Promise<InspectionInfo> => {
-    const { ensureInspectionRelay, inspectionRelayUrl, openInspectionRoom } =
+  async (): Promise<InspectionInfo | null> => {
+    const { ensureInspectionRelay, inspectionRelayUrl, inspectionViewerUrl, openInspectionRoom } =
       await import("./inspection.server");
-    await ensureInspectionRelay();
-    const roomId = openInspectionRoom();
-    return { relayUrl: inspectionRelayUrl(roomId), roomId };
+    try {
+      await ensureInspectionRelay();
+      const roomId = openInspectionRoom();
+      const viewer = await inspectionViewerUrl(roomId);
+      return {
+        relayUrl: inspectionRelayUrl(roomId),
+        roomId,
+        viewerUrl: viewer.url,
+        hosted: viewer.hosted,
+      };
+    } catch {
+      return null;
+    }
   },
 );
 

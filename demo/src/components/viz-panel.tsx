@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createWebSocketTransport } from "@statelyai/sdk";
 import { StateOutline } from "@/components/state-outline";
 import { MachineEmbed, type EmbedStep } from "@/components/machine-embed";
+import type { DiagramHints } from "@/lib/scenarios";
 
 export type LiveWs = { relayUrl: string; roomId: string };
 
@@ -14,18 +15,21 @@ type VizPanelProps = {
   inspectionUnavailable?: boolean;
   /**
    * Stable key for the selected machine, and its source text or plain-JSON
-   * config: what the SDK embed draws when live inspection is unavailable.
+   * config: what the SDK embed can draw if no outline is available.
    */
   machineKey?: string;
   machineConfig?: unknown;
   /**
-   * Plain-JSON machine config for the static outline: the last resort when
-   * the embed cannot connect either. Null when the machine has no JSON view.
+   * Plain-JSON machine config for the outline shown when inspection is down.
+   * Null when the machine has no JSON view.
    */
   outlineConfig?: Record<string, unknown> | null;
+  outlineHints?: DiagramHints | null;
   /** The latest settled step of the run, for the active state. */
   step?: EmbedStep | null;
   theme?: "light" | "dark";
+  /** Prefer the authored outline when the hosted viewer has no browser reachability signal. */
+  preferOutline?: boolean;
   /**
    * Live inspection relay. The panel joins the room as a viewer purely as a
    * reachability canary — the /inspect page connects to the relay itself for
@@ -46,8 +50,10 @@ export function VizPanel({
   machineKey = "",
   machineConfig = null,
   outlineConfig = null,
+  outlineHints = null,
   step = null,
   theme = "light",
+  preferOutline = false,
   liveWs,
   liveUrl,
 }: VizPanelProps) {
@@ -88,15 +94,14 @@ export function VizPanel({
   }, [liveWs?.relayUrl]);
 
   const inspectionDown = inspectionUnavailable || socketUnavailable;
-  const showEmbed = inspectionDown && machineConfig != null && !embedUnavailable;
-  const showOutline = inspectionDown && !showEmbed && outlineConfig;
+  const showOutline = (preferOutline || inspectionDown) && outlineConfig;
+  const showEmbed = inspectionDown && !showOutline && machineConfig != null && !embedUnavailable;
 
   return (
     <section className="viz-shell" aria-label={`Live statechart for ${title}`}>
       <div className="viz-canvas">
         {!hasMachine ? (
-          // Checked before `liveUrl`: the room outlives a selection, so an
-          // example with no machine must not keep showing the previous one.
+          // An example with no machine must not keep showing a previous chart.
           <div className="viz-state" role="status">
             <strong>No machine to inspect</strong>
             <p>This example does not export a state machine from its index.ts.</p>
@@ -111,15 +116,32 @@ export function VizPanel({
             onUnavailable={() => setEmbedUnavailable(true)}
           />
         ) : showOutline ? (
-          <StateOutline title={title} config={outlineConfig} value={step?.value ?? null} />
-        ) : liveUrl ? (
-          <iframe
-            className="viz-embed"
-            title={`Live inspection for ${title}`}
-            src={liveUrl}
-            allow="clipboard-read; clipboard-write"
-            referrerPolicy="strict-origin"
+          <StateOutline
+            title={title}
+            config={outlineConfig}
+            value={step?.value ?? null}
+            hints={outlineHints}
           />
+        ) : liveUrl ? (
+          <>
+            <iframe
+              key={machineKey}
+              className="viz-embed"
+              title={`Live inspection for ${title}`}
+              src={liveUrl}
+              allow="clipboard-read; clipboard-write"
+              referrerPolicy="strict-origin"
+            />
+            <a
+              className="viz-open-link"
+              href={liveUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Open full statechart for ${title}`}
+            >
+              Open full chart ↗
+            </a>
+          </>
         ) : inspectionUnavailable ? (
           <div className="viz-state" role="status">
             <strong>Live inspection unavailable</strong>
