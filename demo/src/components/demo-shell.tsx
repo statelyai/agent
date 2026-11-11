@@ -32,7 +32,7 @@ import {
   startScenario,
 } from "@/lib/run-demo-agent";
 import type { TraceEntry } from "@/lib/agent-runner";
-import { readRunStream, type RunChunk } from "@/lib/run-stream";
+import { readRunStream, type RunChunk, type RunStreamEvent } from "@/lib/run-stream";
 import { getScenario, scenarios, scenarioDiagramHints, scenarioVizConfig } from "@/lib/scenarios";
 import { exampleDiagramHints } from "@/lib/example-diagram-hints";
 import type { Selection } from "@/lib/selection";
@@ -125,6 +125,7 @@ export function DemoShell() {
       const fromHash = selectionFromHash();
       const current = store.getSnapshot().context.selection;
       if (fromHash && (fromHash.type !== current.type || fromHash.id !== current.id)) {
+        discardRun();
         store.trigger.exampleSelected({ selection: fromHash });
       }
     }
@@ -320,6 +321,22 @@ export function DemoShell() {
     setLiveText(next);
   }, []);
 
+  function readCurrentRunStream<TResult>(
+    stream: ReadableStream<RunStreamEvent<TResult>>,
+    signal: AbortSignal,
+  ): Promise<TResult> {
+    return readRunStream(
+      stream,
+      (chunk) => {
+        if (abortRef.current?.signal === signal && !signal.aborted) appendChunk(chunk);
+      },
+      signal,
+      (entry) => {
+        if (abortRef.current?.signal === signal && !signal.aborted) appendStep(entry);
+      },
+    );
+  }
+
   const clearLive = () => {
     liveStepsRef.current = [];
     liveTextRef.current = [];
@@ -327,11 +344,15 @@ export function DemoShell() {
     setLiveText([]);
     setLiveState(null);
   };
-  const beginRun = () => {
+  const discardRun = () => {
     abortRef.current?.abort();
+    abortRef.current = null;
+    clearLive();
+  };
+  const beginRun = () => {
+    discardRun();
     const controller = new AbortController();
     abortRef.current = controller;
-    clearLive();
     return controller.signal;
   };
   const endRun = () => {
@@ -341,23 +362,28 @@ export function DemoShell() {
   const cancelRun = () => abortRef.current?.abort();
 
   const resetRun = () => {
+    discardRun();
     store.trigger.runReset();
   };
 
   const select = (next: Selection) => {
+    discardRun();
     store.trigger.exampleSelected({ selection: next });
   };
 
   const selectMachine = (index: number) => {
+    discardRun();
     store.trigger.machineSelected({ index });
   };
 
-  const settle = (epoch: number, turnId: number, result: AnyRunResult) => {
+  const settle = (epoch: number, turnId: number, result: AnyRunResult, signal: AbortSignal) => {
+    if (abortRef.current?.signal !== signal) return;
     endRun();
     store.trigger.turnSettled({ epoch, id: turnId, result });
   };
 
-  const fail = (epoch: number, turnId: number, error: unknown) => {
+  const fail = (epoch: number, turnId: number, error: unknown, signal: AbortSignal) => {
+    if (abortRef.current?.signal !== signal) return;
     // An aborted fetch is the user's Cancel, not a failure worth a stack trace.
     // What the run showed before the stop stays in its turn.
     const cancelled = error instanceof DOMException && error.name === "AbortError";
@@ -416,10 +442,10 @@ export function DemoShell() {
       },
       signal,
     })
-      .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+      .then((stream) => readCurrentRunStream(stream, signal))
       .then(
         (result) => {
-          settle(epoch, id, result);
+          settle(epoch, id, result, signal);
           if (
             followUpText &&
             result?.status === "idle" &&
@@ -428,7 +454,7 @@ export function DemoShell() {
             sendIdleText(followUpText, result.idle ?? null);
           }
         },
-        (error) => fail(epoch, id, error),
+        (error) => fail(epoch, id, error, signal),
       );
   };
 
@@ -449,10 +475,10 @@ export function DemoShell() {
       },
       signal,
     })
-      .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+      .then((stream) => readCurrentRunStream(stream, signal))
       .then(
-        (result) => settle(epoch, id, result),
-        (error) => fail(epoch, id, error),
+        (result) => settle(epoch, id, result, signal),
+        (error) => fail(epoch, id, error, signal),
       );
   };
 
@@ -477,7 +503,7 @@ export function DemoShell() {
             room: inspection?.roomId,
           },
           signal,
-        }).then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+        }).then((stream) => readCurrentRunStream(stream, signal))
       : resumeExample({
           data: {
             id: selection.type === "example" ? selection.id : "",
@@ -487,10 +513,10 @@ export function DemoShell() {
             room: inspection?.roomId,
           },
           signal,
-        }).then((stream) => readRunStream(stream, appendChunk, signal, appendStep));
+        }).then((stream) => readCurrentRunStream(stream, signal));
     void deliver.then(
-      (result) => settle(epoch, id, result),
-      (error) => fail(epoch, id, error),
+      (result) => settle(epoch, id, result, signal),
+      (error) => fail(epoch, id, error, signal),
     );
   };
 
@@ -575,10 +601,10 @@ export function DemoShell() {
           data: { scenarioId: scenario.id, prompt: text, room: inspection?.roomId },
           signal,
         })
-          .then((stream) => readRunStream(stream, appendChunk, signal, appendStep))
+          .then((stream) => readCurrentRunStream(stream, signal))
           .then(
-            (result) => settle(epoch, id, result),
-            (error) => fail(epoch, id, error),
+            (result) => settle(epoch, id, result, signal),
+            (error) => fail(epoch, id, error, signal),
           );
       } else if (activeMachine?.promptField) {
         startExampleRun(text, { [activeMachine.promptField]: text });
