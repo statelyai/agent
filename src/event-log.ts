@@ -113,6 +113,13 @@ export interface AgentLogEntry {
    * child's state, not just the root's.
    */
   actorPath?: string[];
+  /**
+   * Set when the machine had no transition for the event in the state it
+   * arrived in, so the event changed nothing. Only {@link recordLog} sets it:
+   * a plain actor processes every event it is sent, refused ones included.
+   * Omitted otherwise. Replay-ignored: the fold drops the event the same way.
+   */
+  ignored?: true;
 }
 
 /** The payload of the reserved {@link AGENT_INIT_EVENT_TYPE} first entry. */
@@ -354,6 +361,9 @@ export function assertAgentLogEntry(entry: unknown): asserts entry is AgentLogEn
   }
   if (candidate.decidedBy !== undefined) {
     requireNonEmptyString(candidate.decidedBy, "entry.decidedBy", " when present");
+  }
+  if (candidate.ignored !== undefined && candidate.ignored !== true) {
+    throw new AgentEventLogError("Agent event entry.ignored must be true when present.");
   }
   if (
     candidate.actorPath !== undefined &&
@@ -1453,7 +1463,9 @@ export interface LogRecorder {
  * Records a plain `createActor` run as an event log, with no
  * `createAgentRuntime`: the init entry (the actor's `input`, or the snapshot
  * it was created from), then every event the root machine processed, invoke
- * completions with their outputs inline. Attach it before `actor.start()`.
+ * completions with their outputs inline. An event the machine had no
+ * transition for is recorded too, marked `ignored`. Attach it before
+ * `actor.start()`.
  *
  * @example
  * ```ts no-check
@@ -1481,7 +1493,7 @@ export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
     ? (actor.getPersistedSnapshot() as AgentPersistedSnapshot)
     : undefined;
 
-  const record = (event: EventObject): void => {
+  const record = (event: EventObject, ignored: boolean): void => {
     if (fold === undefined) {
       if (event.type !== "xstate.init") {
         throw new AgentEventLogError(
@@ -1499,6 +1511,7 @@ export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
       machineVersion,
       verification: false,
     });
+    if (ignored) entry.ignored = true;
     entry.verification = { stateHash: getSnapshotStateHash(fold.apply(entry)) };
     entries.push(entry);
   };
@@ -1512,7 +1525,8 @@ export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
       return;
     }
     try {
-      record(inspectionEvent.event);
+      // No microstep: the machine took no transition for the event.
+      record(inspectionEvent.event, inspectionEvent.microsteps.length === 0);
     } catch (error) {
       failure = error;
     }
