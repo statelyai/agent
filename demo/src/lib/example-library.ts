@@ -27,14 +27,17 @@ export type InspectionInfo = { relayUrl: string; roomId: string };
 export type MachineChatStream = ReadableStream<RunStreamEvent<MachineChatResult>>;
 
 /**
- * Returns hosted inspection info, starting a local relay only when opted in.
- * Every call opens a new room: the caller's browser session sends its id back
+ * Returns local inspection info when a usable relay is configured.
+ * Each available call opens a new room: the caller's browser session sends its id back
  * with each declaration and run, so sessions never share a visualizer.
  */
 export const getInspection = createServerFn({ method: "GET" }).handler(
-  async (): Promise<InspectionInfo> => {
-    const { ensureInspectionRelay, inspectionRelayUrl, openInspectionRoom } =
+  async (): Promise<InspectionInfo | null> => {
+    const { ensureInspectionRelay, inspectionRelayUrl, inspectionWsUrl, openInspectionRoom } =
       await import("./inspection.server");
+    // Sky currently accepts a viewer claim, then closes the inspector with
+    // `missing_room`. Let the client render its statechart outline instead.
+    if (new URL(inspectionWsUrl()).hostname === "sky.stately.ai") return null;
     await ensureInspectionRelay();
     const roomId = openInspectionRoom();
     return { relayUrl: inspectionRelayUrl(roomId), roomId };

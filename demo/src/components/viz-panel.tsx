@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createWebSocketTransport } from "@statelyai/sdk";
 import { StateOutline } from "@/components/state-outline";
 import { MachineEmbed, type EmbedStep } from "@/components/machine-embed";
+import type { DiagramHints } from "@/lib/scenarios";
 
 export type LiveWs = { relayUrl: string; roomId: string };
 
@@ -14,15 +15,16 @@ type VizPanelProps = {
   inspectionUnavailable?: boolean;
   /**
    * Stable key for the selected machine, and its source text or plain-JSON
-   * config: what the SDK embed draws when live inspection is unavailable.
+   * config: what the SDK embed can draw if no outline is available.
    */
   machineKey?: string;
   machineConfig?: unknown;
   /**
-   * Plain-JSON machine config for the static outline: the last resort when
-   * the embed cannot connect either. Null when the machine has no JSON view.
+   * Plain-JSON machine config for the outline shown when inspection is down.
+   * Null when the machine has no JSON view.
    */
   outlineConfig?: Record<string, unknown> | null;
+  outlineHints?: DiagramHints | null;
   /** The latest settled step of the run, for the active state. */
   step?: EmbedStep | null;
   theme?: "light" | "dark";
@@ -46,6 +48,7 @@ export function VizPanel({
   machineKey = "",
   machineConfig = null,
   outlineConfig = null,
+  outlineHints = null,
   step = null,
   theme = "light",
   liveWs,
@@ -88,8 +91,8 @@ export function VizPanel({
   }, [liveWs?.relayUrl]);
 
   const inspectionDown = inspectionUnavailable || socketUnavailable;
-  const showEmbed = inspectionDown && machineConfig != null && !embedUnavailable;
-  const showOutline = inspectionDown && !showEmbed && outlineConfig;
+  const showOutline = inspectionDown && outlineConfig;
+  const showEmbed = inspectionDown && !showOutline && machineConfig != null && !embedUnavailable;
 
   return (
     <section className="viz-shell" aria-label={`Live statechart for ${title}`}>
@@ -111,7 +114,12 @@ export function VizPanel({
             onUnavailable={() => setEmbedUnavailable(true)}
           />
         ) : showOutline ? (
-          <StateOutline title={title} config={outlineConfig} value={step?.value ?? null} />
+          <StateOutline
+            title={title}
+            config={outlineConfig}
+            value={step?.value ?? null}
+            hints={outlineHints}
+          />
         ) : liveUrl ? (
           <iframe
             className="viz-embed"

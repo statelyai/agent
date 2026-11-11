@@ -1,6 +1,6 @@
 /**
- * Live inspection (server): real-time statechart inspection over hosted
- * Stately Sky by default, replacing the post-hoc trace replay.
+ * Live inspection (server): real-time statechart inspection over a configured
+ * relay. The browser uses the outline when hosted Sky cannot join its room.
  *
  * Both pieces come from `@statelyai/sdk`:
  * - `createInspectionRelay` — the transport-agnostic relay core, hosted here

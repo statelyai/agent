@@ -5,6 +5,7 @@ import { traceSteps, type TraceStep } from "@/lib/trace-view";
 import { ExampleIntro, ScenarioIntro, type StarterAction } from "@/components/chat-intros";
 import { SiteHeader } from "@/components/site-header";
 import { VizPanel } from "@/components/viz-panel";
+import type { EmbedStep } from "@/components/machine-embed";
 import {
   declareExampleMachine,
   getExample,
@@ -32,7 +33,8 @@ import {
 } from "@/lib/run-demo-agent";
 import type { TraceEntry } from "@/lib/agent-runner";
 import { readRunStream, type RunChunk } from "@/lib/run-stream";
-import { getScenario, scenarios, scenarioVizConfig } from "@/lib/scenarios";
+import { getScenario, scenarios, scenarioDiagramHints, scenarioVizConfig } from "@/lib/scenarios";
+import { exampleDiagramHints } from "@/lib/example-diagram-hints";
 import type { Selection } from "@/lib/selection";
 import {
   createShellStore,
@@ -129,7 +131,7 @@ export function DemoShell() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [store]);
 
-  // Live inspection: use Sky by default; boot a local relay only when opted in.
+  // Live inspection uses a configured relay; Sky currently needs the outline fallback.
   const [inspection, setInspection] = useState<InspectionInfo | null>(null);
   const [inspectionChecked, setInspectionChecked] = useState(false);
   useEffect(() => {
@@ -274,11 +276,18 @@ export function DemoShell() {
   // showed: the settle callbacks run long after the render that created them.
   const liveStepsRef = useRef<TraceStep[]>([]);
   const [liveSteps, setLiveSteps] = useState<TraceStep[]>([]);
+  const [liveState, setLiveState] = useState<EmbedStep | null>(null);
   const appendStep = useCallback((entry: TraceEntry) => {
     const [step] = traceSteps([entry]);
     if (!step) return;
     liveStepsRef.current = [...liveStepsRef.current, step];
     setLiveSteps(liveStepsRef.current);
+    setLiveState({
+      value: entry.value,
+      context: entry.context,
+      event: entry.event,
+      status: "active",
+    });
   }, []);
   // Streamed text of the turn in flight, one lane per streaming request.
   const liveTextRef = useRef<LiveText[]>([]);
@@ -306,6 +315,7 @@ export function DemoShell() {
     liveTextRef.current = [];
     setLiveSteps([]);
     setLiveText([]);
+    setLiveState(null);
   };
   const beginRun = () => {
     abortRef.current?.abort();
@@ -695,33 +705,32 @@ export function DemoShell() {
       : null;
   const liveWs = inspection;
 
-  // Without live inspection the pane draws the machine itself: the SDK embed
-  // takes the machine's source (examples) or JSON config (scenarios), and the
-  // plain outline is the last resort. Both light the latest settled step.
+  // The outline draws immediately when hosted inspection is unavailable.
+  // It follows streamed steps as well as the latest settled state.
   const machineConfig: unknown = isScenario
     ? scenarioVizConfig[scenario.id]
     : (activeMachine?.vizConfig ?? null);
   const outlineConfig = isScenario
     ? scenarioVizConfig[scenario.id]
-    : activeMachine && typeof activeMachine.vizConfig === "object"
-      ? activeMachine.vizConfig
-      : null;
-  const latestStep = (() => {
-    for (let index = turns.length - 1; index >= 0; index--) {
-      const turn = turns[index];
-      if (turn.status !== "ready" || !turn.result) continue;
-      const last = turn.result.trace[turn.result.trace.length - 1];
-      if (!last) continue;
-      const status =
-        turn.result.status === "done"
-          ? "done"
-          : turn.result.status === "error"
-            ? "error"
-            : "active";
-      return { value: last.value, context: last.context, event: last.event, status } as const;
-    }
-    return null;
-  })();
+    : (activeMachine?.outlineConfig ?? null);
+  const latestStep =
+    liveState ??
+    (() => {
+      for (let index = turns.length - 1; index >= 0; index--) {
+        const turn = turns[index];
+        if (turn.status !== "ready" || !turn.result) continue;
+        const last = turn.result.trace[turn.result.trace.length - 1];
+        if (!last) continue;
+        const status =
+          turn.result.status === "done"
+            ? "done"
+            : turn.result.status === "error"
+              ? "error"
+              : "active";
+        return { value: last.value, context: last.context, event: last.event, status } as const;
+      }
+      return null;
+    })();
 
   const vizPanel = (
     <VizPanel
@@ -731,6 +740,9 @@ export function DemoShell() {
       machineKey={inspectKey ?? ""}
       machineConfig={machineConfig}
       outlineConfig={outlineConfig}
+      outlineHints={
+        isScenario ? scenarioDiagramHints[scenario.id] : exampleDiagramHints[selection.id]
+      }
       step={latestStep}
       theme={theme}
       liveWs={liveWs}

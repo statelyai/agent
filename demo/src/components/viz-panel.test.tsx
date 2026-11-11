@@ -30,7 +30,7 @@ describe("VizPanel", () => {
     expect(html).not.toContain("<iframe");
   });
 
-  it("draws the machine through the SDK embed when the relay is unreachable", () => {
+  it("draws the outline immediately when the relay is unreachable", () => {
     const html = renderToStaticMarkup(
       <VizPanel
         title="Test machine"
@@ -43,11 +43,9 @@ describe("VizPanel", () => {
         liveUrl={null}
       />,
     );
-    // The SDK sets the src on attach; server markup has the frame and the
-    // connecting notice, and no live /inspect URL.
-    expect(html).toContain('title="Statechart for Test machine"');
-    expect(html).toContain("Drawing the statechart");
-    expect(html).not.toContain("/inspect");
+    expect(html).toContain('aria-label="Statechart outline for Test machine"');
+    expect(html).toContain('data-active="true"');
+    expect(html).not.toContain("<iframe");
   });
 
   it("says so when the relay is unreachable and there is nothing to draw", () => {
