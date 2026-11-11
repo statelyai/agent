@@ -161,7 +161,7 @@
     "proto:prefabs": "tsx .scratch/prefabs/demo.ts",
     "docs:check": "tsx scripts/check-docs-snippets.ts",
     "typecheck": "pnpm run typecheck:src && pnpm run typecheck:examples && pnpm run typecheck:example-packages",
-    "typecheck:src": "tsc --noEmit",
+    "typecheck:src": "tsc --noEmit && tsc -p tsconfig.exact-optional.json",
     "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",
     "typecheck:example-packages": "pnpm run build && tsc -p examples/next-host --noEmit && tsc -p examples/tanstack-ai-stream --noEmit && tsc -p examples/cloudflare-agent-host --noEmit && tsc -p examples/cloudflare-workers-ai-host --noEmit && tsc -p demo --noEmit",
     "test:cloudflare": "pnpm --filter @statelyai/example-cloudflare-agent-host test && pnpm --filter @statelyai/example-cloudflare-workers-ai-host test",

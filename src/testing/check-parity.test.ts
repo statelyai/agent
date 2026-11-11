@@ -28,6 +28,39 @@ const scenarios = [
 ];
 
 describe("checkParity", () => {
+  test("reviveError lets legacy instanceof checks branch the same in replay", async () => {
+    class OrderMissing extends Error {
+      override name = "OrderMissing";
+    }
+    async function lookupOrFallback(ticket: Ticket, effects: Effects) {
+      try {
+        await effects.lookupOrder(ticket.orderId);
+        return "found";
+      } catch (error) {
+        return error instanceof OrderMissing ? "missing" : "failed";
+      }
+    }
+    const run = (reviveError?: Parameters<typeof checkParity>[0]["reviveError"]) =>
+      checkParity({
+        scenarios: [{ id: "missing", input: { orderId: "A-9", amount: 1 } }],
+        effects: () => ({
+          ...createEffects(),
+          lookupOrder: async (): Promise<never> => {
+            throw new OrderMissing("no order");
+          },
+        }),
+        before: lookupOrFallback,
+        after: lookupOrFallback,
+        reviveError,
+      });
+    expect((await run()).scenarios[0]!.after).toEqual({ output: "failed" });
+    const revived = await run((recorded) =>
+      recorded.name === "OrderMissing" ? new OrderMissing(recorded.message) : undefined,
+    );
+    expect(revived.equivalent).toBe(true);
+    expect(revived.scenarios[0]!.after).toEqual({ output: "missing" });
+  });
+
   test("a wrapped workflow is equivalent to itself", async () => {
     let calls = 0;
     const step0 = wrapWorkflow({ id: "support", effects: createEffects(), run: legacy });

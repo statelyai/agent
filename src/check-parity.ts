@@ -7,6 +7,7 @@ import {
   compareRecordings,
   createRecorder,
   type CompareRecordingsOptions,
+  type CreateRecorderOptions,
   type EffectDivergence,
   type Recorder,
   type Recording,
@@ -57,6 +58,11 @@ export interface CheckParityOptions<
    * raw errors.
    */
   normalizeError?: (error: unknown, scenario: TScenario) => unknown;
+  /**
+   * Builds the error a recorded failure throws in the port's replay, so code
+   * that checks `instanceof` sees its own class. Passed to `createRecorder`.
+   */
+  reviveError?: CreateRecorderOptions["reviveError"];
 }
 
 /** One scenario's row in a {@link CheckParityReport}. */
@@ -154,7 +160,7 @@ export async function checkParity<
     const before = await settle(() => options.before(scenario.input, effects), recorder, normalize);
     const recording = recorder.recording;
 
-    const replayer = createRecorder({ replay: recording });
+    const replayer = createRecorder({ replay: recording, reviveError: options.reviveError });
     const stand = recordEffects(replayer, options.effects(scenario));
     const after = await settle(() => options.after(scenario.input, stand), replayer, normalize);
     const replay = replayer.recording;
