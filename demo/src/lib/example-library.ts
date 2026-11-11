@@ -9,7 +9,6 @@ import { z } from "zod";
 import type { Snapshot } from "xstate";
 
 import { nextDeclaration } from "./declaration-ticket";
-import { exampleDiagramHints } from "./example-diagram-hints";
 import type { ExampleDetail } from "./example-library.server";
 import type { MachineChatResult, MachineChatResumeEvent } from "./machine-chat.server";
 import { streamRun, type RunStreamEvent } from "./run-stream";
@@ -86,7 +85,7 @@ export const declareExampleMachine = createServerFn({ method: "POST" })
     const declaration = nextDeclaration();
     const [
       { getExampleMachine, getExampleMachineSource },
-      { declareInspectionMachine, ensureInspectionRelay, roomMachinePayload },
+      { declareInspectionMachine, ensureInspectionRelay, rootMachinePayload },
     ] = await Promise.all([import("./example-library.server"), import("./inspection.server")]);
     await ensureInspectionRelay();
     if (!data.room) return { declared: false };
@@ -97,7 +96,7 @@ export const declareExampleMachine = createServerFn({ method: "POST" })
     return {
       declared: declareInspectionMachine(
         data.room,
-        roomMachinePayload(data.room, machine, source, exampleDiagramHints[data.id]),
+        rootMachinePayload(machine, source),
         declaration,
       ),
     };
@@ -184,7 +183,6 @@ export const startExample = createServerFn({ method: "POST" })
           onStep,
           budgetMs: exampleBudgetMs(data.id),
           machineSource,
-          diagramHints: exampleDiagramHints[data.id],
           inspectionRoom: data.room,
         }),
       getRequest().signal,
@@ -215,7 +213,6 @@ export const resumeExample = createServerFn({ method: "POST" })
           onStep,
           budgetMs: exampleBudgetMs(data.id),
           machineSource,
-          diagramHints: exampleDiagramHints[data.id],
           inspectionRoom: data.room,
         }),
       getRequest().signal,

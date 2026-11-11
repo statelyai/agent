@@ -447,8 +447,8 @@ export function toVizConfig(machine: AnyStateMachine): VizNode {
   };
 }
 
-/** Add labelled diagram edges for branches selected by runtime functions. */
-export function toHostedVizConfig(machine: AnyStateMachine, hints: DiagramHints): VizNode {
+/** Add labelled edges for runtime branches while keeping guided diagrams compact. */
+export function toGuidedVizConfig(machine: AnyStateMachine, hints: DiagramHints): VizNode {
   const config = toVizConfig(machine);
   const hideInteractionMeta = (node: VizNode) => {
     const meta = node.meta as Record<string, unknown> | undefined;

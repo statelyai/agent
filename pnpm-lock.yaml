@@ -106,8 +106,8 @@ importers:
         specifier: ^5.0.3
         version: 5.0.3(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(vite@8.3.4(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       xstate:
-        specifier: 6.0.0-beta.1
-        version: 6.0.0-beta.1
+        specifier: 6.0.0-beta.2
+        version: 6.0.0-beta.2
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -190,8 +190,8 @@ importers:
         specifier: ^8.22.0
         version: 8.22.0
       xstate:
-        specifier: 6.0.0-beta.1
-        version: 6.0.0-beta.1
+        specifier: 6.0.0-beta.2
+        version: 6.0.0-beta.2
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -251,8 +251,8 @@ importers:
         specifier: ^7.0.133
         version: 7.0.133(zod@4.6.5)
       xstate:
-        specifier: 6.0.0-beta.1
-        version: 6.0.0-beta.1
+        specifier: 6.0.0-beta.2
+        version: 6.0.0-beta.2
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -279,8 +279,8 @@ importers:
         specifier: ^7.0.133
         version: 7.0.133(zod@4.6.5)
       xstate:
-        specifier: 6.0.0-beta.1
-        version: 6.0.0-beta.1
+        specifier: 6.0.0-beta.2
+        version: 6.0.0-beta.2
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -331,8 +331,8 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(react@19.3.0)
       xstate:
-        specifier: 6.0.0-beta.1
-        version: 6.0.0-beta.1
+        specifier: 6.0.0-beta.2
+        version: 6.0.0-beta.2
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -361,8 +361,8 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(react@19.3.0)
       xstate:
-        specifier: 6.0.0-beta.1
-        version: 6.0.0-beta.1
+        specifier: 6.0.0-beta.2
+        version: 6.0.0-beta.2
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -6751,8 +6751,8 @@ packages:
   xstate@5.33.3:
     resolution: {integrity: sha512-AnDRjS/GyKHmbA1PyhVCYBqYsA7EGe3KGgeD0ht3NFsXzoz7leX/HQDFX9QlHFJ/ltLHPsgChJYwPzRvB/0b4g==}
 
-  xstate@6.0.0-beta.1:
-    resolution: {integrity: sha512-HzG+CdBxkxcqBv91aUfbscjKhREhnu949en+Ype3kIZ0cUVmK7LsPWU06GMyu+O7z9bIq52eDPQfzlUM7AtJ9g==}
+  xstate@6.0.0-beta.2:
+    resolution: {integrity: sha512-jFqR+aZbmPCfwMhOw4TPqamfjWWN8H9DAVKlOp3pWY4W9IaqYu3mlb0VvkY8R5pNBn4kz7JsVbAFkddoZlii1A==}
     hasBin: true
 
   xxhash-wasm@1.1.0:
@@ -12985,7 +12985,7 @@ snapshots:
 
   xstate@5.33.3: {}
 
-  xstate@6.0.0-beta.1: {}
+  xstate@6.0.0-beta.2: {}
 
   xxhash-wasm@1.1.0: {}
 

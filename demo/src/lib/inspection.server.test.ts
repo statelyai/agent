@@ -26,7 +26,6 @@ import {
   MAX_ROOMS,
   maybeCreateRunInspection,
   openInspectionRoom,
-  roomMachinePayload,
   rootMachinePayload,
   shouldStartLocalInspectionRelay,
 } from "./inspection.server";
@@ -121,11 +120,7 @@ describe("demo inspection transport", () => {
 
     expect(viewer.url).toBe("https://example.test/claim");
     expect((await inspectionViewerUrl(room)).hosted).toBe(true);
-    expect(roomMachinePayload(room, machine, "source to convert")).toMatchObject({
-      id: "hosted",
-      initial: "idle",
-    });
-    expect(roomMachinePayload(room, machine, "source to convert")).not.toBe("source to convert");
+    expect(rootMachinePayload(machine, "source to convert")).toBe("source to convert");
     declareInspectionMachine(room, "declared source");
     maybeCreateRunInspection(room, {} as never, "declared source", "start");
 

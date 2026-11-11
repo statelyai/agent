@@ -64,23 +64,17 @@ export const declareScenarioMachine = createServerFn({ method: "POST" })
     // Claimed before the first await, so a slower earlier selection cannot
     // land on top of a newer one.
     const declaration = nextDeclaration();
-    const [{ machineFor }, { scenarioSource, scenarioDiagramHints }, inspection] =
-      await Promise.all([
-        import("./agent-runner"),
-        import("./scenarios"),
-        import("./inspection.server"),
-      ]);
+    const [{ machineFor }, { scenarioDiagramHints }, inspection] = await Promise.all([
+      import("./agent-runner"),
+      import("./scenarios"),
+      import("./inspection.server"),
+    ]);
     await inspection.ensureInspectionRelay();
     const id = data.scenarioId as ScenarioId;
     return {
       declared: inspection.declareInspectionMachine(
         data.room,
-        inspection.roomMachinePayload(
-          data.room,
-          machineFor(id),
-          scenarioSource[id],
-          scenarioDiagramHints[id],
-        ),
+        inspection.guidedMachinePayload(machineFor(id), scenarioDiagramHints[id]),
         declaration,
       ),
     };

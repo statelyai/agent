@@ -1,6 +1,6 @@
 /**
  * Live inspection (server): real-time statechart inspection over a configured
- * relay. The browser uses the outline when hosted Sky cannot join its room.
+ * relay. The browser uses the outline when live inspection is unavailable.
  *
  * Both pieces come from `@statelyai/sdk`:
  * - `createInspectionRelay` — the transport-agnostic relay core, hosted here
@@ -33,7 +33,7 @@ import { createInspectionRelay } from "@statelyai/sdk/relay";
 import { createInspector, type Inspector } from "@statelyai/sdk/inspect";
 import { createInspectionRoomUrls, getInspectionRoomId } from "@statelyai/sdk";
 import type { AnyStateMachine, InspectionEvent } from "xstate";
-import { toHostedVizConfig, toVizConfig, type DiagramHints } from "./scenarios";
+import { toGuidedVizConfig, toVizConfig, type DiagramHints } from "./scenarios";
 import { nextDeclaration } from "./declaration-ticket";
 
 const INSPECTION_PRODUCER_ID = "agent-demo-runner";
@@ -297,54 +297,32 @@ export function machineForInspection(
   actor: { logic?: { config?: unknown } },
   primaryMachine: AnyStateMachine,
   primarySource?: string,
-  hosted = false,
 ): unknown {
   // runAgent binds actor implementations with two `.provide(...)` calls, which
   // creates new machine logic objects while preserving the authored config.
   if (actor.logic?.config === primaryMachine.config && primarySource) {
-    return rootMachinePayload(primaryMachine, primarySource, hosted);
+    return rootMachinePayload(primaryMachine, primarySource);
   }
   const config = actor.logic?.config;
   return isMachineConfig(config) ? toVizConfig({ config } as never) : null;
 }
 
 /**
- * What the root actor shows in the visualizer: authored source for direct
- * sessions, or a plain config for hosted sessions and machines without source.
+ * What the root actor shows in the visualizer: authored source when available,
+ * or a plain config for machines without source.
  *
  * `declareInspectionMachine` publishes exactly this ahead of the run, so the
  * graph the viz draws before a run is the same one the root actor registers
  * with — no swap when the first turn starts.
  */
-export function rootMachinePayload(
-  machine: AnyStateMachine,
-  source?: string,
-  hosted = false,
-): unknown {
+export function rootMachinePayload(machine: AnyStateMachine, source?: string): unknown {
   const config = isMachineConfig(machine.config) ? toVizConfig(machine) : null;
-  // Sky's source converter currently returns missing_room for hosted viewers.
-  return hosted ? (config ?? source ?? null) : (source ?? config);
+  return source ?? config;
 }
 
-export function roomMachinePayload(
-  roomId: string,
-  machine: AnyStateMachine,
-  source?: string,
-  hints?: DiagramHints,
-): unknown {
-  const room = rooms.get(roomId);
-  if (room?.inspector?.session) {
-    if (hints) return toHostedVizConfig(machine, hints);
-    const declared = room.declaredMachine;
-    if (
-      declared &&
-      typeof declared === "object" &&
-      (declared as { id?: unknown }).id === machine.config.id
-    ) {
-      return declared;
-    }
-  }
-  return rootMachinePayload(machine, source, Boolean(room?.inspector?.session));
+/** Guided scenarios use a compact graph with explicit runtime branch labels. */
+export function guidedMachinePayload(machine: AnyStateMachine, hints: DiagramHints): unknown {
+  return isMachineConfig(machine.config) ? toGuidedVizConfig(machine, hints) : null;
 }
 
 /**
@@ -460,7 +438,9 @@ export function maybeCreateRunInspection(
   // The run is the authority on what the room's machine is: a headless run
   // (no viz client, so nothing declared) must not inherit whatever a previous
   // selection left behind when the inspector is rebuilt below.
-  const rootPayload = roomMachinePayload(roomId, primaryMachine, primarySource, hints);
+  const rootPayload = hints
+    ? guidedMachinePayload(primaryMachine, hints)
+    : rootMachinePayload(primaryMachine, primarySource);
   // Assigned either way: a run whose machine cannot be serialized publishes
   // nothing, and must not leave the previous selection's graph behind for the
   // inspector below to seed.
@@ -526,12 +506,7 @@ export function maybeCreateRunInspection(
       machine:
         actorRef.logic?.config === primaryMachine.config
           ? rootPayload
-          : machineForInspection(
-              actorRef,
-              primaryMachine,
-              primarySource,
-              Boolean(inspector.session),
-            ),
+          : machineForInspection(actorRef, primaryMachine, primarySource),
       snapshot: serializeSnapshot(snapshot ?? currentSnapshot(actorRef)),
     });
     return id;

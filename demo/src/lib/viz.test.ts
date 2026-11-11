@@ -4,7 +4,7 @@ import {
   scenarioDiagramHints,
   scenarioVizConfig,
   scenarioSource,
-  toHostedVizConfig,
+  toGuidedVizConfig,
   toOutlineConfig,
   toVizConfig,
   type ScenarioId,
@@ -33,6 +33,27 @@ test("every scenario has a serializable viz config and raw source", () => {
     expect(() => JSON.stringify(config)).not.toThrow();
     expect(config.states).toBeTruthy();
     expect(scenarioSource[id as keyof typeof scenarioSource]).toContain("setupAgent");
+  }
+});
+
+test("guided diagrams include runtime branches without expanding interaction cards", () => {
+  for (const id of Object.keys(scenarioDiagramHints) as ScenarioId[]) {
+    const config = toGuidedVizConfig(getScenarioMachine(id), scenarioDiagramHints[id]);
+    expect(() => structuredClone(config)).not.toThrow();
+    const states = config.states as Record<string, Record<string, unknown>>;
+    for (const [path, rows] of Object.entries(scenarioDiagramHints[id])) {
+      const state = path.split(".").reduce<Record<string, unknown>>(
+        (current, part) =>
+          (current.states as Record<string, Record<string, unknown>>)[part],
+        config,
+      );
+      for (const row of rows) {
+        expect((state.on as Record<string, { target: unknown }>)[row.event].target).toBeTruthy();
+      }
+    }
+    for (const state of Object.values(states)) {
+      expect((state.meta as Record<string, unknown> | undefined)?.interaction).toBeUndefined();
+    }
   }
 });
 
@@ -91,25 +112,6 @@ test("the fallback outline includes every dynamic transition and valid targets",
       }
     };
     walk(config.states);
-  }
-});
-
-test("hosted diagram carries every labelled conditional edge", () => {
-  for (const id of Object.keys(scenarioDiagramHints) as ScenarioId[]) {
-    const config = toHostedVizConfig(getScenarioMachine(id), scenarioDiagramHints[id]);
-    for (const [path, rows] of Object.entries(scenarioDiagramHints[id])) {
-      const node = path.split(".").reduce<Record<string, unknown> | undefined>((current, part) => {
-        return (current?.states as Record<string, Record<string, unknown>> | undefined)?.[part];
-      }, config);
-      expect(node, `${id}.${path}`).toBeDefined();
-      expect((node?.meta as Record<string, unknown> | undefined)?.interaction).toBeUndefined();
-      for (const row of rows) {
-        expect(
-          (node?.on as Record<string, unknown>)[row.event],
-          `${id}.${path}: ${row.event}`,
-        ).toBeDefined();
-      }
-    }
   }
 });
 
