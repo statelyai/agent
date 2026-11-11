@@ -80,6 +80,7 @@ const vizOrigin = new URL(import.meta.env.VITE_VIZ_URL || "https://editor.statel
 const inspectUrl = import.meta.env.VITE_VIZ_INSPECT_URL || `${vizOrigin}/inspect`;
 
 function createLiveInspectUrl(baseUrl: string, inspection: InspectionInfo): string {
+  if (inspection.hosted) return inspection.viewerUrl;
   const url = new URL(baseUrl);
   url.searchParams.set("ws", inspection.relayUrl);
   url.searchParams.set("r", inspection.roomId);
@@ -131,7 +132,7 @@ export function DemoShell() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [store]);
 
-  // Live inspection uses a configured relay; Sky currently needs the outline fallback.
+  // Live inspection uses the SDK viewer link for hosted sessions.
   const [inspection, setInspection] = useState<InspectionInfo | null>(null);
   const [inspectionChecked, setInspectionChecked] = useState(false);
   useEffect(() => {
@@ -703,7 +704,7 @@ export function DemoShell() {
     inspection && declaredKey !== null && declaredKey === inspectKey
       ? createLiveInspectUrl(inspectUrl, inspection)
       : null;
-  const liveWs = inspection;
+  const liveWs = inspection && !inspection.hosted ? inspection : null;
 
   // The outline draws immediately when hosted inspection is unavailable.
   // It follows streamed steps as well as the latest settled state.

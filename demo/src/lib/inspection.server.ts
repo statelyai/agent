@@ -163,6 +163,22 @@ export function openInspectionRoom(): string {
   return roomId;
 }
 
+/** Open the room's producer before handing a viewer link to the browser. */
+export async function inspectionViewerUrl(roomId: string): Promise<{
+  url: string;
+  hosted: boolean;
+}> {
+  const room = touchRoom(roomId);
+  if (!room.inspector) {
+    room.inspector = createRoomInspector(roomId, room, { pinSelection: false });
+    room.declarationOnly = true;
+  }
+  const inspector = room.inspector;
+  await inspector.ready;
+  const link = await inspector.createViewerLink({ maxUses: 20, ttlSeconds: 3600 });
+  return { url: link.openUrl, hosted: inspector.session !== null };
+}
+
 /**
  * The room's state, created when missing (an evicted room comes back empty),
  * marked used, and moved to the back of the eviction order.
@@ -252,26 +268,41 @@ export function machineForInspection(
   actor: { logic?: { config?: unknown } },
   primaryMachine: AnyStateMachine,
   primarySource?: string,
+  hosted = false,
 ): unknown {
   // runAgent binds actor implementations with two `.provide(...)` calls, which
   // creates new machine logic objects while preserving the authored config.
   if (actor.logic?.config === primaryMachine.config && primarySource) {
-    return rootMachinePayload(primaryMachine, primarySource);
+    return rootMachinePayload(primaryMachine, primarySource, hosted);
   }
   const config = actor.logic?.config;
   return isMachineConfig(config) ? toVizConfig({ config } as never) : null;
 }
 
 /**
- * What the root actor shows in the visualizer: the authored source when the
- * demo has it (executable expressions survive), otherwise a plain config.
+ * What the root actor shows in the visualizer: authored source for direct
+ * sessions, or a plain config for hosted sessions and machines without source.
  *
  * `declareInspectionMachine` publishes exactly this ahead of the run, so the
  * graph the viz draws before a run is the same one the root actor registers
  * with — no swap when the first turn starts.
  */
-export function rootMachinePayload(machine: AnyStateMachine, source?: string): unknown {
-  return source ?? (isMachineConfig(machine.config) ? toVizConfig(machine) : null);
+export function rootMachinePayload(
+  machine: AnyStateMachine,
+  source?: string,
+  hosted = false,
+): unknown {
+  const config = isMachineConfig(machine.config) ? toVizConfig(machine) : null;
+  // Sky's source converter currently returns missing_room for hosted viewers.
+  return hosted ? (config ?? source ?? null) : (source ?? config);
+}
+
+export function roomMachinePayload(
+  roomId: string,
+  machine: AnyStateMachine,
+  source?: string,
+): unknown {
+  return rootMachinePayload(machine, source, Boolean(rooms.get(roomId)?.inspector?.session));
 }
 
 /**
@@ -342,11 +373,9 @@ export function declareInspectionMachine(
   if (declaration !== undefined && declaration < (room.declarationApplied ?? 0)) return false;
   if (declaration !== undefined) room.declarationApplied = declaration;
   room.declaredMachine = payload;
-  // Selecting an example resets the run, so an inspector a run session owns
-  // goes with it — otherwise that run's actors would sit in the room beside a
-  // machine they do not belong to. One that only ever carried a declaration
-  // has nothing to drop, so it keeps its connection and swaps graphs in place.
-  if (!room.declarationOnly) {
+  // Direct sessions can reset the actor tree by rebuilding the inspector.
+  // Hosted sessions retain their room so existing viewer tickets stay valid.
+  if (!room.declarationOnly && !room.inspector?.session) {
     room.inspector?.destroy();
     room.inspector = undefined;
   }
@@ -362,7 +391,7 @@ export function declareInspectionMachine(
  * asked for live inspection or the run names no room (tests, headless runs),
  * keeping runs free of WS side effects. The run lands in `roomId` only.
  *
- * ONE INSPECTOR PER RUN SESSION, with stable manual actor ids. The demo runs
+ * Stable manual actor ids across turns. The demo runs
  * one `runAgent` per chat turn (a fresh run to start, then a resume from the
  * persisted snapshot for every user event), so an inspector per `runAgent`
  * sent a fresh `@statelyai.system.init` every turn and the hosted /inspect
@@ -372,8 +401,8 @@ export function declareInspectionMachine(
  *
  * So identity is assigned here instead of by the runtime: the root actor is
  * always `"root"` and children keep their xstate id (`"X"`, then `"X#2"` for a
- * re-invocation). `phase: "start"` opens a new session (new inspector, reset
- * bookkeeping); `phase: "resume"` reuses it, so `actor("root")` is a no-op and
+ * re-invocation). Direct `phase: "start"` opens a new inspector; hosted starts
+ * retain the room. `phase: "resume"` reuses it, so `actor("root")` is a no-op and
  * the turn arrives as `@statelyai.system.actorSnapshot` updates on the same
  * inspected actor.
  */
@@ -388,19 +417,21 @@ export function maybeCreateRunInspection(
   // The run is the authority on what the room's machine is: a headless run
   // (no viz client, so nothing declared) must not inherit whatever a previous
   // selection left behind when the inspector is rebuilt below.
-  const rootPayload = rootMachinePayload(primaryMachine, primarySource);
+  const rootPayload = roomMachinePayload(roomId, primaryMachine, primarySource);
   // Assigned either way: a run whose machine cannot be serialized publishes
   // nothing, and must not leave the previous selection's graph behind for the
   // inspector below to seed.
   room.declaredMachine = rootPayload ?? undefined;
   // A run outranks any declaration still in flight.
   room.declarationApplied = nextDeclaration();
-  // A run always opens its own inspector: a declaration-only one was built
-  // without the root selection pin (see `createRoomInspector`), and that
-  // option is fixed at construction.
-  if (phase === "start" || !room.inspector) {
+  // Direct starts rebuild to reset actors and pin selection. Hosted starts
+  // select the root in place to preserve the viewer's room and ticket.
+  if ((phase === "start" && !room.inspector?.session) || !room.inspector) {
     room.inspector?.destroy();
     room.inspector = createRoomInspector(roomId, room, { pinSelection: true });
+  } else if (phase === "start") {
+    room.inspector.selectActor(`${INSPECTION_PRODUCER_ID}:${ROOT_ID}`);
+    if (rootPayload != null) room.inspector.machine(ROOT_ID, rootPayload);
   }
   room.declarationOnly = false;
   const inspector = room.inspector;
@@ -449,7 +480,7 @@ export function maybeCreateRunInspection(
     const parent = ref ? register(ref) : undefined;
     inspector.actor(id, {
       ...(parent ? { parent } : {}),
-      machine: machineForInspection(actorRef, primaryMachine, primarySource),
+      machine: machineForInspection(actorRef, primaryMachine, primarySource, Boolean(inspector.session)),
       snapshot: serializeSnapshot(snapshot ?? currentSnapshot(actorRef)),
     });
     return id;

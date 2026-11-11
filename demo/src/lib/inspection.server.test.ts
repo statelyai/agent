@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { createMachine } from "xstate";
 const createInspectorMock = vi.hoisted(() =>
   vi.fn((_options: unknown) => ({
+    ready: Promise.resolve(),
+    session: null as object | null,
+    createViewerLink: vi.fn(async () => ({ openUrl: "https://example.test/claim" })),
+    selectActor: vi.fn(),
     actor: vi.fn(),
     machine: vi.fn(),
     snapshot: vi.fn(),
@@ -15,12 +19,14 @@ vi.mock("@statelyai/sdk/inspect", () => ({ createInspector: createInspectorMock 
 import {
   declareInspectionMachine,
   ensureInspectionRelay,
+  inspectionViewerUrl,
   inspectionRelayUrl,
   inspectionWsUrl,
   machineForInspection,
   MAX_ROOMS,
   maybeCreateRunInspection,
   openInspectionRoom,
+  roomMachinePayload,
   rootMachinePayload,
   shouldStartLocalInspectionRelay,
 } from "./inspection.server";
@@ -102,6 +108,30 @@ describe("demo inspection transport", () => {
     expect(createInspectorMock.mock.calls.length).toBe(created);
     expect(inspector.destroy).not.toHaveBeenCalled();
     expect(inspector.machine).toHaveBeenCalledWith("root", "second source");
+  });
+
+  it("keeps the hosted viewer's inspector through declaration and run start", async () => {
+    await ensureInspectionRelay();
+    const room = openInspectionRoom();
+    const viewer = await inspectionViewerUrl(room);
+    const inspector = createInspectorMock.mock.results.at(-1)?.value;
+    inspector.session = {};
+    const created = createInspectorMock.mock.calls.length;
+    const machine = createMachine({ id: "hosted", initial: "idle", states: { idle: {} } });
+
+    expect(viewer.url).toBe("https://example.test/claim");
+    expect((await inspectionViewerUrl(room)).hosted).toBe(true);
+    expect(roomMachinePayload(room, machine, "source to convert")).toMatchObject({
+      id: "hosted",
+      initial: "idle",
+    });
+    expect(roomMachinePayload(room, machine, "source to convert")).not.toBe("source to convert");
+    declareInspectionMachine(room, "declared source");
+    maybeCreateRunInspection(room, {} as never, "declared source", "start");
+
+    expect(createInspectorMock.mock.calls.length).toBe(created);
+    expect(inspector.destroy).not.toHaveBeenCalled();
+    expect(inspector.selectActor).toHaveBeenCalledWith("agent-demo-runner:root");
   });
 
   it("pins the root selection for a run but never for a bare declaration", async () => {

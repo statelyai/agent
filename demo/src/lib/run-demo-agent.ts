@@ -74,7 +74,7 @@ export const declareScenarioMachine = createServerFn({ method: "POST" })
     return {
       declared: inspection.declareInspectionMachine(
         data.room,
-        inspection.rootMachinePayload(machineFor(id), scenarioSource[id]),
+        inspection.roomMachinePayload(data.room, machineFor(id), scenarioSource[id]),
         declaration,
       ),
     };
