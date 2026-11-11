@@ -494,18 +494,26 @@ async function* iterate(chunks: unknown[]): AsyncGenerator<unknown> {
 
 /**
  * Yields what `revived` yields (awaited), if it is an async iterable, then
- * calls `onFail` and throws `error`: the replay records the error only when
- * the port reads that far, as the original recorded it.
+ * throws the recorded `failure`, if any. Like the recording wrapper, it calls
+ * `onError` only for a failure the port reads to, or one its consumer throws
+ * in (`.throw()`); `.return()` ends it with no error.
  */
-async function* failAfter(
+async function* replayStream(
   revived: unknown,
-  error: Error,
-  onFail: () => void,
+  onError: (error: RecordedError) => void,
+  failure?: { recorded: RecordedError; error: Error },
 ): AsyncGenerator<unknown> {
-  const value = await revived;
-  if (isAsyncIterable(value)) yield* value;
-  onFail();
-  throw error;
+  try {
+    const value = await revived;
+    if (isAsyncIterable(value)) yield* value;
+  } catch (error) {
+    onError(toRecordedError(error));
+    throw error;
+  }
+  if (failure) {
+    onError(failure.recorded);
+    throw failure.error;
+  }
 }
 
 /**
@@ -587,11 +595,14 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         const { recorded, answer } = replayed;
         usedModels.add(recorded);
         effect.replayed = recorded.call;
+        const recordError = (error: RecordedError) => {
+          effect.error = error;
+        };
         if (answer.error && answer.stream && streamed && seam === "openai") {
-          const { error } = answer;
           effect.stream = answer.stream;
-          return failAfter(iterate(answer.stream), reviveRecordedError(error), () => {
-            effect.error = error;
+          return replayStream(iterate(answer.stream), recordError, {
+            recorded: answer.error,
+            error: reviveRecordedError(answer.error),
           });
         }
         if (answer.error) {
@@ -601,7 +612,9 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         effect.response = answer.response;
         effect.stream = answer.stream;
         if (seam === "openai") {
-          return streamed ? iterate(answer.stream ?? []) : structuredClone(answer.response);
+          return streamed
+            ? replayStream(iterate(answer.stream ?? []), recordError)
+            : structuredClone(answer.response);
         }
         return streamed
           ? {
@@ -791,10 +804,16 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
           const chunks = structuredClone(recorded.stream);
           const revived = revive ? revive(chunks) : iterate(chunks);
           const { error } = recorded;
-          if (!error) return revived;
-          return failAfter(revived, reviveRecordedError(error), () => {
-            effect.error = error;
-          });
+          // A custom revive may return any value; only a failure wraps it.
+          if (!error && revive) return revived;
+          const recordError = (thrown: RecordedError) => {
+            effect.error = thrown;
+          };
+          return replayStream(
+            revived,
+            recordError,
+            error && { recorded: error, error: reviveRecordedError(error) },
+          );
         }
         if (recorded.error) {
           effect.error = recorded.error;

@@ -986,6 +986,24 @@ describe("a stream that fails", () => {
     expect(compareRecordings(recorder.recording, replay.recording).equivalent).toBe(false);
   });
 
+  test("a consumer's .throw() records the same on both sides", async () => {
+    const consume = async (stream: AsyncIterable<string>) => {
+      const iterator = stream[Symbol.asyncIterator]();
+      await iterator.next();
+      await iterator.throw!(new Error("cancelled")).catch(() => {});
+    };
+    const recorder = createRecorder();
+    await consume(
+      await recorder.fn("stream", async function* () {
+        yield* ["a", "b"];
+      } as unknown as () => Promise<AsyncIterable<string>>)(),
+    );
+    expect(recorder.recording.effects[0]).toMatchObject({ error: { message: "cancelled" } });
+    const replay = createRecorder({ replay: JSON.parse(JSON.stringify(recorder.recording)) });
+    await consume(await replay.fn("stream", async () => [] as unknown as AsyncIterable<string>)());
+    expect(compareRecordings(recorder.recording, replay.recording).equivalent).toBe(true);
+  });
+
   test("an async revive still replays the chunks before the error", async () => {
     const recorder = createRecorder();
     await drain(
