@@ -48,8 +48,9 @@ export interface RecordedError {
   /** The error's `cause`, when it was an Error; replay restores it. */
   cause?: RecordedError;
   /** An `AggregateError`'s `errors`, each a recorded error or `{ value }`
-   * for a reason that was not an Error; replay revives an `AggregateError`. */
-  errors?: (RecordedError | { value: unknown })[];
+   * for a reason that was not an Error (`{}` for `undefined`); replay revives
+   * an `AggregateError`. */
+  errors?: (RecordedError | { value?: unknown })[];
 }
 
 /** One model call. `call` is its 0-based position among model calls. */
@@ -357,7 +358,14 @@ function toRecordedError(error: unknown, path = new Set<unknown>()): RecordedErr
   if (error instanceof AggregateError && Array.isArray(error.errors)) {
     recorded.errors = error.errors.flatMap(
       (item: unknown): NonNullable<RecordedError["errors"]> => {
-        if (!(item instanceof Error)) return [{ value: toJson(item) }];
+        if (!(item instanceof Error)) {
+          // A reason that is not JSON (a cycle) records as its string; `undefined` as `{}`.
+          try {
+            return [{ value: toJson(item) }];
+          } catch {
+            return [{ value: String(item) }];
+          }
+        }
         return path.has(item) ? [] : [toRecordedError(item, path)];
       },
     );
@@ -372,7 +380,7 @@ function fromRecordedError(
 ): Error {
   const { data, markers, name, ownName, cause, errors, ...fields } = recorded;
   const revivedErrors = errors?.map((item) =>
-    "value" in item ? structuredClone(item.value) : fromRecordedError(item, reviveError),
+    "name" in item ? fromRecordedError(item, reviveError) : structuredClone(item.value),
   );
   // Non-enumerable, as `new Error(message, { cause })` and `AggregateError` set them.
   const define = (target: Error, key: "cause" | "errors", value: unknown) =>
@@ -480,9 +488,19 @@ async function* iterate(chunks: unknown[]): AsyncGenerator<unknown> {
   for (const chunk of chunks) yield structuredClone(chunk);
 }
 
-/** Yields what `revived` yields, if it is an async iterable, then throws `error`. */
-async function* failAfter(revived: unknown, error: Error): AsyncGenerator<unknown> {
-  if (isAsyncIterable(revived)) yield* revived;
+/**
+ * Yields what `revived` yields (awaited), if it is an async iterable, then
+ * calls `onFail` and throws `error`: the replay records the error only when
+ * the port reads that far, as the original recorded it.
+ */
+async function* failAfter(
+  revived: unknown,
+  error: Error,
+  onFail: () => void,
+): AsyncGenerator<unknown> {
+  const value = await revived;
+  if (isAsyncIterable(value)) yield* value;
+  onFail();
   throw error;
 }
 
@@ -566,9 +584,11 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         usedModels.add(recorded);
         effect.replayed = recorded.call;
         if (answer.error && answer.stream && streamed && seam === "openai") {
+          const { error } = answer;
           effect.stream = answer.stream;
-          effect.error = answer.error;
-          return failAfter(iterate(answer.stream), reviveRecordedError(answer.error));
+          return failAfter(iterate(answer.stream), reviveRecordedError(error), () => {
+            effect.error = error;
+          });
         }
         if (answer.error) {
           effect.error = answer.error;
@@ -764,10 +784,13 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         if (recorded.stream) {
           // A stream that failed replays its chunks, then the error.
           effect.stream = recorded.stream;
-          if (recorded.error) effect.error = recorded.error;
           const chunks = structuredClone(recorded.stream);
           const revived = revive ? revive(chunks) : iterate(chunks);
-          return recorded.error ? failAfter(revived, reviveRecordedError(recorded.error)) : revived;
+          const { error } = recorded;
+          if (!error) return revived;
+          return failAfter(revived, reviveRecordedError(error), () => {
+            effect.error = error;
+          });
         }
         if (recorded.error) {
           effect.error = recorded.error;

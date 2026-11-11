@@ -882,13 +882,14 @@ describe("a replayed error", () => {
   test("keeps a shared entry and non-Error reasons in an AggregateError", async () => {
     const failure = new Error("shared");
     const error = (await replayFailure(
-      new AggregateError([failure, failure, "timeout", 503], "requests failed"),
+      new AggregateError([failure, failure, "timeout", 503, undefined], "requests failed"),
     )) as AggregateError;
     expect(error.errors.map((e: unknown) => (e instanceof Error ? e.message : e))).toEqual([
       "shared",
       "shared",
       "timeout",
       503,
+      undefined,
     ]);
   });
 
@@ -962,6 +963,39 @@ describe("a stream that fails", () => {
     );
     expect(replayed).toEqual(original);
     expect(compareRecordings(recording, replay.recording).equivalent).toBe(true);
+  });
+
+  test("a replayed failure is recorded only when the port reads to it", async () => {
+    const recorder = createRecorder();
+    const stream = recorder.fn("stream", async function* () {
+      yield "a";
+      throw new Error("model down");
+    } as unknown as () => Promise<AsyncIterable<string>>);
+    await drain(await stream());
+    const replay = createRecorder({ replay: JSON.parse(JSON.stringify(recorder.recording)) });
+    await replay.fn("stream", async () => [] as unknown as AsyncIterable<string>)();
+    expect(replay.recording.effects[0]).not.toHaveProperty("error");
+    expect(compareRecordings(recorder.recording, replay.recording).equivalent).toBe(false);
+  });
+
+  test("an async revive still replays the chunks before the error", async () => {
+    const recorder = createRecorder();
+    await drain(
+      await recorder.fn("stream", async function* () {
+        yield "a";
+        throw new Error("model down");
+      } as unknown as () => Promise<AsyncIterable<string>>)(),
+    );
+    const replay = createRecorder({ replay: JSON.parse(JSON.stringify(recorder.recording)) });
+    const replayed = await drain(
+      await replay.fn("stream", async () => [] as unknown as AsyncIterable<string>, {
+        revive: async (chunks) =>
+          (async function* () {
+            yield* chunks as string[];
+          })(),
+      })(),
+    );
+    expect(replayed).toEqual({ chunks: ["a"], error: "model down" });
   });
 
   test("an OpenAI stream that fails midway records and replays the error", async () => {

@@ -9,4 +9,10 @@ const output: InferOutput<typeof accepted> = { count: 1 };
 // @ts-expect-error output keeps its type
 const wrong: InferOutput<typeof accepted> = { count: "1" };
 
-export { output, wrong };
+const inferred: InferOutput<typeof schema> = { count: 1 };
+const parsed = z.string().transform((value) => value.length);
+const length: InferOutput<typeof parsed> = 3;
+// @ts-expect-error a transform's output differs from its input
+const notLength: InferOutput<typeof parsed> = "3";
+
+export { output, wrong, inferred, length, notLength };
