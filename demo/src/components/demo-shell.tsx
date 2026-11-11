@@ -132,27 +132,30 @@ export function DemoShell() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, [store]);
 
-  // Live inspection uses the SDK viewer link for hosted sessions.
-  const [inspection, setInspection] = useState<InspectionInfo | null>(null);
-  const [inspectionChecked, setInspectionChecked] = useState(false);
+  // Each selection gets a room and a viewer ticket for its own machine.
+  const selectionRoomKey = `${selection.type}:${selection.id}:${machineIndex}`;
+  const [inspectionState, setInspectionState] = useState<{
+    key: string;
+    info: InspectionInfo | null;
+  } | null>(null);
+  const inspection = inspectionState?.key === selectionRoomKey ? inspectionState.info : null;
+  const inspectionChecked = inspectionState?.key === selectionRoomKey;
   useEffect(() => {
     let cancelled = false;
     void getInspection().then(
       (info) => {
         if (cancelled) return;
-        setInspection(info);
-        setInspectionChecked(true);
+        setInspectionState({ key: selectionRoomKey, info });
       },
       () => {
         if (cancelled) return;
-        setInspection(null);
-        setInspectionChecked(true);
+        setInspectionState({ key: selectionRoomKey, info: null });
       },
     );
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectionRoomKey]);
 
   // Every run needs both model keys on the server (OpenAI and TypeSafe).
   // Unknown until this resolves; only a confirmed `false` blocks runs.
@@ -225,14 +228,13 @@ export function DemoShell() {
 
   // Publish the selected machine to the inspection room BEFORE any run, so the
   // visualizer draws its statechart on selection instead of an empty room. The
-  // /inspect URL is the room, not the run, so it stays mounted across
-  // selections: each declaration swaps the graph in place rather than
-  // reloading the page.
+  // /inspect URL is the room, not the run. Each selection opens its own room.
   // Which machine the room is currently showing, not merely that something was
-  // declared once: the /inspect page stays mounted across selections, so a
+  // declared once: the previous room can still be open, so a
   // `liveUrl` that ignored the key would keep the PREVIOUS example's chart on
   // screen while the new declaration is still in flight (or after it failed).
   const [declaredKey, setDeclaredKey] = useState<string | null>(null);
+  const [declarationFailedKey, setDeclarationFailedKey] = useState<string | null>(null);
   const inspectScenarioId = isScenario ? scenario.id : null;
   const inspectExampleId = !isScenario && activeMachine ? selection.id : null;
   const inspectExportName = !isScenario && activeMachine ? activeMachine.exportName : null;
@@ -244,20 +246,27 @@ export function DemoShell() {
   useEffect(() => {
     if (!inspection) return;
     let cancelled = false;
+    const key = `${inspection.roomId}:${inspectKey}`;
     const onDeclared = ({ declared }: { declared: boolean }) => {
-      if (!cancelled && declared) setDeclaredKey(inspectKey);
+      if (cancelled) return;
+      if (declared) {
+        setDeclaredKey(key);
+        setDeclarationFailedKey(null);
+      } else {
+        setDeclarationFailedKey(key);
+      }
     };
-    // A failed declaration is not worth surfacing: the panel keeps whatever it
-    // was showing, and the run's own inspection still lights the chart up.
-    const ignore = () => {};
+    const onFailed = () => {
+      if (!cancelled) setDeclarationFailedKey(key);
+    };
     if (inspectScenarioId) {
       void declareScenarioMachine({
         data: { scenarioId: inspectScenarioId, room: inspection.roomId },
-      }).then(onDeclared, ignore);
+      }).then(onDeclared, onFailed);
     } else if (inspectExampleId && inspectExportName) {
       void declareExampleMachine({
         data: { id: inspectExampleId, exportName: inspectExportName, room: inspection.roomId },
-      }).then(onDeclared, ignore);
+      }).then(onDeclared, onFailed);
     }
     return () => {
       cancelled = true;
@@ -701,7 +710,7 @@ export function DemoShell() {
   // The room, not the run: once a machine is published the chart is worth
   // showing, and the first turn animates a diagram already on screen.
   const liveUrl =
-    inspection && declaredKey !== null && declaredKey === inspectKey
+    inspection && declaredKey === `${inspection.roomId}:${inspectKey}`
       ? createLiveInspectUrl(inspectUrl, inspection)
       : null;
   const liveWs = inspection && !inspection.hosted ? inspection : null;
@@ -737,7 +746,10 @@ export function DemoShell() {
     <VizPanel
       title={headerName}
       hasMachine={isScenario || !!activeMachine?.vizConfig}
-      inspectionUnavailable={inspectionChecked && !inspection}
+      inspectionUnavailable={
+        inspectionChecked &&
+        (!inspection || declarationFailedKey === `${inspection.roomId}:${inspectKey}`)
+      }
       machineKey={inspectKey ?? ""}
       machineConfig={machineConfig}
       outlineConfig={outlineConfig}

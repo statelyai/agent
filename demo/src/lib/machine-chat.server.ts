@@ -615,6 +615,7 @@ export type RunLimits = {
   budgetMs?: number;
   /** Raw source passed to Viz so v6 function transitions remain visible. */
   machineSource?: string;
+  diagramHints?: import("./scenarios").DiagramHints;
   /** Each chunk of a streaming request, as it arrives. */
   onChunk?: (chunk: string, info: { request: AgentRequest }) => void;
   /** Each trace entry, as it is recorded. */
@@ -839,6 +840,7 @@ export async function runExampleRunner(
         { config: {} } as never,
         limits.machineSource,
         "start",
+        limits.diagramHints,
       ),
     });
     return {
@@ -889,6 +891,7 @@ export async function startMachineChat(
         machine,
         limits.machineSource,
         "start",
+        limits.diagramHints,
       ),
     }),
     {
@@ -1015,6 +1018,7 @@ export async function resumeMachineChat(
         machine,
         limits.machineSource,
         "resume",
+        limits.diagramHints,
       ),
     }),
     {

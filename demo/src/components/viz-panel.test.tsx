@@ -21,6 +21,7 @@ describe("VizPanel", () => {
       'src="https://editor.stately.ai/inspect?ws=wss%3A%2F%2Frelay&amp;r=room"',
     );
     expect(html).toContain('allow="clipboard-read; clipboard-write"');
+    expect(html).toContain('aria-label="Open full statechart for Test machine"');
   });
 
   it("waits on the machine reaching the room, not on a run", () => {
@@ -60,8 +61,7 @@ describe("VizPanel", () => {
   });
 
   it("drops a previous selection's chart when the next example has no machine", () => {
-    // The room outlives one selection, so a live URL alone must not keep an
-    // unrelated statechart on screen.
+    // A live URL alone must not keep an unrelated statechart on screen.
     const html = renderPanel(
       "https://editor.stately.ai/inspect?ws=wss%3A%2F%2Frelay&r=room",
       false,

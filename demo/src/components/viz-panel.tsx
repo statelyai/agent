@@ -98,8 +98,7 @@ export function VizPanel({
     <section className="viz-shell" aria-label={`Live statechart for ${title}`}>
       <div className="viz-canvas">
         {!hasMachine ? (
-          // Checked before `liveUrl`: the room outlives a selection, so an
-          // example with no machine must not keep showing the previous one.
+          // An example with no machine must not keep showing a previous chart.
           <div className="viz-state" role="status">
             <strong>No machine to inspect</strong>
             <p>This example does not export a state machine from its index.ts.</p>
@@ -121,13 +120,25 @@ export function VizPanel({
             hints={outlineHints}
           />
         ) : liveUrl ? (
-          <iframe
-            className="viz-embed"
-            title={`Live inspection for ${title}`}
-            src={liveUrl}
-            allow="clipboard-read; clipboard-write"
-            referrerPolicy="strict-origin"
-          />
+          <>
+            <iframe
+              key={machineKey}
+              className="viz-embed"
+              title={`Live inspection for ${title}`}
+              src={liveUrl}
+              allow="clipboard-read; clipboard-write"
+              referrerPolicy="strict-origin"
+            />
+            <a
+              className="viz-open-link"
+              href={liveUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Open full statechart for ${title}`}
+            >
+              Open full chart ↗
+            </a>
+          </>
         ) : inspectionUnavailable ? (
           <div className="viz-state" role="status">
             <strong>Live inspection unavailable</strong>

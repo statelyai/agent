@@ -4,6 +4,7 @@ import {
   scenarioDiagramHints,
   scenarioVizConfig,
   scenarioSource,
+  toHostedVizConfig,
   toOutlineConfig,
   toVizConfig,
   type ScenarioId,
@@ -90,6 +91,25 @@ test("the fallback outline includes every dynamic transition and valid targets",
       }
     };
     walk(config.states);
+  }
+});
+
+test("hosted diagram carries every labelled conditional edge", () => {
+  for (const id of Object.keys(scenarioDiagramHints) as ScenarioId[]) {
+    const config = toHostedVizConfig(getScenarioMachine(id), scenarioDiagramHints[id]);
+    for (const [path, rows] of Object.entries(scenarioDiagramHints[id])) {
+      const node = path.split(".").reduce<Record<string, unknown> | undefined>((current, part) => {
+        return (current?.states as Record<string, Record<string, unknown>> | undefined)?.[part];
+      }, config);
+      expect(node, `${id}.${path}`).toBeDefined();
+      expect((node?.meta as Record<string, unknown> | undefined)?.interaction).toBeUndefined();
+      for (const row of rows) {
+        expect(
+          (node?.on as Record<string, unknown>)[row.event],
+          `${id}.${path}: ${row.event}`,
+        ).toBeDefined();
+      }
+    }
   }
 });
 

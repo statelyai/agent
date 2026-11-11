@@ -20,8 +20,8 @@
  * the visualizer draws the statechart immediately and the first run lights up
  * states on a chart that is already on screen.
  *
- * ONE ROOM PER BROWSER SESSION: `openInspectionRoom` mints a room id each time
- * a client asks for connection info, and every declaration, start, and resume
+ * ONE ROOM PER SELECTION: `openInspectionRoom` mints a room id each time
+ * the client selects a machine, and every declaration, start, and resume
  * carries that id back. Each room keeps its own inspector, actor-id maps,
  * declared machine, and declaration ticket, so two browsers on one dev server
  * never see each other's runs. Rooms are evicted least-recently-used past
@@ -33,7 +33,7 @@ import { createInspectionRelay } from "@statelyai/sdk/relay";
 import { createInspector, type Inspector } from "@statelyai/sdk/inspect";
 import { createInspectionRoomUrls, getInspectionRoomId } from "@statelyai/sdk";
 import type { AnyStateMachine, InspectionEvent } from "xstate";
-import { toVizConfig } from "./scenarios";
+import { toHostedVizConfig, toVizConfig, type DiagramHints } from "./scenarios";
 import { nextDeclaration } from "./declaration-ticket";
 
 const INSPECTION_PRODUCER_ID = "agent-demo-runner";
@@ -301,8 +301,21 @@ export function roomMachinePayload(
   roomId: string,
   machine: AnyStateMachine,
   source?: string,
+  hints?: DiagramHints,
 ): unknown {
-  return rootMachinePayload(machine, source, Boolean(rooms.get(roomId)?.inspector?.session));
+  const room = rooms.get(roomId);
+  if (room?.inspector?.session) {
+    if (hints) return toHostedVizConfig(machine, hints);
+    const declared = room.declaredMachine;
+    if (
+      declared &&
+      typeof declared === "object" &&
+      (declared as { id?: unknown }).id === machine.config.id
+    ) {
+      return declared;
+    }
+  }
+  return rootMachinePayload(machine, source, Boolean(room?.inspector?.session));
 }
 
 /**
@@ -411,13 +424,14 @@ export function maybeCreateRunInspection(
   primaryMachine: AnyStateMachine,
   primarySource?: string,
   phase: "start" | "resume" = "start",
+  hints?: DiagramHints,
 ): ((event: InspectionEvent) => void) | undefined {
   if (!state.inspectionEnabled || !roomId) return undefined;
   const room = touchRoom(roomId);
   // The run is the authority on what the room's machine is: a headless run
   // (no viz client, so nothing declared) must not inherit whatever a previous
   // selection left behind when the inspector is rebuilt below.
-  const rootPayload = roomMachinePayload(roomId, primaryMachine, primarySource);
+  const rootPayload = roomMachinePayload(roomId, primaryMachine, primarySource, hints);
   // Assigned either way: a run whose machine cannot be serialized publishes
   // nothing, and must not leave the previous selection's graph behind for the
   // inspector below to seed.
@@ -480,7 +494,15 @@ export function maybeCreateRunInspection(
     const parent = ref ? register(ref) : undefined;
     inspector.actor(id, {
       ...(parent ? { parent } : {}),
-      machine: machineForInspection(actorRef, primaryMachine, primarySource, Boolean(inspector.session)),
+      machine:
+        actorRef.logic?.config === primaryMachine.config
+          ? rootPayload
+          : machineForInspection(
+              actorRef,
+              primaryMachine,
+              primarySource,
+              Boolean(inspector.session),
+            ),
       snapshot: serializeSnapshot(snapshot ?? currentSnapshot(actorRef)),
     });
     return id;

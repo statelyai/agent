@@ -447,6 +447,37 @@ export function toVizConfig(machine: AnyStateMachine): VizNode {
   };
 }
 
+/** Add labelled diagram edges for branches selected by runtime functions. */
+export function toHostedVizConfig(machine: AnyStateMachine, hints: DiagramHints): VizNode {
+  const config = toVizConfig(machine);
+  const hideInteractionMeta = (node: VizNode) => {
+    const meta = node.meta as Record<string, unknown> | undefined;
+    if (meta?.interaction) {
+      delete meta.interaction;
+      if (Object.keys(meta).length === 0) delete node.meta;
+    }
+    for (const child of Object.values((node.states ?? {}) as Record<string, VizNode>)) {
+      hideInteractionMeta(child);
+    }
+  };
+  hideInteractionMeta(config);
+  for (const [path, rows] of Object.entries(hints)) {
+    const node = path.split(".").reduce<VizNode | undefined>((current, part) => {
+      return (current?.states as Record<string, VizNode> | undefined)?.[part];
+    }, config);
+    if (!node) continue;
+    const on = { ...((node.on ?? {}) as Record<string, unknown>) };
+    for (const row of rows) {
+      if (on[row.event] || row.targets.length === 0) continue;
+      on[row.event] = {
+        target: row.targets.length === 1 ? row.targets[0] : row.targets,
+      };
+    }
+    node.on = on;
+  }
+  return config;
+}
+
 /** Preserve function transitions as explicit runtime decisions in the outline. */
 export function toOutlineConfig(machine: AnyStateMachine): VizNode {
   const config = (machine as unknown as { config: Record<string, unknown> }).config;
