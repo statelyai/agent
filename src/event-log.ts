@@ -119,7 +119,8 @@ export interface AgentLogEntry {
    * `xstate.*` event: a stop or a child's completion changes the snapshot
    * with no transition. Only {@link recordLog} sets it: a plain actor
    * processes every event it is sent, refused ones included.
-   * Omitted otherwise. Replay-ignored: the fold drops the event the same way.
+   * Omitted otherwise. Replay does not read it: the fold applies the event
+   * like any other, and the machine has no transition for it.
    */
   ignored?: true;
 }
