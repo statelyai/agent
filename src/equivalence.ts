@@ -366,7 +366,7 @@ function toRecordedError(error: unknown, path = new Set<unknown>()): RecordedErr
             try {
               return [{ value: String(item) }];
             } catch {
-              return [{ value: Object.prototype.toString.call(item) }];
+              return [{ value: "[unserializable]" }];
             }
           }
         }

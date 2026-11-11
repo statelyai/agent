@@ -898,7 +898,7 @@ describe("a replayed error", () => {
     reason.self = reason;
     const error = (await replayFailure(new AggregateError([reason], "failed"))) as AggregateError;
     expect(error.message).toBe("failed");
-    expect(error.errors).toEqual(["[object Object]"]);
+    expect(error.errors).toEqual(["[unserializable]"]);
   });
 
   test("reviveError's class still gets the recorded cause and errors", async () => {
