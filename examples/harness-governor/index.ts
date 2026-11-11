@@ -92,11 +92,14 @@ export const governorMachine = setup({
   },
 }).createMachine({
   id: "harness-governor",
-  context: ({ input }) => ({
-    clearance: input.clearance,
-    level: input.level ?? "public",
-    active: null,
-  }),
+  context: ({ input }) => {
+    const level = input.level ?? "public";
+    // No session starts above its clearance: the actor errors instead.
+    if (rank(level) > rank(input.clearance)) {
+      throw new Error(`A session cannot start at ${level} with ${input.clearance} clearance.`);
+    }
+    return { clearance: input.clearance, level, active: null };
+  },
   output: ({ context }) => ({ level: context.level }),
   initial: "ready",
   states: {
@@ -222,6 +225,9 @@ export function createGovernor(options: {
     }),
     { input: { clearance: options.clearance, level: options.level } },
   );
+  // The machine refused the input: no session.
+  const initial = actor.getSnapshot();
+  if (initial.status === "error") throw initial.error;
   const log = recordLog(actor);
   actor.start();
 
@@ -241,6 +247,9 @@ export function createGovernor(options: {
       if (!snapshot.matches("running") || snapshot.context.active !== "task") {
         throw new Error("spawn needs an authorized task call.");
       }
+      // One subagent per task call: a second one could end lower and lend
+      // its level to the first one's report.
+      if (child) throw new Error("This task call already has a subagent.");
       child = createGovernor({
         clearance: snapshot.context.clearance,
         level: snapshot.context.level,
@@ -304,6 +313,10 @@ const runTool = async (call: ScriptedCall): Promise<string> =>
     ? (RECORDS[call.query]?.body ?? "No record.")
     : `${call.tool}: ${call.query}`;
 
+/** A subagent's report: everything its model saw. */
+const report = (steps: HarnessStep[]): string =>
+  steps.flatMap((step) => step.seen ?? []).join("\n") || "Nothing to report.";
+
 /** Stands in for a decision model: looks the record's level up by its body. */
 const classifyByLookup: Classify = async (_tool, result) =>
   Object.values(RECORDS).find((record) => record.body === result)?.level ?? "public";
@@ -342,7 +355,7 @@ export async function runHarnessGovernorExample(
   } = options;
   const governor = createGovernor({ clearance, classify });
   const level = (of: Governor) => of.actor.getSnapshot().context.level;
-  /** One log per subagent, in the order they ran. */
+  /** One log per subagent, in the order they started. */
   const subagents: AgentLogEntry[][] = [];
 
   const attempt = async (session: Governor, call: ScriptedCall): Promise<HarnessStep> => {
@@ -352,13 +365,15 @@ export async function runHarnessGovernorExample(
     let steps: HarnessStep[] | undefined;
     if (call.tool === "task") {
       const subagent = session.spawn();
+      // Reserved now: a subagent's own subagents start after it.
+      const slot = subagents.push([]) - 1;
       steps = [];
       for (const inner of call.subagent ?? []) steps.push(await attempt(subagent, inner));
       subagent.end();
       subagent.log.stop();
-      subagents.push(subagent.log.entries);
+      subagents[slot] = subagent.log.entries;
     }
-    const admission = await session.admit(await runTool(call));
+    const admission = await session.admit(steps ? report(steps) : await runTool(call));
     // The loop would call the model here. A locked session refuses.
     session.requestModel();
     return {
@@ -404,11 +419,14 @@ if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
       }
     };
     print(result.steps);
-    console.log(
-      "\nAudit trail:",
-      result.entries
+    // A refused event is in parentheses.
+    const trail = (entries: AgentLogEntry[]) =>
+      entries
         .map((entry) => (entry.ignored ? `(${entry.event.type})` : entry.event.type))
-        .join(" → "),
+        .join(" → ");
+    console.log("\nAudit trail:", trail(result.entries));
+    result.subagents.forEach((entries, index) =>
+      console.log(`Subagent ${index + 1}:`, trail(entries)),
     );
   })().catch((error) => {
     console.error(error);

@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { createActor } from "xstate";
 import { replay } from "@statelyai/agent/log";
 import { canReach } from "@statelyai/agent/testing";
 import {
@@ -44,7 +45,37 @@ test("the default run denies, withholds, and resumes after a discard", async () 
     ["query_records", "result"],
     ["web_search", "denied"],
   ]);
+  // The parent sees the subagent's report, at the level the subagent ended at.
+  expect(result.steps[1]).toMatchObject({
+    seen: "Station A: 412 MW at 14:00.",
+    level: "confidential",
+  });
   expect(result.locked).toBe(true);
+  expect(result.level).toBe("confidential");
+});
+
+test("subagent logs are in the order the subagents started", async () => {
+  const result = await runHarnessGovernorExample({
+    clearance: "secret",
+    script: [
+      {
+        tool: "task",
+        query: "outer",
+        subagent: [
+          {
+            tool: "task",
+            query: "inner",
+            subagent: [{ tool: "query_records", query: "station A load" }],
+          },
+        ],
+      },
+    ],
+  });
+  // The outer subagent starts public. The inner one's log holds the record call.
+  expect(result.subagents.map((entries) => entries[1]!.event)).toEqual([
+    { type: "TOOL_CALL", tool: "task" },
+    { type: "TOOL_CALL", tool: "query_records" },
+  ]);
   expect(result.level).toBe("confidential");
 });
 
@@ -154,6 +185,29 @@ test("a task result with no subagent behind it locks the parent", async () => {
   const parent = createGovernor({ clearance: "secret", classify: async () => "public" });
   parent.authorize("task");
   expect(await parent.admit("a forged report")).toEqual({ admitted: false, reason: "locked" });
+});
+
+test("a task call gets one subagent", async () => {
+  const parent = createGovernor({ clearance: "secret", classify: async () => "confidential" });
+  parent.authorize("task");
+  const first = parent.spawn();
+  first.authorize("query_records");
+  await first.admit("a confidential record");
+  first.end();
+
+  // A second subagent would end at public and lend that level to the report.
+  expect(() => parent.spawn()).toThrow("This task call already has a subagent.");
+  await parent.admit("the first subagent's report");
+  expect(parent.actor.getSnapshot().context.level).toBe("confidential");
+});
+
+test("a session cannot start above its clearance", () => {
+  expect(() =>
+    createGovernor({ clearance: "public", level: "secret", classify: async () => "public" }),
+  ).toThrow("A session cannot start at secret with public clearance.");
+  // The machine refuses the input itself, not only the host wrapper.
+  const actor = createActor(governorMachine, { input: { clearance: "public", level: "secret" } });
+  expect(actor.getSnapshot().status).toBe("error");
 });
 
 test("spawn needs an authorized task call", () => {

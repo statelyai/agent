@@ -114,9 +114,11 @@ export interface AgentLogEntry {
    */
   actorPath?: string[];
   /**
-   * Set when the machine had no transition for the event in the state it
-   * arrived in, so the event changed nothing. Only {@link recordLog} sets it:
-   * a plain actor processes every event it is sent, refused ones included.
+   * Set when the machine had no transition for an event sent to it, in the
+   * state the event arrived in, so the event changed nothing. Never set on an
+   * `xstate.*` event: a stop or a child's completion changes the snapshot
+   * with no transition. Only {@link recordLog} sets it: a plain actor
+   * processes every event it is sent, refused ones included.
    * Omitted otherwise. Replay-ignored: the fold drops the event the same way.
    */
   ignored?: true;
@@ -1463,7 +1465,7 @@ export interface LogRecorder {
  * Records a plain `createActor` run as an event log, with no
  * `createAgentRuntime`: the init entry (the actor's `input`, or the snapshot
  * it was created from), then every event the root machine processed, invoke
- * completions with their outputs inline. An event the machine had no
+ * completions with their outputs inline. A sent event the machine had no
  * transition for is recorded too, marked `ignored`. Attach it before
  * `actor.start()`.
  *
@@ -1525,8 +1527,14 @@ export function recordLog(actor: Actor<AnyStateMachine>): LogRecorder {
       return;
     }
     try {
-      // No microstep: the machine took no transition for the event.
-      record(inspectionEvent.event, inspectionEvent.microsteps.length === 0);
+      // No microstep: the machine took no transition for the event. A
+      // lifecycle event (`xstate.stop`, a child's completion) changes the
+      // snapshot without one, so it is never marked.
+      record(
+        inspectionEvent.event,
+        inspectionEvent.microsteps.length === 0 &&
+          !inspectionEvent.event.type.startsWith("xstate."),
+      );
     } catch (error) {
       failure = error;
     }
