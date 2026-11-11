@@ -121,7 +121,7 @@ export function VizPanel({
             config={outlineConfig}
             value={step?.value ?? null}
             hints={outlineHints}
-            liveChartAvailable={preferOutline && !inspectionDown && !!liveUrl}
+            inspectionStatus={inspectionDown ? "unavailable" : liveUrl ? "available" : "loading"}
           />
         ) : liveUrl ? (
           <iframe
