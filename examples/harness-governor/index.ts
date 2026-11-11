@@ -15,13 +15,18 @@
  *     its level, a file read included. The model cannot be called and no tool
  *     can run while a result is held.
  *   - A result above the user's clearance, a verdict that is not a known
- *     level, or a classifier failure moves the session to `locked`. The result is withheld. Only an operator `DISCARD`
- *     leaves `locked`.
+ *     level, or a classifier failure moves the session to `locked`. The result
+ *     is withheld. Only an operator `DISCARD` leaves `locked`.
+ *   - A subagent is the tool `task`. It gets its own machine, which starts at
+ *     the parent's clearance and the parent's level, so it cannot search the
+ *     web with what the parent has seen. Its report is not classified by
+ *     content: the parent takes the level the subagent ended at.
  *
  * The machine imports only from `xstate`. `@statelyai/agent` supplies what
  * surrounds it: `recordLog` journals every event for audit and replay, and
  * `canReach` (in `index.test.ts`) proves the rules above for every clearance,
- * every tool, and every classifier verdict, without a model call.
+ * every starting level, every tool, and every classifier verdict, without a
+ * model call. `recordLog` marks each refused event `ignored`.
  *
  * Tool results never enter the machine. The host keeps the held result in a
  * closure and the machine sees only the tool name and the verdict, so the
@@ -30,15 +35,15 @@
  * No API key needed. Run: npx tsx examples/harness-governor/index.ts
  */
 import { z } from "zod";
-import { createActor, createAsyncLogic, setup, waitFor } from "xstate";
-import { recordLog } from "@statelyai/agent/log";
+import { createActor, createAsyncLogic, setup, waitFor, type Actor } from "xstate";
+import { recordLog, type AgentLogEntry, type LogRecorder } from "@statelyai/agent/log";
 
 // ─── Vocabulary ───
 
 export const LEVELS = ["public", "confidential", "secret"] as const;
 export type Level = (typeof LEVELS)[number];
 
-export const TOOLS = ["read_file", "web_search", "query_records"] as const;
+export const TOOLS = ["read_file", "web_search", "query_records", "task"] as const;
 export type Tool = (typeof TOOLS)[number];
 
 const levelSchema = z.enum(LEVELS);
@@ -76,7 +81,8 @@ export const governorMachine = setup({
   schemas: {
     context: contextSchema,
     events: eventSchemas,
-    input: z.object({ clearance: levelSchema }),
+    // `level` is set for a subagent: it starts at its parent's level.
+    input: z.object({ clearance: levelSchema, level: levelSchema.optional() }),
     output: z.object({ level: levelSchema }),
   },
   actors: {
@@ -86,7 +92,11 @@ export const governorMachine = setup({
   },
 }).createMachine({
   id: "harness-governor",
-  context: ({ input }) => ({ clearance: input.clearance, level: "public", active: null }),
+  context: ({ input }) => ({
+    clearance: input.clearance,
+    level: input.level ?? "public",
+    active: null,
+  }),
   output: ({ context }) => ({ level: context.level }),
   initial: "ready",
   states: {
@@ -146,27 +156,71 @@ export type Admission =
   | { admitted: true; result: string }
   | { admitted: false; reason: "locked" | "not-running" };
 
+type Classify = (tool: Tool, result: string) => Promise<Level>;
+
+export interface Governor {
+  actor: Actor<typeof governorMachine>;
+  log: LogRecorder;
+  /** The tools the current state accepts. */
+  allowedTools(): Tool[];
+  /**
+   * True when the call may run. The machine is then waiting on its result.
+   * A refused call is sent too: the machine ignores it, and the log keeps
+   * the attempt.
+   */
+  authorize(tool: Tool): boolean;
+  /**
+   * A governor for the subagent of an authorized `task` call. Its report is
+   * handed back through `admit` once the subagent has ended.
+   */
+  spawn(): Governor;
+  /**
+   * Returns the result once it is safe for the model, or withholds it. A
+   * result with no authorized call behind it is refused: the machine would
+   * ignore the event, and nothing would classify the result.
+   */
+  admit(result: string): Promise<Admission>;
+  /** True when the conversation may be sent to the model. */
+  requestModel(): boolean;
+  discard(): void;
+  end(): void;
+}
+
 /**
- * Binds the machine to one session. The three methods mirror the points where
- * a harness can be intercepted: when it lists tools, before it runs one, and
- * after one returns.
+ * Binds the machine to one session. The methods mirror the points where a
+ * harness can be intercepted: when it lists tools, before it runs one, when
+ * it starts a subagent, and after a tool returns.
  */
 export function createGovernor(options: {
   clearance: Level;
-  classify: (tool: Tool, result: string) => Promise<Level>;
-}) {
+  classify: Classify;
+  /** The level a subagent starts at. `spawn` sets it. */
+  level?: Level;
+}): Governor {
   // The held result lives here, not in machine context or an event payload.
   let held: string | null = null;
+  let child: Governor | null = null;
+
+  // A subagent's report is built from what its model saw, so it is as
+  // sensitive as the level the subagent ended at. A subagent that has not
+  // ended has no level to give, and the parent locks.
+  const subagentLevel = async (): Promise<Level> => {
+    const snapshot = child?.actor.getSnapshot();
+    child = null;
+    if (snapshot?.status !== "done") throw new Error("The subagent has not ended.");
+    return snapshot.output.level;
+  };
 
   const actor = createActor(
     governorMachine.provide({
       actors: {
         classify: createAsyncLogic<Level, { tool: Tool }>({
-          run: ({ input }) => options.classify(input.tool, held!),
+          run: ({ input }) =>
+            input.tool === "task" ? subagentLevel() : options.classify(input.tool, held!),
         }),
       },
     }),
-    { input: { clearance: options.clearance } },
+    { input: { clearance: options.clearance, level: options.level } },
   );
   const log = recordLog(actor);
   actor.start();
@@ -174,26 +228,27 @@ export function createGovernor(options: {
   return {
     actor,
     log,
-    /** The tools the current state accepts. */
-    allowedTools: (): Tool[] =>
+    allowedTools: () =>
       TOOLS.filter((tool) => actor.getSnapshot().can({ type: "TOOL_CALL", tool })),
-    /**
-     * True when the call may run. The machine is then waiting on its result.
-     * A refused call is sent too: the machine ignores it, and the log keeps
-     * the attempt.
-     */
-    authorize(tool: Tool): boolean {
+    authorize(tool) {
       const event = { type: "TOOL_CALL", tool } as const;
       const allowed = actor.getSnapshot().can(event);
       actor.send(event);
       return allowed;
     },
-    /**
-     * Returns the result once it is safe for the model, or withholds it. A
-     * result with no authorized call behind it is refused: the machine would
-     * ignore the event, and nothing would classify the result.
-     */
-    async admit(result: string): Promise<Admission> {
+    spawn() {
+      const snapshot = actor.getSnapshot();
+      if (!snapshot.matches("running") || snapshot.context.active !== "task") {
+        throw new Error("spawn needs an authorized task call.");
+      }
+      child = createGovernor({
+        clearance: snapshot.context.clearance,
+        level: snapshot.context.level,
+        classify: options.classify,
+      });
+      return child;
+    },
+    async admit(result) {
       const event = { type: "TOOL_RESULT" } as const;
       const running = actor.getSnapshot().can(event);
       if (running) held = result;
@@ -205,8 +260,7 @@ export function createGovernor(options: {
         ? { admitted: false, reason: "locked" }
         : { admitted: true, result };
     },
-    /** True when the conversation may be sent to the model. */
-    requestModel(): boolean {
+    requestModel() {
       const event = { type: "MODEL_REQUEST" } as const;
       const allowed = actor.getSnapshot().can(event);
       actor.send(event);
@@ -223,6 +277,8 @@ export function createGovernor(options: {
 export interface ScriptedCall {
   tool: Tool;
   query: string;
+  /** For `task`: the calls the subagent attempts. */
+  subagent?: ScriptedCall[];
 }
 
 export interface HarnessStep {
@@ -233,6 +289,8 @@ export interface HarnessStep {
   seen?: string;
   /** The session level after the step. */
   level: Level;
+  /** For `task`: what the subagent did. */
+  steps?: HarnessStep[];
 }
 
 /** Fake records. The second one is above a `confidential` clearance. */
@@ -247,13 +305,20 @@ const runTool = async (call: ScriptedCall): Promise<string> =>
     : `${call.tool}: ${call.query}`;
 
 /** Stands in for a decision model: looks the record's level up by its body. */
-const classifyByLookup = async (_tool: Tool, result: string): Promise<Level> =>
+const classifyByLookup: Classify = async (_tool, result) =>
   Object.values(RECORDS).find((record) => record.body === result)?.level ?? "public";
 
 export const DEFAULT_SCRIPT: ScriptedCall[] = [
   { tool: "web_search", query: "grid frequency standards" },
-  { tool: "query_records", query: "station A load" },
-  { tool: "web_search", query: "412 MW at 14:00" },
+  {
+    tool: "task",
+    query: "summarize station A",
+    subagent: [
+      { tool: "query_records", query: "station A load" },
+      { tool: "web_search", query: "412 MW at 14:00" },
+    ],
+  },
+  { tool: "web_search", query: "station A summary" },
   { tool: "query_records", query: "station B protection" },
   { tool: "read_file", query: "notes.md" },
 ];
@@ -267,7 +332,7 @@ export async function runHarnessGovernorExample(
   options: {
     clearance?: Level;
     script?: ScriptedCall[];
-    classify?: (tool: Tool, result: string) => Promise<Level>;
+    classify?: Classify;
   } = {},
 ) {
   const {
@@ -276,30 +341,42 @@ export async function runHarnessGovernorExample(
     classify = classifyByLookup,
   } = options;
   const governor = createGovernor({ clearance, classify });
-  const level = () => governor.actor.getSnapshot().context.level;
-  const steps: HarnessStep[] = [];
+  const level = (of: Governor) => of.actor.getSnapshot().context.level;
+  /** One log per subagent, in the order they ran. */
+  const subagents: AgentLogEntry[][] = [];
 
-  const attempt = async (call: ScriptedCall) => {
-    if (!governor.authorize(call.tool)) {
-      steps.push({ tool: call.tool, outcome: "denied", level: level() });
-      return;
+  const attempt = async (session: Governor, call: ScriptedCall): Promise<HarnessStep> => {
+    if (!session.authorize(call.tool)) {
+      return { tool: call.tool, outcome: "denied", level: level(session) };
     }
-    const admission = await governor.admit(await runTool(call));
-    steps.push(
-      admission.admitted
-        ? { tool: call.tool, outcome: "result", seen: admission.result, level: level() }
-        : { tool: call.tool, outcome: "withheld", level: level() },
-    );
+    let steps: HarnessStep[] | undefined;
+    if (call.tool === "task") {
+      const subagent = session.spawn();
+      steps = [];
+      for (const inner of call.subagent ?? []) steps.push(await attempt(subagent, inner));
+      subagent.end();
+      subagent.log.stop();
+      subagents.push(subagent.log.entries);
+    }
+    const admission = await session.admit(await runTool(call));
     // The loop would call the model here. A locked session refuses.
-    governor.requestModel();
+    session.requestModel();
+    return {
+      tool: call.tool,
+      outcome: admission.admitted ? "result" : "withheld",
+      ...(admission.admitted ? { seen: admission.result } : {}),
+      level: level(session),
+      ...(steps ? { steps } : {}),
+    };
   };
 
-  for (const call of script) await attempt(call);
+  const steps: HarnessStep[] = [];
+  for (const call of script) steps.push(await attempt(governor, call));
 
   const locked = governor.actor.getSnapshot().matches("locked");
   if (locked) {
     governor.discard();
-    await attempt(script.at(-1)!);
+    steps.push(await attempt(governor, script.at(-1)!));
   }
 
   governor.end();
@@ -307,9 +384,10 @@ export async function runHarnessGovernorExample(
   return {
     steps,
     locked,
-    level: level(),
+    level: level(governor),
     /** The audit trail: every event the machine processed, in order. */
     entries: governor.log.entries,
+    subagents,
   };
 }
 
@@ -317,10 +395,21 @@ export async function runHarnessGovernorExample(
 if (import.meta.url === new URL(process.argv[1]!, "file:").href) {
   void (async () => {
     const result = await runHarnessGovernorExample();
-    for (const step of result.steps) {
-      console.log(`${step.tool.padEnd(14)} ${step.outcome.padEnd(9)} level: ${step.level}`);
-    }
-    console.log("\nAudit trail:", result.entries.map((entry) => entry.event.type).join(" → "));
+    const print = (steps: HarnessStep[], indent = "") => {
+      for (const step of steps) {
+        console.log(
+          `${indent}${step.tool.padEnd(14)} ${step.outcome.padEnd(9)} level: ${step.level}`,
+        );
+        if (step.steps) print(step.steps, `${indent}  `);
+      }
+    };
+    print(result.steps);
+    console.log(
+      "\nAudit trail:",
+      result.entries
+        .map((entry) => (entry.ignored ? `(${entry.event.type})` : entry.event.type))
+        .join(" → "),
+    );
   })().catch((error) => {
     console.error(error);
     process.exitCode = 1;
