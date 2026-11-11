@@ -9,7 +9,7 @@
   },
   "comparison": {
     "targets": ["prompt-level guardrails", "tool allowlists", "pre-tool hooks"],
-    "purpose": "A plain XState machine runs beside a tool loop it does not own. Each tool call is an event, so the tool list is whatever the current state accepts. Every tool result is held in a quarantined state until a classifier returns its level. A result above the user's clearance, an unknown verdict, or a classifier failure locks the session. recordLog journals every attempt without the tool results, and canReach proves for every clearance and verdict that web search is unavailable after confidential data, that the model is never called while a result is held, and that the session level never exceeds the clearance."
+    "purpose": "A plain XState machine runs beside a tool loop it does not own. Each tool call is an event, so the tool list is whatever the current state accepts. Every tool result is held in a quarantined state until a classifier returns its level. A result above the user's clearance, an unknown verdict, or a classifier failure locks the session. A subagent is a task tool call with its own machine: it starts at the parent's clearance and level, and the parent takes the level it ended at. recordLog journals every attempt without the tool results and marks refused ones, and canReach proves for every clearance, starting level, and verdict that web search is unavailable after confidential data, that the model is never called while a result is held, and that the session level never exceeds the clearance."
   },
   "machine": "governorMachine"
 }
