@@ -27,7 +27,7 @@ export async function runTicket(ticket: Ticket, effects: SupportEffects): Promis
 - Each effect is an async function. A wrapped or recorded effect returns a Promise even when the original returns an async iterable at once: write `yield* await effects.stream()`.
 - A call made around `effects` (a module-level client, `fetch`) is invisible to the machine, to traces, and to recordings. Move it into `effects` first.
 - Keep effect arguments and results JSON-shaped where you can: they are journaled and recorded. Pass live objects (a chat session, an `AbortSignal`) by closure, not as arguments.
-- An effect whose natural result is a live object (an agent instance) returns its name or id instead. The host keeps a registry from id to object.
+- An effect whose natural result is a live object (an agent instance) returns its name or id instead. The function that starts the run keeps a `Map` from id to object, created per run. See [Live objects](#live-objects).
 - An effect that writes host state by reference (a tool mutating a shared `state` object) returns the change instead, and the wrapper applies it.
 - A synchronous host callback (a stop predicate) or a diagnostic logger is not an effect. The workflow or the machine factory closes over it.
 
@@ -182,6 +182,38 @@ resolving: {
 - A legacy body that owns abort (it returns its own `stopped` result): pass the `signal` to the legacy body only, not to `runAgent`. Its result then reaches the machine as a normal final; `runAgent`'s `signal` would settle the run as `aborted` instead.
 - An invoke whose error must reach the caller unchanged: omit `onError`. The run settles `{ status: "error", error }` with the original error, and the runner rethrows it. Pass `disable: ["invoke-without-on-error"]` to `lintAgentMachine` for that machine, or `ignore: [{ code: "invoke-without-on-error", path }]` for one state.
 
+### Live objects
+
+A store, a class instance, a session or a cancellation token cannot go in context, input or events: those are journaled JSON. Bind the actors and actions that need them per run, as closures, in the function that starts the run.
+
+```ts no-check
+const machine = setupAgent({
+  // ...schemas
+  actions: { setStatus: (_params: { status: string }) => {} }, // default for tests and explorePaths
+  actors: { think: createAsyncLogic({ run: async () => ({ kind: "final" }) }) },
+}).createMachine({
+  // ...
+  entry: ({ actions }, enq) => enq(actions.setStatus, { status: "thinking" }),
+});
+
+async function agenticLoop(agent: Agent, task: Task) {
+  return runAgent(machine, {
+    input: { taskId: task.id },
+    actions: { setStatus: ({ status }) => agent.store.setStatus(task, status) },
+    actors: {
+      think: createAsyncLogic({ run: () => legacy.executeThinking.call(agent, agent, task) }),
+    },
+  });
+}
+```
+
+- `runAgent`'s `actions` and `actors` are merged onto the machine for that run only. Concurrent runs each see their own objects.
+- `actions` keys and params are checked against the actions declared in `setupAgent`. Declare a no-op for each; it is the default for tests and `explorePaths`.
+- Only actors and actions read live objects. A guard, a `choice` or a transition function that reads one makes a decision the log does not record, so replay, resume and `explorePaths` can reach another state. Copy what the machine branches on into an actor's output.
+- An action runs through `enq(...)`, after the transition. A `{ context }` it returns is ignored.
+- Resume binds the same way: the host builds the actors and actions again and passes them with the snapshot or `store`. Nothing about the live objects is journaled.
+- An effect whose result is a live object (an agent instance) records an id. Keep the id-to-object `Map` in the same function, created per run, never at module level.
+
 ### A phase in the middle of a method
 
 - Copy only that phase's lines into the carved actor, with a comment listing the copied line ranges. `checkParity` call-args keep the copy honest: a drifted copy calls its effects with other arguments.
@@ -233,6 +265,7 @@ What it does per scenario:
 - Replay throws a recorded error with its name, message, number and boolean fields, `cause`, and an `AggregateError`'s `errors`. It is a plain `Error` or `AggregateError`. When the code branches on `instanceof`, pass `reviveError` to build its own class: `reviveError: (recorded) => recorded.name === "AbortError" ? new AbortError(recorded.message) : undefined`. A recorder takes the same option.
 - An effect result that is not JSON (a class instance, a `Response`) records as its JSON and replays as a plain value. Pass `recordOptions: { lookupOrder: { serialize, revive } }` to `checkParity` or `wrapWorkflow().run` to keep the class in replay.
 - `compare` passes options through to `compareRecordings`, such as `normalize` for generated ids.
+- `setup: (scenario, side) => liveObject` builds what one side runs on (a class instance, a session). It is called once for `before` and once for `after`, and its result is the last argument of `effects`, `before` and `after`. Effects then bind to the object without a module-level slot, and a mutable object does not carry state from `before` into `after`.
 
 ### Generated ids
 
@@ -317,7 +350,7 @@ Step 0 cannot give this proof: its one `running` state holds the whole function.
 - No resume in the middle of the function. A resumed run starts the workflow again.
 - `canReach` and `explorePaths` prove nothing about the wrapped function's inside.
 - Effect arguments and results are journaled JSON-safe. A value that is not JSON (a class instance) loses what JSON cannot hold. A stream is journaled as the chunks read through `for await` or `next()`; one read another way (a `ReadableStream` reader) never settles its effect.
-- Parity cannot see an effect that mutates host state by reference, or one whose result is a live object. Return a change, a name, or an id, and keep a registry on the host side.
+- Parity cannot see an effect that mutates host state by reference, or one whose result is a live object. Return a change, a name, or an id, and keep a per-run map from id to object.
 - `checkParity` runs `before` on the effects you give it for real. Give it fakes or an isolated fixture, never production writes.
 - `effects` are async functions only. A sync function or a client object goes behind an async function first.
 - Parity covers what goes through `effects` and the output. A change in a call made around `effects` is not seen.

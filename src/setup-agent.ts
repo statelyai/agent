@@ -508,6 +508,9 @@ type BrandedInputSchema<TInputSchema extends StandardSchemaV1> =
       >
     : TInputSchema;
 
+/** Action sources for `setupAgent({ actions })`. */
+type AgentActionSources = NonNullable<AnySetupConfig["actions"]>;
+
 type AgentSetupXStateConfig<
   TContextSchema extends StandardSchemaV1<Record<string, unknown>>,
   TEventSchemas extends AgentEventSchemaInputMap,
@@ -519,6 +522,7 @@ type AgentSetupXStateConfig<
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
   TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  TActions extends AgentActionSources = AgentActionSources,
 > = {
   schemas: {
     context: TContextSchema;
@@ -539,7 +543,7 @@ type AgentSetupXStateConfig<
       AgentModelRef<TModels>
     >
   >;
-  actions?: NonNullable<AnySetupConfig["actions"]>;
+  actions?: TActions;
   guards?: NonNullable<AnySetupConfig["guards"]>;
   delays?: NonNullable<AnySetupConfig["delays"]>;
 };
@@ -556,6 +560,7 @@ type SetupAgentBaseConfig<
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
   TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  TActions extends AgentActionSources = AgentActionSources,
 > = (
   | {
       schemas: AgentSchemaPack<
@@ -587,7 +592,7 @@ type SetupAgentBaseConfig<
    */
   states?: TStateSchemas;
   requests?: AgentRequestInput<TRequestSchemas, AgentModelRef<TModels>>;
-  actions?: NonNullable<AnySetupConfig["actions"]>;
+  actions?: TActions;
   guards?: AgentGuardSources<TContextSchema, TEventSchemas>;
   delays?: AgentDelaySources<TContextSchema, TEventSchemas>;
 };
@@ -604,6 +609,7 @@ type SetupAgentXStateResult<
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
   TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  TActions extends AgentActionSources = AgentActionSources,
 > = SetupReturnFromConfig<
   AgentSetupXStateConfig<
     TContextSchema,
@@ -615,7 +621,8 @@ type SetupAgentXStateResult<
     TMetaSchema,
     TModels,
     TEmittedSchemas,
-    TStateSchemas
+    TStateSchemas,
+    TActions
   >
 >;
 
@@ -638,6 +645,7 @@ export type SetupAgentResult<
   TModels extends AgentModelMap,
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
   TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  TActions extends AgentActionSources = AgentActionSources,
 > = Omit<
   SetupAgentXStateResult<
     TContextSchema,
@@ -649,7 +657,8 @@ export type SetupAgentResult<
     TMetaSchema,
     TModels,
     TEmittedSchemas,
-    TStateSchemas
+    TStateSchemas,
+    TActions
   >,
   "createMachine"
 > & {
@@ -669,7 +678,8 @@ export type SetupAgentResult<
     TMetaSchema,
     TModels,
     TEmittedSchemas,
-    TStateSchemas
+    TStateSchemas,
+    TActions
   >["createMachine"];
   /** The retained schema pack ({@link AgentSchemaPack}) for host-side validation and tooling. Its `events` include the reserved `'@agent.usage'` entry setupAgent registers by default. */
   schemas: AgentSchemaPack<
@@ -742,6 +752,7 @@ export function setupAgent<
   TModels extends AgentModelMap = {},
   TEmittedSchemas extends Record<string, StandardSchemaV1> = {},
   const TStateSchemas extends Record<string, SetupStateSchema> = Record<string, SetupStateSchema>,
+  TActions extends AgentActionSources = AgentActionSources,
 >(
   config: SetupAgentBaseConfig<
     TContextSchema,
@@ -753,7 +764,8 @@ export function setupAgent<
     TRequestSchemas,
     TModels,
     TEmittedSchemas,
-    TStateSchemas
+    TStateSchemas,
+    TActions
   >,
 ): SetupAgentResult<
   TContextSchema,
@@ -765,7 +777,8 @@ export function setupAgent<
   TMetaSchema,
   TModels,
   TEmittedSchemas,
-  TStateSchemas
+  TStateSchemas,
+  TActions
 > {
   const schemas = normalizeAgentSchemas<
     TContextSchema,
@@ -819,7 +832,8 @@ export function setupAgent<
     TMetaSchema,
     TModels,
     TEmittedSchemas,
-    TStateSchemas
+    TStateSchemas,
+    TActions
   > = {
     schemas: {
       context: schemas.context,
@@ -843,7 +857,8 @@ export function setupAgent<
       TMetaSchema,
       TModels,
       TEmittedSchemas,
-      TStateSchemas
+      TStateSchemas,
+      TActions
     >["schemas"],
     ...(config.states ? { states: config.states } : {}),
     // `createAgentActors` builds with a widened `string` event union; the setup
@@ -887,7 +902,8 @@ export function setupAgent<
     TMetaSchema,
     TModels,
     TEmittedSchemas,
-    TStateSchemas
+    TStateSchemas,
+    TActions
   >;
 }
 

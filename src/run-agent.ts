@@ -459,6 +459,11 @@ type AgentTraceEventPayload<TMachine extends AnyStateMachine = AnyStateMachine> 
       : never
     : never;
 
+/** The action implementations `machine.provide` accepts for `TMachine`. */
+type ProvidedActions<TMachine extends AnyStateMachine> = NonNullable<
+  Parameters<TMachine["provide"]>[0]["actions"]
+>;
+
 /**
  * Options for {@link createAgentRuntime}: what the runtime binds and observes.
  * The run's `input`/`snapshot`/`events` go to {@link AgentRuntime.start} (or
@@ -525,6 +530,13 @@ export interface AgentRuntimeOptions<TMachine extends AnyStateMachine> {
   // actor sources — sugar for machine.provide({ actors }) before the run
   /** Actor source implementations, merged onto the machine before binding — sugar for `machine.provide({ actors })` ahead of the run. */
   actors?: Record<string, AnyActorLogic>;
+  /**
+   * Action implementations for this run, merged onto the machine before
+   * binding: sugar for `machine.provide({ actions })`. Each key must be an
+   * action declared in `setupAgent`, with the same params. Build them per run
+   * to close over live objects (a store, a session) that cannot go in context.
+   */
+  actions?: ProvidedActions<TMachine>;
 
   // observation — all void; no callback controls the run
   /**
@@ -3322,10 +3334,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     );
   };
 
-  // Bind sources: `machine.provide({ actors: options.actors })` first, then
+  // Bind sources: `machine.provide({ actors, actions })` from options first, then
   // walk the EFFECTIVE (post-provide) sources (chained provides merge).
   const provided = machine.provide({
     actors: options.actors as never,
+    ...(options.actions && { actions: options.actions as never }),
   }) as TMachine;
 
   logMachine = provided;
