@@ -61,6 +61,31 @@ describe("checkParity", () => {
     expect(revived.scenarios[0]!.after).toEqual({ output: "missing" });
   });
 
+  test("recordOptions revive a class result for the port", async () => {
+    class Order {
+      constructor(readonly total: number) {}
+    }
+    const effects = () => ({ lookupOrder: async () => new Order(50) });
+    const totalOf = async (_input: string, fx: ReturnType<typeof effects>) => {
+      const order = await fx.lookupOrder();
+      return order instanceof Order ? order.total : "plain";
+    };
+    const run = (recordOptions?: { lookupOrder: { revive: (recorded: unknown) => unknown } }) =>
+      checkParity({
+        scenarios: [{ id: "one", input: "A-1" }],
+        effects,
+        before: totalOf,
+        after: totalOf,
+        recordOptions,
+      });
+    expect((await run()).scenarios[0]!.after).toEqual({ output: "plain" });
+    const revived = await run({
+      lookupOrder: { revive: (recorded) => new Order((recorded as Order).total) },
+    });
+    expect(revived.equivalent).toBe(true);
+    expect(revived.scenarios[0]!.after).toEqual({ output: 50 });
+  });
+
   test("a wrapped workflow is equivalent to itself", async () => {
     let calls = 0;
     const step0 = wrapWorkflow({ id: "support", effects: createEffects(), run: legacy });
