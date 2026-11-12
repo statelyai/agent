@@ -27,20 +27,36 @@ export interface CheckParityScenario<TInput = unknown> {
 export type CheckParityOutcome<TOutput = unknown> = { output: TOutput } | { error: unknown };
 
 /** Options for {@link checkParity}. */
-export interface CheckParityOptions<
+export type CheckParityOptions<
+  TScenario extends CheckParityScenario,
+  TEffects extends object,
+  TOutput,
+  TLive = undefined,
+> = CheckParityBaseOptions<TScenario, TEffects, TOutput, TLive> &
+  // Required unless the callbacks accept `undefined`, which a missing `setup` passes.
+  (undefined extends TLive
+    ? { setup?: CheckParitySetup<TScenario, TLive> }
+    : { setup: CheckParitySetup<TScenario, TLive> });
+
+/**
+ * Builds the live objects one side of a scenario runs on (a class instance, a
+ * session), passed to `effects`, `before` and `after`. Called once for
+ * `before` and once for `after`, so a mutable object does not carry state from
+ * one side to the other.
+ */
+export type CheckParitySetup<TScenario extends CheckParityScenario, TLive> = (
+  scenario: TScenario,
+  side: "before" | "after",
+) => TLive | PromiseLike<TLive>;
+
+/** {@link CheckParityOptions} without `setup`. */
+export interface CheckParityBaseOptions<
   TScenario extends CheckParityScenario,
   TEffects extends object,
   TOutput,
   TLive = undefined,
 > {
   scenarios: readonly TScenario[];
-  /**
-   * Builds the live objects one side of a scenario runs on (a class
-   * instance, a session), passed to `effects`, `before` and `after`. Called
-   * once for `before` and once for `after`, so a mutable object does not
-   * carry state from one side to the other.
-   */
-  setup?: (scenario: TScenario, side: "before" | "after") => TLive | PromiseLike<TLive>;
   /**
    * Fresh effects for one scenario: fakes, stubs, or real clients. `before`
    * runs on them for real, recorded, so a write effect writes once per

@@ -113,6 +113,15 @@ describe("checkParity", () => {
       after: run,
     });
     expect(sides).toEqual(["before", "after"]);
+    // Callbacks that need a live object need `setup`. Type-checked, never called.
+    const _missingSetup = () =>
+      // @ts-expect-error: `setup` is missing.
+      checkParity({
+        scenarios: [{ id: "one", input: "A-1" }],
+        effects: (_scenario, runner: Runner) => ({ lookup: async () => runner.steps.length }),
+        before: run,
+        after: run,
+      });
     // `after` replays `before`'s recording, and its runner starts empty.
     expect(report.equivalent).toBe(true);
     expect(report.scenarios[0]!.after).toEqual({ output: { total: 50, steps: 1 } });

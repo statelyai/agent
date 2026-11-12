@@ -31,7 +31,6 @@ const bound = provideExecutors(machine, executors, {
 ```
 
 - `actors` merges extra actor sources before binding, the same shape as `machine.provide({ actors })`.
-- `actions` merges action implementations the same way, `machine.provide({ actions })`. Keys and params are checked against the actions declared in `setupAgent`. Use it to bind live objects per run: see [Live objects](strangler-fig.md#live-objects).
 - `onChunk` receives every chunk of every `mode: 'stream'` request.
 - `onTrace` receives `request.start`, `request.end`, `request.error`, and `stream.chunk` events with the same envelope `runToQuiescence` emits, minted per root actor. Pair it with `traceTransitions` on the actor's `inspect` option to fold `machine.transition` events into the same stream.
 
