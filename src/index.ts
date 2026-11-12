@@ -149,6 +149,8 @@ export type {
   AgentRunResult,
   AgentRunErrorCause,
 } from "./run-agent.js";
+export { createGeneratorBridge } from "./generator-bridge.js";
+export type { ForwardResult, GeneratorBridge } from "./generator-bridge.js";
 export { wrapWorkflow } from "./wrap-workflow.js";
 export type {
   EffectCallEvent,

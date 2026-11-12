@@ -620,6 +620,29 @@ describe("runAgent", () => {
     expect(result.status === "error" ? result.cause : undefined).toBe("aborted");
   });
 
+  test("abort: an abort in the same tick as runAgent runs no actor", async () => {
+    // A host registry that cancels synchronously can rely on this: register
+    // the controller, call runAgent, and a pause before the start costs nothing.
+    let calls = 0;
+    const agent = setupAgent({
+      context: z.object({}),
+      actors: { work: createAsyncLogic({ run: async () => void calls++ }) },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "working",
+      states: {
+        working: { invoke: { src: "work", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const controller = new AbortController();
+    const run = runAgent(machine, { signal: controller.signal });
+    controller.abort();
+    expect(await run).toMatchObject({ status: "error", cause: "aborted" });
+    expect(calls).toBe(0);
+  });
+
   test("abort: aborting mid-run settles an aborted error", async () => {
     const schemas = createAgentSchemas({
       context: z.object({}),
