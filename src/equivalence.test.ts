@@ -11,6 +11,7 @@ import {
   createRecorder,
   RecordingDivergenceError,
   type RecordedEffect,
+  type RecordedError,
   type RecordedModelCall,
   sameModelCallShape,
   type Recorder,
@@ -834,6 +835,221 @@ test("a replayed error's name is enumerable only when the original's was", () =>
       expect(error?.name).toBe("LegacyError");
       expect(Object.keys(error as object)).not.toContain("name");
     });
+});
+
+describe("a replayed error", () => {
+  async function replayFailure(
+    error: Error,
+    reviveError?: (r: RecordedError) => Error | undefined,
+  ) {
+    const recorder = createRecorder();
+    await recorder
+      .fn("fail", async () => {
+        throw error;
+      })()
+      .catch(() => {});
+    const recording: Recording = JSON.parse(JSON.stringify(recorder.recording));
+    const replay = createRecorder({ replay: recording, reviveError });
+    return replay
+      .fn("fail", async () => {})()
+      .then(
+        () => undefined,
+        (e: unknown) => e as Error,
+      );
+  }
+
+  test("keeps its cause chain", async () => {
+    const error = await replayFailure(
+      new Error("agent failed", {
+        cause: new Error("model failed", { cause: new TypeError("bad") }),
+      }),
+    );
+    const cause = error!.cause as Error;
+    expect(error!.message).toBe("agent failed");
+    expect(cause.message).toBe("model failed");
+    expect((cause.cause as Error).name).toBe("TypeError");
+    expect(Object.keys(error!)).not.toContain("cause");
+  });
+
+  test("revives an AggregateError with its errors", async () => {
+    const error = await replayFailure(
+      new AggregateError([new Error("one"), new Error("two")], "both"),
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors.map((e: Error) => e.message)).toEqual(["one", "two"]);
+  });
+
+  test("keeps a shared entry and non-Error reasons in an AggregateError", async () => {
+    const failure = new Error("shared");
+    const error = (await replayFailure(
+      new AggregateError([failure, failure, "timeout", 503, undefined], "requests failed"),
+    )) as AggregateError;
+    expect(error.errors.map((e: unknown) => (e instanceof Error ? e.message : e))).toEqual([
+      "shared",
+      "shared",
+      "timeout",
+      503,
+      undefined,
+    ]);
+  });
+
+  test("an unprintable reason does not mask the failure", async () => {
+    const reason = Object.create(null) as Record<string, unknown>;
+    reason.self = reason;
+    const error = (await replayFailure(new AggregateError([reason], "failed"))) as AggregateError;
+    expect(error.message).toBe("failed");
+    expect(error.errors).toEqual(["[unserializable]"]);
+  });
+
+  test("reviveError's class still gets the recorded cause and errors", async () => {
+    class AbortError extends Error {
+      override name = "AbortError";
+    }
+    class BatchError extends AggregateError {
+      override name = "BatchError";
+    }
+    const error = (await replayFailure(
+      new BatchError([new AbortError("stop")], "failed", { cause: new AbortError("root") }),
+      (recorded) =>
+        recorded.name === "BatchError"
+          ? new BatchError([], recorded.message)
+          : recorded.name === "AbortError"
+            ? new AbortError(recorded.message)
+            : undefined,
+    )) as AggregateError;
+    expect(error).toBeInstanceOf(BatchError);
+    expect(error.errors[0]).toBeInstanceOf(AbortError);
+    expect(error.cause).toBeInstanceOf(AbortError);
+  });
+
+  test("a cyclic cause records once", async () => {
+    const error = new Error("loop");
+    error.cause = error;
+    expect((await replayFailure(error))?.cause).toBeUndefined();
+  });
+
+  test("reviveError restores the class, at every level", async () => {
+    class AbortError extends Error {
+      override name = "AbortError";
+    }
+    const error = await replayFailure(
+      new Error("wrapped", { cause: new AbortError("stopped") }),
+      (recorded) => (recorded.name === "AbortError" ? new AbortError(recorded.message) : undefined),
+    );
+    expect(error).not.toBeInstanceOf(AbortError);
+    expect(error?.cause).toBeInstanceOf(AbortError);
+  });
+});
+
+describe("a stream that fails", () => {
+  async function drain(stream: AsyncIterable<unknown>) {
+    const chunks: unknown[] = [];
+    try {
+      for await (const chunk of stream) chunks.push(chunk);
+    } catch (error) {
+      return { chunks, error: (error as Error).message };
+    }
+    return { chunks };
+  }
+
+  test.each([
+    { label: "before its first chunk", sent: [] as string[] },
+    { label: "after some chunks", sent: ["a", "b"] },
+  ])("$label replays its chunks, then the error", async ({ sent }) => {
+    const recorder = createRecorder();
+    const stream = recorder.fn("stream", async function* () {
+      yield* sent;
+      throw new Error("model down");
+    } as unknown as () => Promise<AsyncIterable<string>>);
+    const original = await drain(await stream());
+    expect(original).toEqual({ chunks: sent, error: "model down" });
+
+    const recording: Recording = JSON.parse(JSON.stringify(recorder.recording));
+    const replay = createRecorder({ replay: recording });
+    const replayed = await drain(
+      await replay.fn("stream", async () => [] as unknown as AsyncIterable<string>)(),
+    );
+    expect(replayed).toEqual(original);
+    expect(compareRecordings(recording, replay.recording).equivalent).toBe(true);
+  });
+
+  test("a replayed failure is recorded only when the port reads to it", async () => {
+    const recorder = createRecorder();
+    const stream = recorder.fn("stream", async function* () {
+      yield "a";
+      throw new Error("model down");
+    } as unknown as () => Promise<AsyncIterable<string>>);
+    await drain(await stream());
+    const replay = createRecorder({ replay: JSON.parse(JSON.stringify(recorder.recording)) });
+    await replay.fn("stream", async () => [] as unknown as AsyncIterable<string>)();
+    expect(replay.recording.effects[0]).not.toHaveProperty("error");
+    expect(compareRecordings(recorder.recording, replay.recording).equivalent).toBe(false);
+  });
+
+  test("a consumer's .throw() records the same on both sides", async () => {
+    const consume = async (stream: AsyncIterable<string>) => {
+      const iterator = stream[Symbol.asyncIterator]();
+      await iterator.next();
+      await iterator.throw!(new Error("cancelled")).catch(() => {});
+    };
+    const recorder = createRecorder();
+    await consume(
+      await recorder.fn("stream", async function* () {
+        yield* ["a", "b"];
+      } as unknown as () => Promise<AsyncIterable<string>>)(),
+    );
+    expect(recorder.recording.effects[0]).toMatchObject({ error: { message: "cancelled" } });
+    const replay = createRecorder({ replay: JSON.parse(JSON.stringify(recorder.recording)) });
+    await consume(await replay.fn("stream", async () => [] as unknown as AsyncIterable<string>)());
+    expect(compareRecordings(recorder.recording, replay.recording).equivalent).toBe(true);
+  });
+
+  test("an async revive still replays the chunks before the error", async () => {
+    const recorder = createRecorder();
+    await drain(
+      await recorder.fn("stream", async function* () {
+        yield "a";
+        throw new Error("model down");
+      } as unknown as () => Promise<AsyncIterable<string>>)(),
+    );
+    const replay = createRecorder({ replay: JSON.parse(JSON.stringify(recorder.recording)) });
+    const replayed = await drain(
+      await replay.fn("stream", async () => [] as unknown as AsyncIterable<string>, {
+        revive: async (chunks) =>
+          (async function* () {
+            yield* chunks as string[];
+          })(),
+      })(),
+    );
+    expect(replayed).toEqual({ chunks: ["a"], error: "model down" });
+  });
+
+  test("an OpenAI stream that fails midway records and replays the error", async () => {
+    const client = {
+      chat: {
+        completions: {
+          create: async () =>
+            (async function* () {
+              yield { choices: [{ delta: { content: "par" } }] };
+              throw new Error("connection reset");
+            })(),
+        },
+      },
+    } as unknown as OpenAI;
+    const recorder = createRecorder();
+    const params = { model: "gpt-x", messages: [], stream: true as const };
+    const original = await drain(await recorder.openai(client).chat.completions.create(params));
+    expect(original.error).toBe("connection reset");
+    expect(recorder.recording.effects[0]).toMatchObject({ error: { message: "connection reset" } });
+
+    const recording: Recording = JSON.parse(JSON.stringify(recorder.recording));
+    const replay = createRecorder({ replay: recording });
+    const replayed = await drain(
+      await replay.openai(new OpenAI({ apiKey: "replay" })).chat.completions.create(params),
+    );
+    expect(replayed).toEqual(original);
+    expect(compareRecordings(recording, replay.recording).equivalent).toBe(true);
+  });
 });
 
 describe("verified equivalence (any client)", () => {

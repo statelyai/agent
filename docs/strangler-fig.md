@@ -24,7 +24,7 @@ export async function runTicket(ticket: Ticket, effects: SupportEffects): Promis
 }
 ```
 
-- Each effect is an async function.
+- Each effect is an async function. A wrapped or recorded effect returns a Promise even when the original returns an async iterable at once: write `yield* await effects.stream()`.
 - A call made around `effects` (a module-level client, `fetch`) is invisible to the machine, to traces, and to recordings. Move it into `effects` first.
 - Keep effect arguments and results JSON-shaped where you can: they are journaled and recorded. Pass live objects (a chat session, an `AbortSignal`) by closure, not as arguments.
 - An effect whose natural result is a live object (an agent instance) returns its name or id instead. The host keeps a registry from id to object.
@@ -37,6 +37,8 @@ When the loop is a class method that calls its own private methods for the model
 
 - `run: (input, effects) => { const executor = createExecutor(input); executor.callModel = (...args) => effects.callModel(...args); return executor.run(); }`, with each effect calling the original method.
 - Route the old test suite through the wrap with a factory or a static `create` stand-in, not a subclass, when the constructor is private.
+- Install each replacement with `Object.defineProperty` (non-enumerable). A plain assignment adds an own enumerable field, which the repo's state snapshots then serialize.
+- The seam is on both sides of `checkParity`: `before` runs the class with the seam installed, so a serialization bug in the seam shows up on both sides and parity reports equivalent. Also compare the untouched class against the port by output, with no seam on the original, and add scenarios for edge results: empty, `null`, non-JSON values, `BigInt`.
 
 ### Seams for other shapes
 
@@ -46,6 +48,7 @@ When the loop is a class method that calls its own private methods for the model
 | Redux thunk                                               | The thunk's `extra` argument plus its nested dispatches. Wrap `dispatch` so every nested thunk gets the effects-backed `extra`.                                                                                                                               |
 | LangGraph graph                                           | Wrap `graph.invoke`. Fake the model factory with the test runner's module mock (`vi.mock`); the fake calls the run's effects.                                                                                                                                 |
 | A closure inside a DI or Layer factory                    | Copy the module, identical outside the carved function, and swap it in with a module mock.                                                                                                                                                                    |
+| Async generator the consumer pulls (yields events, `.return()` on break, `.throw()` to interrupt) | Step 0: wrap the host call that drains the generator, with the collected events as the output. Carve: the machine runs the loop head and each pass is an actor that writes events into a channel the original generator yields from. The actor waits for each item to be pulled before it continues. `.return()` aborts the run and awaits it before it resolves. `.throw()` becomes an event the machine handles. |
 | A step loop inside the model SDK (`stopWhen`, `maxSteps`) | No loop to carve. The SDK call stays one effect; carve the control flow around it, such as handoff or approval.                                                                                                                                               |
 
 ## Step 0: wrap
@@ -223,9 +226,11 @@ What it does per scenario:
 | `row.divergences`            | `compareRecordings` divergences: `call-args`, `missing-effect`, …      |
 | `row.before` / `row.after`   | `{ output }` or `{ error }`                                            |
 | `row.recording` / `row.replay` | The baseline recording, and what `after` did in replay              |
+| `report.scenarios`           | The rows, one per scenario, in order                                   |
 
 - An `after` that throws is a row with `after: { error }`, never a thrown `checkParity`. A call the recording cannot answer throws `RecordingDivergenceError` inside `after`.
 - When both sides throw, they match on the error's name and message.
+- Replay throws a recorded error with its name, message, number and boolean fields, `cause`, and an `AggregateError`'s `errors`. It is a plain `Error` or `AggregateError`. When the code branches on `instanceof`, pass `reviveError` to build its own class: `reviveError: (recorded) => recorded.name === "AbortError" ? new AbortError(recorded.message) : undefined`. A recorder takes the same option.
 - `compare` passes options through to `compareRecordings`, such as `normalize` for generated ids.
 
 ### Generated ids
@@ -279,6 +284,7 @@ Run the module's own tests against the port by swapping the module.
 - Snapshot files are named after the test file that runs them. A swap file that imports the old suite writes fresh snapshots on its first run, and `toMatchSnapshot` passes without comparing. Copy the old `__snapshots__/<old>.snap` to the swap file's name, and run with `CI=true` so a missing snapshot fails.
 - A module mock whose factory imports the port deadlocks or recurses when the port imports the mocked module. Load the port with a dynamic import in `beforeAll`, and call it from inside the mocked functions.
 - When a module mock does not reach the code's own import of the module (one runner did not apply it to a relative import inside the package), patch the class prototype from a setup file instead. Import both modules dynamically in its `beforeAll`: a static import loads the module before the test file's mocks apply.
+- Old code that registers its in-flight call with a host registry synchronously (a store's tracked promises, a map of `AbortController`s), so that pause or stop can cancel it: register the run in the same tick, before calling `runAgent`, with a promise that settles when the run does, and pass the registry's signal as `signal`. Otherwise a pause and resume that land before the run starts leave the first run going next to the resumed one.
 - `runAgent` starts asynchronously. Fire-and-forget work the old code starts at the same time may settle in a different order. An old test that asserts the exact order of actions across concurrent tasks is a structural failure only when those actions commute and their order is not part of the contract; an order that reaches users or storage is behavioral.
 
 ## Repeat
