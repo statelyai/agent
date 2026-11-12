@@ -163,6 +163,43 @@ describe("wrapWorkflow", () => {
     ).rejects.toBeInstanceOf(RecordingDivergenceError);
   });
 
+  test("recordOptions serialize and revive one effect's class result", async () => {
+    class Order {
+      constructor(
+        readonly orderId: string,
+        readonly total: number,
+      ) {}
+    }
+    const effects = { lookupOrder: async (orderId: string) => new Order(orderId, 50) };
+    const support = wrapWorkflow({
+      id: "orders",
+      effects,
+      run: async (orderId: string, fx) => {
+        const order = await fx.lookupOrder(orderId);
+        return order instanceof Order ? order.total : -1;
+      },
+    });
+    const recordOptions = {
+      lookupOrder: {
+        serialize: (value: unknown) => ({ ...(value as Order) }),
+        revive: (recorded: unknown) => {
+          const { orderId, total } = recorded as Order;
+          return new Order(orderId, total);
+        },
+      },
+    };
+    const recorder = createRecorder();
+    expect(await support.run("A-1", { recorder, recordOptions })).toBe(50);
+    expect(recorder.recording.effects[0]).toMatchObject({
+      result: { orderId: "A-1", total: 50 },
+    });
+    const replay = createRecorder({ replay: recorder.recording });
+    expect(await support.run("A-1", { recorder: replay, recordOptions })).toBe(50);
+    // Without revive, the replayed result is the plain record.
+    const plain = createRecorder({ replay: recorder.recording });
+    expect(await support.run("A-1", { recorder: plain })).toBe(-1);
+  });
+
   test("signal reaches the workflow, which decides what an abort returns", async () => {
     let workflowSignal: AbortSignal | undefined;
     const support = wrapWorkflow({

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import { createAsyncLogic } from "xstate";
+import { createAsyncLogic, createMachine } from "xstate";
 import {
   createTextLogic,
   createAgentRuntime,
@@ -868,13 +868,8 @@ describe("scripted key taxonomy — invokes", () => {
 });
 
 describe("invoke-without-on-error", () => {
-  const agent = setupAgent({
-    context: z.object({ topic: z.string() }),
-    events: { RETRY: z.object({}) },
-  });
-
   const makeMachine = (states: Record<string, unknown>) =>
-    agent.createMachine({
+    createMachine({
       context: { topic: "otters" },
       initial: "drafting",
       states: states as never,
@@ -902,6 +897,10 @@ describe("invoke-without-on-error", () => {
   });
 
   test("is silent when the machine root handles actor errors", () => {
+    const agent = setupAgent({
+      context: z.object({ topic: z.string() }),
+      events: { "xstate.error.actor": z.object({}) },
+    });
     const machine = agent.createMachine({
       context: { topic: "otters" },
       initial: "drafting",
@@ -916,7 +915,7 @@ describe("invoke-without-on-error", () => {
         },
         failed: { type: "final" },
         done: { type: "final" },
-      } as never,
+      },
     });
     expect(findings(machine)).toEqual([]);
   });

@@ -10,7 +10,7 @@ export interface StandardSchemaV1<Input = unknown, Output = Input> {
     readonly version: 1;
     readonly vendor: string;
     readonly validate: (value: unknown) => any;
-    readonly types?: { readonly input: Input; readonly output: Output };
+    readonly types?: { readonly input: Input; readonly output: Output } | undefined;
     readonly jsonSchema?: {
       readonly input?: (...args: any[]) => unknown;
       readonly output?: (...args: any[]) => unknown;

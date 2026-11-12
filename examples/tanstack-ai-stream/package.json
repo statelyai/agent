@@ -9,13 +9,13 @@
   },
   "dependencies": {
     "@statelyai/agent": "workspace:*",
-    "@statelyai/sdk": "^0.37.4",
+    "@statelyai/sdk": "0.47.0",
     "@tanstack/ai": "^0.66.0",
     "@tanstack/ai-openai": "^0.28.0",
     "@tanstack/ai-react": "^0.30.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "xstate": "6.0.0-beta.0",
+    "xstate": "6.0.0-beta.2",
     "zod": "^4.6.5"
   },
   "devDependencies": {

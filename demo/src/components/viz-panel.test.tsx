@@ -21,6 +21,7 @@ describe("VizPanel", () => {
       'src="https://editor.stately.ai/inspect?ws=wss%3A%2F%2Frelay&amp;r=room"',
     );
     expect(html).toContain('allow="clipboard-read; clipboard-write"');
+    expect(html).toContain('aria-label="Open full statechart for Test machine"');
   });
 
   it("waits on the machine reaching the room, not on a run", () => {
@@ -30,7 +31,7 @@ describe("VizPanel", () => {
     expect(html).not.toContain("<iframe");
   });
 
-  it("draws the machine through the SDK embed when the relay is unreachable", () => {
+  it("draws the outline immediately when the relay is unreachable", () => {
     const html = renderToStaticMarkup(
       <VizPanel
         title="Test machine"
@@ -43,11 +44,50 @@ describe("VizPanel", () => {
         liveUrl={null}
       />,
     );
-    // The SDK sets the src on attach; server markup has the frame and the
-    // connecting notice, and no live /inspect URL.
-    expect(html).toContain('title="Statechart for Test machine"');
-    expect(html).toContain("Drawing the statechart");
-    expect(html).not.toContain("/inspect");
+    expect(html).toContain('aria-label="Statechart outline for Test machine"');
+    expect(html).toContain('data-active="true"');
+    expect(html).toContain('role="status"');
+    expect(html).toContain("Live inspection is unavailable");
+    expect(html).not.toContain('aria-label="Open full statechart for Test machine"');
+    expect(html).not.toContain("<iframe");
+  });
+
+  it("prefers the authored outline for the hosted viewer", () => {
+    const html = renderToStaticMarkup(
+      <VizPanel
+        title="Test machine"
+        hasMachine
+        machineKey="scenario:test"
+        outlineConfig={{ id: "test", initial: "a", states: { a: {} } }}
+        preferOutline
+        liveWs={null}
+        liveUrl="https://editor.stately.ai/inspect?ws=wss%3A%2F%2Fsky&r=room"
+      />,
+    );
+    expect(html).toContain('aria-label="Statechart outline for Test machine"');
+    expect(html).toContain('data-active="true"');
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-label="Open full statechart for Test machine"');
+    expect(html).toContain("Open full chart for the live diagram.");
+    expect(html).not.toContain("Live inspection is unavailable");
+    expect(html).not.toContain("<iframe");
+  });
+
+  it("labels a hosted chart declaration as pending", () => {
+    const html = renderToStaticMarkup(
+      <VizPanel
+        title="Test machine"
+        hasMachine
+        outlineConfig={{ id: "test", initial: "a", states: { a: {} } }}
+        preferOutline
+        liveWs={null}
+        liveUrl={null}
+      />,
+    );
+    expect(html).toContain('role="status"');
+    expect(html).toContain("Publishing the live chart.");
+    expect(html).not.toContain("Live inspection is unavailable");
+    expect(html).not.toContain('aria-label="Open full statechart for Test machine"');
   });
 
   it("says so when the relay is unreachable and there is nothing to draw", () => {
@@ -62,8 +102,7 @@ describe("VizPanel", () => {
   });
 
   it("drops a previous selection's chart when the next example has no machine", () => {
-    // The room outlives one selection, so a live URL alone must not keep an
-    // unrelated statechart on screen.
+    // A live URL alone must not keep an unrelated statechart on screen.
     const html = renderPanel(
       "https://editor.stately.ai/inspect?ws=wss%3A%2F%2Frelay&r=room",
       false,

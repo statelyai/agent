@@ -51,7 +51,7 @@ import { toolsMachine } from "@/agents/tools";
 import { createEvaluate, reflectionMachine } from "@/agents/reflection";
 import { createEvaluatePrompt, emailDrafterV1Machine } from "@/agents/email-drafter-v1";
 import { emailDrafterV2Machine } from "@/agents/email-drafter-v2";
-import { scenarioSource, type ScenarioId } from "./scenarios";
+import { scenarioDiagramHints, scenarioSource, type ScenarioId } from "./scenarios";
 
 /** JSON-safe value — server fns must return serializable data (TanStack validates it). */
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -347,6 +347,7 @@ export async function startScenarioRun(
         machine,
         scenarioSource[scenarioId],
         "start",
+        scenarioDiagramHints[scenarioId],
       ),
     }),
     {
@@ -389,6 +390,7 @@ export async function resumeScenarioRun(
         machine,
         scenarioSource[scenarioId],
         "resume",
+        scenarioDiagramHints[scenarioId],
       ),
     }),
     {

@@ -193,6 +193,115 @@ export const scenarios: Scenario[] = [
   },
 ];
 
+/** Edges whose targets are chosen inside a transition function or choice state. */
+export type DiagramHints = Record<string, Array<{ event: string; targets: string[] }>>;
+
+export const scenarioDiagramHints: Record<ScenarioId, DiagramHints> = {
+  refund: {
+    deciding: [
+      { event: "NEEDS_DETAILS (first time)", targets: ["askingAmount"] },
+      { event: "NEEDS_DETAILS (again)", targets: ["needsDetails"] },
+    ],
+    askingAmount: [{ event: "DETAILS", targets: ["deciding"] }],
+    checkingLimit: [
+      { event: "amount ≤ $100", targets: ["refunded"] },
+      { event: "amount > $100", targets: ["awaitingApproval"] },
+    ],
+  },
+  approval: {},
+  routing: {
+    classifying: [
+      { event: "classifyIntent ✓ billing", targets: ["billingQueue"] },
+      { event: "classifyIntent ✓ technical", targets: ["technicalQueue"] },
+      { event: "classifyIntent ✓ account", targets: ["accountQueue"] },
+      { event: "classifyIntent ✓ unclear or unsure", targets: ["needsClarification"] },
+    ],
+  },
+  research: {},
+  pipeline: {
+    verifying: [
+      { event: "verifyTask ✓ passed", targets: ["complete"] },
+      { event: "verifyTask ✓ failed check", targets: ["rejected"] },
+    ],
+  },
+  retry: {
+    retrying: [
+      { event: "attempts remain", targets: ["classifying"] },
+      { event: "budget exhausted", targets: ["failed"] },
+    ],
+  },
+  tools: {
+    thinking: [
+      { event: "steps remain", targets: ["deciding"] },
+      { event: "step cap reached", targets: ["forcedAnswer"] },
+    ],
+  },
+  reflection: {
+    checking: [
+      { event: "score ≥ 3 or revision cap", targets: ["done"] },
+      { event: "revise again", targets: ["drafting"] },
+    ],
+  },
+  "email-drafter-v1": {
+    evaluating: [
+      { event: "evaluatePrompt ✓ complete", targets: ["drafting"] },
+      { event: "evaluatePrompt ✓ missing details", targets: ["clarifying"] },
+      { event: "evaluatePrompt ✗", targets: ["failed"] },
+    ],
+    clarifying: [
+      { event: "writeFollowUps ✓", targets: ["needsMoreInfo"] },
+      { event: "writeFollowUps ✗", targets: ["needsMoreInfo"] },
+    ],
+    needsMoreInfo: [
+      { event: "MORE_INFO", targets: ["evaluating"] },
+      { event: "DRAFT_ANYWAY", targets: ["drafting"] },
+    ],
+    drafting: [
+      { event: "draftEmail ✓ revisions remain", targets: ["reviewing"] },
+      { event: "draftEmail ✓ revision cap", targets: ["finalReview"] },
+      { event: "draftEmail ✗", targets: ["failed"] },
+    ],
+    reviewing: [
+      { event: "REQUEST_CHANGES", targets: ["drafting"] },
+      { event: "SEND missing details", targets: ["needsMoreInfo"] },
+      { event: "SEND complete", targets: ["sending"] },
+    ],
+    finalReview: [
+      { event: "SEND missing details", targets: ["needsMoreInfo"] },
+      { event: "SEND complete", targets: ["sending"] },
+    ],
+    sending: [{ event: "sendEmail ✗", targets: ["failed"] }],
+  },
+  "email-drafter-v2": {
+    drafting: [
+      { event: "draftEmail ✓ revisions remain", targets: ["reviewing"] },
+      { event: "draftEmail ✓ revision cap", targets: ["finalReview"] },
+      { event: "draftEmail ✗", targets: ["failed"] },
+    ],
+    reviewing: [
+      { event: "REQUEST_CHANGES", targets: ["drafting"] },
+      { event: "SEND ready", targets: ["sending"] },
+      { event: "SEND missing recipient", targets: ["needsRecipient"] },
+      { event: "ADD_SUBJECT", targets: ["needsSubject"] },
+    ],
+    finalReview: [
+      { event: "SEND ready", targets: ["sending"] },
+      { event: "SEND missing recipient", targets: ["needsRecipient"] },
+      { event: "ADD_SUBJECT", targets: ["needsSubject"] },
+    ],
+    needsSubject: [
+      { event: "SUBJECT_PROVIDED (revisions remain)", targets: ["reviewing"] },
+      { event: "SUBJECT_PROVIDED (revision cap)", targets: ["finalReview"] },
+      { event: "SUBJECT_PROVIDED (empty)", targets: ["needsSubject"] },
+    ],
+    needsRecipient: [
+      { event: "RECIPIENT_PROVIDED (valid)", targets: ["sending"] },
+      { event: "RECIPIENT_PROVIDED (invalid)", targets: ["needsRecipient"] },
+    ],
+    sending: [{ event: "sendEmail ✗", targets: ["failed"] }],
+  },
+};
+
 const machines: Record<ScenarioId, AnyStateMachine> = {
   refund: refundMachine,
   approval: approvalMachine,
@@ -205,6 +314,10 @@ const machines: Record<ScenarioId, AnyStateMachine> = {
   "email-drafter-v1": emailDrafterV1Machine,
   "email-drafter-v2": emailDrafterV2Machine,
 };
+
+export function getScenarioMachine(id: ScenarioId): AnyStateMachine {
+  return machines[id];
+}
 
 export const scenarioSource: Record<ScenarioId, string> = {
   refund: refundSource,
@@ -233,10 +346,15 @@ export function getScenario(id: ScenarioId): Scenario {
 
 type VizNode = Record<string, unknown>;
 
-function serializeTransition(value: unknown): VizNode | VizNode[] | undefined {
+function serializeTransition(
+  value: unknown,
+  includeDynamic = false,
+): VizNode | VizNode[] | undefined {
   if (typeof value === "string") return { target: value };
   if (Array.isArray(value)) {
-    const mapped = value.map(serializeTransition).filter(Boolean) as VizNode[];
+    const mapped = value
+      .map((item) => serializeTransition(item, includeDynamic))
+      .filter(Boolean) as VizNode[];
     return mapped.length ? mapped : undefined;
   }
   if (value && typeof value === "object") {
@@ -245,26 +363,27 @@ function serializeTransition(value: unknown): VizNode | VizNode[] | undefined {
     if (Array.isArray(target)) return { target };
   }
   // Function-form transition: target is dynamic, nothing static to draw.
+  if (includeDynamic && typeof value === "function") return { dynamic: true };
   return undefined;
 }
 
-function serializeTransitions(on: unknown): VizNode | undefined {
+function serializeTransitions(on: unknown, includeDynamic = false): VizNode | undefined {
   if (!on || typeof on !== "object") return undefined;
   const out: VizNode = {};
   for (const [event, value] of Object.entries(on as Record<string, unknown>)) {
-    const transition = serializeTransition(value);
+    const transition = serializeTransition(value, includeDynamic);
     if (transition) out[event] = transition;
   }
   return Object.keys(out).length ? out : undefined;
 }
 
-function serializeInvoke(invoke: unknown): VizNode | VizNode[] | undefined {
+function serializeInvoke(invoke: unknown, includeDynamic = false): VizNode | VizNode[] | undefined {
   const one = (entry: Record<string, unknown>): VizNode => {
     const node: VizNode = {};
     if (typeof entry.src === "string") node.src = entry.src;
     if (typeof entry.id === "string") node.id = entry.id;
-    const onDone = serializeTransition(entry.onDone);
-    const onError = serializeTransition(entry.onError);
+    const onDone = serializeTransition(entry.onDone, includeDynamic);
+    const onError = serializeTransition(entry.onError, includeDynamic);
     if (onDone) node.onDone = onDone;
     if (onError) node.onError = onError;
     return node;
@@ -274,7 +393,7 @@ function serializeInvoke(invoke: unknown): VizNode | VizNode[] | undefined {
   return undefined;
 }
 
-function serializeState(state: Record<string, unknown>): VizNode {
+function serializeState(state: Record<string, unknown>, includeDynamic = false): VizNode {
   const node: VizNode = {};
   if (state.type === "final" || state.type === "parallel") node.type = state.type;
   if (typeof state.initial === "string") node.initial = state.initial;
@@ -285,25 +404,35 @@ function serializeState(state: Record<string, unknown>): VizNode {
     node.meta = JSON.parse(JSON.stringify(state.meta)) as VizNode;
   }
 
-  const on = serializeTransitions(state.on);
+  const on = serializeTransitions(state.on, includeDynamic);
   if (on) node.on = on;
 
-  const invoke = serializeInvoke(state.invoke);
+  const invoke = serializeInvoke(state.invoke, includeDynamic);
   if (invoke) node.invoke = invoke;
 
   // `onDone` on a compound/parallel state (fires when children reach final).
-  const onDone = serializeTransition(state.onDone);
+  const onDone = serializeTransition(state.onDone, includeDynamic);
   if (onDone) node.onDone = onDone;
 
+  const always = serializeTransition(state.always, includeDynamic);
+  if (always) node.always = always;
+
   if (state.states && typeof state.states === "object") {
-    node.states = serializeStates(state.states as Record<string, Record<string, unknown>>);
+    node.states = serializeStates(
+      state.states as Record<string, Record<string, unknown>>,
+      includeDynamic,
+    );
   }
   return node;
 }
 
-function serializeStates(states: Record<string, Record<string, unknown>>): VizNode {
+function serializeStates(
+  states: Record<string, Record<string, unknown>>,
+  includeDynamic = false,
+): VizNode {
   const out: VizNode = {};
-  for (const [name, state] of Object.entries(states)) out[name] = serializeState(state);
+  for (const [name, state] of Object.entries(states))
+    out[name] = serializeState(state, includeDynamic);
   return out;
 }
 
@@ -315,6 +444,48 @@ export function toVizConfig(machine: AnyStateMachine): VizNode {
     initial: config.initial,
     ...(config.type === "parallel" ? { type: "parallel" } : {}),
     states: serializeStates((config.states ?? {}) as Record<string, Record<string, unknown>>),
+  };
+}
+
+/** Add labelled edges for runtime branches while keeping guided diagrams compact. */
+export function toGuidedVizConfig(machine: AnyStateMachine, hints: DiagramHints): VizNode {
+  const config = toVizConfig(machine);
+  const hideInteractionMeta = (node: VizNode) => {
+    const meta = node.meta as Record<string, unknown> | undefined;
+    if (meta?.interaction) {
+      delete meta.interaction;
+      if (Object.keys(meta).length === 0) delete node.meta;
+    }
+    for (const child of Object.values((node.states ?? {}) as Record<string, VizNode>)) {
+      hideInteractionMeta(child);
+    }
+  };
+  hideInteractionMeta(config);
+  for (const [path, rows] of Object.entries(hints)) {
+    const node = path.split(".").reduce<VizNode | undefined>((current, part) => {
+      return (current?.states as Record<string, VizNode> | undefined)?.[part];
+    }, config);
+    if (!node) continue;
+    const on = { ...((node.on ?? {}) as Record<string, unknown>) };
+    for (const row of rows) {
+      if (on[row.event] || row.targets.length === 0) continue;
+      on[row.event] = {
+        target: row.targets.length === 1 ? row.targets[0] : row.targets,
+      };
+    }
+    node.on = on;
+  }
+  return config;
+}
+
+/** Preserve function transitions as explicit runtime decisions in the outline. */
+export function toOutlineConfig(machine: AnyStateMachine): VizNode {
+  const config = (machine as unknown as { config: Record<string, unknown> }).config;
+  return {
+    id: config.id,
+    initial: config.initial,
+    ...(config.type === "parallel" ? { type: "parallel" } : {}),
+    states: serializeStates((config.states ?? {}) as Record<string, Record<string, unknown>>, true),
   };
 }
 

@@ -63,9 +63,9 @@ const workflow = new StateGraph(GraphState)
   .addEdge("rewriteQuery", "retrieve");
 ```
 
-The machine names the same three things: the model call is a request, the routing is a state, and the counter is a patch on the transition that causes it.
+The machine names the same three things: the model call is a request, the routing is a state, and the counter is a patch on the transition that causes it. This excerpt omits the retrieval and generation states.
 
-```ts
+```ts no-check
 import { z } from "zod";
 import { setupAgent } from "@statelyai/agent";
 

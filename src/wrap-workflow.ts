@@ -6,7 +6,7 @@
 import { createAsyncLogic, type AnyActorLogic } from "xstate";
 import type { PresetMachine } from "./machines/internal.js";
 import { AgentError } from "./errors.js";
-import type { Recorder } from "./equivalence.js";
+import type { RecordCallOptions, Recorder } from "./equivalence.js";
 import type { JsonValue } from "./event-log.js";
 import { runAgent, toJsonValue, type AgentRunOptions } from "./run-agent.js";
 import { setupAgent } from "./setup-agent.js";
@@ -104,6 +104,11 @@ export interface WrappedWorkflowRunOptions<TEffects, TInput, TOutput> extends Pi
    * result with `recorder.output`, so `recorder.recording` is a golden run.
    */
   recorder?: Recorder;
+  /**
+   * `recorder.fn` options per effect: `serialize` for a result that is not
+   * JSON, `revive` to rebuild it in replay, `redact` for arguments.
+   */
+  recordOptions?: { [K in keyof TEffects]?: RecordCallOptions };
 }
 
 /** The result of {@link wrapWorkflow}. */
@@ -491,14 +496,16 @@ export function wrapWorkflow<TInput, TOutput, TEffects extends WorkflowEffects<T
   return {
     machine,
     async run(input, options = {}) {
-      const { effects: overrides, recorder, ...runOptions } = options;
+      const { effects: overrides, recorder, recordOptions, ...runOptions } = options;
       // A class instance's prototype methods count, bound to the instance.
       let effects = {
         ...mapEffects(config.effects, (_name, effect) => effect),
         ...(overrides ? mapEffects(overrides, (_name, effect) => effect) : {}),
       } as TEffects;
       if (recorder) {
-        effects = mapEffects(effects, (name, effect) => recorder.fn(name, effect));
+        effects = mapEffects(effects, (name, effect) =>
+          recorder.fn(name, effect, recordOptions?.[name as keyof TEffects]),
+        );
       }
       // The signal goes to the workflow, not the run: a drop-in keeps the
       // workflow's own abort behavior.

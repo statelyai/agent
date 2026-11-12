@@ -7,7 +7,9 @@ import {
   compareRecordings,
   createRecorder,
   type CompareRecordingsOptions,
+  type CreateRecorderOptions,
   type EffectDivergence,
+  type RecordCallOptions,
   type Recorder,
   type Recording,
   stableStringify,
@@ -57,6 +59,17 @@ export interface CheckParityOptions<
    * raw errors.
    */
   normalizeError?: (error: unknown, scenario: TScenario) => unknown;
+  /**
+   * Builds the error a recorded failure throws in the port's replay, so code
+   * that checks `instanceof` sees its own class. Passed to `createRecorder`.
+   */
+  reviveError?: CreateRecorderOptions["reviveError"];
+  /**
+   * `recorder.fn` options per effect, on both sides: `serialize` for a
+   * result that is not JSON, `revive` to rebuild it for the port, `redact`
+   * for arguments.
+   */
+  recordOptions?: { [K in keyof TEffects]?: RecordCallOptions };
 }
 
 /** One scenario's row in a {@link CheckParityReport}. */
@@ -82,8 +95,14 @@ export interface CheckParityReport<TScenario extends CheckParityScenario, TOutpu
 }
 
 /** Each function effect wrapped with `recorder.fn`, by its key. */
-function recordEffects<TEffects extends object>(recorder: Recorder, effects: TEffects): TEffects {
-  return mapEffects(effects, (name, effect) => recorder.fn(name, effect));
+function recordEffects<TEffects extends object>(
+  recorder: Recorder,
+  effects: TEffects,
+  recordOptions?: { [K in keyof TEffects]?: RecordCallOptions },
+): TEffects {
+  return mapEffects(effects, (name, effect) =>
+    recorder.fn(name, effect, recordOptions?.[name as keyof TEffects]),
+  );
 }
 
 async function settle<T>(
@@ -148,14 +167,14 @@ export async function checkParity<
   const rows: CheckParityRow<TScenario, TOutput>[] = [];
   for (const scenario of options.scenarios) {
     const recorder = createRecorder();
-    const effects = recordEffects(recorder, options.effects(scenario));
+    const effects = recordEffects(recorder, options.effects(scenario), options.recordOptions);
     const normalize = (output: unknown) =>
       options.normalizeOutput ? options.normalizeOutput(output, scenario) : output;
     const before = await settle(() => options.before(scenario.input, effects), recorder, normalize);
     const recording = recorder.recording;
 
-    const replayer = createRecorder({ replay: recording });
-    const stand = recordEffects(replayer, options.effects(scenario));
+    const replayer = createRecorder({ replay: recording, reviveError: options.reviveError });
+    const stand = recordEffects(replayer, options.effects(scenario), options.recordOptions);
     const after = await settle(() => options.after(scenario.input, stand), replayer, normalize);
     const replay = replayer.recording;
 

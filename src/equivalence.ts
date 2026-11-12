@@ -45,6 +45,12 @@ export interface RecordedError {
   markers?: string[];
   /** `name` was an own enumerable field, as the AI SDK's errors set it; replay keeps it so. */
   ownName?: true;
+  /** The error's `cause`, when it was an Error; replay restores it. */
+  cause?: RecordedError;
+  /** An `AggregateError`'s `errors`, each a recorded error or `{ value }`
+   * for a reason that was not an Error (`{}` for `undefined`); replay revives
+   * an `AggregateError`. */
+  errors?: (RecordedError | { value?: unknown })[];
 }
 
 /** One model call. `call` is its 0-based position among model calls. */
@@ -149,6 +155,19 @@ export interface Recording {
 export interface CreateRecorderOptions {
   /** Answer model and tool calls from this recording instead of running them. */
   replay?: Recording;
+  /**
+   * In replay, builds the error a recorded failure throws, so code that checks
+   * `instanceof` sees its own class. Called for the error and each `cause`
+   * and `errors` entry; return `undefined` for the default, an `Error` (or
+   * `AggregateError`) with the recorded name, message, and fields.
+   *
+   * @example
+   * ```ts
+   * reviveError: (recorded) =>
+   *   recorded.name === "AbortError" ? new AbortError(recorded.message) : undefined,
+   * ```
+   */
+  reviveError?: (recorded: RecordedError) => Error | undefined;
   /**
    * In replay, `"replay"` (default) returns each tool's recorded result
    * without running it; `"live"` runs the wrapped tool (your stub) and records
@@ -307,8 +326,9 @@ export class RecordingDivergenceError extends Error {
   override name = "RecordingDivergenceError";
 }
 
-function toRecordedError(error: unknown): RecordedError {
+function toRecordedError(error: unknown, path = new Set<unknown>()): RecordedError {
   if (!(error instanceof Error)) return { name: "Error", message: String(error) };
+  path.add(error);
   const recorded: RecordedError = { name: error.name, message: error.message };
   if (Object.prototype.propertyIsEnumerable.call(error, "name")) recorded.ownName = true;
   const code = (error as { code?: unknown }).code;
@@ -331,11 +351,57 @@ function toRecordedError(error: unknown): RecordedError {
     }
   }
   if (markers.size) recorded.markers = [...markers];
+  // `path` holds the errors above this one, so only a cycle is cut.
+  if (error.cause instanceof Error && !path.has(error.cause)) {
+    recorded.cause = toRecordedError(error.cause, path);
+  }
+  if (error instanceof AggregateError && Array.isArray(error.errors)) {
+    recorded.errors = error.errors.flatMap(
+      (item: unknown): NonNullable<RecordedError["errors"]> => {
+        if (!(item instanceof Error)) {
+          // A reason that is not JSON (a cycle) records as its string; `undefined` as `{}`.
+          try {
+            return [{ value: toJson(item) }];
+          } catch {
+            try {
+              return [{ value: String(item) }];
+            } catch {
+              return [{ value: "[unserializable]" }];
+            }
+          }
+        }
+        return path.has(item) ? [] : [toRecordedError(item, path)];
+      },
+    );
+  }
+  path.delete(error);
   return recorded;
 }
 
-function fromRecordedError({ data, markers, name, ownName, ...fields }: RecordedError): Error {
-  const error = Object.assign(new Error(fields.message), fields, data);
+function fromRecordedError(
+  recorded: RecordedError,
+  reviveError?: CreateRecorderOptions["reviveError"],
+): Error {
+  const { data, markers, name, ownName, cause, errors, ...fields } = recorded;
+  const revivedErrors = errors?.map((item) =>
+    "name" in item ? fromRecordedError(item, reviveError) : structuredClone(item.value),
+  );
+  // Non-enumerable, as `new Error(message, { cause })` and `AggregateError` set them.
+  const define = (target: Error, key: "cause" | "errors", value: unknown) =>
+    Object.defineProperty(target, key, { value, writable: true, configurable: true });
+  const custom = reviveError?.(structuredClone(recorded));
+  if (custom) {
+    // A custom class still gets the recorded children, revived the same way.
+    if (cause && custom.cause === undefined)
+      define(custom, "cause", fromRecordedError(cause, reviveError));
+    if (revivedErrors && custom instanceof AggregateError) define(custom, "errors", revivedErrors);
+    return custom;
+  }
+  const base = revivedErrors
+    ? new AggregateError(revivedErrors, fields.message)
+    : new Error(fields.message);
+  const error = Object.assign(base, fields, data);
+  if (cause) define(error, "cause", fromRecordedError(cause, reviveError));
   // Enumerable only when the original's was, so the revived one serializes alike.
   if (ownName || name !== "Error") {
     Object.defineProperty(error, "name", {
@@ -427,6 +493,30 @@ async function* iterate(chunks: unknown[]): AsyncGenerator<unknown> {
 }
 
 /**
+ * Yields what `revived` yields (awaited), if it is an async iterable, then
+ * throws the recorded `failure`, if any. Like the recording wrapper, it calls
+ * `onError` only for a failure the port reads to, or one its consumer throws
+ * in (`.throw()`); `.return()` ends it with no error.
+ */
+async function* replayStream(
+  revived: unknown,
+  onError: (error: RecordedError) => void,
+  failure?: { recorded: RecordedError; error: Error },
+): AsyncGenerator<unknown> {
+  try {
+    const value = await revived;
+    if (isAsyncIterable(value)) yield* value;
+  } catch (error) {
+    onError(toRecordedError(error));
+    throw error;
+  }
+  if (failure) {
+    onError(failure.recorded);
+    throw failure.error;
+  }
+}
+
+/**
  * Creates a {@link Recorder}. With no options it records: every wrapped call
  * runs for real. With `replay` it answers from a recording instead.
  */
@@ -444,6 +534,8 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     options.normalize?.(effect, list.indexOf(effect), list) ?? effect;
   let modelCalls = 0;
   let toolsInFlight = 0;
+  const reviveRecordedError = (error: RecordedError) =>
+    fromRecordedError(error, options.reviveError);
 
   /**
    * The earliest unused recorded call that fits this one: one `translate`
@@ -503,14 +595,26 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
         const { recorded, answer } = replayed;
         usedModels.add(recorded);
         effect.replayed = recorded.call;
+        const recordError = (error: RecordedError) => {
+          effect.error = error;
+        };
+        if (answer.error && answer.stream && streamed && seam === "openai") {
+          effect.stream = answer.stream;
+          return replayStream(iterate(answer.stream), recordError, {
+            recorded: answer.error,
+            error: reviveRecordedError(answer.error),
+          });
+        }
         if (answer.error) {
           effect.error = answer.error;
-          throw fromRecordedError(answer.error);
+          throw reviveRecordedError(answer.error);
         }
         effect.response = answer.response;
         effect.stream = answer.stream;
         if (seam === "openai") {
-          return streamed ? iterate(answer.stream ?? []) : structuredClone(answer.response);
+          return streamed
+            ? replayStream(iterate(answer.stream ?? []), recordError)
+            : structuredClone(answer.response);
         }
         return streamed
           ? {
@@ -543,9 +647,14 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
     if (seam === "openai") {
       const source = result as AsyncIterable<unknown>;
       return (async function* () {
-        for await (const chunk of source) {
-          parts.push(toJson(chunk));
-          yield chunk;
+        try {
+          for await (const chunk of source) {
+            parts.push(toJson(chunk));
+            yield chunk;
+          }
+        } catch (error) {
+          effect.error = toRecordedError(error);
+          throw error;
         }
       })();
     }
@@ -622,7 +731,7 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
           if (recorded.sync) effect.sync = true;
           if (recorded.error) {
             effect.error = recorded.error;
-            throw fromRecordedError(recorded.error);
+            throw reviveRecordedError(recorded.error);
           }
           effect.output = recorded.output;
           return structuredClone(recorded.output);
@@ -689,14 +798,26 @@ export function createRecorder(options: CreateRecorderOptions = {}): Recorder {
           throw error;
         }
         usedCalls.add(recorded);
-        if (recorded.error) {
-          effect.error = recorded.error;
-          throw fromRecordedError(recorded.error);
-        }
         if (recorded.stream) {
+          // A stream that failed replays its chunks, then the error.
           effect.stream = recorded.stream;
           const chunks = structuredClone(recorded.stream);
-          return revive ? revive(chunks) : iterate(chunks);
+          const revived = revive ? revive(chunks) : iterate(chunks);
+          const { error } = recorded;
+          // A custom revive may return any value; only a failure wraps it.
+          if (!error && revive) return revived;
+          const recordError = (thrown: RecordedError) => {
+            effect.error = thrown;
+          };
+          return replayStream(
+            revived,
+            recordError,
+            error && { recorded: error, error: reviveRecordedError(error) },
+          );
+        }
+        if (recorded.error) {
+          effect.error = recorded.error;
+          throw reviveRecordedError(recorded.error);
         }
         effect.result = recorded.result;
         const result = structuredClone(recorded.result);

@@ -161,7 +161,7 @@
     "proto:prefabs": "tsx .scratch/prefabs/demo.ts",
     "docs:check": "tsx scripts/check-docs-snippets.ts",
     "typecheck": "pnpm run typecheck:src && pnpm run typecheck:examples && pnpm run typecheck:example-packages",
-    "typecheck:src": "tsc --noEmit",
+    "typecheck:src": "tsc --noEmit && tsc -p tsconfig.exact-optional.json",
     "typecheck:examples": "tsc -p examples/tsconfig.json --noEmit",
     "typecheck:example-packages": "pnpm run build && tsc -p examples/next-host --noEmit && tsc -p examples/tanstack-ai-stream --noEmit && tsc -p examples/cloudflare-agent-host --noEmit && tsc -p examples/cloudflare-workers-ai-host --noEmit && tsc -p demo --noEmit",
     "test:cloudflare": "pnpm --filter @statelyai/example-cloudflare-agent-host test && pnpm --filter @statelyai/example-cloudflare-workers-ai-host test",
@@ -192,7 +192,7 @@
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/context-async-hooks": "^2.12.0",
     "@opentelemetry/sdk-trace-base": "^2.12.0",
-    "@statelyai/sdk": "0.45.0",
+    "@statelyai/sdk": "0.47.0",
     "@tanstack/ai": "^0.66.0",
     "@types/node": "^22.20.5",
     "@types/react": "^19.3.0",
@@ -211,7 +211,7 @@
     "twoslash": "^0.3.9",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3",
-    "xstate": "6.0.0-beta.0",
+    "xstate": "6.0.0-beta.2",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
@@ -220,7 +220,7 @@
     "ai": "*",
     "ajv": "*",
     "openai": "*",
-    "xstate": "6.0.0-beta.0"
+    "xstate": "6.0.0-beta.2"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/api": {
