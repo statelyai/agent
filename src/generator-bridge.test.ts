@@ -152,6 +152,30 @@ describe("createGeneratorBridge", () => {
     await expect(consume()).rejects.toBe(failure);
   });
 
+  test("cleanup after a yield in `finally` still runs once the run settles", async () => {
+    const bridge = createGeneratorBridge<string>();
+    const log: string[] = [];
+    const forwarded = bridge.forward(
+      (async function* () {
+        try {
+          yield "a";
+        } finally {
+          yield "cleanup";
+          log.push("after cleanup yield");
+        }
+        return "done";
+      })(),
+    );
+    let settle!: (value: string) => void;
+    const gen = bridge.stream(new Promise<string>((resolve) => (settle = resolve)));
+    await gen.next();
+    const stopping = gen.return(undefined as never);
+    settle("stopped");
+    await stopping;
+    expect(await forwarded).toEqual({ closed: true, value: undefined });
+    expect(log).toEqual(["after cleanup yield"]);
+  });
+
   test("a stream returned before its first pull still releases puts", async () => {
     const bridge = createGeneratorBridge<string>();
     let settle!: (value: string) => void;

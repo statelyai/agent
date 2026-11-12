@@ -2535,9 +2535,10 @@ export interface AgentRunOptions<TMachine extends AnyStateMachine>
    * {@link AgentRuntime.send}; one sent before the run starts is delivered
    * after the opening `event`. An inbox event that arrives while the run is
    * idle resumes it, ahead of a pending `onIdle` answer (that answer is then
-   * dropped). Without `onIdle`, the run returns at the first idle state and a
-   * later `send` returns `false`: a pause that waits for a resume needs
-   * `onIdle` as well. One inbox serves one `runAgent` call.
+   * dropped). Without `onIdle`, the run returns at the first idle state
+   * (an event that lands while that pass is finishing still resumes it), and
+   * a `send` after `runAgent` returns gets `false`: a pause that waits for a
+   * resume needs `onIdle` as well. One inbox serves one `runAgent` call.
    */
   inbox?: AgentInbox<EventFromLogic<TMachine>>;
 }

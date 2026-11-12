@@ -116,7 +116,9 @@ export function createGeneratorBridge<T>(): GeneratorBridge<T> {
           step = await generator.throw(error);
           continue;
         }
-        if (pulled) {
+        if (pulled || closed) {
+          // Once closed, a value yielded while unwinding is followed by the
+          // rest of the cleanup, not a second `return()` that would skip it.
           step = await generator.next();
         } else {
           closed = true;
