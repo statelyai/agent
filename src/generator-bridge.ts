@@ -27,7 +27,9 @@ export interface GeneratorBridge<T> {
    * resolves. Values the generator yields while unwinding still reach the
    * consumer, as with `yield*`.
    */
-  forward<TReturn>(generator: AsyncGenerator<T, TReturn, undefined>): Promise<ForwardResult<TReturn>>;
+  forward<TReturn>(
+    generator: AsyncGenerator<T, TReturn, undefined>,
+  ): Promise<ForwardResult<TReturn>>;
   /**
    * Consumer side: yields each value the producer puts until `settled`
    * resolves, then returns what it resolved to. Pass the run:
@@ -36,9 +38,21 @@ export interface GeneratorBridge<T> {
    * producer has unwound by then, and returns what `settled` resolved to
    * rather than the value passed to `.return()`. As with any `yield*`, a
    * stopped consumer skips the code after it in the enclosing generator;
-   * cleanup that must run either way goes in a `finally`.
+   * cleanup that must run either way goes in a `finally`. A run that fails
+   * while a stopped consumer waits (a legacy `finally` that throws) throws
+   * its error from `.return()` instead.
    */
   stream<TSettled>(settled: PromiseLike<TSettled>): AsyncGenerator<T, TSettled, undefined>;
+}
+
+/** A `runAgent` result that settled with an error. */
+function isFailedRun(value: unknown): value is { status: "error"; error: unknown } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { status?: unknown }).status === "error" &&
+    "error" in value
+  );
 }
 
 interface Item<T> {
@@ -111,7 +125,9 @@ export function createGeneratorBridge<T>(): GeneratorBridge<T> {
       }
       return { closed, value: step.value } as ForwardResult<TReturn>;
     },
-    async *stream<TSettled>(settled: PromiseLike<TSettled>) {
+    stream<TSettled>(settled: PromiseLike<TSettled>) {
+      // Outside the generator body: a stream returned before its first
+      // `next()` never runs it, and its producer's puts must still be released.
       const end = () => {
         ended = true;
         // Puts from an actor the run stopped: release them so it unwinds.
@@ -123,10 +139,17 @@ export function createGeneratorBridge<T>(): GeneratorBridge<T> {
         while (!queue.length && !ended) await new Promise<void>((resolve) => (wake = resolve));
         return queue.shift();
       };
-      const loop = async function* (): AsyncGenerator<T, TSettled, undefined> {
+      const loop = async function* (stopped: boolean): AsyncGenerator<T, TSettled, undefined> {
         while (true) {
           const item = await next();
-          if (!item) return await settled;
+          if (!item) {
+            const result = await settled;
+            // A stopped consumer skips the code after `yield*` that would
+            // check the run: a failure while unwinding is thrown, as a
+            // throwing `finally` in the original generator would be.
+            if (stopped && isFailedRun(result)) throw result.error;
+            return result;
+          }
           let resumed = false;
           try {
             yield item.value;
@@ -142,12 +165,12 @@ export function createGeneratorBridge<T>(): GeneratorBridge<T> {
               // `yield*`), and the run settles before this returns.
               item.pulled(false);
               // oxlint-disable-next-line no-unsafe-finally
-              return yield* loop();
+              return yield* loop(true);
             }
           }
         }
       };
-      return yield* loop();
+      return loop(false);
     },
   };
 }

@@ -27,13 +27,20 @@ const loopMachine = setupAgent({
         src: "pass",
         input: ({ context }) => ({ pass: context.passes }),
         onDone: ({ context, output }) => ({
-          target: output.kind === "continue" ? "head" : output.kind === "closed" ? "closed" : "done",
+          target:
+            output.kind === "continue" ? "head" : output.kind === "closed" ? "closed" : "done",
           context: { ...context, passes: context.passes + 1 },
         }),
       },
     },
-    capped: { type: "final", output: ({ context }) => ({ kind: "capped", passes: context.passes }) },
-    closed: { type: "final", output: ({ context }) => ({ kind: "closed", passes: context.passes }) },
+    capped: {
+      type: "final",
+      output: ({ context }) => ({ kind: "capped", passes: context.passes }),
+    },
+    closed: {
+      type: "final",
+      output: ({ context }) => ({ kind: "closed", passes: context.passes }),
+    },
     done: { type: "final", output: ({ context }) => ({ kind: "done", passes: context.passes }) },
   },
 });
@@ -51,8 +58,11 @@ function carve(
         return { kind: step.closed ? "closed" : step.value };
       },
     });
-    const result = yield* bridge.stream(runAgent(loopMachine, { input: { max }, actors: { pass } }));
-    if (result.status !== "done") throw result.status === "error" ? result.error : new Error("idle");
+    const result = yield* bridge.stream(
+      runAgent(loopMachine, { input: { max }, actors: { pass } }),
+    );
+    if (result.status !== "done")
+      throw result.status === "error" ? result.error : new Error("idle");
     return result.output;
   };
 }
@@ -123,6 +133,33 @@ describe("createGeneratorBridge", () => {
     const step = await gen.return(undefined as never);
     expect(step.done).toBe(true);
     expect(step.value).toMatchObject({ status: "done", output: { kind: "closed", passes: 1 } });
+  });
+
+  test("a cleanup that throws after a break reaches the consumer", async () => {
+    const failure = new Error("cleanup failed");
+    const loop = carve(async function* () {
+      try {
+        yield "started";
+        return "continue";
+      } finally {
+        // oxlint-disable-next-line no-unsafe-finally
+        throw failure;
+      }
+    });
+    const consume = async () => {
+      for await (const _value of loop()) break;
+    };
+    await expect(consume()).rejects.toBe(failure);
+  });
+
+  test("a stream returned before its first pull still releases puts", async () => {
+    const bridge = createGeneratorBridge<string>();
+    let settle!: (value: string) => void;
+    const gen = bridge.stream(new Promise<string>((resolve) => (settle = resolve)));
+    const pending = bridge.put("event");
+    await gen.return(undefined as never);
+    settle("done");
+    await expect(pending).resolves.toBe(false);
   });
 
   test("values yielded while unwinding still reach the consumer", async () => {
