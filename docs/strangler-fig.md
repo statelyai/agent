@@ -42,14 +42,14 @@ When the loop is a class method that calls its own private methods for the model
 
 ### Seams for other shapes
 
-| Shape                                                     | Seam                                                                                                                                                                                                                                                          |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Effect-TS generator                                       | Transliterate the generator to async, statement for statement, and bridge each effect from Effect to Promise, keeping the fiber context, typed failures, and interrupts. The parity baseline is the async transliteration; the old suite covers the original. |
-| Redux thunk                                               | The thunk's `extra` argument plus its nested dispatches. Wrap `dispatch` so every nested thunk gets the effects-backed `extra`.                                                                                                                               |
-| LangGraph graph                                           | Wrap `graph.invoke`. Fake the model factory with the test runner's module mock (`vi.mock`); the fake calls the run's effects.                                                                                                                                 |
-| A closure inside a DI or Layer factory                    | Copy the module, identical outside the carved function, and swap it in with a module mock.                                                                                                                                                                    |
+| Shape                                                                                             | Seam                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Effect-TS generator                                                                               | Transliterate the generator to async, statement for statement, and bridge each effect from Effect to Promise, keeping the fiber context, typed failures, and interrupts. The parity baseline is the async transliteration; the old suite covers the original.                                                                                                                                                                                                                                                                                                                                 |
+| Redux thunk                                                                                       | The thunk's `extra` argument plus its nested dispatches. Wrap `dispatch` so every nested thunk gets the effects-backed `extra`.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| LangGraph graph                                                                                   | Wrap `graph.invoke`. Fake the model factory with the test runner's module mock (`vi.mock`); the fake calls the run's effects.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| A closure inside a DI or Layer factory                                                            | Copy the module, identical outside the carved function, and swap it in with a module mock.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Async generator the consumer pulls (yields events, `.return()` on break, `.throw()` to interrupt) | Step 0: wrap the host call that drains the generator, with the collected events as the output. Carve: the machine runs the loop head and each pass is an actor. `createGeneratorBridge` carries the pull contract across: the actor calls `bridge.forward(legacyPass())` and the original generator becomes `yield* bridge.stream(runAgent(...))`. Each value waits for the consumer's next pull, `.throw()` reaches the legacy generator, and `.return()` unwinds it and awaits the run before it resolves. Code after the `yield*` does not run on `.return()`; put cleanup in a `finally`. |
-| A step loop inside the model SDK (`stopWhen`, `maxSteps`) | No loop to carve. The SDK call stays one effect; carve the control flow around it, such as handoff or approval.                                                                                                                                               |
+| A step loop inside the model SDK (`stopWhen`, `maxSteps`)                                         | No loop to carve. The SDK call stays one effect; carve the control flow around it, such as handoff or approval.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## Step 0: wrap
 
@@ -112,9 +112,9 @@ Each effect call is two events, `effect.call` then `effect.done` or `effect.erro
 
 `support.run(input, options)` takes these `runAgent` options: `signal`, `inspect`, `onTransition`, `onTrace`, `onEvent`, `metadata`, and `verification`. Two more are its own:
 
-| Option     | Purpose                                                                                     |
-| ---------- | ------------------------------------------------------------------------------------------- |
-| `effects`  | Replaces some effects for one run: fakes, stubs, replay stand-ins                           |
+| Option     | Purpose                                                                                       |
+| ---------- | --------------------------------------------------------------------------------------------- |
+| `effects`  | Replaces some effects for one run: fakes, stubs, replay stand-ins                             |
 | `recorder` | Wraps every effect with `recorder.fn(name, fn)` and records the result with `recorder.output` |
 
 Effects bound to one call's live objects (a request context, a span) go in per call: create the workflow once and pass `run(input, { effects })` on every call. The `effects` given to `wrapWorkflow` are then the defaults.
@@ -252,13 +252,13 @@ What it does per scenario:
 2. Runs `after` on replay stand-ins: each call is answered from the recording, and no effect runs.
 3. Compares the two recordings with `compareRecordings`: effect names, call order, arguments, results, and the output.
 
-| Field                        | Value                                                                  |
-| ---------------------------- | ---------------------------------------------------------------------- |
-| `report.equivalent`          | `true` when every scenario is                                          |
-| `row.divergences`            | `compareRecordings` divergences: `call-args`, `missing-effect`, …      |
-| `row.before` / `row.after`   | `{ output }` or `{ error }`                                            |
-| `row.recording` / `row.replay` | The baseline recording, and what `after` did in replay              |
-| `report.scenarios`           | The rows, one per scenario, in order                                   |
+| Field                          | Value                                                             |
+| ------------------------------ | ----------------------------------------------------------------- |
+| `report.equivalent`            | `true` when every scenario is                                     |
+| `row.divergences`              | `compareRecordings` divergences: `call-args`, `missing-effect`, … |
+| `row.before` / `row.after`     | `{ output }` or `{ error }`                                       |
+| `row.recording` / `row.replay` | The baseline recording, and what `after` did in replay            |
+| `report.scenarios`             | The rows, one per scenario, in order                              |
 
 - An `after` that throws is a row with `after: { error }`, never a thrown `checkParity`. A call the recording cannot answer throws `RecordingDivergenceError` inside `after`.
 - When both sides throw, they match on the error's name and message.
@@ -325,20 +325,24 @@ Run the module's own tests against the port by swapping the module.
 
 Each carved phase adds what the machine can prove:
 
-| Step | Change                         | Gained                                                          |
-| ---- | ------------------------------ | --------------------------------------------------------------- |
-| 0    | none                           | transitions, traces, event log, `signal`, a recorded baseline   |
-| 1    | classify retry becomes states  | `canReach` proves the classifier runs at most `MAX_ATTEMPTS` times |
-| n    | the last phase becomes states  | the machine is the workflow; drop the wrapper                   |
+| Step | Change                        | Gained                                                             |
+| ---- | ----------------------------- | ------------------------------------------------------------------ |
+| 0    | none                          | transitions, traces, event log, `signal`, a recorded baseline      |
+| 1    | classify retry becomes states | `canReach` proves the classifier runs at most `MAX_ATTEMPTS` times |
+| n    | the last phase becomes states | the machine is the workflow; drop the wrapper                      |
 
 The step 1 proof in `examples/strangler-fig/index.test.ts`:
 
 ```ts no-check
-const tooMany = await canReach(supportMachine, (snapshot) => snapshot.context.attempts > MAX_ATTEMPTS, {
-  input: ticket,
-  outputs: { classify: [classification], resolve: [resolved] },
-  errors: { classify: new Error("model overloaded") },
-});
+const tooMany = await canReach(
+  supportMachine,
+  (snapshot) => snapshot.context.attempts > MAX_ATTEMPTS,
+  {
+    input: ticket,
+    outputs: { classify: [classification], resolve: [resolved] },
+    errors: { classify: new Error("model overloaded") },
+  },
+);
 // { reachable: false, complete: true }
 ```
 

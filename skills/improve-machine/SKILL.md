@@ -29,12 +29,12 @@ This is step 4 of 4, after `loop-to-machine`, `add-traces`, and `add-evals`. To 
 
 The rounds are the same for both formats. What differs is what the diff may touch and how it is gated.
 
-| | TypeScript policy | JSON policy |
-| --- | --- | --- |
-| The policy | A `setupAgent` machine in its own file(s), with a declared `version` | An `AgentWorkflowConfig` file |
+|            | TypeScript policy                                                                                                                                                        | JSON policy                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| The policy | A `setupAgent` machine in its own file(s), with a declared `version`                                                                                                     | An `AgentWorkflowConfig` file       |
 | May change | The policy file(s) and their `CHANGELOG.md`; once, the line in the runner that routes the decision to the policy; tests that pin measured numbers (see the pull request) | The config's `states` and `context` |
-| Gates | `tsc`, `lintAgentMachine`, `explorePaths` on the policy, the environment check, the overfit check | `verifyAgentConfig` |
-| Vocabulary | What the policy file imports and the events the environment offers | The `allow` lists |
+| Gates      | `tsc`, `lintAgentMachine`, `explorePaths` on the policy, the environment check, the overfit check                                                                        | `verifyAgentConfig`                 |
+| Vocabulary | What the policy file imports and the events the environment offers                                                                                                       | The `allow` lists                   |
 
 **No policy yet.** `loop-to-machine` leaves a single model decision inside the environment when the old code had no policy logic. Then:
 
@@ -52,11 +52,11 @@ For a TypeScript policy, before the first round:
 
 A tool loop or a scheduler has no `agent.decide`: the model picks tools inside one text request and the machine only gates. There is no policy to diff. Traces still drive change, as proposals a person reviews:
 
-| Proposal | Evidence from traces | Goes to |
-| --- | --- | --- |
-| An approval rule ("always allow `read_file` under `src/`", "always block `rm -rf`") | Approve/reject verdicts grouped by tool and argument pattern, counted from the log's approval events; `foldTraces` rows for the approval state; `traceCoverage` for approval handlers no run exercised (propose nothing for those) | Environment change request |
-| A cap or threshold (retry cap, max steps, batch size) | Runs ending in the cap's failure final, and how close passing runs came to it | Environment change request |
-| Prompt or tool-description wording of the text request | The rounds below, scored by the objective | A versioned request config the improver may edit |
+| Proposal                                                                            | Evidence from traces                                                                                                                                                                                                               | Goes to                                          |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| An approval rule ("always allow `read_file` under `src/`", "always block `rm -rf`") | Approve/reject verdicts grouped by tool and argument pattern, counted from the log's approval events; `foldTraces` rows for the approval state; `traceCoverage` for approval handlers no run exercised (propose nothing for those) | Environment change request                       |
+| A cap or threshold (retry cap, max steps, batch size)                               | Runs ending in the cap's failure final, and how close passing runs came to it                                                                                                                                                      | Environment change request                       |
+| Prompt or tool-description wording of the text request                              | The rounds below, scored by the objective                                                                                                                                                                                          | A versioned request config the improver may edit |
 
 - **Approval rules and caps are environment.** Write each as a change request ([reference.md](reference.md)) with the counts, the pattern, and thread ids. Never write a persisted "always allow" rule yourself. Propose a rule only from a pattern with no rejection and no violation in the training runs, and say how many runs it rests on.
 - **The request config is the policy.** Move the request's system prompt and tool descriptions into one file with a `version` (`requests/agent.ts`, or JSON), and stamp that version as the decider version (`add-traces`). The move itself is a one-time environment edit, like the routing line when a policy is first introduced: it changes the request's declaration to import the config and nothing else, it is behavior-preserving (replay the training runs before and after), and it goes in the same pull request as `v0` of the config. Re-record the environment hash after it. From then on, one round changes the config once, through the same rounds, replays, and pull request as a policy.
