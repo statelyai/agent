@@ -1,5 +1,26 @@
 # @statelyai/agent
 
+## 2.0.0-alpha.39
+
+### Patch Changes
+
+- [#230](https://github.com/statelyai/agent/pull/230) [`043642e`](https://github.com/statelyai/agent/commit/043642e9e2a77efd9dbd7e7ba6403f0e1dbd62a8) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Require XState 6.0.0-beta.2. Update the demo and host examples to use this beta and Stately SDK 0.47.0. Complete the demo's fallback statechart outlines and show the active state during streamed runs.
+
+- [#236](https://github.com/statelyai/agent/pull/236) [`77d1fb9`](https://github.com/statelyai/agent/commit/77d1fb9eddad7d469425777a3939ccbf7ec47295) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Bind live objects per run:
+  
+  - `runAgent` and `createAgentRuntime` take `actions`, merged onto the machine like `actors`. Keys and params are checked against the actions declared in `setupAgent`.
+  - `setupAgent` keeps the declared action types, so `actions.name` in a transition is typed and a misspelled name is a type error.
+  - `checkParity` takes `setup: (scenario, side) => liveObject`, called once per side; its result is passed to `effects`, `before` and `after`.
+
+- [#233](https://github.com/statelyai/agent/pull/233) [`46aa2b2`](https://github.com/statelyai/agent/commit/46aa2b29ec091ad6d6ca1590a67ec701d8bfe15c) Thanks [@davidkpiano](https://github.com/davidkpiano)! - `recordLog` marks an entry `ignored: true` when the machine had no transition for an event sent to it, in the state the event arrived in. `xstate.*` events are never marked. A refused event can now be read from the log without a replay. `AgentLogEntry` gains the optional `ignored` field, and replay does not read it.
+
+- [#235](https://github.com/statelyai/agent/pull/235) [`5d09f67`](https://github.com/statelyai/agent/commit/5d09f67a069575445e928545c4c285764479599f) Thanks [@davidkpiano](https://github.com/davidkpiano)! - Add `createGeneratorBridge` for carving a loop whose public surface is an async generator: an actor forwards each pass's values to the consumer one pull at a time, with `.throw()` and `.return()` forwarded back. `checkParity` and `wrapWorkflow().run` take `recordOptions` per effect (`serialize`, `revive`, `redact`).
+
+- [#234](https://github.com/statelyai/agent/pull/234) [`6f32118`](https://github.com/statelyai/agent/commit/6f3211865c3e97de8cb338ecf201838e5d8e3e99) Thanks [@davidkpiano](https://github.com/davidkpiano)! - - `StandardSchemaV1` accepts schemas whose `types` is `| undefined`, so zod 4 schemas keep their types under `exactOptionalPropertyTypes`.
+  - A recorded stream that fails replays its chunks, then the error, in `recorder.fn`, `recorder.client`, and the OpenAI seam. An OpenAI stream that fails midway now records the error.
+  - Recorded errors keep `cause` and an `AggregateError`'s `errors`; replay restores them. `createRecorder` and `checkParity` take `reviveError` to rebuild error classes for `instanceof` checks.
+  - Docs and the loop-to-machine skill cover async generator loops, class seams on both sides of parity, and host cancel registries with `runAgent`'s asynchronous start.
+
 ## 2.0.0-alpha.38
 
 ### Patch Changes
