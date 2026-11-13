@@ -38,6 +38,7 @@ interface AgentLogEntry {
   attempts?: DecisionAttempt[];
   decidedBy?: string;
   actorPath?: string[];
+  ignored?: true;
 }
 ```
 
@@ -49,6 +50,7 @@ interface AgentLogEntry {
 - `attempts` holds the decision attempts the machine did not accept before this entry's event landed. Replay ignores it. See [Decision attempts](#decision-attempts).
 - `decidedBy` names the `agent.decide` call an entry settles, as `<requestId>#<n>`: the chosen event, and the invoke's `xstate.done.actor` when the event left it running. A decision usually ends by sending its event, so its invoke never completes; a [`callKey`](hosts.md#idempotency-keys) for a log that cannot be folded counts it from this field. Inside an invoked child machine the call is named by the child's path, as `<childId>/<requestId>#<n>`. Replay ignores it.
 - `actorPath` names the invoked child machine an entry was delivered to, as the invoke ids from the root down (`["worker"]`, `["worker", "review"]`). It is omitted for an entry the root received. Replay applies the event to that child's snapshot with the child's own logic.
+- `ignored` is set when the machine had no transition for an event sent to it, in the state the event arrived in. It is never set on an `xstate.*` event. Only `recordLog` sets it. It records what happened in the live run. Replay does not read it and applies the event like any other.
 
 Entries are strict JSON, and plain objects and arrays from another realm (a jest test's vm context) count as JSON. Object fields set to `undefined` in an input or event are dropped, as `JSON.stringify` drops them. `createReplayEntry`, `initEntry`, and every store append reject the other values JSON would drop or coerce (functions, symbols, bigint, non-finite numbers, `Date`, `Map`, `Set`, class instances, cycles, `undefined` array items) with `NonSerializableAgentEventError`, which carries the offending `path`. `Error` payloads on `xstate.error.actor` are normalized to `{ name, message, code?, cause?, "@error": true }`, keeping `code` when it is a string or a number; an `AgentDecisionExhaustedError` also keeps its `attempts`. `replay` turns objects marked `"@error"` back into `Error` objects, so an `onError` that checks `instanceof Error` takes the same branch on replay. A thrown plain object stays a plain object. Other properties of the thrown value are not kept. Use `assertJsonSerializable` and `assertAgentLogEntry` at custom transport boundaries.
 
@@ -141,6 +143,7 @@ const { snapshot } = replay(orderMachine, log.entries);
 
 - An actor created from a `snapshot` starts its log from that snapshot.
 - Each entry carries `verification.stateHash`, so `replay` verifies the fold.
+- A sent event the machine had no transition for is recorded with `ignored: true`, so a refused attempt can be read from the log without a replay.
 - Attached after `start()`, it misses the init event, and reading `log.entries` throws `AgentEventLogError`. An event that cannot be journaled (a payload that is not JSON) stops the recording the same way.
 
 To build entries yourself, use `initEntry` for index 0 and `createReplayEntry` for each subsequent external input.
