@@ -620,6 +620,54 @@ describe("runAgent", () => {
     expect(result.status === "error" ? result.cause : undefined).toBe("aborted");
   });
 
+  test("actions and actors bound per run reach that run's live objects", async () => {
+    class Store {
+      log: string[] = [];
+    }
+    const machine = setupAgent({
+      context: z.object({ n: z.number() }),
+      output: z.object({ n: z.number() }),
+      // The no-op is the default for tests and `explorePaths`; hosts bind per run.
+      actions: { notify: (_params: { status: string }) => {} },
+      actors: { work: createAsyncLogic<number, void>({ run: async () => 0 }) },
+    }).createMachine({
+      context: { n: 0 },
+      initial: "working",
+      states: {
+        working: {
+          entry: ({ actions }, enq) => enq(actions.notify, { status: "start" }),
+          invoke: {
+            src: "work",
+            onDone: ({ output }) => ({ target: "done", context: { n: output } }),
+          },
+        },
+        done: { type: "final", output: ({ context }) => ({ n: context.n }) },
+      },
+    });
+    const start = (store: Store, n: number) =>
+      runAgent(machine, {
+        actions: { notify: ({ status }) => store.log.push(status) },
+        actors: {
+          work: createAsyncLogic<number, void>({
+            run: async () => {
+              store.log.push("work");
+              return n;
+            },
+          }),
+        },
+      });
+    const [a, b] = [new Store(), new Store()];
+    const results = await Promise.all([start(a, 1), start(b, 2)]);
+    expect(results.map((r) => r.status === "done" && r.output)).toEqual([{ n: 1 }, { n: 2 }]);
+    expect(a.log).toEqual(["start", "work"]);
+    expect(b.log).toEqual(["start", "work"]);
+
+    // @ts-expect-error: `missing` is not a declared action.
+    void runAgent(machine, { actions: { missing: () => {} } });
+    // @ts-expect-error: `notify` takes `{ status: string }`.
+    void runAgent(machine, { actions: { notify: (_params: { status: number }) => {} } });
+  });
+
   test("abort: an abort in the same tick as runAgent runs no actor", async () => {
     // A host registry that cancels synchronously can rely on this: register
     // the controller, call runAgent, and a pause before the start costs nothing.

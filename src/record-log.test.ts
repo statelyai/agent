@@ -56,6 +56,42 @@ describe("recordLog", () => {
     expect(lookups()).toBe(1);
   });
 
+  test("an event the machine has no transition for is marked ignored", async () => {
+    const { machine } = setup();
+    const actor = createActor(machine, { input: { orderId: "o1" } });
+    const log = recordLog(actor);
+    actor.start();
+    actor.send({ type: "CANCEL" });
+    actor.send({ type: "LOOKUP" });
+    actor.send({ type: "LOOKUP" });
+    await toPromise(actor);
+    log.stop();
+
+    expect(log.entries.map((entry) => [entry.event.type, entry.ignored])).toEqual([
+      ["@agent.init", undefined],
+      ["CANCEL", true],
+      ["LOOKUP", undefined],
+      ["LOOKUP", true],
+      ["xstate.done.actor", undefined],
+    ]);
+    expect(replay(machine, log.entries).snapshot.value).toBe("found");
+  });
+
+  test("a stop is not marked ignored", () => {
+    const { machine } = setup();
+    const actor = createActor(machine, { input: { orderId: "o1" } });
+    const log = recordLog(actor);
+    actor.start();
+    actor.send({ type: "CANCEL" });
+    actor.stop();
+
+    expect(log.entries.map((entry) => [entry.event.type, entry.ignored])).toEqual([
+      ["@agent.init", undefined],
+      ["CANCEL", true],
+      ["xstate.stop", undefined],
+    ]);
+  });
+
   test("an actor restored from a snapshot starts its log from that snapshot", () => {
     const { machine } = setup();
     const first = createActor(machine, { input: { orderId: "o1" } }).start();

@@ -86,6 +86,47 @@ describe("checkParity", () => {
     expect(revived.scenarios[0]!.after).toEqual({ output: 50 });
   });
 
+  test("setup gives each side its own live object", async () => {
+    class Runner {
+      steps: string[] = [];
+      constructor(readonly side: string) {}
+    }
+    const sides: string[] = [];
+    const run = async (
+      orderId: string,
+      fx: { lookup: (id: string) => Promise<number> },
+      runner: Runner,
+    ) => {
+      runner.steps.push("lookup");
+      return { total: await fx.lookup(orderId), steps: runner.steps.length };
+    };
+    const report = await checkParity({
+      scenarios: [{ id: "one", input: "A-1" }],
+      setup: (_scenario, side) => {
+        sides.push(side);
+        return new Runner(side);
+      },
+      effects: (_scenario, runner) => ({
+        lookup: async (_id: string) => (runner.side === "before" ? 50 : -1),
+      }),
+      before: run,
+      after: run,
+    });
+    expect(sides).toEqual(["before", "after"]);
+    // Callbacks that need a live object need `setup`. Type-checked, never called.
+    const _missingSetup = () =>
+      // @ts-expect-error: `setup` is missing.
+      checkParity({
+        scenarios: [{ id: "one", input: "A-1" }],
+        effects: (_scenario, runner: Runner) => ({ lookup: async () => runner.steps.length }),
+        before: run,
+        after: run,
+      });
+    // `after` replays `before`'s recording, and its runner starts empty.
+    expect(report.equivalent).toBe(true);
+    expect(report.scenarios[0]!.after).toEqual({ output: { total: 50, steps: 1 } });
+  });
+
   test("a wrapped workflow is equivalent to itself", async () => {
     let calls = 0;
     const step0 = wrapWorkflow({ id: "support", effects: createEffects(), run: legacy });
