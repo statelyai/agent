@@ -137,9 +137,11 @@ export type {
 } from "../equivalence.js";
 export { checkParity } from "../check-parity.js";
 export type {
+  CheckParityBaseOptions,
   CheckParityOptions,
   CheckParityOutcome,
   CheckParityReport,
   CheckParityRow,
   CheckParityScenario,
+  CheckParitySetup,
 } from "../check-parity.js";

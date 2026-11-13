@@ -27,10 +27,34 @@ export interface CheckParityScenario<TInput = unknown> {
 export type CheckParityOutcome<TOutput = unknown> = { output: TOutput } | { error: unknown };
 
 /** Options for {@link checkParity}. */
-export interface CheckParityOptions<
+export type CheckParityOptions<
   TScenario extends CheckParityScenario,
   TEffects extends object,
   TOutput,
+  TLive = undefined,
+> = CheckParityBaseOptions<TScenario, TEffects, TOutput, TLive> &
+  // Required unless the callbacks accept `undefined`, which a missing `setup` passes.
+  (undefined extends TLive
+    ? { setup?: CheckParitySetup<TScenario, TLive> }
+    : { setup: CheckParitySetup<TScenario, TLive> });
+
+/**
+ * Builds the live objects one side of a scenario runs on (a class instance, a
+ * session), passed to `effects`, `before` and `after`. Called once for
+ * `before` and once for `after`, so a mutable object does not carry state from
+ * one side to the other.
+ */
+export type CheckParitySetup<TScenario extends CheckParityScenario, TLive> = (
+  scenario: TScenario,
+  side: "before" | "after",
+) => TLive | PromiseLike<TLive>;
+
+/** {@link CheckParityOptions} without `setup`. */
+export interface CheckParityBaseOptions<
+  TScenario extends CheckParityScenario,
+  TEffects extends object,
+  TOutput,
+  TLive = undefined,
 > {
   scenarios: readonly TScenario[];
   /**
@@ -40,11 +64,11 @@ export interface CheckParityOptions<
    * replay stand-ins and never runs them. A class instance's prototype
    * methods count, bound to the instance.
    */
-  effects: (scenario: TScenario) => TEffects;
+  effects: (scenario: TScenario, live: TLive) => TEffects;
   /** The original workflow. */
-  before: (input: TScenario["input"], effects: TEffects) => PromiseLike<TOutput>;
+  before: (input: TScenario["input"], effects: TEffects, live: TLive) => PromiseLike<TOutput>;
   /** The port: a `wrapWorkflow` run (`(input, effects) => step.run(input, { effects })`) or any runner with the same signature. */
-  after: (input: TScenario["input"], effects: TEffects) => PromiseLike<unknown>;
+  after: (input: TScenario["input"], effects: TEffects, live: TLive) => PromiseLike<unknown>;
   /** Passed to `compareRecordings`. */
   compare?: CompareRecordingsOptions;
   /**
@@ -161,21 +185,38 @@ export async function checkParity<
   TScenario extends CheckParityScenario,
   TEffects extends object,
   TOutput,
+  TLive = undefined,
 >(
-  options: CheckParityOptions<TScenario, TEffects, TOutput>,
+  options: CheckParityOptions<TScenario, TEffects, TOutput, TLive>,
 ): Promise<CheckParityReport<TScenario, TOutput>> {
   const rows: CheckParityRow<TScenario, TOutput>[] = [];
   for (const scenario of options.scenarios) {
+    const setup = (side: "before" | "after") =>
+      options.setup ? options.setup(scenario, side) : (undefined as TLive);
     const recorder = createRecorder();
-    const effects = recordEffects(recorder, options.effects(scenario), options.recordOptions);
+    const live = await setup("before");
+    const effects = recordEffects(recorder, options.effects(scenario, live), options.recordOptions);
     const normalize = (output: unknown) =>
       options.normalizeOutput ? options.normalizeOutput(output, scenario) : output;
-    const before = await settle(() => options.before(scenario.input, effects), recorder, normalize);
+    const before = await settle(
+      () => options.before(scenario.input, effects, live),
+      recorder,
+      normalize,
+    );
     const recording = recorder.recording;
 
     const replayer = createRecorder({ replay: recording, reviveError: options.reviveError });
-    const stand = recordEffects(replayer, options.effects(scenario), options.recordOptions);
-    const after = await settle(() => options.after(scenario.input, stand), replayer, normalize);
+    const liveAfter = await setup("after");
+    const stand = recordEffects(
+      replayer,
+      options.effects(scenario, liveAfter),
+      options.recordOptions,
+    );
+    const after = await settle(
+      () => options.after(scenario.input, stand, liveAfter),
+      replayer,
+      normalize,
+    );
     const replay = replayer.recording;
 
     const { divergences } = compareRecordings(recording, replay, options.compare);

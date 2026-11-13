@@ -776,12 +776,12 @@ describe("setupAgent", () => {
       initial: "waiting",
       states: {
         waiting: {
-          entry: ({ actions }, enq) => enq(actions.markReady!),
+          entry: ({ actions, event }, enq) => enq(actions.markReady, { event }),
           always: ({ context, guards }) =>
             guards.hasPrompt!({ context } as never) ? { target: "done" } : undefined,
           after: { shortPause: { target: "done" } },
           on: {
-            MARK_READY: ({ actions }, enq) => enq(actions.markReady!),
+            MARK_READY: ({ actions, event }, enq) => enq(actions.markReady, { event }),
           },
         },
         done: { type: "final" },
@@ -794,7 +794,8 @@ describe("setupAgent", () => {
       states: {
         waiting: {
           entry: ({ actions }, enq) => {
-            enq(actions.markReadtypo!);
+            // @ts-expect-error: `markReadtypo` is not a declared action.
+            enq(actions.markReadtypo);
           },
         },
       },
