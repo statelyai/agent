@@ -218,7 +218,7 @@ async function agenticLoop(agent: Agent, task: Task) {
 
 Extract the phase first, then carve. The carved actor calls the extracted method or function, and nothing is copied.
 
-- The extract is a step 0 edit: move the loop body or the phase into its own method or function, with no change in behavior. In a class, make it a protected method; the actor calls it on the instance, bound per run.
+- The extract is a step 0 edit: move the loop body or the phase into its own method or function, with no change in behavior. In a class, make it a protected method when the carve is a subclass that builds its actors inside the class body (the drop-in runner the old suite swaps in). An actor built outside the class calls a public method instead, marked `@internal`. Either way the actor calls it on the instance, bound per run.
 - Commit it on its own, before any carve, so the diff is a pure move.
 - Gate it like step 0: the old suite passes unchanged, and `checkParity` against the code before the extract is equivalent on every scenario. `examples/strangler-fig/before-extract.ts` is the one-function original; `index.test.ts` checks the extracted `runTicket` against it.
 - A loop whose head lives in a private method: extract the body (`this._cycle(state)`), so the loop head is the only line the carve replaces.

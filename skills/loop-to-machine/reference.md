@@ -51,7 +51,7 @@ const proofOptions: ExplorePathsOptions = {
 
 ## A phase in the middle of a method
 
-When the phase has no seam at its edges, extract it at step 0: move its lines into a protected method or a function, commit that alone, and check it with the old suite and `checkParity` against the code before the extract. The carved actor then calls it:
+When the phase has no seam at its edges, extract it at step 0: move its lines into a function or a method (protected when the carve is a subclass that builds its actors in the class body, public `@internal` otherwise), commit that alone, and check it with the old suite and `checkParity` against the code before the extract. The carved actor then calls it:
 
 ```ts
 const prepare = createAsyncLogic<Prepared, ToolCall>({
