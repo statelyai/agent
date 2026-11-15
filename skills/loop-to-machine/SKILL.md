@@ -201,7 +201,7 @@ Switch the candidate to `runMachine`; run per stand-in (or against the spec). Co
 
 Report, in this order:
 
-1. The files (environment, runner, tests, any policy); the old code untouched.
+1. The files (environment, runner, tests, any policy); the old code changed only by step 0 edits, each listed (effects seam, extract-method) with its old-suite and parity evidence.
 2. The rule list, each mapped to a guard, a state, or why it was dropped.
 3. The parity table per stand-in model: `same / intended / regression`, one line per `intended` row with its reason. Say whether the baseline was a run or a spec.
 4. The `canReach` results and the loosened-guard test.
