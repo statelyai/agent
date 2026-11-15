@@ -33,7 +33,7 @@ export async function runTicket(ticket: Ticket, effects: SupportEffects): Promis
 
 ### Class-shaped code
 
-When the loop is a class method that calls its own private methods for the model and the tools, there is no `(input, effects)` function to pass. Wrap it with no edit to the class:
+When the loop is a class method that calls its own private methods for the model and the tools, there is no `(input, effects)` function to pass. Wrap it with no edit to the class (a phase in the middle of a method is extracted at step 0, see [A phase in the middle of a method](#a-phase-in-the-middle-of-a-method)):
 
 - `run: (input, effects) => { const executor = createExecutor(input); executor.callModel = (...args) => effects.callModel(...args); return executor.run(); }`, with each effect calling the original method.
 - Route the old test suite through the wrap with a factory or a static `create` stand-in, not a subclass, when the constructor is private.
@@ -216,8 +216,33 @@ async function agenticLoop(agent: Agent, task: Task) {
 
 ### A phase in the middle of a method
 
-- Copy only that phase's lines into the carved actor, with a comment listing the copied line ranges. `checkParity` call-args keep the copy honest: a drifted copy calls its effects with other arguments.
+Extract the phase first, then carve. The carved actor calls the extracted method or function, and nothing is copied.
+
+- The extract is a step 0 edit: move the loop body or the phase into its own method or function, with no change in behavior. In a class, make it a protected method; the actor calls it on the instance, bound per run.
+- Commit it on its own, before any carve, so the diff is a pure move.
+- Gate it like step 0: the old suite passes unchanged, and `checkParity` against the code before the extract is equivalent on every scenario. `examples/strangler-fig/before-extract.ts` is the one-function original; `index.test.ts` checks the extracted `runTicket` against it.
+- A loop whose head lives in a private method: extract the body (`this._cycle(state)`), so the loop head is the only line the carve replaces.
 - When the class has a public per-turn hook, replace that method on the instance instead, and let the machine decide at that boundary. The rest of the method stays legacy.
+
+#### Code you can't edit
+
+For vendored or third-party code (in `node_modules` or a pinned fork), copy only that phase's lines into the carved actor, with a comment listing the copied line ranges.
+
+- `checkParity` call-args catch a drifted copy only when the drift changes an effect's arguments.
+- Add a drift test that hashes each copied range in the original, so an upstream change fails CI:
+
+```ts no-check
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+const lines = readFileSync(require.resolve("vendor-lib/dist/runtime.js"), "utf8").split("\n");
+const hash = (from: number, to: number) =>
+  createHash("sha256").update(lines.slice(from - 1, to).join("\n")).digest("hex");
+
+test("copied ranges match the original", () => {
+  expect(hash(412, 470)).toBe("<sha256 recorded when you copied>");
+});
+```
 
 ## Check parity
 
