@@ -203,6 +203,24 @@ describe("canReach — default key", () => {
     expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
   });
 
+  test("a sparse array with an extra property is not merged with an empty one", async () => {
+    // One hole and one extra property: as many own keys as its length.
+    const machine = createMachine({
+      context: { items: [] as unknown[] },
+      initial: "waiting",
+      states: {
+        waiting: {
+          on: {
+            TAGGED: { context: { items: Object.assign(new Array(1), { tag: true }) } },
+            GO: ({ context }) => (context.items.length === 1 ? { target: "goal" } : undefined),
+          },
+        },
+        goal: { type: "final" },
+      },
+    });
+    expect(await canReach(machine, "goal", { maxDepth: 3 })).toMatchObject({ reachable: true });
+  });
+
   test("negative zero is not merged with zero", async () => {
     const machine = createMachine({
       context: { n: 0 },

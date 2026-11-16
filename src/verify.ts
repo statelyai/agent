@@ -1491,6 +1491,9 @@ function strictKey(value: unknown, seen = new Set<object>()): string {
   if (Array.isArray(value)) {
     // A hole or an extra own property would vanish from the key.
     if (Object.keys(value).length !== value.length) throw new TypeError("unkeyable array");
+    for (let index = 0; index < value.length; index++) {
+      if (!(index in value)) throw new TypeError("unkeyable sparse array");
+    }
     key = `[${value.map((item) => strictKey(item, seen)).join(",")}]`;
   } else {
     const proto = Object.getPrototypeOf(value);
