@@ -323,4 +323,46 @@ describe("createGeneratorBridge", () => {
     // Resumed: the code after `yield*` runs and checks the result itself.
     expect(await gen.next()).toEqual({ done: true, value: failure });
   });
+
+  test("a consumer that stops again after resuming closes the pass, as `yield*` does", async () => {
+    const pass = async function* () {
+      try {
+        yield "a";
+        return "done";
+      } finally {
+        yield "cleanup1";
+        yield "cleanup2";
+      }
+    };
+    const drive = async (gen: AsyncGenerator<string, unknown, undefined>) => [
+      await gen.next(),
+      await gen.return(undefined as never),
+      await gen.next(),
+      await gen.return(undefined as never),
+    ];
+    const log: string[] = [];
+    const native = async function* () {
+      yield* pass();
+      log.push("native after");
+    };
+    const bridge = createGeneratorBridge<string>();
+    let forwarded: unknown;
+    const run = (async () => {
+      forwarded = await bridge.forward(pass());
+      return "settled";
+    })();
+    const bridged = async function* () {
+      yield* bridge.stream(run);
+      log.push("bridged after");
+    };
+    const nativeMoves = await drive(native());
+    const bridgedMoves = await drive(bridged());
+    expect(nativeMoves.slice(0, 3)).toEqual(bridgedMoves.slice(0, 3));
+    expect(nativeMoves[3]).toMatchObject({ done: true });
+    expect(bridgedMoves[3]).toMatchObject({ done: true });
+    // Stopped last: neither runs the code after `yield*`, and the pass ends closed.
+    expect(log).toEqual([]);
+    await run;
+    expect(forwarded).toMatchObject({ closed: true });
+  });
 });

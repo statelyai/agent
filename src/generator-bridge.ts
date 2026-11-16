@@ -126,7 +126,8 @@ export function createGeneratorBridge<T>(): GeneratorBridge<T> {
           step = await generator.throw(error);
           continue;
         }
-        if (pulled && closed) resumed = true;
+        // The consumer's latest move decides: a later stop closes it again.
+        if (closed) resumed = pulled;
         if (pulled || closed) {
           // Once closed, a value yielded while unwinding is followed by the
           // rest of the cleanup, not a second `return()` that would skip it.
