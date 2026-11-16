@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { createActor, createAsyncLogic } from "xstate";
 import { createAgentRuntime, createAgentSchemas, runAgent, setupAgent } from "@statelyai/agent";
-import { createApprovalBatchMachine, createToolLoopMachine } from "@statelyai/agent/machines";
+import { createApprovalBatchMachine } from "@statelyai/agent/machines";
 
 /** A bare setupAgent result. */
 export const batchSetup = setupAgent({
@@ -96,7 +96,6 @@ export const approvalMachine = createApprovalBatchMachine({
 export function createToolCallMachine() {
   return createApprovalBatchMachine({ execute: createAsyncLogic({ run: async () => "ok" }) });
 }
-export const toolLoopMachine = createToolLoopMachine({ model: "openai/gpt-6-luna" });
 
 // A second setup exercising the rest of the config surface: a schema pack,
 // payload-less `{}` events, actors, guards, delays, emitted events, and meta.

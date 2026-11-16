@@ -171,7 +171,7 @@ Run every check; a failure's output is the repair prompt. Cap repairs at 3.
 1. **Environment unchanged:** every environment file hashes as recorded. A change is never repaired; discard the candidate.
 2. **Types:** `tsc --noEmit` passes.
 3. **Lint:** `lintAgentMachine(policy)` from `@statelyai/agent/testing` reports no errors.
-4. **Paths:** for probe inputs built from recorded decision requests (`getDecisionRequests(trace, { name })` from `@statelyai/agent/testing`, one per training scenario that reaches the decision: its facts and offered options), `canReach(policy, (snapshot) => snapshot.status === "done" && !isOfferedEvent(snapshot.output), { input })` is `{ reachable: false, complete: true }`: every final output is one of the offered events. Pass `outputs` for any actor the policy invokes, and `errors: { "agent.decide": new Error("down") }` so the fallback path is checked too.
+4. **Paths:** for probe inputs built from recorded decision requests (`getDecisionRequests(trace, { name })` from `@statelyai/agent/evals`, one per training scenario that reaches the decision: its facts and offered options), `canReach(policy, (snapshot) => snapshot.status === "done" && !isOfferedEvent(snapshot.output), { input })` is `{ reachable: false, complete: true }`: every final output is one of the offered events. Pass `outputs` for any actor the policy invokes, and `errors: { "agent.decide": new Error("down") }` so the fallback path is checked too.
 5. **Source rules:** the policy file is still one `setupAgent` machine; its imports from the environment are only schemas, types, constants, and exported guard functions; it names no actor the environment owns. These are source checks: read the diff, or grep its imports and actor names.
 6. **Overfit:** the diff contains no literal from the scenarios (ids, ticket text, customer ids, order ids). A branch that matches one scenario's data is memorization; discard it.
 7. **Existing evals:** the rule and decision evals from `add-evals` still pass. Tests that pin measured numbers of the current version (a baseline failure list, a call count) are expected to change; update them in the same pull request and list each change in its body.
@@ -216,7 +216,7 @@ const failed = verified.gates.find((gate) => !gate.ok);
 Run the candidate on the training scenarios, then on the held-out scenarios. Write every replay to the store under new thread ids that name the split and version, in the scheme `add-traces` set up (`train:v3:<scenario>:r1`, `held-out:v3:<scenario>:r1`), so the next round can list them by prefix. With no persistent store, write each thread's `result.events` to a file.
 
 - Run the current policy and the candidate on the same scenarios, the same world state, and the same model refs.
-- Model calls are nondeterministic. Run each scenario k times (k ≥ 3 when calls are not cached) with `repeatRuns` (from `@statelyai/agent/testing`), and compare `passHat(k)` as well as the mean. A candidate that raises the mean but lowers pass^k made the agent less reliable.
+- Model calls are nondeterministic. Run each scenario k times (k ≥ 3 when calls are not cached) with `repeatRuns` (from `@statelyai/agent/evals`), and compare `passHat(k)` as well as the mean. A candidate that raises the mean but lowers pass^k made the agent less reliable.
 - Compute the objective, invariant violations, and cost per split, for both versions.
 
 ## 7. Recommend or discard
