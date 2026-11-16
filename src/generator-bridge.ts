@@ -126,15 +126,17 @@ export function createGeneratorBridge<T>(): GeneratorBridge<T> {
           step = await generator.throw(error);
           continue;
         }
+        // A stop after the consumer resumed is a fresh stop, which `yield*`
+        // forwards as another `return()`. Otherwise, once closed, a value
+        // yielded while unwinding is followed by the rest of the cleanup.
+        const freshStop = !pulled && (!closed || resumed);
         // The consumer's latest move decides: a later stop closes it again.
         if (closed) resumed = pulled;
-        if (pulled || closed) {
-          // Once closed, a value yielded while unwinding is followed by the
-          // rest of the cleanup, not a second `return()` that would skip it.
-          step = await generator.next();
-        } else {
+        if (freshStop) {
           closed = true;
           step = await generator.return(undefined as TReturn);
+        } else {
+          step = await generator.next();
         }
       }
       return { closed: closed && !resumed, value: step.value } as ForwardResult<TReturn>;

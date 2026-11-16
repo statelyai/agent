@@ -332,6 +332,7 @@ describe("createGeneratorBridge", () => {
       } finally {
         yield "cleanup1";
         yield "cleanup2";
+        yield "cleanup3";
       }
     };
     const drive = async (gen: AsyncGenerator<string, unknown, undefined>) => [
@@ -358,6 +359,7 @@ describe("createGeneratorBridge", () => {
     const nativeMoves = await drive(native());
     const bridgedMoves = await drive(bridged());
     expect(nativeMoves.slice(0, 3)).toEqual(bridgedMoves.slice(0, 3));
+    // The second stop returns the pass again: "cleanup3" is skipped.
     expect(nativeMoves[3]).toMatchObject({ done: true });
     expect(bridgedMoves[3]).toMatchObject({ done: true });
     // Stopped last: neither runs the code after `yield*`, and the pass ends closed.
