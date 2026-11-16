@@ -1,5 +1,12 @@
 # @statelyai/example-next-host
 
+## 0.0.1-alpha.28
+
+### Patch Changes
+
+- Updated dependencies [[`1f63610`](https://github.com/statelyai/agent/commit/1f636103210aa368580676e8ae88cdaf821523b1), [`5f72ebd`](https://github.com/statelyai/agent/commit/5f72ebd8a657c7107ce941857977b59b0062d863), [`bb74c83`](https://github.com/statelyai/agent/commit/bb74c838e1d7140395be59b1f9e13f799dc8f3b2)]:
+  - @statelyai/agent@2.0.0-alpha.40
+
 ## 0.0.1-alpha.27
 
 ### Patch Changes
