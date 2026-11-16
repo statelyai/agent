@@ -1113,7 +1113,11 @@ export interface ExploreStep {
 export interface CanReachOrdering {
   /** The trigger: an event type, or a step predicate. */
   after: string | ((step: ExploreStep) => boolean);
-  /** Checked on every step after the first `after` step, not on that step itself. */
+  /**
+   * Checked on the first `after` step and every step after it. On the
+   * trigger's own step, `started`, `settled` and `state` are its effects;
+   * `event` is the trigger itself.
+   */
   reach: (step: ExploreStep) => boolean;
 }
 
@@ -2109,16 +2113,17 @@ function explore(
     if (!logging) return next;
     const before = prev && logs.get(prev);
     const step = exploreStep(prev, next, timerDelivers.get(event) ?? event);
-    const after = before?.after ?? false;
     const trigger = ordering?.after;
+    // The trigger's own step counts: what its transition starts comes after it.
+    const after =
+      (before?.after ?? false) ||
+      (trigger !== undefined &&
+        (typeof trigger === "string" ? step.event.type === trigger : trigger(step)));
     logs.set(next, {
       step,
       prev: before,
       length: (before?.length ?? 0) + 1,
-      after:
-        after ||
-        (trigger !== undefined &&
-          (typeof trigger === "string" ? step.event.type === trigger : trigger(step))),
+      after,
       violated: (before?.violated ?? false) || (after && ordering!.reach(step)),
     });
     return next;

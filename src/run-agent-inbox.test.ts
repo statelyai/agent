@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { createAsyncLogic } from "xstate";
 import { z } from "zod";
 import {
   AgentError,
@@ -207,5 +208,52 @@ describe("runAgent inbox", () => {
     const inbox = createAgentInbox<EventOf<typeof steps>>();
     await runAgent(steps, { inbox });
     await expect(runAgent(steps, { inbox })).rejects.toThrow(AgentError);
+  });
+
+  // Actors that settle in microtasks complete inside the batch that starts
+  // them, so a host send must not wait behind their completions.
+  const microtaskLoop = setupAgent({
+    context: z.object({ passes: z.number() }),
+    events: { PAUSE: z.object({}) },
+    actors: { work: createAsyncLogic({ run: async () => 1 }) },
+  }).createMachine({
+    context: { passes: 0 },
+    initial: "working",
+    on: { PAUSE: { target: ".paused" } },
+    states: {
+      working: {
+        invoke: {
+          src: "work",
+          onDone: ({ context }) =>
+            context.passes >= 4
+              ? { target: "done" }
+              : { target: "working", reenter: true, context: { passes: context.passes + 1 } },
+        },
+      },
+      paused: { type: "final" },
+      done: { type: "final" },
+    },
+  });
+
+  test("a send before start lands ahead of completions that settle in microtasks", async () => {
+    const inbox = createAgentInbox<EventOf<typeof microtaskLoop>>();
+    const run = runAgent(microtaskLoop, { inbox });
+    expect(inbox.send({ type: "PAUSE" })).toBe(true);
+    const result = await run;
+    expect(result.snapshot.value).toBe("paused");
+    expect(result.snapshot.context.passes).toBe(0);
+  });
+
+  test("a send mid-run lands before the next microtask completion", async () => {
+    const inbox = createAgentInbox<EventOf<typeof microtaskLoop>>();
+    let transitions = 0;
+    const result = await runAgent(microtaskLoop, {
+      inbox,
+      onTransition: () => {
+        if (++transitions === 2) inbox.send({ type: "PAUSE" });
+      },
+    });
+    expect(result.snapshot.value).toBe("paused");
+    expect(result.snapshot.context.passes).toBe(1);
   });
 });

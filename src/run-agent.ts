@@ -3493,6 +3493,11 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
   // failures, child messages, root timers, the reserved usage event. Filled as
   // things happen (never batched), drained one event per transition.
   const mailbox: EventObject[] = [];
+  // The host's own sends (`send`, an inbox), handed out ahead of completions
+  // the execution already holds: actors that settle in microtasks complete
+  // inside the batch that starts them, and would otherwise keep a send
+  // waiting until the machine stops.
+  const hostQueue: EventObject[] = [];
   let wake: ((event: EventObject | typeof QUIESCENT) => void) | undefined;
   // Events the loop handed out, as opposed to events the host brought in
   // itself: only the host's own event can be reported as `ignored`.
@@ -3513,6 +3518,8 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
     if (waiting) {
       wake = undefined;
       waiting(event);
+    } else if (fromHost) {
+      hostQueue.push(event);
     } else {
       mailbox.push(event);
     }
@@ -3761,7 +3768,7 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       runtime: unknown,
     ) => action.exec(runtime),
     waitForEvent: () => {
-      const queued = mailbox.shift();
+      const queued = hostQueue.shift() ?? mailbox.shift();
       if (queued !== undefined) {
         return queued;
       }
@@ -4315,7 +4322,9 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
         if (finished || stopReason !== undefined || current?.status !== "active") {
           return undefined;
         }
-        const event = (await execution.waitForEvent()) as EventObject | typeof QUIESCENT;
+        const event = (hostQueue.shift() ?? (await execution.waitForEvent())) as
+          | EventObject
+          | typeof QUIESCENT;
         if ((event as unknown) === QUIESCENT || stopReason !== undefined) {
           return undefined;
         }

@@ -6,7 +6,12 @@
 
 /** What {@link GeneratorBridge.forward} reports once the generator stops. */
 export type ForwardResult<TReturn> =
-  | { closed: false; value: TReturn }
+  /**
+   * The generator returned. Also when the consumer stopped and then pulled a
+   * value yielded while unwinding: as with `yield*`, that resumes the
+   * generator, which then completes normally with `value`.
+   */
+  | { closed: false; value: TReturn | undefined }
   /** The consumer stopped reading; `value` is what the generator returned while unwinding. */
   | { closed: true; value: TReturn | undefined };
 
@@ -40,7 +45,9 @@ export interface GeneratorBridge<T> {
    * stopped consumer skips the code after it in the enclosing generator;
    * cleanup that must run either way goes in a `finally`. A run that fails
    * while a stopped consumer waits (a legacy `finally` that throws) throws
-   * its error from `.return()` instead.
+   * its error from `.return()` instead. A consumer that pulls again after
+   * stopping (`.next()` on a value yielded while unwinding) resumes, as with
+   * `yield*`: the code after it runs and gets the run's result, failed or not.
    */
   stream<TSettled>(settled: PromiseLike<TSettled>): AsyncGenerator<T, TSettled, undefined>;
 }
@@ -107,6 +114,9 @@ export function createGeneratorBridge<T>(): GeneratorBridge<T> {
     put,
     async forward<TReturn>(generator: AsyncGenerator<T, TReturn, undefined>) {
       let closed = false;
+      // A consumer that pulls a value yielded while unwinding resumes the
+      // pass: as with `yield*`, it then completes normally.
+      let resumed = false;
       let step = await generator.next();
       while (!step.done) {
         let pulled: boolean;
@@ -116,6 +126,7 @@ export function createGeneratorBridge<T>(): GeneratorBridge<T> {
           step = await generator.throw(error);
           continue;
         }
+        if (pulled && closed) resumed = true;
         if (pulled || closed) {
           // Once closed, a value yielded while unwinding is followed by the
           // rest of the cleanup, not a second `return()` that would skip it.
@@ -125,7 +136,7 @@ export function createGeneratorBridge<T>(): GeneratorBridge<T> {
           step = await generator.return(undefined as TReturn);
         }
       }
-      return { closed, value: step.value } as ForwardResult<TReturn>;
+      return { closed: closed && !resumed, value: step.value } as ForwardResult<TReturn>;
     },
     stream<TSettled>(settled: PromiseLike<TSettled>) {
       // Outside the generator body: a stream returned before its first
@@ -156,6 +167,9 @@ export function createGeneratorBridge<T>(): GeneratorBridge<T> {
           try {
             yield item.value;
             resumed = true;
+            // Pulling again after stopping resumes, as with `yield*`: the
+            // code after it runs and checks the run itself.
+            stopped = false;
             item.pulled(true);
           } catch (error) {
             resumed = true;

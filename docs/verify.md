@@ -45,7 +45,7 @@ assertAgentMachine(machine, { warnings: true });
 | `decide-without-events`     | error    | A state invokes `agent.decide` but neither it nor any ancestor handles any event, so the chosen event can never be delivered.                                                                                                                                   |
 | `decide-allows-human-event` | error    | A decision's literal `allowedEvents` names an event the state or an ancestor handles through a transition tagged `meta: { actor: "human" }`, so the model is never offered it. See [Events a person sends](decisions.md#events-a-person-sends).                 |
 | `invoke-without-on-error`   | warning  | An invoke declares no `onError`, and neither its state nor any ancestor handles an actor error, so a rejected request or actor lands the machine in an error state with no modeled recovery. Add `onError` targeting a `failed` final state or a bounded retry. |
-| `direct-object-src`         | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                     |
+| `direct-object-src`         | warning  | An invoke `src` is a direct object or machine value that `runAgent` cannot rebind, so it inherits no host executors.                                                                                                                                            |
 
 ## Test assertions
 
@@ -505,7 +505,7 @@ const turnAfterStop = await canReach(
 ```
 
 - `after` and `reach` match [steps](#steps). `after` is an event type or a step predicate.
-- `reach` is checked on each step after the first step that matched `after`, not on that step itself.
+- `reach` is checked on the first step that matched `after` and every step after it. On the trigger's own step, `started`, `settled` and `state` are what the trigger's transition did, so a turn it starts is a violation. That step's `event` is the trigger itself: match its effects, not its event.
 - `after` and `reach` may read an event's payload, so an event with no schema is unexpanded until `payloads` lists its variants, even when no transition reads it. A timer's step carries the event the timer delivers.
 - The witness is the event sequence to the first violation.
 - A turn already running when STOP arrives started before it, so it is not a violation. Check that turn with `settled` if the rule covers it.
