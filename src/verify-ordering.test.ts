@@ -113,7 +113,7 @@ describe("canReach — ordering target", () => {
       after: "STOP",
       reach: (step: { started: string[] }) => step.started.includes("cleanup"),
     };
-    const opts = { outputs: { cleanup: [null] } };
+    const opts = { outputs: { cleanup: [null] }, payloads: () => ({ STOP: [{}] }) };
     expect(await canReach(machine, ordering, opts)).toMatchObject({
       reachable: false,
       complete: true,
@@ -153,6 +153,62 @@ describe("canReach — ordering target", () => {
       dedupeBy: (snapshot) => JSON.stringify(snapshot.value),
     });
     expect(result).toMatchObject({ reachable: true, witness: [{ type: "STOP" }, { type: "GO" }] });
+  });
+
+  test("a timer that delivers the trigger counts as the trigger", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      events: { STOP: z.object({}), GO: z.object({}) },
+      actors: { turn: createAsyncLogic<null>({ run: async () => null }) },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: {
+          entry: (_, enq) => {
+            enq.raise({ type: "STOP" }, { delay: 50 });
+          },
+          on: { STOP: { target: "stopping" } },
+        },
+        stopping: { on: { GO: { target: "running" } } },
+        running: { invoke: { src: "turn", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const result = await canReach(machine, noTurnAfterStop, {
+      outputs: { turn: [null] },
+      hostEvents: ["GO"],
+    });
+    expect(result).toMatchObject({ reachable: true, witness: [{ type: "STOP" }, { type: "GO" }] });
+  });
+
+  test("an event with no schema is unexpanded: the target may read its payload", async () => {
+    const agent = setupAgent({
+      context: z.object({}),
+      actors: { turn: createAsyncLogic<null>({ run: async () => null }) },
+    });
+    const machine = agent.createMachine({
+      context: {},
+      initial: "waiting",
+      states: {
+        waiting: { on: { SEND: { target: "running" } } },
+        running: { invoke: { src: "turn", onDone: { target: "done" } } },
+        done: { type: "final" },
+      },
+    });
+    const toAdmin: CanReachOrdering = {
+      after: "xstate.init",
+      reach: (step) => step.event.type === "SEND" && (step.event as { to?: string }).to === "admin",
+    };
+    const bare = await canReach(machine, toAdmin, { outputs: { turn: [null] } });
+    expect(bare).toMatchObject({ reachable: false, complete: false });
+    expect(bare.unexplored!.join("\n")).toContain("the ordering target may read its payload");
+    const listed = await canReach(machine, toAdmin, {
+      outputs: { turn: [null] },
+      payloads: () => ({ SEND: [{ to: "user" }, { to: "admin" }] }),
+    });
+    expect(listed).toMatchObject({ reachable: true, witness: [{ type: "SEND", to: "admin" }] });
   });
 
   test("with children: 'coupled', a started child machine is named by its src", async () => {

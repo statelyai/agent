@@ -2064,10 +2064,13 @@ function explore(
   // the three transitions below or the initial step.
   const logging = nesting === 0 && !stepping && (options.steps === true || ordering !== undefined);
   const logs = new WeakMap<AgentStep, StepLog>();
+  // A fired timer is applied as its `xstate.timer` command; a step records
+  // the event the timer delivers.
+  const timerDelivers = new WeakMap<EventObject, EventObject>();
   const logged = (prev: AgentStep | undefined, next: AgentStep, event: EventObject): AgentStep => {
     if (!logging) return next;
     const before = prev && logs.get(prev);
-    const step = exploreStep(prev, next, event);
+    const step = exploreStep(prev, next, timerDelivers.get(event) ?? event);
     const after = before?.after ?? false;
     const trigger = ordering?.after;
     logs.set(next, {
@@ -2213,7 +2216,12 @@ function explore(
       fill = finitePayloads(safeJsonSchema(schema));
       finiteCache.set(type, fill);
     }
-    fill ??= { payloads: [{}], complete: !mayReadPayload(snapshot, type) };
+    // An ordering target's predicates read the step's event, so a bare
+    // `{ type }` stands in for payloads they may branch on.
+    fill ??= {
+      payloads: [{}],
+      complete: ordering === undefined && !mayReadPayload(snapshot, type),
+    };
     // Only the bare `{ type }` reaches a transition that may read the payload.
     if (
       !fill.complete &&
@@ -2228,7 +2236,9 @@ function explore(
       note(() =>
         schema
           ? `unexpanded: event '${type}' has payload fields the schema fill cannot enumerate; add a payloads entry for it`
-          : `unexpanded: event '${type}' has no schema and a transition that may read its payload; add a payloads entry for it`,
+          : ordering !== undefined && !mayReadPayload(snapshot, type)
+            ? `unexpanded: event '${type}' has no schema, and the ordering target may read its payload; add a payloads entry for it`
+            : `unexpanded: event '${type}' has no schema and a transition that may read its payload; add a payloads entry for it`,
       );
     }
     return fill.payloads;
@@ -2846,7 +2856,9 @@ function explore(
     }
     return armed.map(({ event, key }) => {
       const entry = { ...event } as ChosenEvent;
-      timerFires.set(entry, { type: "xstate.timer", ...key });
+      const command = { type: "xstate.timer", ...key };
+      timerFires.set(entry, command);
+      timerDelivers.set(command, event);
       return entry;
     });
   };

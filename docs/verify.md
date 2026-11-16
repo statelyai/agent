@@ -506,6 +506,7 @@ const turnAfterStop = await canReach(
 
 - `after` and `reach` match [steps](#steps). `after` is an event type or a step predicate.
 - `reach` is checked on each step after the first step that matched `after`, not on that step itself.
+- `after` and `reach` may read an event's payload, so an event with no schema is unexpanded until `payloads` lists its variants, even when no transition reads it. A timer's step carries the event the timer delivers.
 - The witness is the event sequence to the first violation.
 - A turn already running when STOP arrives started before it, so it is not a violation. Check that turn with `settled` if the rule covers it.
 - `dedupeBy` stays sound: the search adds "`after` has matched" to each key, so a snapshot reached before and after the trigger is explored both ways.
