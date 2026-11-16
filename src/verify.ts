@@ -1963,21 +1963,23 @@ function stepsOf(log: StepLog | undefined): ExploreStep[] {
   return steps;
 }
 
-// A child that settled as it started (a machine whose initial state is final,
-// or one that failed at once): pure transitions leave its completion
-// undelivered, and a live run delivers it at once. Pending invokes skip it.
-function finishedChild(
-  step: AgentStep,
-): { id: string; output: unknown } | { id: string; error: unknown } | undefined {
+// Children that settled as they started (a machine whose initial state is
+// final, or one that failed at once): pure transitions leave the completion
+// undelivered, and a live run delivers it. Pending invokes skip them.
+type FinishedChild = { id: string; output: unknown } | { id: string; error: unknown };
+
+function finishedChildren(step: AgentStep): FinishedChild[] {
   const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
-  for (const id of Object.keys(children).sort()) {
-    const snapshot = children[id]?.getSnapshot?.() as
-      | { status?: unknown; output?: unknown; error?: unknown }
-      | undefined;
-    if (snapshot?.status === "done") return { id, output: snapshot.output };
-    if (snapshot?.status === "error") return { id, error: snapshot.error };
-  }
-  return undefined;
+  return Object.keys(children)
+    .sort()
+    .flatMap((id): FinishedChild[] => {
+      const snapshot = children[id]?.getSnapshot?.() as
+        | { status?: unknown; output?: unknown; error?: unknown }
+        | undefined;
+      if (snapshot?.status === "done") return [{ id, output: snapshot.output }];
+      if (snapshot?.status === "error") return [{ id, error: snapshot.error }];
+      return [];
+    });
 }
 
 // Shared engine for explorePaths/canReach. Without `stopWhen` it walks depth
@@ -2505,6 +2507,12 @@ function explore(
         .flatMap((invoke) =>
           asFork(settleFor(invoke.id, invoke.src, false, invoke), invoke.id, invoke.src, false),
         ),
+      // Coupled: `register` settles a finished child in id order with the rest.
+      ...(coupled ? [] : finishedChildren(step)).map((finished) =>
+        "error" in finished
+          ? { id: finished.id, errors: [finished.error], outputs: [] }
+          : { id: finished.id, errors: [], outputs: [finished.output] },
+      ),
     ];
     // Each pending decision's choices are branches of the same node; its
     // `errors` entry, if any, is a failing settlement like the others.
@@ -2701,18 +2709,11 @@ function explore(
       if (current.done) {
         return { step: current };
       }
-      const finished = finishedChild(current);
-      if (finished) {
-        current =
-          "error" in finished
-            ? rejectStep(current, finished.id, finished.error)
-            : resolveStep(current, finished.id, finished.output);
-        recordState(current);
-        continue;
-      }
       const request = current.requests.find(
         (pending) => pending.kind !== "text" || !neverSettles(pending.src),
       );
+      // A finished child races explored and coupled children as one of the
+      // concurrent settlements; with none pending, it settles first.
       const concurrent = concurrentForks(current);
       if (concurrent) {
         return {
@@ -2723,6 +2724,15 @@ function explore(
           decisions: concurrent.decisions,
           ...(concurrent.kids?.length ? { kids: concurrent.kids } : {}),
         };
+      }
+      const [finished] = finishedChildren(current);
+      if (finished) {
+        current =
+          "error" in finished
+            ? rejectStep(current, finished.id, finished.error)
+            : resolveStep(current, finished.id, finished.output);
+        recordState(current);
+        continue;
       }
       if (request && request.kind === "text") {
         const usage = usageFor(current, request);
@@ -3005,7 +3015,23 @@ function explore(
   // (its entry sends queued for the parent), and drops the ones that stopped.
   // False when priming a child ran past the delivery cap.
   const register = (step: AgentStep, kids: Map<string, KidState>, queue: Delivery[]): boolean => {
-    const live = pendingInvokes(step).filter(isExploredChild);
+    // A child machine that finished as it started is registered too: its
+    // completion is queued in id order with the other children's entry sends.
+    const children = (step.snapshot.children ?? {}) as Record<string, ChildRef | undefined>;
+    const finished = finishedChildren(step).map(({ id }): PendingInvoke => {
+      const ref = children[id]!;
+      const own = ref as { src?: unknown; logic?: unknown };
+      return {
+        id,
+        src: typeof own.src === "string" ? own.src : id,
+        input: ref.options?.input,
+        logic: own.logic,
+        ref,
+      };
+    });
+    const live = [...pendingInvokes(step), ...finished]
+      .filter(isExploredChild)
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const sessions = new Set(live.map((invoke) => childSession(invoke.id, invoke.ref)));
     for (const session of kids.keys()) {
       if (!sessions.has(session)) kids.delete(session);
