@@ -322,6 +322,28 @@ describe("checkConformance", () => {
     expect(failed.conforms).toBe(true);
   });
 
+  test("an observation whose event the idle model ignores is a deviation, not consumed", async () => {
+    const recording = await record([{ done: true, email: true }], [true], 3);
+    const report = await checkConformance(model, {
+      input: { maxSteps: 3 },
+      observations: recording.effects.flatMap(toObservation),
+      actors: {
+        assist: { observes: "assist", output: () => ({ done: true, email: true }) },
+        send: { observes: "send" },
+      },
+      // A mapping bug: the approval maps to an event the model does not accept.
+      events: { approval: () => ({ type: "APPROVED" }) },
+    });
+    expect(report.conforms).toBe(false);
+    expect(report.deviation).toMatchObject({
+      reason: "ignored-event",
+      index: 1,
+      observed: { kind: "approval" },
+      state: "awaitingApproval",
+    });
+    expect(report.consumed).toBe(1);
+  });
+
   test("a model that invokes inline logic is rejected before anything runs", async () => {
     let ran = false;
     const inline = setupAgent({

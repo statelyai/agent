@@ -88,6 +88,8 @@ export type ConformanceDeviationReason =
   | "input-mismatch"
   /** The model finished or settled idle, and the recording continues. */
   | "extra-observations"
+  /** The model was idle, and it does not handle the event an observation maps to in that state. */
+  | "ignored-event"
   /** The model invoked a src with no entry in `actors`. */
   | "unmapped-actor";
 
@@ -300,12 +302,25 @@ export async function checkConformance<
     const next = observations[index];
     const toEvent = next === undefined ? undefined : events[next.kind];
     if (!toEvent || next === undefined) break;
+    const event = toEvent(next);
+    // Consumed before the run: actors the event starts read the next observation.
     index += 1;
     result = await runAgent(machine, {
       ...shared,
       snapshot: result.persist(),
-      event: toEvent(next),
+      event,
     } as AgentRunOptions<TMachine>);
+    if (result.ignored !== undefined) {
+      index -= 1;
+      deviation = {
+        reason: "ignored-event",
+        index,
+        expected: `an event ${JSON.stringify(state)} handles`,
+        observed: next,
+        state,
+      };
+      break;
+    }
   }
 
   if (callbackError) throw callbackError;

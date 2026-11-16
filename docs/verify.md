@@ -563,6 +563,7 @@ traceCoverage(supportModel, reports.map((r) => r.trace)); // states and handlers
   - `missing-observation`: the recording had ended.
   - `input-mismatch`: `matches` returned `false`.
   - `extra-observations`: the model finished or settled idle, and the recording continues.
+  - `ignored-event`: the model was idle, and it does not handle the event the next observation maps to.
   - `unmapped-actor`: the model invoked a src with no entry in `actors`.
 
   `expected` is what the model did next, `observed` is the recording's next observation, and `state` is the model's state value.
