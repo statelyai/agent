@@ -2662,9 +2662,6 @@ function explore(
       );
   if (initial) {
     recordState(initial, childRef?._initialEffects ?? initial.actions);
-    if (stops(initial)) {
-      witness = [];
-    }
   }
 
   // Advance a step deterministically through any non-branching text or scripted
@@ -3910,6 +3907,11 @@ function explore(
     };
   }
 
+  // Coupled children still starting apply their entry sends first; the pump
+  // checks the initial step once they have.
+  if (initial && !awaitsKids(initial, undefined) && stops(initial)) {
+    witness = [];
+  }
   const root: ExploreNode = { step: initial!, path: undefined, depth: 0 };
   if (witness === undefined && stopWhen) {
     // Breadth-first by path length, so the first witness found is a shortest

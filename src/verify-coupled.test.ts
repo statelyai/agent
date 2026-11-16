@@ -1153,4 +1153,38 @@ describe("coupled child usage", () => {
     );
     expect(stale).toMatchObject({ reachable: false, complete: true });
   });
+
+  test("'coupled' applies entry sends before checking the initial snapshot", async () => {
+    const announcer = createMachine({
+      initial: "running",
+      states: { running: { entry: tell("READY") } },
+    } as never) as AnyStateMachine;
+    const silent = createMachine({
+      initial: "running",
+      states: { running: {} },
+    } as never) as AnyStateMachine;
+    const parentWith = (child: AnyStateMachine) =>
+      createMachine({
+        initial: "waiting",
+        states: {
+          waiting: { invoke: { id: "child", src: child }, on: { READY: { target: "ready" } } },
+          ready: {},
+        },
+      } as never) as AnyStateMachine;
+    const options = { children: "coupled" as const, hostEvents: [] };
+    // READY applies as the child starts: `waiting` is never a settled state.
+    expect(await canReach(parentWith(announcer), "waiting", options)).toMatchObject({
+      reachable: false,
+      complete: true,
+    });
+    expect(await canReach(parentWith(announcer), "ready", options)).toMatchObject({
+      reachable: true,
+      witness: [{ type: "READY" }],
+    });
+    // A child that sends nothing leaves the parent in `waiting`.
+    expect(await canReach(parentWith(silent), "waiting", options)).toMatchObject({
+      reachable: true,
+      witness: [],
+    });
+  });
 });
