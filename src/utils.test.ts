@@ -3,7 +3,8 @@ import { z } from "zod";
 import { createActor } from "xstate";
 import { getStateMeta, getStatePath, setupAgent } from "./index.js";
 import type { DoneActorEventOf } from "./index.js";
-import { getJsonSchema, getJsonSchemaSync, getMachineStructuralHash } from "./index.js";
+import { getJsonSchema, getJsonSchemaSync } from "./index.js";
+import { getMachineStructuralHash } from "./utils.js";
 import { findNonSerializableContextPaths } from "./utils.js";
 import type { StandardSchemaV1 } from "./types.js";
 
