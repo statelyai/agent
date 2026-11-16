@@ -380,6 +380,7 @@ const result = await runAgent(machine, {
   - the loop never applies it;
   - the machine handled it but settles still `active` (an idle wait nothing will answer), immediately and without waiting for `timeout`;
   - `timeout` ms pass while the machine is still active and working.
+  - `event` is a function and it throws; the run's `error` is what it threw.
 - **Per reason.** `event` can be a function of `signal.reason`, so a pause and a stop send different events: `abortWith: { event: (reason) => ({ type: reason === "pause" ? ("PAUSE" as const) : ("STOP" as const) }) }`. As with `onIdle`, an event built in a function needs `as const` for its `type`.
 - **Journal.** The abort event is a log entry; replay reaches the same final state.
 

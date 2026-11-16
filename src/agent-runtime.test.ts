@@ -810,6 +810,36 @@ describe("abortWith", () => {
     expect(await settleWith("stop")).toBe("stopped");
   });
 
+  test("an `event` function that throws settles the run aborted with its error", async () => {
+    const failure = new Error("cannot map reason");
+    const settleWith = async (preAborted: boolean) => {
+      const controller = new AbortController();
+      if (preAborted) controller.abort("pause");
+      const settled = runToQuiescence(
+        createAgentRuntime(worker, {
+          signal: controller.signal,
+          abortWith: {
+            event: () => {
+              throw failure;
+            },
+            timeout: 1000,
+          },
+          executors: hangingWork(),
+        }),
+      );
+      if (!preAborted) controller.abort("pause");
+      return settled;
+    };
+    for (const preAborted of [false, true]) {
+      const result = await settleWith(preAborted);
+      expect(result.status).toBe("error");
+      expect(result.status === "error" ? [result.cause, result.error] : []).toEqual([
+        "aborted",
+        failure,
+      ]);
+    }
+  });
+
   test("an already-aborted signal delivers the event first", async () => {
     const controller = new AbortController();
     controller.abort();

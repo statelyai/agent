@@ -3678,11 +3678,18 @@ export function createAgentRuntime<TMachine extends AnyStateMachine>(
       abortNow();
       return;
     }
-    const event = (
-      typeof abortWith.event === "function"
-        ? (abortWith.event as (reason: unknown) => EventObject)(options.signal?.reason)
-        : abortWith.event
-    ) as EventObject;
+    let event: EventObject;
+    try {
+      event = (
+        typeof abortWith.event === "function"
+          ? (abortWith.event as (reason: unknown) => EventObject)(options.signal?.reason)
+          : abortWith.event
+      ) as EventObject;
+    } catch (error) {
+      // Called from the signal's listener: a throw would escape the run.
+      stopRun({ cause: "aborted", error });
+      return;
+    }
     if (runtime.send(event as EventFromLogic<TMachine>) === false) {
       abortNow();
       return;
